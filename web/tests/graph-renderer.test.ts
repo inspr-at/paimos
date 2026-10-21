@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { graphLayout, glimpseCore, cloudStride, glimpseOrbDelta, glimpseOrbFinish, glimpsePointInside, glimpseRadius, glimpseShotRadius, GLIMPSE_SHOT_DELTA, holdsIndexColour, labelPosition, onCanvas, type GraphData } from '../src/lib/graphRenderer.ts'
+import { graphLayout, glimpseCore, cloudStride, glimpseFramePaints, glimpseOrbDelta, glimpseOrbFinish, glimpsePointInside, glimpseRadius, glimpseShotRadius, GLIMPSE_SHOT_DELTA, holdsIndexColour, labelPosition, onCanvas, type GraphData } from '../src/lib/graphRenderer.ts'
 
 test('glimpse orbs stay 4–8px across every node weight', () => {
   for (const weight of [-1, 0, 1, 10, 1000, NaN, Infinity]) {
@@ -31,6 +31,18 @@ test('porcelain glimpse orbs stay above the header shot threshold', () => {
   }
   assert.equal(glimpseOrbDelta('not-a-color', '#f7f6f2', 0.35), 0)
   assert.equal(glimpseOrbDelta('#d69b31', '#f7f6f2', 0.35, 0), 0)
+})
+
+test('a glimpse frame paints only while its measured box is connected and non-empty', () => {
+  // display:none measures 0×0 and must not paint. visibility:hidden keeps a
+  // positive box. A disconnected host must not paint from a stale measurement.
+  assert.equal(glimpseFramePaints(true, 1280, 180), true)
+  assert.equal(glimpseFramePaints(true, 1, 1), true)
+  assert.equal(glimpseFramePaints(true, 0, 180), false)
+  assert.equal(glimpseFramePaints(true, 1280, 0), false)
+  assert.equal(glimpseFramePaints(true, -1, 180), false)
+  assert.equal(glimpseFramePaints(false, 1280, 180), false)
+  assert.equal(glimpseFramePaints(false, 0, 0), false)
 })
 
 test('glimpse links reject off-view endpoints including partial orbs and invalid coordinates', () => {

@@ -5,7 +5,7 @@ paths:
     get:
       operationId: listGoals
       summary: List visible goals with current rollup
-      description: "Filters include home and visible contributing projects. Totals ignore search/state/hide-done and span pages. Computed sorts use the displayed ETA or progress. Up to 100 goals share one materialized expansion query; state and ETA reuse the same invoker work scope. Aggregate root/pair/history budgets shrink the returned page with truncated true and a continuation cursor; a singleton that exceeds its budget is counts-only with expansion too_large. Full-filter totals and computed sorts use bounded batches across at most 1000 matching goals; larger sets require narrower project/group filters."
+      description: "Goal nodes are listed as stored. A release is listed only while journey_releases.released_at is unset and it has a live outcome child; that filter precedes totals, paging and project badges. Filters include home and visible contributing projects. Totals ignore search/state/hide-done and span pages. Computed sorts use the displayed ETA or progress. Up to 100 goals share one materialized expansion query; state and ETA reuse the same invoker work scope. Aggregate root/pair/history budgets shrink the returned page with truncated true and a continuation cursor; a singleton that exceeds its budget is counts-only with expansion too_large. Full-filter totals and computed sorts use bounded batches across at most 1000 matching goals; larger sets require narrower project/group filters. An agent key also needs goals.read as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. The handler still rechecks nodes.read."
       security: *auth
       parameters:
         - {name: project, in: query, schema: {type: string, maxLength: 64}}
@@ -31,7 +31,7 @@ paths:
     post:
       operationId: createGoal
       summary: Create a project or workspace goal
-      description: "Creates a goal node and lazily restores the tenant goal/outcome kinds. Requires nodes.write in the destination. Replay rechecks the current created target. An optional eta sets the goal's Lands with the caller as its author (AEON-1618)."
+      description: "Creates a goal node and lazily restores the tenant goal/outcome kinds. Requires nodes.write in the destination. Replay rechecks the current created target. An optional eta sets the goal's Lands with the caller as its author (AEON-1618). An agent key also needs goals.write as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. The handler still rechecks nodes.write."
       security: *auth
       parameters:
         - {$ref: '#/components/parameters/GoalIdempotencyKey'}
@@ -56,7 +56,7 @@ paths:
     get:
       operationId: getGoalStatusNote
       summary: Read the workspace status note
-      description: "The workspace's one status paragraph, written by agents, with its author and time; note is null when none is set. Requires nodes.read in the workspace."
+      description: "The workspace's one status paragraph, written by agents, with its author and time; note is null when none is set. Requires nodes.read in the workspace. An agent key also needs goals.read as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it."
       security: *auth
       responses:
         '200':
@@ -70,7 +70,7 @@ paths:
     patch:
       operationId: setGoalStatusNote
       summary: Set or clear the workspace status note
-      description: "A text of 1–2000 characters replaces the note and records the caller and time; null clears it. Repeating the current text changes nothing. Requires nodes.write in the workspace, rechecked in the write transaction before receipt replay. Each change appends goal.status_note_changed, delivered to topics=goals subscribers and the event stream."
+      description: "A text of 1–2000 characters replaces the note and records the caller and time; null clears it. Repeating the current text changes nothing. Requires nodes.write in the workspace, rechecked in the write transaction before receipt replay. Each change appends goal.status_note_changed, delivered to topics=goals subscribers and the event stream. An agent key also needs goals.write as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it."
       security: *auth
       parameters:
         - {$ref: '#/components/parameters/GoalIdempotencyKey'}
@@ -95,7 +95,7 @@ paths:
     get:
       operationId: listGoalEpics
       summary: List open epics in the goal shape
-      description: "AEON-1395, Goals grouped by epics. An area is the topmost open parent work item in a visible project (no open work parent above it); its items are its direct children without Closed ones, and an item's keys are its own key followed by its children's. Takes the Goals list filters, sorts, page and cursor; cursors are bound to this grouping. Counts follow the children's status and live work: Moving is a live session, In progress or QA, or an open pull request or review; Done is Done, Delivered or Accepted; Paused is Backlog or paused on purpose; the rest is Queued. Progress is computed, never set by hand: completed estimate hours over all estimate hours of the epic's leaves (a parent's own estimate never counts), or completed leaves over all leaves while no leaf has an estimate. LANDS is the latest worker ETA over the open items, else the target release, else the suggested release (~ Next or Next +N from the work queue and release cadence, or the stored suggested release). Hide done keeps an open epic whose own status is open, with its failing checks. Notes and session ids need harness.read; an author name needs harness.read or members.read; a pull request state and a hold reason need delivery.read. Steps list what is missing: the epic's failing entry checks for its next status from the effective definition, in definition order, then held deliveries and blockers; no_active_build is not evaluated in this read. next_step is the first open item by ETA, else the first step. An epic with more than 200 items is counts-only with expansion too_large. Discovery is bounded to 1000 epics."
+      description: "AEON-1395, Goals grouped by epics. An area is the topmost open parent work item in a visible project (no open work parent above it); its items are its direct children without Closed ones, and an item's keys are its own key followed by its children's. Takes the Goals list filters, sorts, page and cursor; cursors are bound to this grouping. Counts follow the children's status and live work: Moving is a live session, In progress or QA, or an open pull request or review; Done is Done, Delivered or Accepted; Paused is Backlog or paused on purpose; the rest is Queued. Progress is computed, never set by hand: completed estimate hours over all estimate hours of the epic's leaves (a parent's own estimate never counts), or completed leaves over all leaves while no leaf has an estimate. LANDS is the latest worker ETA over the open items, else the target release, else the suggested release (~ Next or Next +N from the work queue and release cadence, or the stored suggested release). Hide done keeps an open epic whose own status is open, with its failing checks. Notes and session ids need harness.read; an author name needs harness.read or members.read; a pull request state and a hold reason need delivery.read. Steps list what is missing: the epic's failing entry checks for its next status from the effective definition, in definition order, then held deliveries and blockers; no_active_build is not evaluated in this read. next_step is the first open item by ETA, else the first step. An epic with more than 200 items is counts-only with expansion too_large. Discovery is bounded to 1000 epics. An agent key also needs goals.read as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. The handler still rechecks nodes.read."
       security: *auth
       parameters:
         - {name: project, in: query, schema: {type: string, maxLength: 64}}
@@ -124,7 +124,7 @@ paths:
     get:
       operationId: getGoal
       summary: Read a goal with visibility-filtered derived values
-      description: "An outcome contributes only when its goal and every serves end are visible. Oversized expansion returns HTTP 200 with counts and expansion too_large, omitting outcome states, progress and ETA fallback. Passed uses a fixed ten-minute grace and is computed before scheduled revalidation."
+      description: "An outcome contributes only when its goal and every serves end are visible. Oversized expansion returns HTTP 200 with counts and expansion too_large, omitting outcome states, progress and ETA fallback. Passed uses a fixed ten-minute grace and is computed before scheduled revalidation. An agent key also needs goals.read as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. The handler still rechecks nodes.read."
       security: *auth
       responses:
         '200':
@@ -140,7 +140,7 @@ paths:
     patch:
       operationId: updateGoal
       summary: Atomically update a goal and its outcomes
-      description: "Omitted fields stay unchanged; null clears them. Every upsert requires a client ref. Receipts bind tenant, actor, key, method, immutable target and canonical body. Current target authorization precedes replay. Replace requires the latest goal event watermark. Limits apply before writes. Authorized fresh writes lazily restore the goal/outcome kinds, including a release receiving its first outcome."
+      description: "Omitted fields stay unchanged; null clears them. Every upsert requires a client ref. Receipts bind tenant, actor, key, method, immutable target and canonical body. Current target authorization precedes replay. Replace requires the latest goal event watermark. Limits apply before writes. Authorized fresh writes lazily restore the goal/outcome kinds, including a release receiving its first outcome. An agent key also needs goals.write as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. The handler still rechecks nodes.write."
       security: *auth
       parameters:
         - {$ref: '#/components/parameters/GoalIdempotencyKey'}
@@ -230,7 +230,7 @@ paths:
     get:
       operationId: goalHistory
       summary: Read bounded goal or immutable outcome history
-      description: "Outcome history follows its immutable id across moves; it does not filter by the current goal or client ref. All events remain subject to current visibility. ETA popovers use value-bearing goal.eta_changed events and ignore change pings."
+      description: "Outcome history follows its immutable id across moves; it does not filter by the current goal or client ref. All events remain subject to current visibility. ETA popovers use value-bearing goal.eta_changed events and ignore change pings. An agent key also needs goals.read as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. The handler still rechecks nodes.read."
       security: *auth
       parameters:
         - {name: goalId, in: path, required: true, schema: {type: string, maxLength: 64}}
@@ -252,7 +252,7 @@ paths:
     get:
       operationId: goalProgressSeries
       summary: Read bounded event-backed progress over time
-      description: "24h uses 24 hourly UTC buckets, 7d uses 28 six-hour buckets, and 30d uses 30 daily buckets. Each value is as of the bucket end or now. Immutable outcome events preserve membership across moves. Each bucket includes delta versus the preceding bucket and changed_keys for visible outcome/ticket state transitions, including transitions with unchanged progress. Current visibility filters every point. Work-scope, event-count, byte and projection bounds return expansion too_large with no points."
+      description: "24h uses 24 hourly UTC buckets, 7d uses 28 six-hour buckets, and 30d uses 30 daily buckets. Each value is as of the bucket end or now. Immutable outcome events preserve membership across moves. Each bucket includes delta versus the preceding bucket and changed_keys for visible outcome/ticket state transitions, including transitions with unchanged progress. Current visibility filters every point. Work-scope, event-count, byte and projection bounds return expansion too_large with no points. An agent key also needs goals.read as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. The handler still rechecks nodes.read."
       security: *auth
       parameters:
         - {name: goalId, in: path, required: true, schema: {type: string, maxLength: 64}}

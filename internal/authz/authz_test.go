@@ -50,6 +50,10 @@ func TestRegistryAndBuiltins(t *testing.T) {
 		{"member", "outcome.write", true}, {"viewer", "outcome.read", true},
 		{"viewer", "outcome.write", false}, {"guest", "outcome.read", true},
 		{"customer", "outcome.read", false},
+		{"owner", "goals.write", true}, {"admin", "goals.read", true},
+		{"member", "goals.write", true}, {"member", "goals.read", true},
+		{"viewer", "goals.read", false}, {"guest", "goals.read", false},
+		{"customer", "goals.write", false},
 	}
 	for _, tc := range cases {
 		got, _ := BuiltinPermissions(tc.role)

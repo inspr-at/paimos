@@ -3854,6 +3854,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestFullAccessModelsV2SimpleRead","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestGoalAgentKeyCeiling","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestHarnessProbeRoutesThroughPairedRuntimeMiddleware","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestHasScopeAcceptsDotAndColon","tier":"GATED-FULL"}
@@ -6823,6 +6825,8 @@
     {"kind":"go","package":"internal/goals","name":"TestGoalListAggregateBudgetPaginatesWithoutLoss","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalListFiltersTotalsAndMoveHistory","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalListOmitsEmptyAndShippedReleases","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalListPageWideProjection","tier":"ESSENTIAL"}
     ,

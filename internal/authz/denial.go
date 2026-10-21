@@ -23,6 +23,13 @@ type denial struct {
 func (d *denial) Error() string { return ErrForbidden.Error() }
 func (d *denial) Unwrap() error { return ErrForbidden }
 
+// MissingKeyScope is the authenticated key-ceiling denial for one scope.
+// The agent middleware uses it only after the route is already allowlisted,
+// and only for a ceiling the route permission does not already name.
+func MissingKeyScope(scope string) error {
+	return &denial{reason: "missing_key_scope", scope: scope}
+}
+
 // WriteForbidden preserves the existing envelope and adds safe diagnostics
 // only for decisions made by Require. Unknown/unauthenticated denials stay generic.
 func WriteForbidden(w http.ResponseWriter, err error) {
