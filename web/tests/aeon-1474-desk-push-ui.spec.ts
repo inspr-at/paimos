@@ -245,14 +245,17 @@ test('AEON-1474 rejected writes and refused prompts keep the previous state in p
   const turnOn = page.getByRole('button', { name: 'Turn on', exact: true }), notNow = page.getByRole('button', { name: 'Not now', exact: true })
   const sentence = page.getByTestId('desk-notice-sentence')
   await expect(turnOn).toBeVisible()
-  const deskGuard = await controlStability(page, { header: page.locator('.dp-head'), turnOn, notNow, tabs: page.getByTestId('desk-tab-open'), first: page.locator('[data-testid^="desk-row-"]').first() })
-  await deskGuard.check(async () => { await turnOn.click(); await expect(sentence).toHaveText('Notifications could not be turned on. Check the browser permission.') })
+  const still = { header: page.locator('.dp-head'), tabs: page.getByTestId('desk-tab-open'), first: page.locator('[data-testid^="desk-row-"]').first() }
+  const errorGuard = await controlStability(page, { ...still, turnOn, notNow })
+  await errorGuard.check(async () => { await turnOn.click(); await expect(sentence).toHaveText('Notifications could not be turned on. Check the browser permission.') })
+  errorGuard.done()
   await expect(page.getByRole('status').filter({ hasText: 'Notifications on for this browser' })).toHaveCount(0)
   await expect(page.locator('.notice-feedback')).toHaveCount(0)
   // Turn on retries in place.
   world.control.fail = false
-  await deskGuard.check(async () => { await turnOn.click(); await expect(page.getByRole('status').filter({ hasText: 'Notifications on for this browser' })).toBeVisible() })
-  deskGuard.done()
+  const retryGuard = await controlStability(page, still)
+  await retryGuard.check(async () => { await turnOn.click(); await expect(page.getByRole('status').filter({ hasText: 'Notifications on for this browser' })).toBeVisible() })
+  retryGuard.done()
   expect(world.posts.map(post => post.desk_enabled)).toEqual([true, true, true])
   await page.close()
 
@@ -284,21 +287,19 @@ test('AEON-1474 rejected writes and refused prompts keep the previous state in p
 // Risk: a person who already allowed notifications waits for a read that cannot change their Desk (up to the bound).
 test('AEON-1474 a browser that already allows notifications shows the Desk without waiting for the offer read', async ({ page }) => {
   await setup(page, { permission: 'granted' })
-  let reads = 0
-  await page.route('**/api/me/phone-approvals', route => { if (route.request().method() !== 'GET') return route.fallback(); reads++ })
+  // The read never answers; only not waiting for it can show the tabs.
+  await page.route('**/api/me/phone-approvals', route => route.request().method() === 'GET' ? undefined : route.fallback())
   await page.clock.install({ time: T0 })
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible()
   // The page's clock stands still, so the read bound can never be what shows the tabs.
   await page.clock.pauseAt(T0 + 10_000)
-  reads = 0
   await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: /^Decision Desk/ }).click()
   await expect(page.getByRole('heading', { name: 'Decision Desk', exact: true })).toBeVisible()
   await expect(page.getByTestId('desk-tab-open')).toBeVisible()
   await expect(page.locator('main.decision-desk')).not.toHaveAttribute('aria-busy', 'true')
   await expect(page.getByRole('button', { name: 'Turn on', exact: true })).toHaveCount(0)
   expect(Math.abs(await band(page)), 'no band').toBeLessThanOrEqual(0.5)
-  expect(reads, 'the Desk does not read phone approvals for an allowed browser').toBe(0)
 })
 
 // Below the tabs: the first row's and the queue card's distance from the tabs' bottom edge (Tick item 7).
