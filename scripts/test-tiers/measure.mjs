@@ -54,6 +54,7 @@ export function jobMinutes(job) {
   if(job.conclusion==='skipped'||job.status!=='completed') return null
   // A cancelled queued job has explicit evidence that it never ran. A missing
   // timestamp alone is insufficient to exempt an executed/cancelled job.
+  // Actions can return a null or omitted runner_id when no runner was assigned.
   if(job.conclusion==='cancelled'&&(job.runner_id===0||job.runner_id==null)&&Array.isArray(job.steps)&&job.steps.length===0) return null
   const start=Date.parse(job.started_at),end=Date.parse(job.completed_at)
   const seconds=(end-start)/1000

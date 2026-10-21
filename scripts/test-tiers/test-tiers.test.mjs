@@ -2195,6 +2195,7 @@ test('AEON-1349 measurements re-poll stale jobs within a deadline and preserve i
   const evidence=reportCases([row],[{key:key(row),status:'passed',started:true}],1,'web-shard-12')
   for(const fixture of [
     {states:['queued','in_progress','completed'],waited:10_000,coverage:'reported'},
+    {states:['completed','completed'],upstreamLag:true,waited:5_000,coverage:'reported'},
     {states:['completed'],waited:0,coverage:'reported'},
     {states:['completed'],collector:'tier-measurements / pr-tree-v1:fixture',waited:0,coverage:'reported'},
     {states:['completed'],collector:'nightly-tier-measurements',waited:0,coverage:'reported'},
@@ -2221,7 +2222,8 @@ test('AEON-1349 measurements re-poll stale jobs within a deadline and preserve i
           conclusion:status==='completed'?'success':null}
         if(fixture.cancelled)Object.assign(shard,{conclusion:'cancelled',runner_id:null,steps:[],started_at:null,completed_at:null})
         const inventory=[{name:collector,status:'in_progress'},
-          ...Array.from({length:99},(_,i)=>({...finished,name:`upstream-${i}`})),shard]
+          ...Array.from({length:99},(_,i)=>({...finished,name:`upstream-${i}`,
+            ...(i===0&&fixture.upstreamLag&&poll===0?{status:'in_progress',conclusion:null}:{})})),shard]
         return JSON.stringify({total_count:inventory.length,jobs:inventory.slice((page-1)*100,page*100)})
       },
     })
@@ -2235,6 +2237,7 @@ test('AEON-1349 measurements re-poll stale jobs within a deadline and preserve i
     assert.equal(measured.coverage,fixture.coverage)
     assert.deepEqual(measured.missingEvidence,fixture.missing?['web-shard-12']:[])
     assert.deepEqual(measured.incompleteEvidence,fixture.reason?[{job:'web-shard-12',status:'interrupted',reason:fixture.reason}]:[])
+    assert.equal(measured.classes.ESSENTIAL?.passed,fixture.missing?undefined:1)
     assert.equal(measured.measured.webRunnerMinutes,fixture.cancelled||fixture.waited===60_000?0:2)
   }
   for(const runner_id of [undefined,null,0]) for(const timestamps of [{},{started_at:null,completed_at:null}]) {
