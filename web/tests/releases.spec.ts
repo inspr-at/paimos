@@ -33,6 +33,35 @@ async function setup(page: Page, options: { history?: History; lastSeen?: string
   return { history, data, calls, state }
 }
 
+// AEON-1602: a full load returns before the lazy sheet finishes GET /api/releases,
+// so a row count started on goto saw 0 within 5s (the race AEON-847 holds open
+// in the compare test). Arm the wait before the goto or the click that mounts
+// the sheet, and await it before counting, so the count's deadline starts after
+// the history is in.
+function armReleaseHistory(page: Page) {
+  return page.waitForResponse(response => response.ok() && new URL(response.url()).pathname === '/api/releases')
+}
+
+async function gotoReleaseHistory(page: Page, url: string) {
+  const historyReady = armReleaseHistory(page)
+  await page.goto(url)
+  await historyReady
+}
+
+async function openReleaseHistory(page: Page, open: () => Promise<void>) {
+  const historyReady = armReleaseHistory(page)
+  await open()
+  await historyReady
+}
+
+// Proof runs set AEON_CPU_RATE=4 (CDP). CI leaves it unset, so this is a no-op there.
+test.beforeEach(async ({ page }) => {
+  const rate = Number(process.env.AEON_CPU_RATE)
+  if (!Number.isFinite(rate) || rate <= 1) return
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate })
+})
+
 test('the footer bar holds its own row: pages and docked panels end above it', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await setup(page)
@@ -68,7 +97,7 @@ test('the mark in the release history goes home and leaves the history', async (
   await setup(page)
   await page.goto('/p/PHAROS')
   await expect(page.locator('tr.ticket-row:not(.ghost)').first()).toBeVisible()
-  await pill(page).click()
+  await openReleaseHistory(page, () => pill(page).click())
   await expect(sheet(page)).toBeVisible()
   await sheet(page).getByRole('link', { name: 'PAIMOS AEON home' }).click()
   await expect(page).toHaveURL(/\/$/)
@@ -80,7 +109,7 @@ test('the version pill opens the history over the page, and Esc brings the page 
   const { history } = await setup(page)
   await page.goto('/p/PHAROS')
   await expect(page.locator('tr.ticket-row:not(.ghost)').first()).toBeVisible()
-  await pill(page).click()
+  await openReleaseHistory(page, () => pill(page).click())
   await expect(sheet(page)).toBeVisible()
   await expect(page).toHaveURL(new RegExp(`/p/PHAROS(/tickets)?\\?releases=${escaped(history.current)}$`))
   await expect(page).toHaveTitle('Releases · PAIMOS AEON')
@@ -108,7 +137,7 @@ test('the version pill opens the history over the page, and Esc brings the page 
 test('deep links open one release, and the address follows the selection', async ({ page }) => {
   const { history } = await setup(page)
   const target = history.releases[3]
-  await page.goto(`/releases/${target.version}`)
+  await gotoReleaseHistory(page, `/releases/${target.version}`)
   await expect(sheet(page)).toBeVisible()
   await expect(options(page).nth(3)).toHaveAttribute('aria-selected', 'true')
   // AEON-305: the tag message is evidence, not a title; the key stays in the change metadata.
@@ -145,9 +174,7 @@ test('keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searche
       await route.fallback()
     } finally { navigations-- }
   })
-  const historyReady = page.waitForResponse(res => res.ok() && new URL(res.url()).pathname === '/api/releases')
-  await page.goto('/releases')
-  await historyReady
+  await gotoReleaseHistory(page, '/releases')
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
   // The first selection's address has landed. Later ones wait until Compare is open.
@@ -295,7 +322,7 @@ test('a cancelled selection does not swallow the next visit to that release', as
       await route.fallback()
     } finally { requests-- }
   })
-  await page.goto(path(0))
+  await gotoReleaseHistory(page, path(0))
   await selected(0)
   await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
   armed = true
@@ -324,7 +351,7 @@ test('a cancelled selection does not swallow the next visit to that release', as
 
 test('filters follow the feature and fix blocks, and still keep releases with tickets', async ({ page }) => {
   await setup(page)
-  await page.goto('/releases')
+  await gotoReleaseHistory(page, '/releases')
   await expect(options(page)).toHaveCount(7)
   const toggles = sheet(page).getByRole('group', { name: 'Show only releases with' })
   // These commits name tickets but none tells a benefit, so the rows show other, not features or fixes.
@@ -355,7 +382,7 @@ test('new since the last visit: a badge on the pill, highlighted releases, and t
   await page.goto('/')
   await expect(page.locator('.new-badge')).toHaveText('4 new')
   await expect(pill(page)).toHaveAccessibleName(/, 4 new since your last visit$/)
-  await pill(page).click()
+  await openReleaseHistory(page, () => pill(page).click())
   await expect(sheet(page).locator('.row.fresh')).toHaveCount(4)
   await expect(sheet(page).getByText('New since your last visit')).toBeVisible()
   await expect.poll(() => data.preferences.releases).toEqual({ last_seen: history.current })
@@ -375,7 +402,7 @@ test('evidence: runs, commit and digest with copy, the rollback target, and what
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const { history } = await setup(page)
   const previous = history.releases[1]
-  await page.goto(`/releases/${previous.version}`)
+  await gotoReleaseHistory(page, `/releases/${previous.version}`)
   await expect(sheet(page).locator('.detail .badges')).toContainText('Rollback target')
   await sheet(page).getByRole('button', { name: /^Evidence/ }).click()
   await expect(sheet(page).getByRole('link', { name: /CI/ })).toHaveAttribute('href', previous.evidence.ci.url)
@@ -392,7 +419,7 @@ test('evidence: runs, commit and digest with copy, the rollback target, and what
 
 test('ticket keys link to the tickets this workspace has; others stay plain', async ({ page }) => {
   const { history } = await setup(page)
-  await page.goto(`/releases/${history.releases[3].version}`)
+  await gotoReleaseHistory(page, `/releases/${history.releases[3].version}`)
   await expect(sheet(page).locator('.detail .changes .meta')).toContainText('PAI-1057')
   await expect(sheet(page).locator('.detail .changes .meta .ticket-link')).toHaveCount(0)
   await page.keyboard.press('k'); await page.keyboard.press('k')
@@ -409,7 +436,7 @@ test('ticket keys link to the tickets this workspace has; others stay plain', as
 test('a reserved version reads as reserved and never published', async ({ page }) => {
   const { history } = await setup(page)
   const reserved = history.releases[2]
-  await page.goto(`/releases/${reserved.version}`)
+  await gotoReleaseHistory(page, `/releases/${reserved.version}`)
   await expect(options(page).nth(2)).toHaveClass(/reserved/)
   await expect(options(page).nth(2)).toContainText('Reserved, never published')
   await expect(sheet(page).locator('.detail')).toContainText('The version was taken, but no release was published under it.')
@@ -420,7 +447,7 @@ test('a reserved version reads as reserved and never published', async ({ page }
 test('a build without history says so', async ({ page }) => {
   await mockWork(page, fixtures())
   await mockReleases(page, { schema: 'inspr.release-history.v1', product: 'PAIMOS AEON', repository: '', version_scheme: 'inspr-calendar-v2', generated_at: '0001-01-01T00:00:00Z', source: 'none', current: 'dev', live_since: new Date().toISOString(), releases: [] }, { running: 'dev' })
-  await page.goto('/releases')
+  await gotoReleaseHistory(page, '/releases')
   await expect(sheet(page).getByRole('heading', { name: 'No release history in this build' })).toBeVisible()
   await expect(sheet(page)).toContainText('as development builds are')
 })
@@ -440,7 +467,7 @@ test('a newer version on the server: a toast offers what is new and a reload', a
   await expect(toast).not.toContainText('Time entry editing')
   await expect(toast).toBeVisible()
   await expect(toast.getByRole('button', { name: 'Reload' })).toBeVisible()
-  await toast.getByRole('button', { name: 'What’s new' }).click()
+  await openReleaseHistory(page, () => toast.getByRole('button', { name: 'What’s new' }).click())
   await expect(sheet(page)).toBeVisible()
   await expect(page).toHaveURL(`/?releases=${history.current}`)
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
@@ -458,21 +485,21 @@ test('the palette and the account menu open the history too', async ({ page }) =
   await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
   await page.keyboard.press('Control+k')
   await page.keyboard.type('release history')
-  await page.getByRole('option', { name: /Release history/ }).click()
+  await openReleaseHistory(page, () => page.getByRole('option', { name: /Release history/ }).click())
   await expect(sheet(page)).toBeVisible()
   // Keys wait until the sheet has taken focus.
   await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(sheet(page)).toHaveCount(0)
   await page.getByRole('button', { name: /^Account for / }).click()
-  await page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Release history', exact: true }).click()
+  await openReleaseHistory(page, () => page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Release history', exact: true }).click())
   await expect(sheet(page)).toBeVisible()
 })
 
 test('rows show live and rollback badges, a warm new tint and a full selected ring', async ({ page }) => {
   const history = releaseHistory()
   await setup(page, { history, lastSeen: history.releases[4].version })
-  await page.goto(`/releases/${history.releases[5].version}`)
+  await gotoReleaseHistory(page, `/releases/${history.releases[5].version}`)
   const look = (i: number) => options(page).nth(i).evaluate(el => {
     const c = getComputedStyle(el)
     return { bg: c.backgroundColor, shadow: c.boxShadow, border: c.borderLeftWidth }
@@ -494,7 +521,7 @@ test('rows show live and rollback badges, a warm new tint and a full selected ri
 test('nothing is clipped at 390: stat card and chart stacked, counts in notes, full headlines', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const { history } = await setup(page)
-  await page.goto('/releases')
+  await gotoReleaseHistory(page, '/releases')
   await expect(options(page).first()).toBeVisible()
   // AEON-488: one stat card that cycles, its arrows always there at 44 px, and the chart under it.
   const card = sheet(page).getByRole('region', { name: 'Release stats' })
@@ -543,7 +570,7 @@ test('nothing is clipped at 390: stat card and chart stacked, counts in notes, f
 test('the cadence shows each day’s count above its bar, every bar named for screen readers (AEON-488)', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await setup(page)
-  await page.goto('/releases')
+  await gotoReleaseHistory(page, '/releases')
   await expect(options(page).first()).toBeVisible()
   const days = sheet(page).getByRole('list', { name: /^\d+ releases? in the last 7 days$/ }).getByRole('listitem')
   await expect(days).toHaveCount(7)
@@ -571,7 +598,7 @@ test('release history renders CalVer2 history and CalVer3 versions as six-segmen
   // clicks use.
   await page.goto('/p/PHAROS')
   await expect(page.locator('tr.ticket-row:not(.ghost)').first()).toBeVisible()
-  await pill(page).click()
+  await openReleaseHistory(page, () => pill(page).click())
   await expect(sheet(page)).toBeVisible()
   // At rest: the pointer that clicked the footer pill would otherwise hover a row.
   await page.mouse.move(1, 1)
@@ -605,7 +632,7 @@ test('the running candidate shows frozen features and fixes with honest pending 
   }
   await mockWork(page, fixtures())
   await mockReleases(page, { ...history, releases: [candidate, ...history.releases.slice(1)] })
-  await page.goto('/releases')
+  await gotoReleaseHistory(page, '/releases')
   await expect(sheet(page).getByRole('heading', { level: 2, name: latest.codename })).toBeVisible()
   const detail = sheet(page).locator('article.detail')
   await expect(detail.getByText('Candidate release', { exact: true })).toBeVisible()
