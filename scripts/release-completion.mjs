@@ -91,10 +91,99 @@ export function prepare(env, run = command, { inspect = true } = {}) {
   return release;
 }
 
-export function findRelease(release, run = command) {
-  const matches = releases(run).filter(item => item.tag_name === release.tag);
-  if (matches.length > 1) fail('ambiguous release lookup');
-  const existing = matches[0];
+// The release list lags right after create. Drafts are also absent from
+// GET /releases/tags/<tag>. Read the id gh printed, or resolve that tag directly.
+const CREATED_ATTEMPTS = 5;
+const CREATED_DELAY_MS = 2_000;
+const delay = ms => {
+  if (!Number.isSafeInteger(ms) || ms < 0 || ms > CREATED_DELAY_MS) fail('invalid created release');
+  if (ms === 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+const positiveID = id => {
+  if (!Number.isSafeInteger(id) || id <= 0) fail('invalid created release');
+  return id;
+};
+function optionalJSON(args, run) {
+  let stdout;
+  try { stdout = run('gh', args); }
+  catch (error) {
+    if (error?.message === 'release completion: gh operation failed') return null;
+    throw error;
+  }
+  if (stdout == null || stdout.length === 0) fail('invalid release lookup');
+  return JSON.parse(Buffer.from(stdout).toString('utf8'));
+}
+export function releaseIDFromCreate(stdout) {
+  const text = Buffer.isBuffer(stdout) ? stdout.toString('utf8') : String(stdout ?? '');
+  const line = text.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? '';
+  if (!line || /\/releases\/(?:tag|assets)\//.test(line)) return null;
+  if (/^[1-9][0-9]*$/.test(line)) return positiveID(Number(line));
+  const path = line.split('?')[0].split('#')[0];
+  const match = /\/releases\/(\d+)\/?$/.exec(path);
+  if (!match) return null;
+  if (!line.includes(`/${REPOSITORY}/`)) fail('invalid created release');
+  return positiveID(Number(match[1]));
+}
+function releaseRecord(id, run) {
+  const record = optionalJSON(['api', '--method', 'GET', `repos/${REPOSITORY}/releases/${id}`], run);
+  if (!record) return null;
+  if (record.id !== id || typeof record.tag_name !== 'string' || typeof record.draft !== 'boolean') fail('invalid release lookup');
+  return record;
+}
+function releaseIDByTag(tag, run) {
+  const record = optionalJSON(['api', '--method', 'GET', `repos/${REPOSITORY}/releases/tags/${tag}`], run);
+  if (!record) return null;
+  if (record.tag_name !== tag || typeof record.draft !== 'boolean') fail('invalid release lookup');
+  return positiveID(record.id);
+}
+// gh release view reads a draft by tag (REST tag, then GraphQL) and does not list releases.
+function releaseIDByView(tag, run) {
+  const view = optionalJSON(['release', 'view', tag, '--repo', REPOSITORY, '--json', 'databaseId,isDraft,tagName'], run);
+  if (!view) return null;
+  if (view.tagName !== tag || view.isDraft !== true) return null;
+  return positiveID(view.databaseId);
+}
+function assertTag(tag) {
+  if (typeof tag !== 'string' || !tag.startsWith('v') || !validCalendarVersion(tag.slice(1))) fail('invalid created release');
+}
+export function loadCreated(stdout, tag, run, sleep = delay) {
+  assertTag(tag);
+  if (typeof sleep !== 'function') fail('invalid created release');
+  const direct = releaseIDFromCreate(stdout);
+  for (let attempt = 0; attempt < CREATED_ATTEMPTS; attempt++) {
+    const id = direct ?? releaseIDByTag(tag, run) ?? releaseIDByView(tag, run);
+    if (id) {
+      const record = releaseRecord(id, run);
+      if (record) {
+        if (record.id !== id || record.tag_name !== tag) fail('created release tag mismatch');
+        return record;
+      }
+    }
+    if (attempt + 1 < CREATED_ATTEMPTS) sleep(CREATED_DELAY_MS);
+  }
+  return null;
+}
+function reloadCreated(id, tag, run, sleep) {
+  assertTag(tag);
+  for (let attempt = 0; attempt < CREATED_ATTEMPTS; attempt++) {
+    const record = releaseRecord(id, run);
+    if (record) {
+      if (record.id !== id || record.tag_name !== tag) fail('created release tag mismatch');
+      return record;
+    }
+    if (attempt + 1 < CREATED_ATTEMPTS) sleep(CREATED_DELAY_MS);
+  }
+  fail('draft creation did not produce a draft');
+}
+
+export function findRelease(release, run = command, known = null) {
+  let existing = known;
+  if (!existing) {
+    const matches = releases(run).filter(item => item.tag_name === release.tag);
+    if (matches.length > 1) fail('ambiguous release lookup');
+    existing = matches[0];
+  } else if (existing.tag_name !== release.tag) fail('created release tag mismatch');
   if (!existing) return null;
   if (!Number.isSafeInteger(existing.id) || existing.id <= 0 || existing.prerelease !== false || typeof existing.draft !== 'boolean' || typeof existing.body !== 'string') fail('invalid existing release');
   const digests = existing.body.split(/\r?\n/).filter(line => line.startsWith('Digest: '));
@@ -143,7 +232,7 @@ export function draftArgs(release, notes) {
   return ['release', 'create', release.tag, '--repo', REPOSITORY, '--draft', '--verify-tag', '--target', release.source_sha, '--title', release.tag, '--notes-file', notes];
 }
 
-export function complete(release, directory, { write = false, pinEvidence = '', runtimeAMD64 = '', runtimeARM64 = '' } = {}, run = command) {
+export function complete(release, directory, { write = false, pinEvidence = '', runtimeAMD64 = '', runtimeARM64 = '', sleep = delay } = {}, run = command) {
   for (const runtime of [runtimeAMD64, runtimeARM64]) if (runtime && !digestOK(runtime)) fail('invalid runtime closure digest');
   let existing = findRelease(release, run);
   const bytes = new Map();
@@ -173,6 +262,8 @@ export function complete(release, directory, { write = false, pinEvidence = '', 
   }
   if (!write) return { missing, status: missing.length ? 'planned' : 'complete' };
   // No edits to release metadata; no clobber/delete/upload of existing assets.
+  let createdID = null;
+  const createdRelease = () => findRelease(release, run, reloadCreated(createdID, release.tag, run, sleep));
   if (!existing) {
     const notes = join(directory, 'completion-notes.txt');
     writeFileSync(notes, [
@@ -183,19 +274,21 @@ export function complete(release, directory, { write = false, pinEvidence = '', 
       `Runtime closure linux/arm64: ${runtimeARM64 || 'unknown'}`,
       `Source commit: ${release.source_sha}`, '', pinEvidence,
     ].join('\n'));
-    run('gh', draftArgs(release, notes));
-    existing = findRelease(release, run);
-    if (!existing?.draft) fail('draft creation did not produce a draft');
+    const created = loadCreated(run('gh', draftArgs(release, notes)), release.tag, run, sleep);
+    if (!created?.draft) fail('draft creation did not produce a draft');
+    createdID = created.id;
+    existing = findRelease(release, run, created);
+    if (!existing?.draft || existing.id !== createdID) fail('draft creation did not produce a draft');
   }
   for (const name of missing) {
     // Recheck before each mutation. A race fails closed; gh upload has no --clobber.
-    const current = findRelease(release, run);
+    const current = createdID ? createdRelease() : findRelease(release, run);
     if (!current?.draft || current.id !== existing.id || current.assets.some(asset => asset.name === name)) fail('release changed during completion; retry after inspection');
     writeFileSync(join(directory, name), bytes.get(name), { mode: name === 'SHA256SUMS' ? 0o644 : 0o755 });
     run('gh', ['release', 'upload', release.tag, join(directory, name), '--repo', REPOSITORY]);
   }
   // Verify persisted bytes, not just upload exit codes.
-  const current = findRelease(release, run);
+  const current = createdID ? createdRelease() : findRelease(release, run);
   if (!current || current.id !== existing.id || current.assets.length !== ASSETS.length) fail('release is still incomplete');
   for (const asset of current.assets) if (!assetBytes(asset, run).equals(bytes.get(asset.name))) fail('uploaded asset differs');
   return { missing, status: 'complete' };

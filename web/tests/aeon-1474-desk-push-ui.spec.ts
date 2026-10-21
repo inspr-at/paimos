@@ -247,7 +247,7 @@ test('AEON-1474 rejected writes and refused prompts keep the previous state in p
   await expect(turnOn).toBeVisible()
   const still = { header: page.locator('.dp-head'), tabs: page.getByTestId('desk-tab-open'), first: page.locator('[data-testid^="desk-row-"]').first() }
   const errorGuard = await controlStability(page, { ...still, turnOn, notNow })
-  await errorGuard.check(async () => { await turnOn.click(); await expect(sentence).toHaveText('Notifications could not be turned on. Check the browser permission.') })
+  await errorGuard.check(async () => { await turnOn.click(); await expect(sentence).toHaveText('Notifications could not be turned on.') })
   errorGuard.done()
   await expect(page.getByRole('status').filter({ hasText: 'Notifications on for this browser' })).toHaveCount(0)
   await expect(page.locator('.notice-feedback')).toHaveCount(0)
@@ -276,7 +276,7 @@ test('AEON-1474 rejected writes and refused prompts keep the previous state in p
   const retry = refused.getByRole('button', { name: 'Turn on', exact: true })
   await expect(retry).toBeVisible()
   const refusedGuard = await controlStability(refused, { header: refused.locator('.dp-head'), turnOn: retry, first: refused.locator('[data-testid^="desk-row-"]').first() })
-  await refusedGuard.check(async () => { await retry.click(); await expect(refused.getByTestId('desk-notice-sentence')).toHaveText('Notifications could not be turned on. Check the browser permission.') })
+  await refusedGuard.check(async () => { await retry.click(); await expect(refused.getByTestId('desk-notice-sentence')).toHaveText('Notifications could not be turned on.') })
   refusedGuard.done()
   await expect(refused.getByRole('button', { name: 'Not now', exact: true })).toBeVisible()
   expect(refusedWorld.posts).toEqual([])
@@ -349,6 +349,24 @@ test('AEON-1474 Settings and Desk remain still with EN and DE copy at phone tabl
     const turnOn = page.getByRole('button', { name: de ? 'Einschalten' : 'Turn on', exact: true })
     const notNow = page.getByRole('button', { name: de ? 'Nicht jetzt' : 'Not now', exact: true })
     await expect(turnOn).toBeVisible()
+    // AEON-1617: the offer is the longer sentence, so Turn on sits on its line at 1440 instead of floating past a reserved error.
+    let offerGapPx: number | undefined
+    if (width === 1440) {
+      const place = await page.evaluate(() => {
+        const textOf = (el: Element) => { const range = document.createRange(); range.selectNodeContents(el); return range.getBoundingClientRect() }
+        const sizes = [...document.querySelectorAll('.notice-sentence .notice-size')]
+        const offer = textOf(sizes[0]), failed = textOf(sizes[1])
+        const shown = textOf(document.querySelector('[data-testid="desk-notice-sentence"]')!)
+        const button = document.querySelector('.notice-on')!.getBoundingClientRect()
+        return { offerWidth: offer.width, failedWidth: failed.width, shownHeight: shown.height, gap: button.left - shown.right, sameLine: button.top < shown.bottom && button.bottom > shown.top }
+      })
+      expect(place.offerWidth, `${name} offer is the longer sentence`).toBeGreaterThan(place.failedWidth)
+      expect(place.shownHeight, `${name} offer stays one line`).toBeLessThan(28)
+      expect(place.sameLine, `${name} Turn on is on the offer line`).toBe(true)
+      expect(place.gap, `${name} Turn on sits next to the offer`).toBeGreaterThan(8)
+      expect(place.gap, `${name} Turn on sits next to the offer`).toBeLessThan(24)
+      offerGapPx = place.gap
+    }
     let minimumTarget = Infinity
     for (const button of [turnOn, notNow]) {
       const box = (await button.boundingBox())!
@@ -369,7 +387,7 @@ test('AEON-1474 Settings and Desk remain still with EN and DE copy at phone tabl
     world.control.fail = true
     await errorGuard.check(async () => {
       await turnOn.click()
-      await expect(page.getByTestId('desk-notice-sentence')).toHaveText(de ? 'Benachrichtigungen konnten nicht eingeschaltet werden. Browser-Berechtigung prüfen.' : 'Notifications could not be turned on. Check the browser permission.')
+      await expect(page.getByTestId('desk-notice-sentence')).toHaveText(de ? 'Benachrichtigungen konnten nicht eingeschaltet werden.' : 'Notifications could not be turned on.')
     })
     errorGuard.done()
     await page.screenshot({ path: testInfo.outputPath(`desk-error-${name}.png`) })
@@ -384,7 +402,7 @@ test('AEON-1474 Settings and Desk remain still with EN and DE copy at phone tabl
     const movementPx = Math.max(...(['header', 'first'] as const).map(key => Math.abs(after[key]!.y - before[key]!.y)))
     expect(movementPx).toBe(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
-    checks.push({ language: de ? 'de' : 'en', theme, width, settingsShiftPx: 0, deskErrorShiftPx: 0, movementPx, overflow: false, minimumTargetPx: Math.floor(minimumTarget), offer: true, ...below })
+    checks.push({ language: de ? 'de' : 'en', theme, width, settingsShiftPx: 0, deskErrorShiftPx: 0, movementPx, overflow: false, minimumTargetPx: Math.floor(minimumTarget), offer: true, ...(offerGapPx === undefined ? {} : { offerGapPx: Math.round(offerGapPx * 10) / 10 }), ...below })
     await page.close()
   }
   // The same Desk without the offer: its distance below the tabs is the Desk's own layout (Tick item 7).
