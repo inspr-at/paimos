@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { nextTick, onBeforeUnmount, onMounted } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 import { type ListItem } from '../../lib/api'
+import { ensurePermissions, permissionsKnown } from '../../lib/authz'
+import { scopeOwner } from '../../lib/identityScope'
 import type { ProjectState } from './types'
 import type { useProjectData } from './useProjectData'
 import type { useProjectPanel } from './useProjectPanel'
@@ -10,7 +12,7 @@ import type { useProjectActions } from './useProjectActions'
 import type { useProjectLive } from './useProjectLive'
 
 export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof useProjectData>, pane: ReturnType<typeof useProjectPanel>, selection: ReturnType<typeof useProjectSelection>, actions: ReturnType<typeof useProjectActions>, live: ReturnType<typeof useProjectLive>) {
-  const { ticketKey, knowledgeActive, settingsActive, deliveryActive, graphActive, outlineActive, toolbar, table, panel, cursorId, creating, fullView } = state
+  const { ticketKey, projectId, session, knowledgeActive, settingsActive, deliveryActive, graphActive, outlineActive, toolbar, table, panel, cursorId, creating, fullView, writable } = state
   const { list, outline, activeLive, liveActive, sequence } = data
   const { panelItem, openKey, openRow, closePanel, expand, collapse, trail, trailBack } = pane
   const { selectable, selected, phonePicking, selectRow, selectAll, clearSelection, openBulk, bulkQueue } = selection
@@ -44,6 +46,61 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     cursorId.value = row.id
     void nextTick(() => table.value?.scrollToRow(row.id))
     table.value?.focusGrid()
+  }
+  // The title can be on screen while this project's grants are still in flight.
+  // One e is kept for that ticket and that person, then applied once they may
+  // edit. Another ticket, person, field or dialog spends it and opens nothing.
+  type PendingEdit = { key: string; projectId: string; owner: string; epoch: number }
+  let editEpoch = 0
+  let pendingEdit: PendingEdit | null = null
+  function clearPendingEdit() {
+    if (!pendingEdit) return
+    pendingEdit = null
+    editEpoch++
+  }
+  function samePersonTicket(pending: PendingEdit) {
+    return ticketKey.value === pending.key && projectId.value === pending.projectId
+      && scopeOwner(session.identity) === pending.owner && session.authenticationCurrent()
+  }
+  function shortcutBlocked() {
+    return typing(document.activeElement) || !!document.querySelector('dialog[open], .floating')
+  }
+  function openRememberedEdit(pending: PendingEdit) {
+    const workspace = panel.value
+    if (pending.epoch !== editEpoch || pendingEdit !== pending || !workspace?.startEdit || shortcutBlocked()) return false
+    editEpoch++
+    pendingEdit = null
+    void workspace.startEdit()
+    return true
+  }
+  async function applyPendingEdit(pending: PendingEdit) {
+    if (pending.epoch !== editEpoch || pendingEdit !== pending) return
+    if (!samePersonTicket(pending)) { clearPendingEdit(); return }
+    if (!permissionsKnown(pending.projectId)) return
+    // Known and not writable is a reader, or an answer that never arrived.
+    // Either way the key is spent: a later grant must not open an editor.
+    if (!writable.value) { clearPendingEdit(); return }
+    await nextTick()
+    if (pending.epoch !== editEpoch || pendingEdit !== pending) return
+    if (!samePersonTicket(pending) || !writable.value || shortcutBlocked()) { clearPendingEdit(); return }
+    // The workspace can still be mounting, or it remounted and dropped its own wait.
+    if (!panel.value?.startEdit) return
+    openRememberedEdit(pending)
+  }
+  function rememberEdit() {
+    const key = ticketKey.value
+    const id = projectId.value
+    const owner = scopeOwner(session.identity)
+    if (!key || !id || !owner || !session.authenticationCurrent()) return
+    if (permissionsKnown(id) && !writable.value) return
+    const pending: PendingEdit = { key, projectId: id, owner, epoch: ++editEpoch }
+    pendingEdit = pending
+    // Grants already on screen: edit in this turn, as a press after the button exists does.
+    if (permissionsKnown(id) && writable.value) {
+      if (!openRememberedEdit(pending)) void applyPendingEdit(pending)
+      return
+    }
+    void ensurePermissions(id).then(() => { void applyPendingEdit(pending) })
   }
   function keydown(event: KeyboardEvent) {
     if (event.altKey && event.key === 'ArrowLeft' && ticketKey.value && trail.value.length && !typing(event.target as HTMLElement | null)) { event.preventDefault(); trailBack(); return }
@@ -98,7 +155,7 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
       case '/': if (!fullView.value) { event.preventDefault(); toolbar.value?.focusSearch() } break
       case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && (row?.is_leaf === false || row?.kind_slug === 'epic') ? row : null); break
       case 'u': if (activeLive.value.pill.value && liveActive.value) { event.preventDefault(); showUpdates() } break
-      case 'e': if (ticketKey.value) { event.preventDefault(); void panel.value?.startEdit() } break
+      case 'e': if (ticketKey.value) { event.preventDefault(); rememberEdit() } break
       case 's':
         if (ticketKey.value) { event.preventDefault(); panel.value?.openStatus() }
         else if (row) { const anchor = document.querySelector<HTMLElement>(`#row-${CSS.escape(row.id)} .status-btn, #row-${CSS.escape(row.id)} .phone-state`); if (anchor) { event.preventDefault(); openStatus(row, anchor, 'list') } }
@@ -135,8 +192,13 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     return true
   }
 
+  watch(panel, () => { const pending = pendingEdit; if (pending) void applyPendingEdit(pending) })
+  watch(writable, () => { const pending = pendingEdit; if (pending) void applyPendingEdit(pending) })
+  watch(ticketKey, key => { if (pendingEdit && key !== pendingEdit.key) clearPendingEdit() })
+  watch(projectId, id => { if (pendingEdit && id !== pendingEdit.projectId) clearPendingEdit() })
+  watch(() => scopeOwner(session.identity), () => { if (pendingEdit) clearPendingEdit() })
   onMounted(() => window.addEventListener('keydown', keydown))
-  onBeforeUnmount(() => window.removeEventListener('keydown', keydown))
+  onBeforeUnmount(() => { clearPendingEdit(); window.removeEventListener('keydown', keydown) })
 
   return { move, keydown }
 }
