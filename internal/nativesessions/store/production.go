@@ -52,7 +52,7 @@ type PrivateObserver struct{}
 
 func (PrivateObserver) Observe(ctx context.Context, d nativecontract.DaemonActor, p PendingStart) (Observation, error) {
 	proof, ok := ctx.Value(proofKey{}).(daemon.Proof)
-	if !ok || proof.LocalStart == nil || !reflect.DeepEqual(proof.LocalStart.Intent, p.Intent) {
+	if !ok || len(proof.SessionRef) < 16 || proof.LocalStart == nil || !reflect.DeepEqual(proof.LocalStart.Intent, p.Intent) {
 		return Observation{}, fail(403, nativecontract.ReasonGrantMissing)
 	}
 	ref, lease := sha256.Sum256([]byte(proof.SessionRef)), sha256.Sum256([]byte(proof.WorkerLease))

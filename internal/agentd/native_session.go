@@ -715,14 +715,7 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	if err != nil {
 		return out, err
 	}
-	request, err := randomID()
-	if err != nil {
-		return out, err
-	}
-	reservation, err := randomID()
-	if err != nil {
-		return out, err
-	}
+	request, reservation := uuid.NewString(), uuid.NewString()
 	now := s.capacityNow()
 	e := &nativeOwned{host: h, local: local, group: group, operations: map[string]string{}, observations: map[string]nativecontract.NativeEvidence{}, drains: map[string]nativecontract.FinalDrainGrant{}, proof: daemon.Proof{DaemonID: s.daemonID, Generation: s.generation, Ledger: s.ledgerBinding.Generation, Capability: h.caps.QualificationDigest, WorkerLease: lease, SessionRef: ref, ReservationID: reservation, ObservedAt: now, ExpiresAt: now.Add(20 * time.Second), LocalStart: &local}}
 	e.claim = nativecontract.Claim{RequestID: request, OperationID: local.Intent.RequestID, DaemonID: s.daemonID, DaemonGeneration: s.generation, LedgerGeneration: s.ledgerBinding.Generation, CapabilityDigest: h.caps.QualificationDigest, ExpectedRevision: 1, ClaimKind: "start"}
