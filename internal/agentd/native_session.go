@@ -1019,7 +1019,7 @@ func (e *nativeOwned) require(ctx context.Context) error {
 		}
 		return nil
 	}
-	profile, err := e.host.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: e.host.s.tenantID, OwnerPersonID: e.owner.OwnerPersonID, AccountID: e.local.Intent.AccountID, AccountKey: e.local.AccountKey, WorkspaceID: e.local.Intent.WorkspaceID, Harness: Claude, Policy: e.grant.Policy, BindingRevision: e.grant.ExpectedBinding.BindingRevision})
+	profile, err := e.host.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: e.host.s.tenantID, OwnerPersonID: e.owner.OwnerPersonID, AccountID: e.local.Intent.AccountID, AccountKey: e.local.AccountKey, WorkspaceID: e.local.Intent.WorkspaceID, Harness: Claude, Policy: e.grant.Policy, BindingRevision: e.profile.ProfileBindingRevision})
 	if err != nil {
 		return err
 	}

@@ -98,6 +98,7 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 		a.Capabilities.Take = true
 		a.Capabilities.TakeSupported = true
 		a.Capabilities.TerminalView = true
+		a.Capabilities.EventsSupported = true
 		if config != nil {
 			pty.now = f.now
 			config.Terminal = pty

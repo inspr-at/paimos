@@ -212,12 +212,11 @@ func (e *nativeOwned) switchRuntime(ctx context.Context, g nativecontract.ClaimR
 		return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
 	}
 	e.group = group
-	profile, err := h.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: fresh.TenantID, OwnerPersonID: e.owner.OwnerPersonID, AccountID: e.local.Intent.AccountID, AccountKey: e.local.AccountKey, WorkspaceID: e.local.Intent.WorkspaceID, Harness: Claude, Policy: t.grant.Policy, BindingRevision: fresh.BindingRevision})
+	profile, err := h.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: fresh.TenantID, OwnerPersonID: e.owner.OwnerPersonID, AccountID: e.local.Intent.AccountID, AccountKey: e.local.AccountKey, WorkspaceID: e.local.Intent.WorkspaceID, Harness: Claude, Policy: t.grant.Policy, BindingRevision: e.profile.ProfileBindingRevision})
 	if err != nil {
 		return out, err
 	}
 	oldProfile := e.profile
-	oldProfile.ProfileBindingRevision = fresh.BindingRevision
 	if !reflect.DeepEqual(profile, oldProfile) {
 		return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
 	}
