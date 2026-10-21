@@ -2639,7 +2639,7 @@ test('AEON-1601 visibility list ratio stays on the timing lane and the 600ms bud
   const catalogue=select(manifest.tests,{event:'schedule'}).tests
   assert.equal(catalogue.some(row=>row.name===nightlyName&&row.lane==='timing'),true)
   const source=readFileSync(new URL('../../internal/nodes/visibility_perf_test.go',import.meta.url),'utf8')
-  assert.match(source,/visibilityListRatio = 8/)
+  assert.match(source,/visibilityListRatio = 25/)
   assert.match(source,/visibilityListCeiling = 15 \* time\.Second/)
   assert.match(source,/limit = 600 \* time\.Millisecond/)
   assert.match(source,/if fastest >= limit \{/)
