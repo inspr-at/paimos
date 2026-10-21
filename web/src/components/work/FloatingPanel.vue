@@ -15,7 +15,7 @@ import { getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } 
 // fits on neither side, the page first scrolls the trigger to 16 px below the header (a jump with reduced motion), and
 // the panel then opens below it (Delivery's worst items, AEON-1493).
 // `fieldsOwnEscape`: a text field inside handles its own Escape (a stepper cancels its draft); the next Escape closes.
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; fullSheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; fieldsOwnEscape?: boolean; settingsKeys?: boolean; phoneSheet?: boolean; sheetBelow?: number; belowHeader?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fullSheet: false, fieldEscape: false, fieldsOwnEscape: false, phoneSheet: false, sheetBelow: 720, belowHeader: false })
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; fullSheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; fieldsOwnEscape?: boolean; settingsKeys?: boolean; phoneSheet?: boolean; fillPhone?: boolean; sheetBelow?: number; belowHeader?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fullSheet: false, fieldEscape: false, fieldsOwnEscape: false, phoneSheet: false, fillPhone: false, sheetBelow: 720, belowHeader: false })
 defineOptions({ inheritAttrs: false })
 const floatingID = `floating-${getCurrentInstance()!.uid}`
 const floatingOwner = (props.anchor instanceof Element ? props.anchor.closest<HTMLElement>('[data-floating-id]') : null)?.dataset.floatingId
@@ -49,8 +49,9 @@ function place(keepSide = false) {
   bottom.value = bottomSheet()
   if (bottom.value) {
     // The bottom edge holds it (CSS): a taller menu grows upward and scrolls below 48 px of the screen's top.
+    // fillPhone keeps that full height, so a pinned action does not move as the body grows.
     maxHeight.value = sheetMax()
-    placedHeight.value = undefined
+    placedHeight.value = props.fillPhone ? sheetMax() : undefined
     above.value = false
     return
   }

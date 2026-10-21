@@ -12,7 +12,7 @@ data is created. The tenant goal/outcome kinds are restored lazily on an
 authorized create or fresh update, including a release's first outcome.
 
 The contract is authored in `api/areas/goals.yaml` and served with
-`Aeon-Contract: goals/1.5`. It provides:
+`Aeon-Contract: goals/1.7`. It provides:
 
 - `POST /api/goals` for a goal title and optional project UUID.
 - `PATCH /api/goals/{key-or-id}` for ETA, steps, a flagged progress override,
@@ -194,8 +194,10 @@ People set goals and say which work serves them without ever naming an outcome.
   renamed where they live) and appends `goal.renamed`.
 - **Link work**: `POST /goals/{goalId}/work` with `{"node_ids": [...]}` (keys or
   UUIDs, at most 20 per goal) adds tickets or epics to the goal's one implicit
-  outcome, created on the first link and marked `linked_work` (ref `people-links`).
-  It is idempotent and needs `nodes.write` on the goal and `nodes.read` on every
+  outcome, created on the first link and marked `linked_work`. It stores no
+  `outcome_ref`, so an agent may still use `people-links` as an explicit ref.
+  `delta` lists only the ids this call added or removed; `node_ids` stays the
+  full set afterwards. It is idempotent and needs `nodes.write` on the goal and `nodes.read` on every
   item; an item the caller cannot read (or that does not exist) is 403 and nothing
   changes. A project goal links only work of its own project. The 20-item bound is
   the outcome visibility policy's serves bound; link an epic to bring its tickets.
@@ -214,6 +216,8 @@ People set goals and say which work serves them without ever naming an outcome.
   `POST /events/{eventId}/undo` restores the goal and the same outcomes while the
   goal is still deleted. Linked work items are never changed.
 - **Rights** (Tick spec v1.1): rename, unlink and delete need `nodes.write` on the
-  goal, checked inside the write; a viewer and an API key without that scope get 403,
-  and nothing changes or is appended. Every change is an event whose actor is the
+  goal, checked inside the write. An agent key also needs `goals.write` for create,
+  update, the status note, link, unlink and delete, and `goals.read` to list or read;
+  a key without that ceiling gets 403 before the handler. A viewer and an API key
+  without `nodes.write` get 403, and nothing changes or is appended. Every change is an event whose actor is the
   person (or key) who made it, so history can say who renamed, unlinked or deleted.

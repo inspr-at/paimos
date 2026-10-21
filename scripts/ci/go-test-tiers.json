@@ -6876,6 +6876,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalTooLargeDetailKeepsOnlyVisibleCounts","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalWorkDeltaAndImplicitRef","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestPersonCeilingGoals","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestUpdateDigestRetainsPatchIntent","tier":"ESSENTIAL"}

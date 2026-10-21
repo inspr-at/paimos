@@ -9428,6 +9428,12 @@
     ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 light: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"Link stays put across search results and a refusal, on a desktop and a phone","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"Undo of a stale picker removes only the ids that call added","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"a created goal is shown through search, the Done filter and a one-goal page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"a person who may not create goals sees no New goal, and no goal offers Link work, Edit or Delete","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-epics.spec.ts","name":" › E6 390 dark: phones keep the epic rows and their essentials, 44 px Group targets, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -18751,6 +18757,14 @@
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets filtered to none","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets with blocked","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a created goal is revealed through filters and the first page > clears search and the state filter, and keeps a goal the first page omits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a late goal write does not toast for the next person > drops a late unlink, rename and delete","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a late goal write does not toast for the next person > drops a link, its Undo, the picker and the menu when the person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a late goal write does not toast for the next person > offers no Undo when the link changes nothing, and undoes only the returned delta","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/goals-epics-fix2.unit.test.ts","name":"a group switch keeps the frame > keeps the status note and header while the rows are replaced, then shows an empty list","tier":"ESSENTIAL"}
     ,

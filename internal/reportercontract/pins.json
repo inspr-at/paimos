@@ -699,14 +699,22 @@
     }
   },
   "goals": {
-    "version": "goals/1.6",
-    "sha256": "1695283ea03ad76efc75be21554b2486fbd11def827927cde917bae680f185d2",
+    "version": "goals/1.7",
+    "sha256": "46cc9c12d7dabe83e3983770f6cab4b4c1d681f9ae80595ae76433b84de49904",
     "shape": {
       "DELETE /goals/{goalId} 200": {
         "additionalProperties": false,
         "properties": {
           "changed": {
             "type": "boolean"
+          },
+          "delta": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "event_id": {
             "format": "int64",
@@ -758,6 +766,14 @@
         "properties": {
           "changed": {
             "type": "boolean"
+          },
+          "delta": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "event_id": {
             "format": "int64",
@@ -2409,6 +2425,14 @@
         "properties": {
           "changed": {
             "type": "boolean"
+          },
+          "delta": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "event_id": {
             "format": "int64",

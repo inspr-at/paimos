@@ -17,14 +17,14 @@
 // holds the New goal / Edit goal sheet (the toolbar opens it, GoalsView draws it)
 // and who may do so, by the rule for creating a node in that project, and which
 // goal is being renamed in place (v1.1).
-import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
+import { computed, nextTick, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { useSession } from '../../stores/session'
 import { useProjects } from '../../stores/projects'
 import { can } from '../../lib/authz'
 import { scopeOwner } from '../../lib/identityScope'
 import { usePreference } from '../../lib/preferences'
 import { usePoller } from '../../lib/usePolledData'
-import { goalCreatedAt, goalMatches, goalSeries, isGoalGroup, itemMatches, listGoals, SORT_DIR, type Goal, type GoalCounts, type GoalGroup, type GoalList, type GoalSeries, type GoalSort, type StateFilter } from '../../lib/goals'
+import { goalCreatedAt, goalMatches, goalSeries, isGoalGroup, itemMatches, listGoals, readGoal, SORT_DIR, type Goal, type GoalCounts, type GoalGroup, type GoalList, type GoalSeries, type GoalSort, type StateFilter } from '../../lib/goals'
 import { isGoalRange, type GoalRange } from '../../lib/goalRate'
 import { EPIC_STREAM_EVENTS, GOAL_STREAM_EVENTS, openGoalsLive, type GoalsLiveState } from '../../lib/goalsLive'
 
@@ -106,13 +106,27 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     reading.value = true
     // The answer counts only for the person, query and turn it was asked for.
     const current = () => mine === turn && who === owner.value
-    return listGoals(query(), abort.signal, group.value).then(answer => {
+    return listGoals(query(), abort.signal, group.value).then(async answer => {
       if (!current()) return
       reading.value = false
       // The same question never goes back to an older snapshot than the one on screen.
       const shown = list.value
       if (shown && asked === shownQuery && (answer.read_through < shown.read_through || (answer.read_through === shown.read_through && answer.generation < shown.generation))) { replacing.value = false; return }
-      list.value = answer; shownQuery = asked; error.value = ''; updatedAt.value = Date.now(); replacing.value = false
+      let items = answer.items
+      const pin = pinned
+      // A goal just created may be past this page. Keep it on screen until the
+      // server page includes it, or the person changes the query.
+      if (pin && group.value === 'goals' && !items.some(goal => goal.id === pin)) {
+        try {
+          const one = await readGoal(pin, abort.signal)
+          if (!current()) return
+          if (pinned === pin && one.id === pin && !items.some(goal => goal.id === pin)) items = [one, ...items]
+        } catch {
+          if (!current() || abort.signal.aborted) return
+          pinned = null
+        }
+      } else if (pin && items.some(goal => goal.id === pin)) pinned = null
+      list.value = { ...answer, items }; shownQuery = asked; error.value = ''; updatedAt.value = Date.now(); replacing.value = false
     }, cause => {
       if (!current() || abort.signal.aborted) return
       error.value = cause instanceof Error ? cause.message : 'Goals could not be read.'
@@ -135,10 +149,16 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     }).finally(() => { if (token === pageToken) loadingMore.value = false })
   }
   let settle: ReturnType<typeof setTimeout> | undefined
-  watch(options.term, () => { clearTimeout(settle); settle = setTimeout(() => { void read() }, SEARCH_SETTLE_MS) })
-  watch([filter, sort, dir, hideDone], () => { clearTimeout(settle); void read() })
+  // The goal created just now, kept in front of a page that does not yet list it.
+  let pinned: string | null = null
+  // True while reveal itself clears search and the state filter, so that
+  // change does not drop the goal it is about to show.
+  let revealing = false
+  watch(options.term, () => { if (!revealing) pinned = null; clearTimeout(settle); settle = setTimeout(() => { void read() }, SEARCH_SETTLE_MS) })
+  watch([filter, sort, dir, hideDone], () => { if (!revealing) pinned = null; clearTimeout(settle); void read() })
   // Another group is another list: the rows are replaced, the frame (status note, header) stays.
   watch(group, () => {
+    pinned = null
     turn++; controller?.abort(); retirePagination(); clearTimeout(settle)
     error.value = ''
     const shown = list.value
@@ -262,11 +282,30 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   const sheet = shallowRef<{ goal: Goal | null } | null>(null)
   function openSheet(goal: Goal | null = null) { sheet.value = { goal } }
   function closeSheet() { sheet.value = null }
+  // Show a goal the current search, state filter or first page would hide.
+  // Search and the state filter clear; Hide done stays, because a new goal is
+  // not done. The goal stays pinned across later first-page reads until the
+  // server includes it or the person changes the query.
+  async function reveal(id: string): Promise<boolean> {
+    if (group.value !== 'goals') return false
+    const who = owner.value
+    pinned = id
+    revealing = true
+    if (options.term.value) options.term.value = ''
+    if (filter.value !== 'all') filter.value = 'all'
+    await nextTick()
+    revealing = false
+    clearTimeout(settle)
+    await read()
+    clearTimeout(settle)
+    return who === owner.value && (list.value?.items.some(goal => goal.id === id) ?? false)
+  }
   // Rename in place (Tick spec v1.1): the goal whose name is a text field now.
   const renaming = ref<string | null>(null)
 
   // Another person or workspace starts from nothing: no list, no open goals, no series.
   watch(owner, () => {
+    pinned = null
     sheet.value = null; renaming.value = null
     turn++; controller?.abort(); retireSeries(); retirePagination()
     list.value = null; error.value = ''; reading.value = false; replacing.value = false; updatedAt.value = null
@@ -282,7 +321,7 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     filter, sort, dir, hideDone, setHideDone, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, replacing, loaded, loadingMore, loadMore, read,
     live, updatedAt, statusNote, etaLastSetAt,
     open, charts, folds, isOpen, allOpen, toggle, toggleAll, toggleFold, toggleChart, searchOpens, want, seriesFor, counts, totals, totalsPartial, stop,
-    workspaceWrite, writableProjects, canCreate, canEdit, sheet, openSheet, closeSheet, renaming,
+    workspaceWrite, writableProjects, canCreate, canEdit, sheet, openSheet, closeSheet, renaming, reveal,
   }
 }
 export type GoalsPage = ReturnType<typeof useGoalsPage>

@@ -165,7 +165,7 @@ paths:
     delete:
       operationId: deleteGoal
       summary: Delete a goal with its outcomes
-      description: "AEON-1618. Soft-deletes a goal and every outcome under it in one write; linked work items are never changed. Requires nodes.write in the goal's project, rechecked in the write transaction, and sight of every outcome. Releases are refused with 400. Appends goal.deleted; POST /events/{eventId}/undo with the returned event_id restores the goal and the same outcomes while the goal is still deleted."
+      description: "AEON-1618. Soft-deletes a goal and every outcome under it in one write; linked work items are never changed. Requires nodes.write in the goal's project, rechecked in the write transaction, and sight of every outcome. An agent key also needs goals.write as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. Releases are refused with 400. Appends goal.deleted; POST /events/{eventId}/undo with the returned event_id restores the goal and the same outcomes while the goal is still deleted."
       security: *auth
       responses:
         '200':
@@ -184,7 +184,7 @@ paths:
     post:
       operationId: linkGoalWork
       summary: Link work items to a goal
-      description: "AEON-1618, people's Link work. Adds tickets or epics to the goal's one implicit outcome, created on the first link and never listed as an outcome: GET reads show each linked item as its own item with linked true. Outcomes that agents built stay unchanged. Idempotent: an item already linked changes nothing. Requires nodes.write in the goal's project and nodes.read on every item, rechecked in the write transaction; an item the caller cannot read, or that does not exist, returns 403 and nothing changes. A project goal links only work of its own project. At most 20 linked items per goal (link an epic to bring its tickets along) and 200 items in all. Releases are refused with 400. Appends goal.work_linked with the linked set before and after."
+      description: "AEON-1618, people's Link work. Adds tickets or epics to the goal's one implicit outcome, created on the first link and never listed as an outcome: GET reads show each linked item as its own item with linked true. The implicit outcome stores no outcome_ref, so an explicit outcome may use any legal ref, including people-links. Outcomes that agents built stay unchanged. Idempotent: an item already linked changes nothing, and delta lists only the ids this call added. Requires nodes.write in the goal's project and nodes.read on every item, rechecked in the write transaction; an item the caller cannot read, or that does not exist, returns 403 and nothing changes. An agent key also needs goals.write as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. A project goal links only work of its own project. At most 20 linked items per goal (link an epic to bring its tickets along) and 200 items in all. Releases are refused with 400. Appends goal.work_linked with the linked set before and after."
       security: *auth
       requestBody:
         required: true
@@ -207,7 +207,7 @@ paths:
     delete:
       operationId: unlinkGoalWork
       summary: Unlink work items from a goal
-      description: "AEON-1618, people's Unlink from goal. Removes the named items from the goal's implicit outcome only; an agent outcome that serves the same item keeps it. Idempotent: an item that is not linked changes nothing. Requires nodes.write in the goal's project, rechecked in the write transaction. Linking the same items again is the Undo. Appends goal.work_unlinked with the linked set before and after."
+      description: "AEON-1618, people's Unlink from goal. Removes the named items from the goal's implicit outcome only; an agent outcome that serves the same item keeps it. Idempotent: an item that is not linked changes nothing, and delta lists only the ids this call removed. Requires nodes.write in the goal's project, rechecked in the write transaction. An agent key also needs goals.write as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. Linking those delta ids again is the Undo. Appends goal.work_unlinked with the linked set before and after."
       security: *auth
       requestBody:
         required: true
@@ -279,7 +279,7 @@ components:
   headers:
     GoalsContract:
       description: "Goals API contract"
-      schema: {type: string, enum: [goals/1.6]}
+      schema: {type: string, enum: [goals/1.7]}
   schemas:
     GoalCreate:
       type: object
@@ -401,6 +401,7 @@ components:
         key: {type: string}
         changed: {type: boolean}
         node_ids: {type: array, maxItems: 20, items: {type: string, format: uuid}, description: "The goal's people-linked work after the call; empty after a delete"}
+        delta: {type: array, maxItems: 20, items: {type: string, format: uuid}, description: "Ids this call added on link or removed on unlink; empty when nothing changed, and empty after a delete. Undo this set, not node_ids."}
         event_id: {type: [integer, 'null'], format: int64, minimum: 1, description: "The event this call appended last (goal.work_linked, goal.work_unlinked or goal.deleted); null when nothing changed"}
         read_through: {type: integer, format: int64, minimum: 0}
         generation: {type: integer, format: int64, minimum: 1}

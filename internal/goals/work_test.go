@@ -413,3 +413,67 @@ func TestGoalPeopleRenameUnlinkDeleteRights(t *testing.T) {
 		t.Fatalf("undo event %s by %s", typ, actor)
 	}
 }
+
+// Risk: Undo of a link removes work another client had already linked, and
+// creating the implicit outcome collides with a live or deleted explicit
+// outcome whose ref is people-links.
+func TestGoalWorkDeltaAndImplicitRef(t *testing.T) {
+	f := writerFixture(t)
+	ctx := t.Context()
+	var third string
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		third = fixtureNode(t, tx, f.writer.TenantID, "work", "TKT-3", f.project, nil)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := &module{f.db.App, time.Now}
+	calls := 0
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		calls++
+		return goalRequest(ctx, m, f.writer, method, path, fmt.Sprintf("delta-ref-%d", calls), body)
+	}
+	readWriteResult(t, call("PATCH", "/api/goals/"+f.emptyGoal, `{"items":{"upsert":[{"ref":"people-links","label":"Named by an agent","keys":["TKT-1"]}]}}`), 200)
+	readWriteResult(t, call("PATCH", "/api/goals/"+f.secondGoal, `{"items":{"upsert":[{"ref":"people-links","label":"Retired name","keys":["TKT-1"]}]}}`), 200)
+	readWriteResult(t, call("PATCH", "/api/goals/"+f.secondGoal, `{"items":{"remove":["people-links"]}}`), 200)
+	liveBefore := explicitOutcomes(t, f, f.emptyGoal)
+	deletedBefore := explicitOutcomes(t, f, f.secondGoal)
+
+	path := "/api/goals/" + f.emptyGoal + "/work"
+	first := readWork(t, call("POST", path, `{"node_ids":["TKT-1"]}`), 200)
+	if !first.Changed || len(first.Delta) != 1 || len(first.NodeIDs) != 1 || first.Delta[0] != first.NodeIDs[0] {
+		t.Fatalf("first link %+v", first)
+	}
+	mixed := readWork(t, call("POST", path, `{"node_ids":["TKT-1","`+third+`","TKT-1"]}`), 200)
+	if !mixed.Changed || len(mixed.NodeIDs) != 2 || len(mixed.Delta) != 1 || mixed.Delta[0] != third || slices.Contains(mixed.Delta, first.Delta[0]) {
+		t.Fatalf("mixed batch delta %+v, want only %s", mixed, third)
+	}
+	again := readWork(t, call("POST", path, `{"node_ids":["TKT-1","`+third+`"]}`), 200)
+	if again.Changed || again.EventID != nil || len(again.Delta) != 0 || !slices.Equal(again.NodeIDs, mixed.NodeIDs) {
+		t.Fatalf("repeated link %+v", again)
+	}
+	undone := readWork(t, call("DELETE", path, `{"node_ids":["`+mixed.Delta[0]+`"]}`), 200)
+	if !undone.Changed || len(undone.Delta) != 1 || undone.Delta[0] != third || !slices.Equal(undone.NodeIDs, first.NodeIDs) {
+		t.Fatalf("undoing the delta %+v dropped the pre-existing link %+v", undone, first.NodeIDs)
+	}
+	if got := explicitOutcomes(t, f, f.emptyGoal); got != liveBefore {
+		t.Fatalf("live people-links outcome changed\nbefore %s\nafter %s", liveBefore, got)
+	}
+	beside := readWork(t, call("POST", "/api/goals/"+f.secondGoal+"/work", `{"node_ids":["`+third+`"]}`), 200)
+	if !beside.Changed || len(beside.Delta) != 1 || beside.Delta[0] != third {
+		t.Fatalf("link beside a deleted people-links outcome %+v", beside)
+	}
+	if got := explicitOutcomes(t, f, f.secondGoal); got != deletedBefore {
+		t.Fatalf("deleted people-links outcome changed\nbefore %s\nafter %s", deletedBefore, got)
+	}
+	for _, goal := range []string{f.emptyGoal, f.secondGoal} {
+		var count int
+		var hasRef bool
+		if err := f.db.Admin.QueryRow(ctx, `SELECT count(*), coalesce(bool_or(fields ? 'outcome_ref'), false) FROM nodes WHERE parent_id=$1 AND fields @> '{"linked_work":true}' AND deleted_at IS NULL`, goal).Scan(&count, &hasRef); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 || hasRef {
+			t.Fatalf("goal %s implicit outcomes=%d stores outcome_ref=%v", goal, count, hasRef)
+		}
+	}
+}

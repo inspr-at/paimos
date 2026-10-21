@@ -156,12 +156,15 @@ the first row behind ⋯. Without that right the button is absent.
 - **The sheet** (the New project pattern): Title ("What should be true when this is
   done?"), Where (a project the person may write, or Whole workspace for people who
   may write the workspace; fixed while editing) and an optional Lands day, read as
-  the end of that day. Create goal closes the sheet, the new goal opens where the
-  sort puts it, its **Link work** has focus and the toast says "Goal created".
+  the end of that day. Create goal closes the sheet. Search and the state filter
+  clear so the new goal is on screen, and a goal past the first page is fetched
+  and shown, before it opens with **Link work** focused. The toast says "Goal created".
 - **Link work** sits at the bottom of an opened goal and in its ⋯. It opens the
   ticket picker in its multi-select mode: search tickets and epics (a project goal
-  searches its project), mark several, "Link {n}" (⌘↵ or Ctrl+↵). The toast says
-  "{n} linked" with Undo. Linked items show as the goal's own items; progress,
+  searches its project), mark several, "Link {n}" (⌘↵ or Ctrl+↵). On a desktop the
+  button stays above the results and a refusal. On a phone the results scroll and
+  the button stays pinned. The toast says "{n} linked" and Undo removes only the
+  ids this call added; a link that changes nothing has no Undo. Linked items show as the goal's own items; progress,
   Moving · Queued · Done and Lands roll up as for every item.
 - **Unlink from goal** is in a linked item's ⋯, with Undo. **Edit goal** reopens
   the sheet filled in; **Delete goal** offers Undo ("Goal deleted") and never touches

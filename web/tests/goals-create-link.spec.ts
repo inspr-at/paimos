@@ -27,7 +27,7 @@ function world() {
     id: 'g-agent', title: 'Fleet hosts report health on their own', project_id: 'p-pharos', linked: [], eta: { source: 'agent', text: 'Fri 23 Oct', at: '2026-10-23T15:00:00Z', partial: false },
     outcomes: [{ id: '00000000-0000-4000-8000-000000000001', ref: 'probes', label: 'Probes report every minute', note: '', position: 1, keys: ['PHAROS-14'], state: 'queued', session_ids: [], eta: { source: 'none', partial: false }, passed: false, coverage: { estimated_leaves: 0, total_leaves: 1 }, weight: 1, handed_over: false }],
   }
-  return { data, goals: [agentGoal], writes: [] as { method: string; path: string; body: unknown }[], next: 1 }
+  return { data, goals: [agentGoal], writes: [] as { method: string; path: string; body: unknown }[], next: 1, pageLimit: 0 }
 }
 type World = ReturnType<typeof world>
 const STATE: Record<string, string> = { done: 'done', 'in-progress': 'moving', qa: 'moving' }
@@ -50,7 +50,7 @@ function shape(w: World, g: GoalMock) {
 }
 async function mockGoals(page: Page, w: World, options: { readOnly?: boolean } = {}) {
   await mockWork(page, w.data, { readOnly: options.readOnly })
-  const written = (route: Parameters<Parameters<Page['route']>[1]>[0], extra: Record<string, unknown> = {}) => route.fulfill({ json: { changed: true, read_through: 10 + w.writes.length, generation: 1 + w.writes.length, ...extra }, headers: { 'Aeon-Contract': 'goals/1.6' } })
+  const written = (route: Parameters<Parameters<Page['route']>[1]>[0], extra: Record<string, unknown> = {}) => route.fulfill({ json: { changed: true, read_through: 10 + w.writes.length, generation: 1 + w.writes.length, ...extra }, headers: { 'Aeon-Contract': 'goals/1.7' } })
   await page.route(/\/api\/goals(\?.*)?$/, async route => {
     const request = route.request()
     if (request.method() === 'POST') {
@@ -60,23 +60,38 @@ async function mockGoals(page: Page, w: World, options: { readOnly?: boolean } =
       w.goals.push({ id, title: body.title, project_id: body.project_id, linked: [], outcomes: [], eta: body.eta ? { source: 'agent', at: body.eta.at, partial: false } : { source: 'none', partial: false } })
       return written(route, { id, key: id.toUpperCase() })
     }
-    const items = w.goals.filter(g => !g.deleted).map(g => shape(w, g))
+    const url = new URL(request.url())
+    let items = w.goals.filter(g => !g.deleted).map(g => shape(w, g))
+    const q = (url.searchParams.get('q') ?? '').trim().toLowerCase()
+    if (q) items = items.filter(g => `${g.title} ${g.key}`.toLowerCase().includes(q) || g.items.some(item => `${item.label} ${item.keys.join(' ')}`.toLowerCase().includes(q)))
+    const state = url.searchParams.get('state')
+    if (state === 'moving' || state === 'queued' || state === 'paused' || state === 'done') items = items.filter(g => g.states[state] > 0)
+    const matched = items
+    let next_cursor: string | undefined
+    if (w.pageLimit > 0 && items.length > w.pageLimit) { next_cursor = 'page-2'; items = items.slice(0, w.pageLimit) }
     const totals = { moving: 0, queued: 0, paused: 0, done: 0 }
-    for (const g of items) for (const s of ['moving', 'queued', 'paused', 'done'] as const) totals[s] += g.states[s]
-    return route.fulfill({ json: { items, totals, totals_partial: false, quiet_projects: { count: 0, keys: [] }, truncated: false, read_through: 10 + w.writes.length, generation: 1 + w.writes.length }, headers: { 'Aeon-Contract': 'goals/1.6' } })
+    for (const g of matched) for (const s of ['moving', 'queued', 'paused', 'done'] as const) totals[s] += g.states[s]
+    return route.fulfill({ json: { items, totals, totals_partial: false, quiet_projects: { count: 0, keys: [] }, truncated: false, next_cursor, read_through: 10 + w.writes.length, generation: 1 + w.writes.length }, headers: { 'Aeon-Contract': 'goals/1.7' } })
   })
   await page.route(/\/api\/goals\/g-[a-z0-9]+\/work$/, async route => {
     const request = route.request(), id = new URL(request.url()).pathname.split('/')[3]!
     const goal = w.goals.find(g => g.id === id)!, body = request.postDataJSON() as { node_ids: string[] }
     w.writes.push({ method: request.method(), path: `/goals/${id}/work`, body })
+    const before = [...goal.linked]
     if (request.method() === 'POST') for (const node of body.node_ids) { if (!goal.linked.includes(node)) goal.linked.push(node) }
     else goal.linked = goal.linked.filter(node => !body.node_ids.includes(node))
-    return written(route, { id, key: id.toUpperCase(), node_ids: [...goal.linked], event_id: 40 + w.writes.length })
+    const delta = request.method() === 'POST' ? goal.linked.filter(node => !before.includes(node)) : before.filter(node => !goal.linked.includes(node))
+    return written(route, { id, key: id.toUpperCase(), changed: delta.length > 0, node_ids: [...goal.linked], delta, event_id: delta.length ? 40 + w.writes.length : null })
   })
   // Rename (PATCH title) and Delete; a delete's event undoes through the events API.
   await page.route(/\/api\/goals\/g-[a-z0-9-]+$/, async route => {
     const request = route.request(), id = new URL(request.url()).pathname.split('/')[3]!
-    const goal = w.goals.find(g => g.id === id)!
+    const goal = w.goals.find(g => g.id === id)
+    if (request.method() === 'GET') {
+      if (!goal || goal.deleted) return route.fulfill({ status: 404, json: { error: 'not found' } })
+      return route.fulfill({ json: shape(w, goal), headers: { 'Aeon-Contract': 'goals/1.7' } })
+    }
+    if (!goal) return route.fulfill({ status: 404, json: { error: 'not found' } })
     if (request.method() === 'PATCH') {
       const body = request.postDataJSON() as { title: string }
       w.writes.push({ method: 'PATCH', path: `/goals/${id}`, body })
@@ -310,4 +325,100 @@ test('a person who may not create goals sees no New goal, and no goal offers Lin
   await expect(page.locator('.picker.multi')).toHaveCount(0)
   await expect(goal).toHaveCount(1)
   expect(w.writes).toEqual([])
+})
+
+async function createGoal(page: Page, phone = false) {
+  await (await newGoalEntry(page, phone)).click()
+  await page.locator('#goal-title').fill('Managed provisioning works end to end')
+  await page.locator('#goal-where').selectOption('p-pharos')
+  await page.locator('#goal-go').click()
+  await expect(page.locator('dialog.project-settings-sheet')).toHaveCount(0)
+}
+
+test('Link stays put across search results and a refusal, on a desktop and a phone', async ({ page }) => {
+  for (const [width, height] of [[1440, 900], [390, 844]] as const) {
+    await page.setViewportSize({ width, height })
+    const w = world()
+    await openGoals(page, w)
+    await createGoal(page, width <= 760)
+    const goal = goalRow(page, 'g-new1')
+    await expect(goal.locator('.link-work')).toBeFocused()
+    await page.keyboard.press('Enter')
+    const picker = page.locator('.picker.multi')
+    await expect(picker).toBeVisible()
+    // The label stays "Link 1" for the whole measurement. A later click would
+    // unpick the row, and "Link 0" to "Link 1" would move a right-aligned button.
+    await picker.locator('input').fill('PHAROS-1')
+    await picker.locator('.option', { hasText: 'PHAROS-11' }).click()
+    const link = picker.getByRole('button', { name: 'Link 1' })
+    const guard = await controlStability(page, { link })
+    await guard.check(async () => {
+      await picker.locator('input').fill('PHAROS-12')
+      await expect(picker.locator('.option', { hasText: 'PHAROS-12' })).toBeVisible()
+    })
+    await guard.check(async () => {
+      await picker.locator('input').fill('zzz-no-such-ticket')
+      await expect(picker.getByText(/Nothing matches/)).toBeVisible()
+    })
+    guard.done()
+    await link.click()
+    await expect(picker).toHaveCount(0)
+    await goal.locator('.link-work').click()
+    const again = page.locator('.picker.multi')
+    await expect(again).toBeVisible()
+    await again.locator('input').fill('PHAROS-11')
+    await expect(again.locator('.option', { hasText: 'PHAROS-11' })).toBeVisible()
+    const held = await controlStability(page, { link: again.getByRole('button', { name: 'Link 0' }) })
+    await held.check(async () => {
+      await again.locator('.option', { hasText: 'PHAROS-11' }).click()
+      await expect(again.locator('.refusal')).toBeVisible()
+    })
+    held.done()
+    await page.keyboard.press('Escape')
+  }
+})
+
+test('a created goal is shown through search, the Done filter and a one-goal page', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const w = world()
+  await openGoals(page, w)
+  await page.locator('.project-search input').fill('fleet')
+  await expect(goalRow(page, 'g-agent')).toBeVisible()
+  await page.locator('.state-seg [data-state="done"]').click()
+  await expect(goalRow(page, 'g-agent')).toHaveCount(0)
+  await createGoal(page)
+  const goal = goalRow(page, 'g-new1')
+  await expect(page.locator('.project-search input')).toHaveValue('')
+  await expect(page.locator('.state-seg [data-state="all"]')).toHaveAttribute('aria-checked', 'true')
+  await expect(goal).toHaveAttribute('data-open', '1')
+  await expect(goal.locator('.link-work')).toBeFocused()
+
+  const paged = world()
+  paged.pageLimit = 1
+  await openGoals(page, paged)
+  await createGoal(page)
+  const created = goalRow(page, 'g-new1')
+  await expect(created).toHaveAttribute('data-open', '1')
+  await expect(created.locator('.link-work')).toBeFocused()
+  expect(paged.goals.map(g => g.id)).toEqual(['g-agent', 'g-new1'])
+})
+
+test('Undo of a stale picker removes only the ids that call added', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const w = world()
+  await openGoals(page, w)
+  await createGoal(page)
+  const goal = goalRow(page, 'g-new1')
+  await goal.locator('.link-work').click()
+  const picker = page.locator('.picker.multi')
+  await picker.locator('input').fill('PHAROS-1')
+  await picker.locator('.option', { hasText: 'PHAROS-11' }).click()
+  await picker.locator('.option', { hasText: 'PHAROS-12' }).click()
+  // Another client linked PHAROS-11 after this picker read the goal.
+  w.goals.find(g => g.id === 'g-new1')!.linked.push('n-1')
+  await picker.getByRole('button', { name: /^Link 2/ }).click()
+  await expect(page.getByText('1 linked')).toBeVisible()
+  await page.locator('.toast', { hasText: '1 linked' }).getByRole('button', { name: 'Undo' }).click()
+  expect(w.writes.at(-1)).toEqual({ method: 'DELETE', path: '/goals/g-new1/work', body: { node_ids: ['n-2'] } })
+  expect(w.goals.find(g => g.id === 'g-new1')!.linked).toEqual(['n-1'])
 })

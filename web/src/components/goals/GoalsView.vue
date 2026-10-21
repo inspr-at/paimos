@@ -23,6 +23,7 @@
 // keys do nothing for them. On phones the ⋯ opens as the shared bottom sheet.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useIdentityScope } from '../../lib/useIdentityScope'
 import AppIcon from '../AppIcon.vue'
 import RowMenu from '../business/RowMenu.vue'
 import RelationPicker, { type PickMode } from '../work/RelationPicker.vue'
@@ -47,6 +48,7 @@ import { useProjects } from '../../stores/projects'
 const props = defineProps<{ page: GoalsPage; term: string; now: number; hiddenGroups: boolean }>()
 const emit = defineEmits<{ clear: [] }>()
 const session = useSession()
+const scope = useIdentityScope()
 const live = useLiveAgents()
 const route = useRoute()
 const root = ref<HTMLElement>()
@@ -148,11 +150,13 @@ async function menuAction(action: string) {
 }
 
 // ---------- People's writes (AEON-1618) ----------
-// Each write is bound to the goal it acted on; Undo writes the inverse for that goal.
-// The toast drops its Undo when the person changes (toast owner epoch).
+// Each write is bound to the goal and the person it acted for. A late answer
+// after a sign-in change never toasts, and its Undo never runs for the next person.
+// The toast epoch drops an Undo that was already shown when the person changes.
 const projects = useProjects()
 const failure = (cause: unknown, fallback: string) => toast(cause instanceof Error ? cause.message : fallback, { tone: 'error' })
 const picker = ref<{ goal: Goal; anchor: HTMLElement } | null>(null)
+watch(scope.owner, () => { menu.value = null; picker.value = null }, { flush: 'sync' })
 function openPicker(goal: Goal, anchor: HTMLElement) { picker.value = { goal, anchor } }
 function closePicker(restore: boolean) { const at = picker.value; picker.value = null; if (restore && at?.anchor.isConnected) at.anchor.focus() }
 const pickMode = computed<PickMode | null>(() => {
@@ -162,14 +166,21 @@ const pickMode = computed<PickMode | null>(() => {
   const home = goal.project_id ? projects.byId(goal.project_id)?.routeKey ?? goal.projects.find(badge => badge.id === goal.project_id)?.key ?? null : null
   return { label: 'Link work', linked, onlyProject: home, within: goal.project_id, submit: picked => link(goal, picked) }
 })
+const changedIds = (ids: string[] | undefined) => ids ?? []
 async function link(goal: Goal, picked: RelatedTicket[]): Promise<string | null> {
   const id = goal.id
   try {
-    const result = await linkGoalWork(id, picked.map(item => item.id))
-    const added = picked.map(item => item.id).filter(item => result.node_ids.includes(item))
-    void props.page.read()
-    toast(`${added.length} linked`, { action: { label: 'Undo', run: () => { void unlinkGoalWork(id, added).then(() => props.page.read(), cause => failure(cause, 'The link could not be undone.')) } } })
-    return null
+    const outcome = await scope.run(({ after }) => after(linkGoalWork(id, picked.map(item => item.id)), result => {
+      const added = changedIds(result.delta)
+      void props.page.read()
+      if (!result.changed || added.length === 0) {
+        toast('Already linked')
+        return null
+      }
+      toast(`${added.length} linked`, { action: { label: 'Undo', run: () => { void unlinkGoalWork(id, added).then(() => props.page.read(), cause => failure(cause, 'The link could not be undone.')) } } })
+      return null
+    }))
+    return outcome ?? null
   } catch (cause) {
     return cause instanceof Error ? cause.message : 'The work could not be linked.'
   }
@@ -177,9 +188,12 @@ async function link(goal: Goal, picked: RelatedTicket[]): Promise<string | null>
 async function unlink(goal: Goal, item: GoalOutcome) {
   const id = goal.id, node = item.id
   try {
-    await unlinkGoalWork(id, [node])
-    void props.page.read()
-    toast(`${item.keys[0] ?? item.label} unlinked`, { action: { label: 'Undo', run: () => { void linkGoalWork(id, [node]).then(() => props.page.read(), cause => failure(cause, 'The link could not be restored.')) } } })
+    await scope.run(({ after }) => after(unlinkGoalWork(id, [node]), result => {
+      const removed = changedIds(result.delta)
+      void props.page.read()
+      if (!result.changed || removed.length === 0) return
+      toast(`${item.keys[0] ?? item.label} unlinked`, { action: { label: 'Undo', run: () => { void linkGoalWork(id, removed).then(() => props.page.read(), cause => failure(cause, 'The link could not be restored.')) } } })
+    }))
   } catch (cause) { failure(cause, 'The work could not be unlinked.') }
 }
 const toggleOf = (id: string) => root.value?.querySelector<HTMLElement>(`[data-goal-id="${CSS.escape(id)}"] .goal-toggle`) ?? null
@@ -188,18 +202,19 @@ const toggleOf = (id: string) => root.value?.querySelector<HTMLElement>(`[data-g
 const deleting = new Set<string>()
 async function remove(goal: Goal) {
   if (deleting.has(goal.id)) return
-  deleting.add(goal.id)
-  const list = goals.value, at = list.findIndex(item => item.id === goal.id)
+  const id = goal.id
+  deleting.add(id)
+  const list = goals.value, at = list.findIndex(item => item.id === id)
   const next = list[at + 1] ?? list[at - 1] ?? null
-  const focused = !!root.value?.querySelector(`[data-goal-id="${CSS.escape(goal.id)}"] .goal-row`)?.contains(document.activeElement)
+  const focused = !!root.value?.querySelector(`[data-goal-id="${CSS.escape(id)}"] .goal-row`)?.contains(document.activeElement)
   try {
-    const result = await deleteGoal(goal.id)
-    const event = result.event_id
-    toast('Goal deleted', event ? { action: { label: 'Undo', run: () => { void undoEvent(event).then(() => props.page.read(), cause => failure(cause, 'The goal could not be restored.')) } } } : {})
-    await props.page.read()
-    if (focused && next) { await nextTick(); toggleOf(next.id)?.focus() }
+    await scope.run(({ after }) => after(deleteGoal(id), result => {
+      const event = result.event_id
+      toast('Goal deleted', event ? { action: { label: 'Undo', run: () => { void undoEvent(event).then(() => props.page.read(), cause => failure(cause, 'The goal could not be restored.')) } } } : {})
+      return after(props.page.read(), () => after(nextTick(), () => { if (focused && next) toggleOf(next.id)?.focus() }))
+    }))
   } catch (cause) { failure(cause, 'The goal could not be deleted.') }
-  finally { deleting.delete(goal.id) }
+  finally { deleting.delete(id) }
 }
 // Rename in place: the row's name becomes a field (GoalRow); the write is bound to the goal it renamed.
 const renameBusy = ref<string | null>(null)
@@ -209,10 +224,11 @@ async function rename(goal: Goal, title: string) {
   const id = goal.id, before = goal.title
   renameBusy.value = id
   try {
-    await updateGoal(id, { title })
-    await props.page.read()
-    if (props.page.renaming.value === id) { props.page.renaming.value = null; await nextTick(); toggleOf(id)?.focus() }
-    toast('Goal renamed', { action: { label: 'Undo', run: () => { void updateGoal(id, { title: before }).then(() => props.page.read(), cause => failure(cause, 'The name could not be restored.')) } } })
+    await scope.run(({ after }) => after(updateGoal(id, { title }), () => after(props.page.read(), () => {
+      if (props.page.renaming.value === id) props.page.renaming.value = null
+      toast('Goal renamed', { action: { label: 'Undo', run: () => { void updateGoal(id, { title: before }).then(() => props.page.read(), cause => failure(cause, 'The name could not be restored.')) } } })
+      return after(nextTick(), () => { if (props.page.renaming.value === null) toggleOf(id)?.focus() })
+    })))
   } catch (cause) {
     failure(cause, 'The goal could not be renamed.')
     // A rename that left the field (blur) ends with the failure; one still in the field can be tried again.
@@ -227,14 +243,16 @@ function focusedGoal(): Goal | null {
   const goal = id ? goals.value.find(item => item.id === id) ?? null : null
   return goal && canEdit(goal) ? goal : null
 }
-// After New goal: the row appears where the sort puts it, opens, and Link work has focus.
+// After New goal: clear a search or state filter that would hide it, bring a
+// goal past the first page onto the screen, then open it and focus Link work.
 async function created(id: string) {
   props.page.closeSheet()
-  toast('Goal created')
-  await props.page.read()
-  props.page.toggle(id, true)
-  await nextTick()
-  root.value?.querySelector<HTMLElement>(`[data-goal-id="${CSS.escape(id)}"] .link-work`)?.focus()
+  await scope.run(({ after }) => after(props.page.reveal(id), shown => {
+    toast('Goal created')
+    if (!shown) return
+    props.page.toggle(id, true)
+    return after(nextTick(), () => { root.value?.querySelector<HTMLElement>(`[data-goal-id="${CSS.escape(id)}"] .link-work`)?.focus() })
+  }))
 }
 function saved() { props.page.closeSheet(); void props.page.read() }
 const sheetPreferred = computed(() => {

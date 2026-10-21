@@ -29,11 +29,14 @@ type workInput struct {
 }
 
 // WorkResult names the goal and its people-linked work after the call.
+// Delta is the ids this call added (link) or removed (unlink); empty when
+// nothing changed. Undo uses that set. node_ids stays the full resulting set.
 type WorkResult struct {
 	ID      string   `json:"id"`
 	Key     string   `json:"key"`
 	Changed bool     `json:"changed"`
 	NodeIDs []string `json:"node_ids"`
+	Delta   []string `json:"delta"`
 	EventID *int64   `json:"event_id"`
 	Watermark
 }
@@ -101,7 +104,27 @@ func cleanWorkIDs(values []string) ([]string, error) {
 	return out, nil
 }
 
-// implicitOutcome finds the goal's people-links outcome, also when it serves
+// workDelta is the ids a link added or an unlink removed. Already-linked ids
+// in a repeated or mixed batch are not part of it, so Undo cannot drop them.
+func workDelta(link bool, before, after []string) []string {
+	delta := []string{}
+	if link {
+		for _, id := range after {
+			if !slices.Contains(before, id) {
+				delta = append(delta, id)
+			}
+		}
+		return delta
+	}
+	for _, id := range before {
+		if !slices.Contains(after, id) {
+			delta = append(delta, id)
+		}
+	}
+	return delta
+}
+
+// implicitOutcome finds the goal's people-linked outcome, also when it serves
 // work outside the caller's projects; callers then refuse writes they could
 // not fully read. Its row is locked after the goal's.
 func implicitOutcome(ctx context.Context, tx pgx.Tx, goal string) (*storedNode, error) {
@@ -210,9 +233,10 @@ func workTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, identity string,
 		}
 	}
 	sort.Strings(after)
-	out = WorkResult{ID: goal.ID, Key: goal.Key, NodeIDs: after}
+	out = WorkResult{ID: goal.ID, Key: goal.Key, NodeIDs: after, Delta: workDelta(link, before, after)}
 	if slices.Equal(before, after) {
 		out.NodeIDs = before
+		out.Delta = []string{}
 		out.Watermark, err = watermark(ctx, tx)
 		return out, err
 	}
@@ -247,7 +271,7 @@ func workTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, identity string,
 	}
 	var old *storedNode
 	if implicit == nil {
-		created, err := insertNode(ctx, tx, p, outcomeKind, "Linked work", goal.ID, map[string]any{"outcome_ref": LinkedRef, linkedField: true}, linkedPosition)
+		created, err := insertNode(ctx, tx, p, outcomeKind, "Linked work", goal.ID, map[string]any{linkedField: true}, linkedPosition)
 		if err != nil {
 			return out, err
 		}
@@ -383,7 +407,7 @@ func deleteTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, identity strin
 	if err != nil {
 		return out, err
 	}
-	out = WorkResult{ID: goal.ID, Key: goal.Key, Changed: true, NodeIDs: []string{}, EventID: &e.ID}
+	out = WorkResult{ID: goal.ID, Key: goal.Key, Changed: true, NodeIDs: []string{}, Delta: []string{}, EventID: &e.ID}
 	out.Watermark, err = watermark(ctx, tx)
 	return out, err
 }

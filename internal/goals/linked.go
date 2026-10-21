@@ -10,13 +10,14 @@ import (
 )
 
 // AEON-1618: people link work to a goal without ever naming an outcome. The
-// server keeps those links on one implicit outcome per goal, marked by the
-// linked_work field, under a ref that is unavailable to agents' item upserts.
-// Agent item edits never see it (replace keeps it, moves and removals cannot
-// reach it), and readers never show it as an outcome: each linked work item
-// becomes its own item, with its own state, ETA and progress weight.
+// server keeps those links on one implicit outcome per goal, marked only by
+// the linked_work field. It stores no outcome_ref: "people-links" is a legal
+// client ref, and the unique index includes deleted rows, so a sentinel ref
+// would collide with an explicit outcome. Agent item edits never see it
+// (replace keeps it, moves and removals cannot reach it), and readers never
+// show it as an outcome: each linked work item becomes its own item, with
+// its own state, ETA and progress weight.
 const (
-	LinkedRef   = "people-links"
 	linkedField = "linked_work"
 	// Linked items sort after the agents' outcomes.
 	linkedPosition = "100000000000000"

@@ -92,9 +92,10 @@ export const GOAL_GROUPS: readonly GoalGroup[] = ['goals', 'epics']
 export const GROUP_LABEL: Record<GoalGroup, string> = { goals: 'Goals', epics: 'Epics' }
 export const isGoalGroup = (value: unknown): value is GoalGroup => value === 'goals' || value === 'epics'
 export const listGoals = (query: GoalQuery, signal?: AbortSignal, group: GoalGroup = 'goals') => read<GoalList>(`${group === 'epics' ? '/goals/epics' : '/goals'}?${goalQuery(query)}`, signal)
+export const readGoal = (id: string, signal?: AbortSignal) => read<Goal>(`/goals/${encodeURIComponent(id)}`, signal)
 // ---------- People's writes (AEON-1618) ----------
 export interface GoalWriteResult { id: string; key: string; changed: boolean; read_through: number; generation: number }
-export interface GoalWorkResult extends GoalWriteResult { node_ids: string[]; event_id: number | null }
+export interface GoalWorkResult extends GoalWriteResult { node_ids: string[]; delta?: string[]; event_id: number | null }
 async function write<T>(path: string, method: string, body?: unknown, key?: string): Promise<T> {
   const headers: Record<string, string> = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'

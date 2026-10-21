@@ -188,7 +188,7 @@ let lastChoice = 'relates'
 </script>
 
 <template>
-  <FloatingPanel :anchor="anchor" :width="420" :tallest="520" :label="picking ? `${picking.label}: ${subject}` : `Link ${subject} to another ticket`" cycle @close="restore => emit('close', restore)">
+  <FloatingPanel :anchor="anchor" :width="420" :tallest="520" :phone-sheet="!!picking" :fill-phone="!!picking" :label="picking ? `${picking.label}: ${subject}` : `Link ${subject} to another ticket`" cycle @close="restore => emit('close', restore)">
     <div class="picker" :class="{ multi }" :aria-busy="busy">
       <p v-if="picking" class="head"><span class="eyebrow">{{ picking.label }}</span><span v-clip-tip="subject" class="hint">{{ subject }}</span></p>
       <p v-else class="head"><span class="eyebrow">Link {{ subject }}</span><span class="hint">{{ choice.hint }}</span></p>
@@ -207,6 +207,12 @@ let lastChoice = 'relates'
         />
         <span v-if="loading || busy" class="spinner" aria-hidden="true" />
       </label>
+      <div v-if="multi" class="confirm-row">
+        <button type="button" class="btn primary link-picked" :disabled="!picked.length || busy" :aria-busy="busy" @click="confirmPicked">
+          Link {{ picked.length }}<KeyCap k="mod" /><KeyCap k="enter" />
+        </button>
+      </div>
+      <div class="picker-body" :class="{ contents: !multi }">
       <p v-if="refusal" class="refusal" role="alert"><AppIcon name="alert" :size="14" /><span>{{ refusal }}</span></p>
       <div id="relation-options" class="options" :class="{ stale: loading && !!results.length }">
         <p v-if="!query && results.length" class="group-label eyebrow" aria-hidden="true">Recent</p>
@@ -244,10 +250,6 @@ let lastChoice = 'relates'
         <span><kbd class="keycap"><AppIcon name="enter" /></kbd> link</span>
         <span><kbd class="keycap"><AppIcon name="shift" /></kbd><kbd class="keycap">tab</kbd> relation</span>
       </p>
-      <div v-if="multi" class="confirm-row">
-        <button type="button" class="btn primary link-picked" :disabled="!picked.length || busy" :aria-busy="busy" @click="confirmPicked">
-          Link {{ picked.length }}<KeyCap k="mod" /><KeyCap k="enter" />
-        </button>
       </div>
     </div>
   </FloatingPanel>
@@ -255,6 +257,9 @@ let lastChoice = 'relates'
 
 <style scoped>
 .picker { display: grid; gap: 8px; padding: 4px 4px 2px; }
+.picker-body { display: grid; gap: 8px; min-width: 0; }
+/* Non-picking links keep refusal, results and the hint as rows of the picker. */
+.picker-body.contents { display: contents; }
 .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 2px 4px 0; }
 .head .hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-2); }
 .types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; border-radius: 14px; background: var(--seg-bg); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent); }
@@ -307,6 +312,13 @@ let lastChoice = 'relates'
   .foot { display: none; }
   .confirm-row .btn { flex: 1 0 auto; min-height: 44px; }
   .confirm-row .keycap { display: none; }
+}
+/* Phone sheet (pattern B): the results and a refusal scroll; Link stays pinned. */
+@media (max-width: 720px) and (min-height: 481px) {
+  .picker.multi { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .picker.multi .head, .picker.multi .search, .picker.multi .confirm-row { flex: none; }
+  .picker.multi .picker-body { order: 1; flex: 1 1 auto; min-height: 0; overflow: auto; }
+  .picker.multi .confirm-row { order: 2; }
 }
 
 @media (max-width: 720px) {
