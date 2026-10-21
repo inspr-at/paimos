@@ -840,6 +840,158 @@ func (b listReadBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data 
 }
 func (listReadBarrier) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
+// Risk: a second aggregate read can double the work and display facts newer
+// than the sort order. Overlapping roots must retain their own leaf totals.
+func TestListSortAggregatesReuseSnapshot(t *testing.T) {
+	w := planningSetup(t)
+	top := aggregateNode(t, w, "REUSE-1", w.root.ID, "open", 40)
+	group := aggregateNode(t, w, "REUSE-2", top.ID, "open", 99)
+	active := aggregateNode(t, w, "REUSE-3", group.ID, "open", 6)
+	done := aggregateNode(t, w, "REUSE-4", group.ID, "done", 3)
+	unknown := aggregateNode(t, w, "REUSE-5", group.ID, "open", nil)
+	cancelled := aggregateNode(t, w, "REUSE-6", top.ID, "cancelled", 100)
+	archived := aggregateNode(t, w, "REUSE-7", top.ID, "archived", 4.5)
+	finished := aggregateNode(t, w, "REUSE-8", top.ID, "open", 2)
+	tie := aggregateNode(t, w, "REUSE-9", top.ID, "open", 6)
+	deleted := aggregateNode(t, w, "REUSE-10", group.ID, "open", 200)
+	var now time.Time
+	if err := adminPool.QueryRow(t.Context(), `SELECT now()`).Scan(&now); err != nil {
+		t.Fatal(err)
+	}
+	aggregateETA(t, w, active.ID, 25, now.Add(2*time.Hour), now.Add(3*time.Hour))
+	aggregateETA(t, w, finished.ID, 100, now.Add(time.Hour), now.Add(time.Hour))
+	if _, err := adminPool.Exec(t.Context(), `UPDATE harness_sessions
+ SET phase='stopped',stopped_at=now(),stop_reason='process_exited' WHERE ticket_node_id=$1`, finished.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adminPool.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, deleted.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adminPool.Exec(t.Context(), `UPDATE nodes SET fields=fields||jsonb_build_object('estimate_by',$2::text) WHERE id=$1`, top.ID, w.admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{top.ID, group.ID, active.ID, done.ID, unknown.ID, cancelled.ID, archived.ID, finished.ID, tie.ID}
+	estimates, views := aggregateRead(t, w.admin, ids...)
+	if estimates[top.ID].Hours == nil || *estimates[top.ID].Hours != 17 || estimates[top.ID].LeafCount != 5 ||
+		estimates[group.ID].Hours == nil || *estimates[group.ID].Hours != 9 || estimates[group.ID].LeafCount != 3 ||
+		estimates[top.ID].By == nil || estimates[top.ID].By.ID != w.admin.ID || !views[finished.ID].Finished {
+		t.Fatal("fixture lost overlapping roots, excluded leaves, author or completion")
+	}
+	trace := &sortAggregateReadTracer{}
+	cfg := appPool.Config()
+	cfg.ConnConfig.Tracer = trace
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	mod := New(pool, nil).(*Module)
+	ctx := tenant.WithPrincipal(t.Context(), w.admin)
+	q := listQuery{Within: &w.root.ID, Kinds: []string{"work"}, Limit: 2}
+	checkItem := func(t *testing.T, item listItem) {
+		t.Helper()
+		var wantETA *eta.View
+		if view, ok := views[item.ID]; ok {
+			wantETA = &view
+		}
+		if !reflect.DeepEqual(item.Estimate, estimates[item.ID]) || !reflect.DeepEqual(item.Eta, wantETA) {
+			t.Errorf("%s: sorted estimate/ETA differ from the original root facts: estimate=%+v eta=%+v", item.Key, item.Estimate, item.Eta)
+		}
+	}
+	for _, sort := range []string{"estimate", "-estimate", "progress", "-progress", "eta_ready", "-eta_ready", "progress,-estimate", "key"} {
+		t.Run(sort, func(t *testing.T) {
+			q.Sort, q.Cursor = nil, ""
+			for _, key := range strings.Split(sort, ",") {
+				q.Sort = append(q.Sort, sortKey{Name: strings.TrimPrefix(key, "-"), Desc: strings.HasPrefix(key, "-")})
+			}
+			seen := map[string]bool{}
+			for {
+				trace.scopeReads = 0
+				page, err := mod.listNodes(ctx, w.admin.TenantID, q)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if trace.scopeReads != 1 {
+					t.Errorf("scope traversals=%d, want 1 per page", trace.scopeReads)
+				}
+				if sort == "-estimate" && q.Cursor == "" && (len(page.Items) != 2 || page.Items[0].ID != cancelled.ID || page.Items[1].ID != top.ID) {
+					t.Fatal("sort lost closed leaf estimates or descendants outside the selected page")
+				}
+				for _, item := range page.Items {
+					if seen[item.ID] {
+						t.Fatalf("duplicate cursor item %s", item.Key)
+					}
+					seen[item.ID] = true
+					checkItem(t, item)
+				}
+				if page.NextCursor == nil {
+					break
+				}
+				q.Cursor = *page.NextCursor
+			}
+			if len(seen) != len(ids) {
+				t.Fatalf("cursor coverage=%d, want %d", len(seen), len(ids))
+			}
+		})
+	}
+	// Commit changes after sorting has finished, before page hydration. The
+	// query-end hook establishes the interleaving without a timing assumption.
+	for _, sort := range []string{"estimate", "progress", "eta_ready"} {
+		t.Run(sort+" snapshot", func(t *testing.T) {
+			q.Sort, q.Cursor, q.Limit, q.IDs = []sortKey{{Name: sort}}, "", 10, []string{top.ID, group.ID, active.ID}
+			var hookErr error
+			trace.stopAfterListQuery = stopAfterListQuery{hook: func() {
+				_, hookErr = adminPool.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"estimate_hours":12}'::jsonb WHERE id=$1`, active.ID)
+				if hookErr == nil {
+					_, hookErr = adminPool.Exec(t.Context(), `UPDATE harness_sessions SET progress_pct=75,eta_ready_at=eta_ready_at+interval '4 hours' WHERE ticket_node_id=$1`, active.ID)
+				}
+			}}
+			trace.scopeReads = 0
+			page, err := mod.listNodes(ctx, w.admin.TenantID, q)
+			if err != nil || hookErr != nil || !trace.ran || len(page.Items) != 3 {
+				t.Fatalf("snapshot fixture: read=%v hook=%v ran=%v rows=%d", err, hookErr, trace.ran, len(page.Items))
+			}
+			if trace.scopeReads != 1 {
+				t.Errorf("scope traversals=%d, want 1", trace.scopeReads)
+			}
+			for _, item := range page.Items {
+				checkItem(t, item)
+			}
+			trace.stopAfterListQuery = stopAfterListQuery{}
+			fresh, err := mod.listNodes(ctx, w.admin.TenantID, q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range fresh.Items {
+				if reflect.DeepEqual(item.Estimate, estimates[item.ID]) || item.Eta == nil || reflect.DeepEqual(*item.Eta, views[item.ID]) {
+					t.Errorf("%s: fresh read ignored committed aggregate changes", item.Key)
+				}
+			}
+			if _, err := adminPool.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"estimate_hours":6}'::jsonb WHERE id=$1`, active.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := adminPool.Exec(t.Context(), `UPDATE harness_sessions SET progress_pct=25,eta_ready_at=eta_ready_at-interval '4 hours' WHERE ticket_node_id=$1`, active.ID); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+type sortAggregateReadTracer struct {
+	stopAfterListQuery
+	scopeReads int
+}
+
+func (tr *sortAggregateReadTracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	tr.scopeReads += strings.Count(data.SQL, "SELECT * FROM aeon_work_scope(")
+	return tr.stopAfterListQuery.TraceQueryStart(ctx, conn, data)
+}
+func (tr *sortAggregateReadTracer) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryEndData) {
+	if tr.hook != nil {
+		tr.stopAfterListQuery.TraceQueryEnd(ctx, conn, data)
+	}
+}
+
 func listSortPlanFunctions(t *testing.T, ctx context.Context, tenantID, sql string, args []any) map[string]int {
 	t.Helper()
 	functions := map[string]int{}

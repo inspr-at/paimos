@@ -8982,6 +8982,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestListPlanningColumns","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestListSortAggregatesReuseSnapshot","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestListWithoutStatistics","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestLookupNodesByKeyHidesProjectsTheCallerCannotSee","tier":"GATED-FULL"}
