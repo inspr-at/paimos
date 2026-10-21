@@ -509,30 +509,45 @@ test('Agents links to Connect your machine', async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
 
-// Risk: the connected card can fit the viewport while hiding the end of a path
-// or Touch ID instruction inside a row. Longer names must not move its actions
-// when Details opens; browser region must preserve the English app language.
+// Risk: phone actions squeeze names into split words and desktop paths clip
+// without an ellipsis. Instructions stay whole, paths expose their full title,
+// and actions stay still through Details and a live connectivity update.
 test.describe('AEON-1611 connected computer readability', () => {
   test.use({ locale: 'de-AT' })
   for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
     test(`AEON-1611 connected rows show whole instructions and stable actions at ${width}px ${theme}`, async ({ page }, info) => {
+      await page.clock.install()
       await page.setViewportSize({ width, height: 1100 })
       await page.emulateMedia({ colorScheme: theme })
       await mockWork(page, fixtures())
       const computerName = 'Entwicklungsrechner für die Arbeitsbereichsverwaltung'
       const workspacePath = '/home/team/Arbeitsbereichsverwaltung/Projektunterlagen-und-Freigaben'
-      await mockPairing(page, {}, { computer_name: computerName, workspace_path: workspacePath })
+      const computer = { computer_name: computerName, workspace_path: workspacePath, connectivity: 'online', revision: 4 }
+      await mockPairing(page, {}, computer)
       await page.goto('/agents/register-agent')
       const card = page.getByRole('region', { name: 'Connected computers' })
       const row = card.locator('.computer')
       await expect(row).toHaveCount(1)
-      await expect(row.locator('.name')).toHaveText(computerName)
-      await expect(row.locator('.path')).toHaveText(workspacePath)
+      const name = row.locator('.name')
+      const path = row.locator('.path')
+      await expect(name).toHaveText(computerName)
+      await expect(name).toHaveCSS('overflow-wrap', 'break-word')
+      await expect(path).toHaveText(workspacePath)
+      await expect(path).toHaveAttribute('title', workspacePath)
+      await expect(path).toHaveCSS('text-overflow', 'ellipsis')
+      if (width === 390) {
+        await expect(path).toHaveCSS('-webkit-line-clamp', '2')
+        expect(await path.locator('wbr').count()).toBeGreaterThan(0)
+        expect(await path.evaluate(element => element.clientHeight <= 2 * parseFloat(getComputedStyle(element).lineHeight))).toBe(true)
+      } else {
+        await expect(path).toHaveCSS('white-space', 'nowrap')
+        if (width === 1440) expect(await path.evaluate(element => element.scrollWidth > element.clientWidth), 'desktop path must visibly truncate with an end ellipsis').toBe(true)
+      }
       await expect(row.locator('.confirmation')).toHaveText('Touch ID confirmation: pairing readiness unknown — run aeon-agentd status on this computer.')
       await expect(card.locator(':scope > .muted')).toHaveText('Pairing connects the computer to AEON. Link each running session separately to its ticket.')
 
       const assertReadable = async () => {
-        const targets = width === 390 ? '.confirmation, .location, .path, .path-head, .path-tail, .harness-line, .status' : '.confirmation'
+        const targets = width === 390 ? '.name, .confirmation, .harness-line, .status' : '.confirmation'
         const clipped = await row.locator(targets).evaluateAll(elements => elements.filter(element => {
           const bounds = element.getBoundingClientRect()
           const range = document.createRange()
@@ -543,17 +558,51 @@ test.describe('AEON-1611 connected computer readability', () => {
       }
       await assertReadable()
       const details = row.locator('.details-toggle')
+      const disconnect = row.getByRole('button', { name: 'Disconnect', exact: true })
+      if (width === 390) {
+        for (const action of [disconnect, details]) {
+          const bounds = await action.boundingBox()
+          expect(bounds!.width).toBeGreaterThanOrEqual(44)
+          expect(bounds!.height).toBeGreaterThanOrEqual(44)
+        }
+        const layout = await row.evaluate(element => {
+          const name = element.querySelector('.name')!.getBoundingClientRect()
+          const glyph = element.querySelector('.glyph')!.getBoundingClientRect()
+          const identity = element.querySelector('.identity')!.getBoundingClientRect()
+          const status = element.querySelector('.status')!.getBoundingClientRect()
+          const actions = element.querySelector('.actions')!.getBoundingClientRect()
+          return { nameTop: name.top, glyphTop: glyph.top, identityRight: identity.right, actionsRight: actions.right, actionsTop: actions.top, statusBottom: status.bottom }
+        })
+        expect(layout.glyphTop).toBe(layout.nameTop)
+        expect(layout.identityRight).toBe(layout.actionsRight)
+        expect(layout.actionsTop).toBeGreaterThanOrEqual(layout.statusBottom)
+      }
+      expect(await name.evaluate(element => !!(element.compareDocumentPosition(element.closest('.computer')!.querySelector('.actions')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true)
+      await disconnect.focus()
+      await page.keyboard.press('Tab')
+      await expect(details).toBeFocused()
       const guard = await controlStability(page, {
         refresh: card.getByRole('button', { name: 'Refresh computers' }),
         add: card.getByRole('link', { name: 'Add computer', exact: true }),
-        disconnect: row.getByRole('button', { name: 'Disconnect', exact: true }),
+        name,
+        actions: row.locator('.actions'),
+        disconnect,
         details,
       })
       await guard.check(async () => { await details.click(); await expect(row.locator('.detail')).toBeVisible() })
       await assertReadable()
       await guard.check(async () => { await row.getByRole('button', { name: `Hide details for ${computerName}` }).click(); await expect(row.locator('.detail')).toHaveCount(0) })
-      guard.done()
       await card.screenshot({ path: info.outputPath(`connected-computers-${width}-${theme}.png`), animations: 'disabled' })
+      const beforeStatus = await row.boundingBox()
+      await guard.check(async () => {
+        computer.connectivity = 'offline'
+        computer.revision++
+        await page.clock.runFor(20_000)
+        await expect(row.locator('.status')).toHaveText('Offline')
+      })
+      expect(await row.boundingBox(), 'live status changes must move or resize the row by 0 px').toEqual(beforeStatus)
+      guard.done()
+      if (width === 390) await card.screenshot({ path: info.outputPath(`connected-computers-${width}-${theme}-offline.png`), animations: 'disabled' })
     })
   }
 })

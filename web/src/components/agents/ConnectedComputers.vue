@@ -81,9 +81,7 @@ const revokeExplanation = computed(() => {
   return copy ? `${copy.body} Local processes stay unconfirmed until the computer reports them.` : ''
 })
 function pathParts(path: string) {
-  const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
-  if (cut <= 0 || cut >= path.length - 1) return { head: path, tail: '' }
-  return { head: path.slice(0, cut + 1), tail: path.slice(cut + 1) }
+  return path.match(/[^/\\]*[/\\]|[^/\\]+$/g) ?? [path]
 }
 
 let loadTurn = 0
@@ -299,7 +297,7 @@ function assign(error: unknown, fallback: string) {
               <span class="where">{{ platformCaption(computer.platform, computer.arch) }}</span>
               <template v-if="computer.workspace_path">
                 <span class="sep" aria-hidden="true">·</span>
-                <span class="path" :data-tip="computer.workspace_path"><span class="path-head">{{ pathParts(computer.workspace_path).head }}</span><span class="path-tail">{{ pathParts(computer.workspace_path).tail }}</span></span>
+                <span class="path" :title="computer.workspace_path" :data-tip="computer.workspace_path"><template v-for="(part, index) in pathParts(computer.workspace_path)" :key="index">{{ part }}<wbr /></template></span>
               </template>
             </p>
             <p class="meta confirmation">{{ touchIDConfirmation(computer) }}</p>
@@ -411,17 +409,15 @@ function assign(error: unknown, fallback: string) {
 .sheet { padding: 0 10px 6px; color: var(--ink-3); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; font-variant-ligatures: none; }
 .computer { padding: 8px 10px; border-top: 1px solid var(--line); }
 .identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.identity-text { min-width: 0; }
+.identity-text { flex: 1; min-width: 0; }
 .agent-update { margin-top: 4px; color: var(--ink-2); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .glyph { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-sunken); color: var(--ink-2); }
-.name { color: var(--ink); font-weight: 650; overflow-wrap: anywhere; }
+.name { color: var(--ink); font-weight: 650; overflow-wrap: break-word; }
 .identity .meta { min-width: 0; max-width: 100%; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
 .location { display: flex; align-items: baseline; overflow: hidden; white-space: nowrap; }
 .where, .sep { flex: none; }
 .sep { padding: 0 .35em; }
-.path { display: flex; min-width: 0; flex: 1 1 auto; }
-.path-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.path-tail { flex: none; white-space: nowrap; }
+.path { display: block; min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: break-word; }
 .harness-line, .status { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink); font-size: 13px; white-space: nowrap; }
 .harness-line.reported { display: grid; gap: 10px; }
 .harness-report { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
@@ -483,12 +479,16 @@ function assign(error: unknown, fallback: string) {
   .location { flex-wrap: wrap; overflow: visible; white-space: normal; }
   .location .sep { display: none; }
   .path { display: block; flex-basis: 100%; }
-  .path-head { overflow: visible; white-space: normal; }
-  .path-tail { white-space: normal; }
   .harness-line { grid-area: harness; padding-left: 42px; }
   .status { grid-area: status; padding-left: 42px; }
   .last-active { display: none; }
   .actions { grid-area: actions; align-self: start; }
   .detail { padding-left: 0; }
+}
+@media (max-width: 520px) {
+  .computer { grid-template-areas: "id id" "harness harness" "status status" "actions actions"; }
+  .identity { align-items: flex-start; }
+  .path { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
+  .actions > button { min-width: 44px; min-height: 44px; }
 }
 </style>
