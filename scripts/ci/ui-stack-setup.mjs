@@ -2,12 +2,13 @@
 import { verifySupervisor } from '../playwright-global-setup.mjs'
 import { uiStackTarget, waitForStack } from './stack-ready.mjs'
 
-// UI shards do not start paimos serve. The default mode probes once and
-// continues when :8080 is closed. AEON_REQUIRE_BACKEND=required fails the
-// shard before specs when the backend never accepts.
-export async function runUiStackSetup({ env = process.env, cwd = process.cwd(), fetch, sleep, now, verify = verifySupervisor } = {}) {
+// CI waits for backend health before specs. Approved mock-only jobs set
+// AEON_REQUIRE_BACKEND=off and do not dial. Local runs probe once and
+// continue when :8080 is closed. required fails the shard before specs
+// when the backend never accepts.
+export async function runUiStackSetup({ env = process.env, cwd = process.cwd(), fetch, sleep, now, schedule, verify = verifySupervisor } = {}) {
   verify(undefined, env)
-  return waitForStack({ ...uiStackTarget(env, cwd), fetch, sleep, now })
+  return waitForStack({ ...uiStackTarget(env, cwd), fetch, sleep, now, schedule })
 }
 
 export default async function uiStackSetup() {

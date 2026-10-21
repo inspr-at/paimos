@@ -4,9 +4,9 @@ import { e2eStackTarget, waitForStack } from './stack-ready.mjs'
 
 // e2e serves the app from the Go process. The workflow curl is the first
 // gate; this one fails the run if that process is gone before the first spec.
-export async function runE2eStackSetup({ env = process.env, fetch, sleep, now, verify = verifySupervisor } = {}) {
+export async function runE2eStackSetup({ env = process.env, fetch, sleep, now, schedule, verify = verifySupervisor } = {}) {
   verify(undefined, env)
-  return waitForStack({ ...e2eStackTarget(env), fetch, sleep, now })
+  return waitForStack({ ...e2eStackTarget(env), fetch, sleep, now, schedule })
 }
 
 export default async function e2eStackSetup() {

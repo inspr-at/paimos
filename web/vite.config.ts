@@ -3,7 +3,7 @@ import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolve } from 'node:path'
-import { backendProxyBypass, createBackendProxyGate, healthIsReady, waitForHTTP } from '../scripts/ci/stack-ready.mjs'
+import { backendProxyBypass, createBackendProxyGate, proxyReadyCheck, waitForHTTP } from '../scripts/ci/stack-ready.mjs'
 
 export default defineConfig(({ mode }) => {
   const target = process.env.AEON_API_URL ?? 'http://127.0.0.1:8080'
@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
   // cannot stop http-proxy from dialing :8080. Test mode holds /api until
   // health is 2xx. Dev mode still proxies straight at the configured target.
   const gate = mode === 'test'
-    ? createBackendProxyGate({ check: () => healthIsReady(new URL('/api/health', target).href) })
+    ? createBackendProxyGate({ check: proxyReadyCheck(process.env, new URL('/api/health', target).href) })
     : null
   // bypass's second argument is undefined on a WebSocket upgrade. A required
   // response type is not assignable, and defineConfig then fails vue-tsc.
@@ -41,9 +41,8 @@ export default defineConfig(({ mode }) => {
   }
 })
 
-// Required UI runs fail in this process, before listen, when health never
-// arrives. The default shard leaves the variable unset and does not wait out
-// the bound: mocked CI does not start the Go server.
+// required fails in this process, before listen, when health never arrives.
+// off (approved mock-only jobs) and local optional do not block listen.
 function testModeBackendReady(mode: string): Plugin {
   return {
     name: 'aeon-test-mode-backend-ready',

@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   backendMode,
   backendProxyBypass,
+  backendRequiredCiJobs,
   createBackendProxyGate,
   e2eStackTarget,
   healthIsReady,
   holdBackendResponse,
   isConnectionRefused,
   main,
+  mockOnlyCiJobs,
+  proxyReadyCheck,
   stackTimeout,
   uiDevPort,
   uiStackTarget,
+  waitForHTTP,
   waitForStack,
 } from './stack-ready.mjs'
 import { runE2eStackSetup } from './e2e-stack-setup.mjs'
@@ -26,6 +30,28 @@ const backendURL = 'http://127.0.0.1:8080/api/health'
 function clock() {
   let t = 0
   return { now: () => t, sleep: async ms => { t += ms } }
+}
+
+function timerClock() {
+  let t = 0
+  const timers = []
+  const fire = () => {
+    for (const timer of timers) {
+      if (!timer.fired && timer.at <= t) {
+        timer.fired = true
+        timer.fn()
+      }
+    }
+  }
+  return {
+    now: () => t,
+    sleep: async ms => { t += ms; fire() },
+    schedule: (ms, fn) => {
+      const timer = { at: t + ms, fn, fired: false }
+      timers.push(timer)
+      return () => { timer.fired = true }
+    },
+  }
 }
 
 function refused() {
@@ -378,7 +404,303 @@ test('shard configs keep the waiter in front of specs and leave perf on its own 
   assert.match(vite, /aeon-test-mode-backend-ready/)
   assert.match(vite, /backendProxyBypass/)
   assert.match(vite, /AEON_REQUIRE_BACKEND !== 'required'/)
+  assert.match(vite, /proxyReadyCheck\(process\.env/)
   assert.match(hosted, /import '\.\/ci\/stack-ready\.test\.mjs'/)
   assert.match(readFileSync(new URL('./ui-stack-setup.mjs', import.meta.url), 'utf8'), /verifySupervisor/)
   assert.match(readFileSync(new URL('./e2e-stack-setup.mjs', import.meta.url), 'utf8'), /backend: 'required'|e2eStackTarget/)
+})
+
+test('a stalled probe is cancelled at the deadline and a late 2xx is not readiness', async () => {
+  const time = timerClock()
+  const wall = Date.now()
+  const aborted = { value: false }
+  await assert.rejects(() => waitForHTTP(backendURL, {
+    kind: 'backend',
+    timeoutMs: 1_000,
+    intervalMs: 200,
+    fetch: async (_url, init = {}) => {
+      init.signal?.addEventListener('abort', () => { aborted.value = true })
+      await time.sleep(1_000)
+      return response(200)
+    },
+    sleep: time.sleep,
+    now: time.now,
+    schedule: time.schedule,
+  }), error => {
+    assert.equal(error.message, `Go backend at ${backendURL} did not become ready within 1000ms`)
+    assert.equal(error.code, 'AEON_NOT_READY')
+    return true
+  })
+  assert.equal(time.now(), 1_000)
+  assert.equal(aborted.value, true)
+  assert.ok(Date.now() - wall < 1_000)
+})
+
+test('a 2xx that arrives on the deadline is not readiness and stays inside the injected clock', async () => {
+  const time = clock()
+  const wall = Date.now()
+  await assert.rejects(() => waitForHTTP(backendURL, {
+    kind: 'backend',
+    timeoutMs: 1_000,
+    fetch: async () => {
+      await time.sleep(1_000)
+      return response(200)
+    },
+    sleep: time.sleep,
+    now: time.now,
+  }), /Go backend at http:\/\/127\.0\.0\.1:8080\/api\/health did not become ready within 1000ms/)
+  assert.equal(time.now(), 1_000)
+  assert.ok(Date.now() - wall < 1_000)
+})
+
+test('a slow 2xx inside the deadline is still readiness', async () => {
+  const time = clock()
+  const wall = Date.now()
+  const result = await waitForHTTP(backendURL, {
+    kind: 'backend',
+    timeoutMs: 1_000,
+    fetch: async () => {
+      await time.sleep(400)
+      return response(200)
+    },
+    sleep: time.sleep,
+    now: time.now,
+  })
+  assert.equal(result.status, 200)
+  assert.equal(time.now(), 400)
+  assert.ok(Date.now() - wall < 1_000)
+})
+
+test('an optional probe does not report a late 2xx as up', async () => {
+  const time = timerClock()
+  const aborted = { value: false }
+  await assert.rejects(() => waitForStack({
+    webURL, backendURL, backend: 'optional', timeoutMs: 1_000, intervalMs: 200,
+    fetch: async (url, init = {}) => {
+      if (url !== backendURL) return response(200)
+      init.signal?.addEventListener('abort', () => { aborted.value = true })
+      await time.sleep(1_000)
+      return response(200)
+    },
+    sleep: time.sleep,
+    now: time.now,
+    schedule: time.schedule,
+  }), error => {
+    assert.equal(error.message, `Go backend at ${backendURL} did not become ready within 1000ms`)
+    assert.equal(error.code, 'AEON_NOT_READY')
+    return true
+  })
+  assert.equal(aborted.value, true)
+  assert.equal(time.now(), 1_000)
+})
+
+test('healthIsReady and the proxy check reject a late 2xx and keep an in-budget 2xx', async () => {
+  const late = timerClock()
+  const aborted = { value: false }
+  assert.equal(await healthIsReady(backendURL, async (_url, init = {}) => {
+    init.signal?.addEventListener('abort', () => { aborted.value = true })
+    await late.sleep(500)
+    return response(200)
+  }, { timeoutMs: 500, now: late.now, schedule: late.schedule }), false)
+  assert.equal(aborted.value, true)
+  assert.equal(late.now(), 500)
+
+  const budget = clock()
+  assert.equal(await healthIsReady(backendURL, async () => {
+    await budget.sleep(400)
+    return response(200)
+  }, { timeoutMs: 500, now: budget.now }), true)
+  assert.equal(budget.now(), 400)
+
+  let calls = 0
+  const off = proxyReadyCheck({ AEON_REQUIRE_BACKEND: 'off' }, backendURL, async () => {
+    calls++
+    return response(200)
+  })
+  assert.equal(await off(), false)
+  assert.equal(calls, 0)
+
+  const stalled = timerClock()
+  let proxyAborted = false
+  const check = proxyReadyCheck({}, backendURL, async (_url, init = {}) => {
+    init.signal?.addEventListener('abort', () => { proxyAborted = true })
+    await stalled.sleep(500)
+    return response(200)
+  }, { timeoutMs: 500, now: stalled.now, schedule: stalled.schedule })
+  assert.equal(await check(), false)
+  assert.equal(proxyAborted, true)
+})
+
+test('CI UI setup waits until the backend is ready and a late success is not ready', async () => {
+  const time = clock()
+  let spec = false
+  let specRefused = 0
+  const fetch = async url => {
+    const backend = String(url).endsWith('/api/health')
+    if (backend && time.now() < 600) {
+      if (spec) specRefused++
+      throw refused()
+    }
+    return response(200)
+  }
+  const result = await runUiStackSetup({
+    env: { CI: '1', AEON_STACK_READY_TIMEOUT_MS: '5000' },
+    cwd: '/tmp/aeon-1605-port',
+    verify: () => {},
+    fetch,
+    sleep: time.sleep,
+    now: time.now,
+  })
+  spec = true
+  const firstSpec = await Promise.all([fetch(webURL), fetch(backendURL)])
+  assert.equal(result.backend, 'up')
+  assert.equal(result.web, 'up')
+  assert.deepEqual(firstSpec.map(item => item.status), [200, 200])
+  assert.equal(specRefused, 0)
+  assert.ok(time.now() >= 600)
+  assert.ok(time.now() < 5_000)
+
+  const stalled = timerClock()
+  let aborted = false
+  await assert.rejects(() => runUiStackSetup({
+    env: { CI: '1', AEON_STACK_READY_TIMEOUT_MS: '1000' },
+    verify: () => {},
+    fetch: async (url, init = {}) => {
+      if (!String(url).endsWith('/api/health')) return response(200)
+      init.signal?.addEventListener('abort', () => { aborted = true })
+      await stalled.sleep(1_000)
+      return response(200)
+    },
+    sleep: stalled.sleep,
+    now: stalled.now,
+    schedule: stalled.schedule,
+  }), error => {
+    assert.equal(error.message, 'Go backend at http://127.0.0.1:8080/api/health did not become ready within 1000ms')
+    assert.equal(error.code, 'AEON_NOT_READY')
+    return true
+  })
+  assert.equal(aborted, true)
+  assert.equal(stalled.now(), 1_000)
+})
+
+test('CI UI setup fails inside the bound when the backend never accepts', async () => {
+  const time = clock()
+  let specRan = false
+  await assert.rejects(async () => {
+    await runUiStackSetup({
+      env: { CI: '1', AEON_STACK_READY_TIMEOUT_MS: '1000' },
+      verify: () => {},
+      fetch: async url => {
+        if (String(url).endsWith('/api/health')) throw refused()
+        return response(200)
+      },
+      sleep: time.sleep,
+      now: time.now,
+    })
+    specRan = true
+  }, error => {
+    assert.equal(error.message, 'Go backend at http://127.0.0.1:8080/api/health did not become ready within 1000ms')
+    assert.equal(error.code, 'AEON_NOT_READY')
+    return true
+  })
+  assert.equal(specRan, false)
+  assert.equal(time.now(), 1_000)
+})
+
+test('an approved mock-only job does not dial and CI still requires the backend unless it opts out', async () => {
+  let health = 0
+  let slept = false
+  const result = await runUiStackSetup({
+    env: { CI: '1', AEON_REQUIRE_BACKEND: 'off' },
+    verify: () => {},
+    fetch: async url => {
+      if (String(url).endsWith('/api/health')) health++
+      return response(200)
+    },
+    sleep: async () => { slept = true },
+    now: () => 0,
+  })
+  assert.deepEqual(result, { web: 'up', backend: 'off' })
+  assert.equal(health, 0)
+  assert.equal(slept, false)
+  assert.equal(uiStackTarget({ CI: '1' }).backend, 'required')
+  assert.equal(uiStackTarget({ CI: 'true' }).backend, 'required')
+  assert.equal(uiStackTarget({ CI: '1', AEON_REQUIRE_BACKEND: 'off' }).backend, 'off')
+  assert.equal(uiStackTarget({ CI: '0' }).backend, 'optional')
+  assert.equal(uiStackTarget({ CI: 'false' }).backend, 'optional')
+  assert.equal(uiStackTarget({ CI: '' }).backend, 'optional')
+  assert.equal(uiStackTarget({}).backend, 'optional')
+})
+
+test('e2e setup waits through closed-port probes and the first spec then sees health', async () => {
+  const time = clock()
+  let spec = false
+  let specRefused = 0
+  const base = 'http://127.0.0.1:8080'
+  const fetch = async url => {
+    const backend = String(url).endsWith('/api/health')
+    const up = backend ? time.now() >= 800 : time.now() >= 200
+    if (!up) {
+      if (spec) specRefused++
+      throw refused()
+    }
+    return response(200)
+  }
+  const result = await runE2eStackSetup({
+    env: { CI: '1', BASE_URL: base, AEON_STACK_READY_TIMEOUT_MS: '5000' },
+    verify: () => {},
+    fetch,
+    sleep: time.sleep,
+    now: time.now,
+  })
+  spec = true
+  const first = await fetch(`${base}/api/health`)
+  assert.equal(result.backend, 'up')
+  assert.equal(result.web, 'up')
+  assert.equal(first.status, 200)
+  assert.equal(specRefused, 0)
+  assert.ok(time.now() >= 800)
+  assert.ok(time.now() < 5_000)
+})
+
+test('backend-dependent CI jobs wait and mock-only jobs opt out', () => {
+  const root = new URL('../../.github/workflows/', import.meta.url)
+  const hits = []
+  let job = ''
+  for (const file of readdirSync(root)) {
+    if (!file.endsWith('.yml') && !file.endsWith('.yaml')) continue
+    job = ''
+    for (const line of readFileSync(new URL(file, root), 'utf8').split('\n')) {
+      const header = /^  ([a-z0-9-]+):\s*$/.exec(line)
+      if (header) job = header[1]
+      if (line.includes('AEON_REQUIRE_BACKEND:')) hits.push([file, job, line.trim()])
+    }
+  }
+  const expected = new Map([
+    ...mockOnlyCiJobs.map(([file, name]) => [`${file}:${name}`, 'off']),
+    ...backendRequiredCiJobs.map(([file, name]) => [`${file}:${name}`, 'required']),
+  ])
+  assert.deepEqual(hits.map(([file, name]) => `${file}:${name}`).sort(), [...expected.keys()].sort())
+  for (const [file, name, line] of hits) {
+    assert.match(line, new RegExp(`AEON_REQUIRE_BACKEND: '${expected.get(`${file}:${name}`)}'`))
+  }
+  function jobBody(file, name) {
+    const text = readFileSync(new URL(file, root), 'utf8')
+    const start = text.indexOf(`\n  ${name}:\n`)
+    assert.ok(start >= 0, `${file} ${name}`)
+    const rest = text.slice(start + 1)
+    const next = rest.slice(1).search(/\n  [a-z0-9-]+:\n/)
+    return next === -1 ? rest : rest.slice(0, next + 1)
+  }
+  for (const [file, name] of mockOnlyCiJobs) {
+    assert.match(jobBody(file, name), /AEON_REQUIRE_BACKEND: 'off'/, `${file} ${name}`)
+  }
+  for (const [file, name] of backendRequiredCiJobs) {
+    const body = jobBody(file, name)
+    assert.match(body, /AEON_REQUIRE_BACKEND: 'required'/, `${file} ${name}`)
+    assert.match(body, /paimos serve/)
+    assert.match(body, /node scripts\/ci\/stack-ready\.mjs/)
+    assert.match(body, /cat "\$RUNNER_TEMP\/aeon\.log"/)
+    assert.doesNotMatch(body, /curl -sf/)
+  }
 })
