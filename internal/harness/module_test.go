@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/cli"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
@@ -30,6 +31,49 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workerlease"
 )
+
+// Risk: registering native commands must not reinterpret file uploads,
+// attachment subcommands, escaped filenames or attribution starts.
+func TestNativeSessionCommandAliasesPreserveLegacyHelp(t *testing.T) {
+	for _, args := range [][]string{
+		{"session", "attach", "--help"},
+		{"attach", "--session", "--help"},
+		{"--json", "attach", "--session", "--help"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := cli.Run(append([]string{"aeon"}, args...), strings.NewReader(""), &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "session attach OWNED_ID") {
+			t.Fatalf("native attach route %v: %d %s %s", args, code, stdout.String(), stderr.String())
+		}
+	}
+	for _, args := range [][]string{
+		{"attach", "--help"},
+		{"attach", "--help", "--", "ISSUE", "--session"},
+		{"--config", "--session", "attach", "--help"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := cli.Run(append([]string{"aeon"}, args...), strings.NewReader(""), &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "attach <issue-ref> <file>") {
+			t.Fatalf("legacy upload route %v: %d %s %s", args, code, stdout.String(), stderr.String())
+		}
+	}
+	for _, command := range []string{"start", "take"} {
+		var stdout, stderr bytes.Buffer
+		if code := cli.Run([]string{"aeon", "session", command, "--help"}, strings.NewReader(""), &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "session "+command) {
+			t.Fatalf("session %s missing: %d %s", command, code, stderr.String())
+		}
+	}
+	for _, command := range []string{"list", "get", "rm"} {
+		var stdout, stderr bytes.Buffer
+		if code := cli.Run([]string{"aeon", "attach", command, "--help"}, strings.NewReader(""), &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "attach "+command) {
+			t.Fatalf("attachment %s missing: %d %s", command, code, stderr.String())
+		}
+	}
+	for _, args := range [][]string{{"session", "attach", uid()}, {"attach", "--session", uid()}} {
+		var stdout, stderr bytes.Buffer
+		if code := cli.Run(append([]string{"aeon"}, args...), strings.NewReader(""), &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "--project is required") {
+			t.Fatalf("alias changed validation %v: %d %s", args, code, stderr.String())
+		}
+	}
+}
 
 func TestMain(m *testing.M) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

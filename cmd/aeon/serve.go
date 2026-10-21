@@ -71,6 +71,7 @@ import (
 	"github.com/inspr-at/paimos/internal/modelprovider"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nativeintegration"
+	"github.com/inspr-at/paimos/internal/nativesessions"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/outcomes"
 	"github.com/inspr-at/paimos/internal/parentbenefits"
@@ -463,6 +464,16 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	nativePilot, err := nativeintegration.NewFull(nativeintegration.FullOptions{Enabled: nativeEnabled, Pool: pool, Chat: chat.New(pool, chat.Options{Enabled: cfg.ChatEnabled})})
 	if err != nil {
 		return err
+	}
+	if nativeEnabled {
+		services, err := harness.NativeSessionServices(pool, nativePilot.Services, nativeintegration.Capabilities())
+		if err != nil {
+			return err
+		}
+		nativePilot.HTTP, err = nativesessions.New(services)
+		if err != nil {
+			return err
+		}
 	}
 	goalAPI := goals.New(pool)
 	startWorker(func() { goalAPI.Run(workerCtx) })

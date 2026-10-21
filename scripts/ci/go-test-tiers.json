@@ -7160,6 +7160,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestModelReportsRequireWorkerLeaseAndStayInHarness","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestNativeSessionCommandAliasesPreserveLegacyHelp","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestObservedProfileCannotBeRequestedUntilPersonAcceptance","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestOrdinaryEndpointPreservesNarrowedCallerAndOwner","tier":"GATED-FULL"}
@@ -8767,6 +8769,8 @@
     {"kind":"go","package":"internal/nativesessions/store","name":"TestTerminalViewerURLStrictAllowlist","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestWorkerStartRequiresLeafAndKeepsExistingRun","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestCurrentViewerAuthorityScopesEveryDelivery","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/stream","name":"TestLiveGapClosesAndBindingReplacementRefusesOldView","tier":"NIGHTLY"}
     ,
