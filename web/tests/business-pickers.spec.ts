@@ -44,7 +44,7 @@ test('AEON-1417: rejected rates remain in the hours picker and retry keeps contr
     await expect(form.getByRole('status').filter({ hasText: 'Some rates could not be loaded' })).toBeVisible()
     const failed = cost.locator('option[value="cu-dev"]')
     await expect(failed).toHaveText('Entwicklung und langfristige technische Betreuung — rates unavailable')
-    await expect(failed).toBeDisabled()
+    await expect(failed).toHaveJSProperty('disabled', true)
     const chosenDay = form.getByRole('radio').first()
     const stability = await controlStability(page, {
       cost, days: form.getByRole('radiogroup', { name: 'Day' }), chosenDay,
@@ -58,7 +58,7 @@ test('AEON-1417: rejected rates remain in the hours picker and retry keeps contr
     await stability.check(async () => {
       await form.getByRole('button', { name: 'Retry rates' }).click()
       await expect(form.getByRole('button', { name: 'Retry rates' })).toHaveCount(0)
-      await expect(failed).toBeEnabled()
+      await expect(failed).toHaveJSProperty('disabled', false)
     })
     expect(reads.slice(beforeRetry)).toEqual(['cu-dev'])
     stability.done()

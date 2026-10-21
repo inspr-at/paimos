@@ -127,8 +127,8 @@ export async function contactDirectory(): Promise<ListResult<Map<string, Contact
   const out = new Map<string, ContactCard>()
   const result = await listNodePages({ kind: ['contact'], limit: 500 })
   for (const node of result.items) {
-      const f = node.fields ?? {}
-      out.set(node.id, { name: node.title, email: typeof f.email === 'string' ? f.email : '', role: typeof f.role === 'string' ? f.role : '' })
+    const f = node.fields ?? {}
+    out.set(node.id, { name: node.title, email: typeof f.email === 'string' ? f.email : '', role: typeof f.role === 'string' ? f.role : '' })
   }
   return { items: out, partial: result.partial }
 }
