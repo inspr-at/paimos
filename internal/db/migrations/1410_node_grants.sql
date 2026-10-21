@@ -96,10 +96,9 @@ $$;
 -- Alter only USING. The existing project/workspace WITH CHECK stays intact;
 -- node grants never become write authority in either RLS checks or RequireTx.
 --
--- A bare "id = ANY(visible nodes)" is a second index path. The 6000-node child
--- walk then BitmapOr's the primary key and misses its budget, even when the
--- grant list is empty. Keep that list a non-indexable constant false unless a
--- grant exists; membership itself is unchanged.
+-- Keep the empty node-grant arm non-indexable. A bare "id = ANY(visible nodes)"
+-- is eligible for an additional primary-key path; the CASE preserves the
+-- child-index shape of scoped walks without changing membership.
 ALTER POLICY nodes_project_visibility ON nodes
     USING ((SELECT aeon_visible_all())
         OR project_id = ANY ((SELECT aeon_visible_projects())::uuid[])

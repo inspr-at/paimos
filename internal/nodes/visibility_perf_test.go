@@ -69,9 +69,9 @@ func TestList6000WithProjectVisibility(t *testing.T) {
 			}
 		}
 		t.Logf("%s 6000-node list with visibility: fastest of 3 = %s", who.name, fastest)
-		// The node-grant arm must not turn the scoped walk into a second access
-		// path. A BitmapOr or a sequential scan of nodes inside CTE scope is the
-		// failure TestList6000WithProjectVisibility saw at 2.1s against 600ms.
+		// Guard the scoped walk independently of wall-clock budgets. The grant
+		// arm must not introduce a BitmapOr, a sequential nodes scan or
+		// unbounded repeated work in either the list or its facets.
 		plans := logListPerformancePlans(t, who.p, path)
 		if types := scopeNodesAccess(plans["list"]); badScopeAccess(types) {
 			t.Fatalf("%s list scope access %v; want index lookups, not a sequential scan or BitmapOr", who.name, types)
