@@ -108,9 +108,6 @@ func (s *Store) Start(ctx context.Context, actor nativecontract.Actor, intent na
 	if !workorders.UUID(project) {
 		return out, fail(400, nativecontract.ReasonInvalidInput)
 	}
-	if intent.ResumeFromOwnedSessionID != nil {
-		return out, fail(400, nativecontract.ReasonUnsupported)
-	}
 	p, err := authenticated(ctx, actor)
 	if err != nil {
 		return out, err
@@ -127,6 +124,16 @@ func (s *Store) Start(ctx context.Context, actor nativecontract.Actor, intent na
 		a, err := s.authorize(ctx, tx, actor, project, intent)
 		if err != nil {
 			return err
+		}
+		if intent.ResumeFromOwnedSessionID != nil {
+			var exact bool
+			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM native_session_bindings source JOIN native_session_roots root ON root.tenant_id=source.tenant_id AND root.owned_session_id=source.id AND root.runtime_epoch=source.runtime_epoch WHERE source.tenant_id=$1 AND source.id=$2 AND source.project_id=$3 AND source.owner_person_id=$4 AND source.account_id=$5 AND source.computer_id=$6 AND source.workspace_id=$7 AND source.harness=$8 AND source.run_id IS NULL AND root.released_at IS NOT NULL AND source.view->>'state'='exited')`, p.TenantID, *intent.ResumeFromOwnedSessionID, project, a.OwnerPersonID, intent.AccountID, intent.ComputerID, intent.WorkspaceID, intent.Harness).Scan(&exact)
+			if err != nil {
+				return err
+			}
+			if !exact {
+				return fail(409, nativecontract.ReasonAfterExitUnconfirmed)
+			}
 		}
 		r := actorRecord{Principal: p, KeyID: p.KeyID, AuthKeyID: p.AuthKeyID, ActorOwnerID: a.OwnerPersonID, GrantID: a.Policy.GrantID, GrantRevision: a.Policy.GrantRevision}
 		intentRaw, _ := json.Marshal(intent)

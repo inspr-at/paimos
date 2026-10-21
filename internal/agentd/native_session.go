@@ -603,6 +603,8 @@ type NativeHost struct {
 	entries  map[string]*nativeOwned
 }
 type nativeOwned struct {
+	released     chan struct{}
+	releaseOnce  sync.Once
 	ownership    *ownedprocess.Identity
 	cancel       context.CancelFunc
 	observations map[string]nativecontract.NativeEvidence
@@ -654,8 +656,8 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	}
 	// Resume/handover requires an exact retained source writer; never adopt an
 	// arbitrary saved PID or let the old first-start DTO bypass C0's barrier.
-	if local.AfterExit != nil || local.NativeResumeRef != nil || local.Intent.ResumeFromOwnedSessionID != nil {
-		return out, nativeRefusal(nativecontract.ReasonUnsupported)
+	if err = h.prepareAfterExit(ctx, local); err != nil {
+		return out, err
 	}
 	s := h.s
 	if err = s.dispatchMu.LockContext(ctx); err != nil {
@@ -717,7 +719,7 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	}
 	request, reservation := uuid.NewString(), uuid.NewString()
 	now := s.capacityNow()
-	e := &nativeOwned{host: h, local: local, group: group, operations: map[string]string{}, observations: map[string]nativecontract.NativeEvidence{}, drains: map[string]nativecontract.FinalDrainGrant{}, proof: daemon.Proof{DaemonID: s.daemonID, Generation: s.generation, Ledger: s.ledgerBinding.Generation, Capability: h.caps.QualificationDigest, WorkerLease: lease, SessionRef: ref, ReservationID: reservation, ObservedAt: now, ExpiresAt: now.Add(20 * time.Second), LocalStart: &local}}
+	e := &nativeOwned{host: h, local: local, group: group, released: make(chan struct{}), operations: map[string]string{}, observations: map[string]nativecontract.NativeEvidence{}, drains: map[string]nativecontract.FinalDrainGrant{}, proof: daemon.Proof{DaemonID: s.daemonID, Generation: s.generation, Ledger: s.ledgerBinding.Generation, Capability: h.caps.QualificationDigest, WorkerLease: lease, SessionRef: ref, ReservationID: reservation, ObservedAt: now, ExpiresAt: now.Add(20 * time.Second), LocalStart: &local}}
 	e.claim = nativecontract.Claim{RequestID: request, OperationID: local.Intent.RequestID, DaemonID: s.daemonID, DaemonGeneration: s.generation, LedgerGeneration: s.ledgerBinding.Generation, CapabilityDigest: h.caps.QualificationDigest, ExpectedRevision: 1, ClaimKind: "start"}
 	if err = e.call(ctx, "POST", "/api/agentd/native-sessions/claim", e.claim, &e.grant); err != nil {
 		return out, errors.Join(err, s.ledger.Release(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, group))
@@ -751,6 +753,9 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 		return out, err
 	}
 	spec := nativecontract.LaunchSpec{Binding: b, Profile: profile, Policy: g.Policy, Cwd: local.Cwd, Mode: "structured", OwnedWriterID: b.RuntimeEpoch, Options: g.LaunchConfig, Lifetime: s.lifetime}
+	if local.NativeResumeRef != nil {
+		spec.ResumeRef = *local.NativeResumeRef
+	}
 	deadline := s.capacityNow().Add(time.Duration(g.Policy.MaximumRuntimeSeconds) * time.Second)
 	if g.Policy.ExpiresAt.Before(deadline) {
 		deadline = g.Policy.ExpiresAt
@@ -840,7 +845,11 @@ func (h *NativeHost) Open(ctx context.Context, spec nativecontract.LaunchSpec) (
 		effort = *grant.LaunchConfig.Effort
 	}
 	policyDigest, _ := nativereceipts.Digest(spec.Policy)
-	n := &NativeLeadSpec{Grant: NativeLeadGrant{TenantID: spec.Binding.TenantID, PrincipalID: h.s.principalID, OwnerID: grant.CommandActor.OwnerPersonID, ProjectID: spec.Binding.ProjectID, AccountID: spec.Profile.AccountID, SessionID: spec.Binding.HarnessSessionID, DaemonID: h.s.daemonID, Generation: h.s.generation, PolicyDigest: policyDigest, AccountHomeDigest: nativeDigest(spec.Profile.AccountHome), WorkspaceDigest: nativeDigest(spec.Cwd), Revision: spec.Policy.GrantRevision, ExpiresAt: spec.Policy.ExpiresAt, HistoryApproved: true, AllowedTools: []string{}}, Prompt: "Wait for the person's next instruction. No tool use is authorized by this initialization.", Model: grant.LaunchConfig.Model, Effort: effort, Require: e.require, BeforeInput: t.beforeInput, Observe: func(AdapterEvent) {}, Now: h.s.capacityNow}
+	resumeDigest := ""
+	if spec.ResumeRef != "" {
+		resumeDigest = nativeDigest(spec.ResumeRef)
+	}
+	n := &NativeLeadSpec{Resume: spec.ResumeRef, Grant: NativeLeadGrant{TenantID: spec.Binding.TenantID, PrincipalID: h.s.principalID, OwnerID: grant.CommandActor.OwnerPersonID, ProjectID: spec.Binding.ProjectID, AccountID: spec.Profile.AccountID, SessionID: spec.Binding.HarnessSessionID, DaemonID: h.s.daemonID, Generation: h.s.generation, PolicyDigest: policyDigest, AccountHomeDigest: nativeDigest(spec.Profile.AccountHome), WorkspaceDigest: nativeDigest(spec.Cwd), ResumeDigest: resumeDigest, Revision: spec.Policy.GrantRevision, ExpiresAt: spec.Policy.ExpiresAt, HistoryApproved: true, AllowedTools: []string{}}, Prompt: "Wait for the person's next instruction. No tool use is authorized by this initialization.", Model: grant.LaunchConfig.Model, Effort: effort, Require: e.require, BeforeInput: t.beforeInput, Observe: func(AdapterEvent) {}, Now: h.s.capacityNow}
 	launch := &nativeC0Launch{spec: spec, observe: t.observe}
 	process, err := adapter.StartLead(context.WithValue(ctx, nativeC0Key{}, launch), LeadStartRequest{Native: n, Session: HarnessSession{ID: spec.Binding.HarnessSessionID, ProjectID: spec.Binding.ProjectID, Harness: Claude, Lease: e.proof.WorkerLease}, AccountKey: e.local.AccountKey, Workspace: spec.Cwd, Lifetime: spec.Lifetime})
 	if err != nil {
@@ -1018,6 +1027,10 @@ func (e *nativeOwned) release(ctx context.Context, b nativecontract.Binding, x n
 	}
 	e.mu.Lock()
 	e.exited = true
+	if e.cancel != nil {
+		e.cancel()
+	}
+	e.releaseOnce.Do(func() { close(e.released) })
 	e.mu.Unlock()
 	return nil
 }
