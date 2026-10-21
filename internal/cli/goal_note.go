@@ -18,6 +18,7 @@ func (rt *runtime) cmdGoalNote() *Command {
 	var workspace, clear, dry bool
 	return &Command{Name: "note", Short: "Set or clear the workspace status note or an item's note",
 		Use:     "goal note --workspace [TEXT|--clear] | goal note GOAL --item REF (TEXT|--clear); writes need --idempotency-key KEY [--dry-run]",
+		Long:    goalAgentScopeHelp,
 		maxArgs: 2,
 		addFlags: func(fs *flagSet) {
 			fs.bool(&workspace, "workspace", 0, "the workspace status note; without TEXT or --clear it is read")

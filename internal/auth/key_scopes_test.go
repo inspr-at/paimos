@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/goals"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -130,6 +131,188 @@ func TestDeployRecordAgentKeyCeiling(t *testing.T) {
 	}
 	if code, reason := call(key.Token); code != 403 || reason != "missing_role_permission" || entered {
 		t.Fatalf("scope without project permission: status=%d reason=%s entered=%v", code, reason, entered)
+	}
+}
+
+func TestGoalAgentKeyCeiling(t *testing.T) {
+	// Risk: any agent key can read or write goals, or a granted goals.write
+	// key is still refused before the handler. The scope is an outer ceiling.
+	// Handlers still recheck nodes.read and nodes.write.
+	for _, tc := range []struct {
+		method, path, want string
+		ok                 bool
+	}{
+		{http.MethodGet, "/api/goals", "goals.read", true},
+		{http.MethodHead, "/api/goals", "goals.read", true},
+		{http.MethodGet, "/api/goals/epics", "goals.read", true},
+		{http.MethodGet, "/api/goals/status-note", "goals.read", true},
+		{http.MethodGet, "/api/goals/GOAL-1", "goals.read", true},
+		{http.MethodHead, "/api/goals/GOAL-1/history", "goals.read", true},
+		{http.MethodGet, "/api/goals/GOAL-1/history", "goals.read", true},
+		{http.MethodGet, "/api/goals/GOAL-1/series", "goals.read", true},
+		{http.MethodPost, "/api/goals", "goals.write", true},
+		{http.MethodPatch, "/api/goals/GOAL-1", "goals.write", true},
+		{http.MethodPatch, "/api/goals/status-note", "goals.write", true},
+		{http.MethodPut, "/api/goals/GOAL-1", "goals.write", true},
+		{http.MethodPut, "/api/goals/status-note", "goals.write", true},
+		{http.MethodDelete, "/api/goals/GOAL-1", "", false},
+		{http.MethodPost, "/api/goals/GOAL-1", "", false},
+		{http.MethodPost, "/api/goals/GOAL-1/history", "", false},
+		{http.MethodPatch, "/api/goals", "", false},
+		{http.MethodPut, "/api/goals", "", false},
+		{http.MethodGet, "/api/goals/", "", false},
+		{http.MethodGet, "/api/goals/GOAL-1/other", "", false},
+		{http.MethodGet, "/api/goals/GOAL-1/history/extra", "", false},
+		{http.MethodGet, "/api/goals//history", "", false},
+	} {
+		got, ok := coreAgentScope(httptest.NewRequest(tc.method, tc.path, nil))
+		if ok != tc.ok || got != tc.want {
+			t.Fatalf("%s %s = %q %v, want %q %v", tc.method, tc.path, got, ok, tc.want, tc.ok)
+		}
+	}
+	if agentHasScope([]string{"nodes.read", "nodes.write"}, "goals.write") || agentHasScope([]string{"nodes.read"}, "goals.read") || !agentHasScope([]string{"goals.read"}, "goals.read") || !agentHasScope([]string{"goals.write"}, "goals.write") {
+		t.Fatal("unrelated key scopes satisfy a goals scope")
+	}
+	m, owner := keyFixture(t)
+	ctx := dbtest.Seed(t.Context())
+	var agentID, projectID string
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Goals') RETURNING id::text`, owner.TenantID).Scan(&agentID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='admin'`, owner.TenantID, agentID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,title,state,kind_id)
+			SELECT $1::uuid,'PRJ-1','Project','active',id FROM node_kinds WHERE tenant_id=$1 AND slug='project'
+			RETURNING id::text`, owner.TenantID).Scan(&projectID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO nodes(tenant_id,key,title,parent_id,kind_id)
+			SELECT $1::uuid,'TKT-1','Ticket',$2::uuid,id FROM node_kinds WHERE tenant_id=$1 AND slug='work'`, owner.TenantID, projectID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	key := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "goals", "principal_id": agentID, "scopes": []string{"nodes.read", "nodes.write"}}))
+	if slices.Contains(key.Scopes, "goals.read") || slices.Contains(key.Scopes, "goals.write") {
+		t.Fatal("admin key was created with a goals scope")
+	}
+	plain := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "plain-goals", "scopes": []string{"nodes.read"}}))
+	if slices.Contains(plain.Scopes, "goals.read") || slices.Contains(plain.Scopes, "goals.write") {
+		t.Fatal("new key received a goals scope")
+	}
+	entered := 0
+	mux := http.NewServeMux()
+	goals.New(m.pool).Mount(mux)
+	secured := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		entered++
+		mux.ServeHTTP(w, r)
+	}))
+	goalRows := func() int {
+		t.Helper()
+		var n int
+		if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='goal' AND n.deleted_at IS NULL`).Scan(&n)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	call := func(method, path, body, idem string) (int, string, []byte) {
+		t.Helper()
+		entered = 0
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		if idem != "" {
+			r.Header.Set("Idempotency-Key", idem)
+		}
+		r.Header.Set("Authorization", "Bearer "+key.Token)
+		_, r.Pattern = mux.Handler(r)
+		w := httptest.NewRecorder()
+		secured.ServeHTTP(w, r)
+		var parsed map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &parsed)
+		reason, _ := parsed["reason_code"].(string)
+		scope, _ := parsed["scope"].(string)
+		if scope != "" {
+			reason += ":" + scope
+		}
+		return w.Code, reason, w.Body.Bytes()
+	}
+	createBody := `{"title":"Ship the ceiling","project_id":"` + projectID + `"}`
+	if code, reason, _ := call(http.MethodPost, "/api/goals", createBody, "goal-create-1"); code != 403 || reason != "missing_key_scope:goals.write" || entered != 0 || goalRows() != 0 {
+		t.Fatalf("create without scope: status=%d reason=%s entered=%d goals=%d", code, reason, entered, goalRows())
+	}
+	if code, reason, _ := call(http.MethodGet, "/api/goals", "", ""); code != 403 || reason != "missing_key_scope:goals.read" || entered != 0 {
+		t.Fatalf("list without scope: status=%d reason=%s entered=%d", code, reason, entered)
+	}
+	agent := tenant.Principal{ID: agentID, TenantID: owner.TenantID, Kind: tenant.Agent, Scopes: key.Scopes}
+	if w := scopesRequest(m, agent, key.ID, "PATCH", `{"add":["goals.read","goals.write"]}`); w.Code != 403 {
+		t.Fatalf("agent grant status %d", w.Code)
+	}
+	if w := scopesRequest(m, owner, key.ID, "PATCH", `{"add":["goals.read","goals.write"]}`); w.Code != 200 {
+		t.Fatalf("person grant status %d", w.Code)
+	}
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		var audited bool
+		if err := tx.QueryRow(ctx, `SELECT count(*)=1 AND bool_and(actor_principal_id=$1::uuid AND before->>'key_id'=$2 AND after->>'key_id'=$2 AND after->'scopes' ? 'goals.read' AND after->'scopes' ? 'goals.write' AND NOT (before->'scopes' ? 'goals.read') AND NOT (before->'scopes' ? 'goals.write')) FROM events WHERE type='agent_key.scopes_changed'`, owner.ID, key.ID).Scan(&audited); err != nil {
+			return err
+		}
+		if !audited {
+			t.Error("person grant did not audit goals.read and goals.write")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE role_bindings b SET role_id=r.id FROM roles r WHERE b.tenant_id=r.tenant_id AND b.principal_id=$1 AND r.key='customer'`, agentID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if code, reason, _ := call(http.MethodPost, "/api/goals", createBody, "goal-create-2"); code != 403 || reason != "missing_role_permission" || entered != 0 || goalRows() != 0 {
+		t.Fatalf("scope without project permission: status=%d reason=%s entered=%d goals=%d", code, reason, entered, goalRows())
+	}
+	if code, reason, _ := call(http.MethodGet, "/api/goals", "", ""); code != 403 || reason != "missing_role_permission" || entered != 0 {
+		t.Fatalf("list without project permission: status=%d reason=%s entered=%d", code, reason, entered)
+	}
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE role_bindings b SET role_id=r.id FROM roles r WHERE b.tenant_id=r.tenant_id AND b.principal_id=$1 AND r.key='admin'`, agentID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, reason, raw := call(http.MethodPost, "/api/goals", createBody, "goal-create-3")
+	var created struct {
+		Key     string `json:"key"`
+		Changed bool   `json:"changed"`
+	}
+	if code != 200 || reason != "" || entered != 1 || json.Unmarshal(raw, &created) != nil || created.Key == "" || !created.Changed || goalRows() != 1 {
+		t.Fatalf("granted create: status=%d reason=%s entered=%d key=%t goals=%d", code, reason, entered, created.Key != "", goalRows())
+	}
+	patch := `{"items":{"upsert":[{"ref":"one","label":"One","keys":["TKT-1"]}]},"eta":{"text":"tonight"}}`
+	code, reason, raw = call(http.MethodPatch, "/api/goals/"+created.Key, patch, "goal-update-1")
+	var updated struct {
+		Changed bool `json:"changed"`
+	}
+	if code != 200 || reason != "" || entered != 1 || json.Unmarshal(raw, &updated) != nil || !updated.Changed {
+		t.Fatalf("granted update: status=%d reason=%s entered=%d", code, reason, entered)
+	}
+	var linked bool
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT EXISTS(
+			SELECT 1 FROM nodes o
+			JOIN node_kinds k ON k.tenant_id=o.tenant_id AND k.id=o.kind_id AND k.slug='outcome'
+			JOIN node_relations rel ON rel.tenant_id=o.tenant_id AND rel.source_node_id=o.id AND rel.type='serves'
+			JOIN nodes ticket ON ticket.id=rel.target_node_id AND ticket.key='TKT-1'
+			WHERE o.fields->>'outcome_ref'='one' AND o.deleted_at IS NULL)`).Scan(&linked)
+	}); err != nil || !linked {
+		t.Fatalf("outcome upsert did not link TKT-1: %v", err)
+	}
+	code, reason, raw = call(http.MethodGet, "/api/goals", "", "")
+	if code != 200 || reason != "" || entered != 1 || !bytes.Contains(raw, []byte(created.Key)) || !bytes.Contains(raw, []byte("Ship the ceiling")) {
+		t.Fatalf("granted list: status=%d reason=%s entered=%d", code, reason, entered)
 	}
 }
 

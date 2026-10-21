@@ -16558,6 +16558,8 @@
     ,
     {"kind":"node","file":"tests/goal-rate.test.ts","name":"the stall line counts whole hours; the point line names the bucket and what changed","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a glimpse frame paints only while its measured box is connected and non-empty","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a hit-bitmap pixel belongs to a node only when it is opaque and holds its index colour","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a ticket adapter needs no knowledge schema and engines cannot mutate the source","tier":"GATED-FULL"}
