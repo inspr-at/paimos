@@ -14230,6 +14230,8 @@
     ,
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"tall up-opening popovers stay separated from their trigger through keyboard viewport changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"AEON-1366: a late Colours deep link scrolls, rings and holds without moving navigation","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"Agents links admins to the agent keys","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"Business shows the parts and the stored quote settings; a deep link rings its card","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -14723,8 +14725,6 @@
     {"kind":"browser","file":"tests/theme-control-geometry.spec.ts","name":"the attachment stage keeps a radial wash in every theme even if canvas-lo is missing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/theme-control-geometry.spec.ts","name":"the shared switch centres its knob on any track and the agents label keeps a 44px hit target","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"AEON-1366: a late Colours deep link scrolls, rings and holds without moving navigation","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Load more is disabled while the current theme is unavailable and works again after Reload (1024 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
