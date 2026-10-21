@@ -72,9 +72,14 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
   function shortcutBlocked() {
     return typing(document.activeElement) || !!document.querySelector('dialog[open], .floating')
   }
+  // The workspace mounts before its ticket loads, and startEdit does nothing
+  // without one. e waits for the ticket it was pressed on.
+  function ticketShown(pending: PendingShortcut) {
+    return panelItem.value?.key.toLowerCase() === pending.key.toLowerCase()
+  }
   function openRememberedEdit(pending: PendingShortcut) {
     const workspace = panel.value
-    if (pending.epoch !== editEpoch || pendingEdit !== pending || !workspace?.startEdit || shortcutBlocked()) return false
+    if (pending.epoch !== editEpoch || pendingEdit !== pending || !workspace?.startEdit || !ticketShown(pending) || shortcutBlocked()) return false
     editEpoch++
     pendingEdit = null
     void workspace.startEdit()
@@ -90,8 +95,8 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     await nextTick()
     if (pending.epoch !== editEpoch || pendingEdit !== pending) return
     if (!samePersonTicket(pending) || !writable.value || shortcutBlocked()) { clearPendingEdit(); return }
-    // The workspace can still be mounting, or it remounted and dropped its own wait.
-    if (!panel.value?.startEdit) return
+    // The workspace can still be mounting or loading its ticket, or it remounted and dropped its own wait.
+    if (!panel.value?.startEdit || !ticketShown(pending)) return
     openRememberedEdit(pending)
   }
   function commentField(): HTMLTextAreaElement | null {
@@ -253,7 +258,11 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     if (edit) void applyPendingEdit(edit)
     if (comment) void applyPendingComment(comment)
   })
-  watch(panelItem, () => { const pending = pendingComment; if (pending) void applyPendingComment(pending) })
+  watch(panelItem, () => {
+    const edit = pendingEdit, comment = pendingComment
+    if (edit) void applyPendingEdit(edit)
+    if (comment) void applyPendingComment(comment)
+  })
   watch(writable, () => { const pending = pendingEdit; if (pending) void applyPendingEdit(pending) })
   watch(() => commentable?.value ?? false, () => { const pending = pendingComment; if (pending) void applyPendingComment(pending) })
   watch(ticketKey, key => {

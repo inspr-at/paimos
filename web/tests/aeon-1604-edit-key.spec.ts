@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1604: e or c pressed while this project's grants are still in flight is
-// kept for that ticket. e opens the editor once the person may edit. c focuses
-// the comment box once they may comment. A reader, or a ticket they have since
-// left, gets neither. The press itself adds nothing to the page, so the heading
-// stays where it is until the editor opens.
+// kept for that ticket. e opens the editor once the person may edit and the
+// ticket itself has loaded. c focuses the comment box once they may comment.
+// A reader, or a ticket they have since left, gets neither. The press itself
+// adds nothing to the page, so the heading stays where it is until the editor opens.
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 
@@ -17,6 +17,18 @@ function holdProjectPermissions() {
     release: () => release(),
     hold: ({ path, method, query }: { path: string; method: string; query: URLSearchParams }) =>
       path === '/api/me/permissions' && method === 'GET' && query.has('project_id') ? { until: held } : undefined,
+  }
+}
+
+// The project list and the ticket lookup both read GET /api/nodes; holding it
+// keeps the workspace on its loading state.
+function holdTicketLookups() {
+  let release = () => {}
+  const held = new Promise<void>(resolve => { release = resolve })
+  return {
+    release: () => release(),
+    hold: ({ path, method }: { path: string; method: string }) =>
+      path === '/api/nodes' && method === 'GET' ? { until: held } : undefined,
   }
 }
 
@@ -108,4 +120,27 @@ test('AEON-1604: e remembered for one ticket does not edit the ticket opened nex
     await expect(next).toBeVisible()
     await expect(page.locator('.edit-form')).toHaveCount(0)
   } finally { gate.release() }
+})
+
+test('AEON-1604: e pressed while the ticket loads opens the editor when the ticket arrives after its permissions', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const gate = holdProjectPermissions()
+  const lookups = holdTicketLookups()
+  try {
+    await mockWork(page, fixtures(), { hold: request => gate.hold(request) ?? lookups.hold(request) })
+    await page.goto('/p/PHAROS/PHAROS-12?view=full')
+    const details = article(page)
+    const loading = details.getByRole('status', { name: 'Loading ticket' })
+    await expect(loading).toBeVisible()
+    await expect(details.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
+    await page.keyboard.press('e')
+    // Permissions first: Edit appears while the ticket is still loading.
+    gate.release()
+    await expect(details.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
+    await painted(page)
+    await expect(loading).toBeVisible()
+    await expect(page.locator('.edit-form')).toHaveCount(0)
+    lookups.release()
+    await expect(page.locator('.edit-form .md-editor').first()).toHaveClass(/split/)
+  } finally { gate.release(); lookups.release() }
 })

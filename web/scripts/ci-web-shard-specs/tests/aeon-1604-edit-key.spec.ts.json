@@ -2,12 +2,12 @@
   "group": "remaining-ui",
   "nightlyTiming": {
     "seconds": 6,
-    "selectedTests": 4
+    "selectedTests": 5
   },
   "spec": {
     "file": "tests/aeon-1604-edit-key.spec.ts",
-    "listedTests": 4,
-    "weightSeconds": 8.878049,
+    "listedTests": 5,
+    "weightSeconds": 11.097561,
     "weightSource": "unmeasured-test-rate"
   }
 }
