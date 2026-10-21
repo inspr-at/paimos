@@ -32,8 +32,8 @@ func NewPersonProof(c *client.Client) (*PersonProof, error) {
 	}
 	return &PersonProof{token: c.SessionToken}, nil
 }
-func (*PersonProof) Format(f fmt.State, _ rune) { _, _ = fmt.Fprint(f, "[native person proof]") }
-func (*PersonProof) MarshalJSON() ([]byte, error) {
+func (PersonProof) Format(f fmt.State, _ rune) { _, _ = fmt.Fprint(f, "[native person proof]") }
+func (PersonProof) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("person proof is local authority")
 }
 func (*PersonProof) UnmarshalJSON([]byte) error { return errors.New("person proof cannot be decoded") }
@@ -48,6 +48,10 @@ func (p *PersonProof) Authorize(r *http.Request) {
 
 type projectionKey struct{}
 type projectionOptions struct{ control string }
+
+func (projectionOptions) Format(f fmt.State, _ rune) {
+	_, _ = fmt.Fprint(f, "[native local projection]")
+}
 
 // WithLocalPersonProjection is used only after public transport authentication.
 // The value is a presentation selector and cannot substitute for authorization.

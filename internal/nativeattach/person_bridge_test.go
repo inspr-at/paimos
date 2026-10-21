@@ -272,7 +272,7 @@ func TestNativePersonBootstrapAttachTakeHandBack(t *testing.T) {
 	if _, err = json.Marshal(proof); err == nil {
 		t.Fatal("person proof became a DTO")
 	}
-	if strings.Contains(fmt.Sprintf("%+v", proof), personCookie) {
+	if strings.Contains(fmt.Sprintf("%+v %+v", proof, *proof), personCookie) {
 		t.Fatal("person proof leaked in diagnostics")
 	}
 	ctx := t.Context()
