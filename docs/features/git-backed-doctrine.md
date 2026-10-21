@@ -183,8 +183,9 @@ unchanged, and project, person and role rules remain delivered.
 
 Review and verification runs with a repository binding read `AGENTS.md` from
 its trusted `BaseSHA`, using sealed Git objects rather than the reviewed head
-or working tree. Verification probes without a repository binding have no
-repository delta and still require the doctrine pin and floor. Missing or
+or working tree. Verification probes without a repository binding and approved workspaces
+without a checkout have no repository delta and still require the doctrine
+pin and floor. Existing but invalid Git metadata refuses the run. Missing or
 invalid repository evidence returns `rules_repository_unavailable`. Claude's
 native setting sources remain empty. The coordinator task and relayed chat,
 inbox and steering messages carry distinct author labels; a message never

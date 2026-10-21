@@ -230,3 +230,27 @@ func testPinnedSupervisor(t *testing.T) (*Supervisor, *packStartAPI, *fakeProces
 	})
 	return s, api, process
 }
+
+// Risk: a workspace without a clone must receive the floor and server pins,
+// while invalid repository metadata must never become a file-reader fallback.
+func TestPinnedRulesWithoutCheckoutRequirePin(t *testing.T) {
+	s, api, _ := testPinnedSupervisor(t)
+	entry := &owned{harness: HarnessSession{ProjectID: api.context.ProjectID}}
+	prompt := "Coordinator task"
+	body, err := s.prepareClaudeRules(t.Context(), entry, api.run, Profile{Harness: Claude}, preparedRun{workspace: t.TempDir()}, &prompt, nil)
+	if err != nil || !strings.HasPrefix(body, hardSafetyFloor) || !strings.Contains(body, "Company rules.") || strings.Contains(body, `"kind":"repository"`) {
+		t.Fatal("no-checkout instructions incomplete", err)
+	}
+	api.bundle.PinnedFiles = nil
+	if _, err = s.prepareClaudeRules(t.Context(), entry, api.run, Profile{Harness: Claude}, preparedRun{workspace: t.TempDir()}, &prompt, nil); !errors.Is(err, ErrRulesPinMissing) {
+		t.Fatal("no-checkout run bypassed pin", err)
+	}
+	api.bundle.PinnedFiles = []doctrine.PinnedFile{packFile("public", "fixture/company", "docs/KERNEL.md", "Company rules.\n")}
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, ".git"), []byte("invalid metadata"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.prepareClaudeRules(t.Context(), entry, api.run, Profile{Harness: Claude}, preparedRun{workspace: workspace}, &prompt, nil); !errors.Is(err, ErrRulesRepository) {
+		t.Fatal("invalid repository silently dropped delta", err)
+	}
+}

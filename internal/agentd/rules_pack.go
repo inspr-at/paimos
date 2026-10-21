@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -165,6 +167,9 @@ func (s *Supervisor) prepareClaudeRules(ctx context.Context, entry *owned, run R
 		} else if run.ReadOnlyReview {
 			return "", ErrRulesRepository
 		}
+	} else if _, e := os.Lstat(filepath.Join(prepared.workspace, ".git")); os.IsNotExist(e) {
+		// Non-developer runs may have an approved workspace without a clone.
+		// They still require the full server pin, floor and database layers.
 	} else {
 		gitDir, commonDir, e := reviewWorkspaceDirs(prepared.workspace)
 		if e != nil {

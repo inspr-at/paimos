@@ -1954,6 +1954,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesTaskAndMessageAuthorLabels","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesWithoutCheckoutRequirePin","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestPollContextErrorCausesDoNotConsumePendingProbe","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPollDiagnosticRemindersEveryFifteenMinutes","tier":"GATED-FULL"}
