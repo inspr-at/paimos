@@ -9,10 +9,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as pause } from 'node:timers/promises'
 import { boundFixture, fixtureOwner, maxFixtureMs } from './testdata/fixture-lifecycle.mjs'
-import { groupProcesses, trackGroups } from './playwright-processes.mjs'
+import { groupProcesses, processStart, trackGroups, validStart } from './playwright-processes.mjs'
 
 const fixtures = fixtureOwner()
 afterEach(() => fixtures.cleanup())
+function signalFixture(pid, started, signal) {
+  assert.ok(validStart(started), 'fixture must publish a valid start identity')
+  assert.equal(processStart(pid), started, 'fixture identity must still match before signalling')
+  process.kill(pid, signal)
+}
 async function until(check, describe = () => '') {
   const deadline = Date.now() + 15000
   while (!check()) {
@@ -65,11 +70,11 @@ test('AEON-1064: interrupted fixture runners leave no owned processes in 20 rand
       writeFileSync(log, ready.groups.map(row => JSON.stringify({ pid: row.pid, started: row.started })).join('\n') + '\n')
       tracker = trackGroups(log); tracker.snapshot()
       if (signal === 'parent-death') {
-        process.kill(ready.parent, 'SIGKILL')
+        signalFixture(ready.parent, ready.groups.find(row => row.pid === ready.parent)?.started, 'SIGKILL')
         await until(() => { try { process.kill(ready.stub, 0); return false } catch (error) { assert.equal(error.code, 'ESRCH'); return true } })
-        process.kill(ready.worker, 'SIGTERM')
+        signalFixture(ready.worker, ready.workerStarted, 'SIGTERM')
       } else if (['return', 'failure', 'timeout'].includes(signal)) writeFileSync(join(directory, 'release'), 'ready')
-      else process.kill(ready.worker, signal === 'negative-control' ? 'SIGTERM' : signal)
+      else signalFixture(ready.worker, ready.workerStarted, signal === 'negative-control' ? 'SIGTERM' : signal)
       const code = await completion
       if (signal === 'return') assert.equal(code, 0, output)
       else assert.notEqual(code, 0, `${phase} ${signal} must report an interrupted test`)

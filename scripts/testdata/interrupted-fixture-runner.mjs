@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { setTimeout as pause } from 'node:timers/promises'
 import { aptFixture } from './apt-fixture.mjs'
 import { fixtureOwner } from './fixture-lifecycle.mjs'
+import { processStart } from '../playwright-processes.mjs'
 
 const fixtures = fixtureOwner()
 afterEach(() => fixtures.cleanup())
@@ -18,6 +19,7 @@ async function until(check) {
 }
 
 test('fixture worker interrupted by its owning test', { timeout: 30000 }, async t => {
+  const worker = { worker: process.pid, workerStarted: processStart(process.pid) }
   try {
     if (phase === 'apt') {
       const { state, env } = aptFixture({ mode: 'hung' })
@@ -25,7 +27,7 @@ test('fixture worker interrupted by its owning test', { timeout: 30000 }, async 
       await until(() => { assert.equal(child.exitCode, null, 'apt fixture exited before hanging'); return existsSync(join(state, 'hung')) })
       // The stub must finish exec and install its parent watchdog first.
       await until(() => { assert.equal(child.exitCode, null, 'apt fixture exited before its watchdog'); return existsSync(join(state, 'watching')) })
-      writeFileSync(join(directory, 'ready'), JSON.stringify({ worker: process.pid, parent: child.pid, stub: Number(readFileSync(join(state, 'apt.pid'), 'utf8')), groups: fixtures.snapshot() }))
+      writeFileSync(join(directory, 'ready'), JSON.stringify({ ...worker, parent: child.pid, stub: Number(readFileSync(join(state, 'apt.pid'), 'utf8')), groups: fixtures.snapshot() }))
     } else {
       const lock = join(directory, 'suite.lock'), ready = join(directory, 'hang.ready')
       const args = mode => [new URL('./playwright/supervisor.mjs', import.meta.url).pathname, mode, lock, mode === 'hang' ? ready : join(directory, 'normal.ready'), join(directory, 'hang.pid'), join(directory, 'result.json')]
@@ -41,7 +43,7 @@ test('fixture worker interrupted by its owning test', { timeout: 30000 }, async 
           return entries.length === 1 && JSON.parse(readFileSync(join(`${lock}.guard`, entries[0]), 'utf8')).pid === reaper.pid
         })
       }
-      writeFileSync(join(directory, 'ready'), JSON.stringify({ worker: process.pid, groups: fixtures.snapshot() }))
+      writeFileSync(join(directory, 'ready'), JSON.stringify({ ...worker, groups: fixtures.snapshot() }))
     }
     // An isolated negative control proves the outer PID/group assertion sees
     // survivors when this worker's signal cleanup is absent. The outer test

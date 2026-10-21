@@ -6,7 +6,7 @@ import { appendFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { groupProcesses, recordSpawnedGroup, trackGroups } from '../playwright-processes.mjs'
+import { groupProcesses, recordSpawnedGroup, signalGroup, trackGroups } from '../playwright-processes.mjs'
 
 export const maxFixtureMs = 10 * 60_000
 export function boundFixture({ timeoutMs = Number(process.env.AEON_FIXTURE_TIMEOUT_MS ?? maxFixtureMs), parent,
@@ -68,7 +68,13 @@ export function fixtureOwner() {
       delete env.NODE_TEST_CONTEXT
       env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ''} --import=${new URL('./fixture-lifecycle.mjs', import.meta.url).href}`
       const child = childProcess.spawn(command, args, { ...options, env, detached: true })
-      const entry = { directory, tracker: trackGroups(log) }
+      const killed = new Set()
+      const entry = { directory, tracker: trackGroups(log, { kill(pid, signal) {
+        // A second snapshot must collect new groups, without signalling a
+        // group already killed and waiting for its parent to reap it (macOS
+        // can return EPERM for that zombie). Failed signals remain retryable.
+        if (!killed.has(pid)) { signalGroup(pid, signal); killed.add(pid) }
+      } }) }
       owned.add(entry)
       recordSpawnedGroup(child, row => appendFileSync(log, JSON.stringify(row) + '\n'))
       entry.tracker.snapshot()
