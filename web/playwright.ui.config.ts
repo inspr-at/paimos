@@ -17,6 +17,9 @@ export default defineConfig({
   ...browserPolicy(process.env, 4, true),
   // AEON-410's one-worker shards must override policy after the spread.
   ...uiShardPolicy(process.env),
+  // browserPolicy points globalSetup at the supervisor lock. Replace it so the
+  // same process also waits for the stack before the first spec.
+  globalSetup: '../scripts/ci/ui-stack-setup.mjs',
   use: { ...headlessChromium, baseURL: `http://127.0.0.1:${port}`, reducedMotion: 'reduce' },
   webServer: {
     // Mode test keeps the dev server (DEV stays true) and is the only build that
