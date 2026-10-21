@@ -230,7 +230,7 @@ export type DeskEmptyState = 'reading' | 'clear' | 'incomplete' | 'scoped' | 'fa
 // not answer, an empty list proves nothing; design B (all clear and a quiet line) stays for the minor
 // sources: project names, lessons, tiers and the other side reads.
 const MAJOR_SOURCES: ReadonlySet<DeskSource> = new Set(['desk', 'questions', 'approvals'])
-export const deskMajorSilent = (unanswered: readonly DeskSource[]) => unanswered.some(source => MAJOR_SOURCES.has(source))
+const deskMajorSilent = (unanswered: readonly DeskSource[]) => unanswered.some(source => MAJOR_SOURCES.has(source))
 /** The Open tab with nothing to show: reading (D), all clear (A), a minor source did not answer (B),
  * a narrowed view (C), or a desk that could not be loaded. Null while rows are listed. `waiting` is
  * the count the badge shows; `checking` is a read under way that may still fill the list. */

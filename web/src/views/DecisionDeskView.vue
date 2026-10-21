@@ -6,7 +6,7 @@ import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
 import PersonStepRequest from '../components/agents/PersonStepRequest.vue'
 import DoctrineProposalDialog from '../components/rules/DoctrineProposalDialog.vue'
 import { getDoctrine, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineInboxItem, type DoctrineProposal } from '../lib/doctrine'
-import { arrivals, deskAutoRetry, deskEmptyState, deskFailedWords, deskItemID, deskMajorSilent, deskLinkItem, deskReadAborted, deskRefreshNotice, deskSourceLines, deskUnansweredLine, draftFor, kindLabels, newRound, outcomeLabels, retainDecidedLessons, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskRetryPhase, type DeskSource, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
+import { arrivals, deskAutoRetry, deskEmptyState, deskFailedWords, deskItemID, deskLinkItem, deskReadAborted, deskRefreshNotice, deskSourceLines, deskUnansweredLine, draftFor, kindLabels, newRound, outcomeLabels, retainDecidedLessons, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskRetryPhase, type DeskSource, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import KeyCap from '../components/KeyCap.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
@@ -399,9 +399,10 @@ async function hydrate(projection: DeskProjection): Promise<void> {
         } catch { result.warnings.push('The linked approval could not be read. Retry before reviewing it.') }
       }
       if (!current()) return
-      // AEON-1631: a read without the desk, its questions or its approvals never replaces good open rows from
-      // this visit. They stay actionable (the server decides every write), with a quiet note naming their time.
-      if (deskMajorSilent(result.unanswered ?? []) && currentRead && !deskMajorSilent(currentRead.unanswered ?? []) && items.value.some(item => !item.decided)) {
+      // AEON-1631: a read whose canonical desk did not answer never replaces good open rows from this visit.
+      // They stay actionable (the server decides every write), with a quiet note naming their time. A missing
+      // question or approval source still lists every canonical row, so that read applies with its own line.
+      if (result.unanswered?.includes('desk') && currentRead && !currentRead.unanswered?.includes('desk') && items.value.some(item => !item.decided)) {
         stale.value = true
         return
       }
