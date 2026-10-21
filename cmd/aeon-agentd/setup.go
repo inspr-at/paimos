@@ -140,7 +140,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
 	f.SetOutput(io.Discard)
 	var instance string
-	var root, origin, tenantID, tenantSlug, workspace, computer, account, contextLabel, nodePath, sdkPath string
+	var root, origin, tenantID, tenantSlug, workspace, computer, account, contextLabel, nodePath, sdkPath, profileHome string
 	var harnesses stringsFlag
 	var jsonOutput, startService, once, yes, installHooks bool
 	var hookExecutable string
@@ -156,6 +156,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	f.StringVar(&openRouterFile, "openrouter-env-file", "", "owner-selected private file containing OPENROUTER_API_KEY")
 	f.Var(&harnesses, "harness", "selected harness; repeat for another harness. Enroll each Claude login separately; every login needs person approval")
 	f.StringVar(&contextLabel, "account-context", "", "Expected account identity (pi: configured provider ID)")
+	f.StringVar(&profileHome, "home", "", "already signed-in private profile home; add-harness with claude or codex only")
 	f.StringVar(&account, "account-id", "", "remove only this enrolled account")
 	f.StringVar(&nodePath, "node-path", "", "pinned Node executable for npm harness launchers")
 	f.StringVar(&sdkPath, "claude-sdk-path", "", "pinned Claude Agent SDK module")
@@ -167,6 +168,16 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	f.BoolVar(&yes, "yes", false, "confirm Claude dependency repin without prompting")
 	if f.Parse(args) != nil || len(f.Args()) != 0 {
 		return errors.New("invalid setup arguments")
+	}
+	homeSelected := false
+	f.Visit(func(v *flag.Flag) { homeSelected = homeSelected || v.Name == "home" })
+	if homeSelected {
+		if profileHome == "" || command != "add-harness" || len(harnesses) != 1 || harnesses[0] != "claude" && harnesses[0] != "codex" {
+			return errors.New("--home requires add-harness with exactly one --harness claude or codex and a profile directory")
+		}
+		if err := agentsetup.ValidateHarnessHome(profileHome); err != nil {
+			return err
+		}
 	}
 	if command == "repin" {
 		if len(harnesses) != 1 || harnesses[0] != "claude" {
@@ -344,6 +355,11 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	var candidates []agentsetup.Candidate
 	if savedErr != nil || command == "add-harness" {
 		d := agentsetup.Discovery{Home: home, NodePath: nodePath, Workspace: workspace}
+		if homeSelected && harnesses[0] == "claude" {
+			d.ClaudeHome = profileHome
+		} else if homeSelected {
+			d.CodexHome = profileHome
+		}
 		if len(harnesses) == 0 && (command == "setup" || command == "add-harness") {
 			if jsonOutput {
 				return errors.New("--harness is required with --json")

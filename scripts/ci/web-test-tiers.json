@@ -16298,6 +16298,10 @@
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1594 a shrink does not adopt a sample wider than the card now","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1600 a dock breakpoint and a capped host supersede the provisional shrink","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1600 a shrink lays out at the viewport delta while the content box is still the previous frame","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: a loaded fit keeps the designed width until the value is wider","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: automatic fits give width back until Title keeps its minimum","tier":"GATED-FULL"}
@@ -16847,6 +16851,8 @@
     {"kind":"node","file":"tests/palette.test.ts","name":"tickets: list matches first, then work search hits once, exact key leads","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/palette.test.ts","name":"tickets: search hits skip non-work kinds, deleted nodes and other projects in a scope","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/phone-push.test.ts","name":"Desk push accepts bounded copy and focuses an existing PAIMOS tab","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/phone-push.test.ts","name":"malformed and foreign notification paths remain on the same origin","tier":"NIGHTLY"}
     ,

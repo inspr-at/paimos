@@ -393,6 +393,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		vapid = &webpush.Options{VAPIDPublicKey: cfg.PhonePush.PublicKey, VAPIDPrivateKey: cfg.PhonePush.PrivateKey, Subscriber: cfg.PhonePush.Subject}
 	}
 	phoneMod := phoneapprovals.New(pool, pairingMod, cfg.PublicURL, cfg.LinkKey, vapid)
+	phoneMod.DeskPush = decisiondesk.PushSource{}
 	stepupMod := stepup.New(pool, phoneMod, cfg.PublicURL)
 	stepupMod.RecordResultsTx = inbox.RecordResults
 	stepupMod.Reauthenticate = authMod.BeginStepUp

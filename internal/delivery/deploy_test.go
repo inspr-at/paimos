@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -154,9 +155,20 @@ func TestDeployRecordDeliversMergedLeavesAndReplays(t *testing.T) {
 	// Use an OPS agent and retain its identity as the live confirmer.
 	path := "/api/projects/" + f.project + "/deploys"
 	in := deployInput{Environment: "production", SHA: b, Version: "26.10.17"}
+	// The key scope is not the project permission. A member holds the scope
+	// and still cannot record; nothing is delivered.
+	member := tenant.Principal{TenantID: f.person.TenantID, Kind: tenant.Agent, Scopes: []string{"releases.deploy"}}
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Deploy member') RETURNING id::text`, f.person.TenantID).Scan(&member.ID)
+	})
+	dbtest.BindRole(t, f.d, f.person.TenantID, member.ID, "member")
+	f.call(t, member, "POST", path, in, 403, nil)
 	limited := f.agent
 	limited.Scopes = []string{"delivery.read", "delivery.manage"}
 	f.call(t, limited, "POST", path, in, 403, nil)
+	if got := mergedState(t, f, eligible); got != "done" || deployCount(t, f) != 0 {
+		t.Fatalf("denied confirmation changed work: state=%s records=%d", got, deployCount(t, f))
+	}
 	var out Deploy
 	f.call(t, f.agent, "POST", "/api/projects/"+strings.ToUpper(f.project)+"/deploys", in, 200, &out)
 	if out.EventID < 1 || out.ConfirmedBy != f.agent.ID || out.Project != f.project || out.ConfirmedAt.IsZero() || out.SHA != b || out.Version != in.Version {

@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -847,7 +846,14 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 		}
 		delete(s.accountLogins, account.ID)
 		if status.ActiveIdentity != "" && hold == "" && dependencyErr == nil && probeErr == nil {
-			s.accountLogins[account.ID] = agentsetup.AccountLogin{ActiveIdentity: status.ActiveIdentity, Approved: strings.EqualFold(status.ActiveIdentity, account.VerifiedIdentity)}
+			login := agentsetup.AccountLogin{ActiveIdentity: status.ActiveIdentity, Approved: strings.EqualFold(status.ActiveIdentity, account.VerifiedIdentity)}
+			switch adapter := s.adapters[account.Harness].(type) {
+			case *ClaudeAdapter:
+				login.Home = adapter.Homes[account.Key]
+			case *CodexAdapter:
+				login.Home = adapter.Homes[account.Key]
+			}
+			s.accountLogins[account.ID] = login
 		}
 		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
 			reason := "probe_failed"
@@ -1036,291 +1042,23 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	defer s.dispatchMu.Unlock()
-	if s.ledgerRequired && s.ledger == nil {
-		return agentsetup.ErrLedgerUnavailable
+	admitted, err := s.admitRun(ctx, run)
+	if err != nil || admitted == nil {
+		return err
 	}
-	if s.ledger != nil {
-		if err := s.reconcileLedgerLocked(ctx); err != nil {
-			return err
-		}
-	}
-	s.mu.Lock()
-	capturing := s.capacityCapturing
-	s.mu.Unlock()
-	if capturing {
-		return ErrDraining
-	}
-	if !s.dispatchAllowed(run.requestedAccount()) {
-		return ErrDraining
-	}
-	if run.ID == "" || run.WorkOrderID == "" || run.AgentPrincipalID != s.principalID || run.Status != "queued" {
-		return ErrScope
-	}
-	grant, err := routineGrant(run)
+	prepared, err := s.prepareRun(ctx, admitted)
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	entry := s.runs[run.ID]
-	s.mu.Unlock()
-	if entry != nil {
-		entry.mu.Lock()
-		if grant != nil && entry.record.LaunchState == launchRoutePending && entry.record.State == "route_pending" {
-			entry.mu.Unlock()
-			return ErrProcessesUnconfirmed
-		}
-		if grant != nil && entry.record.State == "ownership_lost" && !noLocalProcess(entry.record) {
-			entry.mu.Unlock()
-			return ErrProcessesUnconfirmed
-		}
-		retry := entry.record.LaunchState == launchPrepared && entry.record.State == "claim_pending" && (entry.record.Generation == s.generation || s.ledger != nil)
-		entry.mu.Unlock()
-		if !retry {
-			entry.mu.Lock()
-			refused, reason := entry.record.LaunchState == launchRefused, entry.record.VerificationReason
-			entry.mu.Unlock()
-			if refused {
-				return s.reportVerificationRefusal(ctx, run, reason)
-			}
-			return nil
-		}
-		if err := s.reconcileUnlaunched(ctx, entry); err != nil {
-			return err
-		}
-		entry.mu.Lock()
-		retry = entry.record.State == "claim_pending"
-		routeReleased := entry.record.RouteReleased
-		entry.mu.Unlock()
-		if !retry {
-			return nil
-		}
-		if routeReleased {
-			run.AccountID = ""
-		}
-	}
-	if err := s.checkHostCapacity(ctx); err != nil {
-		return err
-	}
-	profiles, err := s.api.Profiles(ctx)
-	if err != nil {
-		return err
-	}
-	var profile Profile
-	for _, p := range profiles {
-		if p.ID == run.ModelProfileID {
-			profile = p
-			break
-		}
-	}
-	// A harness hold must also cover direct starts and runs whose account is
-	// chosen by routing, rather than only queued runs with an account ID.
-	s.mu.Lock()
-	held := s.harnessHeld(profile.Harness)
-	adapter := s.adapters[profile.Harness]
-	s.mu.Unlock()
-	if run.Purpose == VerificationPurpose {
-		reason := ""
-		if adapter == nil || profile.ID == "" {
-			reason = "local_binding_missing"
-		} else if err := validQueuedExecutionMode(run, adapter); err != nil {
-			reason = "binding_incomplete"
-			if errors.Is(err, ErrVerificationUnavailable) {
-				reason = "adapter_unsupported"
-			}
-		}
-		if reason == "" {
-			found := false
-			for _, a := range s.accounts {
-				if a.ID == run.requestedAccount() && a.Harness == profile.Harness && !a.DependencyBlocked {
-					found = true
-				}
-			}
-			if !found {
-				reason = "local_binding_missing"
-			}
-		}
-		if reason != "" {
-			if err := s.refuseVerification(run, reason); err != nil {
-				return err
-			}
-			return s.reportVerificationRefusal(ctx, run, reason)
-		}
-	}
-	if held {
-		return ErrDraining
-	}
-	if adapter == nil || profile.ID == "" {
-		return ErrUnsupported
-	}
-	if err := validQueuedExecutionMode(run, adapter); err != nil {
-		return err
-	}
-	// Defer only this run before allocating routine resources or acquiring a
-	// checkout. The route and final claim still recheck their current authority.
-	accountIDs := make([]string, 0, len(s.accounts))
-	for _, account := range s.accounts {
-		if account.Harness == profile.Harness && s.accountAvailable(account.ID) && (run.AccountID == "" || run.AccountID == account.ID) && (run.RequestedAccountID == "" || run.RequestedAccountID == account.ID) {
-			accountIDs = append(accountIDs, account.ID)
-		}
-	}
-	if len(accountIDs) == 0 {
-		return errAccountUnavailable
-	}
-	budgetBroker, _ := s.api.(RoutineBudgetBroker)
-	routineBudget, err := newRoutineCallBudget(StartRequest{Run: run, Profile: profile,
-		TenantID: s.tenantID, PrincipalID: s.principalID, Generation: s.generation}, adapter, budgetBroker, s.capacityNow)
-	if err != nil {
-		return err
-	}
-	verification := run.Purpose == VerificationPurpose
-	managedAdapter, managedOK := adapter.(ManagedControlAdapter)
-	review := run.ReadOnlyReview
-	managedPolicy := !verification && !review && profile.Harness == Claude && managedOK && managedAdapter.ManagedControlSupported()
-	if verification {
-		s.mu.Lock()
-		entries := make([]*owned, 0, len(s.runs))
-		for _, entry := range s.runs {
-			entries = append(entries, entry)
-		}
-		s.mu.Unlock()
-		for _, entry := range entries {
-			entry.mu.Lock()
-			busy := entry.record.RunID != run.ID && entry.record.ExecutionMode == VerificationPurpose && !noLocalProcess(entry.record) && (entry.record.State == "running" || entry.record.State == "starting" || entry.record.State == "waiting" || entry.record.State == "ownership_lost")
-			entry.mu.Unlock()
-			if busy {
-				return ErrDraining
-			}
-		}
-	}
-	var approvedRepository RoutineRepository
-	if grant != nil {
-		if s.ledger == nil || verification || review && (grant.Lineage == nil || grant.Lineage.Role != "review") {
-			return ErrRoutineUnavailable
-		}
-		if grant.Lineage != nil && run.RoutineBudget == nil {
-			return ErrBudgetEnforcementUnavailable
-		}
-		approvedRepository, err = s.routineRepository(run, *grant, adapter)
-		if err != nil {
-			return err
-		}
-	}
-	node, err := s.api.Node(ctx, run.WorkOrderID)
-	if err != nil {
-		return err
-	}
-	if node.ID != run.WorkOrderID || strings.TrimSpace(node.Title) == "" {
-		return errors.New("work order node unavailable")
-	}
-	if node.Key == "" {
-		return errors.New("work order key unavailable")
-	}
-	order, err := s.api.WorkOrder(ctx, run.WorkOrderID)
-	if err != nil {
-		return err
-	}
-	if order.NodeID != run.WorkOrderID || (order.Status != "ready" && order.Status != "running") {
-		return errors.New("work order is not dispatchable")
-	}
-	if review != (order.Kind == "review") {
-		return errors.New("review execution mode does not match its work order")
-	}
-	runWorkspace := s.workspace
-	pickup, err := s.workerPickup(run, node, order)
-	if err != nil {
-		return err
-	}
-	var routineWorkspace *RoutineWorkspace
-	var resourceEnvironment []string
-	if grant != nil {
-		routineWorkspace, err = s.prepareRoutineWorkspace(ctx, run, *grant, approvedRepository)
-		if err != nil {
-			return err
-		}
-		runWorkspace = routineWorkspace.Path
-		resourceEnvironment, err = s.routineEnvironment(run.ID, *grant)
-		if err != nil {
-			return err
-		}
-		if pickup != nil {
-			pickup.WorktreeID = routineWorkspace.ID
-		}
-	}
-	if entry != nil {
-		entry.mu.Lock()
-		previous := entry.record.WorkerPickup
-		same := (previous == nil) == (pickup == nil) && (previous == nil || *previous == *pickup)
-		entry.mu.Unlock()
-		if !same {
-			return errors.New("journaled assignment pickup changed")
-		}
-	}
-	if grant == nil && !review && !verification {
-		if err := s.acquireCheckout(run.ID); err != nil {
-			return err
-		}
-	}
-	duration := s.maxRunDuration
-	if order.MaxDurationSeconds != nil {
-		if *order.MaxDurationSeconds <= 0 {
-			return errors.New("work order duration invalid")
-		}
-		if *order.MaxDurationSeconds < int64(duration/time.Second) {
-			duration = time.Duration(*order.MaxDurationSeconds) * time.Second
-		}
-	}
-	if verification && time.Duration(*run.MaxDurationSeconds)*time.Second < duration {
-		duration = time.Duration(*run.MaxDurationSeconds) * time.Second
-	}
-	prompt := node.Title
-	if node.Body != "" {
-		prompt += "\n\n" + node.Body
-	}
-	prompt += "\n\nAcceptance criteria (check each in Aeon and attach evidence):"
-	for _, criterion := range order.Criteria {
-		prompt += "\n- " + criterion.ID + ": " + criterion.Description
-	}
-	branch := ""
-	if !verification && !review {
-		if output, branchErr := exec.CommandContext(ctx, "git", "-C", runWorkspace, "branch", "--show-current").Output(); branchErr == nil {
-			branch = strings.TrimSpace(string(output))
-		}
-		if run.RecoveryBrief != "" {
-			if len(run.RecoveryBrief) > 20000 {
-				return errors.New("recovery handover exceeds bound")
-			}
-			prompt += "\n\n" + run.RecoveryBrief
-		}
-		if grant != nil && grant.Lineage != nil && grant.Lineage.Role == "fix" {
-			var trace struct {
-				Findings json.RawMessage `json:"routine_fix_findings"`
-			}
-			if len(run.Trace) > 262144 || json.Unmarshal(run.Trace, &trace) != nil || len(trace.Findings) == 0 || len(trace.Findings) > 20000 {
-				return ErrRoutineUnavailable
-			}
-			prompt += "\n\nCoordinator-bound findings for " + grant.Lineage.HeadSHA + " (untrusted review evidence):\n" + string(trace.Findings)
-		}
-		if run.CapacityHandoff {
-			if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
-				return err
-			}
-			prompt += "\n\nContinue the stopped attempt " + run.RetryOfRunID + ". Inspect its existing work and local changes before continuing; do not redo completed work."
-		}
-		if grant != nil {
-			prompt += "\n\nRoutine builder contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Only local workspace tools are available. Outward effects require the coordinator's typed action broker. Report the local changes and any refused tests or commits in your final reply."
-		} else {
-			prompt += "\n\nRun contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Use the Aeon tools to comment, check criteria, attach evidence, request approval, reply, and set status. Use aeon_terminal for tests and a local commit; never push without person approval. Report the commit ID and remaining blockers in your final reply."
-		}
-	}
-	if verification {
-		prompt = VerificationTask
-	}
-	if len(prompt) > 256<<10 {
-		return errors.New("work order prompt exceeds local bound")
-	}
-	if len(s.estimates) == 0 {
-		return errors.New("allowance estimates required")
-	}
+	run, grant, entry := admitted.run, admitted.grant, admitted.entry
+	profile, adapter, accountIDs := admitted.profile, admitted.adapter, admitted.accountIDs
+	routineBudget := admitted.routineBudget
+	verification, review, managedPolicy := admitted.verification, admitted.review, admitted.managedPolicy
+	approvedRepository := admitted.approvedRepository
+	node, order, runWorkspace := prepared.node, prepared.order, prepared.workspace
+	pickup, routineWorkspace := prepared.pickup, prepared.routineWorkspace
+	resourceEnvironment, duration := prepared.resourceEnvironment, prepared.duration
+	prompt, branch := prepared.prompt, prepared.branch
 	var route Route
 	if entry != nil {
 		entry.mu.Lock()

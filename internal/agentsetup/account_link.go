@@ -24,6 +24,7 @@ type SetupRequest struct {
 type AccountLogin struct {
 	ActiveIdentity string `json:"active_identity"`
 	Approved       bool   `json:"approved"`
+	Home           string `json:"home,omitempty"`
 }
 
 func ValidLoginLabel(label string) bool {

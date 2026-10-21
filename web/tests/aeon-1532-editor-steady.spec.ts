@@ -325,9 +325,18 @@ test('AEON-1532: the comment editor grows to its 560 px cap without ever collaps
 test('AEON-1532: the full ticket page writes the description in one row as tall as its preview', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockWork(page, fixtures())
+  // The title paints from the ticket payload while this project's grants are
+  // still in flight. e in that gap must open the editor once the answer lands.
+  let releasePermissions!: () => void
+  const permissionsHeld = new Promise<void>(resolve => { releasePermissions = resolve })
+  await page.route('**/api/me/permissions**', async route => {
+    if (new URL(route.request().url()).searchParams.has('project_id')) await permissionsHeld
+    await route.fallback()
+  })
   await page.goto('/p/PHAROS/PHAROS-12?view=full')
   await expect(page.getByRole('article', { name: 'Ticket details' }).getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
   await page.keyboard.press('e')
+  releasePermissions()
   const editor = page.locator('.edit-form .md-editor').first()
   await expect(editor).toHaveClass(/split/)
   const box = editor.getByLabel('Description, Markdown')

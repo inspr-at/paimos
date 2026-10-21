@@ -14,7 +14,9 @@ import (
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -29,6 +31,7 @@ type item struct {
 	ID           string    `json:"id"`
 	Created      time.Time `json:"created_at"`
 	EndpointHash string    `json:"endpoint_hash,omitempty"`
+	DeskEnabled  *bool     `json:"desk_enabled,omitempty"`
 }
 
 func preference(ctx context.Context, tx pgx.Tx, person string) (Preferences, error) {
@@ -55,14 +58,14 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 		for _, entry := range []struct {
 			query string
 			dst   *[]item
-		}{{`SELECT id::text,created_at,'' FROM phone_passkeys WHERE person_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT 8`, &keys}, {`SELECT id::text,created_at,endpoint_hash FROM phone_push_subscriptions WHERE person_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT 8`, &subs}} {
+		}{{`SELECT id::text,created_at,'',NULL::boolean FROM phone_passkeys WHERE person_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT 8`, &keys}, {`SELECT id::text,created_at,endpoint_hash,coalesce(desk_enabled,false) FROM phone_push_subscriptions WHERE person_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT 8`, &subs}} {
 			rows, err := tx.Query(r.Context(), entry.query, p.ID)
 			if err != nil {
 				return err
 			}
 			for rows.Next() {
 				var it item
-				if err = rows.Scan(&it.ID, &it.Created, &it.EndpointHash); err != nil {
+				if err = rows.Scan(&it.ID, &it.Created, &it.EndpointHash, &it.DeskEnabled); err != nil {
 					rows.Close()
 					return err
 				}
@@ -258,12 +261,15 @@ func (m *Module) subscribe(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, fail(503, "push is not configured"))
 		return
 	}
-	var in webpush.Subscription
-	if err := decode(w, r, &in); err != nil || !validSubscription(in) {
+	var in struct {
+		webpush.Subscription
+		DeskEnabled *bool `json:"desk_enabled"`
+	}
+	if err := decode(w, r, &in); err != nil || !validSubscription(in.Subscription) {
 		respond(w, nil, fail(400, "invalid or unsupported push subscription"))
 		return
 	}
-	b, err := json.Marshal(in)
+	b, err := json.Marshal(in.Subscription)
 	if err != nil {
 		respond(w, nil, err)
 		return
@@ -275,12 +281,17 @@ func (m *Module) subscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	var out item
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		u, err := loadUser(r.Context(), tx, p)
-		if err != nil {
+		if err := lockDeviceOwner(r.Context(), tx, p); err != nil {
 			return err
 		}
-		if len(u.creds) == 0 {
-			return fail(409, "add a passkey first")
+		if in.DeskEnabled == nil {
+			u, err := loadUser(r.Context(), tx, p)
+			if err != nil {
+				return err
+			}
+			if len(u.creds) == 0 {
+				return fail(409, "add a passkey first")
+			}
 		}
 		var n int
 		if err = tx.QueryRow(r.Context(), `SELECT count(*) FROM phone_push_subscriptions WHERE person_id=$1 AND revoked_at IS NULL AND endpoint_hash<>$2`, p.ID, digest(in.Endpoint)).Scan(&n); err != nil {
@@ -289,14 +300,14 @@ func (m *Module) subscribe(w http.ResponseWriter, r *http.Request) {
 		if n >= 8 {
 			return fail(409, "subscription limit reached")
 		}
-		err = tx.QueryRow(r.Context(), `INSERT INTO phone_push_subscriptions(tenant_id,person_id,endpoint_hash,subscription) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id,endpoint_hash) DO UPDATE SET subscription=excluded.subscription,revoked_at=NULL WHERE phone_push_subscriptions.person_id=excluded.person_id RETURNING id::text,created_at`, p.TenantID, p.ID, digest(in.Endpoint), encrypted).Scan(&out.ID, &out.Created)
+		err = tx.QueryRow(r.Context(), `INSERT INTO phone_push_subscriptions(tenant_id,person_id,endpoint_hash,subscription,desk_enabled,desk_enabled_at) VALUES($1,$2,$3,$4,coalesce($5,false),CASE WHEN coalesce($5,false) THEN clock_timestamp() END) ON CONFLICT(tenant_id,endpoint_hash) DO UPDATE SET subscription=excluded.subscription,desk_enabled=coalesce($5,phone_push_subscriptions.desk_enabled,false),desk_enabled_at=CASE WHEN NOT coalesce($5,phone_push_subscriptions.desk_enabled,false) THEN NULL WHEN phone_push_subscriptions.desk_enabled IS TRUE AND phone_push_subscriptions.revoked_at IS NULL THEN coalesce(phone_push_subscriptions.desk_enabled_at,phone_push_subscriptions.created_at) ELSE clock_timestamp() END,revoked_at=NULL WHERE phone_push_subscriptions.person_id=excluded.person_id RETURNING id::text,created_at,coalesce(desk_enabled,false)`, p.TenantID, p.ID, digest(in.Endpoint), encrypted, in.DeskEnabled).Scan(&out.ID, &out.Created, &out.DeskEnabled)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fail(409, "subscription belongs to another account; disable it there first")
 		}
 		if err != nil {
 			return err
 		}
-		return audit(r.Context(), tx, p, "phone_approval.subscribed", map[string]string{"subscription_id": out.ID})
+		return audit(r.Context(), tx, p, "phone_approval.subscribed", map[string]any{"subscription_id": out.ID, "desk_enabled": out.DeskEnabled})
 	})
 	respond(w, out, err)
 }
@@ -311,6 +322,9 @@ func (m *Module) unsubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := lockDeviceOwner(r.Context(), tx, p); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(r.Context(), `UPDATE phone_push_subscriptions SET revoked_at=coalesce(revoked_at,now()) WHERE id=$1 AND person_id=$2`, id, p.ID)
 		if err != nil {
 			return err
@@ -340,4 +354,24 @@ func quiet(p Preferences, now time.Time) bool {
 		return minute >= p.Start && minute < p.End
 	}
 	return minute >= p.Start || minute < p.End
+}
+
+// Lock the same access-change fence as role mutations before checking the
+// current person and profile permission. The row also serializes the device cap.
+func lockDeviceOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	if err := authz.LockProjectWrite(ctx, tx, p.TenantID); err != nil {
+		return err
+	}
+	if err := authz.RequireTx(ctx, tx, p, "profile.write", authz.Scope{}); err != nil {
+		return fail(403, "profile permission required")
+	}
+	var kind, state string
+	var linked *string
+	if err := tx.QueryRow(ctx, `SELECT kind,status,linked_to::text FROM principals WHERE id=$1 FOR NO KEY UPDATE`, p.ID).Scan(&kind, &state, &linked); err != nil {
+		return err
+	}
+	if kind != "person" || state != "active" || linked != nil || p.KeyCreatorID != "" {
+		return fail(403, "active signed-in person required")
+	}
+	return nil
 }

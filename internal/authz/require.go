@@ -205,7 +205,63 @@ func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string
 	if err := workstationEffectiveTx(ctx, tx, p, &result); err != nil {
 		return Effective{}, err
 	}
+	person, err := actingGrantsTx(ctx, tx, p)
+	if err != nil {
+		return Effective{}, err
+	}
+	if person != nil {
+		ceiling := effectiveGrants(*person, projectID)
+		result.Workspace.Permissions = intersect(result.Workspace.Permissions, ceiling.Workspace.Permissions)
+		if result.Project != nil {
+			result.Project.Permissions = intersect(result.Project.Permissions, ceiling.Project.Permissions)
+		}
+		// AnyProject must have one common project, not permission names drawn
+		// from disjoint projects. Coordinator derivations are capped here too.
+		check := projectCheck(p, g, creator, person)
+		candidates := grantProjectIDs(g, creator, person)
+		allowed := []string{}
+		for _, permission := range result.anyProject {
+			if check(permission, "") {
+				allowed = append(allowed, permission)
+				continue
+			}
+			for id := range candidates {
+				if check(permission, id) {
+					allowed = append(allowed, permission)
+					break
+				}
+			}
+		}
+		result.anyProject = unique(allowed)
+	}
 	return result, nil
+}
+
+func actingGrantsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (*grants, error) {
+	id, ok := db.ActingPersonID(ctx, p).(string)
+	if !ok {
+		return nil, nil
+	}
+	g, err := readGrants(ctx, tx, tenant.Principal{ID: id, TenantID: p.TenantID, Kind: tenant.Person})
+	if err != nil {
+		return nil, err
+	}
+	return &g, nil
+}
+
+func grantProjectIDs(own grants, ceilings ...*grants) map[string]struct{} {
+	ids := map[string]struct{}{}
+	for id := range own.projects {
+		ids[id] = struct{}{}
+	}
+	for _, ceiling := range ceilings {
+		if ceiling != nil {
+			for id := range ceiling.projects {
+				ids[id] = struct{}{}
+			}
+		}
+	}
+	return ids
 }
 
 func effectiveGrants(g grants, projectID string) Effective {
@@ -244,6 +300,9 @@ func readGrants(ctx context.Context, tx pgx.Tx, p tenant.Principal) (grants, err
 		FROM principals p JOIN principals canonical
 		  ON canonical.tenant_id=p.tenant_id AND canonical.id=coalesce(p.linked_to,p.id)
 		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid`, p.TenantID, p.ID).Scan(&status, &kind, &bindingID, &canonicalStatus, &messagingOnly); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return g, ErrForbidden
+		}
 		return g, err
 	}
 	if status != "active" || canonicalStatus != "active" || kind != string(p.Kind) {
@@ -362,6 +421,18 @@ func GrantedProjectIDsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, per
 			}
 		}
 	}
+	person, err := actingGrantsTx(ctx, tx, p)
+	if errors.Is(err, ErrForbidden) {
+		return []string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if person != nil {
+		for id := range person.projects {
+			candidates[id] = struct{}{}
+		}
+	}
 	ids := make([]string, 0, len(candidates))
 	for id := range candidates {
 		if id != "" && check(permission, id) {
@@ -401,6 +472,17 @@ func ProjectsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (ProjectChec
 		}
 		creator = &c
 	}
+	person, err := actingGrantsTx(ctx, tx, p)
+	if errors.Is(err, ErrForbidden) {
+		return deny, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return projectCheck(p, own, creator, person), nil
+}
+
+func projectCheck(p tenant.Principal, own grants, creator, person *grants) ProjectCheck {
 	return func(permission, projectID string) bool {
 		if _, ok := Lookup(permission); !ok {
 			return false
@@ -411,8 +493,11 @@ func ProjectsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (ProjectChec
 		if creator != nil && !creator.allows(permission, projectID) {
 			return false
 		}
+		if person != nil && !person.allows(permission, projectID) {
+			return false
+		}
 		return p.Kind != tenant.Agent || KeyGrantable(permission, OwnerWorkstation(p)) && KeyAllows(p, permission)
-	}, nil
+	}
 }
 
 // ProjectGrantable reports whether a registry permission may be granted by a
@@ -517,6 +602,11 @@ func ProjectStartReasonTx(ctx context.Context, tx pgx.Tx, project string) (strin
 // RequireProjectAdminTx supplements nodes.write for project deletion. Grants
 // are live; a project Admin or workspace Owner/Admin supplies the admin role.
 func RequireProjectAdminTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) error {
+	if person, ok := db.ActingPersonID(ctx, p).(string); ok {
+		if err := RequireProjectAdminTx(ctx, tx, tenant.Principal{ID: person, TenantID: p.TenantID, Kind: tenant.Person}, project); err != nil {
+			return err
+		}
+	}
 	if p.Kind == tenant.Agent && p.KeyCreatorID != "" {
 		creator := tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person}
 		if err := RequireProjectAdminTx(ctx, tx, creator, project); err != nil {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/approvals"
@@ -117,6 +118,16 @@ const claimExistsSQL = `SELECT EXISTS(SELECT 1 FROM desk_notification_claims c
 // tree fence, native source row and current-source authorization precede
 // the insert. No later lock or event acquisition belongs in this transaction.
 func ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) (bool, error) {
+	return claimTx(ctx, tx, p, item, false)
+}
+
+// ClaimBrowserTx uses the same at-most-once claim and adds person routing under
+// the final write fence, so a new owner cannot inherit a stale recipient scan.
+func ClaimBrowserTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) (bool, error) {
+	return claimTx(ctx, tx, p, item, true)
+}
+
+func claimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item, browser bool) (bool, error) {
 	if p.Kind != tenant.Person || p.KeyCreatorID != "" || !validID(item.ID) || item.Revision < 1 {
 		return false, nil
 	}
@@ -158,6 +169,12 @@ func ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) (boo
 	if err != nil {
 		return false, err
 	}
+	if browser && allowed {
+		_, allowed, err = BrowserCurrentTx(ctx, tx, p, current)
+		if err != nil {
+			return false, err
+		}
+	}
 	state := "claimed"
 	if !allowed {
 		state = "skipped"
@@ -169,10 +186,10 @@ func ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) (boo
 // FinishTx records transport evidence without private content. A failed or
 // unknown delivery is not reported as sent and never resets its durable claim.
 func FinishTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item, state string) error {
-	if state != "sent" && state != "failed" && state != "skipped" {
+	if state != "sent" && state != "failed" && state != "skipped" && state != "summarised" {
 		return errors.New("invalid desk notification result")
 	}
-	tag, err := tx.Exec(ctx, `UPDATE desk_notification_claims SET state=$6,completed_at=clock_timestamp() WHERE tenant_id=$1 AND kind=$2 AND item_id=$3 AND revision=$4 AND recipient_id=$5 AND state='claimed'`, p.TenantID, item.Kind, item.ID, item.Revision, p.ID, state)
+	tag, err := tx.Exec(ctx, `UPDATE desk_notification_claims SET state=CASE WHEN $6='summarised' THEN 'sent' ELSE $6 END,completed_at=clock_timestamp(),summarised_at=CASE WHEN $6='summarised' THEN clock_timestamp() END WHERE tenant_id=$1 AND kind=$2 AND item_id=$3 AND revision=$4 AND recipient_id=$5 AND state='claimed'`, p.TenantID, item.Kind, item.ID, item.Revision, p.ID, state)
 	if err != nil {
 		return err
 	}
@@ -182,16 +199,141 @@ func FinishTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item, sta
 	return nil
 }
 
-// Payload never includes title, question, rationale, context, findings or an
-// answer. Opening a pointer performs the source's normal authorization again.
-func Payload(item Item) ([]byte, error) {
+// BrowserCurrentTx adds exact person routing to the normal source authorization.
+// Direct held messages belong only to their recipient. Questions without a held
+// message use the project's human owner, resolved by the existing owner policy.
+func BrowserCurrentTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) (Item, bool, error) {
+	current, ok, err := currentSourceTx(ctx, tx, p, item)
+	if err != nil || !ok {
+		return Item{}, false, err
+	}
+	allowed, err := canDecideTx(ctx, tx, p, current)
+	if err != nil || !allowed {
+		return Item{}, false, err
+	}
+	var recipient bool
+	switch current.Kind {
+	case "question":
+		err = tx.QueryRow(ctx, `SELECT coalesce(CASE WHEN EXISTS(SELECT 1 FROM desk_askers a WHERE a.tenant_id=q.tenant_id AND a.question_id=q.node_id AND a.source_request_id IS NOT NULL)
+   THEN EXISTS(SELECT 1 FROM desk_askers a JOIN inbox_compat_messages m ON m.tenant_id=a.tenant_id AND m.id=a.source_request_id WHERE a.tenant_id=q.tenant_id AND a.question_id=q.node_id AND m.recipient_principal_id=$3)
+   ELSE aeon_person_step_owner(q.project_id,(SELECT owner_principal_id FROM project_leads WHERE tenant_id=q.tenant_id AND project_id=q.project_id),NULL)=$3 END,false)
+   FROM desk_questions q WHERE q.tenant_id=$1 AND q.node_id=$2`, p.TenantID, current.ID, p.ID).Scan(&recipient)
+	case "action_request":
+		err = tx.QueryRow(ctx, `SELECT recipient_principal_id=$3 FROM inbox_compat_messages WHERE tenant_id=$1 AND id=$2`, p.TenantID, current.ID, p.ID).Scan(&recipient)
+	case "approval":
+		err = tx.QueryRow(ctx, `SELECT coalesce(aeon_person_step_owner($1::uuid,(SELECT owner_principal_id FROM project_leads WHERE tenant_id=$2 AND project_id=$1::uuid),NULL)=$3,false)`, nullableProject(current.ProjectID), p.TenantID, p.ID).Scan(&recipient)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Item{}, false, nil
+	}
+	return current, recipient, err
+}
+
+func nullableProject(id string) any {
+	if id == "" {
+		return nil
+	}
+	return id
+}
+
+// BrowserPayloadTx reads only an authorized current source and its project key.
+func BrowserPayloadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) ([]byte, bool, error) {
+	current, ok, err := BrowserCurrentTx(ctx, tx, p, item)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	key := ""
+	if current.ProjectID != "" {
+		if err = tx.QueryRow(ctx, `SELECT key FROM nodes WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, p.TenantID, current.ProjectID).Scan(&key); err != nil {
+			return nil, false, err
+		}
+	}
+	payload, err := Payload(current, key)
+	return payload, err == nil, err
+}
+
+// Payload contains only the source's first line and project key, never context,
+// findings, comments, attachments or an answer. Limits fit encrypted Web Push.
+func Payload(item Item, projectKey string) ([]byte, error) {
 	if (item.Kind != "question" && item.Kind != "approval" && item.Kind != "action_request") || !validID(item.ID) || item.Revision < 1 {
 		return nil, errors.New("invalid desk pointer")
 	}
-	prefix := map[string]string{"question": "q:", "action_request": "m:"}[item.Kind]
-	href := "/decision-desk?item=" + prefix + item.ID
-	if item.Kind == "approval" {
-		href = "/phone-approvals/approval/" + item.ID
+	prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:"}[item.Kind]
+	line := item.Title
+	if end := strings.IndexFunc(line, func(r rune) bool { return r == '\n' || r == '\r' || r == '\u0085' || r == '\u2028' || r == '\u2029' }); end >= 0 {
+		line = line[:end]
 	}
-	return json.Marshal(map[string]any{"url": href, "kind": item.Kind, "item_id": item.ID, "revision": item.Revision})
+	// Truncate bytes at UTF-8 boundaries; JSON escaping also has a hard bound.
+	bounded := func(s string, n int) string {
+		var b strings.Builder
+		for _, r := range s {
+			if b.Len()+len(string(r)) > n {
+				break
+			}
+			if r >= 32 {
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	}
+	body := bounded(strings.TrimSpace(line), 240)
+	if key := bounded(projectKey, 80); key != "" {
+		body += " · " + key
+	}
+	return json.Marshal(map[string]string{"title": "PAIMOS · Decision waiting", "body": body, "tag": "desk-" + item.Kind + "-" + item.ID, "url": "/decision-desk?item=" + prefix + item.ID})
+}
+
+// BrowserNoticesTx pages before filtering exact recipients; unrelated visible
+// items cannot occupy the first page forever. Fail explicitly at the coverage
+// bound instead of silently truncating a summary or dropping later sources.
+func BrowserNoticesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]Item, error) {
+	var after *cursor
+	items := []Item{}
+	for pageNumber := 0; pageNumber < 10; pageNumber++ {
+		page, err := readProjection(ctx, tx, p, 100, after, true, true)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range page.Items {
+			current, ok, err := BrowserCurrentTx(ctx, tx, p, item)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				items = append(items, current)
+			}
+		}
+		if !page.HasMore {
+			return items, nil
+		}
+		after, err = decodeCursor(page.NextCursor)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return nil, errors.New("desk notification coverage exceeds 1000 source items")
+}
+
+// PushSource adapts the projection to the existing phone push worker without a
+// dependency cycle. Startup assigns it to phoneapprovals.Module.DeskPush.
+type PushSource struct{}
+
+func (PushSource) NoticesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, visit func(kind, id string, revision int64, created time.Time)) error {
+	items, err := BrowserNoticesTx(ctx, tx, p)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		visit(item.Kind, item.ID, item.Revision, item.CreatedAt)
+	}
+	return nil
+}
+func (PushSource) ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, id string, revision int64) (bool, error) {
+	return ClaimBrowserTx(ctx, tx, p, Item{Kind: kind, ID: id, Revision: revision})
+}
+func (PushSource) PayloadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, id string, revision int64) ([]byte, bool, error) {
+	return BrowserPayloadTx(ctx, tx, p, Item{Kind: kind, ID: id, Revision: revision})
+}
+func (PushSource) FinishTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, id string, revision int64, state string) error {
+	return FinishTx(ctx, tx, p, Item{Kind: kind, ID: id, Revision: revision}, state)
 }

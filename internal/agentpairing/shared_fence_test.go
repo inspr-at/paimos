@@ -25,7 +25,7 @@ var sharedFenceCallers = map[string][]string{
 	"agentpairing.Lock":         {"agentaccounts/native_session.go", "agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/routine_launch.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "harness/lead_runtime.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/harness_probes.go", "modelregistry/preparation.go", "nativeintegration/root/authority.go", "nativesessions/interaction/store.go", "nativesessions/store/claim.go", "nativesessions/store/commands.go", "nativesessions/store/production.go", "nativesessions/store/read.go", "nativesessions/store/start.go", "nodes/bulk.go", "nodes/nodes.go", "routineactions/catalog.go", "routineactions/pipeline.go", "routineactions/pr.go", "routinebudget/store.go", "routineexec/dispatch.go", "routineexec/recovery.go", "routineexec/review.go"},
 	"agentpairing.LockMutation": {"agentaccounts/module.go", "agentpairing/module.go", "agentruns/queue.go", "auth/owner_workstation.go", "harness/agent_recovery.go", "harness/module.go", "modelprovider/settings.go", "parentbenefits/module.go", "portal/market.go", "portal/moderate.go", "portal/module.go", "portal/products.go", "questions/store.go"},
 	"authz.LockProjectMutation": {"authz/agent_creation.go", "authz/members.go", "authz/project_members.go", "importer/users_backfill.go", "importer/writer.go", "statusautopilot/settings.go"},
-	"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "delivery/status_timing_store.go", "events/causal_undo.go", "events/module.go", "harness/lead_decisions.go", "knowledge/learning_cleanup.go", "knowledge/learnings.go", "nodes/causal_undo.go", "nodes/portal_publish.go", "projectdraft/create.go", "projectdraft/retention.go", "projectdraft/retention_settings.go", "themes/store.go", "themes/undo.go"},
+	"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "delivery/status_timing_store.go", "events/causal_undo.go", "events/module.go", "harness/lead_decisions.go", "knowledge/learning_cleanup.go", "knowledge/learnings.go", "nodes/causal_undo.go", "nodes/portal_publish.go", "phoneapprovals/settings.go", "projectdraft/create.go", "projectdraft/retention.go", "projectdraft/retention_settings.go", "themes/store.go", "themes/undo.go"},
 	"operatoractor.Ensure":      {"auth/store.go", "authz/operator.go", "operatoractor/actor.go"},
 	"rules.PrepareWrite":        {"knowledge/learning_draft.go"},
 }
@@ -149,8 +149,8 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		// Receipt projection and final drain (AEON-1271) enter tenant/tree
 		// before refreshing visibility and invoking current authority. Receipt
 		// events follow row writes; final storage follows authority and row locks.
-		{"../nativesessions/receipts/repository.go", "write", "db.LockTree(", "SELECT aeon_enter_principal("},
-		{"../nativesessions/receipts/repository.go", "write", "SELECT aeon_enter_principal(", "return fn(ctx, tx)"},
+		{"../nativesessions/receipts/repository.go", "write", "db.LockTree(", "db.EnterPrincipal("},
+		{"../nativesessions/receipts/repository.go", "write", "db.EnterPrincipal(", "return fn(ctx, tx)"},
 		{"../nativesessions/receipts/repository.go", "Report", "s.write(", "s.authority.ReceiptTx("},
 		{"../nativesessions/receipts/repository.go", "Report", "s.authority.ReceiptTx(", "authz.RequireTx("},
 		{"../nativesessions/receipts/repository.go", "Report", "authz.RequireTx(", "FOR NO KEY UPDATE"},

@@ -65,7 +65,7 @@ func lockWrite(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 	if p.KeyCreatorID != "" {
 		creator = p.KeyCreatorID
 	}
-	if _, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, p.TenantID, p.ID, creator); err != nil {
+	if err := db.EnterPrincipal(ctx, tx, p.TenantID, p.ID, creator, db.ActingPersonID(ctx, p)); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `SET LOCAL statement_timeout='5s'`)
