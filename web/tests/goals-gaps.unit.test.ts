@@ -47,6 +47,9 @@ import type { GoalsPage } from '../src/components/goals/goalsPage'
 const HOUR = 3_600_000
 // Sun 18 Oct 2026, 00:30 in Vienna (22:30 UTC the day before).
 const NOW = Date.parse('2026-10-17T22:30:00Z')
+// Local midday, Sat 17 Oct 2026. Minute and hour offsets stay on this civil
+// day. A real Date.now() in the first minutes after local midnight does not.
+const MIDDAY = new Date(2026, 9, 17, 12, 0, 0, 0).getTime()
 const VIENNA = 'Europe/Vienna'
 const clock = (ms: number) => new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms))
 const person = (id: string): Identity => ({ principal: { id, name: id, kind: 'person' }, tenant: { id: 'tenant', name: 'Workspace' } })
@@ -237,45 +240,74 @@ describe('what the rows and the footer show', () => {
   })
 
   it('an item shows its agent note with a speech icon, its author and time; without a note no note line', async () => {
-    const at = Date.now() - 10 * 60_000
-    const noted = await html(GoalItem, { item: outcome({ note: 'Hand-check of 5 review runs, then the gate goes live', note_by: 'p1', note_by_name: 'AEON-LEAD', note_at: new Date(at).toISOString() }), goalId: 'g', agents: [], project: { title: 'Release', routeKey: 'AEON' }, now: Date.now() })
-    expect(noted).toContain('i-live is-note')
-    expect(noted).toContain('Hand-check of 5 review runs, then the gate goes live')
-    expect(noted).toContain(`· AEON-LEAD ${clock(at)}`)
-    expect(noted).toContain('M3.2 2.8h9.6') // the speech icon
-    const plain = await html(GoalItem, { item: outcome(), goalId: 'g', agents: [], project: { title: 'Release', routeKey: 'AEON' }, now: Date.now() })
-    expect(plain).not.toContain('is-note')
+    // Ten minutes before midday stays the same local day, so the byline is the
+    // clock only. The real clock in the ten minutes after local midnight puts
+    // the note on yesterday, and whenText adds the weekday (PR #805).
+    const yesterday = new Date(2026, 9, 16, 18, 52, 0, 0).getTime()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(MIDDAY)
+    try {
+      const now = Date.now()
+      const at = now - 10 * 60_000
+      expect(now).toBe(MIDDAY)
+      expect(whenText(at, now)).toBe(clock(at))
+      const noted = await html(GoalItem, { item: outcome({ note: 'Hand-check of 5 review runs, then the gate goes live', note_by: 'p1', note_by_name: 'AEON-LEAD', note_at: new Date(at).toISOString() }), goalId: 'g', agents: [], project: { title: 'Release', routeKey: 'AEON' }, now })
+      expect(noted).toContain('i-live is-note')
+      expect(noted).toContain('Hand-check of 5 review runs, then the gate goes live')
+      expect(noted).toContain(`· AEON-LEAD ${clock(at)}`)
+      expect(noted).toContain('M3.2 2.8h9.6') // the speech icon
+      const plain = await html(GoalItem, { item: outcome(), goalId: 'g', agents: [], project: { title: 'Release', routeKey: 'AEON' }, now })
+      expect(plain).not.toContain('is-note')
+
+      // A note from the previous local day (Fri 16 Oct) shows that day, not only the clock.
+      const day = whenText(yesterday, now)
+      expect(day).toBe(`Fri ${clock(yesterday)}`)
+      const older = await html(GoalItem, { item: outcome({ note: 'Left yesterday, still on the item', note_by: 'p1', note_by_name: 'AEON-LEAD', note_at: new Date(yesterday).toISOString() }), goalId: 'g', agents: [], project: { title: 'Release', routeKey: 'AEON' }, now })
+      expect(older).toContain('Left yesterday, still on the item')
+      expect(older).toContain(`· AEON-LEAD ${day}`)
+      expect(older).not.toContain(`· AEON-LEAD ${clock(yesterday)}`)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('a goal row keeps a reserved hours-left line, and its Done fold counts today’s merges', async () => {
-    const now = Date.now()
-    const items = [
-      outcome({ id: 'd1', state: 'done', merged_at: new Date(now - 60_000).toISOString() }),
-      outcome({ id: 'd2', state: 'done', merged_at: new Date(now - 120_000).toISOString() }),
-      outcome({ id: 'd3', state: 'done', merged_at: new Date(now - 72 * HOUR).toISOString() }),
-      outcome({ id: 'm1', state: 'moving' }),
-    ]
-    const g = goal('g-r136', { items, eta: { source: 'agent', text: 'Sat 17 Oct', partial: false }, progress: { ...goal('x').progress!, remaining_hours: 39.6, remaining_unestimated: 0 }, states: { moving: 1, queued: 0, paused: 0, done: 3 } })
-    const rendered = await html(GoalRow, { goal: g, page: row(true), now, agents: new Map(), term: '', menuOpen: false })
-    expect(rendered).toContain('~40 h left')
-    expect(rendered).toContain('about 40 h left')
-    expect(bare(rendered)).toMatch(/<b[^>]*>3<\/b> done<span class="today"[^>]*>· 2 today<\/span>/)
-    const unknown = await html(GoalRow, { goal: goal('g2', { eta: { source: 'agent', text: '~21:00', partial: false } }), page: row(false), now, agents: new Map(), term: '', menuOpen: false })
-    // The line is there while unknown, empty and hidden from screen readers, so nothing moves when it arrives.
-    expect(unknown).toMatch(/<span class="left"[^>]*aria-hidden="true"[^>]*><\/span>/)
-    expect(unknown).not.toContain(' today')
+    // A minute or two before the real clock, just after local midnight, is
+    // yesterday, so the fold would count fewer than 2 today.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(MIDDAY)
+    try {
+      const now = Date.now()
+      expect(now).toBe(MIDDAY)
+      const items = [
+        outcome({ id: 'd1', state: 'done', merged_at: new Date(now - 60_000).toISOString() }),
+        outcome({ id: 'd2', state: 'done', merged_at: new Date(now - 120_000).toISOString() }),
+        outcome({ id: 'd3', state: 'done', merged_at: new Date(now - 72 * HOUR).toISOString() }),
+        outcome({ id: 'm1', state: 'moving' }),
+      ]
+      const g = goal('g-r136', { items, eta: { source: 'agent', text: 'Sat 17 Oct', partial: false }, progress: { ...goal('x').progress!, remaining_hours: 39.6, remaining_unestimated: 0 }, states: { moving: 1, queued: 0, paused: 0, done: 3 } })
+      const rendered = await html(GoalRow, { goal: g, page: row(true), now, agents: new Map(), term: '', menuOpen: false })
+      expect(rendered).toContain('~40 h left')
+      expect(rendered).toContain('about 40 h left')
+      expect(bare(rendered)).toMatch(/<b[^>]*>3<\/b> done<span class="today"[^>]*>· 2 today<\/span>/)
+      const unknown = await html(GoalRow, { goal: goal('g2', { eta: { source: 'agent', text: '~21:00', partial: false } }), page: row(false), now, agents: new Map(), term: '', menuOpen: false })
+      // The line is there while unknown, empty and hidden from screen readers, so nothing moves when it arrives.
+      expect(unknown).toMatch(/<span class="left"[^>]*aria-hidden="true"[^>]*><\/span>/)
+      expect(unknown).not.toContain(' today')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('the footer says Live with the last ETA time, or Reconnecting with the last update, in one slot', async () => {
     // Local midday on a fixed date. Thirty minutes earlier stays the same local
     // day, so whenText is the clock only. Using the real clock in the half hour
     // after local midnight puts the ETA on yesterday, and whenText adds the weekday.
-    const midday = new Date(2026, 9, 17, 12, 0, 0, 0).getTime()
     vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(midday)
+    vi.setSystemTime(MIDDAY)
     try {
       const now = Date.now(), set = now - 30 * 60_000, update = now - 4 * 60_000
-      expect(now).toBe(midday)
+      expect(now).toBe(MIDDAY)
       expect(whenText(set, now)).toBe(clock(set))
       expect(whenText(update, now)).toBe(clock(update))
       const on = await html(GoalFreshness, { live: 'live', etaSetAt: set, updatedAt: update, now })
