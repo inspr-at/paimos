@@ -393,11 +393,12 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 1, work_hours: 0, warning: false } } }))
     await page.goto('/p/PHAROS?sort=key&closed=1')
     if (width === 390) {
-      // D11 (AEON-1460): compact rows carry no planning columns; each ticket keeps its suggested release.
+      // Saved ticks draw on the classic card, Suggested included. The ticket panel repeats the same facts.
       const ticket = page.getByRole('complementary', { name: 'Ticket details' }), close = ticket.getByRole('button', { name: 'Close ticket details', exact: true })
       const open = async (key: string) => { await row(page, key).locator('.title-link').click(); await expect(ticket.getByRole('button', { name: `Copy ${key}`, exact: true })).toBeVisible(); return ticket.locator('.plan-rel') }
-      await expect(row(page, 'PHAROS-15')).toBeVisible()
-      await expect(page.locator('.tickets .ticket-row .c-suggested')).toHaveCount(0)
+      await expect(row(page, 'PHAROS-15').locator('.c-suggested .plan-rel')).toHaveText('—')
+      await expect(row(page, 'PHAROS-13').locator('.c-suggested .plan-rel')).toHaveText('~Next release')
+      await expect(row(page, 'PHAROS-16').locator('.c-suggested .plan-rel')).toContainText('Cloud City')
       const parentSuggestion = await open('PHAROS-15')
       await expect(parentSuggestion).toHaveText('—')
       await expect(parentSuggestion).toHaveAccessibleDescription('Releases are suggested for leaf work; a parent’s leaves can span releases')

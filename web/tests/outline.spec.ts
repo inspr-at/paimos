@@ -767,6 +767,13 @@ for (const view of ['outline', 'list']) for (const audience of ['viewer', 'empty
     const search = page.getByRole('searchbox', { name: 'Search tickets in this project' })
     await search.click(); await expect(search).toBeFocused()
     await expect(pill).toBeVisible()
+    // A filled field (the empty audience arrives on q=Zebra) clears on the first Escape and blurs on the second.
+    if ((await search.inputValue()).length > 0) {
+      await page.keyboard.press('Escape')
+      await expect(search).toHaveValue('')
+      await expect(search).toBeFocused()
+      await expect(search).toBeVisible()
+    }
     await page.keyboard.press('Escape')
     await expect(search).toBeVisible()
     await expect(search).not.toBeFocused()

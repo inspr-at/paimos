@@ -70,9 +70,12 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
   await expect.poll(() => sorts.some(sort => sort.split(',').includes('eta_ready'))).toBe(true)
 
   // The phone card keeps the fresher of ETA and Updated in the date slot.
+  // DOM order is Updated then ETA, and the unused one is hidden, so the visible slot is named directly.
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(row(page, 'PHAROS-11').locator('.c-eta .eta-cell, .c-updated time').first()).toBeVisible()
-  await expect(row(page, 'PHAROS-14').locator('.c-eta .eta-cell, .c-updated time').first()).toBeVisible()
+  await expect(row(page, 'PHAROS-11').locator('.c-eta .eta-cell')).toBeVisible()
+  await expect(row(page, 'PHAROS-11').locator('.c-updated time')).toBeHidden()
+  await expect(row(page, 'PHAROS-14').locator('.c-updated time')).toBeVisible()
+  await expect(row(page, 'PHAROS-14').locator('.c-eta .eta-cell')).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 1000 })

@@ -9,18 +9,21 @@
 import { computed, ref } from 'vue'
 import { statusMeta } from '../../lib/work'
 import { useOffscreenPause } from '../../lib/statusMotion'
-const props = withDefaults(defineProps<{ state: string; size?: number }>(), { size: 14 })
+const props = withDefaults(defineProps<{ state: string; size?: number; name?: string }>(), { size: 14 })
 const key = computed(() => statusMeta(props.state).key)
 const shape = ref<HTMLElement | null>(null)
 const offscreen = useOffscreenPause(shape)
+// Phone cards name the glyph itself: the text label is hidden on the narrowest cards, and a wrapping span
+// would match `.status-btn > span:not(.status-icon)` and hide the icon with it. Desktop leaves the glyph unnamed.
+const labelled = computed(() => props.name ? { role: 'img' as const, 'aria-label': props.name } : { 'aria-hidden': true as const })
 // Inline, so rules a host writes for its label spans (for example `.status-btn span`) cannot resize or re-display the
 // shape: it keeps the SVG icons' box and baseline.
 const shapeStyle = computed(() => ({ display: 'inline-block', position: 'relative' as const, flex: 'none', width: `${props.size}px`, height: `${props.size}px`, padding: '0', fontSize: `${props.size}px`, color: 'var(--st-progress)' }))
 </script>
 
 <template>
-  <span v-if="key === 'progress'" ref="shape" class="status-icon st-progress st-ip" :class="{ offscreen }" :style="shapeStyle" aria-hidden="true"><i /></span>
-  <svg v-else class="status-icon" :class="`st-${key}`" :width="size" :height="size" viewBox="0 0 14 14" fill="none" overflow="visible" aria-hidden="true" focusable="false">
+  <span v-if="key === 'progress'" ref="shape" class="status-icon st-progress st-ip" :class="{ offscreen }" :style="shapeStyle" v-bind="labelled"><i /></span>
+  <svg v-else class="status-icon" :class="`st-${key}`" :width="size" :height="size" viewBox="0 0 14 14" fill="none" overflow="visible" focusable="false" v-bind="labelled">
     <template v-if="key === 'new'"><circle class="ring" cx="7" cy="7" r="5.1" stroke="var(--st-new)" stroke-width="1.8" /><circle class="dot" cx="11" cy="3" r="2.6" fill="var(--st-new)" stroke="var(--surface)" stroke-width="1.2" /></template>
     <template v-else-if="key === 'open'"><circle class="ring" cx="7" cy="7" r="5.1" stroke="var(--st-progress)" stroke-width="1.8" /><circle class="glint" pathLength="1" stroke-dasharray=".14 .86" cx="7" cy="7" r="5.1" stroke="var(--surface)" stroke-width="2.2" opacity="0" transform="rotate(-90 7 7)" /></template>
     <circle v-else-if="key === 'backlog'" class="dots" cx="7" cy="7" r="5.1" stroke="var(--st-backlog)" stroke-width="1.6" stroke-dasharray="2.1 1.9" />

@@ -1379,7 +1379,7 @@ defineExpose({
                   type="button" class="status-btn" :aria-label="`Status: ${statusMeta(entry.row.state).label}${queued(entry.row) ? `, queued #${queued(entry.row)!.position}` : ''}. Change status of ${entry.row.key}`" aria-haspopup="menu"
                   :data-tip="narrowStatus ? `${statusMeta(entry.row.state).label}${queued(entry.row) ? ` · #${queued(entry.row)!.position}` : ''}` : undefined" @click.stop="statusClick($event, entry.row)"
                 >
-                  <StatusIcon :state="entry.row.state" />
+                  <StatusIcon :state="entry.row.state" :name="phone ? statusMeta(entry.row.state).label : undefined" />
                   <span>{{ statusMeta(entry.row.state).label }}</span><span v-if="queued(entry.row)" class="q-pos">· #{{ queued(entry.row)!.position }}</span>
                 </button><QueueStaleHint :row="entry.row" /></div>
               </td>
@@ -1970,6 +1970,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
      so a third line never shows through the reach below (AEON-140). */
   /* The whole card opens the ticket, so the title needs no padded reach of its own. */
   .title-link { flex: 1 1 calc(100% - 30px - var(--person-wait-room, 0px)); min-width: 0; white-space: normal; font-size: 14.5px; line-height: 1.35; }
+  /* A live label shares the title line. The default basis is nearly the full row, which wrapped the 20px pill and grew the card. */
+  .title-cell:has(.live-label) .title-link { flex: 1 1 0%; min-width: 0; }
   .title-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
   .child-count { display: none; }
   .row-actions { display: none; }
@@ -1984,11 +1986,16 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .guide { display: none; }
   /* The chevron area sits left of the title with a generous tap target. */
   .tree-row .title-cell { position: relative; padding-left: 0; }
+  /* display:contents hoisted the twisty out of a stacking context, so the epic
+     line painted over the bottom of the 44px ring (z-index on the twisty alone
+     did not). A flex tree keeps the 36px control and paints that ring above it. */
+  .tree-row .tree { display: flex; width: auto !important; position: relative; z-index: 2; overflow: visible; align-self: flex-start; }
   /* Centre the shared hit area on the arrow; desktop indentation is already
      represented by the card's padding, so it must not offset the phone arrow. */
   .twisty { position: relative; inset: auto; z-index: 1; flex: none; width: 36px; height: 36px; margin: 4px; }
+  .twisty::before { width: 44px; height: 44px; transform: none; top: 50%; left: 50%; margin: -22px 0 0 -22px; }
   .twisty-spacer { display: block; flex-shrink: 0; width: 44px; }
-  .tree-row .tree { display: contents; }
+  .tree-row .epic-progress { position: relative; z-index: 0; }
   /* The arrow slot (44), type marker (22) and two gaps (16) share one line.
      Reserve all three so a long title cannot wrap under the arrow's reach. */
   .tree-row .title-link { flex-basis: calc(100% - 82px - var(--person-wait-room, 0px)); }
