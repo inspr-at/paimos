@@ -198,6 +198,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 	var closeNote, closeNoteFile string
 	var role, area, complexity string
 	var addTag, removeTag []string
+	var ifStatus []string
 	var dryRun bool
 	var benefits benefitFlags
 	var estimate string
@@ -217,6 +218,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 			fs.string(&complexity, "complexity", 0, "work complexity: S, M, or L")
 			fs.string(&typ, "type", 0, "refuses a different kind; use issue convert")
 			fs.string(&status, "status", 0, "new status")
+			fs.strings(&ifStatus, "if-status", "only update from these comma-separated canonical statuses (requires --status)")
 			fs.string(&priority, "priority", 0, "new priority")
 			fs.string(&parent, "parent", 0, "new parent key or id:<n>")
 			fs.string(&assignee, "assignee", 0, "new assignee id")
@@ -234,6 +236,10 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 			fs.bool(&dryRun, "dry-run", 0, "validate and print the action without writing")
 		},
 		run: func(args []string) error {
+			expectedStates, err := issueExpectedStates(ifStatus, status)
+			if err != nil {
+				return err
+			}
 			if _, err := normalizeIssueRef(args[0]); err != nil {
 				return err
 			}
@@ -284,7 +290,8 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 			}
 			return rt.updateIssue(issuePatch{
 				Estimate: estimate, Benefits: benefits, Ref: args[0], Title: title, Status: status, Priority: priority,
-				Parent: parent, Assignee: assignee, Project: project, Description: desc,
+				ExpectedStates: expectedStates,
+				Parent:         parent, Assignee: assignee, Project: project, Description: desc,
 				AC: acText, Notes: notesText, CloseNote: closeText, AddTag: addTag, RemoveTag: removeTag,
 				RouteRole: role, Area: area, Complexity: complexity,
 			})
