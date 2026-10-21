@@ -148,7 +148,9 @@ export async function healthIsReady(url, fetchImpl = globalThis.fetch) {
 }
 
 export function holdBackendResponse(res) {
-  if (res.writableEnded) return
+  // Vite calls bypass with no response on a WebSocket upgrade. There is
+  // nothing to end, and reading writableEnded would throw.
+  if (!res || res.writableEnded) return
   res.statusCode = 502
   res.setHeader('Connection', 'close')
   res.setHeader('Content-Type', 'text/plain; charset=utf-8')
@@ -157,6 +159,7 @@ export function holdBackendResponse(res) {
 
 // Vite 8.3 treats a string bypass as a rewrite unless the response is already
 // ended. Ending here is what stops http-proxy from dialing :8080.
+// res is undefined for a WebSocket upgrade; a hold still returns the URL.
 export async function backendProxyBypass(gate, req, res) {
   const decision = await gate({
     connect: async () => {},

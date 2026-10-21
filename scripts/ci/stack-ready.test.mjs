@@ -203,6 +203,27 @@ test('off mode never dials the backend', async () => {
   assert.deepEqual(seen, [webURL])
 })
 
+test('a missing proxy response does not dial and does not throw', async () => {
+  // Vite calls bypass(req, undefined) for a WebSocket upgrade. A required
+  // response makes holdBackendResponse throw before the gate can refuse the dial.
+  let checks = 0
+  const gate = createBackendProxyGate({
+    check: async () => {
+      checks++
+      return false
+    },
+  })
+  const rewritten = await backendProxyBypass(gate, { url: '/api/events' }, undefined)
+  assert.equal(rewritten, '/api/events')
+  assert.equal(checks, 1)
+  const open = await backendProxyBypass(
+    createBackendProxyGate({ check: async () => true }),
+    { url: '/api/health' },
+    undefined,
+  )
+  assert.equal(open, undefined)
+})
+
 test('proxy connect waits for a 2xx health check and does not cache a miss', async () => {
   let checks = 0
   const gate = createBackendProxyGate({

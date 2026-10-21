@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolve } from 'node:path'
 import { backendProxyBypass, createBackendProxyGate, healthIsReady, waitForHTTP } from '../scripts/ci/stack-ready.mjs'
-
-type HoldResponse = {
-  writableEnded?: boolean
-  statusCode: number
-  setHeader: (name: string, value: string) => void
-  end: (body?: string) => void
-}
 
 export default defineConfig(({ mode }) => {
   const target = process.env.AEON_API_URL ?? 'http://127.0.0.1:8080'
@@ -19,8 +13,10 @@ export default defineConfig(({ mode }) => {
   const gate = mode === 'test'
     ? createBackendProxyGate({ check: () => healthIsReady(new URL('/api/health', target).href) })
     : null
+  // bypass's second argument is undefined on a WebSocket upgrade. A required
+  // response type is not assignable, and defineConfig then fails vue-tsc.
   const bypass = gate
-    ? (req: { url?: string }, res: HoldResponse) => backendProxyBypass(gate, req, res)
+    ? (req: IncomingMessage, res: ServerResponse | undefined) => backendProxyBypass(gate, req, res)
     : undefined
   const entry = (rewrite?: (path: string) => string) => {
     if (!bypass && !rewrite) return target

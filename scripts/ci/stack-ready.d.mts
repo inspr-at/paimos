@@ -21,10 +21,11 @@ export function healthIsReady(url: string, fetchImpl?: (url: string) => Promise<
 export function backendProxyBypass(
   gate: ProxyGate,
   req: { url?: string },
+  // undefined: Vite's WebSocket upgrade calls bypass with no response.
   res: {
     writableEnded?: boolean
     statusCode: number
     setHeader: (name: string, value: string) => void
     end: (body?: string) => void
-  },
+  } | undefined,
 ): Promise<string | undefined>
