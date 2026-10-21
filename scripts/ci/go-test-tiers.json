@@ -3820,6 +3820,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestDeliveryBuiltinAdminCeilingFixture","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestDeployRecordAgentKeyCeiling","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestDevIdentitySubjectPreservesUnicodeMailbox","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestDevLoginAndAgentKeys","tier":"GATED-FULL"}
