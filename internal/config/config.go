@@ -97,6 +97,9 @@ type Config struct {
 	// the client for public rate limits (AEON_TRUSTED_PROXIES: comma-separated
 	// addresses or CIDRs, default loopback, "none" trusts no proxy).
 	TrustedProxies []netip.Prefix
+	// Instances names this instance and its siblings for the owner's Waiting
+	// on you across instances (AEON_INSTANCE_TAG, AEON_SIBLING_INSTANCES).
+	Instances Instances
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -181,6 +184,11 @@ func FromEnv() (Config, error) {
 		cfg.AithemaOperatorLocalServices = strings.Split(raw, ",")
 	}
 	cfg.ImportTenantSlug = getenv("AEON_IMPORT_TENANT_SLUG", cfg.BootstrapTenantSlug)
+	var instancesErr error
+	cfg.Instances, instancesErr = ParseInstances(os.Getenv("AEON_INSTANCE_TAG"), os.Getenv("AEON_SIBLING_INSTANCES"), cfg.Env == "dev")
+	if instancesErr != nil {
+		return Config{}, instancesErr
+	}
 	var proxyErr error
 	cfg.TrustedProxies, proxyErr = TrustedProxies(getenv("AEON_TRUSTED_PROXIES", "127.0.0.0/8,::1"))
 	if proxyErr != nil {

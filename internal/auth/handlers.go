@@ -213,6 +213,9 @@ func (m *Module) handleLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	m.clearSessionCookie(w)
+	if _, err := r.Cookie(deskPeekCookieName); err == nil {
+		m.clearDeskPeek(w)
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
 }
