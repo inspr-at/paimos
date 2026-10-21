@@ -68,4 +68,7 @@ func TestPersonCeilingLeadRefusesAnotherAgent(t *testing.T) {
 	if err := check(lead); err != nil {
 		t.Fatalf("lead agent: %v", err)
 	}
+	if err := check(tenant.Principal{ID: owner, TenantID: tid, Kind: tenant.Person}); err != nil {
+		t.Fatalf("owner person: %v", err)
+	}
 }
