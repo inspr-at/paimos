@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
+	guuid "github.com/google/uuid"
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/approvals"
@@ -71,7 +71,7 @@ type compositionProvider struct {
 
 func (p *compositionProvider) Open(_ context.Context, s nativecontract.LaunchSpec) (nativecontract.NativeTransport, error) {
 	p.binding = s.Binding
-	p.identity = nativecontract.NativeIdentity{Provider: "claude", NativeSessionRef: uuid.NewString(), RuntimeEpoch: s.Binding.RuntimeEpoch, PID: 12345, StartedAt: p.now, ProcessIdentityDigest: strings.Repeat("f", 64)}
+	p.identity = nativecontract.NativeIdentity{Provider: "claude", NativeSessionRef: guuid.NewString(), RuntimeEpoch: s.Binding.RuntimeEpoch, PID: 12345, StartedAt: p.now, ProcessIdentityDigest: strings.Repeat("f", 64)}
 	return p, nil
 }
 func (p *compositionProvider) Ownership() (ownedprocess.Identity, error) {
@@ -251,7 +251,7 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 	var approval approvals.Approval
 	_ = json.Unmarshal(w.Body.Bytes(), &approval)
 	personCall("/api/approvals/"+approval.ID+"/decision", map[string]string{"decision": "approved"}, nil)
-	in := nativecontract.Input{RequestID: uuid.NewString(), InputID: uuid.NewString(), ExpectedBinding: b, Mode: "now", Text: "person input stays exact", ExpiresAt: f.now.Add(time.Minute)}
+	in := nativecontract.Input{RequestID: guuid.NewString(), InputID: guuid.NewString(), ExpectedBinding: b, Mode: "now", Text: "person input stays exact", ExpiresAt: f.now.Add(time.Minute)}
 	queued, err := f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "input", Input: &in})
 	if err != nil {
 		t.Fatal("queue", err)
@@ -263,7 +263,7 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 	if provider.input.Text != in.Text {
 		t.Fatal("provider did not receive exact person text")
 	}
-	turn := uuid.NewString()
+	turn := guuid.NewString()
 	provider.turn("turn_started", turn, 2)
 	// Receipt completion and final are separate explicit observations.
 	provider.turn("turn_completed", turn, 3)
@@ -272,7 +272,7 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("completion report did not arrive")
 	}
-	final := nativecontract.FinalPublish{RequestID: uuid.NewString(), FinalID: uuid.NewString(), ExpectedBinding: b, InputID: in.InputID, TurnRef: turn, Text: "explicit provider final"}
+	final := nativecontract.FinalPublish{RequestID: guuid.NewString(), FinalID: guuid.NewString(), ExpectedBinding: b, InputID: in.InputID, TurnRef: turn, Text: "explicit provider final"}
 	provider.events <- nativecontract.ProviderEvent{Identity: provider.identity, Final: &final}
 	select {
 	case <-finalDone:
@@ -283,13 +283,13 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 	if err = f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM native_session_finals WHERE tenant_id=$1 AND final_id=$2 AND state='persisted'`, f.person.TenantID, final.FinalID).Scan(&count); err != nil || count != 1 {
 		t.Fatal("final was not persisted", count, err)
 	}
-	if _, err = config.Host.Detach(t.Context(), nativecontract.Detach{RequestID: uuid.NewString(), ExpectedBinding: b, ViewerID: uuid.NewString()}); err == nil {
+	if _, err = config.Host.Detach(t.Context(), nativecontract.Detach{RequestID: guuid.NewString(), ExpectedBinding: b, ViewerID: guuid.NewString()}); err == nil {
 		t.Fatal("attach is not installed by this slice")
 	}
 	if provider.closed {
 		t.Fatal("detach closed owned writer")
 	}
-	stop := nativecontract.Stop{RequestID: uuid.NewString(), ExpectedBinding: b, Kind: "graceful", ExpectedProcessIdentityDigest: provider.identity.ProcessIdentityDigest, ExpiresAt: f.now.Add(time.Minute)}
+	stop := nativecontract.Stop{RequestID: guuid.NewString(), ExpectedBinding: b, Kind: "graceful", ExpectedProcessIdentityDigest: provider.identity.ProcessIdentityDigest, ExpiresAt: f.now.Add(time.Minute)}
 	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "stop", Stop: &stop}); err != nil {
 		t.Fatal("queue stop", err)
 	}
