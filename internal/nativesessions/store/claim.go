@@ -16,7 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/nativecontract"
-	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
+	privateDaemon "github.com/inspr-at/paimos/internal/nativesessions/daemon"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -178,7 +178,7 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 			return err
 		}
 		if s.production != nil {
-			if proof, ok := ctx.Value(proofKey{}).(daemon.Proof); ok && proof.LocalStart != nil && proof.WorkspaceRoot != "" {
+			if proof, ok := ctx.Value(proofKey{}).(privateDaemon.Proof); ok && proof.LocalStart != nil && proof.WorkspaceRoot != "" {
 				if err = s.production.consent.RequireLocalProfileTx(ctx, tx, r.actor.actor(), r.Intent, r.policy, nativecontract.LocalProfile{AccountID: r.Intent.AccountID, WorkspaceRoot: proof.WorkspaceRoot}, proof.LocalStart.Cwd); err != nil {
 					return err
 				}
