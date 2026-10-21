@@ -347,25 +347,29 @@ func AbandonNativeRootTx(ctx context.Context, tx pgx.Tx, account, session, epoch
 	if len(raw) > 1<<20 || json.Unmarshal(raw, &holds) != nil || len(holds) > 4096 {
 		return nativeDenial(nativecontract.ReasonIdentityMismatch)
 	}
+	units := map[string]int64{}
+	ids := make([]string, 0, len(holds))
 	for _, h := range holds {
 		if h.ReservedUnits < 1 {
 			return nativeDenial(nativecontract.ReasonIdentityMismatch)
 		}
+		if _, ok := units[h.WindowID]; !ok {
+			ids = append(ids, h.WindowID)
+		}
+		units[h.WindowID] += h.ReservedUnits
 	}
-	// Holds are sorted by window ID at reservation; the CHECK on reserved
-	// refuses any unwind below zero instead of inventing headroom.
-	tag, err := tx.Exec(ctx, `WITH holds AS (SELECT h.window_id,sum(h.reserved_units)::bigint AS units
- FROM jsonb_to_recordset($2::jsonb) AS h(window_id uuid,reserved_units bigint) GROUP BY h.window_id)
- UPDATE account_allowance_windows w SET reserved=w.reserved-h.units FROM holds h WHERE w.id=h.window_id AND w.account_id=$1`, account, raw)
-	if err != nil {
-		return err
-	}
-	windows := map[string]bool{}
-	for _, h := range holds {
-		windows[h.WindowID] = true
-	}
-	if tag.RowsAffected() != int64(len(windows)) {
-		return nativeDenial(nativecontract.ReasonIdentityMismatch)
+	// Windows are locked in ID order, as at reservation. A hold may sit on a
+	// shared login's window and is returned like its own; the CHECK on
+	// reserved refuses any unwind below zero instead of inventing headroom.
+	slices.Sort(ids)
+	for _, id := range ids {
+		tag, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET reserved=reserved-$2 WHERE id=$1`, id, units[id])
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return nativeDenial(nativecontract.ReasonIdentityMismatch)
+		}
 	}
 	return nil
 }

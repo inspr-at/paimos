@@ -247,6 +247,10 @@ func (s *Store) reportAbandoned(ctx context.Context, d nativecontract.DaemonActo
 		// its period-usage estimate are all returned in this transaction.
 		now := s.now()
 		if err = agentaccounts.AbandonNativeRootTx(ctx, tx, r.Intent.AccountID, b.OwnedSessionID, b.RuntimeEpoch, now); err != nil {
+			var refusal *nativecontract.ValidationError
+			if errors.As(err, &refusal) {
+				return fail(409, refusal.Reason)
+			}
 			return err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE harness_sessions SET phase='stopped',stopped_at=coalesce(stopped_at,$2),stop_reason=coalesce(stop_reason,'stopped') WHERE id=$1`, b.HarnessSessionID, now); err != nil {
