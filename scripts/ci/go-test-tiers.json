@@ -2134,6 +2134,18 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSlowManagedControlCannotRestartBudgetAfterLock","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunBudgetExits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunContinuationExits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunExits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunFixFindingsExit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunLaunchHandoff","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunRoutineExits","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestStatuslineOffWithoutExecutable","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStatuslineQuotedExecutableOwnership","tier":"GATED-FULL"}
