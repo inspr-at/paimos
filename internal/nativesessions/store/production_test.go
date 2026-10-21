@@ -432,7 +432,7 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 		t.Fatal("retained-source handover", next, err)
 	}
 	nextBinding := *next.Session.CurrentBinding
-	personCall("/api/chat-threads/"+thread.ID+"/binding", chat.BindingWrite{SessionID: nextBinding.HarnessSessionID, ExpectedEpoch: thread.Role.BindingEpoch}, &thread)
+	personCall("/api/chat-threads/"+thread.ID+"/binding", chat.BindingWrite{SessionID: nextBinding.HarnessSessionID, ExpectedEpoch: thread.BindingEpoch}, &thread)
 	active := hold
 	active.ExpectedBinding = nextBinding
 	active.RequestID = guuid.NewString()

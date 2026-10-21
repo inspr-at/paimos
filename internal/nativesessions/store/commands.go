@@ -58,6 +58,17 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 	if err != nil {
 		return out, err
 	}
+	if c.Input != nil && len(c.Input.Text) > nativecontract.InputUTF8Bytes || c.Interrupt != nil && len(c.Interrupt.ExpectedTurnRef) > 128 || c.Stop != nil && len(c.Stop.ExpectedProcessIdentityDigest) > 64 {
+		return out, fail(413, nativecontract.ReasonBufferFull)
+	}
+	for _, id := range []string{b.TenantID, b.ProjectID, b.OwnedSessionID, b.HarnessSessionID, b.RuntimeEpoch, request} {
+		if len(id) > 36 {
+			return out, fail(413, nativecontract.ReasonBufferFull)
+		}
+	}
+	if len(b.DaemonID) > 128 || len(b.DaemonGeneration) > 128 {
+		return out, fail(413, nativecontract.ReasonBufferFull)
+	}
 	raw, err := json.Marshal(value)
 	if err != nil || len(raw) > nativecontract.RequestBodyBytes {
 		return out, fail(413, nativecontract.ReasonBufferFull)
