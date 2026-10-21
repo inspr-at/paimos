@@ -7,7 +7,7 @@ import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
 import PairingUsePreview from '../components/agents/PairingUsePreview.vue'
 import { resilientFetch } from '../lib/api'
-import { addHarnessCommand, pairingCopy } from '../lib/attachCopy'
+import { addHarnessCommand, deadlineMoment, pairingCopy } from '../lib/attachCopy'
 import { brand } from '../lib/brand'
 import { displayLanguage } from '../lib/displayLanguage'
 import { harnessLabel } from '../lib/agentState'
@@ -18,7 +18,7 @@ import { PairingFollow } from '../lib/pairingFollow'
 import {
   DEFAULT_REVIEW_CHOICE, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
   addHarnessTargetProblem, approvePairedAccounts, defaultSelectedAccountKeys, denyPairing, describeHarnessStatus, describeProgress,
-  formatAllowanceMoment, getPairingComputer, getPairingGuide,
+  getPairingComputer, getPairingGuide,
   isAddHarness, lookupPairing, pairingLiveCopy, pairingPermissions,
   pairingEventScope, pairingReadGeneration, peekPairingCode, platformCaption, presentPublicGuide, subscribePairingEvents,
   rememberPairingCode, setHarnessAccount, submitApproval, takePairingCode,
@@ -106,10 +106,10 @@ const titleParts = computed(() => {
   if (!addRequest.value) return words.value.pairTitle(view.computer_name, view.tenant_name)
   return words.value.addTitle(accountGroups.value.map(group => ({ name: harnessLabel(group.harness), account: accountName(group.harness) })), view.computer_name)
 })
-const limitLines = computed(() => terms.value ? words.value.limits(terms.value, formatAllowanceMoment(terms.value.expires_at)) : [])
-const endedSentence = computed(() => {
+const limitLines = computed(() => terms.value ? words.value.limits(terms.value, deadlineMoment(terms.value.expires_at, displayLanguage())) : [])
+const endedParts = computed(() => {
   const view = current.value
-  if (!view || !ended.value) return ''
+  if (!view || !ended.value) return []
   const adding = !!view.existing_computer_id
   if (progress.value?.phase === 'expired') return adding ? words.value.expiredAdd(harnessNames.value, view.computer_name) : words.value.expiredPair(view.computer_name, view.tenant_name)
   return adding ? words.value.deniedAdd(harnessNames.value, view.computer_name) : words.value.deniedPair(view.computer_name, view.tenant_name)
@@ -718,10 +718,10 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 
       <template v-else-if="ended">
         <header class="ask-head">
-          <h1 ref="reviewTitle" tabindex="-1" class="ask-title ended-title" data-review-title>{{ endedSentence }}</h1>
+          <h1 ref="reviewTitle" tabindex="-1" class="ask-title ended-title" data-review-title><template v-for="(part, index) in endedParts" :key="index"><span v-if="part.kind === 'computer'" class="host">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></h1>
           <button type="button" class="btn sm ghost" :disabled="!!busy" @click="resetCode">{{ words.otherCode }}</button>
         </header>
-        <p class="facts-line next-step" data-review-next><template v-if="endedCommand">{{ words.runAgain(current.computer_name).before }}<code class="command-inline">{{ endedCommand }}</code>{{ words.runAgain(current.computer_name).after }}</template><template v-else>{{ words.newRequest }}</template></p>
+        <p class="facts-line next-step" data-review-next><template v-if="endedCommand"><template v-for="(part, index) in words.runAgain(endedCommand, current.computer_name)" :key="index"><code v-if="part.kind === 'command'" class="command-inline">{{ part.text }}</code><span v-else-if="part.kind === 'computer'" class="host">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></template><template v-else>{{ words.newRequest }}</template></p>
       </template>
 
       <template v-else>
@@ -852,6 +852,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .ask > .problem { margin: 12px 0 8px; }
 .next-step { margin-top: 12px; }
 .command-inline { padding: 1px 6px; border-radius: 6px; background: var(--surface-sunken); font: 12.5px/1.6 var(--mono); overflow-wrap: anywhere; }
+.next-step .host { font: 500 12.5px/1.6 var(--mono); }
 /* Details grows downward only: nothing above it moves when it opens. */
 .more { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .more > summary { min-height: 32px; cursor: pointer; color: var(--ink-2); font-size: 13.5px; font-weight: 600; }

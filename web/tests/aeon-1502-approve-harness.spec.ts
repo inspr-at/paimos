@@ -9,6 +9,9 @@ import { mockPairing, type PairingCall } from './agent-pairing-fixtures'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 
 type Language = 'en' | 'de'
+// A US-English browser in UTC: the German pass proves its 24 h clock against a 12 h browser (Tick round 1).
+const BROWSER = { locale: 'en-US', timezoneId: 'UTC' } as const
+test.use(BROWSER)
 const COMPUTER = '33333333-3333-4333-8333-333333333333'
 const DIGEST = 'ab'.repeat(32)
 // Neutral fixtures: public sources name no operator host and no business domain.
@@ -38,6 +41,10 @@ const COPY = {
     expiredNext: `Run aeon-agentd add-harness --harness claude on ${HOST} to ask again.`,
     denied: 'Pairing studio with INSPR was denied.',
     deniedNext: "Run aeon-agentd pair --url 'https://aeon.example' on studio to ask again.",
+    accountLabel: 'Claude Code account',
+    // The fixture's verification ends 2026-09-27T20:30Z; the clock stands at 20:00Z.
+    deadline: 'until\u00a08:30\u00a0PM',
+    units: ['60\u00a0seconds', '1\u00a0request', '1\u00a0run'],
   },
   de: {
     addOne: `Claude Code (${ACCOUNT}) zu ${HOST} hinzufügen?`,
@@ -51,6 +58,9 @@ const COPY = {
     expiredNext: `Zum erneuten Anfragen aeon-agentd add-harness --harness claude auf ${HOST} ausführen.`,
     denied: 'Das Koppeln von studio mit INSPR wurde abgelehnt.',
     deniedNext: "Zum erneuten Anfragen aeon-agentd pair --url 'https://aeon.example' auf studio ausführen.",
+    accountLabel: 'Konto für Claude Code',
+    deadline: 'bis\u00a020:30',
+    units: ['max.\u00a060\u00a0Sekunden', '1\u00a0Anfrage', '1\u00a0Lauf'],
   },
 } as const
 
@@ -105,7 +115,7 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
 // English on the test's page, German in a fresh context of its own: one case covers both languages.
 async function bothLanguages(browser: Browser, page: Page, run: (page: Page, language: Language) => Promise<void>) {
   await run(page, 'en')
-  const context = await browser.newContext({ baseURL: test.info().project.use.baseURL, reducedMotion: 'reduce' })
+  const context = await browser.newContext({ baseURL: test.info().project.use.baseURL, reducedMotion: 'reduce', ...BROWSER })
   try { await run(await context.newPage(), 'de') } finally { await context.close() }
 }
 
@@ -134,6 +144,24 @@ async function overflowing(review: Locator) {
     .filter(el => el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 0.5)
     .map(el => el.textContent?.trim()))
 }
+
+/** The first limits line, and how many lines each number-and-unit pair spans in it. */
+async function limitsLine(review: Locator, pairs: readonly string[]) {
+  return review.locator('.verify .limits').first().evaluate((el, pairs) => {
+    const node = el.firstChild!, text = node.textContent ?? ''
+    const lines = pairs.map(pair => {
+      const at = text.indexOf(pair)
+      if (at < 0) return 0
+      const range = document.createRange()
+      range.setStart(node, at)
+      range.setEnd(node, at + pair.length)
+      return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size
+    })
+    return { text, lines }
+  }, pairs)
+}
+
+const MONO = /monospace/
 
 async function detailsHold(page: Page, review: Locator, primary: string) {
   const summary = review.locator('details.more > summary')
@@ -179,6 +207,7 @@ for (const [language, theme] of [['en', 'light'], ['de', 'light'], ['de', 'dark'
     await expect(review.locator('[data-review-title]')).toHaveText(copy.addOne)
     await expect(review.locator('[data-review-title] .acct')).toHaveText(`(${ACCOUNT})`)
     await expect(review.locator('[data-review-title] .host')).toHaveText(HOST)
+    await expect(review.locator('[data-review-title] .host')).toHaveCSS('font-family', MONO)
     await expect(review.locator('[data-review-facts]')).toHaveText(copy.factsOn)
     await expect(review.locator('[data-review-role]')).toHaveText(copy.role)
     await expect(review.locator('details.more')).toHaveJSProperty('open', false)
@@ -195,9 +224,15 @@ for (const [language, theme] of [['en', 'light'], ['de', 'light'], ['de', 'dark'
     await detailsHold(page, review, copy.add)
     await review.locator('details.more > summary').click()
     expect(await overflowing(review)).toEqual([])
+    // Tick round 1: the language's own clock (German 24 h, never AM/PM), units bound to their numbers, "Konto für".
+    await expect(review.locator('.harness-row dt')).toHaveText(copy.accountLabel)
+    const limits = await limitsLine(review, copy.units)
+    expect(limits.text.endsWith(copy.deadline), limits.text).toBe(true)
+    if (language === 'de') expect(limits.text).not.toMatch(/AM|PM/)
+    expect(limits.lines).toEqual(copy.units.map(() => 1))
     await shot(page, testInfo, `add-one-details-${language}-${theme}`)
     await review.locator('details.more > summary').click()
-    record(`add one ${language} ${theme}`, { viewport: '1280x800', fit, sentences: 2, detailsMovementPx: 0 })
+    record(`add one ${language} ${theme}`, { viewport: '1280x800', fit, sentences: 2, detailsMovementPx: 0, limits: limits.text, unitLines: limits.lines })
 
     // One click on Add sends exactly the payload main sends today for this request:
     // the one account selected, verification on because Claude Code can be verified.
@@ -305,6 +340,11 @@ test("AEON-1502 expired and denied 1280 en and de: one sentence and today's comm
     await expect(expired.review.locator('[data-review-title]')).toHaveText(copy.expired)
     await expect(expired.review.locator('[data-review-next]')).toHaveText(copy.expiredNext)
     await expect(expired.review.locator('[data-review-next] code')).toHaveText('aeon-agentd add-harness --harness claude')
+    // The computer is set in mono in the sentence and the next step, as in the ask (Tick round 1).
+    for (const where of ['[data-review-title]', '[data-review-next]']) {
+      await expect(expired.review.locator(`${where} .host`)).toHaveText(HOST)
+      await expect(expired.review.locator(`${where} .host`)).toHaveCSS('font-family', MONO)
+    }
     await expect(expired.review.getByRole('button', { name: copy.add, exact: true })).toHaveCount(0)
     await shot(page, testInfo, `expired-${language}`)
 
@@ -318,8 +358,12 @@ test("AEON-1502 expired and denied 1280 en and de: one sentence and today's comm
     const review = page.getByRole('region', { name: 'Pairing review' })
     await expect(review.locator('[data-review-title]')).toHaveText(copy.denied)
     await expect(review.locator('[data-review-next]')).toHaveText(copy.deniedNext)
+    for (const where of ['[data-review-title]', '[data-review-next]']) {
+      await expect(review.locator(`${where} .host`)).toHaveText('studio')
+      await expect(review.locator(`${where} .host`)).toHaveCSS('font-family', MONO)
+    }
     await shot(page, testInfo, `denied-${language}`)
-    record(`expired and denied ${language}`, { expired: copy.expired, denied: copy.denied })
+    record(`expired and denied ${language}`, { expired: copy.expired, denied: copy.denied, computerMono: true })
   })
 })
 

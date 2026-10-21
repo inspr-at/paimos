@@ -477,15 +477,6 @@ export function platformCaption(platform: string, arch: string): string {
   return arch ? `${os} · ${arch}` : os
 }
 
-export function formatAllowanceMoment(iso: string, now = Date.now()): string {
-  const time = Date.parse(iso)
-  if (!Number.isFinite(time)) return iso
-  const date = new Date(time)
-  const sameDay = new Date(now).toDateString() === date.toDateString()
-  const clock = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  return sameDay ? clock : date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
-
 export function lastActiveLabel(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return 'Not reported'
   const time = Date.parse(iso)

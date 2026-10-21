@@ -3,7 +3,7 @@ import { afterEach, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { sessionEnded } from '../src/lib/api.ts'
-import { pairingCopy } from '../src/lib/attachCopy.ts'
+import { deadlineMoment, pairingCopy } from '../src/lib/attachCopy.ts'
 import {
   DEFAULT_REVIEW_CHOICE, MIN_POLL_INTERVAL_MS, PairingError,
   canonicalUserCode, clearPairingClientState, denyPairing,
@@ -14,7 +14,7 @@ import {
   peekPairingCode, presentPublicGuide, rememberPairingCode, takePairingCode,
   chooseInstallMethod, agentUpdateAdvice, installMethods, readPairingInstallMethod, writePairingInstallMethod,
   isAddHarness, pairingScopeKey, setHarnessAccount,
-  addHarnessTargetProblem, applyComputerListRefresh, discardPairingReads, formatAllowanceMoment,
+  addHarnessTargetProblem, applyComputerListRefresh, discardPairingReads,
   pairingReadGeneration, unsupportedVerification, verifiableAccountKeys, connectDisabledReason, approvePairedAccounts,
   type PairingGuide, type PairingView, type RequestedAccount,
 } from '../src/lib/agentPairing.ts'
@@ -218,18 +218,18 @@ test('verification stays on the server terms and is selected by default', () => 
   const now = Date.parse('2026-09-27T20:00:00Z')
   const terms = view().verification!
   assert.equal(verificationWarning(terms), null)
-  const until = formatAllowanceMoment(terms.expires_at, now)
+  const until = (language: 'en' | 'de', iso: string) => deadlineMoment(iso, language, now)
+  // A number and its unit are joined by a no-break space (AEON-1502 Tick round 1).
   const line = (language: 'en' | 'de', seconds: number, moment: string) => language === 'de'
-    ? [`Nur lesend · 1 Anfrage pro Harness · 1 Lauf gleichzeitig · max. ${seconds} Sekunden · bis ${moment}`, 'Keine Änderungen am Repository und keine privilegierten Aktionen', 'PAIMOS-Kontingent, getrennt vom Anbieter-Abo']
-    : [`Read-only · 1 request per harness · 1 run at a time · ${seconds} seconds max · until ${moment}`, 'No repository changes or privileged actions', 'PAIMOS allowance, separate from the vendor subscription']
-  const rendered = pairingCopy('en', 'PAIMOS').limits(terms, until)
-  assert.deepEqual(rendered, line('en', 60, until))
-  assert.deepEqual(pairingCopy('de', 'PAIMOS').limits(terms, until), line('de', 60, until))
+    ? [`Nur lesend · 1\u00a0Anfrage pro Harness · 1\u00a0Lauf gleichzeitig · max.\u00a0${seconds}\u00a0Sekunden · bis\u00a0${moment}`, 'Keine Änderungen am Repository und keine privilegierten Aktionen', 'PAIMOS-Kontingent, getrennt vom Anbieter-Abo']
+    : [`Read-only · 1\u00a0request per harness · 1\u00a0run at a time · ${seconds}\u00a0seconds max · until\u00a0${moment}`, 'No repository changes or privileged actions', 'PAIMOS allowance, separate from the vendor subscription']
+  const rendered = pairingCopy('en', 'PAIMOS').limits(terms, until('en', terms.expires_at))
+  assert.deepEqual(rendered, line('en', 60, until('en', terms.expires_at)))
+  assert.deepEqual(pairingCopy('de', 'PAIMOS').limits(terms, until('de', terms.expires_at)), line('de', 60, until('de', terms.expires_at)))
   assert.equal(rendered.join('\n').includes('2026-09-27T20:30:00'), false)
   const mocked = { ...terms, max_duration_seconds: 900, expires_at: '2026-09-27T19:15:00Z' }
-  const mockedUntil = formatAllowanceMoment(mocked.expires_at, now)
-  assert.deepEqual(pairingCopy('en', 'PAIMOS').limits(mocked, mockedUntil), line('en', 900, mockedUntil))
-  assert.deepEqual(pairingCopy('de', 'PAIMOS').limits(mocked, mockedUntil), line('de', 900, mockedUntil))
+  assert.deepEqual(pairingCopy('en', 'PAIMOS').limits(mocked, until('en', mocked.expires_at)), line('en', 900, until('en', mocked.expires_at)))
+  assert.deepEqual(pairingCopy('de', 'PAIMOS').limits(mocked, until('de', mocked.expires_at)), line('de', 900, until('de', mocked.expires_at)))
   assert.ok(verificationWarning(mocked))
 })
 

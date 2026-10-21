@@ -509,7 +509,7 @@ test('the pairing review shows the rows the rule pre-fills', async ({ page }) =>
   await review.locator('details.more > summary').click()
   const preview = review.locator('[data-pairing-use]')
   await expect(preview.locator('dt')).toHaveText('Where accounts may work')
-  await expect(preview.locator('dd')).toHaveText('Default and Acme client work · change on Accounts in Settings')
+  await expect(preview.locator('dd')).toHaveText('Default and Acme client work · change in Settings › Accounts')
   expect(w.writes).toEqual([])
 })
 
@@ -531,11 +531,11 @@ test('the pairing review never claims nowhere from a partial read of contexts', 
     await review.locator('details.more > summary').click()
     return review.locator('[data-pairing-use] dd')
   }
-  await expect(await lookUp()).toHaveText('Not in the first 2 contexts; the rest were not read · check Accounts in Settings')
+  await expect(await lookUp()).toHaveText('Not in the first 2 contexts; the rest were not read · check Settings › Accounts')
   // "Ask first" ticks no context for a new account, read in full or not: nowhere is proven.
   w.rules.new_accounts = 'ask'
   await review.getByRole('button', { name: 'Use a different code' }).click()
-  await expect(await lookUp()).toHaveText('Nowhere yet · allow on Accounts in Settings before first use')
+  await expect(await lookUp()).toHaveText('Nowhere yet · allow in Settings › Accounts before first use')
   expect(w.writes).toEqual([])
 })
 
