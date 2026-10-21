@@ -174,20 +174,17 @@ const layer = (props.anchor instanceof Element ? props.anchor.closest<HTMLElemen
 // must consume Escape before that peek's native cancel (AEON-1632).
 // A child still open (focus may have stayed on its trigger here) closes first, on its own Escape.
 const openChild = () => [...document.querySelectorAll<HTMLElement>('[data-floating-owner]')].some(childOverlay)
-function inertDialog(dialog: Element) {
-  try { return dialog.matches(':inert') } catch { return false }
-}
 // True when some other open dialog can still take keys. An inert dialog is below
-// the top modal, so it must not keep this menu from closing.
+// the top modal, so it must not keep this menu from closing. Teleported modals
+// append in open order; the last :modal is the top one ToastHost already uses.
 function dialogAboveLayer() {
   const others = [...document.querySelectorAll('dialog[open]')].filter(dialog => dialog !== layer)
   if (!others.length) return false
   if (layer === 'body') return true
   try {
     if (layer.matches(':inert')) return true
-    if (others.some(dialog => !inertDialog(dialog))) return true
-    return false
-  } catch { /* :inert is missing; the top modal in tree order is the same signal ToastHost uses. */ }
+    if (others.every(dialog => dialog.matches(':inert'))) return false
+  } catch { /* :inert is unavailable; the top modal decides below. */ }
   let top: Element | undefined
   try { top = [...document.querySelectorAll('dialog:modal')].at(-1) } catch { return true }
   if (!top || top === layer || top.contains(layer)) return false
