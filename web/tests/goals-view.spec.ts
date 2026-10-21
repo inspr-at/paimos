@@ -135,7 +135,7 @@ async function mockGoals(page: Page, w: World, options: { failList?: boolean } =
   })
   await page.route(/\/api\/decision-desk\/projection/, route => route.fulfill({ json: {
     items: w.desk.open ? [
-      { id: 'q-gate', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'Which identity should agent reviews run as for the gatekeeper go-live?', created_at: iso(NOW - 3 * HOUR), held: true, href: '', source: '', ticket_key: 'AEON-1394' },
+      { id: 'q-gate', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'Which identity should agent reviews run as for the gatekeeper go-live?', created_at: iso(NOW - 3 * HOUR), held: true, href: '', source: '', ticket_key: 'AEON-1394', asked_by: { id: 'p-lead', name: 'AEON-LEAD' } },
       { id: 'q-arp', kind: 'question', project_id: 'p-pharos', revision: 1, title: 'Allow privileged ARP through an Apple entitlement, or stay without it?', created_at: iso(NOW - 2 * HOUR), held: false, href: '', source: '' },
     ].slice(0, w.desk.open) : [],
     counts: { open: w.desk.open, held: w.desk.open ? 1 : 0, chores: 0 }, has_more: false, as_of: iso(NOW),
@@ -229,8 +229,10 @@ test('Waiting on you lists live Desk items; header labels sort with LANDS first;
   expect(keyClip.max).not.toBe('none')
   await expect(rows.first()).toContainText('Which identity should agent reviews run as')
   await expect(rows.nth(1).locator('.wkey')).toHaveText('PHAROS')
-  await expect(rows.first().locator('.wgoal')).toHaveText('Release 136 · steady and complete')
-  await expect(rows.nth(1).locator('.wgoal')).toHaveText('Pharos')
+  // AEON-1495 (design aeon-1494, decision 2): each line names its asker and ends in Open.
+  await expect(rows.first().locator('.wby')).toHaveText('· asked by AEON-LEAD')
+  await expect(rows.nth(1).locator('.wby')).toHaveCount(0)
+  await expect(rows.locator('.wopen')).toHaveText(['Open', 'Open'])
   await expect(waiting.getByRole('link', { name: /Open Desk/ })).toHaveAttribute('href', '/decision-desk')
   // A warm full tint, never an edge bar.
   const tint = await waiting.evaluate(el => { const s = getComputedStyle(el, '::before'), own = getComputedStyle(el); return { bg: s.backgroundColor, left: own.borderLeftWidth, top: own.borderTopWidth } })

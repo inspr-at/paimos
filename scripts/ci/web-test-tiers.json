@@ -9480,6 +9480,18 @@
     ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"the bar opens a stepped chart in place; one global range; the signal row and its stall rule; nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"a person who is not the owner never reads a sibling and sees no instance tags","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"an unreadable sibling is one quiet line in the same slot; Try again reads it in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"the owner sees this instance first, then the sibling, with tags, askers and Coming at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"the owner sees this instance first, then the sibling, with tags, askers and Coming at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"two sibling lines keep the goals controls still when a refresh fails and recovers","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"unknown coverage is not an empty desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/graph-canvas.spec.ts","name":"a glimpse renderer takes its host size when its engine loads after the first resize pass","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/graph-canvas.spec.ts","name":"the shared canvas consumes a ticket adapter and honors its FPS prop","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -18611,6 +18623,18 @@
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"reviewer rules stay through a project switch and never land for another person","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"the paused step and configured check progress are shown without inventing a completed step","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"parseSummary > keeps first lines and resolves links inside the sibling only","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"parseSummary > refuses another instance, bad counts and unbounded lists","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"readSibling > rejects a sibling body over 64000 bytes even when Content-Length is smaller","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"useDeskElsewhere > keeps a failed instance list unknown and reads it again on refresh","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"useDeskElsewhere > keeps the shown line count when a later sibling refresh fails","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"useDeskElsewhere > treats a confirmed empty sibling list as known","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > chooses reading, all clear, a silent source or the scope line, and nothing while rows are listed","tier":"ESSENTIAL"}
     ,
