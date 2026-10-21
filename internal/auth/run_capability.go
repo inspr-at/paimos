@@ -3,6 +3,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -18,6 +19,10 @@ import (
 // route allowlist, not a resource-prefix exemption. Each handler still checks
 // its own computer/account/lease and must project only metadata.
 func transportMetadataRoute(r *http.Request) bool {
+	if r.Pattern == "POST /api/models/{collection}/{accountId}" {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		return len(parts) == 4 && parts[2] == "harness-probes" && validRouteUUID(parts[3])
+	}
 	if workerlease.SafetyRoute(r) && workerlease.Read(r) != "" {
 		return true
 	}
@@ -33,7 +38,7 @@ func transportMetadataRoute(r *http.Request) bool {
 		"GET /api/agent-accounts/{accountId}/readings", "POST /api/agent-accounts/{accountId}/readings",
 		"GET /api/agent-accounts/{accountId}/quota-series", "GET /api/agent-accounts/{accountId}/statusline",
 		"PUT /api/agent-accounts/{accountId}/signals", "POST /api/agent-accounts/{accountId}/quota-key",
-		"POST /api/models/harness-probes/claim", "POST /api/models/harness-probes/{probeId}",
+		"POST /api/models/harness-probes/claim",
 		"GET /api/agentd/step-ups/{challenge_id}",
 		"POST /api/harness-recoveries/claim", "POST /api/harness-recoveries/{requestId}/complete",
 		// Native sessions have their own server-issued actor grants and exact
@@ -66,6 +71,9 @@ func (m *Module) runContentBoundary(r *http.Request, p tenant.Principal) (*http.
 		return err
 	})
 	if err != nil {
+		if errors.Is(err, db.ErrRunCapabilityEnrollmentRevoked) {
+			return r, p, revokedRunEnrollment()
+		}
 		return r, p, authz.ErrForbidden
 	}
 	if !runCapabilityTarget(r, p) {
@@ -80,6 +88,9 @@ func (m *Module) runContentBoundary(r *http.Request, p tenant.Principal) (*http.
 			return err
 		}
 		current, err := db.RunCapabilityPrincipalTx(ctx, tx, p, token)
+		if errors.Is(err, db.ErrRunCapabilityEnrollmentRevoked) {
+			return revokedRunEnrollment()
+		}
 		if err != nil || current.KeyPersonID != p.KeyPersonID || current.RunComputerID != p.TransportComputerID || current.RunProjectID != p.RunProjectID || current.RunWorkOrderID != p.RunWorkOrderID || current.RunGeneration != p.RunGeneration {
 			return authz.ErrForbidden
 		}
@@ -141,4 +152,8 @@ func runCapabilityTarget(r *http.Request, p tenant.Principal) bool {
 		return false
 	}
 	return true
+}
+
+func revokedRunEnrollment() error {
+	return &agentpairing.Error{Status: 410, Code: "enrollment_revoked", Message: "enrollment revoked; reconcile local cleanup"}
 }

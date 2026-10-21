@@ -64,7 +64,7 @@ func TestComputerStartLeadRuntimeRechecksRunPerson(t *testing.T) {
 	// through the same seam as the existing lead-runtime replay tests.
 	outer := v.runtimeCall(t, path, pickup)
 	expect(t, outer, 403)
-	if !strings.Contains(outer.Body.String(), "outside this computer's runtime authority") {
+	if !strings.Contains(outer.Body.String(), "run_capability_upgrade_required") {
 		t.Fatal("synthetic replay escaped or failed a different runtime boundary")
 	}
 	expect(t, f.call(f.agent, "POST", path, pickup, ""), 200)

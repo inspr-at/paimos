@@ -310,6 +310,7 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 }
 
 func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix string, body, dest any) error {
+	ctx = r.sessionContentContext(ctx, s.ID)
 	headers := map[string]string{rules.ClientMaximumHeader: strconv.Itoa(rules.SessionFileLimit(s.Harness))}
 	if s.Lease != "" && r.Client.Token != "" {
 		headers["Authorization"] = workerlease.Value(r.Client.Token, s.Lease)
@@ -317,7 +318,7 @@ func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix str
 	err := r.Client.DoWithHeaders(ctx, "POST", harnessPath(s)+suffix, body, dest, headers)
 	var status *client.StatusError
 	if errors.As(err, &status) && status.Status == http.StatusForbidden && (suffix == "/yield" || suffix == "/stop" || suffix == "/confirm-exit" || strings.HasSuffix(suffix, "/complete")) {
-		err = r.Client.DoWithHeaders(context.WithValue(ctx, runCapabilityContextKey{}, ""), "POST", harnessPath(s)+suffix, body, dest, headers)
+		err = r.Client.DoWithHeaders(withoutRunContent(ctx), "POST", harnessPath(s)+suffix, body, dest, headers)
 	}
 	if errors.As(err, &status) && status.Status == 410 && status.Message == "harness generation archived" {
 		return ErrHarnessArchived
@@ -538,7 +539,7 @@ func (r *Remote) Report(ctx context.Context, runID string, t Telemetry) error {
 // or another claim. Possession of these public strings grants no authority.
 func (r *Remote) ReportForClaim(ctx context.Context, runID, daemon, generation string, t Telemetry) error {
 	// Settlement is metadata transport and must survive lost content authority.
-	ctx = context.WithValue(ctx, runCapabilityContextKey{}, "")
+	ctx = withoutRunContent(ctx)
 	if daemon == "" || generation == "" {
 		return errors.New("run has no daemon claim")
 	}

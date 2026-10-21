@@ -154,7 +154,12 @@ func TestHeartbeatAttachedOwnershipAuditedOnce(t *testing.T) {
 	}
 	baseline := count()
 	beat := map[string]any{"phase": "working", "activity_sequence": 2, "attached_hook": true, "process_ownership": v.identity}
-	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
+	denied := v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease)
+	expect(t, denied, 403)
+	if !strings.Contains(denied.Body.String(), "run_capability_upgrade_required") {
+		t.Fatal("unbound hook refused for wrong reason")
+	}
+	expect(t, f.call(f.agent, "POST", v.path+"/heartbeat", beat, v.lease), 200)
 	if got := count() - baseline; got != 1 {
 		t.Fatalf("first attached ownership report wrote %d heartbeat events, want 1", got)
 	}
@@ -192,7 +197,7 @@ func TestHeartbeatAttachedOwnershipAuditedOnce(t *testing.T) {
 	})
 	for sequence := 3; sequence <= 4; sequence++ {
 		beat["activity_sequence"] = sequence
-		expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
+		expect(t, f.call(f.agent, "POST", v.path+"/heartbeat", beat, v.lease), 200)
 		if got := count() - baseline; got != 1 {
 			t.Fatalf("repeated attached ownership report wrote %d total heartbeat events, want 1", got)
 		}

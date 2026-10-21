@@ -2086,6 +2086,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineWorkspacesSeparateAndRetainWriters","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunChildLaunchDropsTransportCredentials","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRunChildrenScrubTransportEnvironment","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRunCommitsEarlierReproductions","tier":"GATED-FULL"}

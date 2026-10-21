@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/db"
 )
 
@@ -45,7 +46,7 @@ func (r *Remote) RunContext(ctx context.Context, runID string) context.Context {
 	r.mu.RLock()
 	token := r.runCapabilities[runID]
 	r.mu.RUnlock()
-	return context.WithValue(ctx, runCapabilityContextKey{}, token)
+	return client.WithRunContentCapability(context.WithValue(ctx, runCapabilityContextKey{}, token), token)
 }
 
 // PrepareRunContent is the sole acquisition point. Proofs live only in daemon
@@ -142,4 +143,14 @@ func (r *Remote) forgetRunContent(runID string) {
 			delete(r.sessionRuns, session)
 		}
 	}
+}
+
+func withoutRunContent(ctx context.Context) context.Context {
+	return client.WithRunContentCapability(context.WithValue(ctx, runCapabilityContextKey{}, ""), "")
+}
+func (r *Remote) sessionContentContext(ctx context.Context, sessionID string) context.Context {
+	r.mu.RLock()
+	runID := r.sessionRuns[sessionID]
+	r.mu.RUnlock()
+	return r.RunContext(ctx, runID)
 }

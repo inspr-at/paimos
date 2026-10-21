@@ -17,6 +17,7 @@ const RunCapabilityPolicyHeader = "X-Aeon-Run-Capability-Policy"
 const RunCapabilityPolicy = "run_content_v1"
 
 var ErrRunCapability = errors.New("run capability rejected")
+var ErrRunCapabilityEnrollmentRevoked = errors.New("run capability enrollment revoked")
 
 // RunCapabilityPrincipalTx resolves a secret issued by the server, never a
 // caller-selected person/run header. The caller holds the tenant/tree fence.
@@ -46,22 +47,36 @@ func RunCapabilityPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
  JOIN principals person ON person.tenant_id=r.tenant_id AND person.id=r.acting_person_id
   AND person.kind='person' AND person.status='active' AND person.linked_to IS NULL
  JOIN agent_pairing_computers c ON c.tenant_id=r.tenant_id AND c.id=r.content_capability_computer_id
-  AND c.principal_id=r.agent_principal_id AND c.daemon_id=r.content_capability_daemon_id AND c.state='connected'
+  AND c.principal_id=r.agent_principal_id AND c.daemon_id=r.content_capability_daemon_id AND c.state IN ('connected','draining')
   AND c.content_daemon_generation=r.content_capability_generation
   AND c.content_capability_epoch=r.content_capability_epoch
  JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id AND q.state='redeemed'
  JOIN agent_pairing_enrollments e ON e.tenant_id=c.tenant_id AND e.computer_id=c.id
-  AND e.account_id=r.content_capability_account_id AND e.state='connected'
+  AND e.account_id=r.content_capability_account_id AND e.state IN ('connected','draining')
  JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id
   AND a.registered_by_principal_id=r.agent_principal_id AND a.daemon_id=c.daemon_id
   AND a.last_daemon_generation=r.content_capability_generation
  WHERE r.tenant_id=$1 AND r.agent_principal_id=$2 AND r.content_capability_digest=$3
-  AND r.status IN ('queued','starting','running','waiting')
   AND r.content_capability_person_id=r.acting_person_id
   AND r.content_capability_expires_at>clock_timestamp()
   AND (r.daemon_generation IS NULL OR r.daemon_generation=r.content_capability_generation)
   AND (r.daemon_id IS NULL OR r.daemon_id=r.content_capability_daemon_id)`, p.TenantID, p.ID, sum[:]).Scan(
 		&next.RunID, &next.RunWorkOrderID, &next.KeyPersonID, &next.RunComputerID, &next.RunDaemonID, &next.RunGeneration, &next.RunProjectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Preserve the metadata cleanup signal for a revoked enrollment. This
+		// lookup returns no content and accepts only this agent's stored proof.
+		var revoked bool
+		lookupErr := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r
+ JOIN agent_pairing_computers c ON c.tenant_id=r.tenant_id AND c.id=r.content_capability_computer_id
+ JOIN agent_pairing_enrollments e ON e.tenant_id=c.tenant_id AND e.computer_id=c.id AND e.account_id=r.content_capability_account_id
+ WHERE r.tenant_id=$1 AND r.agent_principal_id=$2 AND r.content_capability_digest=$3
+ AND (c.state='revoked' OR e.state='revoked'))`, p.TenantID, p.ID, sum[:]).Scan(&revoked)
+		if lookupErr != nil {
+			err = lookupErr
+		} else if revoked {
+			err = ErrRunCapabilityEnrollmentRevoked
+		}
+	}
 	_, restoreErr := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true)`, visibility)
 	if restoreErr != nil {
 		return p, restoreErr

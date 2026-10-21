@@ -264,6 +264,7 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	for name, value := range headers {
 		req.Header.Set(name, value)
 	}
+	applyRunContentCapability(ctx, req.Header)
 	hc := c.HTTP
 	if hc == nil {
 		hc = http.DefaultClient

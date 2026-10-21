@@ -61,6 +61,7 @@ func TestPrepareRunContentUsesOnlyItsServerCapability(t *testing.T) {
 	}))
 	defer server.Close()
 	remote := NewRemote(server.URL, "synthetic-transport-key")
+	remote.Client.HTTP.Transport = server.Client().Transport // injected transports must retain the run proof
 	for _, id := range []string{"a", "b"} {
 		run, node, order, err := remote.PrepareRunContent(t.Context(), Run{ID: id, WorkOrderID: "order-" + id, AgentPrincipalID: "agent", ActingPersonID: "person-" + id, Status: "queued", RunCapabilityRequired: true}, "daemon", "generation")
 		if err != nil || node.Body != "Private body" || order.NodeID != node.ID || run.RecoveryBrief != "private recovery context" {

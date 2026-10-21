@@ -307,6 +307,11 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 				}
 			}
 			if err := permissionErr; err != nil {
+				var pairingErr *agentpairing.Error
+				if errors.As(err, &pairingErr) {
+					agentpairing.WriteError(w, err)
+					return
+				}
 				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
 					if err := m.auditWorkstation(r, p, false, "permission_denied"); err != nil {
 						internalFailure(w, r, "audit_permission_denied", err)

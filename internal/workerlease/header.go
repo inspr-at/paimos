@@ -63,7 +63,7 @@ func Carries(h http.Header) bool {
 	if h == nil {
 		return false
 	}
-	if h.Get(LegacyHeader) != "" || workerScheme(h.Get("Authorization")) {
+	if h.Get(LegacyHeader) != "" || h.Get(RunCapabilityHeader) != "" || workerScheme(h.Get("Authorization")) {
 		return true
 	}
 	return false

@@ -19,6 +19,7 @@ func TestOwnerWorkstationAuthLockInventory(t *testing.T) {
 		"key_trim.go:trimFence":                       "tenant:NO KEY UPDATE",
 		"messaging_assistant.go:messagingAssistant":   "tenant.NO_KEY_UPDATE",
 		"owner_workstation.go:workstationGuard":       "pairing.Mutation",
+		"run_capability.go:runContentBoundary":        "pairing.Lock pairing.Lock", // issuance lookup and per-transaction revalidation; each enters tenant -> tree -> pairing
 		"owner_workstation.go:auditWorkstation":       "tenant:NO KEY UPDATE",
 		"owner_workstation.go:handleOwnerWorkstation": "pairing.Mutation",
 		"store.go:resolveOIDCPerson":                  "tenant:NO KEY UPDATE",

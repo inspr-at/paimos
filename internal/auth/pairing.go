@@ -35,7 +35,20 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 			return &agentpairing.Error{Status: 410, Code: "pairing_revoked", Message: "pairing revoked or setup not redeemed"}
 		}
 		if workerlease.SafetyRoute(r) && workerlease.Read(r) != "" {
-			return nil // Exact own-session proof and metadata projection live in the control handler.
+			// Bounded ownership metadata only. The final write repeats this
+			// check under its access fence and verifies the exact private lease.
+			if _, err := tx.Exec(r.Context(), `SELECT set_config('aeon.visible_projects','*',true)`); err != nil {
+				return err
+			}
+			values := authz.PatternValues(r.Pattern, r.URL.Path)
+			owned, err := db.WorkerSafetyOwnedTx(r.Context(), tx, p, values["projectId"], values["sessionId"])
+			if err != nil {
+				return err
+			}
+			if !owned {
+				return &agentpairing.Error{Status: 403, Code: "forbidden", Message: "outside this computer's runtime authority"}
+			}
+			return nil
 		}
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		deny := &agentpairing.Error{Status: 403, Code: "forbidden", Message: "outside this computer's runtime authority"}

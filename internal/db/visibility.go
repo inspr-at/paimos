@@ -231,6 +231,15 @@ func WorkerSessionPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true)`); err != nil {
 		return p, err
 	}
+	if p.TransportComputerID != "" {
+		owned, err := WorkerSafetyOwnedTx(ctx, tx, p, project, session)
+		if err != nil {
+			return p, err
+		}
+		if !owned {
+			return p, errors.New("unowned safety target")
+		}
+	}
 	sum := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
 	var person *string
 	err := tx.QueryRow(ctx, `SELECT r.acting_person_id::text FROM harness_sessions s LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id AND r.agent_principal_id=s.agent_principal_id WHERE s.tenant_id=$1::uuid AND s.agent_principal_id=$2::uuid AND s.project_id=$3::uuid AND s.id=$4::uuid AND s.lease_digest=$5`, p.TenantID, p.ID, project, session, sum[:]).Scan(&person)
@@ -242,6 +251,25 @@ func WorkerSessionPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		return p, err
 	}
 	return next, reenterActingPrincipal(ctx, tx, next)
+}
+
+// WorkerSafetyOwnedTx reads only the exact target's ownership metadata. Callers
+// provide metadata visibility and, for a write, the tenant/tree access fence.
+// A private lease on a person-created direct registration is not daemon
+// process ownership and cannot authorize the metadata safety exception.
+func WorkerSafetyOwnedTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, session string) (bool, error) {
+	if !uuidLike(project) || !uuidLike(session) || !uuidLike(p.TransportComputerID) {
+		return false, nil
+	}
+	var owned bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions s
+ JOIN agent_pairing_computers c ON c.tenant_id=s.tenant_id AND c.principal_id=s.agent_principal_id
+ WHERE s.tenant_id=$1 AND s.project_id=$2 AND s.id=$3 AND s.agent_principal_id=$4 AND c.id=$5
+ AND ((s.management='managed' AND EXISTS(SELECT 1 FROM agent_runs r WHERE r.tenant_id=s.tenant_id
+ AND r.id=s.run_id AND r.agent_principal_id=s.agent_principal_id AND r.daemon_id=c.daemon_id))
+ OR (s.process_ownership->>'daemon_id'=c.daemon_id AND EXISTS(SELECT 1 FROM harness_attach_requests a
+ WHERE a.tenant_id=s.tenant_id AND a.computer_id=c.id AND a.session_id=s.id AND a.state='active'))))`, p.TenantID, project, session, p.ID, p.TransportComputerID).Scan(&owned)
+	return owned, err
 }
 
 // reenterActingPrincipal installs this principal's own ceiling. It passes the
