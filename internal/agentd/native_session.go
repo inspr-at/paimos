@@ -8,8 +8,11 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/internal/nativeintegration/delivery"
+	"github.com/inspr-at/paimos/internal/nativepty"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
+	"github.com/inspr-at/paimos/internal/nativesessions/stream"
+	"github.com/inspr-at/paimos/internal/nativestream"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -82,6 +85,16 @@ type NativeSessionConfig struct {
 	Close    func(context.Context) error
 	Host     nativecontract.Host
 	Launcher nativecontract.Launcher
+	// Terminal and Qualification are supplied together by an independently
+	// qualified provider. Neither a socket caller nor a capability flag installs
+	// them. The released composition leaves both nil.
+	Terminal      nativecontract.PTYLauncher
+	Qualification nativepty.Qualification
+	// Local reads/control need a separately verified person and current server
+	// grants. No default maps a socket peer or the paired agent to that person.
+	LocalAuthority nativestream.LocalAuthority
+	Projector      *nativestream.Projector
+	Live           *stream.Relay
 
 	// StartLocal resolves the exact persisted PERSON-issued C0 intent and
 	// revalidates its original actor/current grant before using the owning
@@ -108,6 +121,7 @@ type nativeLeadRecord struct {
 	AccountHomeDigest string                    `json:"account_home_digest"`
 	VendorSessionID   string                    `json:"vendor_session_id,omitempty"`
 	Attempts          map[string]string         `json:"attempts,omitempty"`
+	Transition        *nativeTransitionRecord   `json:"transition,omitempty"`
 }
 
 type nativeLeadEntry struct {
@@ -660,6 +674,10 @@ type nativeOwned struct {
 	opMu              sync.Mutex
 	attempted, exited bool
 	lastError         error
+	transition        *nativeTransition
+	eventCancel       context.CancelFunc
+	eventDone         chan struct{}
+	lifetime          context.Context
 }
 
 type nativeC0Key struct{}
@@ -822,6 +840,7 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 		deadline = g.Policy.ExpiresAt
 	}
 	spec.Lifetime, e.cancel = context.WithDeadline(s.lifetime, deadline)
+	e.lifetime = spec.Lifetime
 	if err = e.require(ctx); err != nil {
 		return out, err
 	}
@@ -865,7 +884,7 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	if err != nil {
 		return out, err
 	}
-	go e.events(s.lifetime)
+	e.startEvents()
 	return out, nil
 }
 func nativeWithin(root, cwd string) bool {
@@ -942,6 +961,9 @@ func (h *NativeHost) Open(ctx context.Context, spec nativecontract.LaunchSpec) (
 func (e *nativeOwned) save(state string) error {
 	request := NativeSessionStartRequest{RequestID: e.local.Intent.RequestID, ProjectID: e.grant.ExpectedBinding.ProjectID, Profile: "native", Role: "coordinator", Harness: Claude, Cwd: e.local.Cwd}
 	record := leadRecord{Version: leadRecordSchemaVersion, Pickup: agentsetup.LeadPickup{Demand: agentsetup.LeadDemand{ID: e.local.Intent.RequestID, ProjectID: e.grant.ExpectedBinding.ProjectID, OwnerID: e.owner.OwnerPersonID}, DaemonID: e.host.s.daemonID, DaemonGeneration: e.host.s.generation, LedgerGeneration: e.host.s.ledgerBinding.Generation, AccountID: e.local.Intent.AccountID}, Group: e.group, Attempted: e.attempted, Ownership: e.ownership, Native: &nativeLeadRecord{Request: request, SessionID: e.grant.ExpectedBinding.HarnessSessionID}}
+	if e.transition != nil {
+		record.Native.Transition = &e.transition.record
+	}
 	if state == "exit_confirmed" {
 		record.ExitObserved = true
 		record.ExitReported = true
@@ -980,6 +1002,9 @@ func (e *nativeOwned) require(ctx context.Context) error {
 	t, active := e.transport, e.active
 	e.mu.Unlock()
 	if t == nil {
+		if e.transition != nil {
+			return e.revalidateSuccessor(ctx)
+		}
 		if !e.host.s.capacityNow().Before(e.claimDeadline) {
 			return nativeRefusal(nativecontract.ReasonGrantExpired)
 		}
@@ -1005,7 +1030,7 @@ func (e *nativeOwned) require(ctx context.Context) error {
 		if err = e.call(ctx, "POST", "/api/agentd/native-sessions/claim", claim, &current); err != nil {
 			return err
 		}
-		if current.ExpectedBinding == nil || !current.ExpectedBinding.Equal(*e.grant.ExpectedBinding) || !reflect.DeepEqual(current.Command, active.Command) || current.CommandActor == nil || current.CommandActor.PrincipalID != e.owner.PrincipalID {
+		if current.ExpectedBinding == nil || !current.ExpectedBinding.Equal(*e.grant.ExpectedBinding) || !reflect.DeepEqual(current.Command, active.Command) || current.CommandActor == nil || active.CommandActor == nil || *current.CommandActor != *active.CommandActor {
 			return nativeRefusal(nativecontract.ReasonIdentityMismatch)
 		}
 		return nil
@@ -1275,6 +1300,11 @@ func (h *NativeHost) Poll(ctx context.Context) error {
 // longer retries reports, events, finals or new input (their outcomes could not
 // be reported), but it still reconciles its exit and executes the person's stop.
 func (e *nativeOwned) poll(ctx context.Context) error {
+	e.opMu.Lock()
+	defer e.opMu.Unlock()
+	if e.transition != nil {
+		return nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	}
 	e.mu.Lock()
 	live := e.transport != nil && e.delivery != nil && !e.exited
 	e.mu.Unlock()
@@ -1327,7 +1357,7 @@ func (e *nativeOwned) poll(ctx context.Context) error {
 		if _, err := e.journal.Get(item.ExpectedBinding, item.OperationID); err == nil {
 			continue
 		}
-		if _, err := e.execute(ctx, item); err != nil {
+		if _, err := e.executeLocked(ctx, item); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -1395,6 +1425,10 @@ func (e *nativeOwned) reconcileExit(ctx context.Context) error {
 func (e *nativeOwned) execute(ctx context.Context, item nativecontract.PendingCommand) (nativecontract.OperationResult, error) {
 	e.opMu.Lock()
 	defer e.opMu.Unlock()
+	return e.executeLocked(ctx, item)
+}
+
+func (e *nativeOwned) executeLocked(ctx context.Context, item nativecontract.PendingCommand) (nativecontract.OperationResult, error) {
 	var out nativecontract.OperationResult
 	claim := nativecontract.Claim{RequestID: uuid.NewString(), OperationID: item.OperationID, DaemonID: e.host.s.daemonID, DaemonGeneration: e.host.s.generation, LedgerGeneration: e.host.s.ledgerBinding.Generation, CapabilityDigest: e.host.caps.QualificationDigest, ExpectedRevision: item.ExpectedBinding.BindingRevision, ClaimKind: "command"}
 	var g nativecontract.ClaimResult
@@ -1403,6 +1437,12 @@ func (e *nativeOwned) execute(ctx context.Context, item nativecontract.PendingCo
 	}
 	if g.ExpectedBinding == nil || !g.ExpectedBinding.Equal(item.ExpectedBinding) || g.Command == nil || g.Command.Kind != item.Kind {
 		return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
+	}
+	if g.CommandActor == nil || g.CommandActor.TenantID != item.ExpectedBinding.TenantID || g.CommandActor.OwnerPersonID != e.owner.OwnerPersonID {
+		return out, nativeRefusal(nativecontract.ReasonWrongPrincipal)
+	}
+	if g.Command.Kind == "take" || g.Command.Kind == "return" {
+		return e.switchRuntime(ctx, g)
 	}
 	e.mu.Lock()
 	e.active = g
@@ -1459,11 +1499,14 @@ func (e *nativeOwned) execute(ctx context.Context, item nativecontract.PendingCo
 	return out, err
 }
 func (e *nativeOwned) events(ctx context.Context) {
+	e.mu.Lock()
+	transport := e.transport
+	e.mu.Unlock()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case event, ok := <-e.transport.Events():
+		case event, ok := <-transport.Events():
 			if !ok {
 				return
 			}

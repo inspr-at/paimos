@@ -35,6 +35,11 @@ type production struct {
 
 type proofKey struct{}
 type daemonKey struct{}
+type successorProofKey struct{}
+
+// SuccessorProofHeader carries a freshly rotated lease/reference for the next
+// epoch. The ordinary proof still authenticates the exact predecessor and exit.
+const SuccessorProofHeader = "X-Aeon-Native-Successor-Proof"
 
 // BindProduction is a construction-only composition seam. Missing services
 // retain qualification_missing; there is no default authority implementation.
@@ -91,6 +96,22 @@ func (s *Store) DaemonRequest(r *http.Request) (context.Context, nativecontract.
 	i, e, x := proof.Runtime()
 	ctx = context.WithValue(ctx, proofKey{}, proof)
 	ctx = context.WithValue(ctx, daemonKey{}, d)
+	if values := r.Header.Values(SuccessorProofHeader); len(values) > 0 {
+		if len(values) != 1 {
+			return ctx, d, fail(403, nativecontract.ReasonGrantMissing)
+		}
+		copy := r.Clone(ctx)
+		copy.Header = r.Header.Clone()
+		copy.Header.Set(daemon.ProofHeader, values[0])
+		next, err := daemon.Decode(copy)
+		if err != nil {
+			return ctx, d, err
+		}
+		if next.DaemonID != proof.DaemonID || next.Generation != proof.Generation || next.Ledger != proof.Ledger || next.Capability != proof.Capability || next.WorkerLease == proof.WorkerLease || len(next.SessionRef) < 16 || next.SessionRef == proof.SessionRef {
+			return ctx, d, fail(403, nativecontract.ReasonIdentityMismatch)
+		}
+		ctx = context.WithValue(ctx, successorProofKey{}, next)
+	}
 	return receipts.WithRuntimeProof(ctx, receipts.RuntimeProof{WorkerLease: proof.WorkerLease, Identity: i, Evidence: e, Exit: x}), d, nil
 }
 

@@ -169,6 +169,13 @@ func (t *nativeC0Transport) beforeInput(ctx context.Context, id, digest string) 
 		if id != "native-stop" || digest != nativeDigest("stop") {
 			return nativeRefusal(nativecontract.ReasonIdentityMismatch)
 		}
+	case "take", "return":
+		// A current person-authorized switch may close this exact predecessor;
+		// it cannot send provider input or reuse the old command on a successor.
+		if id != "native-stop" || digest != nativeDigest("stop") {
+			return nativeRefusal(nativecontract.ReasonIdentityMismatch)
+		}
+		return t.owner.require(ctx)
 	default:
 		return ErrUnsupported
 	}
