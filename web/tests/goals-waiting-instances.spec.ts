@@ -185,7 +185,10 @@ test('two sibling lines keep the goals controls still when a refresh fails and r
     still(beforeControl, duringControl)
     mock.set('ok')
     const retry = slots.first().locator('button.w-retry')
-    await retry.click(width > 760 ? undefined : { force: true })
+    // Phone hides every list row after the first (display:none), so the sibling
+    // retry has no box and a pointer click cannot land. The handler is the same.
+    if (width > 760) await retry.click()
+    else await retry.evaluate(button => (button as HTMLButtonElement).click())
     await expect(band.locator('a.waiting-item')).toHaveCount(5)
     await expect(band.locator('.w-err-li')).toHaveCount(0)
     const [afterHead, afterControl] = await Promise.all([box(head), box(control)])
