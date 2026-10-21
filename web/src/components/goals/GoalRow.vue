@@ -53,7 +53,8 @@ function endRename(restore: boolean) {
 function commitRename() {
   if (props.renameBusy) return
   const title = draft.value.trim()
-  if (!title) { refused.value = true; return }
+  // The field empties, so its placeholder says why.
+  if (!title) { draft.value = ''; refused.value = true; return }
   if (title === props.goal.title) endRename(true)
   else emit('rename', title)
 }

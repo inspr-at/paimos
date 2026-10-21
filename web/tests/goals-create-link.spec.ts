@@ -83,7 +83,8 @@ async function mockGoals(page: Page, w: World, options: { readOnly?: boolean } =
       goal.title = body.title
       return written(route, { id, key: id.toUpperCase() })
     }
-    w.writes.push({ method: request.method(), path: `/goals/${id}`, body: null })
+    if (request.method() !== 'DELETE') return route.fallback()
+    w.writes.push({ method: 'DELETE', path: `/goals/${id}`, body: null })
     goal.deleted = 900 + w.writes.length
     return written(route, { id, key: id.toUpperCase(), node_ids: [], event_id: goal.deleted })
   })
@@ -257,6 +258,7 @@ for (const [width, height] of [[1440, 900], [390, 844]] as const) {
       await expect(field).toBeFocused()
       await guard.check(async () => { await field.fill('   '); await page.keyboard.press('Enter'); await expect(field).toHaveAttribute('aria-invalid', 'true') })
       await expect(field).toHaveAttribute('placeholder', 'A goal needs a name')
+      await expect(field).toHaveValue('')
       expect(w.writes.filter(write => write.method === 'PATCH')).toEqual([])
       await shot(page, info, `rename-refused-${name}`)
       await guard.check(async () => { await field.fill('Fleet hosts report their own health'); await page.keyboard.press('Enter'); await expect(field).toHaveCount(0) })
