@@ -704,11 +704,7 @@ func releaseObsoleteClaim(ctx context.Context, tx pgx.Tx, p tenant.Principal, v 
 }
 
 func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	paired, err := agentpairing.PairedPrincipal(r.Context(), tx, p.ID)
-	if err != nil {
-		return nil, err
-	}
-	if paired && p.RunID != r.PathValue("runId") {
+	if p.TransportComputerID != "" && p.RunID != r.PathValue("runId") {
 		return nil, workorders.Fail(403, "run_capability_upgrade_required")
 	}
 	var in struct {

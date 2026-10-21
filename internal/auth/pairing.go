@@ -147,7 +147,7 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 				}
 				for _, key := range keys {
 					var own bool
-					if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM nodes n JOIN agent_runs r ON r.tenant_id=n.tenant_id AND r.work_order_id=n.id WHERE n.key=$1 AND r.agent_principal_id=$2)`, key, p.ID).Scan(&own); err != nil {
+					if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM nodes n JOIN agent_runs r ON r.tenant_id=n.tenant_id AND r.work_order_id=n.id WHERE n.key=$1 AND r.agent_principal_id=$2 AND ($3::uuid IS NULL OR r.id=$3))`, key, p.ID, nullableRunID(p.RunID)).Scan(&own); err != nil {
 						return err
 					}
 					if !own {
@@ -191,4 +191,11 @@ func pairedIdentity(ctx context.Context, tx pgx.Tx, principal string) error {
 		return errServicePrincipal
 	}
 	return nil
+}
+
+func nullableRunID(id string) any {
+	if id == "" {
+		return nil
+	}
+	return id
 }

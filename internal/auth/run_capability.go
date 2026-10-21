@@ -112,6 +112,9 @@ func runCapabilityTarget(r *http.Request, p tenant.Principal) bool {
 	if len(parts) >= 3 && parts[1] == "work-orders" && parts[2] != p.RunWorkOrderID {
 		return false
 	}
+	if len(parts) >= 3 && parts[1] == "nodes" && parts[2] != "lookup" && parts[2] != p.RunWorkOrderID {
+		return false
+	}
 	if len(parts) >= 3 && parts[1] == "projects" && parts[2] != p.RunProjectID {
 		return false
 	}

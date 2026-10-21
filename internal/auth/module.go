@@ -759,6 +759,8 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		if len(parts) > 2 {
 			switch parts[2] {
+			case "capability":
+				return "run.read", true
 			case "claim":
 				return "run.claim", true
 			case "telemetry":
