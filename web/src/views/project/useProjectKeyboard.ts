@@ -2,8 +2,6 @@
 
 import { nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { type ListItem } from '../../lib/api'
-import { ensurePermissions, permissionsKnown } from '../../lib/authz'
-import { scopeOwner } from '../../lib/identityScope'
 import type { ProjectState } from './types'
 import type { useProjectData } from './useProjectData'
 import type { useProjectPanel } from './useProjectPanel'
@@ -12,7 +10,7 @@ import type { useProjectActions } from './useProjectActions'
 import type { useProjectLive } from './useProjectLive'
 
 export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof useProjectData>, pane: ReturnType<typeof useProjectPanel>, selection: ReturnType<typeof useProjectSelection>, actions: ReturnType<typeof useProjectActions>, live: ReturnType<typeof useProjectLive>) {
-  const { ticketKey, projectId, session, knowledgeActive, settingsActive, deliveryActive, graphActive, outlineActive, toolbar, table, panel, cursorId, creating, fullView } = state
+  const { ticketKey, knowledgeActive, settingsActive, deliveryActive, graphActive, outlineActive, toolbar, table, panel, cursorId, creating, fullView } = state
   const { list, outline, activeLive, liveActive, sequence } = data
   const { panelItem, openKey, openRow, closePanel, expand, collapse, trail, trailBack } = pane
   const { selectable, selected, phonePicking, selectRow, selectAll, clearSelection, openBulk, bulkQueue } = selection
@@ -46,24 +44,6 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     cursorId.value = row.id
     void nextTick(() => table.value?.scrollToRow(row.id))
     table.value?.focusGrid()
-  }
-  // The title can be on screen while this project's grants are still in flight.
-  // startEdit then returns, and a single e is gone. Wait for that answer and
-  // edit only while this ticket and this person are still the ones who pressed it.
-  function editOpenTicket() {
-    const key = ticketKey.value
-    const id = projectId.value
-    if (!id || permissionsKnown(id)) { panel.value?.startEdit(); return }
-    const owner = scopeOwner(session.identity)
-    void ensurePermissions(id).then(answer => {
-      if (answer !== 'known') return
-      return nextTick(() => {
-        if (ticketKey.value !== key || projectId.value !== id) return
-        if (scopeOwner(session.identity) !== owner || !session.authenticationCurrent()) return
-        if (document.querySelector('dialog[open], .floating')) return
-        panel.value?.startEdit()
-      })
-    })
   }
   function keydown(event: KeyboardEvent) {
     if (event.altKey && event.key === 'ArrowLeft' && ticketKey.value && trail.value.length && !typing(event.target as HTMLElement | null)) { event.preventDefault(); trailBack(); return }
@@ -118,7 +98,7 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
       case '/': if (!fullView.value) { event.preventDefault(); toolbar.value?.focusSearch() } break
       case 'n': event.preventDefault(); void startCreate(outlineActive.value && !ticketKey.value && (row?.is_leaf === false || row?.kind_slug === 'epic') ? row : null); break
       case 'u': if (activeLive.value.pill.value && liveActive.value) { event.preventDefault(); showUpdates() } break
-      case 'e': if (ticketKey.value) { event.preventDefault(); editOpenTicket() } break
+      case 'e': if (ticketKey.value) { event.preventDefault(); void panel.value?.startEdit() } break
       case 's':
         if (ticketKey.value) { event.preventDefault(); panel.value?.openStatus() }
         else if (row) { const anchor = document.querySelector<HTMLElement>(`#row-${CSS.escape(row.id)} .status-btn, #row-${CSS.escape(row.id)} .phone-state`); if (anchor) { event.preventDefault(); openStatus(row, anchor, 'list') } }
