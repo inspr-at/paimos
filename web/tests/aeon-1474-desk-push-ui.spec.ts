@@ -30,13 +30,13 @@ const endpoint = 'https://push.example.test/this-browser'
 const hash = createHash('sha256').update(JSON.stringify(endpoint)).digest('hex')
 const device = { id: 'device-current', created_at: '2026-10-01T12:00:00Z', endpoint_hash: hash, desk_enabled: false }
 const other = { id: 'device-other', created_at: '2026-10-01T12:00:00Z', endpoint_hash: 'f'.repeat(64), desk_enabled: true }
-async function setup(page: Page, options: { permission?: NotificationPermission; ios?: boolean; available?: boolean; on?: boolean; supported?: boolean; theme?: 'light' | 'dark'; de?: boolean } = {}) {
+async function setup(page: Page, options: { permission?: NotificationPermission; answer?: NotificationPermission; ios?: boolean; available?: boolean; on?: boolean; supported?: boolean; theme?: 'light' | 'dark'; de?: boolean } = {}) {
   await mockDesk(page, options.theme)
   await mockSettings(page, settingsData())
   // The app language policy currently keeps app surfaces English. Exercise the
   // complete German copy here without changing that production-wide policy.
   if (options.de) await page.route('**/src/lib/displayLanguage.ts', route => route.fulfill({ contentType: 'application/javascript', body: "export function displayLanguage() { return 'de' }" }))
-  await page.addInitScript(({ endpoint, permission, ios, supported }) => {
+  await page.addInitScript(({ endpoint, permission, answer, ios, supported }) => {
     const state = { permission, permissionCalls: 0, registrations: 0, subscriptions: 0 }
     Object.assign(window, { deskPushTest: state })
     if (ios) {
@@ -45,7 +45,7 @@ async function setup(page: Page, options: { permission?: NotificationPermission;
     }
     Object.defineProperty(window, 'Notification', { configurable: true, value: class {
       static get permission() { return state.permission }
-      static async requestPermission() { state.permissionCalls++; state.permission = 'granted'; return 'granted' }
+      static async requestPermission() { state.permissionCalls++; state.permission = answer; return answer }
     } })
     if (!supported) { Reflect.deleteProperty(window, 'PushManager'); return }
     Object.defineProperty(window, 'PushManager', { configurable: true, value: class {} })
@@ -61,7 +61,7 @@ async function setup(page: Page, options: { permission?: NotificationPermission;
       getRegistration: async () => registration,
       register: async () => { state.registrations++; return registration }, ready: Promise.resolve(registration),
     } })
-  }, { endpoint, permission: options.permission ?? (options.on ? 'granted' : 'default'), ios: !!options.ios, supported: options.supported !== false })
+  }, { endpoint, permission: options.permission ?? (options.on ? 'granted' : 'default'), answer: options.answer ?? 'granted', ios: !!options.ios, supported: options.supported !== false })
   const settings = { available: true, push_available: options.available !== false, vapid_public_key: 'AQID',
     preferences: { enabled: true, time_zone: 'Europe/Vienna', quiet_start: 1320, quiet_end: 420, escalation_minutes: 15 },
     passkeys: [], subscriptions: [{ ...device, desk_enabled: !!options.on }, { ...other }] }
@@ -93,11 +93,14 @@ test('AEON-1474 Settings prompts only on click and independently enables disable
   await page.goto('/settings/personal#notifications')
   const card = cardOf(page), toggle = card.getByRole('switch')
   await expect(toggle).toBeEnabled()
+  await expect(card.getByRole('status')).toHaveText('Off for this browser')
   expect((await browserState(page)).permissionCalls).toBe(0)
-  const guard = await controlStability(page, { toggle, row: card.locator('.switch-row') })
+  const guard = await controlStability(page, { toggle, row: card.locator('.switch-row'), slot: card.locator('.state-slot') })
   await guard.check(async () => { await toggle.click(); await expect(toggle).toHaveAttribute('aria-checked', 'true') })
+  await expect(card.getByRole('status')).toHaveText('Notifications on for this browser')
   expect(world.posts[0]).toEqual({ endpoint, keys: { auth: 'AQID', p256dh: 'BAUG' }, desk_enabled: true })
-  await expect(card.getByRole('listitem').first()).toContainText('This browser')
+  // Day, short month and year read the same everywhere; 10/1/2026 does not (Tick).
+  await expect(card.getByRole('listitem').first()).toContainText('This browser · added 1 Oct 2026')
   expect((await browserState(page)).permissionCalls).toBe(1)
   await guard.check(async () => { await toggle.click(); await expect(toggle).toHaveAttribute('aria-checked', 'false') })
   expect(world.posts[1]?.desk_enabled).toBe(false)
@@ -131,6 +134,8 @@ test('AEON-1474 unavailable blocked unsupported and iOS states never prompt or e
     await expect(card.getByText(state.line, { exact: true }).filter({ visible: true })).toBeVisible()
     if (state.ios) await expect(card.getByRole('switch')).toHaveCount(0)
     else await expect(card.getByRole('switch')).toBeDisabled()
+    // Only an iPhone outside the Home Screen reserves room for the iPhone hint.
+    await expect(card.locator('.state-size').filter({ hasText: 'Home Screen' })).toHaveCount(state.ios ? 1 : 0)
     expect((await browserState(page)).permissionCalls).toBe(0)
     await page.goto('/decision-desk')
     await expect(page.getByRole('heading', { name: 'Decision Desk', exact: true })).toBeVisible()
@@ -182,7 +187,6 @@ test('AEON-1474 the Desk decides its offer before the tabs show, without a band 
   await expect(declined.getByTestId('desk-tab-open')).toBeVisible()
   await expect(declined.getByRole('button', { name: 'Turn on', exact: true })).toHaveCount(0)
   expect(Math.abs(await band(declined)), 'no band, the gap is the section gap').toBeLessThanOrEqual(0.5)
-  await expect(declined.locator('.notice-feedback')).toHaveCount(0)
   await declined.close()
 
   // While the read is held, only the title shows; the offer and the tabs then appear together.
@@ -224,52 +228,152 @@ test('AEON-1474 the Desk decides its offer before the tabs show, without a band 
   await hung.close()
 })
 
-test('AEON-1474 rejected writes retain the previous state and never announce success', async ({ page }) => {
+// Risk: a failed or refused Turn on that reports success, pushes the Desk down with an extra line, or drops the
+// offer (and its retry) once the browser reports the refusal.
+test('AEON-1474 rejected writes and refused prompts keep the previous state in place and never announce success', async ({ context }) => {
+  const page = await context.newPage()
   const world = await setup(page)
   world.control.fail = true
   await page.goto('/settings/personal#notifications')
   const card = cardOf(page), toggle = card.getByRole('switch')
   await expect(toggle).toBeEnabled()
-  await toggle.click()
-  await expect(card.getByRole('alert')).toContainText('could not be updated')
+  const settingsGuard = await controlStability(page, { toggle, slot: card.locator('.state-slot') })
+  await settingsGuard.check(async () => { await toggle.click(); await expect(card.getByRole('alert')).toHaveText('Notifications could not be updated. Please try again.') })
+  settingsGuard.done()
   await expect(toggle).toHaveAttribute('aria-checked', 'false')
   await page.goto('/decision-desk')
-  await page.getByRole('button', { name: 'Turn on', exact: true }).click()
-  await expect(page.locator('.notice-feedback')).toContainText('could not be enabled')
+  const turnOn = page.getByRole('button', { name: 'Turn on', exact: true }), notNow = page.getByRole('button', { name: 'Not now', exact: true })
+  const sentence = page.getByTestId('desk-notice-sentence')
+  await expect(turnOn).toBeVisible()
+  const deskGuard = await controlStability(page, { header: page.locator('.dp-head'), turnOn, notNow, tabs: page.getByTestId('desk-tab-open'), first: page.locator('[data-testid^="desk-row-"]').first() })
+  await deskGuard.check(async () => { await turnOn.click(); await expect(sentence).toHaveText('Notifications could not be turned on. Check the browser permission.') })
   await expect(page.getByRole('status').filter({ hasText: 'Notifications on for this browser' })).toHaveCount(0)
+  await expect(page.locator('.notice-feedback')).toHaveCount(0)
+  // Turn on retries in place.
+  world.control.fail = false
+  await deskGuard.check(async () => { await turnOn.click(); await expect(page.getByRole('status').filter({ hasText: 'Notifications on for this browser' })).toBeVisible() })
+  deskGuard.done()
+  expect(world.posts.map(post => post.desk_enabled)).toEqual([true, true, true])
+  await page.close()
+
+  // A refused prompt: Settings shows the blocked line in the same slot; the Desk keeps its offer with the failure.
+  const refused = await context.newPage()
+  const refusedWorld = await setup(refused, { answer: 'denied' })
+  await refused.goto('/settings/personal#notifications')
+  const refusedCard = cardOf(refused), refusedToggle = refusedCard.getByRole('switch')
+  await expect(refusedToggle).toBeEnabled()
+  const blockedGuard = await controlStability(refused, { toggle: refusedToggle, slot: refusedCard.locator('.state-slot') })
+  await blockedGuard.check(async () => {
+    await refusedToggle.click()
+    await expect(refusedCard.getByText("Notifications are blocked for this site. Allow them in the browser's site settings.", { exact: true }).filter({ visible: true })).toBeVisible()
+  })
+  blockedGuard.done()
+  await expect(refusedToggle).toBeDisabled()
+  await refused.goto('/decision-desk')
+  const retry = refused.getByRole('button', { name: 'Turn on', exact: true })
+  await expect(retry).toBeVisible()
+  const refusedGuard = await controlStability(refused, { header: refused.locator('.dp-head'), turnOn: retry, first: refused.locator('[data-testid^="desk-row-"]').first() })
+  await refusedGuard.check(async () => { await retry.click(); await expect(refused.getByTestId('desk-notice-sentence')).toHaveText('Notifications could not be turned on. Check the browser permission.') })
+  refusedGuard.done()
+  await expect(refused.getByRole('button', { name: 'Not now', exact: true })).toBeVisible()
+  expect(refusedWorld.posts).toEqual([])
+  expect((await browserState(refused)).permissionCalls).toBe(1)
+  await refused.close()
+})
+
+// Risk: a person who already allowed notifications waits for a read that cannot change their Desk (up to the bound).
+test('AEON-1474 a browser that already allows notifications shows the Desk without waiting for the offer read', async ({ page }) => {
+  await setup(page, { permission: 'granted' })
+  let reads = 0
+  await page.route('**/api/me/phone-approvals', route => { if (route.request().method() !== 'GET') return route.fallback(); reads++ })
+  await page.clock.install({ time: T0 })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible()
+  // The page's clock stands still, so the read bound can never be what shows the tabs.
+  await page.clock.pauseAt(T0 + 10_000)
+  reads = 0
+  await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: /^Decision Desk/ }).click()
+  await expect(page.getByRole('heading', { name: 'Decision Desk', exact: true })).toBeVisible()
+  await expect(page.getByTestId('desk-tab-open')).toBeVisible()
+  await expect(page.locator('main.decision-desk')).not.toHaveAttribute('aria-busy', 'true')
+  await expect(page.getByRole('button', { name: 'Turn on', exact: true })).toHaveCount(0)
+  expect(Math.abs(await band(page)), 'no band').toBeLessThanOrEqual(0.5)
+  expect(reads, 'the Desk does not read phone approvals for an allowed browser').toBe(0)
+})
+
+// Below the tabs: the first row's and the queue card's distance from the tabs' bottom edge (Tick item 7).
+const belowTabs = (page: Page) => page.evaluate(() => {
+  const tabs = document.querySelector('[role="radiogroup"][aria-label="Show"]')!.getBoundingClientRect()
+  const top = (selector: string) => Math.round(document.querySelector(selector)!.getBoundingClientRect().top - tabs.bottom)
+  return { tabsBottom: Math.round(tabs.bottom), tabsToQueuePx: top('[data-testid="desk-list"]'), tabsToFirstRowPx: top('[data-testid^="desk-row-"]') }
+})
+// Computed colours of the link and muted ink tokens, to compare the offer's actions with.
+const inks = (page: Page) => page.evaluate(() => {
+  const probe = document.body.appendChild(document.createElement('span'))
+  const ink = (token: string) => { probe.style.color = `var(${token})`; return getComputedStyle(probe).color }
+  const result = { link: ink('--primary-ink'), muted: ink('--ink-3') }
+  probe.remove()
+  return result
 })
 
 test('AEON-1474 Settings and Desk remain still with EN and DE copy at phone tablet and desktop widths in both themes', async ({ context }, testInfo) => {
-  test.setTimeout(120_000)
+  test.setTimeout(240_000)
   const checks: unknown[] = []
   for (const de of [false, true]) for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024, 390]) {
+    const name = `${de ? 'de' : 'en'}-${width}-${theme}`
     const page = await context.newPage()
     await page.setViewportSize({ width, height: 1000 })
-    await setup(page, { theme, de })
+    const world = await setup(page, { theme, de })
     await page.goto('/settings/personal#notifications')
     const card = cardOf(page), toggle = card.getByRole('switch')
     await expect(toggle).toBeEnabled()
     await expect(toggle).toContainText(de ? 'In diesem Browser benachrichtigen' : 'Notify me in this browser')
+    await expect(card.getByRole('status')).toHaveText(de ? 'Für diesen Browser aus' : 'Off for this browser')
+    await expect(card.getByRole('listitem').first()).toContainText(de ? 'hinzugefügt am 1. Okt. 2026' : 'added 1 Oct 2026')
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
-    await card.screenshot({ path: testInfo.outputPath(`settings-${de ? 'de' : 'en'}-${width}-${theme}.png`) })
-    const guard = await controlStability(page, { toggle, row: card.locator('.switch-row') })
+    await card.screenshot({ path: testInfo.outputPath(`settings-off-${name}.png`) })
+    // Off, on and a failed update share the slot: the switch, the slot and the list below stay put.
+    const guard = await controlStability(page, { toggle, row: card.locator('.switch-row'), slot: card.locator('.state-slot') })
     await guard.check(async () => { await toggle.click(); await expect(toggle).toHaveAttribute('aria-checked', 'true') })
-    await card.screenshot({ path: testInfo.outputPath(`settings-enabled-${de ? 'de' : 'en'}-${width}-${theme}.png`) })
+    await card.screenshot({ path: testInfo.outputPath(`settings-on-${name}.png`) })
+    world.control.fail = true
+    await guard.check(async () => { await toggle.click(); await expect(card.getByRole('alert')).toBeVisible() })
+    world.control.fail = false
     await guard.check(async () => { await toggle.click(); await expect(toggle).toHaveAttribute('aria-checked', 'false') })
     guard.done()
     expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
     for (const button of await card.getByRole('button').all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+
     await page.goto('/decision-desk')
     const turnOn = page.getByRole('button', { name: de ? 'Einschalten' : 'Turn on', exact: true })
+    const notNow = page.getByRole('button', { name: de ? 'Nicht jetzt' : 'Not now', exact: true })
     await expect(turnOn).toBeVisible()
-    for (const button of await page.locator('.notice-actions').getByRole('button').all()) {
+    let minimumTarget = Infinity
+    for (const button of [turnOn, notNow]) {
       const box = (await button.boundingBox())!
       expect(box.height).toBeGreaterThanOrEqual(44); expect(box.width).toBeGreaterThanOrEqual(44)
+      minimumTarget = Math.min(minimumTarget, box.height, box.width)
     }
+    // Quiet actions: Turn on in link ink, Not now muted, both in regular weight.
+    const ink = await inks(page)
+    const look = (button: typeof turnOn) => button.evaluate(el => ({ color: getComputedStyle(el).color, weight: getComputedStyle(el).fontWeight }))
+    expect(await look(turnOn)).toEqual({ color: ink.link, weight: '400' })
+    expect(await look(notNow)).toEqual({ color: ink.muted, weight: '400' })
     const header = page.locator('.dp-head'), first = page.locator('[data-testid^="desk-row-"]').first()
     const before = { header: await header.boundingBox(), first: await first.boundingBox() }
+    const below = await belowTabs(page)
+    await page.screenshot({ path: testInfo.outputPath(`desk-${name}.png`) })
+    // The failure takes the offer's own sentence; both actions stay where they were and Turn on retries.
+    const errorGuard = await controlStability(page, { header, turnOn, notNow, first })
+    world.control.fail = true
+    await errorGuard.check(async () => {
+      await turnOn.click()
+      await expect(page.getByTestId('desk-notice-sentence')).toHaveText(de ? 'Benachrichtigungen konnten nicht eingeschaltet werden. Browser-Berechtigung prüfen.' : 'Notifications could not be turned on. Check the browser permission.')
+    })
+    errorGuard.done()
+    await page.screenshot({ path: testInfo.outputPath(`desk-error-${name}.png`) })
+    world.control.fail = false
     const deskGuard = await controlStability(page, { header, first })
-    await page.screenshot({ path: testInfo.outputPath(`desk-${de ? 'de' : 'en'}-${width}-${theme}.png`) })
     await deskGuard.check(async () => {
       await turnOn.click()
       await expect(page.getByRole('status').filter({ hasText: de ? 'Benachrichtigungen für diesen Browser an' : 'Notifications on for this browser' })).toBeVisible()
@@ -279,7 +383,18 @@ test('AEON-1474 Settings and Desk remain still with EN and DE copy at phone tabl
     const movementPx = Math.max(...(['header', 'first'] as const).map(key => Math.abs(after[key]!.y - before[key]!.y)))
     expect(movementPx).toBe(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
-    checks.push({ language: de ? 'de' : 'en', theme, width, movementPx, overflow: false, minimumTargetHeight: 44 })
+    checks.push({ language: de ? 'de' : 'en', theme, width, settingsShiftPx: 0, deskErrorShiftPx: 0, movementPx, overflow: false, minimumTargetPx: Math.floor(minimumTarget), offer: true, ...below })
+    await page.close()
+  }
+  // The same Desk without the offer: its distance below the tabs is the Desk's own layout (Tick item 7).
+  for (const width of [1440, 1024, 390]) {
+    const page = await context.newPage()
+    await page.setViewportSize({ width, height: 1000 })
+    await setup(page, { available: false })
+    await page.goto('/decision-desk')
+    await expect(page.getByTestId('desk-tab-open')).toBeVisible()
+    await expect(page.locator('[data-testid^="desk-row-"]').first()).toBeVisible()
+    checks.push({ language: 'en', theme: 'light', width, offer: false, ...(await belowTabs(page)) })
     await page.close()
   }
   const evidence = JSON.stringify(checks, null, 2)

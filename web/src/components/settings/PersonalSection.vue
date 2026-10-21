@@ -89,7 +89,7 @@ const KEYS: { keys: string[][]; label: string }[] = [
       <SessionWatchingSettings :key="`${session.identity?.tenant.id}/${session.identity?.principal.id}`" />
     </SettingsCard>
 
-    <SettingsCard v-if="session.identity?.principal.kind === 'person' && can('profile.read')" :title="displayLanguage(profile?.locale) === 'de' ? 'Benachrichtigungen' : 'Notifications'" icon="shield" anchor="notifications">
+    <SettingsCard v-if="session.identity?.principal.kind === 'person' && can('profile.read')" :title="displayLanguage(profile?.locale) === 'de' ? 'Benachrichtigungen' : 'Notifications'" icon="bell" anchor="notifications">
       <DeskNotificationSettings :key="`${session.identity?.tenant.id}/${session.identity?.principal.id}`" />
     </SettingsCard>
 
