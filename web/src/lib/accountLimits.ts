@@ -43,7 +43,7 @@ export function missingQuota(harness: string, support?: AgentAccount['reading_su
   if (support === 'statusline') return { short: 'Waiting for the status line', detail: `${name} quota appears when its status line reports it during a run.` }
   if (support === 'every_5_min') return { short: 'Waiting for a quota reading', detail: 'This account reports quota every five minutes. No reading has arrived yet.' }
   if (harness === 'claude' || harness === 'codex') return { short: 'Reads after the first run', detail: `${name} quota readings start with a run on this account. Idle quota reading is not available for this helper.` }
-  return { short: 'Quota source unavailable', detail: `${name} has no supported quota source in PAIMOS.` }
+  return { short: 'Quota reading unavailable', detail: `${name} has not supplied a usable quota reading for this account.` }
 }
 export function readingSupport(harness: string, support?: AgentAccount['reading_support']): string {
   if (support === 'every_5_min') return 'Reads every 5 min'

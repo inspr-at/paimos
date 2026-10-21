@@ -82,6 +82,11 @@ test('no reading: a dashed track and “Quota not reported”, never a guess', (
   assert.deepEqual(quotaCaption(bar, { now: NOW }), { text: 'Quota not reported', tone: '', icon: '' })
   assert.equal(quotaLabel(bar, 'Cursor · markus'), 'Cursor · markus: quota not reported')
   assert.match(said(quotaSentence(bar, { vendor: 'Cursor' })), /doesn’t report its quota/)
+  const unreported = 'Cursor has no supported headless quota source.'
+  assert.equal(quotaCaption(bar, { now: NOW, unreported }).text, unreported)
+  assert.equal(quotaLabel(bar, 'Cursor', '', unreported), `Cursor: ${unreported}`)
+  assert.equal(said(quotaSentence(bar, { vendor: 'Cursor', unreported })), unreported)
+  assert.deepEqual([bar.known, bar.room, bar.limit], [false, null, null])
   // A redacted door is no reading of its own; the capacity window still is one.
   const redacted = quotaBar(quotaInput({ daily: door({ details_redacted: true, used_pct: null, limit_used_pct: null }) }))
   assert.equal(redacted.known, false)

@@ -135,8 +135,8 @@ export const VERDICT_ICON: Record<UsageKind, string> = { fast: 'alert', slow: 'h
 export function usageView(harness: string, group: OutlookGroup | undefined, anchorHour: string | undefined, tz?: string, known: KnownAccount[] = [], read: 'loading' | 'ready' | 'error' = 'ready', truncated = false, sinceMs?: number): UsageView {
   const name = HARNESS_NAME[harness] ?? harness
   const base: UsageView = { harness, name, kind: 'none', group: group ?? null, known, head: 'No accounts yet', short: 'No accounts yet', tip: '', muted: '', stale: false, verdict: '', paceLine: '', focus: null }
-  const missing = missingQuota(harness, known[0]?.reading_support)
-  const unreported = (accounts: string): UsageView => ({ ...base, kind: 'not_reported', head: missing.short, short: `${missing.short} · ${accounts}`, tip: missing.detail, muted: accounts })
+  const missingReading = missingQuota(harness, known[0]?.reading_support)
+  const unreported = (accounts: string): UsageView => ({ ...base, kind: 'not_reported', head: missingReading.short, short: `${missingReading.short} · ${accounts}`, tip: missingReading.detail, muted: accounts })
   if (!group || !group.accounts.length) {
     if (!known.length) return read === 'ready' ? base : { ...base, kind: 'pending', head: '', short: '' }
     const accounts = `${known.length} ${known.length === 1 ? 'account' : 'accounts'}`

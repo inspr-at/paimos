@@ -68,6 +68,8 @@ export interface CascadeStatus { label: string; detail: string; tone: 'neutral' 
 export interface CascadePresentation {
   hosts: CascadeOption[]; harnesses: CascadeOption[]; accounts: CascadeOption[]
   models: CascadeOption[]; efforts: CascadeOption[]; notes: CascadeNotes
+  /** Reserve the account explanation's tallest candidate so later selectors stay put. */
+  accountNotes: string[]
   roleNote: string; profileId: string; agentId: string; status: CascadeStatus; requested: RequestedRun
 }
 export interface CascadeContext {
@@ -383,6 +385,7 @@ export function presentCascade(input: CascadeContext, choice: CascadeChoice, tou
       model: modelNote(choice, touch, account, models, input.role.role),
       effort: effortNote(choice, model, efforts, selectedEffort, account),
     },
+    accountNotes: accounts.flatMap(item => [accountNote(choice, touch, accounts, item, defaultId), accountNote(choice, { ...touch, account: true }, accounts, item, defaultId)]),
     roleNote,
     profileId: selectedEffort?.model_profile_id ?? '',
     agentId: account?.registered_by_principal_id ?? '',

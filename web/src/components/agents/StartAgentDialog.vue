@@ -315,7 +315,10 @@ defineExpose({ open })
               <option value="">Choose an account</option>
               <option v-for="account in view.accounts" :key="account.value" :value="account.value">{{ accountLabel(account.label) }}</option>
             </select>
-            <p v-if="notes.account" :id="`${uid}-account-note`" class="note">{{ notes.account }}</p>
+            <div class="account-notes">
+              <p v-if="notes.account" :id="`${uid}-account-note`" class="note">{{ notes.account }}</p>
+              <p v-for="(text, i) in view.accountNotes" :key="i" class="note sizer" aria-hidden="true">{{ text }}</p>
+            </div>
             <label v-if="choice.accountId" class="remember"><input v-model="remember" type="checkbox"> Remember for this ticket</label>
           </div>
           <div class="pair" :class="{ 'pi-bound': piModelBound }">
@@ -411,6 +414,9 @@ label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; c
 .ticket-results > .note { padding: 12px; }
 .more { margin: 8px 12px; }
 .note { font-size: 12px; line-height: 1.5; color: var(--ink-2); margin-top: 6px; }
+.account-notes { display: grid; }
+.account-notes .note { grid-area: 1 / 1; }
+.account-notes .sizer { visibility: hidden; pointer-events: none; }
 .remember { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 13px; font-weight: 500; color: var(--ink-2); }
 .remember input { margin: 0; }
 .role-note { margin-top: 0; }

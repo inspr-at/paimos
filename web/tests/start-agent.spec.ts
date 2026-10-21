@@ -191,6 +191,19 @@ test('a provisional window is unknown and is not treated as fully unused', async
   const spare = dialog(page).getByRole('option', { name: /Spare account/ })
   await expect(spare).toContainText('Reads after the first run')
   await expect(spare).not.toContainText('100%')
+  const account = dialog(page).getByLabel('Account', { exact: true })
+  const primary = await account.inputValue()
+  await expectStableControls({
+    controls: { account, model: dialog(page).getByLabel('Model', { exact: true }), thinking: dialog(page).getByLabel('Thinking', { exact: true }), queue: dialog(page).getByRole('button', { name: 'Queue run', exact: true }), cancel: dialog(page).getByRole('button', { name: 'Cancel', exact: true }) },
+    scrollAreas: { dialog: dialog(page) },
+    interactions: [{ name: 'select an account without a reading', run: async () => {
+      await account.selectOption(await spare.getAttribute('value') ?? '')
+      await expect(dialog(page).locator('.account-notes > p:not(.sizer)')).toContainText('Idle quota reading is not available for this helper.')
+    } }, { name: 'return to the measured account', run: async () => {
+      await account.selectOption(primary)
+      await expect(dialog(page).locator('.account-notes > p:not(.sizer)')).toContainText('80%')
+    } }],
+  })
 })
 
 test('a stale grant does not queue or fall back, and catalog refresh drops the hidden model', async ({ page }) => {

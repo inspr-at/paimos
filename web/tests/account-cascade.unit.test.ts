@@ -228,7 +228,7 @@ describe('account catalog contract', () => {
     expect(known.filled.accountId).toBe(knownId)
     expect(known.view.notes.account).toContain('most allowance left')
     expect(known.view.notes.account).toContain('30%')
-    expect(known.view.accounts.find(item => item.value === freshId)?.label).toContain('Quota source unavailable')
+    expect(known.view.accounts.find(item => item.value === freshId)?.label).toContain('Quota reading unavailable')
     expect(known.view.accounts.find(item => item.value === freshId)?.label).not.toContain('100%')
     const mixed = account({
       remaining_fraction: null,
@@ -242,7 +242,7 @@ describe('account catalog contract', () => {
     const unranked = presented(inflated)
     expect(unranked.filled.accountId).toBe('')
     expect(unranked.view.notes.account).not.toContain('most allowance left')
-    expect(unranked.view.accounts.find(item => item.value === freshId)?.label).toContain('Quota source unavailable')
+    expect(unranked.view.accounts.find(item => item.value === freshId)?.label).toContain('Quota reading unavailable')
     expect(unranked.view.accounts.find(item => item.value === freshId)?.label).not.toContain('100%')
     const onlyFresh = presented(catalog([account({ remaining_fraction: 1, windows: [unmeasured] })]))
     expect(onlyFresh.view.notes.account).toContain('Idle quota reading is not available for this helper.')
