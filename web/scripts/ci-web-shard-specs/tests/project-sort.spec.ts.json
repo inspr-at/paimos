@@ -9,14 +9,14 @@
     "listedTests": 15,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.497,
-        "median": 2.254,
-        "min": 1.881
+        "max": 3.95,
+        "median": 3.95,
+        "min": 3.95
       },
-      "seconds": 41.763,
-      "selectedTests": 15
+      "seconds": 4.401,
+      "selectedTests": 1
     },
-    "weightSeconds": 33.292683,
-    "weightSource": "unmeasured-test-rate"
+    "weightSeconds": 4.401,
+    "weightSource": "hosted-CI-39565819178"
   }
 }

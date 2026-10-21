@@ -4,6 +4,8 @@ import test from 'node:test'
 import './openapi-sort.test.mjs'
 // AEON-837: the same entry runs the tracked-bytecode regressions.
 import './check-tracked-bytecode.test.mjs'
+// AEON-1605: the same entry runs the backend readiness regressions.
+import './ci/stack-ready.test.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, realpathSync, rmSync, chmodSync, watchFile, unwatchFile } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -47,10 +49,10 @@ test('static CI commands are registered and every origin still exists', () => {
 
 // AEON-1451: the full-mode shard literal lives inside the ci-plan run body.
 // Refreshing that literal without a new not-static inventory digest is unclassified.
-test('ci-plan eighteen-shard full list is classified and a twelve-shard body is not', () => {
+test('ci-plan twenty-shard full list is classified and a twelve-shard body is not', () => {
   const jobs = parseWorkflow(workflow)
   const body = jobs.get('ci-plan').filter(step => step.run).map(step => step.run).join('\n')
-  const fullShards = '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]'
+  const fullShards = '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]'
   const twelve = '[1,2,3,4,5,6,7,8,9,10,11,12]'
   assert.equal(body.split(fullShards).length - 1, 3)
   assert.equal(body.includes(twelve), false)

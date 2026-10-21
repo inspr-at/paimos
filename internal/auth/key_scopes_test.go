@@ -31,6 +31,108 @@ func scopesRequest(m *Module, p tenant.Principal, id, method, body string) *http
 	return w
 }
 
+func TestDeployRecordAgentKeyCeiling(t *testing.T) {
+	// Risk: any agent key can record a deploy, or a granted releases.deploy
+	// key is still refused before the handler. The scope is an outer ceiling.
+	// Project permission, repository linkage and ancestry stay in recordDeploy.
+	project := "/api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/deploys"
+	for _, tc := range []struct {
+		method, path, want string
+		ok                 bool
+	}{
+		{http.MethodPost, project, "releases.deploy", true},
+		{http.MethodGet, project, "", false},
+		{http.MethodPost, project + "/extra", "", false},
+		{http.MethodPost, "/api/projects/not-a-uuid/deploys", "", false},
+	} {
+		got, ok := coreAgentScope(httptest.NewRequest(tc.method, tc.path, nil))
+		if ok != tc.ok || got != tc.want {
+			t.Fatalf("%s %s = %q %v, want %q %v", tc.method, tc.path, got, ok, tc.want, tc.ok)
+		}
+	}
+	if agentHasScope([]string{"nodes.read", "releases.read", "releases.write"}, "releases.deploy") || !agentHasScope([]string{"releases.deploy"}, "releases.deploy") {
+		t.Fatal("unrelated key scopes satisfy releases.deploy")
+	}
+	m, owner := keyFixture(t)
+	ctx := dbtest.Seed(t.Context())
+	var agentID string
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','OPS') RETURNING id::text`, owner.TenantID).Scan(&agentID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='admin'`, owner.TenantID, agentID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	key := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "ops", "principal_id": agentID, "scopes": []string{"nodes.read"}}))
+	if slices.Contains(key.Scopes, "releases.deploy") {
+		t.Fatal("admin key was created with releases.deploy")
+	}
+	plain := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "plain-worker", "scopes": []string{"nodes.read"}}))
+	if slices.Contains(plain.Scopes, "releases.deploy") {
+		t.Fatal("new key received releases.deploy")
+	}
+	entered := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/projects/{projectId}/deploys", func(w http.ResponseWriter, _ *http.Request) {
+		entered = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	secured := m.Middleware(mux)
+	call := func(token string) (int, string) {
+		t.Helper()
+		entered = false
+		r := httptest.NewRequest(http.MethodPost, project, strings.NewReader(`{"environment":"production","sha":"`+strings.Repeat("ab", 20)+`"}`))
+		r.Pattern = "POST /api/projects/{projectId}/deploys"
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		secured.ServeHTTP(w, r)
+		var body map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		reason, _ := body["reason_code"].(string)
+		scope, _ := body["scope"].(string)
+		if scope != "" {
+			reason += ":" + scope
+		}
+		return w.Code, reason
+	}
+	if code, reason := call(key.Token); code != 403 || reason != "missing_key_scope:releases.deploy" || entered {
+		t.Fatalf("scope missing: status=%d reason=%s entered=%v", code, reason, entered)
+	}
+	agent := tenant.Principal{ID: agentID, TenantID: owner.TenantID, Kind: tenant.Agent, Scopes: key.Scopes}
+	if w := scopesRequest(m, agent, key.ID, "PATCH", `{"add":["releases.deploy"]}`); w.Code != 403 {
+		t.Fatalf("agent grant status %d", w.Code)
+	}
+	if w := scopesRequest(m, owner, key.ID, "PATCH", `{"add":["releases.deploy"]}`); w.Code != 200 {
+		t.Fatalf("person grant status %d", w.Code)
+	}
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		var audited bool
+		if err := tx.QueryRow(ctx, `SELECT count(*)=1 AND bool_and(actor_principal_id=$1::uuid AND before->>'key_id'=$2 AND after->>'key_id'=$2 AND after->'scopes' ? 'releases.deploy' AND NOT (before->'scopes' ? 'releases.deploy')) FROM events WHERE type='agent_key.scopes_changed'`, owner.ID, key.ID).Scan(&audited); err != nil {
+			return err
+		}
+		if !audited {
+			t.Error("person grant did not audit releases.deploy")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if code, reason := call(key.Token); code != http.StatusNoContent || reason != "" || !entered {
+		t.Fatalf("granted key: status=%d reason=%s entered=%v", code, reason, entered)
+	}
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE role_bindings b SET role_id=r.id FROM roles r WHERE b.tenant_id=r.tenant_id AND b.principal_id=$1 AND r.key='member'`, agentID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if code, reason := call(key.Token); code != 403 || reason != "missing_role_permission" || entered {
+		t.Fatalf("scope without project permission: status=%d reason=%s entered=%v", code, reason, entered)
+	}
+}
+
 func TestKeyScopeChangesImmediateAuditedAndBounded(t *testing.T) {
 	m, owner := keyFixture(t)
 	key := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "scope-worker", "scopes": []string{"nodes.read", "harness.worker", "events.read"}}))

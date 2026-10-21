@@ -8,11 +8,11 @@
     "file": "tests/work-aggregates.spec.ts",
     "tierTiming": {
       "caseSeconds": {
-        "max": 8.397,
-        "median": 6.096,
-        "min": 3.618
+        "max": 9.032,
+        "median": 5.867,
+        "min": 3.103
       },
-      "seconds": 178.299,
+      "seconds": 167.776,
       "selectedTests": 29
     },
     "weightSeconds": 60

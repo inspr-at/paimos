@@ -21,12 +21,14 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await page.getByLabel('Pairing code').fill('123-456-789')
     await page.getByRole('button', { name: 'Look up code' }).click()
     const review = page.getByRole('region', { name: 'Pairing review' })
+    // AEON-1502: the per-account choice sits behind Details.
+    await review.locator('details.more > summary').click()
     await expect(review.getByRole('checkbox', { name: /Connect account/ })).toHaveCount(5)
     const clicked = review.getByRole('checkbox', { name: `Connect account ${accounts[1]!.label}`, exact: true })
     const guard = await controlStability(page, {
-      connect: review.getByRole('button', { name: 'Connect your machine', exact: true }),
+      connect: review.getByRole('button', { name: 'Pair', exact: true }),
       deny: review.getByRole('button', { name: 'Deny', exact: true }),
-      selectors: review.locator('.harness').first(),
+      selectors: review.locator('.harness-row dd').first(),
       selectedRow: clicked.locator('..'),
       clicked,
     })
@@ -34,7 +36,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await guard.check(() => clicked.check())
     guard.done()
     await page.screenshot({ path: testInfo.outputPath(`pairing-${width}-${theme}.png`), fullPage: true })
-    await review.getByRole('button', { name: 'Connect your machine', exact: true }).click()
+    await review.getByRole('button', { name: 'Pair', exact: true }).click()
     await expect.poll(() => calls.some(call => call.path.endsWith('/approve'))).toBe(true)
     const approval = calls.find(call => call.path.endsWith('/approve'))!.body as { selected_account_keys: string[] }
     expect(approval.selected_account_keys).toEqual(accounts.map(account => account.account_key))

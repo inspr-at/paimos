@@ -51,6 +51,7 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || 'origin/main' }}
           AEON_501_SHOTS: ${{ runner.temp }}/aeon-501-shots
+          AEON_REQUIRE_BACKEND: 'off'
         run: |
           set -euo pipefail
           cp src/components/agents/SessionList.vue "$RUNNER_TEMP/candidate-session-list.vue"

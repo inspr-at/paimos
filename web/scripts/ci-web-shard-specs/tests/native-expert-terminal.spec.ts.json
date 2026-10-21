@@ -9,12 +9,12 @@
     "listedTests": 5,
     "tierTiming": {
       "caseSeconds": {
-        "max": 11.893,
-        "median": 1.123,
-        "min": 0.572
+        "max": 2.788,
+        "median": 0.759,
+        "min": 0.513
       },
-      "seconds": 21.548,
-      "selectedTests": 5
+      "seconds": 4.357,
+      "selectedTests": 3
     },
     "weightSeconds": 10,
     "weightSource": "aeon-1289-guarded-serial-wall-5.3s-with-headroom"

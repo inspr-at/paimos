@@ -7,10 +7,15 @@
   "spec": {
     "file": "tests/hide-states.spec.ts",
     "tierTiming": {
-      "seconds": 74.995,
-      "selectedTests": 32
+      "caseSeconds": {
+        "max": 18.584,
+        "median": 5.735,
+        "min": 3.994
+      },
+      "seconds": 313.709,
+      "selectedTests": 39
     },
-    "weightSeconds": 60,
-    "weightSource": "unmeasured-estimate"
+    "weightSeconds": 313.709,
+    "weightSource": "hosted-CI-39561617303"
   }
 }

@@ -7,7 +7,9 @@ import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
 import PairingUsePreview from '../components/agents/PairingUsePreview.vue'
 import { resilientFetch } from '../lib/api'
+import { addHarnessCommand, deadlineMoment, pairingCopy } from '../lib/attachCopy'
 import { brand } from '../lib/brand'
+import { displayLanguage } from '../lib/displayLanguage'
 import { harnessLabel } from '../lib/agentState'
 import { myPermissions, onAccessRevalidate, refreshPermissions } from '../lib/authz'
 import { rememberSignInReturn } from '../lib/signInReturn'
@@ -16,7 +18,7 @@ import { PairingFollow } from '../lib/pairingFollow'
 import {
   DEFAULT_REVIEW_CHOICE, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
   addHarnessTargetProblem, approvePairedAccounts, defaultSelectedAccountKeys, denyPairing, describeHarnessStatus, describeProgress,
-  formatAllowanceMoment, formatVerification, getPairingComputer, getPairingGuide,
+  getPairingComputer, getPairingGuide,
   isAddHarness, lookupPairing, pairingLiveCopy, pairingPermissions,
   pairingEventScope, pairingReadGeneration, peekPairingCode, platformCaption, presentPublicGuide, subscribePairingEvents,
   rememberPairingCode, setHarnessAccount, submitApproval, takePairingCode,
@@ -39,8 +41,11 @@ const current = ref<PairingView | null>(null)
 const verify = ref(true)
 const verificationChoice = ref(false)
 const connectButton = ref<HTMLButtonElement | null>(null)
-const connectOnlyButton = ref<HTMLButtonElement | null>(null)
+const verifyInput = ref<HTMLInputElement | null>(null)
 const reviewTitle = ref<HTMLElement | null>(null)
+// AEON-1502: everything beyond the one sentence sits behind Details, closed by default.
+const detailsOpen = ref(false)
+const words = computed(() => pairingCopy(displayLanguage(), brand.value.short_name))
 const allowAgents = ref(true)
 const approvalPending = ref(false)
 const selected = ref<string[]>([])
@@ -91,6 +96,30 @@ const accountGroups = computed(() => {
 })
 const terms = computed(() => verify.value ? current.value?.verification ?? null : null)
 const pendingReview = computed(() => current.value?.state === 'pending')
+// An expired or denied request is one sentence and one next step.
+const ended = computed(() => progress.value?.phase === 'expired' || progress.value?.phase === 'denied')
+const asking = computed(() => pendingReview.value && !ended.value)
+const harnessNames = computed(() => accountGroups.value.map(group => harnessLabel(group.harness)))
+const titleParts = computed(() => {
+  const view = current.value
+  if (!view) return []
+  if (!addRequest.value) return words.value.pairTitle(view.computer_name, view.tenant_name)
+  return words.value.addTitle(accountGroups.value.map(group => ({ name: harnessLabel(group.harness), account: accountName(group.harness) })), view.computer_name)
+})
+const limitLines = computed(() => terms.value ? words.value.limits(terms.value, deadlineMoment(terms.value.expires_at, displayLanguage())) : [])
+const endedParts = computed(() => {
+  const view = current.value
+  if (!view || !ended.value) return []
+  const adding = !!view.existing_computer_id
+  if (progress.value?.phase === 'expired') return adding ? words.value.expiredAdd(harnessNames.value, view.computer_name) : words.value.expiredPair(view.computer_name, view.tenant_name)
+  return adding ? words.value.deniedAdd(harnessNames.value, view.computer_name) : words.value.deniedPair(view.computer_name, view.tenant_name)
+})
+// Today's commands: add-harness for an existing computer, the guide's pair command when this page has it.
+const endedCommand = computed(() => {
+  const view = current.value
+  if (!view || !ended.value) return ''
+  return view.existing_computer_id ? addHarnessCommand(accountGroups.value.map(group => group.harness)) : presentation.value?.setupCommand ?? ''
+})
 const targetProblem = computed(() => current.value ? addHarnessTargetProblem({
   view: current.value,
   requestedComputerId: requestedComputer.value,
@@ -105,9 +134,9 @@ const connectReason = computed(() => connectDisabledReason({
 const denyReason = computed(() => denyDisabledReason({ busy: busy.value, canDeny: permissions.value.canDeny }))
 // One live region at the buttons, rendered before it has text, so a reason or
 // the verification choice is announced when it appears (AEON-402).
-const actionNote = computed(() => connectReason.value
-  || (verificationChoice.value ? `${listNames(blockedLabels.value)} can’t be verified — ${addRequest.value ? 'add' : 'connect'} without verification, or leave them out.` : '')
-  || denyReason.value || '')
+const actionNote = computed(() => (connectReason.value && words.value.reason(connectReason.value))
+  || (verificationChoice.value ? words.value.choice(blockedLabels.value) : '')
+  || (denyReason.value && words.value.reason(denyReason.value)) || '')
 const selectedHarnesses = computed(() => {
   const view = current.value
   if (!view) return [] as string[]
@@ -133,14 +162,13 @@ const verificationBlocked = computed(() => {
 const verifyNote = computed(() => {
   if (!pendingReview.value || !current.value) return ''
   if (verifyLocked.value) {
-    if (!current.value.verification_capabilities) return `This ${brand.value.short_name} has not said which harnesses can be verified.`
-    const names = listNames(blockedLabels.value)
-    return names ? `${names} can’t be verified.` : 'Verification is unavailable.'
+    if (!current.value.verification_capabilities) return words.value.notSaid
+    return blockedLabels.value.length ? words.value.cannotVerify(blockedLabels.value) : words.value.unavailable
   }
   if (!verify.value || !verifiableLabels.value.length) return ''
   return blockedLabels.value.length
-    ? `${listNames(verifiableLabels.value)} can be verified. ${listNames(blockedLabels.value)} can’t be verified.`
-    : `${listNames(verifiableLabels.value)} will be verified.`
+    ? `${words.value.canVerify(verifiableLabels.value)} ${words.value.cannotVerify(blockedLabels.value)}`
+    : words.value.willVerify(verifiableLabels.value)
 })
 watch(verifyLocked, locked => { if (locked) verify.value = false })
 watch([verify, selected, current], () => { verificationChoice.value = false })
@@ -204,6 +232,7 @@ function clearSignedInPreview() {
   grantedKeys.value = null
   approvalPending.value = false
   allowAgents.value = true
+  detailsOpen.value = false
   message.value = ''
   nextStep.value = ''
   busy.value = ''
@@ -255,7 +284,9 @@ async function lookup() {
     const found = await lookupPairing(code.value)
     if (started !== pairingReadGeneration()) return
     current.value = found
-    selected.value = defaultSelectedAccountKeys(found.requested_accounts)
+    // A harness the computer reports as signed out is never selected (AEON-1502); every other default is today's.
+    selected.value = defaultSelectedAccountKeys(found.requested_accounts).filter(key => !signedOut(found, found.requested_accounts.find(account => account.account_key === key)?.harness ?? ''))
+    detailsOpen.value = false
     grantedKeys.value = null
     verify.value = verifiableHarnesses(found, selected.value).length > 0
     allowAgents.value = true
@@ -275,10 +306,12 @@ function choice(): ReviewChoice {
 
 async function connect() {
   if (!current.value || connectReason.value) return
+  // The choice is made in Details: verification off, or the harnesses left out. Nothing is sent before that.
   if (verificationBlocked.value.length) {
     verificationChoice.value = true
+    detailsOpen.value = true
     await nextTick()
-    connectOnlyButton.value?.focus()
+    verifyInput.value?.focus()
     return
   }
   message.value = ''
@@ -310,24 +343,6 @@ async function connect() {
     await nextTick()
     connectButton.value?.focus()
   }
-}
-
-async function connectWithoutVerification() {
-  if (connectReason.value) return
-  verify.value = false
-  verificationChoice.value = false
-  // The choice buttons are gone: focus the review title, which stays through the result.
-  await nextTick()
-  reviewTitle.value?.focus()
-  await connect()
-}
-
-async function leaveUnverifiableOut() {
-  if (!current.value || connectReason.value) return
-  selected.value = verifiableAccountKeys(current.value, selected.value)
-  verificationChoice.value = false
-  await nextTick()
-  connectButton.value?.focus()
 }
 
 async function approveAccounts(pairing = current.value, keys = grantedKeys.value ?? []) {
@@ -370,6 +385,7 @@ async function deny() {
 
 function resetCode() {
   current.value = null
+  detailsOpen.value = false
   grantedKeys.value = null
   approvalPending.value = false
   message.value = ''
@@ -414,6 +430,17 @@ async function copyText(value: string, label: string) {
     message.value = `${label} could not be copied.`
     nextStep.value = 'Select the text and copy it from the page.'
   }
+}
+
+/** The computer reported this harness as signed out; it cannot be selected here. */
+function signedOut(view: PairingView | null, harness: string) {
+  return !!view && (view.harness_details?.[harness]?.state === 'login_required' || view.harness_statuses?.[harness] === 'login_required')
+}
+
+/** The accounts the computer found for a harness: its login, or a count. It never follows Details choices, so nothing above them moves. */
+function accountName(harness: string) {
+  const accounts = current.value?.requested_accounts.filter(account => account.harness === harness) ?? []
+  return accounts.length === 1 ? accounts[0]!.label : words.value.accounts(accounts.length)
 }
 
 function selectedKey(harness: string) {
@@ -468,11 +495,6 @@ function harnessReason(harness: string) {
   return rest.charAt(0).toUpperCase() + rest.slice(1)
 }
 
-function listNames(names: string[]) {
-  if (names.length < 2) return names[0] ?? ''
-  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
-}
-
 function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
   const parts: string[] = [enrollment.state.replace(/_/g, ' ')]
   if (enrollment.verification_state && enrollment.verification_state !== 'not_selected') {
@@ -487,14 +509,14 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 
 <template>
   <article class="connect" data-aeon-pairing-guide="pairing-v1">
-    <header class="intro">
+    <header v-if="!asking && !ended" class="intro">
       <p class="eyebrow">Agents</p>
       <h1>Connect your machine</h1>
       <p class="lede">{{ adding ? 'Add a harness on a computer that is already paired. It keeps the same daemon.' : 'Pair a computer with agentd; no API key needed.' }}</p>
       <p class="key-path">For a CLI or script, <RouterLink to="/settings/access/agents?new=1">create an agent and key</RouterLink>.</p>
     </header>
 
-    <ol class="steps" aria-label="Setup progress">
+    <ol v-if="!asking && !ended" class="steps" aria-label="Setup progress">
       <li v-for="(label, index) in STEPS" :key="label" :class="{ done: step > index + 1, current: step === index + 1 }">
         <span class="num" aria-hidden="true"><AppIcon v-if="step > index + 1" name="check" :size="12" /><template v-else>{{ index + 1 }}</template></span>
         <span>{{ label }}</span>
@@ -502,8 +524,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
     </ol>
 
     <p v-if="!online" class="banner" role="status"><AppIcon name="alert" :size="15" />You appear to be offline. The guide can still be read. Lookup, approval and disconnect need a connection.</p>
-    <p v-if="addRequest && !targetProblem" class="banner">Adding a harness on {{ current?.computer_name }}. It keeps the same daemon. This page does not send a lifecycle secret.</p>
-    <p v-else-if="addTarget && !current" class="banner">Adding a harness on {{ addTarget.computer_name }}. Start that on the computer, then enter the new code here. This page does not send a lifecycle secret.</p>
+    <p v-if="addTarget && !current" class="banner">Adding a harness on {{ addTarget.computer_name }}. Start that on the computer, then enter the new code here. This page does not send a lifecycle secret.</p>
     <p v-else-if="requestedComputer && session.identity && !current" class="banner">Enter the code from the computer you are adding a harness to.</p>
 
     <section v-if="!current" class="card">
@@ -616,16 +637,101 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
       </details>
     </section>
 
-    <section v-else-if="progress" class="card" aria-live="polite" aria-label="Pairing review">
+    <section v-else-if="progress" class="card" :class="{ ask: asking || ended }" aria-live="polite" aria-label="Pairing review">
+      <!-- AEON-1502: the routine approval is one sentence, Add or Deny; everything else is behind Details. -->
+      <template v-if="asking">
+        <header class="ask-head">
+          <h1 ref="reviewTitle" tabindex="-1" class="ask-title" data-review-title><template v-for="(part, index) in titleParts" :key="index"><span v-if="part.kind === 'account'" class="acct">{{ part.text }}</span><span v-else-if="part.kind === 'computer'" class="host">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></h1>
+          <button type="button" class="btn sm ghost" :disabled="!!busy" @click="resetCode">{{ words.otherCode }}</button>
+        </header>
+        <ul v-if="addRequest && accountGroups.length > 1" class="harness-list">
+          <li v-for="group in accountGroups" :key="group.harness"><HarnessMark :harness="group.harness" :size="16" /><span class="name">{{ harnessLabel(group.harness) }}</span><span class="acct">{{ accountName(group.harness) }}</span></li>
+        </ul>
+        <ul v-else-if="!addRequest" class="harness-list checklist">
+          <li v-for="group in accountGroups" :key="group.harness" class="harness" :class="{ off: signedOut(current, group.harness) }">
+            <label class="check">
+              <input type="checkbox" :checked="!!selectedKey(group.harness) && !signedOut(current, group.harness)" :disabled="signedOut(current, group.harness)" :aria-label="words.connectHarness(harnessLabel(group.harness))" @change="toggleHarness(group.harness, group.accounts, ($event.target as HTMLInputElement).checked)" />
+              <HarnessMark :harness="group.harness" :size="16" />
+              <span class="name">{{ harnessLabel(group.harness) }}</span>
+              <span class="acct">{{ signedOut(current, group.harness) ? words.notSignedIn : accountName(group.harness) }}</span>
+            </label>
+          </li>
+        </ul>
+        <p v-if="targetProblem" class="problem" role="alert">{{ targetProblem.message }} {{ targetProblem.next }}</p>
+        <button v-if="targetProblem" type="button" class="btn sm" @click="reviewAsNewComputer">{{ words.newComputer }}</button>
+        <p class="facts-line" data-review-facts>{{ words.facts(verify, allowAgents) }}</p>
+        <p class="role" data-review-role><AppIcon name="users" :size="15" />{{ words.role }}</p>
+
+        <div class="actions">
+          <button ref="connectButton" class="btn primary go" type="button" :disabled="!!connectReason" :aria-describedby="connectReason || verificationChoice ? 'connect-reason' : undefined" @click="connect">{{ busy === 'approve' ? (addRequest ? words.adding : words.pairing) : addRequest ? words.add : words.pair }}</button>
+          <button class="btn go" type="button" :disabled="!!denyReason" :aria-describedby="denyReason ? 'connect-reason' : undefined" @click="deny">{{ words.deny }}</button>
+          <p id="connect-reason" class="connect-reason" role="status">{{ actionNote }}</p>
+        </div>
+
+        <details class="more" :open="detailsOpen" @toggle="detailsOpen = ($event.target as HTMLDetailsElement).open">
+          <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />{{ words.details }}</summary>
+          <dl class="rows">
+            <div class="row"><dt>{{ words.workspace }}</dt><dd>{{ current.tenant_name }} · {{ platformCaption(current.platform, current.arch) }}</dd></div>
+            <div class="row"><dt>{{ words.folder }}</dt><dd class="path">{{ current.workspace_path }}</dd></div>
+            <div v-for="group in accountGroups" :key="group.harness" class="row harness-row">
+              <dt>{{ words.account(harnessLabel(group.harness)) }}</dt>
+              <dd>
+                <div v-if="isolatedAccounts(group.accounts)" class="account-pick">
+                  <label v-for="account in group.accounts" :key="account.account_key" class="check">
+                    <input type="checkbox" :checked="selected.includes(account.account_key)" :disabled="signedOut(current, group.harness)" :aria-label="words.connectAccount(account.label)" @change="toggleAccount(account.account_key, ($event.target as HTMLInputElement).checked)" />
+                    <span>{{ account.label }}</span>
+                  </label>
+                </div>
+                <select v-else class="field account-pick" :value="selectedKey(group.harness)" :disabled="signedOut(current, group.harness)" :aria-label="words.accountFor(harnessLabel(group.harness))" @change="chooseAccount(group.harness, ($event.target as HTMLSelectElement).value)">
+                  <option value="">{{ words.leaveOut }}</option>
+                  <option v-for="account in group.accounts" :key="account.account_key" :value="account.account_key">{{ account.label }}</option>
+                </select>
+                <p v-if="verify && harnessCapability(group.harness).length" class="harness-note"><AppIcon name="info" :size="14" />{{ harnessReason(group.harness) }}</p>
+              </dd>
+            </div>
+            <div class="row">
+              <dt>{{ words.verification }}</dt>
+              <dd class="verify" :class="{ locked: verifyLocked }">
+                <label class="check"><input ref="verifyInput" v-model="verify" type="checkbox" :disabled="verifyLocked" /><span>{{ words.verifyLabel }}</span></label>
+                <p v-if="verifyNote" class="sub" :title="blockedHarnesses.map(harness => harnessCapability(harness)[0]?.reason).filter(Boolean).join(' ')">{{ verifyNote }}</p>
+                <template v-if="verify && terms && !blockedLabels.length">
+                  <p v-for="line in limitLines" :key="line" class="limits">{{ line }}</p>
+                  <p v-if="verificationWarning(terms)" class="problem" role="alert">{{ words.limitsDiffer }}</p>
+                </template>
+                <p v-if="verify && !verifyLocked && !current.verification" class="problem">{{ words.noTerms }}</p>
+              </dd>
+            </div>
+            <PairingUsePreview :language="displayLanguage()" />
+            <div class="row">
+              <dt><label for="after-connecting">{{ words.after }}</label></dt>
+              <dd>
+                <select id="after-connecting" class="field" :value="allowAgents ? 'use' : 'paused'" @change="allowAgents = ($event.target as HTMLSelectElement).value === 'use'">
+                  <option value="use">{{ words.allowAgents }}</option>
+                  <option value="paused">{{ words.keepPaused }}</option>
+                </select>
+              </dd>
+            </div>
+          </dl>
+          <p class="keep"><AppIcon name="shield" :size="14" />{{ words.footer }}</p>
+        </details>
+      </template>
+
+      <template v-else-if="ended">
+        <header class="ask-head">
+          <h1 ref="reviewTitle" tabindex="-1" class="ask-title ended-title" data-review-title><template v-for="(part, index) in endedParts" :key="index"><span v-if="part.kind === 'computer'" class="host">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></h1>
+          <button type="button" class="btn sm ghost" :disabled="!!busy" @click="resetCode">{{ words.otherCode }}</button>
+        </header>
+        <p class="facts-line next-step" data-review-next><template v-if="endedCommand"><template v-for="(part, index) in words.runAgain(endedCommand, current.computer_name)" :key="index"><code v-if="part.kind === 'command'" class="command-inline">{{ part.text }}</code><span v-else-if="part.kind === 'computer'" class="host">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></template><template v-else>{{ words.newRequest }}</template></p>
+      </template>
+
+      <template v-else>
       <header class="review-head">
         <div>
-          <h2 ref="reviewTitle" tabindex="-1">{{ adding && pendingReview ? 'Add a harness' : pendingReview ? 'Review this computer' : liveCopy?.title }}</h2>
-          <p>{{ pendingReview ? 'Confirm the details and choose which harnesses to connect.' : liveCopy?.detail }}</p>
+          <h2 ref="reviewTitle" tabindex="-1">{{ liveCopy?.title }}</h2>
+          <p>{{ liveCopy?.detail }}</p>
         </div>
         <button type="button" class="btn sm ghost" :disabled="!!busy" @click="resetCode">Use a different code</button>
       </header>
-      <p v-if="targetProblem" class="problem" role="alert">{{ targetProblem.message }} {{ targetProblem.next }}</p>
-      <button v-if="targetProblem" type="button" class="btn sm" @click="reviewAsNewComputer">Review as a new computer</button>
 
       <div class="facts">
         <div><span class="glyph"><AppIcon name="monitor" :size="16" /></span><div><p class="k">Computer</p><p>{{ current.computer_name }}</p><p class="sub">{{ [platformCaption(current.platform, current.arch), ...current.capabilities.map(capability)].join(' · ') }}</p></div></div>
@@ -633,53 +739,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         <div><span class="glyph"><AppIcon name="folder" :size="16" /></span><div><p class="k">Folder</p><p class="path" :data-tip="current.workspace_path"><span class="path-head">{{ pathParts(current.workspace_path).head }}</span><span class="path-tail">{{ pathParts(current.workspace_path).tail }}</span></p></div></div>
       </div>
 
-      <template v-if="pendingReview">
-        <h3>Harnesses</h3>
-        <p class="sub">Several accounts can connect to the same harness when each has a separate isolated config home. Without isolation, choose one account.</p>
-        <div v-for="group in accountGroups" :key="group.harness" class="harness">
-          <label class="check">
-            <input type="checkbox" :checked="!!selectedKey(group.harness)" :aria-label="`Connect ${harnessLabel(group.harness)}`" @change="toggleHarness(group.harness, group.accounts, ($event.target as HTMLInputElement).checked)" />
-            <HarnessMark :harness="group.harness" />
-            <span>{{ harnessLabel(group.harness) }}</span>
-          </label>
-          <div v-if="isolatedAccounts(group.accounts)" class="account-pick">
-            <label v-for="account in group.accounts" :key="account.account_key" class="check">
-              <input type="checkbox" :checked="selected.includes(account.account_key)" :aria-label="`Connect account ${account.label}`" @change="toggleAccount(account.account_key, ($event.target as HTMLInputElement).checked)" />
-              <span>{{ account.label }}</span>
-            </label>
-          </div>
-          <label v-else class="account-pick">
-            <span class="sr">Account for {{ harnessLabel(group.harness) }}</span>
-            <select class="field" :value="selectedKey(group.harness)" :aria-label="`Account for ${harnessLabel(group.harness)}`" @change="chooseAccount(group.harness, ($event.target as HTMLSelectElement).value)">
-              <option value="">Leave out</option>
-              <option v-for="account in group.accounts" :key="account.account_key" :value="account.account_key">{{ account.label }}</option>
-            </select>
-          </label>
-          <p v-if="verify && harnessCapability(group.harness).length" class="harness-note"><AppIcon name="info" :size="14" />{{ harnessReason(group.harness) }}</p>
-        </div>
-
-        <label class="verify" :class="{ locked: verifyLocked }">
-          <input v-model="verify" type="checkbox" :disabled="verifyLocked" />
-          <span>
-            <strong>Verify selected harnesses</strong>
-            <span v-if="verifyNote" class="sub" :title="blockedHarnesses.map(harness => harnessCapability(harness)[0]?.reason).filter(Boolean).join(' ')">{{ verifyNote }}</span>
-            <span v-if="verify && terms && !blockedLabels.length" class="sub">{{ formatVerification(terms) }}</span>
-          </span>
-          <time v-if="verify && terms && !blockedLabels.length" class="expiry" :datetime="terms.expires_at"><AppIcon name="clock" :size="14" />until {{ formatAllowanceMoment(terms.expires_at) }}</time>
-        </label>
-        <p v-if="verify && terms && !blockedLabels.length && verificationWarning(terms)" class="problem" role="alert">{{ verificationWarning(terms) }}</p>
-        <p v-if="verify && !verifyLocked && !current.verification" class="problem">The server did not include verification terms. Leave verification off, or look the code up again.</p>
-
-        <PairingUsePreview />
-
-        <fieldset>
-          <legend>After connecting</legend>
-          <label class="radio"><input v-model="allowAgents" type="radio" :value="true" /> <span><strong>Let agents use these accounts</strong><span class="sub">{{ brand.short_name }} reads their limits and follows your plan.</span></span></label>
-          <label class="radio"><input v-model="allowAgents" type="radio" :value="false" /> <span><strong>Keep agents paused</strong><span class="sub">Turn them on later in Settings / Accounts.</span></span></label>
-        </fieldset>
-      </template>
-
-      <div v-else class="progress-copy">
+      <div class="progress-copy">
         <p>{{ liveCopy?.next }}</p>
         <ul class="enrollments">
           <li v-for="enrollment in current.enrollments" :key="enrollment.account_id">
@@ -694,17 +754,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         <p v-if="grantedKeys && !approvalPending" class="sub">{{ allowAgents ? 'Agents may use the selected accounts once setup finishes.' : 'Agents stay paused. Turn them on in Settings / Accounts.' }}</p>
         <button v-if="approvalPending && permissions.canApproveAccounts" type="button" class="btn sm" :disabled="!!busy" @click="retryAccountApproval">Retry account approval</button>
       </div>
-
-      <div v-if="pendingReview" class="actions" :role="verificationChoice ? 'group' : undefined" :aria-label="verificationChoice ? 'Verification choice' : undefined">
-        <p id="connect-reason" class="connect-reason" :class="{ quiet: !actionNote }" role="status">{{ actionNote }}</p>
-        <template v-if="verificationChoice">
-          <button ref="connectOnlyButton" class="btn primary go" type="button" :disabled="!!connectReason" aria-describedby="connect-reason" @click="connectWithoutVerification">{{ addRequest ? 'Add without verification' : 'Connect without verification' }}</button>
-          <button class="btn" type="button" :disabled="!!connectReason" @click="leaveUnverifiableOut">Leave them out</button>
-        </template>
-        <button v-else ref="connectButton" class="btn primary go" type="button" :disabled="!!connectReason" :aria-describedby="connectReason ? 'connect-reason' : undefined" @click="connect">{{ busy === 'approve' ? (addRequest ? 'Adding…' : 'Connecting…') : addRequest ? 'Add harness' : 'Connect your machine' }}</button>
-        <button class="btn" type="button" :disabled="!!denyReason" :aria-describedby="denyReason ? 'connect-reason' : undefined" @click="deny">Deny</button>
-        <p class="keep"><AppIcon name="shield" :size="14" />Vendor sign-ins and project files stay on the computer.</p>
-      </div>
+      </template>
     </section>
 
     <p v-if="message" class="problem" role="alert">{{ message }}</p>
@@ -778,35 +828,59 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .path { display: flex; min-width: 0; overflow: hidden; }
 .path-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .path-tail { flex: none; white-space: nowrap; }
-.harness, .verify, .radio { display: flex; align-items: center; gap: 10px; min-height: 52px; margin-top: 8px; padding: 10px 12px; border-radius: 12px; background: var(--surface-sunken); }
-.harness { justify-content: space-between; flex-wrap: wrap; }
-.check, .verify, .radio { cursor: pointer; }
-.check { display: flex; align-items: center; gap: 10px; min-width: 0; font-weight: 600; }
-.check input, .verify input, .radio input { width: 16px; height: 16px; margin: 0; flex-shrink: 0; accent-color: var(--teal); }
-.harness-note { display: flex; align-items: flex-start; gap: 6px; flex-basis: 100%; margin: 0; padding-left: 26px; font-size: 13px; color: var(--ink-2); }
+/* AEON-1502: the ask. One sentence, the facts line, the role line, Add or Deny, then Details. */
+.card.ask { padding: 24px 24px 18px; }
+.ask-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.ask-head .btn { flex-shrink: 0; margin-top: 4px; }
+.ask-title { min-width: 0; font: 400 clamp(22px, 2.2vw, 27px)/1.3 var(--serif); letter-spacing: -.015em; overflow-wrap: anywhere; text-wrap: pretty; }
+.ask-title:focus { outline: none; }
+.ask-title .acct { font: 500 .66em/1.3 var(--font); letter-spacing: 0; color: var(--ink-2); }
+.ask-title .host { font: 500 .8em/1.3 var(--mono); letter-spacing: 0; }
+/* Not .who: base.css gives .who a phone touch overlay that would sit over these checkboxes. */
+.harness-list { display: grid; gap: 2px; margin: 12px 0 0; padding: 0; list-style: none; }
+.harness-list li { display: flex; align-items: center; gap: 10px; min-height: 32px; min-width: 0; font-size: 14px; }
+.harness-list .name { font-weight: 600; }
+.harness-list .acct { min-width: 0; overflow-wrap: anywhere; color: var(--ink-2); font-size: 13px; }
+.checklist .check { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 36px; cursor: pointer; }
+.checklist .off .check { cursor: default; color: var(--ink-3); }
+.checklist .off .name { color: var(--ink-3); }
+.check input { width: 16px; height: 16px; margin: 0; flex-shrink: 0; accent-color: var(--teal); }
+.facts-line { margin-top: 14px; color: var(--ink-2); font-size: 13.5px; }
+.role { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: var(--ink-2); font-size: 13.5px; }
+.role svg { flex-shrink: 0; color: var(--ink-3); }
+.ask .actions { margin-top: 18px; padding-top: 0; border-top: 0; }
+.ask > .problem { margin: 12px 0 8px; }
+.next-step { margin-top: 12px; }
+.command-inline { padding: 1px 6px; border-radius: 6px; background: var(--surface-sunken); font: 12.5px/1.6 var(--mono); overflow-wrap: anywhere; }
+.next-step .host { font: 500 12.5px/1.6 var(--mono); }
+/* Details grows downward only: nothing above it moves when it opens. */
+.more { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.more > summary { min-height: 32px; cursor: pointer; color: var(--ink-2); font-size: 13.5px; font-weight: 600; }
+/* No column gap: each row's hairline runs unbroken across label and value. */
+.rows { display: grid; grid-template-columns: fit-content(15rem) minmax(0, 1fr); margin: 8px 0 0; }
+.rows :deep(.row) { display: contents; }
+.rows :deep(dt), .rows :deep(dd) { margin: 0; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13.5px; line-height: 1.45; }
+.rows :deep(dt) { padding-right: 20px; color: var(--ink-3); }
+.rows :deep(dd) { min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
+.rows .path { font: 12.5px/1.6 var(--mono); }
+.rows .field { height: 36px; max-width: 100%; }
+.account-pick { display: grid; gap: 4px; }
+.account-pick .check { display: flex; align-items: center; gap: 10px; min-height: 32px; cursor: pointer; }
+.harness-note { display: flex; align-items: flex-start; gap: 6px; margin: 6px 0 0; font-size: 13px; color: var(--ink-2); }
 .harness-note svg { flex-shrink: 0; margin-top: 2px; color: var(--ink-3); }
-.account-pick { flex: 0 1 220px; }
-.account-pick .field { height: 36px; }
-.verify { align-items: flex-start; margin-top: 16px; }
-.verify.locked { cursor: default; }
-.verify input { margin-top: 2px; }
+.verify .check { display: flex; align-items: center; gap: 10px; min-height: 28px; cursor: pointer; }
+.verify.locked .check { cursor: default; }
 .verify.locked input { opacity: .4; }
-.verify input:disabled { cursor: default; }
-.verify > span { flex: 1; min-width: 0; }
-.verify strong, .radio strong { display: block; color: var(--ink); font-weight: 600; }
-.verify .sub { display: block; margin-top: 2px; color: var(--ink-3); font-size: 12.5px; font-weight: 400; }
-.expiry { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
-fieldset { margin: 20px 0 0; padding: 0; border: 0; }
-legend { margin-bottom: 4px; color: var(--ink); font-weight: 600; font-size: 14px; }
-.radio { align-items: flex-start; }
-.radio input { margin-top: 2px; }
-.radio .sub { display: block; margin-top: 2px; }
+.verify .sub { margin-top: 2px; color: var(--ink-3); font-size: 12.5px; }
+.limits { margin-top: 2px; color: var(--ink-3); font-size: 12.5px; }
+.verify .problem { margin: 6px 0 0; font-size: 13px; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
-.connect-reason { flex-basis: 100%; margin: 0; color: var(--ink-2); font-size: 13px; }
-/* Empty, the live region stays in the page for screen readers but takes no room. */
-.connect-reason.quiet { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* The status line keeps its slot when empty: a reason appears in place and never pushes Details under the pointer. */
+.connect-reason { flex-basis: 100%; min-height: calc(13px * 1.45); margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
+.ask .more { margin-top: 2px; }
 .go { min-height: 44px; padding: 0 18px; }
-.keep { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 0 auto; color: var(--ink-3); font-size: 12.5px; }
+.keep { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; color: var(--ink-3); font-size: 12.5px; line-height: 1.5; }
+.keep svg { flex-shrink: 0; margin-top: 2px; }
 .review-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .review-head p { margin-top: 4px; color: var(--ink-2); font-size: 13.5px; }
 .review-head h2:focus { outline: none; }
@@ -826,14 +900,20 @@ legend { margin-bottom: 4px; color: var(--ink); font-weight: 600; font-size: 14p
   .facts { grid-template-columns: 1fr; gap: 0; padding: 4px 12px; border-radius: 12px; background: var(--surface-sunken); }
   .facts > div { padding: 10px 0; border-radius: 0; background: none; }
   .facts > div + div { border-top: 1px solid var(--line); }
-  .harness, .verify { flex-wrap: wrap; }
-  .account-pick { flex-basis: 100%; }
-  .expiry { display: none; }
+  .card.ask { padding: 18px 16px 14px; }
+  .ask-head { flex-direction: column; gap: 8px; }
+  .ask-head .btn { margin: 0 0 0 -11px; }
+  /* The facts line wraps once on phones; its two lines stay reserved so toggles in Details never move Add and Deny. */
+  .facts-line { min-height: calc(2 * 1.45 * 13.5px); line-height: 1.45; }
+  .rows { grid-template-columns: minmax(0, 1fr); }
+  .rows :deep(dt) { padding-right: 0; }
+  .rows :deep(dd) { padding-top: 0; border-top: 0; }
+  .rows .field { width: 100%; }
   .review-head { flex-direction: column; gap: 8px; }
   .review-head .btn { margin-left: -11px; }
   .code-row .code { flex: 1 1 100%; }
   .code-row .go { flex: 1 1 100%; }
-  .actions .go { flex: 1 1 auto; }
-  .keep { flex-basis: 100%; margin-left: 0; }
+  /* Phones: Add and Deny full width, stacked, primary first. */
+  .ask .actions .go { flex: 1 1 100%; }
 }
 </style>

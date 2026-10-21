@@ -371,7 +371,7 @@ func mergeGroupInventory(t *testing.T, w map[string]any) []string {
 		}
 		var shards []int
 		// Both matrices choose the final literal array for merge_group:
-		// hosted seven Go shards and the full eighteen web shards.
+		// hosted seven Go shards and the full twenty web shards.
 		if expr, ok := matrix["shard"].(string); ok {
 			arrays := regexp.MustCompile(`'\[([0-9, ]+)\]'`).FindAllStringSubmatch(expr, -1)
 			if len(arrays) == 0 {
@@ -434,7 +434,7 @@ func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
 		t.Fatal("new workflow job escaped drift check")
 	}
 	delete(jobs, "new-required-job")
-	treeMap(treeMap(treeMap(jobs["web-shard"])["strategy"])["matrix"])["shard"] = []any{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}
+	treeMap(treeMap(treeMap(jobs["web-shard"])["strategy"])["matrix"])["shard"] = []any{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
 	if reflect.DeepEqual(proof.RequiredJobs, mergeGroupInventory(t, w)) {
 		t.Fatal("new matrix row escaped drift check")
 	}
@@ -737,9 +737,9 @@ func normalizeEffectiveLane(t *testing.T, id string, value map[string]any) {
 					// that exact wiring and full-event fallback before projecting
 					// onto the immutable historical two-shard execution pin.
 					if id == "web-shard" {
-						const planned = `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]') }}`
+						const planned = `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]') }}`
 						if v != planned {
-							t.Fatal("PR web shards must consume the planned list and retain eighteen full-event rows")
+							t.Fatal("PR web shards must consume the planned list and retain twenty full-event rows")
 						}
 						v = `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}`
 					}
@@ -801,6 +801,33 @@ func normalizeAEON933InstallBounds(t *testing.T, id string, job map[string]any) 
 	case "e2e-run":
 		restorePlaywrightDeps(t, reuseStep(t, job, "Install Playwright"), "npx playwright install --with-deps --only-shell chromium", "bash \"$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh\" playwright install --with-deps --only-shell chromium")
 	}
+}
+
+// AEON-1605: mocked browser shards opt out of the backend wait, and e2e
+// requires it through the bounded readiness waiter. Prove both exact additions
+// before projecting onto the accepted-CI pin.
+func normalizeAEON1605BackendReadiness(t *testing.T, id string, job map[string]any) {
+	t.Helper()
+	mode := map[string]string{"web-shard": "off", "e2e-run": "required"}[id]
+	if mode == "" {
+		return
+	}
+	env := treeMap(job["env"])
+	if env["AEON_REQUIRE_BACKEND"] != mode {
+		t.Fatalf("AEON-1605: %s must set AEON_REQUIRE_BACKEND=%s", id, mode)
+	}
+	delete(env, "AEON_REQUIRE_BACKEND")
+	if id != "e2e-run" {
+		return
+	}
+	step := reuseStep(t, job, "Start server and run smoke")
+	run, _ := step["run"].(string)
+	const bounded = "if ! node scripts/ci/stack-ready.mjs \"$BASE_URL/api/health\"; then\n"
+	const historical = "ready=0\nfor _ in $(seq 1 30); do\n  if curl -sf \"$BASE_URL/api/health\" >/dev/null; then\n    ready=1\n    break\n  fi\n  sleep 1\ndone\nif [ \"$ready\" -ne 1 ]; then\n"
+	if strings.Count(run, bounded) != 1 || strings.Contains(run, "curl") {
+		t.Fatalf("AEON-1605: e2e must wait for backend health with the bounded waiter:\n%s", run)
+	}
+	step["run"] = strings.Replace(run, bounded, historical, 1)
 }
 
 func restoreBoundedShellInstall(t *testing.T, step map[string]any) {
@@ -1158,6 +1185,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				}
 			}
 			normalizeAEON933InstallBounds(t, id, j)
+			normalizeAEON1605BackendReadiness(t, id, j)
 			if id != "web-setup" { // Already proved and projected by normalizeParallelWebSetup.
 				normalizeAEON1018Classification(t, id, j)
 			}

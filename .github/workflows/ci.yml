@@ -224,17 +224,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${CI_IMPACT:-}" = off ]; then
-            printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n' >> "$GITHUB_OUTPUT"
+            printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           case "$GITHUB_EVENT_NAME" in
             pull_request) node scripts/test-tiers/diff.mjs ;;
             # Enforce full merge-group coverage here: the candidate planner can be edited by a PR.
-            merge_group) printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n' >> "$GITHUB_OUTPUT" ;;
+            merge_group) printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n' >> "$GITHUB_OUTPUT" ;;
             *)
               lane=full
               if [ "$CI_AFFECTED_LANE" != on ]; then lane="$CI_PLAN_LANE"; fi
-              printf 'mode=full\nlayout=full\nlane=%s\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n' "$lane" >> "$GITHUB_OUTPUT" ;;
+              printf 'mode=full\nlayout=full\nlane=%s\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n' "$lane" >> "$GITHUB_OUTPUT" ;;
           esac
 
 
@@ -847,9 +847,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(github.event_name == 'pull_request' && needs.ci-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]') }}
+        shard: ${{ fromJSON(github.event_name == 'pull_request' && needs.ci-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]') }}
     env:
       PW_RETRIES: '0'
+      # Mocked UI specs. The e2e job is the backend-required shard.
+      AEON_REQUIRE_BACKEND: 'off'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -1339,6 +1341,7 @@ jobs:
       AEON_ENV: dev
       AEON_DATABASE_URL: postgres://aeon:aeon@127.0.0.1:5432/aeon?sslmode=disable
       BASE_URL: http://127.0.0.1:8080
+      AEON_REQUIRE_BACKEND: 'required'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -1372,15 +1375,7 @@ jobs:
           set -euo pipefail
           nohup ./bin/paimos serve >"$RUNNER_TEMP/aeon.log" 2>&1 &
           echo $! >"$RUNNER_TEMP/aeon.pid"
-          ready=0
-          for _ in $(seq 1 30); do
-            if curl -sf "$BASE_URL/api/health" >/dev/null; then
-              ready=1
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ready" -ne 1 ]; then
+          if ! node scripts/ci/stack-ready.mjs "$BASE_URL/api/health"; then
             echo "server did not become ready" >&2
             cat "$RUNNER_TEMP/aeon.log" >&2 || true
             exit 1

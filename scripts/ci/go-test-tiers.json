@@ -1850,6 +1850,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeBrowserCaptureBrokerBoundsAndReceipts","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeC0TransportCountsOnlyLiveWork","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeChatReceiptsRequireMatchingInputCorrelation","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeClaudeCoordinatorStreamsExactInputAndConfirmsExit","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
@@ -1861,6 +1863,12 @@
     {"kind":"go","package":"internal/agentd","name":"TestNativeCoordinatorRegistrationUsesManagedRootContract","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeFixturesSurviveUntrustedNodePrefixAndUTCTimezone","reason":"AEON-1261: preserve native fixture security and ownership assertions across CI hosts","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostAbandonsStartRefusedBeforeFork","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostLimitsCountOnlyLiveWork","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPollIsolatesSessionWithRefusedReports","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeLeadSchemaMigrationPreservesEvidenceAndRefusesUnknownVersion","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
     ,
@@ -3821,6 +3829,8 @@
     {"kind":"go","package":"internal/auth","name":"TestDeclaredPublicRoutesSkipSessionOnEverySpelling","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestDeliveryBuiltinAdminCeilingFixture","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestDeployRecordAgentKeyCeiling","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestDevIdentitySubjectPreservesUnicodeMailbox","tier":"GATED-FULL"}
     ,
@@ -8584,6 +8594,8 @@
     ,
     {"kind":"go","package":"internal/nativeintegration","name":"TestPilotDefaultsOffAndRejectsIncompleteQualification","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativeintegration","name":"TestProductionDefaultsOffAndRequiresAuthorities","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativeinteraction","name":"TestCallbackExactOnceAndRuntimeFence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeinteraction","name":"TestCallbackExpiryRevocationAndRestart","tier":"ESSENTIAL"}
@@ -8737,6 +8749,14 @@
     {"kind":"go","package":"internal/nativesessions/store","name":"TestNativeSessionDSARInventoryMatchesSchema","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestPairedNativeStartAndRevalidationKeepSeparateAuthorities","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestProductionCompositionAbandonedStartReturnsItsQuota","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestProductionCompositionAbandonsStartRefusedBeforeFork","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestProductionCompositionOwnerStopsFaultedSessionAfterWithdrawal","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestProductionCompositionStartsDeliversAndConfirmsExit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestStartClaimRevocationBarrier","tier":"ESSENTIAL"}
     ,

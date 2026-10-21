@@ -234,6 +234,7 @@ let interruptReceipt = false;
 let grantTimer;
 let activeInputUUID = "";
 let activeCorrelationID = "";
+let activeNativeTurnRef = "";
 const correlations = new Map();
 function deleteCorrelation(uuid) {
   const state = correlations.get(uuid);
@@ -262,9 +263,14 @@ function observeReaction(message) {
   if (!state || state.reacted) return;
   state.reacted = true;
   state.resolveReaction();
-  if (native) { activeInputUUID = uuid; activeCorrelationID = state.correlationID; }
+  if (native) {
+    const turnRef = message?.uuid ?? message?.message?.id;
+    if (start.native_c0 === true && !validID(turnRef, 128)) { state.reacted = false; return; }
+    activeInputUUID = uuid; activeCorrelationID = state.correlationID;
+    activeNativeTurnRef = start.native_c0 === true ? turnRef : "";
+  }
   turnActive = true;
-  emit({ kind: "turn_started", correlation_id: state.correlationID });
+  emit({ kind: "turn_started", correlation_id: state.correlationID, ...(start.native_c0 === true ? { native_turn_ref: activeNativeTurnRef } : {}) });
   if (state.applied) deleteCorrelation(uuid);
 }
 
@@ -361,7 +367,7 @@ function observeChatFinal(message) {
     emit({ kind: "chat_dropped" });
     return;
   }
-  emit({ kind: "chat_final", text, ...(native ? { correlation_id: activeCorrelationID } : {}) });
+  emit({ kind: "chat_final", text, ...(native ? { correlation_id: activeCorrelationID } : {}), ...(start.native_c0 === true ? { native_turn_ref: activeNativeTurnRef } : {}) });
 }
 
 // Project only the documented quota fields. Never forward arbitrary SDK data.
@@ -775,7 +781,7 @@ try {
         emit({ kind: "turn_completed" });
         break;
       }
-      emit({ kind: "turn_completed", ...(native ? { correlation_id: activeCorrelationID } : {}) });
+      emit({ kind: "turn_completed", ...(native ? { correlation_id: activeCorrelationID } : {}), ...(start.native_c0 === true ? { native_turn_ref: activeNativeTurnRef } : {}) });
       if (start.purpose === "pairing_verification" || start.read_only_review === true) {
         verificationSucceeded = message.subtype === "success" && message.is_error !== true;
         if (start.read_only_review === true && verificationSucceeded) {

@@ -83,7 +83,7 @@ func TestDeployRecordCommandAndFailures(t *testing.T) {
 					t.Fatalf("failure reported success: code=%d %s %s", code, out, stderr)
 				}
 			case "help":
-				if code != 0 || calls != 0 || !strings.Contains(out, "releases.deploy") || !strings.Contains(out, "--version") {
+				if code != 0 || calls != 0 || !strings.Contains(out, "releases.deploy") || !strings.Contains(out, "granted by a person") || !strings.Contains(out, "new keys") || !strings.Contains(out, "--version") {
 					t.Fatalf("help missing confirmation contract: %s %s", out, stderr)
 				}
 			case "json":

@@ -5500,6 +5500,8 @@
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"screenshots of the matrix, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"the pairing review never claims nowhere from a partial read of contexts","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"the pairing review shows the rows the rule pre-fills","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 1024 dark › where 1024 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -6365,6 +6367,38 @@
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: every page leads with the badge’s count: none at 0, (1), (9), then (9+)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: reduced motion changes only the number, visible or in the background","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 Desk dismissal persists and an enabled browser gets no offer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 Settings and Desk remain still with EN and DE copy at phone tablet and desktop widths in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 Settings prompts only on click and independently enables disables and removes Desk devices","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 a browser that already allows notifications shows the Desk without waiting for the offer read","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 rejected writes and refused prompts keep the previous state in place and never announce success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 the Desk decides its offer before the tabs show, without a band or a late offer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 unavailable blocked unsupported and iOS states never prompt or expose a dead iPhone switch","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 a harness that is not signed in shows disabled and is never checked","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 de dark: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 de light: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 en light: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 expired and denied 1280 en and de: one sentence and today's command","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 first pairing 1280x800 en and de: Pair or Deny with the harness checklist, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 phone 390 en and de: Add and Deny full width, 44 px, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 phone 390: a pointer reaches each harness checkbox and toggles it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 several harnesses 1280x800 en and de: one row per harness under the title","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: a queued narrow table resize preserves the columns after the table grows","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -16042,6 +16076,18 @@
     ,
     {"kind":"node","file":"tests/arrival.test.ts","name":"the hold is bounded: it ends after its window, when the target leaves, or when the page lets it go","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/attach-copy.test.ts","name":"AEON-1502 a number and its unit never break apart on the card","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/attach-copy.test.ts","name":"AEON-1502 an unread rest of contexts is named, never claimed as nowhere","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/attach-copy.test.ts","name":"AEON-1502 expired and denied lines mark the computer for mono, as the ask does","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/attach-copy.test.ts","name":"AEON-1502 the German account label reads Konto für the harness","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/attach-copy.test.ts","name":"AEON-1502 the verification deadline reads in the language’s own clock","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/attach-copy.test.ts","name":"AEON-1502 where-lines name Settings › Accounts with the › separator","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/attach-copy.test.ts","name":"pairing and a session link stay separate in the app language for English and German profiles","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/attach-flow-scope.test.ts","name":"AttachApproval.vue continues only through synchronous identity callbacks","tier":"GATED-FULL"}
@@ -18569,6 +18615,14 @@
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > keeps the empty desk incomplete when session discovery fails, until a successful retry","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > names the source that did not answer, so an empty read is never all clear","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Denied permission and an identity abort between browser work and POST cannot persist a Desk subscription","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Desk off posts an explicit flag without prompting registering unsubscribing or touching phone preferences","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Desk offer requires every eligibility condition and tolerates unavailable browser storage","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"iPhone and iPad require the Home Screen while standalone and desktop browsers remain eligible","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"only the Display menu mounts the display editors","tier":"ESSENTIAL"}
     ,

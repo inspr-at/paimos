@@ -12,6 +12,10 @@ aeon deploy record --project AIT --env production --sha FULL_COMMIT_SHA --versio
 linked through the existing Delivery source settings. The API is
 `POST /api/projects/{projectId}/deploys`, with `environment`, `sha` and optional
 `version`. It uses the existing project-scoped `releases.deploy` permission.
+An agent key also needs `releases.deploy` as an outer key-scope ceiling. A
+person grants that scope on the existing key-scope path; the grant is audited
+as `agent_key.scopes_changed`, and new keys do not receive it. The project
+permission, linked repository and verified ancestry checks stay in force.
 The authenticated person or agent is recorded as the live confirmer, with the
 server's timestamp. Recording is an explicit confirmation; unattended Status
 autopilot modes do not disable this authorized action.

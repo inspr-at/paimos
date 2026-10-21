@@ -27,13 +27,13 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/nativeadmission"
 	"github.com/inspr-at/paimos/internal/nativecontract"
-	"github.com/inspr-at/paimos/internal/nativeintegration"
+	"github.com/inspr-at/paimos/internal/nativeintegration/root"
 	"github.com/inspr-at/paimos/internal/nativesessions/consent"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
-func newPairedStartFixture(t *testing.T) (*startFixture, consent.Authority) {
+func newPairedStartFixture(t *testing.T, options ...consent.Facts) (*startFixture, consent.Authority) {
 	t.Helper()
 	f := newStartFixture(t)
 	proposer := f.agent
@@ -131,6 +131,10 @@ func newPairedStartFixture(t *testing.T) (*startFixture, consent.Authority) {
 	proposer.AuthKeyID = proposer.KeyID
 	approvals.New(f.d.App).Mount(mux)
 	facts := consent.Facts{ComputerID: f.intent.ComputerID, AccountID: f.intent.AccountID, WorkspaceID: f.intent.WorkspaceID, WorkspaceRoot: "/fixture/native", ModelProfileID: f.intent.ModelProfileID, ToolSet: []string{}, SettingsProfile: consent.SettingsProfile, LocalHistory: "vendor_native", Revision: 1, MaximumRuntimeSeconds: 3600, MaximumTurns: 100, MaximumTokens: 10000}
+	if len(options) > 0 {
+		facts.WorkspaceRoot = options[0].WorkspaceRoot
+		facts.RetainFinals = options[0].RetainFinals
+	}
 	proposalRaw, _ := json.Marshal(map[string]any{"scope": consent.SessionScope, "resource_kind": "node", "resource_id": f.project, "rationale": "Native coordinator with explicit local history", "expires_at": f.now.Add(time.Hour), "native_consent": facts})
 	r := httptest.NewRequest("POST", "/api/approvals", bytes.NewReader(proposalRaw)).WithContext(tenant.WithPrincipal(t.Context(), proposer))
 	r.Header.Set("Content-Type", "application/json")
@@ -186,7 +190,7 @@ func TestPairedNativeStartAndRevalidationKeepSeparateAuthorities(t *testing.T) {
 			if err := check(); err != nil {
 				t.Fatalf("real paired key failed exact-root runtime validation: %v", err)
 			}
-			root := nativeintegration.RootAuthority{Pool: f.d.App, Grants: authority, Now: func() time.Time { return f.now }}
+			root := root.Authority{Pool: f.d.App, Grants: authority, Now: func() time.Time { return f.now }}
 			runtimeRequest := nativeadmission.Request{Binding: *claimed.ExpectedBinding, AccountBindingDigest: binding.Digest(),
 				Profile: nativecontract.ProfileRequest{TenantID: f.person.TenantID, OwnerPersonID: f.person.ID,
 					AccountID: f.intent.AccountID, AccountKey: binding.AccountKey, Harness: f.intent.Harness,

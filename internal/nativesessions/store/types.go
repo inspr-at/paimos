@@ -7,6 +7,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/nativecontract"
@@ -63,6 +64,12 @@ type Options struct {
 }
 
 type Store struct {
+	production *production
+	mu         sync.Mutex
+	commandMu  sync.Mutex
+	commands   map[string]queuedCommand
+	runtimes   map[string]string
+
 	pool        *pgxpool.Pool
 	authority   Authority
 	observer    Observer

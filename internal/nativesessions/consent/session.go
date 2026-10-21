@@ -19,13 +19,55 @@ type Session struct {
 	Actor    nativecontract.Actor
 	Intent   nativecontract.StartIntent
 	View     nativecontract.SessionView
+	// StopOnly marks a session whose consent no longer holds. It carries only
+	// the pinned policy and no consent facts: the exact owner's stop of the
+	// exact binding may proceed, never input, launch, reads or finals.
+	StopOnly bool
 }
 
 // SessionTx revalidates the persisted original person and the exact immutable
 // policy pins under the caller's final access fence. It intentionally does not
 // require a live process: final drains may follow a confirmed exit.
 func (a Authority) SessionTx(ctx context.Context, tx pgx.Tx, b nativecontract.Binding) (Session, error) {
+	out, policy, err := a.ownedTx(ctx, tx, b)
+	if err != nil {
+		return out, err
+	}
+	if err = a.RequireNativeGrantTx(ctx, tx, out.Actor, out.Intent, policy); err != nil {
+		return out, err
+	}
+	out.Current, err = a.CurrentTx(ctx, tx, out.Actor, out.Intent, b.ProjectID, SessionScope)
+	return out, err
+}
+
+// StopSessionTx authorizes only a stop of the exact binding by its exact
+// original owner. Withdrawn or lapsed consent must never keep a native process
+// running, so the grant is read but not required: a consent refusal yields a
+// StopOnly session with the pinned policy instead of an error. Identity,
+// binding and the owner's harness.control permission are still required.
+func (a Authority) StopSessionTx(ctx context.Context, tx pgx.Tx, b nativecontract.Binding) (Session, error) {
+	out, policy, err := a.ownedTx(ctx, tx, b)
+	if err != nil {
+		return out, err
+	}
+	if err = a.RequireNativeGrantTx(ctx, tx, out.Actor, out.Intent, policy); err == nil {
+		out.Current, err = a.CurrentTx(ctx, tx, out.Actor, out.Intent, b.ProjectID, SessionScope)
+	}
+	var refusal *nativecontract.ValidationError
+	if !errors.As(err, &refusal) {
+		return out, err
+	}
+	out.Current = Current{GrantID: out.Actor.GrantID, OwnerPersonID: out.Actor.OwnerPersonID, ProjectID: b.ProjectID, Policy: policy}
+	out.Revision = out.Actor.GrantRevision
+	out.StopOnly = true
+	return out, nil
+}
+
+// ownedTx reads the exact binding's persisted original person, pins and
+// owner permission; it does not read consent.
+func (a Authority) ownedTx(ctx context.Context, tx pgx.Tx, b nativecontract.Binding) (Session, nativecontract.Policy, error) {
 	var out Session
+	var policy nativecontract.Policy
 	var actorRaw, intentRaw, policyRaw, viewRaw []byte
 	var principalID, kind, grant, owner string
 	var revision int64
@@ -40,10 +82,10 @@ func (a Authority) SessionTx(ctx context.Context, tx pgx.Tx, b nativecontract.Bi
 		b.DaemonID, b.DaemonGeneration, b.BindingRevision, b.RunID).Scan(&actorRaw, &intentRaw, &policyRaw, &viewRaw,
 		&principalID, &kind, &grant, &revision, &owner)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return out, refuse(nativecontract.ReasonWrongGeneration)
+		return out, policy, refuse(nativecontract.ReasonWrongGeneration)
 	}
 	if err != nil {
-		return out, err
+		return out, policy, err
 	}
 	var record struct {
 		Principal tenant.Principal `json:"principal"`
@@ -53,13 +95,12 @@ func (a Authority) SessionTx(ctx context.Context, tx pgx.Tx, b nativecontract.Bi
 		Grant     string           `json:"grant_id"`
 		Revision  int64            `json:"grant_revision"`
 	}
-	var policy nativecontract.Policy
 	for _, v := range []struct {
 		raw []byte
 		dst any
 	}{{actorRaw, &record}, {intentRaw, &out.Intent}, {policyRaw, &policy}, {viewRaw, &out.View}} {
 		if len(v.raw) > 131072 || json.Unmarshal(v.raw, v.dst) != nil {
-			return out, refuse(nativecontract.ReasonIdentityMismatch)
+			return out, policy, refuse(nativecontract.ReasonIdentityMismatch)
 		}
 	}
 	// This pilot's coordinator is person-invoked. An agent's stored role label
@@ -69,15 +110,11 @@ func (a Authority) SessionTx(ctx context.Context, tx pgx.Tx, b nativecontract.Bi
 		record.KeyID != "" || record.AuthKeyID != "" || out.Original.KeyID != "" || out.Original.AuthKeyID != "" || out.Original.KeyCreatorID != "" ||
 		record.Owner != owner || out.View.OwnerPersonID != owner || record.Grant != grant || record.Revision != revision ||
 		out.View.CurrentBinding == nil || !out.View.CurrentBinding.Equal(b) || out.Intent.Role != "coordinator" || b.RunID != nil {
-		return out, refuse(nativecontract.ReasonPermissionRevoked)
+		return out, policy, refuse(nativecontract.ReasonPermissionRevoked)
 	}
 	if err = authz.RequireTx(ctx, tx, out.Original, "harness.control", authz.Scope{ProjectID: b.ProjectID}); err != nil {
-		return out, refuse(nativecontract.ReasonPermissionRevoked)
+		return out, policy, refuse(nativecontract.ReasonPermissionRevoked)
 	}
 	out.Actor = nativecontract.Actor{TenantID: b.TenantID, PrincipalID: principalID, PrincipalKind: kind, OwnerPersonID: owner, GrantID: grant, GrantRevision: revision}
-	if err = a.RequireNativeGrantTx(ctx, tx, out.Actor, out.Intent, policy); err != nil {
-		return out, err
-	}
-	out.Current, err = a.CurrentTx(ctx, tx, out.Actor, out.Intent, b.ProjectID, SessionScope)
-	return out, err
+	return out, policy, nil
 }
