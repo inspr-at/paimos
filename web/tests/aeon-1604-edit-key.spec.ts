@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-1604: e pressed while this project's grants are still in flight is kept
-// for that ticket. It opens the editor once the person may edit, and never for
-// a reader or for a ticket they have since left. The press itself adds nothing
-// to the page, so the heading stays where it is until the editor opens.
+// AEON-1604: e or c pressed while this project's grants are still in flight is
+// kept for that ticket. e opens the editor once the person may edit. c focuses
+// the comment box once they may comment. A reader, or a ticket they have since
+// left, gets neither. The press itself adds nothing to the page, so the heading
+// stays where it is until the editor opens.
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 
 const article = (page: Page) => page.getByRole('article', { name: 'Ticket details' })
+const panel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
 
 function holdProjectPermissions() {
   let release = () => {}
@@ -63,6 +65,26 @@ test('AEON-1604: a reader who presses e before permissions load gets no editor',
     await painted(page)
     await expect(details.getByRole('note')).toContainText('You can read this ticket but not change it.')
     await expect(details.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
+    await expect(page.locator('.edit-form')).toHaveCount(0)
+  } finally { gate.release() }
+})
+
+test('AEON-1604: c pressed before project permissions load focuses the comment box once they arrive', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const gate = holdProjectPermissions()
+  try {
+    await mockWork(page, fixtures(), { hold: gate.hold })
+    await page.goto('/p/PHAROS/PHAROS-13')
+    const details = panel(page)
+    await expect(details.getByRole('heading', { name: 'Run the disposable Hetzner end-to-end check' })).toBeVisible()
+    const composer = details.getByLabel('Add a comment')
+    await expect(composer).toBeDisabled()
+    await page.keyboard.press('e')
+    await page.keyboard.press('c')
+    await expect(page.locator('.edit-form')).toHaveCount(0)
+    await expect(composer).not.toBeFocused()
+    gate.release()
+    await expect(composer).toBeFocused()
     await expect(page.locator('.edit-form')).toHaveCount(0)
   } finally { gate.release() }
 })

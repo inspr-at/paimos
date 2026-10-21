@@ -12,7 +12,7 @@ import type { useProjectActions } from './useProjectActions'
 import type { useProjectLive } from './useProjectLive'
 
 export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof useProjectData>, pane: ReturnType<typeof useProjectPanel>, selection: ReturnType<typeof useProjectSelection>, actions: ReturnType<typeof useProjectActions>, live: ReturnType<typeof useProjectLive>) {
-  const { ticketKey, projectId, session, knowledgeActive, settingsActive, deliveryActive, graphActive, outlineActive, toolbar, table, panel, cursorId, creating, fullView, writable } = state
+  const { ticketKey, projectId, session, knowledgeActive, settingsActive, deliveryActive, graphActive, outlineActive, toolbar, table, panel, cursorId, creating, fullView, writable, commentable } = state
   const { list, outline, activeLive, liveActive, sequence } = data
   const { panelItem, openKey, openRow, closePanel, expand, collapse, trail, trailBack } = pane
   const { selectable, selected, phonePicking, selectRow, selectAll, clearSelection, openBulk, bulkQueue } = selection
@@ -47,25 +47,32 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     void nextTick(() => table.value?.scrollToRow(row.id))
     table.value?.focusGrid()
   }
-  // The title can be on screen while this project's grants are still in flight.
-  // One e is kept for that ticket and that person, then applied once they may
-  // edit. Another ticket, person, field or dialog spends it and opens nothing.
-  type PendingEdit = { key: string; projectId: string; owner: string; epoch: number }
+  // The title and the comment box can be on screen while this project's grants
+  // are still in flight. One e or one c is kept for that ticket and that person.
+  // Another ticket, person, field, dialog, or the other of those two keys spends it.
+  type PendingShortcut = { key: string; projectId: string; owner: string; epoch: number }
   let editEpoch = 0
-  let pendingEdit: PendingEdit | null = null
+  let pendingEdit: PendingShortcut | null = null
+  let commentEpoch = 0
+  let pendingComment: PendingShortcut | null = null
   function clearPendingEdit() {
     if (!pendingEdit) return
     pendingEdit = null
     editEpoch++
   }
-  function samePersonTicket(pending: PendingEdit) {
+  function clearPendingComment() {
+    if (!pendingComment) return
+    pendingComment = null
+    commentEpoch++
+  }
+  function samePersonTicket(pending: PendingShortcut) {
     return ticketKey.value === pending.key && projectId.value === pending.projectId
       && scopeOwner(session.identity) === pending.owner && session.authenticationCurrent()
   }
   function shortcutBlocked() {
     return typing(document.activeElement) || !!document.querySelector('dialog[open], .floating')
   }
-  function openRememberedEdit(pending: PendingEdit) {
+  function openRememberedEdit(pending: PendingShortcut) {
     const workspace = panel.value
     if (pending.epoch !== editEpoch || pendingEdit !== pending || !workspace?.startEdit || shortcutBlocked()) return false
     editEpoch++
@@ -73,7 +80,7 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     void workspace.startEdit()
     return true
   }
-  async function applyPendingEdit(pending: PendingEdit) {
+  async function applyPendingEdit(pending: PendingShortcut) {
     if (pending.epoch !== editEpoch || pendingEdit !== pending) return
     if (!samePersonTicket(pending)) { clearPendingEdit(); return }
     if (!permissionsKnown(pending.projectId)) return
@@ -87,13 +94,62 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     if (!panel.value?.startEdit) return
     openRememberedEdit(pending)
   }
+  function commentField(): HTMLTextAreaElement | null {
+    const root = panel.value?.el
+    if (!(root instanceof HTMLElement)) return null
+    const field = root.querySelector('textarea[aria-label="Add a comment"]')
+    return field instanceof HTMLTextAreaElement ? field : null
+  }
+  // The comment box can be on screen and disabled while grants are in flight.
+  // Focusing it then does nothing. One c is kept until that box can take the
+  // caret. A reader, another shortcut, or a ticket they have left spends it,
+  // so a later grant does not focus the box on its own.
+  function openRememberedComment(pending: PendingShortcut) {
+    if (pending.epoch !== commentEpoch || pendingComment !== pending || shortcutBlocked()) return false
+    const field = commentField()
+    if (!field || field.disabled) return false
+    panel.value?.focusComposer()
+    if (document.activeElement !== field) return false
+    commentEpoch++
+    pendingComment = null
+    return true
+  }
+  async function applyPendingComment(pending: PendingShortcut) {
+    if (pending.epoch !== commentEpoch || pendingComment !== pending) return
+    if (!samePersonTicket(pending)) { clearPendingComment(); return }
+    if (!permissionsKnown(pending.projectId)) return
+    if (!commentable?.value) { clearPendingComment(); return }
+    await nextTick()
+    if (pending.epoch !== commentEpoch || pendingComment !== pending) return
+    if (!samePersonTicket(pending) || !commentable?.value || shortcutBlocked()) { clearPendingComment(); return }
+    const field = commentField()
+    if (!field) return
+    if (field.disabled) { clearPendingComment(); return }
+    openRememberedComment(pending)
+  }
+  function rememberComment() {
+    clearPendingEdit()
+    const key = ticketKey.value
+    const id = projectId.value
+    const owner = scopeOwner(session.identity)
+    if (!key || !id || !owner || !session.authenticationCurrent()) return
+    if (permissionsKnown(id) && !commentable?.value) return
+    const pending: PendingShortcut = { key, projectId: id, owner, epoch: ++commentEpoch }
+    pendingComment = pending
+    if (permissionsKnown(id) && commentable?.value) {
+      if (!openRememberedComment(pending)) void applyPendingComment(pending)
+      return
+    }
+    void ensurePermissions(id).then(() => { void applyPendingComment(pending) })
+  }
   function rememberEdit() {
+    clearPendingComment()
     const key = ticketKey.value
     const id = projectId.value
     const owner = scopeOwner(session.identity)
     if (!key || !id || !owner || !session.authenticationCurrent()) return
     if (permissionsKnown(id) && !writable.value) return
-    const pending: PendingEdit = { key, projectId: id, owner, epoch: ++editEpoch }
+    const pending: PendingShortcut = { key, projectId: id, owner, epoch: ++editEpoch }
     pendingEdit = pending
     // Grants already on screen: edit in this turn, as a press after the button exists does.
     if (permissionsKnown(id) && writable.value) {
@@ -164,7 +220,7 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
       case 'a': if (ticketKey.value) { event.preventDefault(); panel.value?.openAssignee() } else if (row) { const anchor = document.querySelector<HTMLElement>(`#row-${CSS.escape(row.id)} .assignee-btn`); if (anchor) { event.preventDefault(); openAssignee(row, anchor) } } break
       case 'r': if (ticketKey.value) { event.preventDefault(); panel.value?.openLink() } break
       case 'g': if (ticketKey.value) { event.preventDefault(); panel.value?.openRelease() } break
-      case 'c': if (ticketKey.value) { event.preventDefault(); panel.value?.focusComposer() } break
+      case 'c': if (ticketKey.value) { event.preventDefault(); rememberComment() } break
       case 'f': if (ticketKey.value) { event.preventDefault(); if (fullView.value) collapse(); else expand() } break
     }
   }
@@ -192,13 +248,28 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     return true
   }
 
-  watch(panel, () => { const pending = pendingEdit; if (pending) void applyPendingEdit(pending) })
+  watch(panel, () => {
+    const edit = pendingEdit, comment = pendingComment
+    if (edit) void applyPendingEdit(edit)
+    if (comment) void applyPendingComment(comment)
+  })
+  watch(panelItem, () => { const pending = pendingComment; if (pending) void applyPendingComment(pending) })
   watch(writable, () => { const pending = pendingEdit; if (pending) void applyPendingEdit(pending) })
-  watch(ticketKey, key => { if (pendingEdit && key !== pendingEdit.key) clearPendingEdit() })
-  watch(projectId, id => { if (pendingEdit && id !== pendingEdit.projectId) clearPendingEdit() })
-  watch(() => scopeOwner(session.identity), () => { if (pendingEdit) clearPendingEdit() })
+  watch(() => commentable?.value ?? false, () => { const pending = pendingComment; if (pending) void applyPendingComment(pending) })
+  watch(ticketKey, key => {
+    if (pendingEdit && key !== pendingEdit.key) clearPendingEdit()
+    if (pendingComment && key !== pendingComment.key) clearPendingComment()
+  })
+  watch(projectId, id => {
+    if (pendingEdit && id !== pendingEdit.projectId) clearPendingEdit()
+    if (pendingComment && id !== pendingComment.projectId) clearPendingComment()
+  })
+  watch(() => scopeOwner(session.identity), () => {
+    if (pendingEdit) clearPendingEdit()
+    if (pendingComment) clearPendingComment()
+  })
   onMounted(() => window.addEventListener('keydown', keydown))
-  onBeforeUnmount(() => { clearPendingEdit(); window.removeEventListener('keydown', keydown) })
+  onBeforeUnmount(() => { clearPendingEdit(); clearPendingComment(); window.removeEventListener('keydown', keydown) })
 
   return { move, keydown }
 }
