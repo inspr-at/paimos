@@ -149,7 +149,13 @@ func TestDeskPeekClearFollowsBrowserCookiePath(t *testing.T) {
 	mux := http.NewServeMux()
 	mod.Mount(mux)
 	decisiondesk.New(appPool).WithInstances(config.Instances{Here: "ppm", Siblings: []config.Sibling{{Tag: "pma", Origin: sibling}}}, mod).Mount(mux)
-	ts := httptest.NewTLSServer(mod.Middleware(mux))
+	// Auth reads r.Pattern before the mux serves. Production sets it first
+	// (routePatternMiddleware); an empty pattern is forbidden and never issues.
+	secured := mod.Middleware(mux)
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, r.Pattern = mux.Handler(r)
+		secured.ServeHTTP(w, r)
+	}))
 	t.Cleanup(ts.Close)
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -231,9 +237,9 @@ func TestDeskPeekClearFollowsBrowserCookiePath(t *testing.T) {
 		t.Helper()
 		setSession(token)
 		resp := do(http.MethodGet, "/api/decision-desk/instances", "", nil)
-		_, _ = io.Copy(io.Discard, resp.Body)
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 180))
 		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("instances %d", resp.StatusCode)
+			t.Fatalf("instances %d: %s", resp.StatusCode, raw)
 		}
 		if !holds("/api/decision-desk/owner-summary", deskPeekCookieName) {
 			t.Fatal("browser did not keep the summary cookie")
