@@ -140,11 +140,13 @@ test('layout shift audit arms after navigation and resets startup movement', asy
     expect(await page.evaluate(readLayoutShiftAudit)).toEqual({ score: 0, sources: [] })
     expect(await page.evaluate(() => (window as unknown as { auditShiftArmed: boolean }).auditShiftArmed)).toBe(false)
   }
-  // A real two-pixel shift after arm must survive, however small its score.
+  // Chromium ignores movement below three CSS pixels. Use four pixels so the
+  // observer receives a real entry while the CLS score still stays below 0.001.
   await page.evaluate(armLayoutShiftAudit)
-  const score = await moveAuditControl(page, 12)
+  const score = await moveAuditControl(page, 14)
   const shifted = await page.evaluate(readLayoutShiftAudit)
   expect(score).toBeGreaterThan(0)
+  expect(score).toBeLessThan(0.001)
   expect(shifted.score, shifted.sources.join(' | ')).toBe(score)
   expect(shifted.sources).toHaveLength(1)
   expect(shifted.sources[0]).toContain('audit-control')
