@@ -531,7 +531,7 @@ test('September lands as Sep, a flat pace says no change, and hidden columns sor
       } else {
         await expect(headers).toHaveCount(3)
         await expect(headers.first()).toBeHidden()
-        const more = page.getByRole('button', { name: 'More: state filter, hide done, expand all' })
+        const more = page.getByRole('button', { name: 'More: state filter, show, expand all' })
         const neighbors = width <= 760 ? { search, views, more } : { search, views }
         // Phones hide every header, so Display names every sort there; wider, only the hidden counts.
         expect(await visibleWords(display)).toEqual([width <= 760 ? 'ETA' : 'Display'])
@@ -571,7 +571,7 @@ test('Display keeps one box through every sort at 1024, 820 and 390, shows only 
     const search = page.locator('.project-search')
     const views = page.locator('.view-seg')
     const phone = width <= 760
-    const neighbors = phone ? { search, views, more: page.getByRole('button', { name: 'More: state filter, hide done, expand all' }) } : { search, views }
+    const neighbors = phone ? { search, views, more: page.getByRole('button', { name: 'More: state filter, show, expand all' }) } : { search, views }
     await display.click()
     const menu = page.getByRole('dialog', { name: 'Display options' })
     await expect(menu).toBeVisible()
@@ -622,7 +622,7 @@ for (const [width, height] of [[1440, 900], [1024, 800], [390, 844]] as const) {
         const expandRow = page.locator('.head-expand')
         await expect(expandRow).toBeVisible()
         expect((await box(expandRow)).height).toBeGreaterThanOrEqual(44)
-        const more = page.getByRole('button', { name: 'More: state filter, hide done, expand all' })
+        const more = page.getByRole('button', { name: 'More: state filter, show, expand all' })
         expect((await box(more)).width).toBeGreaterThanOrEqual(44)
         await more.click()
         await expect(page.getByRole('menuitemradio', { name: /Moving/ })).toBeVisible()

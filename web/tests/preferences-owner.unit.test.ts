@@ -69,3 +69,44 @@ it('AEON-1213: shared preference reads retry failures, coalesce recovery and acc
   expect(empty.value.value).toBeNull()
   expect(fetch).toHaveBeenCalledTimes(3)
 })
+
+// The goals toolbar saves with delay 0. The channel posts, then a reload can
+// discard the document before that message reaches fetch. The pagehide listener
+// must already have sent the value in hand, with keepalive and no abort signal.
+it('AEON-1614: a delay-0 save still queued on its channel is written with keepalive when the page hides', async () => {
+  const calls: RequestInit[] = []
+  const messages: (() => void)[] = []
+  const hides: Array<(event: Event) => void> = []
+  vi.stubGlobal('MessageChannel', class {
+    port1 = { onmessage: (() => {}) as () => void, close() {} }
+    port2 = { close() {}, postMessage: () => messages.push(() => this.port1.onmessage()) }
+  })
+  vi.stubGlobal('window', {
+    addEventListener: (type: string, listener: (event: Event) => void) => { if (type === 'pagehide') hides.push(listener) },
+    removeEventListener() {},
+  })
+  vi.stubGlobal('fetch', vi.fn((_url: unknown, init?: RequestInit) => {
+    calls.push(init ?? {})
+    return Promise.resolve(new Response(JSON.stringify({ value: null })))
+  }))
+  Preferences.setPreferenceOwner(who('A'))
+  const pref = Preferences.usePreference<{ showWaiting: boolean }>('goals')
+  await pref.ready
+  await flush()
+  calls.length = 0
+  const saving = pref.save({ showWaiting: false }, 0)
+  expect(messages).toHaveLength(1)
+  expect(calls.filter(init => init.method === 'PUT')).toHaveLength(0)
+  expect(hides).toHaveLength(1)
+  hides[0]!(new Event('pagehide'))
+  await flush()
+  const puts = calls.filter(init => init.method === 'PUT')
+  expect(puts).toHaveLength(1)
+  expect(puts[0]!.keepalive).toBe(true)
+  expect(puts[0]!.signal).toBeUndefined()
+  expect(String(puts[0]!.body)).toContain('"showWaiting":false')
+  messages.splice(0).forEach(run => run())
+  await flush()
+  expect(calls.filter(init => init.method === 'PUT')).toHaveLength(1)
+  expect(await saving).toBe(true)
+})

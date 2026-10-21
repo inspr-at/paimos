@@ -12,7 +12,7 @@ interface Preference {
   timer?: ReturnType<typeof setTimeout>; channel?: MessageChannel; tail?: Promise<boolean>
   // The promise for a delay-0 save that has not reached the network yet, and the
   // resolvers for a save a newer one replaced or a sign-out cancelled.
-  soon?: Promise<boolean>; settle?: (ok: boolean) => void; delaySettle?: (ok: boolean) => void
+  soon?: Promise<boolean>; settle?: (ok: boolean | Promise<boolean>) => void; delaySettle?: (ok: boolean | Promise<boolean>) => void
 }
 const owner = shallowRef('')
 // Read-only ownership fence for caches that follow the same authentication epoch.
@@ -44,8 +44,10 @@ export function setPreferenceOwner(who: Owner, current = () => true) {
     if (pref.timer !== undefined) clearTimeout(pref.timer)
     pref.timer = undefined
     pref.delaySettle?.(false); pref.delaySettle = undefined
+    const channel = pref.channel
+    pref.channel = undefined
     pref.settle?.(false); pref.settle = undefined; pref.soon = undefined
-    pref.channel?.port1.close(); pref.channel?.port2.close(); pref.channel = undefined
+    channel?.port1.close(); channel?.port2.close()
   }
   for (const flight of flights) flight.abort()
   flights.clear(); cache.clear(); owner.value = next
@@ -71,21 +73,26 @@ async function readPreferenceResult(key: string): Promise<{ ok: boolean; value: 
 export async function readPreference(key: string): Promise<Json | null> {
   return (await readPreferenceResult(key)).value
 }
-export async function writePreference(key: string, value: Json): Promise<boolean> {
-  const current = capture(), controller = new AbortController()
+export async function writePreference(key: string, value: Json, keepalive = false): Promise<boolean> {
+  const current = capture(), controller = keepalive ? undefined : new AbortController()
   if (!current()) return false
   const id = `${owner.value}/${key}`
   inflight.set(id, (inflight.get(id) ?? 0) + 1)
   preferenceSaves.saving.add(id)
-  flights.add(controller)
+  if (controller) flights.add(controller)
   try {
-    const response = await api(`/preferences/${encodeURIComponent(key)}`, { method: 'PUT', signal: controller.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) })
+    // A leaving write has no abort signal: AbortSignal.timeout(0) aborts at once,
+    // and a timeout would cancel the keepalive request during unload.
+    const response = await api(`/preferences/${encodeURIComponent(key)}`, {
+      method: 'PUT', ...(controller ? { signal: controller.signal } : {}), ...(keepalive ? { keepalive: true } : {}),
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
+    }, keepalive ? 0 : undefined)
     if (!current()) return false
     if (!response.ok) failures.forEach(listener => listener(key))
     return response.ok
   } catch { if (current()) failures.forEach(listener => listener(key)); return false }
   finally {
-    flights.delete(controller)
+    if (controller) flights.delete(controller)
     const left = (inflight.get(id) ?? 1) - 1
     if (left > 0) inflight.set(id, left)
     else { inflight.delete(id); preferenceSaves.saving.delete(id) }
@@ -133,6 +140,8 @@ function writeSoon(pref: Preference): Promise<boolean> {
     pref.settle = resolve
     const channel = pref.channel = new MessageChannel()
     channel.port1.onmessage = () => {
+      // pagehide already took this channel and sent the value in hand.
+      if (pref.channel !== channel) return
       channel.port1.close(); channel.port2.close(); pref.channel = undefined
       pref.soon = undefined; pref.settle = undefined
       if (owned(pref) && pref.timer === undefined) resolve(persist(pref))
@@ -160,6 +169,7 @@ export function usePreference<T extends object>(key: string) {
   function save(next: T, delay = 400): Promise<boolean> {
     const pref = preference(key)
     if (!pref || !owned(pref)) return Promise.resolve(false)
+    ensureLeaveHook()
     pref.value.value = next as Json
     if (pref.timer !== undefined) clearTimeout(pref.timer)
     pref.timer = undefined
@@ -186,6 +196,45 @@ export function usePreference<T extends object>(key: string) {
     return Promise.resolve(pref.loaded)
   }
   return { value, get ready() { return preference(key)?.ready ?? Promise.resolve() }, ensureLoaded, save, done }
+}
+// Registered on the first save so a test that stubs window is seen then, not at import.
+// Node tests have no window; the hook stays off and the channel path is unchanged.
+let leaveHooked = false
+function ensureLeaveHook() {
+  if (leaveHooked || typeof window === 'undefined') return
+  leaveHooked = true
+  window.addEventListener('pagehide', flushLeaving)
+}
+// Navigation can discard a delay-0 save before its channel message reaches fetch,
+// or abort a write already in flight. Send the value in hand before the document goes.
+function flushLeaving() {
+  for (const pref of cache.values()) {
+    if (!owned(pref) || !pref.value.value) continue
+    if (pref.timer === undefined && !pref.soon && !pref.tail) continue
+    if (pref.timer !== undefined) clearTimeout(pref.timer)
+    pref.timer = undefined
+    const delaySettle = pref.delaySettle
+    pref.delaySettle = undefined
+    const channel = pref.channel
+    const settle = pref.settle
+    pref.channel = undefined
+    pref.soon = undefined
+    pref.settle = undefined
+    const request = writePreference(pref.key, pref.value.value, true)
+    const tracked = request.then(saved => {
+      if (owned(pref)) {
+        const id = `${pref.owner}/${pref.key}`
+        if (saved) preferenceSaves.failed.delete(id)
+        else preferenceSaves.failed.add(id)
+      }
+      return saved && owned(pref)
+    }).finally(() => { if (pref.tail === tracked) pref.tail = undefined })
+    pref.tail = tracked
+    settle?.(tracked)
+    delaySettle?.(tracked)
+    channel?.port1.close()
+    channel?.port2.close()
+  }
 }
 // Saves again what a preference holds now, where its last write failed.
 export function retryFailedPreferences() {
