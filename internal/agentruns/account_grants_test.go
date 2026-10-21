@@ -13,6 +13,7 @@ func TestAccountModelGrantsEnforcedAtCreateAndClaim(t *testing.T) {
 	o := f.order(t, nil)
 	run := f.run(t, o)
 	ids := f.reserve(t, run)
+	f.legacyAccount(t, run.ID)
 	var account string
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `SELECT account_id::text FROM agent_runs WHERE id=$1`, run.ID).Scan(&account); err != nil {
