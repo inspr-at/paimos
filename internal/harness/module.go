@@ -132,6 +132,8 @@ func (a nativeSessionAuthority) SessionTx(ctx context.Context, tx pgx.Tx, b nati
 	if !live {
 		return s, nativestream.Refuse(nativecontract.ReasonOwnershipUnconfirmed)
 	}
+	s.View.Capabilities.ChatSupported = s.View.Capabilities.ChatSupported && a.consent.Capabilities.ChatSupported
+	s.View.Capabilities.Input = s.View.Capabilities.Input && s.View.Capabilities.ChatSupported
 	return s, nil
 }
 
@@ -272,6 +274,8 @@ func (s *nativeSessionStore) project(ctx context.Context, actor nativecontract.A
 		}
 		// Public v1 is read-only for native terminal handoff.
 		view.Capabilities.Take, view.Capabilities.TakeSupported = false, false
+		view.Capabilities.ChatSupported = view.Capabilities.ChatSupported && s.authority.consent.Capabilities.ChatSupported
+		view.Capabilities.Input = view.Capabilities.Input && view.Capabilities.ChatSupported
 		if _, err := s.authority.SessionTx(ctx, tx, *view.CurrentBinding); err != nil {
 			var validation *nativecontract.ValidationError
 			var denied *nativestream.Failure
@@ -287,6 +291,9 @@ func (s *nativeSessionStore) project(ctx context.Context, actor nativecontract.A
 }
 
 func (s *nativeSessionStore) Mutate(ctx context.Context, actor nativecontract.Actor, c nativecontract.Command) (nativecontract.OperationResult, error) {
+	if c.Kind == "input" && !s.authority.consent.Capabilities.ChatSupported {
+		return nativecontract.OperationResult{}, nativestream.Refuse(nativecontract.ReasonFeatureDisabled)
+	}
 	var err error
 	var binding nativecontract.Binding
 	var request string

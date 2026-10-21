@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/cli"
@@ -26,11 +28,55 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workerlease"
 )
+
+type nativeWiringProbe struct {
+	nativecontract.Store
+	calls int
+}
+
+func (p *nativeWiringProbe) Mutate(context.Context, nativecontract.Actor, nativecontract.Command) (nativecontract.OperationResult, error) {
+	p.calls++
+	return nativecontract.OperationResult{Receipt: nativecontract.Receipt{State: "accepted"}}, nil
+}
+func (*nativeWiringProbe) View(context.Context, nativecontract.Actor, string, string) (nativecontract.SessionView, error) {
+	panic("unexpected native view")
+}
+func (*nativeWiringProbe) ByHarness(context.Context, nativecontract.Actor, string, string) (nativecontract.SessionView, error) {
+	panic("unexpected native context")
+}
+func (*nativeWiringProbe) DaemonRequest(*http.Request) (context.Context, nativecontract.DaemonActor, error) {
+	panic("unexpected daemon proof")
+}
+
+// Risk: native input must not bypass the server's explicit chat-disabled gate.
+func TestNativeSessionWiringKeepsChatDisabled(t *testing.T) {
+	base := &nativeWiringProbe{}
+	caps := nativecontract.Capabilities{QualificationDigest: strings.Repeat("a", 64)}
+	for _, enabled := range []bool{false, true} {
+		caps.ChatSupported = enabled
+		services, err := harness.NativeSessionServices(new(pgxpool.Pool), nativecontract.Services{Store: base, Qualified: true}, caps)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = services.Store.Mutate(t.Context(), nativecontract.Actor{}, nativecontract.Command{Kind: "input", Input: &nativecontract.Input{}})
+		if enabled {
+			if err != nil || base.calls != 1 {
+				t.Fatalf("enabled input did not reach the existing writer: %v", err)
+			}
+		} else {
+			var denied *nativecontract.ValidationError
+			if !errors.As(err, &denied) || denied.Reason != nativecontract.ReasonFeatureDisabled || base.calls != 0 {
+				t.Fatalf("disabled input reached the writer or returned the wrong refusal: %v", err)
+			}
+		}
+	}
+}
 
 // Risk: registering native commands must not reinterpret file uploads,
 // attachment subcommands, escaped filenames or attribution starts.

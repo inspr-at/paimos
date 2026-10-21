@@ -221,7 +221,7 @@ watch([() => s.value?.project_id, () => s.value?.id, owner, () => s.value?.heart
       if (!isNativeContext(value) || (value.current_binding && (value.current_binding.tenant_id !== viewer.value.tenantId || value.current_binding.project_id !== selected.project_id || value.current_binding.harness_session_id !== selected.id || value.current_binding.owned_session_id !== value.owned_session_id))) throw new Error('Invalid native context')
       native.value = value; nativeKnown.value = true; nativeReason.value = ''
       if (!menuReady.value) viewerAtOpen.value = !!terminalLink.value
-      if (!menuReady.value) terminalAtOpen.value = viewer.value.kind === 'person' && viewer.value.canRead && (value.capabilities.take_supported || value.mode === 'terminal' || !!terminalLink.value)
+      if (!menuReady.value) terminalAtOpen.value = viewer.value.kind === 'person' && viewer.value.canRead && (value.capabilities.take_supported || value.capabilities.terminal_view || !!terminalLink.value)
     } catch (error) {
       if (read !== nativeRead || abort.signal.aborted) return
       // Once identified as owned, failed context reads never fall back to legacy writes.

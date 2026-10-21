@@ -466,7 +466,9 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		return err
 	}
 	if nativeEnabled {
-		services, err := harness.NativeSessionServices(pool, nativePilot.Services, nativeintegration.Capabilities())
+		nativeCaps := nativeintegration.Capabilities()
+		nativeCaps.ChatSupported = cfg.ChatEnabled
+		services, err := harness.NativeSessionServices(pool, nativePilot.Services, nativeCaps)
 		if err != nil {
 			return err
 		}

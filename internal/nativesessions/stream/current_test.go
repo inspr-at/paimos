@@ -5,6 +5,7 @@ package stream
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -131,6 +132,17 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 	if err = relay.Register(snapshot); err != nil {
 		t.Fatal(err)
 	}
+	expertRaw, _ := json.Marshal(nativecontract.ExpertFrame{Provider: "claude", EventName: "assistant", FrameJSON: `{"type":"assistant","message":{"content":[{"type":"text","text":"qualified expert output"}]}}`, RedactedPaths: []string{}, OriginalBytes: 128})
+	terminalRaw, _ := json.Marshal(nativecontract.TerminalFrame{TerminalEpoch: b.RuntimeEpoch, Sequence: "1", DataBase64: base64.StdEncoding.EncodeToString([]byte("qualified terminal output")), Rows: 24, Cols: 80})
+	err = relay.Publish(t.Context(), nativecontract.Publish{RequestID: uuid.NewString(), ExpectedBinding: b, Events: []nativecontract.StreamEvent{
+		{Binding: b, Generation: 1, Seq: "1", Sequence: "1", Source: "native", Kind: "expert", Payload: expertRaw, ObservedAt: now, DroppedFrames: "0"},
+		{Binding: b, Generation: 1, Seq: "2", Sequence: "2", Source: "native", Kind: "terminal", Payload: terminalRaw, ObservedAt: now, DroppedFrames: "0"},
+	}}, func(_ context.Context, deliver func(nativecontract.ValidationContext) error) error {
+		return deliver(nativecontract.ValidationContext{Binding: &b, Generation: 1, PrincipalKind: "agent", Private: true, Mode: snapshot.Mode, State: snapshot.State, Capabilities: &snapshot.Capabilities})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler, err := NewHTTPHandler(relay, a)
 	if err != nil {
 		t.Fatal(err)
@@ -169,6 +181,9 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 				if allowed && w.Code != 200 {
 					t.Fatalf("authorized view refused: %d %s", w.Code, w.Body.String())
 				}
+				if allowed && !strings.Contains(w.Body.String(), `"kind":"`+view+`"`) {
+					t.Fatalf("authorized view did not receive its actual frame: %s", w.Body.String())
+				}
 				if !allowed && (w.Code != 403 || !strings.Contains(w.Body.String(), `"reason":"wrong_principal"`)) {
 					t.Fatalf("wrong visibility refusal: %d %s", w.Code, w.Body.String())
 				}
@@ -189,6 +204,9 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 	mux.ServeHTTP(w, request(member, "structured", memberID, "events"))
 	if w.Code != 200 {
 		t.Fatalf("member structured read refused: %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "qualified terminal") || strings.Contains(w.Body.String(), "qualified expert") || strings.Contains(w.Body.String(), `"kind":"terminal"`) {
+		t.Fatal("member structured response leaked a sensitive frame")
 	}
 	// A project admin can take but cannot export; ordinary members cannot take.
 	for _, name := range []string{"owner", "workspace-admin", "project-admin", "member", "agent"} {
@@ -235,6 +253,23 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 	runtime.session.View.Capabilities.QualificationDigest = strings.Repeat("b", 64)
 	assertDenied(nativecontract.ReasonQualificationMissing)
 	runtime.session.View.Capabilities.QualificationDigest = snapshot.Capabilities.QualificationDigest
+	// Revoking a role after authentication closes the already-issued grant.
+	admin := people["workspace-admin"]
+	adminID := viewer(admin, "terminal")
+	adminReq := request(admin, "terminal", adminID, "events")
+	adminReq.SetPathValue("projectId", project)
+	adminReq.SetPathValue("ownedSessionId", b.OwnedSessionID)
+	_, adminGrant, err := a.AuthenticateViewer(adminReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, d, tid, admin.ID, "member")
+	called := false
+	err = adminGrant.Fence(adminReq.Context(), func(nativecontract.ValidationContext) error { called = true; return nil })
+	var denied *nativecontract.ValidationError
+	if called || !errors.As(err, &denied) || denied.Reason != nativecontract.ReasonWrongPrincipal {
+		t.Fatalf("revoked workspace admin retained its stream: %v", err)
+	}
 	keyOwner := owner
 	keyOwner.AuthKeyID = uuid.NewString()
 	bad := httptest.NewRecorder()

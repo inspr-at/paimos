@@ -7162,6 +7162,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestNativeSessionCommandAliasesPreserveLegacyHelp","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestNativeSessionWiringKeepsChatDisabled","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestObservedProfileCannotBeRequestedUntilPersonAcceptance","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestOrdinaryEndpointPreservesNarrowedCallerAndOwner","tier":"GATED-FULL"}
