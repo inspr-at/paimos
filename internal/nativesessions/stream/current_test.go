@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 // The fake represents a separately qualified runtime and watch export. It
 // supplies no production fallback, provider process or model call.
 type viewerRuntime struct {
+	mu      sync.RWMutex
 	session consent.Session
 	refusal nativecontract.Reason
 }
@@ -38,11 +40,37 @@ type viewerPageRecorder struct{ *httptest.ResponseRecorder }
 func (*viewerPageRecorder) SetWriteDeadline(time.Time) error { return nil }
 
 func (v *viewerRuntime) SessionTx(context.Context, pgx.Tx, nativecontract.Binding) (consent.Session, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	if v.refusal != "" {
 		return consent.Session{}, nativestream.Refuse(v.refusal)
 	}
 	return v.session, nil
 }
+
+func (v *viewerRuntime) reject(reason nativecontract.Reason) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.refusal = reason
+}
+func (v *viewerRuntime) pin(digest string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.session.View.Capabilities.QualificationDigest = digest
+}
+
+type viewerClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *viewerClock) Now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.now }
+func (c *viewerClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+func (*viewerClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
 type viewerExport struct {
 	binding nativecontract.Binding
@@ -113,6 +141,11 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='admin'`, tid, people["project-admin"].ID, project)
 		return err
 	})
+	// One database clock supplies both the fixture's persisted timestamps and
+	// every injected time comparison. Timers below only guard against hangs.
+	var now time.Time
+	seed(func(tx pgx.Tx) error { return tx.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now) })
+	clock := &viewerClock{now: now}
 	b := nativecontract.Binding{TenantID: tid, ProjectID: project, OwnedSessionID: uuid.NewString(), HarnessSessionID: uuid.NewString(), RuntimeEpoch: uuid.NewString(), DaemonID: "fixture-daemon", DaemonGeneration: "fixture-generation", BindingRevision: 1}
 	snapshot := testSnapshot()
 	snapshot.CurrentBinding = &b
@@ -121,19 +154,15 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 	terminalURL := "https://terminal.example.ts.net/run"
 	snapshot.TerminalViewerURL = &terminalURL
 	used := 10.0
-	snapshot.Quota = &nativecontract.Quota{AccountID: uuid.NewString(), ProfileBindingRevision: 1, Source: "claude_stream", Scope: "account", State: "known", UsedPercent: &used, ObservedAt: time.Now(), FreshUntil: time.Now().Add(time.Minute)}
+	snapshot.Quota = &nativecontract.Quota{AccountID: uuid.NewString(), ProfileBindingRevision: 1, Source: "claude_stream", Scope: "account", State: "known", UsedPercent: &used, ObservedAt: now, FreshUntil: now.Add(time.Minute)}
 	runtime := &viewerRuntime{session: consent.Session{Current: consent.Current{OwnerPersonID: snapshot.OwnerPersonID}, View: snapshot}}
 	consentID := uuid.NewString()
 	a, err := NewCurrentReadAuthority(d.App, runtime, snapshot.Capabilities.QualificationDigest, viewerExport{b, consentID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Read the fixture's real database clock once. No fixed calendar date is
-	// compared with the database-stamped viewer expiry.
-	var now time.Time
-	seed(func(tx pgx.Tx) error { return tx.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now) })
-	a.now = func() time.Time { return now }
-	relay, err := NewRelay(testProjector(t), nil)
+	a.now = clock.Now
+	relay, err := NewRelay(testProjector(t), clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,6 +288,7 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 	if err = sub.Close(); err != nil {
 		t.Fatal(err)
 	}
+	requireClosed(t, sub)
 	var initialView nativecontract.SessionView
 	if err = json.Unmarshal(initial.Payload, &initialView); err != nil {
 		t.Fatal(err)
@@ -305,12 +335,12 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 			t.Fatalf("stale delivery was not fenced (%t): %v", called, err)
 		}
 	}
-	runtime.refusal = nativecontract.ReasonPermissionRevoked
+	runtime.reject(nativecontract.ReasonPermissionRevoked)
 	assertDenied(nativecontract.ReasonPermissionRevoked)
-	runtime.refusal = ""
-	runtime.session.View.Capabilities.QualificationDigest = strings.Repeat("b", 64)
+	runtime.reject("")
+	runtime.pin(strings.Repeat("b", 64))
 	assertDenied(nativecontract.ReasonQualificationMissing)
-	runtime.session.View.Capabilities.QualificationDigest = snapshot.Capabilities.QualificationDigest
+	runtime.pin(snapshot.Capabilities.QualificationDigest)
 	// Revoking a role after authentication closes the already-issued grant.
 	admin := people["workspace-admin"]
 	adminID := viewer(admin, "terminal")
@@ -336,6 +366,6 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 		t.Fatalf("person API key exported: %d %s", bad.Code, bad.Body.String())
 	}
 	// Expiry is injected; the test never sleeps or relies on wall-clock speed.
-	now = now.Add(31 * time.Second)
+	clock.Advance(31 * time.Second)
 	assertDenied(nativecontract.ReasonControllerExpired)
 }
