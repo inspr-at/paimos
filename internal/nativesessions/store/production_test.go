@@ -5,6 +5,8 @@ package store
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -107,11 +109,19 @@ type compositionProvider struct {
 	confirmed bool
 	closes    int
 	now       time.Time
+	age       time.Duration
+	opens     int
 }
 
 func (p *compositionProvider) Open(_ context.Context, s nativecontract.LaunchSpec) (nativecontract.NativeTransport, error) {
 	p.binding = s.Binding
 	p.identity = nativecontract.NativeIdentity{Provider: "claude", NativeSessionRef: guuid.NewString(), RuntimeEpoch: s.Binding.RuntimeEpoch, PID: 12345, StartedAt: p.now, ProcessIdentityDigest: strings.Repeat("f", 64)}
+	if p.age > 0 {
+		p.opens++
+		p.identity.StartedAt = p.now.Add(-p.age + time.Duration(p.opens)*time.Second)
+		sum := sha256.Sum256([]byte(s.Binding.RuntimeEpoch))
+		p.identity.ProcessIdentityDigest = hex.EncodeToString(sum[:])
+	}
 	if s.ResumeRef != "" {
 		p.identity.NativeSessionRef = s.ResumeRef
 	}
@@ -244,13 +254,25 @@ func (c *productionComposition) approve(t *testing.T, scope string) string {
 	return approval.ID
 }
 
-func composeProduction(t *testing.T) *productionComposition {
+type compositionOptions struct {
+	disableRetention bool
+	configure        func(*startFixture, *consent.Authority, *agentd.NativeSessionConfig)
+}
+
+func composeProduction(t *testing.T, options ...compositionOptions) *productionComposition {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, a := newPairedStartFixture(t, consent.Facts{WorkspaceRoot: root, RetainFinals: true})
+	var option compositionOptions
+	if len(options) > 0 {
+		option = options[0]
+	}
+	f, a := newPairedStartFixture(t, consent.Facts{WorkspaceRoot: root, RetainFinals: !option.disableRetention})
+	if option.configure != nil {
+		option.configure(f, &a, nil)
+	}
 	a.Capabilities.Input = true
 	a.Capabilities.ChatSupported = true
 	a.Capabilities.InterruptSupported = true
@@ -316,6 +338,9 @@ func composeProduction(t *testing.T) *productionComposition {
 	remote := agentd.NewRemote(server.URL, "fixture-runtime")
 	profiles := &compositionHookProfiles{compositionProfiles: compositionProfiles{f.intent.AccountID, root}}
 	config := agentd.NativeProduction(remote, f.intent.ComputerID, f.person.ID, profiles, a.Capabilities)
+	if option.configure != nil {
+		option.configure(f, &a, config)
+	}
 	provider := &compositionProvider{now: f.now, events: make(chan nativecontract.ProviderEvent, 16)}
 	config.Launcher = provider
 	api := &compositionAPI{f: f}

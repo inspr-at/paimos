@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +15,8 @@ import (
 	"github.com/inspr-at/paimos/internal/nativeintegration/delivery"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
+	"github.com/inspr-at/paimos/internal/nativesessions/stream"
+	"github.com/inspr-at/paimos/internal/nativestream"
 )
 
 // Only content-free transition metadata enters the existing possible-fork
@@ -309,8 +312,87 @@ func (e *nativeOwned) switchRuntime(ctx context.Context, g nativecontract.ClaimR
 	e.transition = nil
 	if mode == "structured" {
 		e.startEvents()
+	} else if terminal, ok := transport.(*nativeTerminalTransport); ok {
+		if err = e.startTerminalFrames(*out.Session, terminal.PTYRuntime); err != nil {
+			return out, err
+		}
 	}
 	return out, nil
+}
+
+func (e *nativeOwned) startTerminalFrames(view nativecontract.SessionView, pty nativecontract.PTYRuntime) error {
+	live := e.host.config.Live
+	if live == nil {
+		return nil
+	}
+	// The daemon receipt is projected for its agent key. Local screen export
+	// is separately installed and qualified; it still needs the viewer's
+	// current person/watch consent at every delivery via LocalAuthority.
+	view.Capabilities.TerminalView = e.host.caps.TerminalView
+	if !view.Capabilities.TerminalView {
+		return nativeRefusal(nativecontract.ReasonQualificationMissing)
+	}
+	if err := live.Register(view); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithCancel(e.host.s.lifetime)
+	done := make(chan struct{})
+	e.mu.Lock()
+	e.eventCancel = cancel
+	e.eventDone = done
+	e.mu.Unlock()
+	go func() {
+		defer close(done)
+		var sequence uint64
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case frame, ok := <-pty.Frames():
+				if !ok {
+					return
+				}
+				sequence++
+				raw, err := json.Marshal(frame)
+				if err != nil || len(raw) > nativecontract.ExportedFrameBytes {
+					_ = e.fault(nativeRefusal(nativecontract.ReasonBufferFull))
+					return
+				}
+				position := strconv.FormatUint(sequence, 10)
+				event := nativecontract.StreamEvent{Binding: *view.CurrentBinding, Generation: view.Generation, Sequence: position, Seq: position, Source: "native", ObservedAt: e.host.s.capacityNow(), Kind: "terminal", Payload: raw, DroppedFrames: "0"}
+				err = live.Publish(ctx, nativecontract.Publish{RequestID: uuid.NewString(), ExpectedBinding: *view.CurrentBinding, Events: []nativecontract.StreamEvent{event}}, func(ctx context.Context, deliver func(nativecontract.ValidationContext) error) error {
+					if err := e.require(ctx); err != nil {
+						return err
+					}
+					return deliver(nativecontract.ValidationContext{Binding: view.CurrentBinding, OwnedSessionID: view.OwnedSessionID, Generation: view.Generation, Private: true, PrincipalKind: "agent", Capabilities: &view.Capabilities, Mode: "terminal", State: "taken", View: "terminal"})
+				})
+				if err != nil {
+					_ = e.fault(err)
+					return
+				}
+			}
+		}
+	}()
+	return nil
+}
+
+// nativeLocalRequest is installed only by the protected socket wrapper. It
+// preserves viewer provenance for the relay's per-delivery authorization.
+type nativeLocalRequest struct {
+	request nativestream.LocalRequest
+	actor   nativecontract.Actor
+}
+type nativeLocalRequestKey struct{}
+
+func (h *NativeHost) localSubscription(ctx context.Context, b nativecontract.Binding, q nativecontract.StreamQuery) (nativecontract.Subscription, error) {
+	r, ok := ctx.Value(nativeLocalRequestKey{}).(nativeLocalRequest)
+	if !ok || h.config.LocalAuthority == nil || h.config.Live == nil {
+		return nil, nativeRefusal(nativecontract.ReasonGrantMissing)
+	}
+	fence := func(ctx context.Context, deliver func(nativecontract.ValidationContext) error) error {
+		return h.config.LocalAuthority.WithAccess(ctx, r.actor, r.request, deliver)
+	}
+	return h.config.Live.SubscribeView(ctx, b, stream.Viewer{Query: q, Fence: fence})
 }
 
 func sameNativeConversation(a, b nativecontract.Binding) bool {

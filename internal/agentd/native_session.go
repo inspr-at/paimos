@@ -678,6 +678,7 @@ type nativeOwned struct {
 	eventCancel       context.CancelFunc
 	eventDone         chan struct{}
 	lifetime          context.Context
+	startOperation    string
 }
 
 type nativeC0Key struct{}
@@ -794,6 +795,7 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 		return out, err
 	}
 	g := e.grant
+	e.startOperation = g.OperationID
 	e.claimDeadline = now.Add(time.Duration(g.AuthorizationTTLMS) * time.Millisecond)
 	if !g.LaunchAuthorized || g.ExpectedBinding == nil || !reflect.DeepEqual(g.Intent, local.Intent) || g.ExpectedBinding.DaemonID != s.daemonID || g.ExpectedBinding.DaemonGeneration != s.generation || g.ExpectedBinding.TenantID != s.tenantID {
 		return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
@@ -989,7 +991,7 @@ func (e *nativeOwned) call(ctx context.Context, method, path string, body, dest 
 	return e.host.remote.Client.DoWithHeaders(ctx, method, path, body, dest, map[string]string{daemon.ProofHeader: header})
 }
 func (e *nativeOwned) ready(ctx context.Context, g nativecontract.ClaimResult) (nativecontract.OperationResult, error) {
-	r := nativecontract.Receipt{RequestID: g.Intent.RequestID, OperationID: g.OperationID, Binding: g.ExpectedBinding, Operation: "start", State: "applied", SourceSequence: "0", UpdatedAt: e.host.s.capacityNow().UTC()}
+	r := nativecontract.Receipt{RequestID: e.local.Intent.RequestID, OperationID: e.startOperation, Binding: g.ExpectedBinding, Operation: "start", State: "applied", SourceSequence: "0", UpdatedAt: e.host.s.capacityNow().UTC()}
 	var out nativecontract.OperationResult
 	err := e.call(ctx, "POST", "/api/agentd/native-sessions/receipts", r, &out)
 	if err == nil && (out.Session == nil || out.Session.OwnerPersonID != e.owner.OwnerPersonID) {
@@ -1671,11 +1673,11 @@ func (h *NativeHost) Renew(context.Context, nativecontract.AttachRenew) (nativec
 func (h *NativeHost) Detach(context.Context, nativecontract.Detach) (nativecontract.OperationResult, error) {
 	return nativecontract.OperationResult{}, ErrUnsupported
 }
-func (h *NativeHost) Take(context.Context, nativecontract.TakeIntent) (nativecontract.OperationResult, error) {
-	return nativecontract.OperationResult{}, ErrUnsupported
+func (h *NativeHost) Take(ctx context.Context, in nativecontract.TakeIntent) (nativecontract.OperationResult, error) {
+	return h.localCommand(ctx, in.ExpectedBinding, in.RequestID, "take", in)
 }
-func (h *NativeHost) Return(context.Context, nativecontract.ReturnIntent) (nativecontract.OperationResult, error) {
-	return nativecontract.OperationResult{}, ErrUnsupported
+func (h *NativeHost) Return(ctx context.Context, in nativecontract.ReturnIntent) (nativecontract.OperationResult, error) {
+	return h.localCommand(ctx, in.ExpectedBinding, in.RequestID, "return", in)
 }
 func (h *NativeHost) PTYInput(context.Context, nativecontract.PTYInput) (nativecontract.OperationResult, error) {
 	return nativecontract.OperationResult{}, ErrUnsupported
@@ -1698,8 +1700,8 @@ func (h *NativeHost) Snapshot(context.Context, nativecontract.Binding) (nativeco
 func (h *NativeHost) Receipts(context.Context, nativecontract.Binding, nativecontract.PageQuery) (nativecontract.ReceiptPage, error) {
 	return nativecontract.ReceiptPage{}, ErrUnsupported
 }
-func (h *NativeHost) Subscribe(context.Context, nativecontract.Binding, nativecontract.StreamQuery) (nativecontract.Subscription, error) {
-	return nil, ErrUnsupported
+func (h *NativeHost) Subscribe(ctx context.Context, b nativecontract.Binding, q nativecontract.StreamQuery) (nativecontract.Subscription, error) {
+	return h.localSubscription(ctx, b, q)
 }
 
 var _ nativecontract.Host = (*NativeHost)(nil)

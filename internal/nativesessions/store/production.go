@@ -191,6 +191,9 @@ func (s *Store) reportStarted(ctx context.Context, d nativecontract.DaemonActor,
 		}
 		view := session.View
 		changed := view.State == "starting"
+		if changed && b.BindingRevision != 2 {
+			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
 		if changed {
 			view.State = "running"
 			view.Revision++
@@ -199,7 +202,7 @@ func (s *Store) reportStarted(ctx context.Context, d nativecontract.DaemonActor,
 				return err
 			}
 		}
-		if view.State != "running" && view.State != "idle" {
+		if view.State != "running" && view.State != "idle" && view.State != "taken" {
 			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
 		}
 		out = nativecontract.OperationResult{Receipt: in, Session: &view}
