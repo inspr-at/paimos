@@ -225,6 +225,7 @@ describe('Start Agent leaf selection', () => {
     const pending = deferred<ProjectLead>()
     readLead.mockReturnValueOnce(pending.promise)
     await state.open({ ...ticket, project })
+    expect(readLead).toHaveBeenCalledExactlyOnceWith(project.id)
     expect(state.dispatchMode.value).toBe('checking')
     expect(state.canSubmit.value).toBe(false)
     await state.submit()
