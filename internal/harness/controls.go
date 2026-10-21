@@ -43,8 +43,10 @@ func safetyMetadata(value any) any {
 			c.RequestPayload = &SessionRequestPayload{StopNow: true}
 		}
 		return c
-	default:
+	case nil:
 		return nil
+	default:
+		return map[string]bool{"safety": true}
 	}
 }
 

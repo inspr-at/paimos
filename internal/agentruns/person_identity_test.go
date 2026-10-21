@@ -56,7 +56,7 @@ func TestRoutineUnresolvedRunPersonManualAndSchedulerAudits(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `SELECT
  (SELECT count(*) FROM events WHERE type='run.admission_refused' AND after='{"reason":"run_person_unresolved","source_rule":"routine"}'::jsonb),
  (SELECT count(*) FROM events WHERE type='run.admission_refused' AND actor_principal_id=$2),
- (SELECT count(*) FROM nodes WHERE fields->>'recurrence_id'=$1)+(SELECT count(*) FROM recurrence_occurrences WHERE recurrence_id=$1)+(SELECT occurrence_count::int FROM recurrences WHERE id=$1)+(SELECT count(*) FROM agent_runs)+(SELECT count(*) FROM work_orders)`, routine.ID, f.person.ID).Scan(&audits, &manual, &partial); err != nil {
+ (SELECT count(*) FROM nodes WHERE fields->>'recurrence_id'=$1::text)+(SELECT count(*) FROM recurrence_occurrences WHERE recurrence_id=$1::uuid)+(SELECT occurrence_count::int FROM recurrences WHERE id=$1::uuid)+(SELECT count(*) FROM agent_runs)+(SELECT count(*) FROM work_orders)`, routine.ID, f.person.ID).Scan(&audits, &manual, &partial); err != nil {
 			return err
 		}
 		if audits != 2 || manual != 1 || partial != 0 {

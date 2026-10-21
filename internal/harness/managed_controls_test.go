@@ -39,7 +39,7 @@ func TestRunPersonRevocationKeepsOnlyOwnedSafetyControls(t *testing.T) {
 				_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET daemon_id=$2,daemon_generation=$3 WHERE id=$1`, run, identity.DaemonID, identity.Generation)
 				return err
 			})
-			expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1, "process_ownership": identity, "doing": "Private task content"}, lease), 200)
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1, "process_ownership": identity, "doing": "Reviewing task content"}, lease), 200)
 			controls := map[string]string{}
 			for _, kind := range []string{"steer", "stop"} {
 				body := map[string]any{"request_id": uid(), "kind": kind, "expected_ownership": identity}
@@ -79,7 +79,7 @@ func TestRunPersonRevocationKeepsOnlyOwnedSafetyControls(t *testing.T) {
 			if len(offered) != 1 || offered[0].(map[string]any)["id"] != controls["stop"] {
 				t.Fatalf("safety yield offered non-stop work: %s", w.Body.String())
 			}
-			for _, forbidden := range []string{"private-", "Private task content", "ticket_node_id", "work_order_id", "model", "handover", "host"} {
+			for _, forbidden := range []string{"private-", "Reviewing task content", "ticket_node_id", "work_order_id", "model", "handover", "host"} {
 				if strings.Contains(w.Body.String(), forbidden) {
 					t.Fatalf("safety response exposed %s: %s", forbidden, w.Body.String())
 				}
