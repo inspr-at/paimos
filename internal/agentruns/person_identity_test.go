@@ -16,7 +16,6 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workerlease"
-	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
@@ -219,7 +218,7 @@ func TestRunPersonRecoveryAndChildInheritServerRun(t *testing.T) {
 			t.Fatalf("unproven parent accepted: %d %s", w.Code, w.Body.String())
 		}
 	}
-	w = call(lease)
+	w := call(lease)
 	if w.Code != 201 {
 		t.Fatalf("child: %d %s", w.Code, w.Body.String())
 	}

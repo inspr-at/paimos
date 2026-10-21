@@ -34,7 +34,7 @@ func BindRoutineCompletion(boundary httpapi.Module, completion UsageRecorder) er
 // QueueRoutineFixTx retains the previous writer's order and checkout identity.
 // Its caller resolves the current registry route and persists the shared budget
 // hold and launch before committing. Ordinary HTTP clients cannot use it.
-func QueueRoutineFixTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, routine, previous, profile, account string, trace json.RawMessage, deferred ...*[]events.Change) (Run, error) {
+func QueueRoutineFixTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, routine, previous, profile, account string, trace json.RawMessage, pending *[]events.Change) (Run, error) {
 	var order, agent, project, owner string
 	err := tx.QueryRow(ctx, `SELECT ar.work_order_id::text,ar.agent_principal_id::text,r.output_project_id::text,r.owner_principal_id::text FROM agent_runs ar JOIN routine_attempts a ON a.agent_run_id=ar.id JOIN routine_runs r ON r.id=a.run_id WHERE ar.id=$1 AND r.id=$2 AND a.role IN ('build','fix') AND ar.status IN ('completed','failed') AND ar.account_id=$3`, previous, routine, account).Scan(&order, &agent, &project, &owner)
 	if err != nil {
@@ -63,20 +63,10 @@ func QueueRoutineFixTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, routi
 	if err != nil {
 		return Run{}, err
 	}
-	// No later resource acquisition follows this narrow fix creation seam.
-	var pending []events.Change
-	if err := bindRunPerson(ctx, tx, p, &v, actingPerson, "fix", &pending); err != nil {
+	if err := bindRunPerson(ctx, tx, p, &v, actingPerson, "fix", pending); err != nil {
 		return Run{}, err
 	}
-	if len(deferred) > 0 {
-		*deferred[0] = append(*deferred[0], pending...)
-	} else {
-		for _, change := range pending {
-			if _, err := events.Append(ctx, tx, p, change); err != nil {
-				return Run{}, err
-			}
-		}
-	}
+
 	return v, nil
 }
 
