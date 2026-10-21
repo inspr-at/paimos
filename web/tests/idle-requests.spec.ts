@@ -34,7 +34,7 @@ async function harness(page: Page, components = false) {
       signal(type, node = 'p1') { for (const stream of streams) if (!stream.closed) stream.dispatchEvent(new MessageEvent(type, {data:JSON.stringify({node_id:node})})); },
       visible(value) { Object.defineProperty(document,'visibilityState',{configurable:true,value:value?'visible':'hidden'}); Object.defineProperty(document,'hidden',{configurable:true,value:!value}); document.dispatchEvent(new Event('visibilitychange')); },
     };
-    ${components ? `
+    window.idleRequests.start = async () => { ${components ? `
       const {default: TicketDelivery} = await import('/src/components/work/TicketDelivery.vue');
       const {default: TicketReviews} = await import('/src/components/work/TicketReviews.vue');
       const {useSession} = await import('/src/stores/session.ts');
@@ -44,13 +44,14 @@ async function harness(page: Page, components = false) {
       const {QuotePresence} = await import('/src/lib/quotePresence.ts');
       const presence = new QuotePresence('quote','person',() => {},() => {});
       await presence.start(1); window.idleRequests.presence = presence;
-    ` : 'window.idleRequests.mount();'}
+    ` : 'window.idleRequests.mount();'} };
     window.idleRequests.ready = true;
   </script></body></html>` }))
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
   await page.goto('/tests/idle-requests-inline.html')
   await expect.poll(() => page.evaluate(() => !!(window as any).idleRequests?.ready)).toBe(true)
+  await page.evaluate(() => (window as any).idleRequests.start())
   return errors
 }
 // The live transport keeps hearing pings while the injected browser clock
