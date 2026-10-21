@@ -50,8 +50,9 @@ separate rollout concerns.
 
 The exact owned stop/yield/confirm-exit/control-completion safety routes retain
 their private worker-lease checks without a content capability. The server also
-rechecks a claimed managed run or an active daemon attachment; a lease on a
-person-created direct registration does not establish daemon ownership. Bare paired
+rechecks the exact lease and S1-03 ownership: an assigned run, a generation
+started by the paired principal, or its current native session binding. A lease
+on a person-created direct registration does not establish daemon ownership. Bare paired
 transport on those routes always uses the metadata-only projection. Revoked
 person access or an obsolete content capability cannot prevent the owning
 daemon from requesting or confirming a stop; handovers, steer text and other

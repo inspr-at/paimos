@@ -757,7 +757,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if v.ReadOnlyReview && r.Header.Get(reviewgate.PolicyHeader) != reviewgate.Policy {
 		return nil, workorders.Fail(409, "review-capable daemon policy required")
 	}
-	if err := agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
+	// Enrollment precedes the person and revocation checks. A classic or
+	// never-enrolled daemon is ledger_enrollment_required, not permission_revoked.
+	if err = agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
 		return nil, err
 	}
 	if err = workqueue.RequireRunPersonTx(ctx, tx, p, v.ID); err != nil {
@@ -785,7 +787,6 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err = m.validateRoutinePickup(ctx, tx, p, v, o, in.Routine, in.Daemon, in.Generation); err != nil {
 		return nil, err
 	}
-
 	if in.Refusal != "" {
 		if len(in.Reservations) != 0 {
 			return nil, workorders.Fail(400, "refusal must not claim reservations")
