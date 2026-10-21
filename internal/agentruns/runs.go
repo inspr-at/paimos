@@ -545,7 +545,7 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 		// The existing worker proof identifies its parent run. No caller-chosen
 		// person, run-identity header or additional request field is accepted.
 		sum := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
-		rows, err := tx.Query(ctx, `SELECT DISTINCT r.id::text FROM harness_sessions s JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id WHERE s.tenant_id=$1 AND s.agent_principal_id=$2 AND r.agent_principal_id=$2 AND s.lease_digest=$3 AND s.archived_at IS NULL AND s.stopped_at IS NULL AND r.status IN ('running','starting','waiting') AND coalesce(n.project_id::text,'')=$4 ORDER BY r.id LIMIT 2`, p.TenantID, p.ID, sum[:], projectID)
+		rows, err := tx.Query(ctx, `SELECT DISTINCT r.id::text FROM harness_sessions s JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id WHERE s.tenant_id=$1 AND s.agent_principal_id=$2 AND r.agent_principal_id=$2 AND s.lease_digest=$3 AND s.archived_at IS NULL AND s.stopped_at IS NULL AND r.status IN ('running','starting','waiting') AND coalesce(n.project_id::text,'')=$4 ORDER BY r.id::text LIMIT 2`, p.TenantID, p.ID, sum[:], projectID)
 		if err != nil {
 			return nil, err
 		}

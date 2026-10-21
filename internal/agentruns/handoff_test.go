@@ -364,6 +364,7 @@ func secondWorkerHandoff(t *testing.T, f *fixture, project string, first qEntry)
 	body := claimBody(f.reserve(t, second.Run))
 	body["daemon_id"] = "daemon-other"
 	f.legacyAccount(t, second.Run.ID)
+	f.key(t, f.other, []string{"run.claim"})
 	f.pairedRunComputer(t, f.other)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET registered_by_principal_id=$2,daemon_id='daemon-other' WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1)`, second.Run.ID, f.other.ID)
