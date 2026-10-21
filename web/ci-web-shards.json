@@ -902,7 +902,7 @@
     ,
     "AEON-1502: aeon-1502-approve-harness was not in a hosted nightly run yet. An mbp2606 one-worker run of its twelve cases at c210b0e21 took 12.8 seconds; nightlyTiming keeps that wall as a scheduling estimate, not a hosted measurement. PR packing stays on the unmeasured-test-rate weight."
     ,
-    "AEON-1604: aeon-1604-edit-key was not in a hosted nightly run yet. An mbp2606 one-worker run of its first three cases at 2fbda8c1c passed in 5.3 seconds. nightlyTiming keeps that wall as the scheduling estimate for all four cases until a one-worker run of the whole file replaces it. PR packing stays on the unmeasured-test-rate weight."
+    "AEON-1604: aeon-1604-edit-key was not in a hosted nightly run yet. An mbp2606 one-worker run of all four cases at 5f3ad9ba5 passed in 6.0 seconds; nightlyTiming keeps that wall as a scheduling estimate, not a hosted measurement. PR packing stays on the unmeasured-test-rate weight."
   ]
   ,
   "nightlyTiming": {

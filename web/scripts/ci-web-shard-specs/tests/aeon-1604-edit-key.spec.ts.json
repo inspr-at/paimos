@@ -1,7 +1,7 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 5.3,
+    "seconds": 6,
     "selectedTests": 4
   },
   "spec": {
