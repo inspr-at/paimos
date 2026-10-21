@@ -77,6 +77,9 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 	if err := s.validate("NativeClaim", in); err != nil {
 		return out, err
 	}
+	if s.production != nil && in.ClaimKind == "final_drain" {
+		return s.claimDrain(ctx, daemon, in)
+	}
 	if s.production != nil && in.ClaimKind == "command" {
 		return s.claimCommand(ctx, daemon, in)
 	}
@@ -259,7 +262,7 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 		// The immutable harness generation is registered as the paired computer
 		// principal, not the earlier person/CLI registration principal.
 		_, err = tx.Exec(ctx, `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,owner_principal_id,model_profile_id,model,reasoning_effort,started_by_principal_id)
- VALUES($1,$2,$3,$4,$5,$6,$20,$7,$8,$9,'managed',$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`, p.TenantID, harnessID, r.ProjectID, p.ID, grant.RunID, r.Intent.WorkID, r.Intent.ParentHarnessSessionID, r.Intent.Harness, daemon.ComputerID, r.Intent.Role, shape, []string{"interrupt", "stop"}, observed.SessionRefDigest, observed.WorkerLeaseDigest, r.OwnerPersonID, r.Intent.ModelProfileID, r.launch.Model, r.launch.Effort, r.actor.Principal.ID, workOrder)
+ VALUES($1,$2,$3,$4,$5,$6,$20,$7,$8,$9,'managed',$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`, p.TenantID, harnessID, r.ProjectID, p.ID, grant.RunID, r.Intent.WorkID, r.Intent.ParentHarnessSessionID, r.Intent.Harness, daemon.ComputerID, r.Intent.Role, shape, []string{"interrupt", "stop", "chat"}, observed.SessionRefDigest, observed.WorkerLeaseDigest, r.OwnerPersonID, r.Intent.ModelProfileID, r.launch.Model, r.launch.Effort, r.actor.Principal.ID, workOrder)
 		if err != nil {
 			return err
 		}

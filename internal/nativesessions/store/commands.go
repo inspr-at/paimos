@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativesessions/consent"
+	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
 	"github.com/inspr-at/paimos/internal/nativesessions/receipts"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -178,7 +179,12 @@ func (s *Store) Commands(ctx context.Context, d nativecontract.DaemonActor, q na
 	}
 	s.commandMu.Unlock()
 	sort.Slice(items, func(i, j int) bool { return items[i].intent.Receipt.OperationID < items[j].intent.Receipt.OperationID })
+	private, _ := ctx.Value(proofKey{}).(daemon.Proof)
+	identity, _, _ := private.Runtime()
 	for _, c := range items {
+		if identity.RuntimeEpoch != "" && c.intent.Receipt.Binding.RuntimeEpoch != identity.RuntimeEpoch {
+			continue
+		}
 		r := c.intent.Receipt
 		b := *r.Binding
 		if b.TenantID != d.TenantID || b.DaemonID != d.DaemonID || b.DaemonGeneration != d.DaemonGeneration || r.OperationID <= q.After || !s.now().Before(c.intent.ExpiresAt) {
@@ -271,6 +277,48 @@ func (s *Store) Report(ctx context.Context, d nativecontract.DaemonActor, in nat
 			_, err := tx.Exec(ctx, `UPDATE native_session_bindings SET view=$2 WHERE id=$1`, b.OwnedSessionID, raw)
 			return err
 		})
+	}
+	return out, err
+}
+
+// Final-drain claims only re-read the original non-renewable grant. They never
+// issue command, input or launch authority and may follow a confirmed exit.
+func (s *Store) claimDrain(ctx context.Context, d nativecontract.DaemonActor, in nativecontract.Claim) (nativecontract.ClaimResult, error) {
+	var out nativecontract.ClaimResult
+	s.commandMu.Lock()
+	c, ok := s.commands[in.OperationID]
+	s.commandMu.Unlock()
+	if !ok || c.drain == nil || c.intent.Receipt.Binding == nil {
+		return out, fail(403, nativecontract.ReasonRetentionUnapproved)
+	}
+	b := *c.intent.Receipt.Binding
+	err := s.runtimeTx(ctx, d, b, true, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
+		if in.DaemonID != d.DaemonID || in.DaemonGeneration != d.DaemonGeneration || in.LedgerGeneration != d.LedgerGeneration || in.CapabilityDigest != d.CapabilityDigest {
+			return fail(403, nativecontract.ReasonWrongGeneration)
+		}
+		// FinalTx independently validates the separate current retention decision.
+		dummy := nativecontract.FinalPublish{ExpectedBinding: b, DrainGrantID: c.drain.GrantID}
+		a, err := s.production.authority.FinalTx(ctx, tx, d, dummy)
+		if err != nil {
+			return err
+		}
+		now := s.now()
+		if !now.Before(a.Grant.ExpiresAt) {
+			return fail(403, nativecontract.ReasonPublicationGrantExpired)
+		}
+		var raw []byte
+		if err = tx.QueryRow(ctx, `SELECT launch_config FROM native_session_intents WHERE owned_session_id=$1`, b.OwnedSessionID).Scan(&raw); err != nil {
+			return err
+		}
+		var launch nativecontract.LaunchConfig
+		if err = json.Unmarshal(raw, &launch); err != nil {
+			return err
+		}
+		out = nativecontract.ClaimResult{OperationID: in.OperationID, OwnedSessionID: b.OwnedSessionID, Intent: session.Intent, Policy: session.Policy, ExpectedBinding: &b, ExpiresAt: a.Grant.ExpiresAt, FinalDrainGrant: &a.Grant, ClaimKind: "final_drain", LaunchConfig: launch, AuthorizationTTLMS: min(20000, a.Grant.ExpiresAt.Sub(now).Milliseconds())}
+		return nil
+	})
+	if err == nil {
+		err = s.validate("NativeClaimResult", out)
 	}
 	return out, err
 }

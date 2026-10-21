@@ -587,11 +587,13 @@ func (s *Supervisor) PollNativeSessions(ctx context.Context) error {
 func NativeProduction(remote *Remote, computer string, profiles nativecontract.ProfileResolver, caps nativecontract.Capabilities) *NativeSessionConfig {
 	h := &NativeHost{remote: remote, computer: computer, profiles: profiles, caps: caps, entries: map[string]*nativeOwned{}}
 	c := &NativeSessionConfig{StartLocal: h.Start, Poll: h.Poll, Close: h.Close, Host: h, Launcher: h}
+	h.config = c
 	c.Bind = func(s *Supervisor) { h.s = s }
 	return c
 }
 
 type NativeHost struct {
+	config   *NativeSessionConfig
 	s        *Supervisor
 	remote   *Remote
 	computer string
@@ -601,6 +603,12 @@ type NativeHost struct {
 	entries  map[string]*nativeOwned
 }
 type nativeOwned struct {
+	ownership    *ownedprocess.Identity
+	cancel       context.CancelFunc
+	observations map[string]nativecontract.NativeEvidence
+	exit         *nativecontract.ExitEvidence
+	drains       map[string]nativecontract.FinalDrainGrant
+
 	host              *NativeHost
 	local             nativecontract.LocalStart
 	claim             nativecontract.Claim
@@ -610,7 +618,7 @@ type nativeOwned struct {
 	group             string
 	journal           *nativereceipts.Store
 	delivery          *delivery.Delivery
-	transport         *nativeC0Transport
+	transport         nativecontract.NativeTransport
 	active            nativecontract.ClaimResult
 	operations        map[string]string // input ID -> operation ID, bounded by journal
 	mu                sync.Mutex
@@ -682,7 +690,7 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 			return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
 		}
 	}
-	record := "native-c0-" + local.Intent.RequestID + ".json"
+	record := "lead-runtime-" + local.Intent.RequestID + ".json"
 	if _, err = s.state.Read(record, 16384); err == nil {
 		return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -716,9 +724,9 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 		return out, err
 	}
 	now := s.capacityNow()
-	e := &nativeOwned{host: h, local: local, group: group, operations: map[string]string{}, proof: daemon.Proof{DaemonID: s.daemonID, Generation: s.generation, Ledger: s.ledgerBinding.Generation, Capability: h.caps.QualificationDigest, WorkerLease: lease, SessionRef: ref, ReservationID: reservation, ObservedAt: now, ExpiresAt: now.Add(20 * time.Second), LocalStart: &local}}
+	e := &nativeOwned{host: h, local: local, group: group, operations: map[string]string{}, observations: map[string]nativecontract.NativeEvidence{}, drains: map[string]nativecontract.FinalDrainGrant{}, proof: daemon.Proof{DaemonID: s.daemonID, Generation: s.generation, Ledger: s.ledgerBinding.Generation, Capability: h.caps.QualificationDigest, WorkerLease: lease, SessionRef: ref, ReservationID: reservation, ObservedAt: now, ExpiresAt: now.Add(20 * time.Second), LocalStart: &local}}
 	e.claim = nativecontract.Claim{RequestID: request, OperationID: local.Intent.RequestID, DaemonID: s.daemonID, DaemonGeneration: s.generation, LedgerGeneration: s.ledgerBinding.Generation, CapabilityDigest: h.caps.QualificationDigest, ExpectedRevision: 1, ClaimKind: "start"}
-	if err = e.call(ctx, "POST", "/api/native-sessions/claim", e.claim, &e.grant); err != nil {
+	if err = e.call(ctx, "POST", "/api/agentd/native-sessions/claim", e.claim, &e.grant); err != nil {
 		return out, errors.Join(err, s.ledger.Release(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, group))
 	}
 	g := e.grant
@@ -750,11 +758,42 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 		return out, err
 	}
 	spec := nativecontract.LaunchSpec{Binding: b, Profile: profile, Policy: g.Policy, Cwd: local.Cwd, Mode: "structured", OwnedWriterID: b.RuntimeEpoch, Options: g.LaunchConfig, Lifetime: s.lifetime}
-	process, err := h.Open(ctx, spec)
+	deadline := s.capacityNow().Add(time.Duration(g.Policy.MaximumRuntimeSeconds) * time.Second)
+	if g.Policy.ExpiresAt.Before(deadline) {
+		deadline = g.Policy.ExpiresAt
+	}
+	spec.Lifetime, e.cancel = context.WithDeadline(s.lifetime, deadline)
+	if err = e.require(ctx); err != nil {
+		return out, err
+	}
+	e.attempted = true
+	if err = e.save("possible_fork"); err != nil {
+		return out, err
+	}
+	if err = s.ledger.Launching(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, e.group); err != nil {
+		return out, err
+	}
+	process, err := h.config.Launcher.Open(ctx, spec)
 	if err != nil {
 		return out, err
 	}
-	t := process.(*nativeC0Transport)
+	i := process.Identity()
+	if i.RuntimeEpoch != b.RuntimeEpoch || i.PID < 1 || i.StartedAt.IsZero() || !nativereceipts.ValidDigest(i.ProcessIdentityDigest) {
+		return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	if owner, ok := process.(interface {
+		Ownership() (ownedprocess.Identity, error)
+	}); ok {
+		identity, err := owner.Ownership()
+		if err != nil {
+			return out, err
+		}
+		e.ownership = &identity
+	}
+	if err = s.ledger.Running(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, e.group, i.PID, i.StartedAt); err != nil {
+		return out, err
+	}
+	t := &nativeObservedTransport{NativeTransport: process, owner: e}
 	e.mu.Lock()
 	e.transport = t
 	e.mu.Unlock()
@@ -791,7 +830,7 @@ func (h *NativeHost) Open(ctx context.Context, spec nativecontract.LaunchSpec) (
 		}
 	}
 	h.mu.Unlock()
-	if e == nil || e.attempted || !reflect.DeepEqual(e.profile, spec.Profile) || spec.Cwd != e.local.Cwd {
+	if e == nil || !e.attempted || e.transport != nil || !reflect.DeepEqual(e.profile, spec.Profile) || spec.Cwd != e.local.Cwd {
 		return nil, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
 	}
 	adapter, ok := h.s.adapters[Claude].(*ClaudeAdapter)
@@ -809,16 +848,6 @@ func (h *NativeHost) Open(ctx context.Context, spec nativecontract.LaunchSpec) (
 	}
 	policyDigest, _ := nativereceipts.Digest(spec.Policy)
 	n := &NativeLeadSpec{Grant: NativeLeadGrant{TenantID: spec.Binding.TenantID, PrincipalID: h.s.principalID, OwnerID: grant.CommandActor.OwnerPersonID, ProjectID: spec.Binding.ProjectID, AccountID: spec.Profile.AccountID, SessionID: spec.Binding.HarnessSessionID, DaemonID: h.s.daemonID, Generation: h.s.generation, PolicyDigest: policyDigest, AccountHomeDigest: nativeDigest(spec.Profile.AccountHome), WorkspaceDigest: nativeDigest(spec.Cwd), Revision: spec.Policy.GrantRevision, ExpiresAt: spec.Policy.ExpiresAt, HistoryApproved: true, AllowedTools: []string{}}, Prompt: "Wait for the person's next instruction. No tool use is authorized by this initialization.", Model: grant.LaunchConfig.Model, Effort: effort, Require: e.require, BeforeInput: t.beforeInput, Observe: func(AdapterEvent) {}, Now: h.s.capacityNow}
-	if err = e.require(ctx); err != nil {
-		return nil, err
-	}
-	if err = e.save("possible_fork"); err != nil {
-		return nil, err
-	}
-	e.attempted = true
-	if err = h.s.ledger.Launching(h.s.ledgerBinding.Member.ID, h.s.ledgerBinding.Generation, e.group); err != nil {
-		return nil, err
-	}
 	launch := &nativeC0Launch{spec: spec, observe: t.observe}
 	process, err := adapter.StartLead(context.WithValue(ctx, nativeC0Key{}, launch), LeadStartRequest{Native: n, Session: HarnessSession{ID: spec.Binding.HarnessSessionID, ProjectID: spec.Binding.ProjectID, Harness: Claude, Lease: e.proof.WorkerLease}, AccountKey: e.local.AccountKey, Workspace: spec.Cwd, Lifetime: spec.Lifetime})
 	if err != nil {
@@ -844,23 +873,17 @@ func (h *NativeHost) Open(ctx context.Context, spec nativecontract.LaunchSpec) (
 	if t.Identity().NativeSessionRef == "" {
 		return nil, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
 	}
-	if err = h.s.ledger.Running(h.s.ledgerBinding.Member.ID, h.s.ledgerBinding.Generation, e.group, identity.RootPID, identity.StartedAt); err != nil {
-		return nil, err
-	}
+	e.ownership = &identity
 	return t, nil
 }
 func (e *nativeOwned) save(state string) error {
-	record := struct {
-		Version int                     `json:"version"`
-		Binding *nativecontract.Binding `json:"binding"`
-		Group   string                  `json:"group"`
-		State   string                  `json:"state"`
-	}{1, e.grant.ExpectedBinding, e.group, state}
-	raw, err := json.Marshal(record)
-	if err != nil {
-		return err
+	request := NativeSessionStartRequest{RequestID: e.local.Intent.RequestID, ProjectID: e.grant.ExpectedBinding.ProjectID, Profile: "native", Role: "coordinator", Harness: Claude, Cwd: e.local.Cwd}
+	record := leadRecord{Version: leadRecordSchemaVersion, Pickup: agentsetup.LeadPickup{Demand: agentsetup.LeadDemand{ID: e.local.Intent.RequestID, ProjectID: e.grant.ExpectedBinding.ProjectID, OwnerID: e.grant.CommandActor.OwnerPersonID}, DaemonID: e.host.s.daemonID, DaemonGeneration: e.host.s.generation, LedgerGeneration: e.host.s.ledgerBinding.Generation, AccountID: e.local.Intent.AccountID}, Group: e.group, Attempted: e.attempted, Ownership: e.ownership, Native: &nativeLeadRecord{Request: request, SessionID: e.grant.ExpectedBinding.HarnessSessionID}}
+	if state == "exit_confirmed" {
+		record.ExitObserved = true
+		record.ExitReported = true
 	}
-	return e.host.s.state.Write("native-c0-"+e.local.Intent.RequestID+".json", raw, false)
+	return e.host.s.writeLead(record, false)
 }
 func (e *nativeOwned) call(ctx context.Context, method, path string, body, dest any) error {
 	e.mu.Lock()
@@ -868,7 +891,7 @@ func (e *nativeOwned) call(ctx context.Context, method, path string, body, dest 
 	t := e.transport
 	e.mu.Unlock()
 	if t != nil {
-		i, ev, x := t.proofFor(nil)
+		i, ev, x := e.proofFor(nil)
 		proof.SetRuntime(i, ev, x)
 	}
 	header, err := daemon.Encode(proof)
@@ -880,7 +903,7 @@ func (e *nativeOwned) call(ctx context.Context, method, path string, body, dest 
 func (e *nativeOwned) ready(ctx context.Context, g nativecontract.ClaimResult) (nativecontract.OperationResult, error) {
 	r := nativecontract.Receipt{RequestID: g.Intent.RequestID, OperationID: g.OperationID, Binding: g.ExpectedBinding, Operation: "start", State: "applied", SourceSequence: "0", UpdatedAt: e.host.s.capacityNow().UTC()}
 	var out nativecontract.OperationResult
-	err := e.call(ctx, "POST", "/api/native-sessions/receipts", r, &out)
+	err := e.call(ctx, "POST", "/api/agentd/native-sessions/receipts", r, &out)
 	return out, err
 }
 func (e *nativeOwned) require(ctx context.Context) error {
@@ -889,7 +912,7 @@ func (e *nativeOwned) require(ctx context.Context) error {
 	e.mu.Unlock()
 	if t == nil {
 		var out nativecontract.ClaimResult
-		return e.call(ctx, "POST", "/api/native-sessions/claim", e.claim, &out)
+		return e.call(ctx, "POST", "/api/agentd/native-sessions/claim", e.claim, &out)
 	}
 	profile, err := e.host.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: e.host.s.tenantID, OwnerPersonID: e.grant.CommandActor.OwnerPersonID, AccountID: e.local.Intent.AccountID, AccountKey: e.local.AccountKey, WorkspaceID: e.local.Intent.WorkspaceID, Harness: Claude, Policy: e.grant.Policy, BindingRevision: e.grant.ExpectedBinding.BindingRevision})
 	if err != nil {
@@ -901,7 +924,7 @@ func (e *nativeOwned) require(ctx context.Context) error {
 	if active.OperationID != "" {
 		claim := nativecontract.Claim{RequestID: uuid.NewString(), OperationID: active.OperationID, DaemonID: e.host.s.daemonID, DaemonGeneration: e.host.s.generation, LedgerGeneration: e.host.s.ledgerBinding.Generation, CapabilityDigest: e.host.caps.QualificationDigest, ExpectedRevision: e.grant.ExpectedBinding.BindingRevision, ClaimKind: "command"}
 		var current nativecontract.ClaimResult
-		if err = e.call(ctx, "POST", "/api/native-sessions/claim", claim, &current); err != nil {
+		if err = e.call(ctx, "POST", "/api/agentd/native-sessions/claim", claim, &current); err != nil {
 			return err
 		}
 		if current.ExpectedBinding == nil || !current.ExpectedBinding.Equal(*e.grant.ExpectedBinding) || !reflect.DeepEqual(current.Command, active.Command) || current.CommandActor == nil || current.CommandActor.PrincipalID != e.grant.CommandActor.PrincipalID {
@@ -956,32 +979,38 @@ func (e *nativeOwned) Report(ctx context.Context, r nativecontract.Receipt) (nat
 	if t == nil {
 		return r, ErrNotOwned
 	}
-	i, ev, x := t.proofFor(&r)
+	i, ev, x := e.proofFor(&r)
 	proof.SetRuntime(i, ev, x)
 	header, err := daemon.Encode(proof)
 	if err != nil {
 		return r, err
 	}
 	var out nativecontract.OperationResult
-	err = e.host.remote.Client.DoWithHeaders(ctx, "POST", "/api/native-sessions/receipts", r, &out, map[string]string{daemon.ProofHeader: header})
+	err = e.host.remote.Client.DoWithHeaders(ctx, "POST", "/api/agentd/native-sessions/receipts", r, &out, map[string]string{daemon.ProofHeader: header})
 	return out.Receipt, err
 }
 func (e *nativeOwned) Persist(ctx context.Context, f nativecontract.FinalDelivery) (nativecontract.FinalReceipt, error) {
 	var out nativecontract.FinalReceipt
-	err := e.call(ctx, "POST", "/api/native-sessions/finals", f, &out)
+	err := e.call(ctx, "POST", "/api/agentd/native-sessions/finals", f, &out)
 	return out, err
 }
 func (e *nativeOwned) retention(ctx context.Context, f nativecontract.FinalPublish) (nativecontract.FinalDrainGrant, nativereceipts.RetentionApproval, error) {
 	e.mu.Lock()
-	grant := e.active.FinalDrainGrant
+	grant, found := e.drains[f.InputID]
+	operation := e.operations[f.InputID]
 	e.mu.Unlock()
-	if grant == nil || grant.GrantID != f.DrainGrantID || !e.host.s.capacityNow().Before(grant.ExpiresAt) {
-		return nativecontract.FinalDrainGrant{}, nativereceipts.RetentionApproval{}, nativeRefusal(nativecontract.ReasonRetentionUnapproved)
+	if !found || grant.GrantID != f.DrainGrantID || !e.host.s.capacityNow().Before(grant.ExpiresAt) {
+		return grant, nativereceipts.RetentionApproval{}, nativeRefusal(nativecontract.ReasonRetentionUnapproved)
 	}
-	if err := e.require(ctx); err != nil {
-		return *grant, nativereceipts.RetentionApproval{}, err
+	claim := nativecontract.Claim{RequestID: uuid.NewString(), OperationID: operation, DaemonID: e.host.s.daemonID, DaemonGeneration: e.host.s.generation, LedgerGeneration: e.host.s.ledgerBinding.Generation, CapabilityDigest: e.host.caps.QualificationDigest, ExpectedRevision: e.grant.ExpectedBinding.BindingRevision, ClaimKind: "final_drain"}
+	var current nativecontract.ClaimResult
+	if err := e.call(ctx, "POST", "/api/agentd/native-sessions/claim", claim, &current); err != nil {
+		return grant, nativereceipts.RetentionApproval{}, err
 	}
-	return *grant, nativereceipts.RetentionApproval{Approved: true, OwnerPersonID: e.grant.CommandActor.OwnerPersonID, Until: grant.ExpiresAt}, nil
+	if current.LaunchAuthorized || current.Command != nil || current.FinalDrainGrant == nil || !reflect.DeepEqual(*current.FinalDrainGrant, grant) {
+		return grant, nativereceipts.RetentionApproval{}, nativeRefusal(nativecontract.ReasonRetentionUnapproved)
+	}
+	return grant, nativereceipts.RetentionApproval{Approved: true, OwnerPersonID: e.grant.CommandActor.OwnerPersonID, Until: grant.ExpiresAt}, nil
 }
 func (e *nativeOwned) release(ctx context.Context, b nativecontract.Binding, x nativecontract.ExitEvidence) error {
 	if !x.RootExited || !x.GroupAbsent || x.ProcessIdentityDigest != e.transport.Identity().ProcessIdentityDigest {
@@ -1028,7 +1057,7 @@ func (h *NativeHost) Poll(ctx context.Context) error {
 			}
 		}
 		var page nativecontract.PendingCommandPage
-		if err := e.call(ctx, "GET", "/api/native-sessions/commands?limit=50", nil, &page); err != nil {
+		if err := e.call(ctx, "GET", "/api/agentd/native-sessions/commands?limit=50", nil, &page); err != nil {
 			return err
 		}
 		for _, item := range page.Items {
@@ -1051,7 +1080,7 @@ func (e *nativeOwned) execute(ctx context.Context, item nativecontract.PendingCo
 	var out nativecontract.OperationResult
 	claim := nativecontract.Claim{RequestID: uuid.NewString(), OperationID: item.OperationID, DaemonID: e.host.s.daemonID, DaemonGeneration: e.host.s.generation, LedgerGeneration: e.host.s.ledgerBinding.Generation, CapabilityDigest: e.host.caps.QualificationDigest, ExpectedRevision: item.ExpectedBinding.BindingRevision, ClaimKind: "command"}
 	var g nativecontract.ClaimResult
-	if err := e.call(ctx, "POST", "/api/native-sessions/claim", claim, &g); err != nil {
+	if err := e.call(ctx, "POST", "/api/agentd/native-sessions/claim", claim, &g); err != nil {
 		return out, err
 	}
 	if g.ExpectedBinding == nil || !g.ExpectedBinding.Equal(item.ExpectedBinding) || g.Command == nil || g.CommandActor == nil || g.Command.Kind != item.Kind {
@@ -1075,6 +1104,9 @@ func (e *nativeOwned) execute(ctx context.Context, item nativecontract.PendingCo
 			return out, nativeRefusal(nativecontract.ReasonBufferFull)
 		}
 		e.operations[in.InputID] = item.OperationID
+		if g.FinalDrainGrant != nil {
+			e.drains[in.InputID] = *g.FinalDrainGrant
+		}
 		e.mu.Unlock()
 		r, err = e.delivery.Send(ctx, actor, item.OperationID, in)
 	case "interrupt":
@@ -1088,7 +1120,7 @@ func (e *nativeOwned) execute(ctx context.Context, item nativecontract.PendingCo
 		if json.Unmarshal(g.Command.Params, &in) != nil {
 			return out, ErrScope
 		}
-		r, err = e.delivery.Close(ctx, actor, item.OperationID, in, e.transport.nextSequence())
+		r, err = e.delivery.Close(ctx, actor, item.OperationID, in, uint64(1))
 	default:
 		err = ErrUnsupported
 	}
@@ -1112,14 +1144,28 @@ func (e *nativeOwned) events(ctx context.Context) {
 			if event.Final != nil {
 				operation = e.operations[event.Final.InputID]
 			}
-			grant := e.active.FinalDrainGrant
+			var grant *nativecontract.FinalDrainGrant
+			if event.Final != nil {
+				if g, ok := e.drains[event.Final.InputID]; ok {
+					grant = &g
+				}
+			}
 			e.mu.Unlock()
 			if operation == "" {
 				continue
 			}
 			var err error
 			if event.Receipt != nil {
-				ev := e.transport.evidenceFor(*event.Receipt)
+				ev := nativecontract.NativeEvidence{Stage: event.Receipt.State, RequestID: event.Receipt.RequestID, SourceSequence: event.SourceSequence, ObservedAt: e.host.s.capacityNow()}
+				if event.Receipt.InputID != nil {
+					ev.InputID = *event.Receipt.InputID
+				}
+				if event.Receipt.TurnRef != nil {
+					ev.TurnRef = *event.Receipt.TurnRef
+				}
+				e.mu.Lock()
+				e.observations[ev.Stage+"/"+ev.RequestID] = ev
+				e.mu.Unlock()
 				_, err = e.delivery.Observe(ctx, operation, event.Identity, ev)
 			}
 			if event.Final != nil && grant != nil {
@@ -1153,7 +1199,7 @@ func (h *NativeHost) localCommand(ctx context.Context, b nativecontract.Binding,
 		return nativecontract.OperationResult{}, ErrNotOwned
 	}
 	var page nativecontract.PendingCommandPage
-	if err := e.call(ctx, "GET", "/api/native-sessions/commands?limit=50", nil, &page); err != nil {
+	if err := e.call(ctx, "GET", "/api/agentd/native-sessions/commands?limit=50", nil, &page); err != nil {
 		return nativecontract.OperationResult{}, err
 	}
 	for _, item := range page.Items {

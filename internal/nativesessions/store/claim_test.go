@@ -33,7 +33,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func newPairedStartFixture(t *testing.T) (*startFixture, consent.Authority) {
+func newPairedStartFixture(t *testing.T, options ...consent.Facts) (*startFixture, consent.Authority) {
 	t.Helper()
 	f := newStartFixture(t)
 	proposer := f.agent
@@ -131,6 +131,10 @@ func newPairedStartFixture(t *testing.T) (*startFixture, consent.Authority) {
 	proposer.AuthKeyID = proposer.KeyID
 	approvals.New(f.d.App).Mount(mux)
 	facts := consent.Facts{ComputerID: f.intent.ComputerID, AccountID: f.intent.AccountID, WorkspaceID: f.intent.WorkspaceID, WorkspaceRoot: "/fixture/native", ModelProfileID: f.intent.ModelProfileID, ToolSet: []string{}, SettingsProfile: consent.SettingsProfile, LocalHistory: "vendor_native", Revision: 1, MaximumRuntimeSeconds: 3600, MaximumTurns: 100, MaximumTokens: 10000}
+	if len(options) > 0 {
+		facts.WorkspaceRoot = options[0].WorkspaceRoot
+		facts.RetainFinals = options[0].RetainFinals
+	}
 	proposalRaw, _ := json.Marshal(map[string]any{"scope": consent.SessionScope, "resource_kind": "node", "resource_id": f.project, "rationale": "Native coordinator with explicit local history", "expires_at": f.now.Add(time.Hour), "native_consent": facts})
 	r := httptest.NewRequest("POST", "/api/approvals", bytes.NewReader(proposalRaw)).WithContext(tenant.WithPrincipal(t.Context(), proposer))
 	r.Header.Set("Content-Type", "application/json")

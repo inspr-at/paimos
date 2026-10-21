@@ -385,3 +385,56 @@ func verifyNativePin(pin nativecontract.BinaryPin) error {
 	}
 	return nil
 }
+
+// The owner records evidence only from its installed provider. A public body
+// cannot fill this cache, and retrying a report never repeats provider I/O.
+type nativeObservedTransport struct {
+	nativecontract.NativeTransport
+	owner *nativeOwned
+}
+
+func (t *nativeObservedTransport) Send(ctx context.Context, in nativecontract.Input) (nativecontract.NativeEvidence, error) {
+	e, err := t.NativeTransport.Send(ctx, in)
+	if err == nil {
+		t.owner.mu.Lock()
+		t.owner.observations[e.Stage+"/"+e.RequestID] = e
+		t.owner.mu.Unlock()
+	}
+	return e, err
+}
+func (t *nativeObservedTransport) Interrupt(ctx context.Context, in nativecontract.Interrupt) (nativecontract.NativeEvidence, error) {
+	e, err := t.NativeTransport.Interrupt(ctx, in)
+	if err == nil {
+		t.owner.mu.Lock()
+		t.owner.observations[e.Stage+"/"+e.RequestID] = e
+		t.owner.mu.Unlock()
+	}
+	return e, err
+}
+func (t *nativeObservedTransport) Close(ctx context.Context) (nativecontract.ExitEvidence, error) {
+	x, err := t.NativeTransport.Close(ctx)
+	if err == nil {
+		t.owner.mu.Lock()
+		t.owner.exit = &x
+		t.owner.mu.Unlock()
+	}
+	return x, err
+}
+func (t *nativeObservedTransport) Wait(ctx context.Context) (nativecontract.ExitEvidence, error) {
+	x, err := t.NativeTransport.Wait(ctx)
+	if err == nil {
+		t.owner.mu.Lock()
+		t.owner.exit = &x
+		t.owner.mu.Unlock()
+	}
+	return x, err
+}
+func (e *nativeOwned) proofFor(r *nativecontract.Receipt) (nativecontract.NativeIdentity, nativecontract.NativeEvidence, *nativecontract.ExitEvidence) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var ev nativecontract.NativeEvidence
+	if r != nil {
+		ev = e.observations[r.State+"/"+r.RequestID]
+	}
+	return e.transport.Identity(), ev, e.exit
+}
