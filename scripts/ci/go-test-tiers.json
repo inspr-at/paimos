@@ -8644,6 +8644,8 @@
     ,
     {"kind":"go","package":"internal/nativeproviders/pi","name":"TestPiRefusesUnprovedNativeActions","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativepty","name":"TestNativePTYSocketCarriesPersonAndGeneration","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativepty","name":"TestNativeTakeClientAcknowledgementAndHandBack","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativepty","name":"TestNativeTakeClientRebindsAndDetachNeverReturns","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}

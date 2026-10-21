@@ -29,8 +29,8 @@ func (rt *runtime) cmdSessionAttach() *Command {
 	var control bool
 	return &Command{
 		Name: "attach", Short: "View an owned native session, with optional exclusive control",
-		Use: "session attach OWNED_ID --project KEY [--control]", minArgs: 1, maxArgs: 1,
-		Long: "Viewing is read-only. --control requests one exclusive controller lease. Esc leaves input, then detaches; i interrupts only outside input. EOF and signals detach the viewer without stopping the session. Submit uses " + nativeattach.SubmitLabel(goruntime.GOOS) + " with a compatible terminal, or Esc then s.",
+		Use: "session attach OWNED_ID --project KEY --session-cookie-file FILE [--control]", minArgs: 1, maxArgs: 1,
+		Long: "An existing person session supplied by --session-cookie-file is required; agent keys are refused. Viewing is read-only. --control requests one exclusive controller lease. Esc leaves input, then detaches; i interrupts only outside input. EOF and signals detach the viewer without stopping the session. Submit uses " + nativeattach.SubmitLabel(goruntime.GOOS) + " with a compatible terminal, or Esc then s.",
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "project key or UUID (required)")
 			fs.string(&personSession, "session-cookie-file", 0, "existing person session cookie file; API keys are refused")

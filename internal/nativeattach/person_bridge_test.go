@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -185,21 +186,25 @@ func newBootstrap(t *testing.T) (string, *bootstrapStore, *client.Client) {
 	mux := http.NewServeMux()
 	m.Mount(mux)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" {
+		if auth := r.Header.Get("Authorization"); auth != "" && auth != "Bearer synthetic-person-key" {
 			t.Error("socket bearer leaked to person API")
 			http.Error(w, "wrong authentication", http.StatusUnauthorized)
 			return
 		}
 		cookie, err := r.Cookie("aeon_session")
-		if err != nil {
+		if err != nil && r.Header.Get("Authorization") == "" {
 			http.Error(w, "person required", http.StatusUnauthorized)
 			return
 		}
 		p := tenant.Principal{ID: s.view.OwnerPersonID, TenantID: b.TenantID, Kind: tenant.Person}
-		if cookie.Value == strings.Repeat("a", 64) {
+		if r.Header.Get("Authorization") == "Bearer synthetic-person-key" {
+			p.KeyID = uuid.NewString()
+			p.AuthKeyID = p.KeyID
+		}
+		if cookie != nil && cookie.Value == strings.Repeat("a", 64) {
 			p.Kind = tenant.Agent
 		}
-		if cookie.Value == strings.Repeat("b", 64) {
+		if cookie != nil && cookie.Value == strings.Repeat("b", 64) {
 			p.TenantID = uuid.NewString()
 		}
 		if r.URL.Path == "/api/me" {
@@ -259,8 +264,27 @@ func TestNativePersonBootstrapAttachTakeHandBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err = json.Marshal(proof); err == nil {
+		t.Fatal("person proof became a DTO")
+	}
+	if strings.Contains(fmt.Sprintf("%+v", proof), personCookie) {
+		t.Fatal("person proof leaked in diagnostics")
+	}
 	ctx := t.Context()
 	view := store.snapshot()
+	keyed := client.New(person.BaseURL, "synthetic-person-key")
+	in := nativecontract.AttachIntent{RequestID: uuid.NewString(), ExpectedBinding: *view.CurrentBinding, ClientID: uuid.NewString(), Mode: "control", View: "structured"}
+	var keyResult nativecontract.AttachResult
+	err = keyed.DoWithHeaders(ctx, http.MethodPost, apiPath(*view.CurrentBinding, "attach"), in, &keyResult, map[string]string{nativeattach.LocalPersonHeader: nativeattach.LocalPersonVersion})
+	var status *client.StatusError
+	if !errors.As(err, &status) || status.Status != http.StatusForbidden {
+		t.Fatalf("person-role API key reached attach: %v", err)
+	}
+	var keyRefusal nativecontract.Error
+	if err = json.Unmarshal([]byte(status.Message), &keyRefusal); err != nil || keyRefusal.Reason != nativecontract.ReasonWrongPrincipal {
+		t.Fatalf("wrong API-key refusal: %v, %v", keyRefusal.Reason, err)
+	}
+
 	var projection nativecontract.SessionView
 	if err = person.Do(ctx, http.MethodGet, apiPath(*view.CurrentBinding, ""), nil, &projection); err != nil {
 		t.Fatal(err)

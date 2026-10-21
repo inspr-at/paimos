@@ -27,8 +27,8 @@ import (
 func (rt *runtime) cmdSessionTake() *Command {
 	var project, socket, state, personSession string
 	var handBack bool
-	return &Command{Name: "take", Short: "Take exclusive local control of a qualified native TUI", Use: "session take OWNED_ID --project KEY [--hand-back]", minArgs: 1, maxArgs: 1,
-		Long: "A qualified TUI replaces the structured writer only after verified exit. Esc belongs to the TUI. Ctrl+] then d detaches; Ctrl+] then r hands back. EOF and signals leave the owned PTY running without a controller. --hand-back explicitly returns an already taken session.",
+	return &Command{Name: "take", Short: "Take exclusive local control of a qualified native TUI", Use: "session take OWNED_ID --project KEY --session-cookie-file FILE [--hand-back]", minArgs: 1, maxArgs: 1,
+		Long: "An existing person session supplied by --session-cookie-file is required; agent keys are refused. A qualified TUI replaces the structured writer only after verified exit. Esc belongs to the TUI. Ctrl+] then d detaches; Ctrl+] then r hands back. EOF and signals leave the owned PTY running without a controller. --hand-back explicitly returns an already taken session.",
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "project key or UUID (required)")
 			fs.string(&personSession, "session-cookie-file", 0, "existing person session cookie file; API keys are refused")
