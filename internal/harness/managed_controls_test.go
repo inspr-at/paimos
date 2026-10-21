@@ -57,13 +57,16 @@ func TestRunPersonRevocationKeepsOnlyOwnedSafetyControls(t *testing.T) {
 			// Keep the independently authenticated computer transport active.
 			// The run's starting person, never its key issuer, is revoked.
 			var admin string
+			keyParts := strings.SplitN(f.key, "_", 3)
+			prefix := strings.ReplaceAll(f.person.TenantID, "-", "") + keyParts[1][:16]
 			f.tx(t, f.person, func(tx pgx.Tx) error {
 				if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Retained transport administrator') RETURNING id::text`, f.person.TenantID).Scan(&admin); err != nil {
 					return err
 				}
-				_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$2 WHERE id=$1`, f.agent.AuthKeyID, admin)
+				_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$2,prefix=$3 WHERE id=$1`, f.agent.AuthKeyID, admin, prefix)
 				return err
 			})
+			f.key = "aeon_" + prefix + "_" + keyParts[2]
 			dbtest.BindRole(t, f.db, f.person.TenantID, admin, "admin")
 			f.agent.KeyID, f.agent.KeyCreatorID = f.agent.AuthKeyID, admin
 			am, err := auth.New(auth.Config{Env: "dev", PublicURL: "https://safety.test", SessionKey: []byte(strings.Repeat("f", 32))}, f.db.App)
