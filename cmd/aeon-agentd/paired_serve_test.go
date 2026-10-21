@@ -880,7 +880,6 @@ func TestColdRevokedDaemonReconcilesWithoutRuntimeAuthentication(t *testing.T) {
 func TestRunningEnrollmentFencesTheCandidatesOwnHome(t *testing.T) {
 	for _, harness := range []string{"claude", "codex"} {
 		t.Run(harness, func(t *testing.T) {
-			e, pins := repinCommandFixture(t)
 			owner, err := filepath.EvalSymlinks(t.TempDir())
 			if err != nil {
 				t.Fatal(err)
@@ -927,61 +926,137 @@ esac
 				t.Fatal(err)
 			}
 			req := agentsetup.SetupRequest{Operation: "add_harness", Candidates: []agentsetup.LocalCandidate{{Candidate: c, Path: c.Path, Home: c.Home, Identity: c.Identity, Version: c.Version}}}
-			created := 0
-			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodPost {
-					t.Error("unexpected method")
-					w.WriteHeader(400)
-					return
-				}
-				var requested agentsetup.DeviceRequest
-				if json.NewDecoder(r.Body).Decode(&requested) != nil || len(requested.Accounts) != 1 || requested.Accounts[0].Harness != harness || requested.Accounts[0].Label != "second@example.test" {
-					t.Error("wrong approval request")
-					w.WriteHeader(400)
-					return
-				}
-				created++
-				_ = json.NewEncoder(w).Encode(agentsetup.DeviceResponse{RequestID: requested.RequestID, TenantID: "11111111-1111-4111-8111-111111111111", Digest: agentsetup.Hash([]byte("details")), VerificationURI: "https://" + r.Host + "/agents/register-agent", UserCode: "123-456-789", State: "pending", ExpiresAt: time.Now().Add(time.Minute)})
-			}))
-			defer server.Close()
-			prior := http.DefaultTransport
-			http.DefaultTransport = server.Client().Transport
-			defer func() { http.DefaultTransport = prior }()
-			raw, err := e.Store.Read("pairing.json", 1<<20)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var snapshot map[string]any
-			if err := json.Unmarshal(raw, &snapshot); err != nil {
-				t.Fatal(err)
-			}
-			snapshot["origin"], snapshot["node_path"], snapshot["claude_sdk_path"] = server.URL, pins.NodePath, pins.SDKPath
-			raw, _ = json.Marshal(snapshot)
-			if err := e.Store.Write("pairing.json", raw, false); err != nil {
-				t.Fatal(err)
-			}
-			if err := e.Store.Close(); err != nil {
-				t.Fatal(err)
-			}
-			lifecycle := &pairedSetup{root: e.Store.Path(), origin: server.URL, gate: make(chan struct{}, 1)}
+			lifecycle, created := runningEnrollmentLifecycle(t, harness, "second@example.test")
 			writeIdentity("switched@example.test")
-			if _, err := lifecycle.setup(t.Context(), req); err == nil || !strings.Contains(err.Error(), "vendor login changed before enrollment") || created != 0 {
+			if _, err := lifecycle.setup(t.Context(), req); err == nil || !strings.Contains(err.Error(), "vendor login changed before enrollment") || *created != 0 {
 				t.Fatalf("switched home reached approval: %v", err)
 			}
 			writeIdentity("second@example.test")
 			// The unchanged candidate passes the daemon handler and still requires
 			// a new person approval; this fixture provides no service manager.
 			p, err := lifecycle.setup(t.Context(), req)
-			if err != nil || p.Stage != "awaiting_approval" || created != 1 {
+			if err != nil || p.Stage != "awaiting_approval" || *created != 1 {
 				t.Fatalf("unchanged home rejected: %s %v", p.Stage, err)
 			}
 			// The CLI must rediscover H2 and resume this same approval when the
 			// daemon socket is absent; neither path may fall back to the default.
 			t.Setenv("PATH", owner)
 			var output bytes.Buffer
-			if err := setupCommand("add-harness", []string{"--state-root", e.Store.Path(), "--harness", harness, "--home", profile, "--once"}, &output); err != nil || !strings.Contains(output.String(), "awaiting_approval") || created != 1 {
+			if err := setupCommand("add-harness", []string{"--state-root", lifecycle.root, "--harness", harness, "--home", profile, "--once"}, &output); err != nil || !strings.Contains(output.String(), "awaiting_approval") || *created != 1 {
 				t.Fatalf("CLI lost selected home or pending approval: %v %s", err, output.String())
 			}
 		})
 	}
+}
+
+// Risk: the daemon recheck demands a private directory for the vendor's
+// default profile, whose 0755 mode polling names and repairs later, or stops
+// demanding one for a second home. Both requests execute only a fake vendor.
+func TestRunningEnrollmentKeepsDefaultProfileRepair(t *testing.T) {
+	for _, harness := range []string{"claude", "codex"} {
+		t.Run(harness, func(t *testing.T) {
+			owner, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HOME", owner)
+			bin := filepath.Join(owner, harness)
+			body := `#!/bin/sh
+home="$CODEX_HOME"
+if [ "${0##*/}" = claude ]; then home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; fi
+identity=$(/bin/cat "$home/active-login") || exit 10
+case "$1" in
+--version) echo 1.2.3; exit 0;;
+auth) printf '{"loggedIn":true,"email":"%s","authMethod":"claude.ai"}\n' "$identity"; exit 0;;
+login) echo 'Logged in using ChatGPT'; exit 0;;
+app-server)
+while IFS= read -r line; do
+case "$line" in
+*'"id":1'*) printf '{"id":1,"result":{}}\n';;
+*'"id":2'*) printf '{"id":2,"result":{"account":{"type":"chatgpt","email":"%s"}}}\n' "$identity";;
+esac
+done;;
+*) exit 11;;
+esac
+`
+			if err := os.WriteFile(bin, []byte(body), 0700); err != nil {
+				t.Fatal(err)
+			}
+			// Detect each home while private, as the CLI did, then widen it to
+			// the vendor-created mode before the daemon rechecks.
+			detect := func(d agentsetup.Discovery, profile string) agentsetup.SetupRequest {
+				t.Helper()
+				if err := os.Mkdir(profile, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(profile, "active-login"), []byte("person@example.test"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				d.Home, d.LookPath = owner, func(string) (string, error) { return bin, nil }
+				c, err := d.Detect(t.Context(), harness, "")
+				if err != nil || c.Home != profile {
+					t.Fatalf("fixture home not detected: %q %v", c.Home, err)
+				}
+				if err := os.Chmod(profile, 0755); err != nil {
+					t.Fatal(err)
+				}
+				return agentsetup.SetupRequest{Operation: "add_harness", Candidates: []agentsetup.LocalCandidate{{Candidate: c, Path: c.Path, Home: c.Home, Identity: c.Identity, Version: c.Version}}}
+			}
+			second := filepath.Join(owner, harness+"-second")
+			private := detect(agentsetup.Discovery{ClaudeHome: second, CodexHome: second}, second)
+			standard := detect(agentsetup.Discovery{}, filepath.Join(owner, "."+harness))
+			lifecycle, created := runningEnrollmentLifecycle(t, harness, "person@example.test")
+			if _, err := lifecycle.setup(t.Context(), private); err == nil || !strings.Contains(err.Error(), "profile home must be an existing private") || *created != 0 {
+				t.Fatalf("0755 second home reached approval: %v", err)
+			}
+			p, err := lifecycle.setup(t.Context(), standard)
+			if err != nil || p.Stage != "awaiting_approval" || *created != 1 {
+				t.Fatalf("0755 default profile stopped before its repair: %s %v", p.Stage, err)
+			}
+		})
+	}
+}
+
+// runningEnrollmentLifecycle serves the daemon's add-harness handler against a
+// fake approval endpoint that accepts one account named label.
+func runningEnrollmentLifecycle(t *testing.T, harness, label string) (*pairedSetup, *int) {
+	t.Helper()
+	e, pins := repinCommandFixture(t)
+	created := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Error("unexpected method")
+			w.WriteHeader(400)
+			return
+		}
+		var requested agentsetup.DeviceRequest
+		if json.NewDecoder(r.Body).Decode(&requested) != nil || len(requested.Accounts) != 1 || requested.Accounts[0].Harness != harness || requested.Accounts[0].Label != label {
+			t.Error("wrong approval request")
+			w.WriteHeader(400)
+			return
+		}
+		created++
+		_ = json.NewEncoder(w).Encode(agentsetup.DeviceResponse{RequestID: requested.RequestID, TenantID: "11111111-1111-4111-8111-111111111111", Digest: agentsetup.Hash([]byte("details")), VerificationURI: "https://" + r.Host + "/agents/register-agent", UserCode: "123-456-789", State: "pending", ExpiresAt: time.Now().Add(time.Minute)})
+	}))
+	t.Cleanup(server.Close)
+	prior := http.DefaultTransport
+	http.DefaultTransport = server.Client().Transport
+	t.Cleanup(func() { http.DefaultTransport = prior })
+	raw, err := e.Store.Read("pairing.json", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot map[string]any
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	snapshot["origin"], snapshot["node_path"], snapshot["claude_sdk_path"] = server.URL, pins.NodePath, pins.SDKPath
+	raw, _ = json.Marshal(snapshot)
+	if err := e.Store.Write("pairing.json", raw, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return &pairedSetup{root: e.Store.Path(), origin: server.URL, gate: make(chan struct{}, 1)}, &created
 }

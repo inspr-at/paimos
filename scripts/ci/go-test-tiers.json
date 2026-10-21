@@ -572,6 +572,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestRunningEnrollmentFencesTheCandidatesOwnHome","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestRunningEnrollmentKeepsDefaultProfileRepair","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestRuntimeDriftKeepsSiblingPolling","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestServeStartupLogsExactMissingFile","tags":["delete-candidate"],"tier":"GATED-FULL"}

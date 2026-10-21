@@ -688,13 +688,22 @@ func (p *pairedSetup) setup(ctx context.Context, req agentsetup.SetupRequest) (a
 			if len(local.Path) > 4096 || len(local.Home) > 4096 || !agentsetup.ValidLoginLabel(local.Identity) {
 				return agentsetup.Progress{}, errors.New("invalid local login binding")
 			}
-			d := agentsetup.Discovery{Home: home, ClaudeHome: local.Home, CodexHome: local.Home, PiHome: local.Home, NodePath: local.Candidate.Interpreter().Path, Workspace: saved.Workspace,
+			d := agentsetup.Discovery{Home: home, PiHome: local.Home, NodePath: local.Candidate.Interpreter().Path, Workspace: saved.Workspace,
 				LookPath: func(name string) (string, error) {
 					if name == "node" {
 						return exec.LookPath(name)
 					}
 					return local.Path, nil
 				}}
+			// A default profile keeps the default probe, so a vendor-created 0755
+			// mode reaches the polling repair hint. Every other home must
+			// already be a private directory, as `--home` requires.
+			if local.Home != filepath.Join(home, ".claude") {
+				d.ClaudeHome = local.Home
+			}
+			if local.Home != filepath.Join(home, ".codex") {
+				d.CodexHome = local.Home
+			}
 			expected := local.Identity
 			if local.Candidate.Harness == "claude" || local.Candidate.Harness == "codex" {
 				expected = "" // Compare below so a switched login has the enrollment-fence reason.
