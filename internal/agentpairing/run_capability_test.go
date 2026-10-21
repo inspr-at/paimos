@@ -99,7 +99,9 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 		}
 	}
 	var unbound string
-	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_account_id) SELECT tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_account_id FROM agent_runs WHERE id=$1 RETURNING id::text`, a.ID).Scan(&unbound); err != nil {
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_account_id) SELECT tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_account_id FROM agent_runs WHERE id=$1 RETURNING id::text`, a.ID).Scan(&unbound)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	call("POST", "/api/runs/"+unbound+"/capability", map[string]string{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation"}, "", true, 403)
@@ -124,6 +126,7 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 		t.Fatal("authorized content fixture was lost")
 	}
 	call("GET", "/api/runs/"+b.ID, nil, tokenA, true, 403)
+	call("GET", "/api/runs", nil, tokenA, true, 403)
 	call("GET", "/api/work-orders/"+b.OrderID, nil, tokenA, true, 403)
 	call("GET", "/api/nodes/"+b.OrderID, nil, tokenA, true, 403)
 	call("GET", "/api/runs/"+a.ID, nil, strings.Repeat("0", 64), true, 403)
@@ -132,7 +135,18 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 	freshA := issue(a.ID)
 	call("GET", "/api/runs/"+a.ID, nil, tokenA, true, 403)
 	call("GET", "/api/runs/"+a.ID, nil, freshA, true, 200)
-	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_runs SET content_capability_person_id=$2 WHERE id=$1`, a.ID, personB); err != nil {
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET content_capability_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, a.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	call("GET", "/api/runs/"+a.ID, nil, freshA, true, 403)
+	freshA = issue(a.ID)
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET content_capability_person_id=$2 WHERE id=$1`, a.ID, personB)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	call("GET", "/api/runs/"+a.ID, nil, freshA, true, 403)
@@ -144,7 +158,10 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 	call("POST", "/api/agent-accounts/"+sibling.AccountID+"/probe", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "available": true}, "", false, 200)
 	call("GET", "/api/runs/"+b.ID, nil, tokenB, true, 403)
 	// Person deactivation cannot be bypassed by issuing another capability.
-	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE principals SET status='deactivated' WHERE id=$1`, personB); err != nil {
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE principals SET status='deactivated' WHERE id=$1`, personB)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	denied := call("POST", "/api/runs/"+b.ID+"/capability", map[string]string{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation"}, "", true, 403)

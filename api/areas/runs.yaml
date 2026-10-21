@@ -37,7 +37,7 @@ paths:
         - {name: X-Aeon-Run-Capability-Policy, in: header, schema: {type: string, const: run_content_v1}}
         - {name: X-Aeon-Review-Policy, in: header, schema: {type: string, enum: [no_tools_v1]}, description: Advertise no_tools_v1 to receive review runs. Legacy daemons receive ordinary runs only.}
       responses:
-        '200': {description: Queued runs, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}}}}
+        '200': {description: "Queued metadata; Aeon-Run-Content-Policy advertises run_content_v1 and Aeon-Upgrade-Reason explains missing daemon support, including an empty queue", content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}}}}
         '403': {$ref: '#/components/responses/Error'}
   /runs/queued/notifications:
     get:
@@ -86,7 +86,7 @@ paths:
                 type: object
                 required: [capability, run_id, acting_person_id, computer_id, daemon_id, daemon_generation, expires_at]
                 properties:
-                  capability: {type: string, minLength: 64, maxLength: 64, writeOnly: true}
+                  capability: {type: string, minLength: 64, maxLength: 64, readOnly: true}
                   run_id: {type: string, format: uuid}
                   acting_person_id: {type: string, format: uuid}
                   computer_id: {type: string, format: uuid}
