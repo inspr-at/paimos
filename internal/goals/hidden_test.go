@@ -122,17 +122,20 @@ func TestGoalHideForMePerPersonTenantAndKeys(t *testing.T) {
 	if found, _ := hiddenOf(list(f.writer, ""), f.goal); !found {
 		t.Fatal("B's hide changed A's view")
 	}
-	if got := list(f.reader, ""); *got.HiddenCount != 1 {
+	hiddenWrite(t, goalRequest(t.Context(), m, f.reader, "PUT", "/api/me/goals/GOAL-5/hidden", "", ""), 200)
+	if got := list(f.reader, ""); *got.HiddenCount != 2 {
 		t.Fatalf("B's count %v", *got.HiddenCount)
 	}
-	// B can no longer read the goal: it stays out of B's count. B cannot hide what B cannot see.
-	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE nodes SET project_id=$2 WHERE id=$1`, f.goal, f.otherProject); err != nil {
+	// GOAL-5 (no items) moves to a project B cannot read: it leaves B's count, and B cannot hide it again.
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE nodes SET project_id=$2 WHERE id=$1`, f.emptyGoal, f.otherProject); err != nil {
 		t.Fatal(err)
 	}
-	if got := list(f.reader, "?hidden=include"); *got.HiddenCount != 0 {
+	if got := list(f.reader, "?hidden=include"); *got.HiddenCount != 1 {
 		t.Fatalf("an unreadable goal counts for B: %v", *got.HiddenCount)
+	} else if found, _ := hiddenOf(got, f.emptyGoal); found {
+		t.Fatal("fixture: B still reads GOAL-5")
 	}
-	hiddenWrite(t, goalRequest(t.Context(), m, f.reader, "PUT", "/api/me/goals/GOAL-1/hidden", "", ""), 404)
+	hiddenWrite(t, goalRequest(t.Context(), m, f.reader, "PUT", "/api/me/goals/GOAL-5/hidden", "", ""), 404)
 	hiddenWrite(t, goalRequest(t.Context(), m, f.writer, "PUT", "/api/me/goals/TKT-1/hidden", "", ""), 404)
 
 	// Agents and API keys can neither hide nor unhide, for anyone.
