@@ -43,6 +43,10 @@ test('fixture worker interrupted by its owning test', { timeout: 30000 }, async 
       }
       writeFileSync(join(directory, 'ready'), JSON.stringify({ worker: process.pid, groups: fixtures.snapshot() }))
     }
+    // An isolated negative control proves the outer PID/group assertion sees
+    // survivors when this worker's signal cleanup is absent. The outer test
+    // retains its own verified tracker and kills these fixtures afterwards.
+    if (ending === 'negative-control') process.removeAllListeners('SIGTERM')
     if (['return', 'failure', 'timeout'].includes(ending)) {
       await until(() => existsSync(join(directory, 'release')))
       if (ending === 'failure') throw new Error('Intentional fixture failure')

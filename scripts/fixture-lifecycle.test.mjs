@@ -42,7 +42,7 @@ test('AEON-1064: interrupted fixture runners leave no owned processes in 20 rand
     const other = randomInt(index + 1)
     ;[rounds[index], rounds[other]] = [rounds[other], rounds[index]]
   }
-  for (const { phase, signal } of [...rounds, { phase: 'apt', signal: 'parent-death' }, ...['return', 'failure', 'timeout'].map(signal => ({ phase: 'running', signal }))]) {
+  for (const { phase, signal } of [...rounds, { phase: 'apt', signal: 'parent-death' }, ...['return', 'failure', 'timeout', 'negative-control'].map(signal => ({ phase: 'running', signal }))]) {
     const directory = mkdtempSync(join(tmpdir(), 'aeon-fixture-interrupt-'))
     const sentinel = fixtures.spawn(process.execPath, [new URL('./testdata/playwright/hang.mjs', import.meta.url).pathname], { stdio: 'ignore' })
     const child = fixtures.spawn(process.execPath, ['--test', new URL('./testdata/interrupted-fixture-runner.mjs', import.meta.url).pathname], {
@@ -66,12 +66,16 @@ test('AEON-1064: interrupted fixture runners leave no owned processes in 20 rand
         await until(() => { try { process.kill(ready.stub, 0); return false } catch (error) { assert.equal(error.code, 'ESRCH'); return true } })
         process.kill(ready.worker, 'SIGTERM')
       } else if (['return', 'failure', 'timeout'].includes(signal)) writeFileSync(join(directory, 'release'), 'ready')
-      else process.kill(ready.worker, signal)
+      else process.kill(ready.worker, signal === 'negative-control' ? 'SIGTERM' : signal)
       const code = await completion
       if (signal === 'return') assert.equal(code, 0, output)
       else assert.notEqual(code, 0, `${phase} ${signal} must report an interrupted test`)
       if (signal === 'failure') assert.match(output, /Intentional fixture failure/)
       if (signal === 'timeout') assert.match(output, /timed out/)
+      if (signal === 'negative-control') {
+        assert.ok(ready.groups.some(row => groupProcesses(row.pid).length > 0), 'disabling the signal cleanup must expose surviving fixtures')
+        tracker.signal('SIGKILL')
+      }
       await until(() => ready.groups.every(row => groupProcesses(row.pid).length === 0), () => JSON.stringify({ phase, signal,
         remaining: ready.groups.flatMap(row => groupProcesses(row.pid)).map(row => ({ ...row,
           state: process.platform === 'linux' ? readFileSync(`/proc/${row.pid}/stat`, 'utf8').split(') ')[1]?.split(' ')[0] : undefined,
