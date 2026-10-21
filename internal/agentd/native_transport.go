@@ -52,6 +52,9 @@ func (a *nativeSocketAuthority) Authenticate(r *http.Request) (nativecontract.Ac
 	if err != nil {
 		return actor, err
 	}
+	if actor.PrincipalKind != "person" || !uuidPattern.MatchString(actor.PrincipalID) || !uuidPattern.MatchString(actor.TenantID) || len(actor.KeyCeiling) > 0 {
+		return nativecontract.Actor{}, nativeRefusal(nativecontract.ReasonWrongPrincipal)
+	}
 	query := r.URL.Query()
 	request := nativestream.LocalRequest{Method: "stream", OwnedSessionID: r.PathValue("ownedSessionId"), ViewerID: r.Header.Get(nativecontract.ViewerHeader), Query: query, View: query.Get("view")}
 	if request.View == "" {
