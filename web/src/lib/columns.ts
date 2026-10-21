@@ -80,12 +80,13 @@ export function nextMeasuredCardWidth(current: number, live: number, viewportGre
   return current
 }
 
-/** Card width for a viewport resize before the content box has to agree. On a shrink, clientWidth can still be the previous frame. Keeping it lays the wide columns into the card that has already narrowed, and Title — the only column without its own width — is the crushed remainder (AEON-1600: a 903 px card still wearing 788 px of design widths measured 115). The viewport delta is the new card until the content box moves. A box that has already moved is that frame, including a few pixels of scrollbar disagreement. A grow still trusts the live box (AEON-1532). */
+/** Card width for a viewport resize before the content box has to agree. On a shrink, clientWidth can still be the previous frame. Keeping it lays the wide columns into the card that has already narrowed, and Title — the only column without its own width — is the crushed remainder (AEON-1600: a 903 px card still wearing 788 px of design widths measured 115). The viewport delta is only an estimate while the box has not moved off `current`. A box that has already moved is that frame, including a few pixels of scrollbar disagreement and a card that grew when a dock breakpoint released the panel (1800→1790, about 862→1032). A grow still trusts the live box (AEON-1532). */
 export function cardWidthOnViewportResize(current: number, live: number | null, viewportDelta: number): number {
   const grew = viewportDelta > 0.5
   const predicted = viewportDelta < -0.5 && current > 0 ? Math.max(0, current + viewportDelta) : null
   if (live !== null && live > 0) {
-    if (predicted !== null && live > predicted + 0.5 && live > current - 0.5) return predicted
+    if (predicted !== null && Math.abs(live - current) <= 0.5) return predicted
+    if (predicted !== null && live > current + 0.5) return live
     return nextMeasuredCardWidth(current, live, grew)
   }
   return predicted ?? current
@@ -96,11 +97,14 @@ export function cardWidthOnViewportResize(current: number, live: number | null, 
 // still be the card. The previous frame is the whole delta away (AEON-1600).
 const SHRINK_SAMPLE_SLACK = 48
 
-/** A sample that may replace the width already chosen for this resize. Null keeps the chosen width. A shrink that already laid out at the viewport delta must not take the previous wide frame back (AEON-1600). A box a gutter-swing above that delta is still the shrunk card. Any other sample, including a wider card when nothing set a ceiling, still stands. */
-export function resizeSampleWidth(chosen: number | null, ceiling: number | null): number | null {
+/** A sample that may replace the width already chosen for this resize. Null keeps the chosen width. The viewport delta is a provisional estimate. A sample that is still the pre-resize width (`before`) is the content box that has not moved, so it does not replace the estimate (AEON-1600) until the sample window is exhausted (`atCap`): a capped host can absorb the viewport change, and that stable measurement is then the card. A box that has left the pre-resize width replaces the estimate even when it is wider — a dock breakpoint can grow the card while the viewport shrinks. Without `before`, a sample more than a gutter-swing above the estimate stays rejected, which is the previous frame when the caller does not know it. */
+export function resizeSampleWidth(chosen: number | null, ceiling: number | null, before: number | null = null, atCap = false): number | null {
   if (chosen === null || !(chosen > 0)) return null
-  if (ceiling !== null && chosen > ceiling + SHRINK_SAMPLE_SLACK) return null
-  return chosen
+  if (ceiling === null) return chosen
+  if (before !== null && Math.abs(chosen - before) <= 0.5) return atCap ? chosen : null
+  if (chosen <= ceiling + SHRINK_SAMPLE_SLACK) return chosen
+  if (before !== null || atCap) return chosen
+  return null
 }
 
 /** The first agreeing pair that is safe to adopt. The first pair replaces a stale narrow content box with the live card (AEON-1532). A later pair that is wider is adopted only when the viewport grew, so one disagreeing pair cannot keep a column hidden (AEON-1570) and a stale wide pair cannot undo a shrink (AEON-1401). */

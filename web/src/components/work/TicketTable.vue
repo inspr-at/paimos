@@ -532,9 +532,14 @@ function readCardWidth(): number | null {
 let cardFrame = 0
 let lastInner = window.innerWidth
 let viewportGrew = false
-// Set when this resize already laid out a narrower card than the content box
-// has caught up to. Cleared when that settle finishes or the viewport grows.
+// Set when this resize laid a provisional card out from the viewport delta,
+// before the content box moved. `shrinkBefore` is the card width that estimate
+// started from. The estimate is not a ceiling: a stable measurement that has
+// left that width replaces it, and at the end of the sample window a box that
+// never moved replaces it too (a dock breakpoint or a capped host). Cleared
+// when that settle finishes or the viewport grows.
 let shrinkCeiling: number | null = null
+let shrinkBefore: number | null = null
 // Bumped when a sample window finishes. Readers wait for the next epoch instead of a timer:
 // the list spec installs a clock that stubs requestAnimationFrame, so two of those frames are
 // not two paints (AEON-1594).
@@ -546,22 +551,25 @@ function measureWidth() {
 }
 // clientWidth during a viewport resize can still be the previous frame. One
 // such read lays the wide column set into the card that has already narrowed
-// and crushes Title (AEON-1470). A narrower content box is that frame; a wider
-// one is a stale sample, so the live card wins (AEON-1401). Two agreeing
-// frames then adopt the card, so a queued narrow sample cannot keep Updated
-// hidden after the card has grown, and one stale frame cannot undo the shrink.
-// One disagreeing pair is not a reason to keep the old width: later pairs are
-// read until one agrees. A later wider pair is kept only when the viewport
-// grew. A newer measure bumps cardFrame and cancels this read.
+// and crushes Title (AEON-1470). The viewport delta is a provisional layout
+// until the box moves. Two agreeing frames then adopt the card, so a queued
+// narrow sample cannot keep Updated hidden after the card has grown, and the
+// pre-resize frame cannot undo a real shrink (AEON-1401, AEON-1600). A box
+// that has left that frame replaces the estimate, including when a dock
+// breakpoint made the card wider. One disagreeing pair is not a reason to
+// keep the old width: later pairs are read until one agrees. A newer measure
+// bumps cardFrame and cancels this read.
 function finishCardSettle(frame: number) {
   if (frame !== cardFrame || !columnsAlive) return
   shrinkCeiling = null
+  shrinkBefore = null
   cardEpoch.value++
   cardWidthSettled.value = true
 }
 function settleCardWidth(viewportGrew = false) {
   const frame = ++cardFrame
   const ceiling = shrinkCeiling
+  const before = shrinkBefore
   cardWidthSettled.value = false
   const samples: (number | null)[] = []
   const take = () => {
@@ -570,16 +578,17 @@ function settleCardWidth(viewportGrew = false) {
       samples.push(readCardWidth())
       if (samples.length % 2 === 1) { take(); return }
       const live = readCardWidth()
-      // A shrink already laid out at the viewport delta. A pair still showing
-      // the previous wide frame must not replace it: Title would be the crushed
-      // remainder until the next resize (AEON-1600).
-      const chosen = resizeSampleWidth(adoptedCardWidth(cardWidthAfterSamples(samples, width.value, viewportGrew), live, viewportGrew), ceiling)
+      // The viewport delta is provisional. A pair still showing the pre-resize
+      // width must not replace it: Title would be the crushed remainder until
+      // the box moves (AEON-1600). A pair that has left that width is the card,
+      // even when a dock breakpoint made it wider than the estimate.
+      const chosen = resizeSampleWidth(adoptedCardWidth(cardWidthAfterSamples(samples, width.value, viewportGrew), live, viewportGrew), ceiling, before)
       if (chosen === null) {
         if (samples.length < CARD_WIDTH_SAMPLE_CAP) { take(); return }
-        // The pairs never matched the card. Lay out in the box that is on screen,
-        // so a stale wide sample cannot leave a column at 0 inside the narrow card.
-        // A sample above the shrink ceiling is that previous frame: keep the delta.
-        const onScreen = resizeSampleWidth(live, ceiling)
+        // The window is exhausted. The live box supersedes the estimate: a
+        // capped host may have held the pre-resize width the whole time, and a
+        // dock breakpoint may have grown the card. A null read keeps the estimate.
+        const onScreen = resizeSampleWidth(live, ceiling, before, true)
         if (onScreen !== null) width.value = onScreen
         finishCardSettle(frame)
         return
@@ -613,8 +622,13 @@ function measureSoon() {
   lastInner = inner
   const previous = width.value
   const next = cardWidthOnViewportResize(previous, readCardWidth(), delta)
-  if (viewportGrew) shrinkCeiling = null
-  else if (next + 0.5 < previous) shrinkCeiling = next
+  if (viewportGrew) {
+    shrinkCeiling = null
+    shrinkBefore = null
+  } else if (next + 0.5 < previous) {
+    shrinkCeiling = next
+    shrinkBefore = previous
+  }
   if (next > 0) width.value = next
   settleCardWidth(viewportGrew)
 }
