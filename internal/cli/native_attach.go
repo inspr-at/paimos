@@ -79,7 +79,7 @@ func (rt *runtime) cmdSessionAttach() *Command {
 				return err
 			}
 			var raw json.RawMessage
-			if err = rt.personClient.DoWithHeaders(readCtx, http.MethodGet, "/api/projects/"+projectID+"/native-sessions/"+args[0], nil, &raw, map[string]string{nativeattach.LocalPersonHeader: nativeattach.LocalPersonVersion}); err != nil {
+			if err = rt.doHeadersCtx(readCtx, http.MethodGet, "/api/projects/"+projectID+"/native-sessions/"+args[0], nil, &raw, map[string]string{nativeattach.LocalPersonHeader: nativeattach.LocalPersonVersion}); err != nil {
 				return err
 			}
 			validator, err := nativecontract.NewValidator()

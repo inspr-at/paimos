@@ -73,7 +73,7 @@ func (rt *runtime) cmdSessionTake() *Command {
 				ctx, done := context.WithTimeout(ctx, nativecontract.LocalOperationSeconds*time.Second)
 				defer done()
 				var raw json.RawMessage
-				if err := rt.personClient.DoWithHeaders(ctx, http.MethodGet, "/api/projects/"+projectID+"/native-sessions/"+args[0], nil, &raw, map[string]string{nativeattach.LocalPersonHeader: nativeattach.LocalPersonVersion}); err != nil {
+				if err := rt.doHeadersCtx(ctx, http.MethodGet, "/api/projects/"+projectID+"/native-sessions/"+args[0], nil, &raw, map[string]string{nativeattach.LocalPersonHeader: nativeattach.LocalPersonVersion}); err != nil {
 					return nativecontract.SessionView{}, err
 				}
 				v, err := nativecontract.NewValidator()

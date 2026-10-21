@@ -282,14 +282,8 @@ func (s *nativeSessionStore) project(ctx context.Context, actor nativecontract.A
 			view.Quota = nil
 			view.Capabilities.TerminalView, view.Capabilities.Expert = false, false
 		}
-		// CLI projection retains only currently qualified take capability. The
-		// presentation selector grants no mutation or terminal-export authority.
-		if !nativeattach.LocalPersonProjection(ctx) {
-			view.Capabilities.Take, view.Capabilities.TakeSupported = false, false
-		} else {
-			view.Capabilities.Take = view.Capabilities.Take && s.authority.consent.Capabilities.Take
-			view.Capabilities.TakeSupported = view.Capabilities.TakeSupported && s.authority.consent.Capabilities.TakeSupported
-		}
+		// Take is restored below only from the current qualified local projection.
+		view.Capabilities.Take, view.Capabilities.TakeSupported = false, false
 		// This composition has no qualified owner watch-export adapter. A
 		// stored capability or URL cannot substitute for that current authority.
 		view.Capabilities.Expert, view.Capabilities.TerminalView = false, false

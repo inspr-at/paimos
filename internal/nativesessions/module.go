@@ -359,7 +359,7 @@ func (m *Module) read(w http.ResponseWriter, r *http.Request, route nativecontra
 		return nil, err
 	}
 	if route.OperationID == "getNativeSession" {
-		return nativecontract.PersonProjection(view, actor.PrincipalKind, !nativeattach.LocalPersonProjection(ctx)), nil
+		return nativecontract.PersonProjection(view, actor.PrincipalKind, !nativeattach.LocalPersonProjection(r.Context())), nil
 	}
 	if view.CurrentBinding == nil {
 		return nil, invalid(nativecontract.ReasonWrongGeneration)

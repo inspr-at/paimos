@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -38,6 +39,9 @@ type personRequest struct {
 	control, viewer string
 }
 type personRequestKey struct{}
+
+func (*PersonBridge) Format(f fmt.State, _ rune)  { _, _ = fmt.Fprint(f, "[native person bridge]") }
+func (*personRequest) Format(f fmt.State, _ rune) { _, _ = fmt.Fprint(f, "[native person request]") }
 
 func NewPersonBridge(origin, tenant string, host nativecontract.Host) (*PersonBridge, error) {
 	u, err := url.Parse(origin)
@@ -231,7 +235,21 @@ func (b *PersonBridge) operation(ctx context.Context, binding nativecontract.Bin
 		return out, err
 	}
 	err = b.call(ctx, p, http.MethodPost, publicPath(binding, method), in, "NativeOperationResult", &out)
-	return out, err
+	if err != nil {
+		return out, err
+	}
+	raw, _ := json.Marshal(in)
+	var request struct {
+		RequestID string `json:"request_id"`
+	}
+	if json.Unmarshal(raw, &request) != nil || out.Receipt.RequestID != request.RequestID || out.Receipt.Operation != method || out.Receipt.Binding == nil || !out.Receipt.Binding.Equal(binding) {
+		return nativecontract.OperationResult{}, bridgeRefuse(nativecontract.ReasonIdentityMismatch)
+	}
+	switch out.Receipt.State {
+	case "rejected", "uncertain", "expired":
+		return nativecontract.OperationResult{}, bridgeRefuse(nativecontract.ReasonInputOutcomeUnconfirmed)
+	}
+	return out, nil
 }
 func (b *PersonBridge) Detach(ctx context.Context, in nativecontract.Detach) (nativecontract.OperationResult, error) {
 	return b.operation(ctx, in.ExpectedBinding, "detach", in)
