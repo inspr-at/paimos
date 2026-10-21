@@ -22,6 +22,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/chat"
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativesessions"
@@ -167,11 +168,84 @@ func (p *compositionProvider) turn(state, turn string, seq uint64) {
 	p.events <- nativecontract.ProviderEvent{Identity: p.identity, SourceSequence: seq, Receipt: &nativecontract.Receipt{RequestID: in.RequestID, InputID: &in.InputID, TurnRef: &turn, State: state}}
 }
 
-// Risk: the installed production start/command/receipt/final paths borrow the
-// daemon's person authority, infer turn/final evidence, or release on detach.
-// The real person approvals, issued pairing key and transaction authorities
-// surround a fake owned provider; channels establish each observation.
-func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
+// compositionHookProfiles runs before once inside the first resolve: after the
+// start claim and before the daemon's final launch re-check.
+type compositionHookProfiles struct {
+	compositionProfiles
+	once   sync.Once
+	before func()
+}
+
+func (p *compositionHookProfiles) Resolve(ctx context.Context, q nativecontract.ProfileRequest) (nativecontract.LocalProfile, error) {
+	if p.before != nil {
+		p.once.Do(p.before)
+	}
+	return p.compositionProfiles.Resolve(ctx, q)
+}
+
+// productionComposition is the installed server module and paired daemon host
+// around a fake owned provider; channels establish each server observation.
+type productionComposition struct {
+	f                                *startFixture
+	mux                              *http.ServeMux
+	config                           *agentd.NativeSessionConfig
+	provider                         *compositionProvider
+	profiles                         *compositionHookProfiles
+	root                             string
+	denials                          chan error
+	finalDone, turnDone, turnStarted chan struct{}
+}
+
+func (c *productionComposition) personCall(t *testing.T, path string, body, out any) {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	r := httptest.NewRequest("POST", path, bytes.NewReader(raw)).WithContext(c.f.personCtx(t))
+	w := httptest.NewRecorder()
+	c.mux.ServeHTTP(w, r)
+	if w.Code != 200 && w.Code != 201 {
+		t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+	}
+	if out != nil {
+		if err := json.Unmarshal(w.Body.Bytes(), out); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// approve records a separate actual person decision, through approvals, on a
+// proposal with the original session consent's facts; it returns its ID.
+func (c *productionComposition) approve(t *testing.T, scope string) string {
+	t.Helper()
+	f := c.f
+	var facts consent.Facts
+	var proposer tenant.Principal
+	proposer.TenantID = f.person.TenantID
+	proposer.Kind = tenant.Agent
+	var rawFacts []byte
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT r.native_consent,k.principal_id::text,k.id::text,k.scopes FROM approval_requests r JOIN native_session_consents c ON c.tenant_id=r.tenant_id AND c.grant_id=r.id JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.principal_id=c.agent_principal_id AND k.prefix='nativeproposal' WHERE r.id=$1`, f.intent.PolicyID).Scan(&rawFacts, &proposer.ID, &proposer.KeyID, &proposer.Scopes); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(rawFacts, &facts); err != nil {
+		t.Fatal(err)
+	}
+	proposer.AuthKeyID = proposer.KeyID
+	proposer.KeyCreatorID = f.person.ID
+	raw, _ := json.Marshal(map[string]any{"scope": scope, "resource_kind": "node", "resource_id": f.project, "rationale": "Separate person decision", "expires_at": f.now.Add(time.Hour), "native_consent": facts})
+	r := httptest.NewRequest("POST", "/api/approvals", bytes.NewReader(raw)).WithContext(tenant.WithPrincipal(t.Context(), proposer))
+	r.Header.Set("Authorization", "Bearer aeon_nativeproposal_"+strings.Repeat("p", 64))
+	w := httptest.NewRecorder()
+	c.mux.ServeHTTP(w, r)
+	if w.Code != 201 {
+		t.Fatalf("%s approval %d %s", scope, w.Code, w.Body.String())
+	}
+	var approval approvals.Approval
+	_ = json.Unmarshal(w.Body.Bytes(), &approval)
+	c.personCall(t, "/api/approvals/"+approval.ID+"/decision", map[string]string{"decision": "approved"}, nil)
+	return approval.ID
+}
+
+func composeProduction(t *testing.T) *productionComposition {
+	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -238,9 +312,10 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 			}
 		}
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 	remote := agentd.NewRemote(server.URL, "fixture-runtime")
-	config := agentd.NativeProduction(remote, f.intent.ComputerID, f.person.ID, compositionProfiles{f.intent.AccountID, root}, a.Capabilities)
+	profiles := &compositionHookProfiles{compositionProfiles: compositionProfiles{f.intent.AccountID, root}}
+	config := agentd.NativeProduction(remote, f.intent.ComputerID, f.person.ID, profiles, a.Capabilities)
 	provider := &compositionProvider{now: f.now, events: make(chan nativecontract.ProviderEvent, 16)}
 	config.Launcher = provider
 	api := &compositionAPI{f: f}
@@ -265,6 +340,17 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_pairing_computers SET ledger_generation=$2 WHERE id=$1`, f.intent.ComputerID, api.ledger)
 		return err
 	})
+	return &productionComposition{f: f, mux: mux, config: config, provider: provider, profiles: profiles, root: root, denials: denials, finalDone: finalDone, turnDone: turnDone, turnStarted: turnStarted}
+}
+
+// Risk: the installed production start/command/receipt/final paths borrow the
+// daemon's person authority, infer turn/final evidence, or release on detach.
+// The real person approvals, issued pairing key and transaction authorities
+// surround a fake owned provider; channels establish each observation.
+func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
+	c := composeProduction(t)
+	f, config, provider, root := c.f, c.config, c.provider, c.root
+	finalDone, turnDone, turnStarted, denials := c.finalDone, c.turnDone, c.turnStarted, c.denials
 	started := f.begin(t)
 	result, err := config.Host.Start(t.Context(), nativecontract.LocalStart{Intent: f.intent, Cwd: root, AccountKey: "real-own-account"})
 	if err != nil {
@@ -276,18 +362,7 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 	b := *result.Session.CurrentBinding
 	personCall := func(path string, body, out any) {
 		t.Helper()
-		raw, _ := json.Marshal(body)
-		r := httptest.NewRequest("POST", path, bytes.NewReader(raw)).WithContext(f.personCtx(t))
-		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, r)
-		if w.Code != 200 && w.Code != 201 {
-			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
-		}
-		if out != nil {
-			if err := json.Unmarshal(w.Body.Bytes(), out); err != nil {
-				t.Fatal(err)
-			}
-		}
+		c.personCall(t, path, body, out)
 	}
 	var role chat.Role
 	personCall("/api/projects/"+f.project+"/chat-roles", chat.RoleCreate{Kind: "lead", SlotKey: "lead"}, &role)
@@ -295,30 +370,7 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 	personCall("/api/projects/"+f.project+"/chat-threads/resolve", chat.ThreadResolve{RoleID: role.ID}, &thread)
 	personCall("/api/chat-threads/"+thread.ID+"/binding", chat.BindingWrite{SessionID: b.HarnessSessionID, ExpectedEpoch: "0"}, &thread)
 	// Retention is a distinct actual person decision, made through approvals.
-	var facts consent.Facts
-	var proposer tenant.Principal
-	proposer.TenantID = f.person.TenantID
-	proposer.Kind = tenant.Agent
-	var rawFacts []byte
-	if err = f.d.Admin.QueryRow(t.Context(), `SELECT r.native_consent,k.principal_id::text,k.id::text,k.scopes FROM approval_requests r JOIN native_session_consents c ON c.tenant_id=r.tenant_id AND c.grant_id=r.id JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.principal_id=c.agent_principal_id AND k.prefix='nativeproposal' WHERE r.id=$1`, f.intent.PolicyID).Scan(&rawFacts, &proposer.ID, &proposer.KeyID, &proposer.Scopes); err != nil {
-		t.Fatal(err)
-	}
-	if err = json.Unmarshal(rawFacts, &facts); err != nil {
-		t.Fatal(err)
-	}
-	proposer.AuthKeyID = proposer.KeyID
-	proposer.KeyCreatorID = f.person.ID
-	raw, _ := json.Marshal(map[string]any{"scope": consent.RetentionScope, "resource_kind": "node", "resource_id": f.project, "rationale": "Separate retention", "expires_at": f.now.Add(time.Hour), "native_consent": facts})
-	r := httptest.NewRequest("POST", "/api/approvals", bytes.NewReader(raw)).WithContext(tenant.WithPrincipal(t.Context(), proposer))
-	r.Header.Set("Authorization", "Bearer aeon_nativeproposal_"+strings.Repeat("p", 64))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, r)
-	if w.Code != 201 {
-		t.Fatalf("retention %d %s", w.Code, w.Body.String())
-	}
-	var approval approvals.Approval
-	_ = json.Unmarshal(w.Body.Bytes(), &approval)
-	personCall("/api/approvals/"+approval.ID+"/decision", map[string]string{"decision": "approved"}, nil)
+	c.approve(t, consent.RetentionScope)
 	in := nativecontract.Input{RequestID: guuid.NewString(), InputID: guuid.NewString(), ExpectedBinding: b, Mode: "now", Text: "person input stays exact", ExpiresAt: f.now.Add(time.Minute)}
 	queued, err := f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "input", Input: &in})
 	if err != nil {
@@ -472,4 +524,50 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 		t.Fatal("queue claimed native delivery")
 	}
 }
+
+// Risk: a start refused after its claim but before fork (here the person
+// withdraws consent before the daemon's final launch re-check) keeps the
+// server root, the local ledger hold and the host slot, so the same account
+// can never start again. Abandonment itself must not need that consent.
+func TestProductionCompositionAbandonsStartRefusedBeforeFork(t *testing.T) {
+	c := composeProduction(t)
+	f := c.f
+	started := f.begin(t)
+	c.profiles.before = func() { c.personCall(t, "/api/approvals/"+f.intent.PolicyID+"/revoke", nil, nil) }
+	_, err := c.config.Host.Start(t.Context(), nativecontract.LocalStart{Intent: f.intent, Cwd: c.root, AccountKey: "real-own-account"})
+	var status *client.StatusError
+	if !errors.As(err, &status) || status.Status != http.StatusForbidden || !strings.Contains(status.Message, string(nativecontract.ReasonPermissionRevoked)) {
+		t.Fatal("withdrawn consent did not refuse the launch for its own reason", err)
+	}
+	if c.provider.binding.RuntimeEpoch != "" {
+		t.Fatal("refused start reached the provider")
+	}
+	var released, stopped bool
+	var state, reason string
+	if err = f.d.Admin.QueryRow(t.Context(), `SELECT r.released_at IS NOT NULL,h.stopped_at IS NOT NULL,b.view->>'state',coalesce(b.view->>'reason','') FROM native_session_roots r
+ JOIN native_session_bindings b ON b.id=r.owned_session_id JOIN harness_sessions h ON h.id=b.current_harness_session_id WHERE r.owned_session_id=$1`, started.Session.OwnedSessionID).Scan(&released, &stopped, &state, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if !released || !stopped || state != "failed" || reason != string(nativecontract.ReasonPermissionRevoked) {
+		t.Fatal("claimed root was not settled as verified no-fork abandonment", released, stopped, state, reason)
+	}
+	ledger, err := agentsetup.OpenSharedLedger(filepath.Join(c.root, "ledger"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _, err := ledger.Snapshot()
+	_ = ledger.Close()
+	if err != nil || len(data.Groups) != 0 {
+		t.Fatal("refused start kept the account's ledger hold", data.Groups, err)
+	}
+	// A fresh person consent and intent start the same account again.
+	f.intent.PolicyID = c.approve(t, consent.SessionScope)
+	f.intent.RequestID = guuid.NewString()
+	next := f.begin(t)
+	result, err := c.config.Host.Start(t.Context(), nativecontract.LocalStart{Intent: f.intent, Cwd: c.root, AccountKey: "real-own-account"})
+	if err != nil || result.Session == nil || result.Session.State != "running" || result.Receipt.OperationID != next.Receipt.OperationID {
+		t.Fatal("the account could not start again after abandonment", result, err)
+	}
+}
+
 func ioNop(raw []byte) io.ReadCloser { return io.NopCloser(bytes.NewReader(raw)) }

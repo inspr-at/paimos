@@ -343,3 +343,15 @@ func (a CurrentAuthority) RuntimeTx(ctx context.Context, tx pgx.Tx, d nativecont
 	_, proof, err := a.pairedTx(ctx, tx, d, b, s, draining)
 	return s, proof, err
 }
+
+// AbandonTx authenticates only the exact paired owner and worker lease of a
+// claimed binding. Verified no-fork abandonment needs no current person consent
+// (its withdrawal is a cause): it settles occupancy and grants no launch, input
+// or final. A settled retry finds its harness stopped, so liveness is not read.
+func (a CurrentAuthority) AbandonTx(ctx context.Context, tx pgx.Tx, d nativecontract.DaemonActor, b nativecontract.Binding, intent nativecontract.StartIntent, view nativecontract.SessionView) error {
+	if d.DaemonID != b.DaemonID || d.DaemonGeneration != b.DaemonGeneration {
+		return currentFailure(nativecontract.ReasonPermissionRevoked)
+	}
+	_, _, err := a.pairedTx(ctx, tx, d, b, consent.Session{Intent: intent, View: view}, true)
+	return err
+}

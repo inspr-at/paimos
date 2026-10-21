@@ -111,13 +111,22 @@ type nativeC0Transport struct {
 	owner    *nativeOwned
 	spec     nativecontract.LaunchSpec
 	process  *nativeClaudeLead
+	writer   nativeC0Writer // the same owned process; its write boundary only
 	identity nativecontract.NativeIdentity
 	caps     nativecontract.Capabilities
 	events   chan nativecontract.ProviderEvent
 	sequence uint64
-	pending  map[string]*nativeC0Input
-	exit     *nativecontract.ExitEvidence
-	fault    error
+	// Live or uncertain work only: a completed input or applied interrupt
+	// leaves, an unconfirmed one stays and keeps blocking the next input.
+	pending map[string]*nativeC0Input
+	exit    *nativecontract.ExitEvidence
+	fault   error
+}
+
+// nativeC0Writer is the owned provider's input/control boundary.
+type nativeC0Writer interface {
+	Input(ctx context.Context, id, text string) error
+	nativeControl(ctx context.Context, id, op string) error
 }
 type nativeC0Input struct {
 	input, request, turn, text, kind                       string
@@ -179,6 +188,11 @@ func (t *nativeC0Transport) Send(ctx context.Context, in nativecontract.Input) (
 		t.mu.Unlock()
 		return nativecontract.NativeEvidence{}, err
 	}
+	w := t.writer
+	if w == nil {
+		t.mu.Unlock()
+		return nativecontract.NativeEvidence{}, ErrNotOwned
+	}
 	if len(t.pending) >= 128 || t.pending[in.InputID] != nil {
 		t.mu.Unlock()
 		return nativecontract.NativeEvidence{}, nativeRefusal(nativecontract.ReasonInputOutcomeUnconfirmed)
@@ -191,12 +205,8 @@ func (t *nativeC0Transport) Send(ctx context.Context, in nativecontract.Input) (
 	}
 	pending := &nativeC0Input{input: in.InputID, request: in.RequestID, kind: "input"}
 	t.pending[in.InputID] = pending
-	p := t.process
 	t.mu.Unlock()
-	if p == nil {
-		return nativecontract.NativeEvidence{}, ErrNotOwned
-	}
-	if err := p.Input(ctx, in.InputID, in.Text); err != nil {
+	if err := w.Input(ctx, in.InputID, in.Text); err != nil {
 		return nativecontract.NativeEvidence{}, err
 	}
 	t.mu.Lock()
@@ -211,21 +221,21 @@ func (t *nativeC0Transport) Interrupt(ctx context.Context, in nativecontract.Int
 		return nativecontract.NativeEvidence{}, nativeRefusal(nativecontract.ReasonWrongGeneration)
 	}
 	t.mu.Lock()
+	w := t.writer
 	found := false
 	for _, p := range t.pending {
 		if p.kind == "input" && p.turn == in.ExpectedTurnRef && p.started && !p.completed {
 			found = true
 		}
 	}
-	if !found || t.pending[in.RequestID] != nil || len(t.pending) >= 128 {
+	if w == nil || !found || t.pending[in.RequestID] != nil || len(t.pending) >= 128 {
 		t.mu.Unlock()
 		return nativecontract.NativeEvidence{}, nativeRefusal(nativecontract.ReasonInputOutcomeUnconfirmed)
 	}
 	pending := &nativeC0Input{request: in.RequestID, turn: in.ExpectedTurnRef, kind: "interrupt"}
 	t.pending[in.RequestID] = pending
-	p := t.process
 	t.mu.Unlock()
-	if err := p.nativeControl(ctx, in.RequestID, "interrupt"); err != nil {
+	if err := w.nativeControl(ctx, in.RequestID, "interrupt"); err != nil {
 		return nativecontract.NativeEvidence{}, err
 	}
 	t.mu.Lock()
@@ -233,6 +243,7 @@ func (t *nativeC0Transport) Interrupt(ctx context.Context, in nativecontract.Int
 	if !pending.ack {
 		return nativecontract.NativeEvidence{}, nativeRefusal(nativecontract.ReasonInputOutcomeUnconfirmed)
 	}
+	delete(t.pending, in.RequestID) // Applied: no longer live work.
 	return pending.ackEvidence, nil
 }
 func (*nativeC0Transport) Decide(context.Context, nativecontract.ApprovalDecision) (nativecontract.NativeEvidence, error) {
@@ -344,6 +355,9 @@ func (t *nativeC0Transport) observe(raw json.RawMessage) {
 			t.emit(nativecontract.ProviderEvent{Identity: t.identity, Final: &final})
 		}
 		p.text = ""
+		// Completion and its final are emitted: the input is no longer live.
+		// The bridge drops the correlation too; a late frame finds no entry.
+		delete(t.pending, p.input)
 	}
 }
 func (t *nativeC0Transport) newEvidence(p *nativeC0Input, stage string) nativecontract.NativeEvidence {

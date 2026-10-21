@@ -293,6 +293,9 @@ func (s *Store) Report(ctx context.Context, d nativecontract.DaemonActor, in nat
 	if err := s.validate("NativeReceipt", in); err != nil {
 		return nativecontract.OperationResult{}, err
 	}
+	if in.Operation == "start" && in.State == "rejected" {
+		return s.reportAbandoned(ctx, d, in)
+	}
 	if in.Operation == "start" {
 		return s.reportStarted(ctx, d, in)
 	}

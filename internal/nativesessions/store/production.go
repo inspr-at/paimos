@@ -194,6 +194,78 @@ func (s *Store) reportStarted(ctx context.Context, d nativecontract.DaemonActor,
 	return out, err
 }
 
+// Verified no-fork abandonment is a rejected start receipt from the exact
+// paired owner, sent only before its possible-fork marker. It releases a root
+// never reported running and records why. Withdrawn consent is one of its
+// causes, so it needs none; it grants no launch, input or final authority.
+func (s *Store) reportAbandoned(ctx context.Context, d nativecontract.DaemonActor, in nativecontract.Receipt) (nativecontract.OperationResult, error) {
+	var out nativecontract.OperationResult
+	if in.Binding == nil || in.Reason == nil || in.SourceSequence != "0" || in.InputID != nil || in.TurnRef != nil || in.Binding.RunID != nil {
+		return out, fail(400, nativecontract.ReasonInvalidInput)
+	}
+	b := *in.Binding
+	reason := *in.Reason
+	p, err := authenticated(ctx, d.Actor)
+	if err != nil {
+		return out, err
+	}
+	s.mu.Lock()
+	started := s.runtimes[b.OwnedSessionID] != ""
+	s.mu.Unlock()
+	if started {
+		return out, fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	// The locked binding row serialises this against reportStarted: whichever
+	// commits first moves the view out of "starting" and refuses the other.
+	err = db.InTenant(ctx, s.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := agentpairing.Lock(ctx, tx); err != nil {
+			return err
+		}
+		r, err := loadPending(ctx, tx, in.OperationID, true)
+		if err != nil {
+			return err
+		}
+		if r.Intent.RequestID != in.RequestID || r.view.CurrentBinding == nil || !r.view.CurrentBinding.Equal(b) || r.pairedPrincipal != d.PrincipalID || r.daemon != d.DaemonID || r.runID != nil {
+			return fail(409, nativecontract.ReasonIdentityMismatch)
+		}
+		if err = s.production.authority.AbandonTx(ctx, tx, d, b, r.Intent, r.view); err != nil {
+			return err
+		}
+		out = nativecontract.OperationResult{Receipt: in, Session: &r.view}
+		if r.view.State == "failed" {
+			return nil // A lost reply: the first report already released the root.
+		}
+		// Only a start never reported running is settled; anything later is a
+		// possible owned writer and keeps its hold until its confirmed exit.
+		if r.view.State != "starting" {
+			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
+		now := s.now()
+		tag, err := tx.Exec(ctx, `UPDATE native_session_roots SET released_at=$3,hold_state='released' WHERE owned_session_id=$1 AND runtime_epoch=$2 AND released_at IS NULL AND run_id IS NULL`, b.OwnedSessionID, b.RuntimeEpoch, now)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
+		if _, err = tx.Exec(ctx, `UPDATE harness_sessions SET phase='stopped',stopped_at=coalesce(stopped_at,$2),stop_reason=coalesce(stop_reason,'stopped') WHERE id=$1`, b.HarnessSessionID, now); err != nil {
+			return err
+		}
+		view := r.view
+		view.State, view.Reason = "failed", &reason
+		view.Revision++
+		raw, _ := json.Marshal(view)
+		if _, err = tx.Exec(ctx, `UPDATE native_session_bindings SET view=$2 WHERE id=$1`, b.OwnedSessionID, raw); err != nil {
+			return err
+		}
+		out.Session = &view
+		return appendEvent(ctx, tx, p, "native_session.stopped", b.ProjectID, in.OperationID, in.RequestID, view)
+	})
+	return out, err
+}
+
 func (s *Store) runtimeTx(ctx context.Context, d nativecontract.DaemonActor, b nativecontract.Binding, draining bool, fn func(context.Context, pgx.Tx, consent.Session, receipts.RuntimeProof) error) error {
 	if s.production == nil {
 		return fail(503, nativecontract.ReasonQualificationMissing)

@@ -10,6 +10,7 @@ import (
 	"github.com/inspr-at/paimos/internal/nativeintegration/delivery"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
@@ -605,6 +607,23 @@ type NativeHost struct {
 	caps     nativecontract.Capabilities
 	mu       sync.Mutex
 	entries  map[string]*nativeOwned
+	// Abandoned starts whose server root is not yet settled; Poll retries them.
+	unsettled []*nativeOwned
+}
+
+// Limits count live work only. Exited owners are retained as exact successor
+// sources up to nativeRetainedExits, newest first; completed inputs leave the
+// live set, and their final-drain routes stay until the grant expires.
+const (
+	nativeHostSessions  = 32
+	nativeRetainedExits = 32
+	nativeLiveInputs    = 128
+)
+
+// nativeDrain keeps the operation of a possibly completed input for its final.
+type nativeDrain struct {
+	grant     nativecontract.FinalDrainGrant
+	operation string
 }
 type nativeOwned struct {
 	owner         nativecontract.CommandActor
@@ -613,11 +632,17 @@ type nativeOwned struct {
 	claimDeadline time.Time
 	released      chan struct{}
 	releaseOnce   sync.Once
+	releasedAt    time.Time
 	ownership     *ownedprocess.Identity
 	cancel        context.CancelFunc
 	observations  map[string]nativecontract.NativeEvidence
 	exit          *nativecontract.ExitEvidence
-	drains        map[string]nativecontract.FinalDrainGrant
+	drains        map[string]nativeDrain // input ID -> final route, until grant expiry
+	// recorded: the possible lead record may exist. refused: report delivery
+	// was refused for good, so only exit reconciliation and stop still run.
+	recorded      bool
+	refused       error
+	abandonReason nativecontract.Reason
 
 	host              *NativeHost
 	local             nativecontract.LocalStart
@@ -630,7 +655,7 @@ type nativeOwned struct {
 	delivery          *delivery.Delivery
 	transport         nativecontract.NativeTransport
 	active            nativecontract.ClaimResult
-	operations        map[string]string // input ID -> operation ID, bounded by journal
+	operations        map[string]string // live input ID -> operation ID
 	mu                sync.Mutex
 	opMu              sync.Mutex
 	attempted, exited bool
@@ -647,11 +672,10 @@ func nativeRefusal(reason nativecontract.Reason) error {
 	return &nativecontract.ValidationError{Reason: reason, Path: "$"}
 }
 
-func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart) (nativecontract.OperationResult, error) {
+func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart) (out nativecontract.OperationResult, err error) {
 	// Startup only. Cancelling this context does not close the accepted lifetime.
 	ctx, cancel := context.WithTimeout(ctx, nativecontract.LocalOperationSeconds*time.Second)
 	defer cancel()
-	var out nativecontract.OperationResult
 	if h.s == nil || h.remote == nil || h.profiles == nil || !uuidPattern.MatchString(h.owner) || h.s.ledger == nil || h.caps.QualificationDigest == "" {
 		return out, nativeRefusal(nativecontract.ReasonQualificationMissing)
 	}
@@ -680,7 +704,7 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	}
 	h.mu.Lock()
 	existing := h.entries[local.Intent.RequestID]
-	count := len(h.entries)
+	live := h.liveLocked()
 	h.mu.Unlock()
 	if existing != nil {
 		if !reflect.DeepEqual(existing.local, local) {
@@ -695,7 +719,7 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 		}
 		return existing.ready(ctx, grant)
 	}
-	if count >= 32 {
+	if live >= nativeHostSessions {
 		return out, nativeRefusal(nativecontract.ReasonHostFull)
 	}
 	enrolled := false
@@ -724,6 +748,15 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	if err != nil {
 		return out, err
 	}
+	e := &nativeOwned{host: h, local: local, group: group, released: make(chan struct{}), operations: map[string]string{}, observations: map[string]nativecontract.NativeEvidence{}, drains: map[string]nativeDrain{}}
+	// Before the possible-fork marker no provider exists: every refusal frees
+	// the local slot and host entry and settles a claimed server root, like the
+	// legacy abandonNativeLocked. Later failures retain the possible owner.
+	defer func() {
+		if err != nil && !e.attempted {
+			err = errors.Join(err, h.abandon(e, err))
+		}
+	}()
 	if len(candidates) != 1 || candidates[0].AccountID != local.Intent.AccountID {
 		return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
 	}
@@ -737,10 +770,10 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	}
 	request, reservation := uuid.NewString(), uuid.NewString()
 	now := s.capacityNow()
-	e := &nativeOwned{host: h, local: local, group: group, released: make(chan struct{}), operations: map[string]string{}, observations: map[string]nativecontract.NativeEvidence{}, drains: map[string]nativecontract.FinalDrainGrant{}, proof: daemon.Proof{DaemonID: s.daemonID, Generation: s.generation, Ledger: s.ledgerBinding.Generation, Capability: h.caps.QualificationDigest, WorkerLease: lease, SessionRef: ref, ReservationID: reservation, ObservedAt: now, ExpiresAt: now.Add(20 * time.Second), LocalStart: &local}}
+	e.proof = daemon.Proof{DaemonID: s.daemonID, Generation: s.generation, Ledger: s.ledgerBinding.Generation, Capability: h.caps.QualificationDigest, WorkerLease: lease, SessionRef: ref, ReservationID: reservation, ObservedAt: now, ExpiresAt: now.Add(20 * time.Second), LocalStart: &local}
 	e.claim = nativecontract.Claim{RequestID: request, OperationID: local.Intent.RequestID, DaemonID: s.daemonID, DaemonGeneration: s.generation, LedgerGeneration: s.ledgerBinding.Generation, CapabilityDigest: h.caps.QualificationDigest, ExpectedRevision: 1, ClaimKind: "start"}
 	if err = e.call(ctx, "POST", "/api/agentd/native-sessions/claim", e.claim, &e.grant); err != nil {
-		return out, errors.Join(err, s.ledger.Release(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, group))
+		return out, err
 	}
 	g := e.grant
 	e.claimDeadline = now.Add(time.Duration(g.AuthorizationTTLMS) * time.Millisecond)
@@ -773,6 +806,7 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	h.mu.Lock()
 	h.entries[local.Intent.RequestID] = e
 	h.mu.Unlock()
+	e.recorded = true
 	if err = e.save("reserved"); err != nil {
 		return out, err
 	}
@@ -892,7 +926,7 @@ func (h *NativeHost) Open(ctx context.Context, spec nativecontract.LaunchSpec) (
 	}
 	raw, _ := json.Marshal(identity)
 	t.mu.Lock()
-	t.process = p
+	t.process, t.writer = p, p
 	t.identity.Provider = Claude
 	t.identity.RuntimeEpoch = spec.Binding.RuntimeEpoch
 	t.identity.PID = identity.RootPID
@@ -911,6 +945,9 @@ func (e *nativeOwned) save(state string) error {
 	if state == "exit_confirmed" {
 		record.ExitObserved = true
 		record.ExitReported = true
+	}
+	if state == "abandoned" {
+		record.Abandoned = true
 	}
 	return e.host.s.writeLead(record, false)
 }
@@ -1037,13 +1074,13 @@ func (e *nativeOwned) Persist(ctx context.Context, f nativecontract.FinalDeliver
 }
 func (e *nativeOwned) retention(ctx context.Context, f nativecontract.FinalPublish) (nativecontract.FinalDrainGrant, nativereceipts.RetentionApproval, error) {
 	e.mu.Lock()
-	grant, found := e.drains[f.InputID]
-	operation := e.operations[f.InputID]
+	drain, found := e.drains[f.InputID]
 	e.mu.Unlock()
+	grant := drain.grant
 	if !found || grant.GrantID != f.DrainGrantID || !e.host.s.capacityNow().Before(grant.ExpiresAt) {
 		return grant, nativereceipts.RetentionApproval{}, nativeRefusal(nativecontract.ReasonRetentionUnapproved)
 	}
-	claim := nativecontract.Claim{RequestID: uuid.NewString(), OperationID: operation, DaemonID: e.host.s.daemonID, DaemonGeneration: e.host.s.generation, LedgerGeneration: e.host.s.ledgerBinding.Generation, CapabilityDigest: e.host.caps.QualificationDigest, ExpectedRevision: e.grant.ExpectedBinding.BindingRevision, ClaimKind: "final_drain"}
+	claim := nativecontract.Claim{RequestID: uuid.NewString(), OperationID: drain.operation, DaemonID: e.host.s.daemonID, DaemonGeneration: e.host.s.generation, LedgerGeneration: e.host.s.ledgerBinding.Generation, CapabilityDigest: e.host.caps.QualificationDigest, ExpectedRevision: e.grant.ExpectedBinding.BindingRevision, ClaimKind: "final_drain"}
 	var current nativecontract.ClaimResult
 	if err := e.call(ctx, "POST", "/api/agentd/native-sessions/claim", claim, &current); err != nil {
 		return grant, nativereceipts.RetentionApproval{}, err
@@ -1066,6 +1103,7 @@ func (e *nativeOwned) release(ctx context.Context, b nativecontract.Binding, x n
 	}
 	e.mu.Lock()
 	e.exited = true
+	e.releasedAt = s.capacityNow()
 	if e.cancel != nil {
 		e.cancel()
 	}
@@ -1073,9 +1111,154 @@ func (e *nativeOwned) release(ctx context.Context, b nativecontract.Binding, x n
 	e.mu.Unlock()
 	return nil
 }
+
+// liveLocked counts owners that may still hold a writer, under h.mu. Exited
+// owners remain only as exact successor sources; beyond nativeRetainedExits
+// the longest-released are dropped and their journals closed.
+func (h *NativeHost) liveLocked() int {
+	live := 0
+	type retained struct {
+		e  *nativeOwned
+		at time.Time
+	}
+	var exited []retained
+	for _, e := range h.entries {
+		e.mu.Lock()
+		done, at := e.exited, e.releasedAt
+		e.mu.Unlock()
+		if !done {
+			live++
+			continue
+		}
+		exited = append(exited, retained{e, at})
+	}
+	if len(exited) > nativeRetainedExits {
+		slices.SortFunc(exited, func(a, b retained) int { return a.at.Compare(b.at) })
+		for _, r := range exited[:len(exited)-nativeRetainedExits] {
+			delete(h.entries, r.e.local.Intent.RequestID)
+			_ = r.e.journal.Close()
+		}
+	}
+	return live
+}
+
+// abandon settles a start refused before its possible-fork marker. No provider
+// was opened, so the exact local slot and host entry are freed at once. A
+// claimed server root is settled with a rejected start receipt; while the
+// server cannot answer, Poll retries it. Every failure is returned.
+func (h *NativeHost) abandon(e *nativeOwned, cause error) error {
+	s := h.s
+	var errs []error
+	if e.cancel != nil {
+		e.cancel()
+	}
+	if e.journal != nil {
+		errs = append(errs, e.journal.Close())
+	}
+	if e.recorded {
+		errs = append(errs, e.save("abandoned"))
+	}
+	errs = append(errs, s.ledger.Release(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, e.group))
+	h.mu.Lock()
+	if h.entries[e.local.Intent.RequestID] == e {
+		delete(h.entries, e.local.Intent.RequestID)
+	}
+	h.mu.Unlock()
+	if b := e.grant.ExpectedBinding; b == nil || e.grant.OperationID == "" || b.TenantID != s.tenantID || b.DaemonID != s.daemonID || b.DaemonGeneration != s.generation {
+		return errors.Join(errs...) // No root of this daemon was reserved.
+	}
+	e.abandonReason = nativeRefusalReason(cause)
+	ctx, cancel := context.WithTimeout(context.Background(), nativecontract.LocalOperationSeconds*time.Second)
+	defer cancel()
+	if err := e.reject(ctx); err != nil {
+		errs = append(errs, err)
+		if !nativeDefinitive(err) {
+			h.mu.Lock()
+			if len(h.unsettled) < nativeHostSessions {
+				h.unsettled = append(h.unsettled, e)
+			}
+			h.mu.Unlock()
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// reject reports verified no-fork abandonment for the exact claimed binding.
+func (e *nativeOwned) reject(ctx context.Context) error {
+	g := e.grant
+	reason := e.abandonReason
+	r := nativecontract.Receipt{RequestID: g.Intent.RequestID, OperationID: g.OperationID, Binding: g.ExpectedBinding, Operation: "start", State: "rejected", SourceSequence: "0", UpdatedAt: e.host.s.capacityNow().UTC(), Reason: &reason}
+	var out nativecontract.OperationResult
+	if err := e.call(ctx, "POST", "/api/agentd/native-sessions/receipts", r, &out); err != nil {
+		return err
+	}
+	if out.Session == nil || out.Session.State != "failed" {
+		return nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	return nil
+}
+
+// settleAbandoned retries server settlement of abandoned starts; a definitive
+// server answer ends the retry, an outage keeps it.
+func (h *NativeHost) settleAbandoned(ctx context.Context) error {
+	h.mu.Lock()
+	pending := slices.Clone(h.unsettled)
+	h.mu.Unlock()
+	var errs []error
+	for _, e := range pending {
+		err := e.reject(ctx)
+		if err == nil || nativeDefinitive(err) {
+			h.mu.Lock()
+			h.unsettled = slices.DeleteFunc(h.unsettled, func(c *nativeOwned) bool { return c == e })
+			h.mu.Unlock()
+		}
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// nativeDefinitive reports a server refusal that a retry cannot change for
+// the same binding (as opposed to an outage, timeout or rate limit).
+func nativeDefinitive(err error) bool {
+	var status *client.StatusError
+	return errors.As(err, &status) && status.Status >= 400 && status.Status < 500 && status.Status != http.StatusRequestTimeout && status.Status != http.StatusTooManyRequests
+}
+
+// nativeRefusalReason names a start refusal with its closed native reason.
+func nativeRefusalReason(err error) nativecontract.Reason {
+	var refusal *nativecontract.ValidationError
+	if errors.As(err, &refusal) {
+		return refusal.Reason
+	}
+	var journal *nativereceipts.Error
+	if errors.As(err, &journal) {
+		return journal.Reason
+	}
+	var status *client.StatusError
+	if errors.As(err, &status) {
+		var body nativecontract.Error
+		if json.Unmarshal([]byte(status.Message), &body) == nil {
+			raw, _ := json.Marshal(body.Reason)
+			if v, err := nativecontract.NewValidator(); err == nil && v.ValidateJSON("NativeReason", raw) == nil {
+				return body.Reason
+			}
+		}
+	}
+	if errors.Is(err, ErrDraining) {
+		return nativecontract.ReasonDraining
+	}
+	return nativecontract.ReasonNativeFailure
+}
+
+// Poll services every owner independently: one session's refused report,
+// exit or command failure never starves another's input, final or stop. All
+// failures are returned together.
 func (h *NativeHost) Poll(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, nativecontract.LocalOperationSeconds*time.Second)
 	defer cancel()
+	errs := []error{h.settleAbandoned(ctx)}
 	h.mu.Lock()
 	entries := make([]*nativeOwned, 0, len(h.entries))
 	for _, e := range h.entries {
@@ -1083,51 +1266,88 @@ func (h *NativeHost) Poll(ctx context.Context) error {
 	}
 	h.mu.Unlock()
 	for _, e := range entries {
-		e.mu.Lock()
-		live := e.transport != nil && e.delivery != nil && !e.exited
-		e.mu.Unlock()
-		if !live {
-			continue
+		errs = append(errs, e.poll(ctx))
+	}
+	return errors.Join(errs...)
+}
+
+// poll services one owner. Once its report delivery is refused for good it no
+// longer retries reports, events, finals or new input (their outcomes could not
+// be reported), but it still reconciles its exit and executes the person's stop.
+func (e *nativeOwned) poll(ctx context.Context) error {
+	e.mu.Lock()
+	live := e.transport != nil && e.delivery != nil && !e.exited
+	e.mu.Unlock()
+	if !live {
+		return nil
+	}
+	b := *e.grant.ExpectedBinding
+	var errs []error
+	if e.faulted() == nil {
+		if _, err := e.journal.FlushReports(ctx, b, 100, e); err != nil {
+			errs = append(errs, e.fault(err))
 		}
-		if _, err := e.journal.FlushReports(ctx, *e.grant.ExpectedBinding, 100, e); err != nil {
-			return err
-		}
-		if err := e.reconcileExit(ctx); err != nil {
-			return err
-		}
-		e.mu.Lock()
-		exited := e.exited
-		e.mu.Unlock()
-		if exited {
-			continue
-		}
+	}
+	if err := e.reconcileExit(ctx); err != nil {
+		errs = append(errs, err)
+	}
+	e.mu.Lock()
+	exited := e.exited
+	e.mu.Unlock()
+	if exited {
+		return errors.Join(errs...)
+	}
+	if e.faulted() == nil {
 		if err := e.flushEvents(ctx); err != nil {
-			return err
+			errs = append(errs, e.fault(err))
 		}
+	}
+	if e.faulted() == nil {
 		for _, f := range e.journal.FinalStatuses() {
 			if f.State == "pending" {
 				if _, err := e.journal.RetryFinal(ctx, f.FinalID, e); err != nil {
-					return err
+					errs = append(errs, err)
 				}
 			}
 		}
-		var page nativecontract.PendingCommandPage
-		if err := e.call(ctx, "GET", "/api/agentd/native-sessions/commands?limit=50", nil, &page); err != nil {
-			return err
+	}
+	var page nativecontract.PendingCommandPage
+	if err := e.call(ctx, "GET", "/api/agentd/native-sessions/commands?limit=50", nil, &page); err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	stopOnly := e.faulted() != nil
+	for _, item := range page.Items {
+		if !item.ExpectedBinding.Equal(b) {
+			errs = append(errs, nativeRefusal(nativecontract.ReasonIdentityMismatch))
+			continue
 		}
-		for _, item := range page.Items {
-			if !item.ExpectedBinding.Equal(*e.grant.ExpectedBinding) {
-				return nativeRefusal(nativecontract.ReasonIdentityMismatch)
-			}
-			if _, err := e.journal.Get(item.ExpectedBinding, item.OperationID); err == nil {
-				continue
-			}
-			if _, err := e.execute(ctx, item); err != nil {
-				return err
-			}
+		if stopOnly && item.Kind != "stop" {
+			continue
+		}
+		if _, err := e.journal.Get(item.ExpectedBinding, item.OperationID); err == nil {
+			continue
+		}
+		if _, err := e.execute(ctx, item); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+// fault marks report delivery refused for good after a definitive server
+// refusal or the sticky local event fault; it returns err unchanged.
+func (e *nativeOwned) fault(err error) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.refused == nil && (nativeDefinitive(err) || e.lastError != nil && errors.Is(err, e.lastError)) {
+		e.refused = err
+	}
+	return err
+}
+func (e *nativeOwned) faulted() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.refused
 }
 
 // Reconcile only an exact retained stop and the owning provider's exit
@@ -1197,16 +1417,29 @@ func (e *nativeOwned) execute(ctx context.Context, item nativecontract.PendingCo
 			return out, ErrScope
 		}
 		e.mu.Lock()
-		if len(e.operations) >= 128 {
+		now := e.host.s.capacityNow()
+		for id, d := range e.drains {
+			if !now.Before(d.grant.ExpiresAt) {
+				delete(e.drains, id)
+			}
+		}
+		// Only unfinished (live or uncertain) inputs count; the journal bounds
+		// the routes of completed inputs whose final drain is still open.
+		_, live := e.operations[in.InputID]
+		_, routed := e.drains[in.InputID]
+		if !live && len(e.operations) >= nativeLiveInputs || g.FinalDrainGrant != nil && !routed && len(e.drains) >= nativereceipts.MaxReceipts {
 			e.mu.Unlock()
 			return out, nativeRefusal(nativecontract.ReasonBufferFull)
 		}
 		e.operations[in.InputID] = item.OperationID
 		if g.FinalDrainGrant != nil {
-			e.drains[in.InputID] = *g.FinalDrainGrant
+			e.drains[in.InputID] = nativeDrain{grant: *g.FinalDrainGrant, operation: item.OperationID}
 		}
 		e.mu.Unlock()
 		r, err = e.delivery.Send(ctx, actor, item.OperationID, in)
+		if nativeTerminal(r.State) {
+			e.retireInput(in.InputID)
+		}
 	case "interrupt":
 		var in nativecontract.Interrupt
 		if json.Unmarshal(g.Command.Params, &in) != nil {
@@ -1256,6 +1489,20 @@ func (e *nativeOwned) events(ctx context.Context) {
 		}
 	}
 }
+
+// nativeTerminal reports a journal state that ends an input's live work.
+func nativeTerminal(state string) bool {
+	return state == "turn_completed" || state == "rejected" || state == "expired"
+}
+
+// retireInput removes a finished input from the live set; its final route,
+// if any, stays in drains until the grant expires.
+func (e *nativeOwned) retireInput(id string) {
+	e.mu.Lock()
+	delete(e.operations, id)
+	e.mu.Unlock()
+}
+
 func (e *nativeOwned) flushEvents(ctx context.Context) error {
 	e.eventMu.Lock()
 	defer e.eventMu.Unlock()
@@ -1268,9 +1515,9 @@ func (e *nativeOwned) flushEvents(ctx context.Context) error {
 		}
 		var grant *nativecontract.FinalDrainGrant
 		if event.Final != nil {
-			operation = e.operations[event.Final.InputID]
-			if g, ok := e.drains[event.Final.InputID]; ok {
-				grant = &g
+			// A final follows its completion, which already left the live set.
+			if d, ok := e.drains[event.Final.InputID]; ok {
+				operation, grant = d.operation, &d.grant
 			}
 		}
 		e.mu.Unlock()
@@ -1286,7 +1533,11 @@ func (e *nativeOwned) flushEvents(ctx context.Context) error {
 			e.mu.Lock()
 			e.observations[ev.Stage+"/"+ev.RequestID] = ev
 			e.mu.Unlock()
-			_, err = e.delivery.Observe(ctx, operation, event.Identity, ev)
+			var r nativecontract.Receipt
+			r, err = e.delivery.Observe(ctx, operation, event.Identity, ev)
+			if nativeTerminal(r.State) && ev.InputID != "" {
+				e.retireInput(ev.InputID)
+			}
 		}
 		if operation != "" && event.Final != nil && grant != nil {
 			f := *event.Final
