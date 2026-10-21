@@ -3,6 +3,7 @@
 import { useRouter } from 'vue-router'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch, watchEffect } from 'vue'
 import { APIError, getRecurrence, undoEvent, type ListItem } from '../../lib/api'
+import { ensurePermissions, permissionsKnown } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
 import { rowStore } from '../../lib/rowStore'
 import { liveNodes } from '../../lib/liveNodes'
@@ -270,8 +271,21 @@ function refreshBenefitNotice() {
   benefitNotice.value = gap?.line ?? ''
   benefitInvalidKey.value = gap?.key ?? ''
 }
+// e can arrive after the title is on screen and before this project's grants
+// answer. can() is false in that gap; dropping the key leaves the page closed.
+let editRequest = 0
+onBeforeUnmount(() => { editRequest++ })
 async function startEdit(focus: 'title' | 'body' | 'benefit' = 'title') {
-  if (!editable.value || !item.value || editing.value) return
+  const ticketId = item.value?.id
+  if (!ticketId || editing.value) return
+  const request = ++editRequest
+  if (!permissionsKnown(props.project.id)) {
+    const answer = await ensurePermissions(props.project.id)
+    if (request !== editRequest || answer !== 'known') return
+    await nextTick()
+    if (request !== editRequest) return
+  }
+  if (!editable.value || item.value?.id !== ticketId || editing.value) return
   // Editing starts now: the row is pinned and the draft builds on the copy
   // the editor keeps as its base.
   const copy = ticket.hold()
