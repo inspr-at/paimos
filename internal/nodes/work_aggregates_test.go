@@ -906,13 +906,13 @@ func TestListSortAggregatesReuseSnapshot(t *testing.T) {
 			}
 			seen := map[string]bool{}
 			for {
-				trace.scopeReads = 0
+				trace.aggregateReads = 0
 				page, err := mod.listNodes(ctx, w.admin.TenantID, q)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if trace.scopeReads != 1 {
-					t.Errorf("scope traversals=%d, want 1 per page", trace.scopeReads)
+				if trace.aggregateReads != 1 {
+					t.Errorf("aggregate reads=%d, want 1 per page", trace.aggregateReads)
 				}
 				if sort == "-estimate" && q.Cursor == "" && (len(page.Items) != 2 || page.Items[0].ID != cancelled.ID || page.Items[1].ID != top.ID) {
 					t.Fatal("sort lost closed leaf estimates or descendants outside the selected page")
@@ -946,13 +946,13 @@ func TestListSortAggregatesReuseSnapshot(t *testing.T) {
 					_, hookErr = adminPool.Exec(t.Context(), `UPDATE harness_sessions SET progress_pct=75,eta_ready_at=eta_ready_at+interval '4 hours' WHERE ticket_node_id=$1`, active.ID)
 				}
 			}}
-			trace.scopeReads = 0
+			trace.aggregateReads = 0
 			page, err := mod.listNodes(ctx, w.admin.TenantID, q)
 			if err != nil || hookErr != nil || !trace.ran || len(page.Items) != 3 {
 				t.Fatalf("snapshot fixture: read=%v hook=%v ran=%v rows=%d", err, hookErr, trace.ran, len(page.Items))
 			}
-			if trace.scopeReads != 1 {
-				t.Errorf("scope traversals=%d, want 1", trace.scopeReads)
+			if trace.aggregateReads != 1 {
+				t.Errorf("aggregate reads=%d, want 1", trace.aggregateReads)
 			}
 			for _, item := range page.Items {
 				checkItem(t, item)
@@ -979,11 +979,13 @@ func TestListSortAggregatesReuseSnapshot(t *testing.T) {
 
 type sortAggregateReadTracer struct {
 	stopAfterListQuery
-	scopeReads int
+	aggregateReads int
 }
 
 func (tr *sortAggregateReadTracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	tr.scopeReads += strings.Count(data.SQL, "SELECT * FROM aeon_work_scope(")
+	if strings.Contains(data.SQL, "leaf_facts AS MATERIALIZED") {
+		tr.aggregateReads++
+	}
 	return tr.stopAfterListQuery.TraceQueryStart(ctx, conn, data)
 }
 func (tr *sortAggregateReadTracer) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryEndData) {
