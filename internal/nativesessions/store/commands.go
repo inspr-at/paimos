@@ -74,6 +74,9 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 	if c.Input != nil && len(c.Input.Text) > nativecontract.InputUTF8Bytes || c.Interrupt != nil && len(c.Interrupt.ExpectedTurnRef) > 128 || c.Stop != nil && len(c.Stop.ExpectedProcessIdentityDigest) > 64 {
 		return out, fail(413, nativecontract.ReasonBufferFull)
 	}
+	if c.Take != nil && len(c.Take.ControllerEpoch) > 36 || c.Return != nil && len(c.Return.ControllerEpoch) > 36 || c.Resume != nil && (len(c.Resume.PolicyID) > 36 || len(c.Resume.Reason) > 32) {
+		return out, fail(413, nativecontract.ReasonBufferFull)
+	}
 	for _, id := range []string{b.TenantID, b.ProjectID, b.OwnedSessionID, b.HarnessSessionID, b.RuntimeEpoch, request} {
 		if len(id) > 36 {
 			return out, fail(413, nativecontract.ReasonBufferFull)
@@ -96,7 +99,7 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 	if err != nil {
 		return out, err
 	}
-	if p.Kind != tenant.Person || p.KeyID != "" || p.AuthKeyID != "" {
+	if p.Kind != tenant.Person || p.KeyID != "" || p.AuthKeyID != "" || p.KeyCreatorID != "" {
 		return out, fail(403, nativecontract.ReasonWrongPrincipal)
 	}
 	digest, err := nativereceipts.Digest(value)

@@ -1611,6 +1611,17 @@ func (e *nativeOwned) flushEvents(ctx context.Context) error {
 // Local commands select an already person-authorized pending command; daemon
 // socket possession never creates a person command or expands its key ceiling.
 func (h *NativeHost) localCommand(ctx context.Context, b nativecontract.Binding, request, kind string, value any) (nativecontract.OperationResult, error) {
+	schema := map[string]string{"input": "NativeInput", "interrupt": "NativeInterrupt", "stop": "NativeStop", "take": "NativeTakeIntent", "return": "NativeReturnIntent"}[kind]
+	if schema == "" {
+		return nativecontract.OperationResult{}, ErrUnsupported
+	}
+	v, err := nativecontract.NewValidator()
+	if err != nil {
+		return nativecontract.OperationResult{}, err
+	}
+	if _, err = nativestream.Encode(v, schema, value); err != nil {
+		return nativecontract.OperationResult{}, err
+	}
 	h.mu.Lock()
 	var e *nativeOwned
 	for _, candidate := range h.entries {
@@ -1641,7 +1652,11 @@ func (h *NativeHost) localCommand(ctx context.Context, b nativecontract.Binding,
 			if current.Command == nil || !bytes.Equal(bytes.TrimSpace(current.Command.Params), bytes.TrimSpace(expected)) {
 				return nativecontract.OperationResult{}, nativeRefusal(nativecontract.ReasonIdentityMismatch)
 			}
-			return e.execute(ctx, item)
+			out, err := e.execute(ctx, item)
+			if err == nil && (kind == "take" || kind == "return") {
+				out = localTransitionReceipt(out, b)
+			}
+			return out, err
 		}
 	}
 	return nativecontract.OperationResult{}, nativeRefusal(nativecontract.ReasonGrantMissing)

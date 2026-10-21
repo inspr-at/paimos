@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativerecovery"
+	"github.com/inspr-at/paimos/internal/nativestream"
 )
 
 // Recovery retains only the current owning handle. Disk/ledger reads validate
@@ -33,7 +34,7 @@ func (h *NativeHost) resumeOwned(ctx context.Context, in nativecontract.ResumeIn
 	if err != nil {
 		return out, err
 	}
-	if err = nativereceipts.Validate(v, "NativeResumeIntent", in); err != nil {
+	if _, err = nativestream.Encode(v, "NativeResumeIntent", in); err != nil {
 		return out, err
 	}
 	h.mu.Lock()
@@ -75,12 +76,12 @@ func (h *NativeHost) resumeOwned(ctx context.Context, in nativecontract.ResumeIn
 		if !ok || prior.Session == nil || prior.Session.CurrentBinding == nil || !prior.Session.CurrentBinding.Equal(status.Binding) {
 			return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
 		}
-		return prior, nil
+		return localTransitionReceipt(prior, in.ExpectedBinding), nil
 	}
 	if runtime.result.Session.CurrentBinding == nil || !runtime.result.Session.CurrentBinding.Equal(status.Binding) {
 		return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
 	}
-	return runtime.result, nil
+	return localTransitionReceipt(runtime.result, in.ExpectedBinding), nil
 }
 
 func (r *nativeRecovery) WithWriter(ctx context.Context, b nativecontract.Binding, fn func(context.Context) error) error {
@@ -109,11 +110,9 @@ func (r *nativeRecovery) Read(ctx context.Context, b nativecontract.Binding) (na
 	if transport == nil || grant.ExpectedBinding == nil || e.transition != nil || grant.ExpectedBinding.OwnedSessionID != b.OwnedSessionID {
 		return out, nativeRecoveryUnconfirmed("retained source")
 	}
-	raw, err := e.host.s.state.Read("lead-runtime-"+e.local.Intent.RequestID+".json", 32768)
-	if err != nil {
-		return out, err
-	}
-	record, err := decodeLeadRecord(raw)
+	// The canonical reader verifies BOTH the legacy retained-process fence
+	// and its version-2 native provenance; the legacy projection omits Native.
+	record, _, err := readLeadState(e.host.s.state, "lead-runtime-"+e.local.Intent.RequestID+".json")
 	if err != nil || !record.Attempted || record.Abandoned || record.ExitObserved || record.Native == nil || record.Native.SessionID != grant.ExpectedBinding.HarnessSessionID || record.Group != e.group {
 		return out, nativeRecoveryUnconfirmed("owner journal")
 	}

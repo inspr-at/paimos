@@ -121,6 +121,11 @@ func (e *nativeOwned) switchRuntime(ctx context.Context, g nativecontract.ClaimR
 	}
 	e.mu.Lock()
 	old := e.transport
+	for id, drain := range e.drains {
+		if !s.capacityNow().Before(drain.grant.ExpiresAt) {
+			delete(e.drains, id)
+		}
+	}
 	busy := len(e.operations) > 0 || len(e.drains) > 0
 	e.active = g
 	e.mu.Unlock()
@@ -452,4 +457,13 @@ func decodeNativeControl(raw []byte, out any) error {
 		return nativeRefusal(nativecontract.ReasonInvalidInput)
 	}
 	return nil
+}
+
+// The old request's acknowledgement stays bound to the old generation. The
+// client explicitly refreshes/re-attaches to the successor, as required by the
+// local contract; no stale stream or controller follows a switch implicitly.
+func localTransitionReceipt(out nativecontract.OperationResult, b nativecontract.Binding) nativecontract.OperationResult {
+	out.Receipt.Binding = &b
+	out.Session = nil
+	return out
 }

@@ -169,9 +169,14 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 	}
 	c.provider.confirmed = true
 	taken, err := c.config.Host.Take(t.Context(), take)
-	if err != nil || taken.Session == nil || taken.Session.State != "taken" {
+	if err != nil || taken.Session != nil || taken.Receipt.State != "applied" || taken.Receipt.Binding == nil || !taken.Receipt.Binding.Equal(b) {
 		t.Fatal("take", taken, err)
 	}
+	takenView, err := f.s.View(f.personCtx(t), f.actor, b.ProjectID, b.OwnedSessionID)
+	if err != nil || takenView.State != "taken" {
+		t.Fatal("fresh take projection", err)
+	}
+	taken.Session = &takenView
 	takenBinding := *taken.Session.CurrentBinding
 	if takenBinding.RuntimeEpoch == b.RuntimeEpoch || takenBinding.HarnessSessionID == b.HarnessSessionID || takenBinding.BindingRevision <= b.BindingRevision || pty.opens != 1 {
 		t.Fatal("take did not make one fresh writer")
@@ -228,9 +233,14 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 		t.Fatal("queue hand-back", err)
 	}
 	returned, err := c.config.Host.Return(t.Context(), back)
-	if err != nil || returned.Session == nil || returned.Session.State != "idle" {
+	if err != nil || returned.Session != nil || returned.Receipt.State != "applied" || returned.Receipt.Binding == nil || !returned.Receipt.Binding.Equal(takenBinding) {
 		t.Fatal("hand-back", returned, err)
 	}
+	returnedView, err := f.s.View(f.personCtx(t), f.actor, b.ProjectID, b.OwnedSessionID)
+	if err != nil || returnedView.State != "idle" {
+		t.Fatal("fresh hand-back projection", err)
+	}
+	returned.Session = &returnedView
 	fresh := *returned.Session.CurrentBinding
 	if fresh.RuntimeEpoch == takenBinding.RuntimeEpoch || fresh.HarnessSessionID == takenBinding.HarnessSessionID || pty.closes != 1 {
 		t.Fatal("hand-back skipped exit/fresh epoch")
@@ -259,9 +269,14 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 		t.Fatal("authorize explicit recovery", err)
 	}
 	recovered, err := c.config.Host.Resume(t.Context(), resume)
-	if err != nil || recovered.Session == nil || recovered.Session.State != "idle" {
+	if err != nil || recovered.Session != nil || recovered.Receipt.State != "applied" || recovered.Receipt.Binding == nil || !recovered.Receipt.Binding.Equal(fresh) {
 		t.Fatal("owned recovery", recovered, err)
 	}
+	recoveredView, err := f.s.View(f.personCtx(t), f.actor, b.ProjectID, b.OwnedSessionID)
+	if err != nil || recoveredView.State != "idle" {
+		t.Fatal("fresh recovery projection", err)
+	}
+	recovered.Session = &recoveredView
 	if recovered.Session.CurrentBinding.RuntimeEpoch == fresh.RuntimeEpoch || recovered.Session.CurrentBinding.OwnedSessionID != fresh.OwnedSessionID {
 		t.Fatal("recovery did not preserve conversation and advance epoch")
 	}
