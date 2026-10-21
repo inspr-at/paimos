@@ -2,6 +2,8 @@
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { performance } from 'node:perf_hooks'
+import { setTimeout as delay } from 'node:timers/promises'
 import { command } from './collect.mjs'
 import { measurementCauses, measurementErrorCause } from './measurement-causes.mjs'
 import { countCaseResults } from './report.mjs'
@@ -52,7 +54,7 @@ export function jobMinutes(job) {
   if(job.conclusion==='skipped'||job.status!=='completed') return null
   // A cancelled queued job has explicit evidence that it never ran. A missing
   // timestamp alone is insufficient to exempt an executed/cancelled job.
-  if(job.conclusion==='cancelled'&&job.runner_id===0&&Array.isArray(job.steps)&&job.steps.length===0) return null
+  if(job.conclusion==='cancelled'&&(job.runner_id===0||job.runner_id==null)&&Array.isArray(job.steps)&&job.steps.length===0) return null
   const start=Date.parse(job.started_at),end=Date.parse(job.completed_at)
   const seconds=(end-start)/1000
   if(typeof job.started_at!=='string'||typeof job.completed_at!=='string'||!Number.isFinite(seconds)||start<=0||end<=0||seconds<0) throw new Error(`Invalid job timestamps: ${job.name}`)
@@ -147,15 +149,35 @@ export function readReports(directory) {
   }
   return reports
 }
-export function main(directory,env=process.env) {
-  if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY??'')||! /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID??'')||! /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ATTEMPT??'')) throw new Error('Missing Actions run identity')
-  const jobs=[]
-  for(let page=1;page<=20;page++) {
-    const result=JSON.parse(command('gh',['api',`repos/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}/jobs?filter=latest&per_page=100&page=${page}`]))
-    jobs.push(...result.jobs)
-    if(jobs.length>=result.total_count) break
-    if(page===20) throw new Error('Job inventory exceeds measurement bound')
+export async function pollJobInventory(env,{execute=command,now=()=>performance.now(),wait=delay}={}) {
+  const deadline=now()+60_000
+  let jobs
+  for(;;) {
+    // Replace the whole snapshot on every poll, including every API page.
+    const snapshot=[]
+    for(let page=1;page<=20;page++) {
+      const remaining=Math.floor(deadline-now())
+      if(remaining<=0) {
+        if(jobs) return jobs
+        throw new Error('Job inventory deadline exceeded')
+      }
+      const result=JSON.parse(execute('gh',['api',`repos/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}/jobs?filter=latest&per_page=100&page=${page}`],{timeout:remaining}))
+      if(!Array.isArray(result.jobs)||result.jobs.length>100||!Number.isSafeInteger(result.total_count)||result.total_count<0) throw new Error('Invalid job inventory')
+      snapshot.push(...result.jobs)
+      if(snapshot.length>=result.total_count) break
+      if(page===20) throw new Error('Job inventory exceeds measurement bound')
+    }
+    jobs=snapshot
+    // The collector is still running; only the other jobs can have finished.
+    if(jobs.every(job=>job.status==='completed'||/^(?:nightly-)?tier-measurements(?:$| \/)/.test(job.name))) return jobs
+    const remaining=deadline-now()
+    if(remaining<=0) return jobs
+    await wait(Math.min(5_000,remaining))
   }
+}
+export async function main(directory,env=process.env,dependencies={}) {
+  if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY??'')||! /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID??'')||! /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ATTEMPT??'')) throw new Error('Missing Actions run identity')
+  const jobs=await pollJobInventory(env,dependencies)
   const report=aggregate(readReports(directory),jobs,{runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT,sha:env.GITHUB_SHA,lane:env.CI_LANE,layout:env.TIER_LAYOUT,reusedFrom:['merge_group','pull_request'].includes(env.REUSE)?env.SOURCE_RUN:undefined,freshTiming:env.REUSE==='pull_request'})
   report.measurementCauses=measurementCauses(report)
   if(report.incompleteEvidence.length) report.measurementCauses.push('incomplete_case_execution')
@@ -169,7 +191,7 @@ export function main(directory,env=process.env) {
   return report.coverage==='incomplete'?1:0
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
-  try { process.exitCode=main(process.argv[2]) } catch(error) {
+  try { process.exitCode=await main(process.argv[2]) } catch(error) {
     mkdirSync('tmp',{recursive:true})
     writeFileSync('tmp/test-tier-run-measurement.json',JSON.stringify({version:1,coverage:'incomplete',measurementCauses:[measurementErrorCause(error)]})+'\n')
     console.error(JSON.stringify({metric:'tier_measurements_failure',cause:measurementErrorCause(error)}));process.exitCode=1
