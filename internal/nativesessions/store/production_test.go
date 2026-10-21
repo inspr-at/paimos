@@ -160,6 +160,11 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 			r.Body = ioNop(raw)
 		}
 		r = r.WithContext(tenant.WithPrincipal(r.Context(), f.agent))
+		if strings.HasPrefix(r.URL.Path, "/api/agentd/native-sessions/") {
+			if _, _, err := f.s.DaemonRequest(r); err != nil {
+				t.Logf("private daemon admission failed: %T %v", err, err)
+			}
+		}
 		mux.ServeHTTP(w, r)
 		if r.URL.Path == "/api/agentd/native-sessions/finals" {
 			finalDone <- struct{}{}
