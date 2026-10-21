@@ -103,6 +103,7 @@ func (s *Store) Start(ctx context.Context, actor nativecontract.Actor, intent na
 	if err := s.validate("NativeStartIntent", intent); err != nil {
 		return out, err
 	}
+	ctx = productionProject(ctx)
 	project := projectFrom(ctx)
 	if !workorders.UUID(project) {
 		return out, fail(400, nativecontract.ReasonInvalidInput)

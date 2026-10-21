@@ -77,6 +77,16 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 	if err := s.validate("NativeClaim", in); err != nil {
 		return out, err
 	}
+	if s.production != nil && in.ClaimKind == "command" {
+		return s.claimCommand(ctx, daemon, in)
+	}
+	if s.production != nil && in.ClaimKind == "start" {
+		var err error
+		in, err = s.resolveLocal(ctx, daemon, in)
+		if err != nil {
+			return out, err
+		}
+	}
 	if in.ClaimKind != "start" {
 		return out, fail(400, nativecontract.ReasonUnsupported)
 	}

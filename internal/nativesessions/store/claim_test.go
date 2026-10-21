@@ -27,7 +27,7 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/nativeadmission"
 	"github.com/inspr-at/paimos/internal/nativecontract"
-	"github.com/inspr-at/paimos/internal/nativeintegration"
+	"github.com/inspr-at/paimos/internal/nativeintegration/root"
 	"github.com/inspr-at/paimos/internal/nativesessions/consent"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -186,7 +186,7 @@ func TestPairedNativeStartAndRevalidationKeepSeparateAuthorities(t *testing.T) {
 			if err := check(); err != nil {
 				t.Fatalf("real paired key failed exact-root runtime validation: %v", err)
 			}
-			root := nativeintegration.RootAuthority{Pool: f.d.App, Grants: authority, Now: func() time.Time { return f.now }}
+			root := root.Authority{Pool: f.d.App, Grants: authority, Now: func() time.Time { return f.now }}
 			runtimeRequest := nativeadmission.Request{Binding: *claimed.ExpectedBinding, AccountBindingDigest: binding.Digest(),
 				Profile: nativecontract.ProfileRequest{TenantID: f.person.TenantID, OwnerPersonID: f.person.ID,
 					AccountID: f.intent.AccountID, AccountKey: binding.AccountKey, Harness: f.intent.Harness,

@@ -332,3 +332,14 @@ func (a CurrentAuthority) IssueDrainTx(ctx context.Context, tx pgx.Tx, b nativec
 	_, err = tx.Exec(ctx, `INSERT INTO native_session_drain_grants(tenant_id,grant_id,owned_session_id,project_id,owner_person_id,actor_grant_id,actor_grant_revision,retention_grant_id,binding,conversation_ref,conversation_id,role_id,issued_at,expires_at,maximum_finals,maximum_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, b.TenantID, out.GrantID, b.OwnedSessionID, b.ProjectID, s.OwnerPersonID, s.GrantID, s.Revision, retentionID, raw, out.ConversationRef, conversation, role, now, expiry, out.MaximumFinals, out.MaximumBytes)
 	return out, err
 }
+
+// RuntimeTx revalidates the exact original consent and current paired lease
+// for the owning composition. It issues no launch or person authority.
+func (a CurrentAuthority) RuntimeTx(ctx context.Context, tx pgx.Tx, d nativecontract.DaemonActor, b nativecontract.Binding, draining bool) (consent.Session, RuntimeProof, error) {
+	s, err := a.Consent.SessionTx(ctx, tx, b)
+	if err != nil {
+		return s, RuntimeProof{}, currentError(err)
+	}
+	_, proof, err := a.pairedTx(ctx, tx, d, b, s, draining)
+	return s, proof, err
+}
