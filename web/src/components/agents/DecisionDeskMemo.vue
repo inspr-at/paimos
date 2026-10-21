@@ -385,12 +385,21 @@ function closePeek() {
   const from = peekOpener; peekOpener = null
   void nextTick(() => { if (from?.isConnected && from.getClientRects().length) from.focus({ preventScroll: true }); else memo.value?.focus({ preventScroll: true }) })
 }
-// Esc leaves a field, then closes the peek, unless one of its menus or a confirmation is open.
+// A menu inside the peek is not a dialog, so the browser would cancel the peek.
+const peekMenuOpen = () => !!peekDialog.value?.querySelector('.floating')
+function cancelPeek() {
+  // The open menu consumes Escape. Native cancel must not close the ticket under it,
+  // and a confirmation above the peek keeps its own Escape (AEON-1632).
+  if (peekMenuOpen() || document.querySelector('dialog.confirm[open]')) return
+  void requestPeekClose()
+}
+// Esc leaves a field, then closes the peek. A menu inside the peek consumes the first Esc.
 // The panel's own keys (e, s, p, a, r, c) work inside it, as in the app's dock.
 function peekKeys(event: KeyboardEvent) {
   if (event.defaultPrevented || event.isComposing) return
   if (event.key === 'Escape') {
-    if (peekDialog.value?.querySelector('.floating') || document.querySelector('dialog.confirm[open]')) return
+    if (document.querySelector('dialog.confirm[open]')) return
+    if (peekMenuOpen()) { event.preventDefault(); event.stopPropagation(); return }
     event.preventDefault(); event.stopPropagation()
     if (fieldTarget(event.target)) { (event.target as HTMLElement).blur(); void peekHost.value?.focus() } else void requestPeekClose()
     return
@@ -968,7 +977,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
     <AttachmentLightbox ref="lightbox" :items="context.attachments" :ticket-key="context.ticket?.key || ''" :can-write="false" :set-caption="async () => false" @close="viewing = false" />
     <!-- Outside the memo's DOM, so the memo's own keys (J/K, P, the stamps) never fire from inside the peek. -->
     <Teleport to="body">
-      <dialog v-if="peekKey" ref="peekDialog" class="desk-peek" :aria-label="`Ticket ${peekKey}`" data-testid="desk-peek" @cancel.prevent="requestPeekClose" @keydown="peekKeys" @click="peekBackdrop">
+      <dialog v-if="peekKey" ref="peekDialog" class="desk-peek" :aria-label="`Ticket ${peekKey}`" data-testid="desk-peek" @cancel.prevent="cancelPeek" @keydown="peekKeys" @click="peekBackdrop">
         <TicketPeekHost ref="peekHost" :ticket-key="peekKey" @close="closePeek" />
       </dialog>
     </Teleport>

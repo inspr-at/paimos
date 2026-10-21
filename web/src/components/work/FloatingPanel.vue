@@ -168,13 +168,34 @@ function scrolled(event: Event) {
 // into it: everything outside the top layer is inert while the modal is open.
 // (Context menus anchor to a point, not an element: those stay in <body>.)
 const layer = (props.anchor instanceof Element ? props.anchor.closest<HTMLElement>('dialog[open]') : null) ?? 'body'
-// Escape closes the popover wherever focus is, before any page shortcut sees it;
-// another dialog open above the popover's own layer handles its Escape itself.
+// Escape closes the popover wherever focus is, before any page shortcut sees it.
+// A dialog above this layer handles its own Escape. A dialog left open underneath
+// (the memo under the ticket peek) does not: this menu is the top overlay and
+// must consume Escape before that peek's native cancel (AEON-1632).
 // A child still open (focus may have stayed on its trigger here) closes first, on its own Escape.
 const openChild = () => [...document.querySelectorAll<HTMLElement>('[data-floating-owner]')].some(childOverlay)
+function inertDialog(dialog: Element) {
+  try { return dialog.matches(':inert') } catch { return false }
+}
+// True when some other open dialog can still take keys. An inert dialog is below
+// the top modal, so it must not keep this menu from closing.
+function dialogAboveLayer() {
+  const others = [...document.querySelectorAll('dialog[open]')].filter(dialog => dialog !== layer)
+  if (!others.length) return false
+  if (layer === 'body') return true
+  try {
+    if (layer.matches(':inert')) return true
+    if (others.some(dialog => !inertDialog(dialog))) return true
+    return false
+  } catch { /* :inert is missing; the top modal in tree order is the same signal ToastHost uses. */ }
+  let top: Element | undefined
+  try { top = [...document.querySelectorAll('dialog:modal')].at(-1) } catch { return true }
+  if (!top || top === layer || top.contains(layer)) return false
+  return true
+}
 function escape(event: KeyboardEvent) {
   if (childOverlay(document.activeElement) || openChild()) return
-  if (event.key !== 'Escape' || [...document.querySelectorAll('dialog[open]')].some(dialog => dialog !== layer)) return
+  if (event.key !== 'Escape' || dialogAboveLayer()) return
   // Names loaded after this panel mounts register their Escape listener later.
   // Let the open disclosure consume Escape before dismissing its menu.
   if (panel.value?.querySelector('.read-name-detail:popover-open')) return
