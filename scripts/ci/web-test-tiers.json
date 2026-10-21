@@ -10938,7 +10938,7 @@
     ,
     {"kind":"browser","file":"tests/live-list.spec.ts","name":"field changes patch in place; a regrouped row waits as moved until u","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/live-list.spec.ts","name":"on a phone the marked row, the text mark and the deleted selection fit 390 px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/live-list.spec.ts","name":"on a phone the marked row, the pill and the deleted selection fit 390 px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/live-list.spec.ts","name":"screenshots of the waiting states","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

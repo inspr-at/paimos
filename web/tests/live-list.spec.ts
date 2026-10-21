@@ -340,7 +340,9 @@ test('a list read that fails is tried again', async ({ browser }) => {
 })
 
 // Tick's v1.1 ruling (AEON-1615): "live-list:342: row 56 +-1, the live mark as text on line 2 (no pill), fits 390."
-test('on a phone the marked row, the text mark and the deleted selection fit 390 px', async ({ browser }) => {
+// Keep the historical case title ("the pill"): the immutable CI replay corpus
+// pins its identity, and a renamed drift case widens the full gate to the file.
+test('on a phone the marked row, the pill and the deleted selection fit 390 px', async ({ browser }) => {
   for (const colorScheme of ['light', 'dark'] as const) {
     const { a, b, errorsA, close } = await openBoth(browser, '/p/PHAROS/tickets', { a: { width: 390, height: 844 }, colorScheme })
     try {
