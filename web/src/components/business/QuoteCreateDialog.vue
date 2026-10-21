@@ -128,6 +128,7 @@ defineExpose({ open })
         <button type="button" class="icon-btn sm flat" aria-label="Close" data-tip="Close · Esc" @click="close"><AppIcon name="close" :size="15" /></button>
       </header>
 
+      <div class="create-body">
       <div v-if="settings === 'missing'" class="gate" role="alert">
         <span class="gate-icon"><BizIcon name="seal" :size="16" /></span>
         <div>
@@ -191,6 +192,7 @@ defineExpose({ open })
         </div>
       </div>
       <p v-if="error" class="f-error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
+      </div>
       <footer class="create-foot">
         <p class="f-hint"><KeyCap k="mod" /><KeyCap k="enter" /> creates · <kbd class="keycap">esc</kbd> closes</p>
         <button type="button" class="btn" @click="close">Cancel</button>
@@ -208,6 +210,7 @@ defineExpose({ open })
 .create { --create-top: min(8dvh, 4rem); margin: var(--create-top) auto 0; width: min(var(--dialog-m), calc(100vw - 24px)); max-height: calc(100dvh - var(--create-top) - 12px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .create::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .create-card { display: grid; gap: 16px; max-height: calc(100dvh - var(--create-top) - 12px); overflow: auto; padding: 20px 22px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
+.create-body { display: grid; gap: 16px; }
 .create-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 h2 { font-size: 18px; }
 .lead { margin-top: 4px; max-width: 46ch; font-size: 13px; color: var(--ink-2); }
@@ -230,8 +233,12 @@ h2 { font-size: 18px; }
 .create-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .create-foot .f-hint { flex: 1; }
 @media (max-width: 600px) {
-  .create-card { padding: 16px; }
-  .create-foot { flex-wrap: wrap; }
+  .create { --create-top: 0px; margin: 0; width: 100%; height: 100dvh; max-height: 100dvh; }
+  .create-card { display: flex; flex-direction: column; height: 100%; max-height: 100%; overflow: hidden; border-radius: 0; padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  .create-head { flex-shrink: 0; }
+  .create-body { flex: 1; min-height: 0; overflow-y: auto; align-content: start; }
+  .create-card > .load-status { order: 2; flex-shrink: 0; }
+  .create-foot { order: 3; flex-shrink: 0; flex-wrap: wrap; }
   .create-foot .f-hint { display: none; }
   .create-foot .btn { flex: 1; height: 44px; }
 }

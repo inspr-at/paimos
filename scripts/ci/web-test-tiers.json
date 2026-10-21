@@ -7762,6 +7762,10 @@
     ,
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"the bulk bar and its menus have no axe violations in light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: 200 cost units keep rate request concurrency at six","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: continuation on the last allowed page reports partial for every business directory","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: partial customer quote contact and project lists show retry beside retained results","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: rejected rates remain in the hours picker and retry keeps controls still","tier":"ESSENTIAL"}

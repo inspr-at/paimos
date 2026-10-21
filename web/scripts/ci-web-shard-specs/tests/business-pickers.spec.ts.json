@@ -2,7 +2,7 @@
   "group": "remaining-ui",
   "spec": {
     "file": "tests/business-pickers.spec.ts",
-    "listedTests": 2,
+    "listedTests": 4,
     "weightSeconds": 80,
     "weightSource": "acceptance-and-visual-matrix-estimate"
   }
