@@ -184,7 +184,11 @@ async function unlink(goal: Goal, item: GoalOutcome) {
 }
 const toggleOf = (id: string) => root.value?.querySelector<HTMLElement>(`[data-goal-id="${CSS.escape(id)}"] .goal-toggle`) ?? null
 // No confirm: the toast's Undo restores the goal. Focus that was on its row moves to the next goal.
+// A held or repeated Del sends one delete per goal.
+const deleting = new Set<string>()
 async function remove(goal: Goal) {
+  if (deleting.has(goal.id)) return
+  deleting.add(goal.id)
   const list = goals.value, at = list.findIndex(item => item.id === goal.id)
   const next = list[at + 1] ?? list[at - 1] ?? null
   const focused = !!root.value?.querySelector(`[data-goal-id="${CSS.escape(goal.id)}"] .goal-row`)?.contains(document.activeElement)
@@ -195,6 +199,7 @@ async function remove(goal: Goal) {
     await props.page.read()
     if (focused && next) { await nextTick(); toggleOf(next.id)?.focus() }
   } catch (cause) { failure(cause, 'The goal could not be deleted.') }
+  finally { deleting.delete(goal.id) }
 }
 // Rename in place: the row's name becomes a field (GoalRow); the write is bound to the goal it renamed.
 const renameBusy = ref<string | null>(null)
