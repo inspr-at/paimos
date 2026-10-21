@@ -73,7 +73,7 @@ function near(after: { x: number; y: number; width: number; height: number }, be
 }
 
 // Opens the link's peek over the memo and closes it with Esc; the Desk item, its answer and the memo's controls stay.
-async function peekAndBack(page: Page, link: Locator, ticket: { key: string; title: string; href: string }, item: { heading: string; check: () => Promise<void> }) {
+async function peekAndBack(page: Page, link: Locator, ticket: { key: string; title: string; href: string }, item: { heading: string; check: () => Promise<void> }, shot?: string) {
   await expect(link).toHaveAttribute('href', ticket.href)
   await link.scrollIntoViewIfNeeded()
   const address = page.url(), decide = page.getByTestId('desk-decide'), frame = page.getByTestId('desk-frame')
@@ -83,6 +83,7 @@ async function peekAndBack(page: Page, link: Locator, ticket: { key: string; tit
   await expect(peek).toBeVisible()
   await expect(peek).toContainText(ticket.key)
   await expect(peek).toContainText(ticket.title)
+  if (shot) { await page.evaluate(() => document.fonts.ready); await page.screenshot({ path: shot }) }
   // The memo stays mounted under the peek, and the address does not change (any change closes the memo).
   expect(page.url()).toBe(address)
   await expect(frame).toBeAttached()
@@ -116,7 +117,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     const aeon1 = { key: 'AEON-1', title: 'Aeon foundation', href: '/p/AEON/AEON-1' }
     const openItem = { heading: OPEN, check: answerKept }
     await peekAndBack(page, page.getByTestId('desk-re-link'), aeon1, openItem)
-    await peekAndBack(page, page.getByTestId('desk-ticket-key'), aeon1, openItem)
+    await peekAndBack(page, page.getByTestId('desk-ticket-key'), aeon1, openItem, testInfo.outputPath(`aeon1632-peek-${width}-${theme}.png`))
     await peekAndBack(page, page.getByTestId('desk-ticket-open'), aeon1, openItem)
     await peekAndBack(page, page.getByTestId('desk-related-link'), { key: 'PHAROS-15', title: 'Beacon health probes', href: '/p/PHAROS/PHAROS-15' }, openItem)
     await page.screenshot({ path: testInfo.outputPath(`aeon1632-open-${width}-${theme}.png`) })
