@@ -9450,11 +9450,19 @@
     ,
     {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 dark: Hide for me, Undo, Display › Show (Done goals, Hidden goals, Waiting on you), Unhide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 dark: the toolbar's Waiting on you toggle hides and shows the band, Display › Show follows, and the count stays without moving anything","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: Hide for me, Undo, Display › Show (Done goals, Hidden goals, Waiting on you), Unhide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: Waiting on you off leaves no band, keeps the header Desk count, and stays off from the first paint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: the toolbar's Waiting on you toggle hides and shows the band, Display › Show follows, and the count stays without moving anything","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 dark: the toolbar toggle steps aside; the ⋯ row reads \"Waiting on you · 1\", hides and shows the band, and keeps the count while hidden","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 dark: the ⋯ Goal display menu has the three Show rows; the opened goal hides, Undo restores, Hidden goals shows it and Unhide brings it back","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 light: the toolbar toggle steps aside; the ⋯ row reads \"Waiting on you · 1\", hides and shows the band, and keeps the count while hidden","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 light: the ⋯ Goal display menu has the three Show rows; the opened goal hides, Undo restores, Hidden goals shows it and Unhide brings it back","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -18773,6 +18781,8 @@
     {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"what the rows and the footer show > the footer says Live with the last ETA time, or Reconnecting with the last update, in one slot","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"what the rows and the footer show > the status note is one line with its author and age, without a fold chevron, and renders nothing without a note","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-waiting-toggle.unit.test.ts","name":"Waiting on you: one setting for the toolbar toggle and Display › Show > a flip from either control shows in both, keeps the other Goals preferences, and the count stays while the band is hidden","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/graph-focus.unit.test.ts","name":"contains a rejected exit and tolerates a missing exit API","tier":"GATED-FULL"}
     ,

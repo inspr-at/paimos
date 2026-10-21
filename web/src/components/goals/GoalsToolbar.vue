@@ -6,15 +6,27 @@
 // Collapse all (E), both labels reserved in one box. On phones the same controls live
 // behind ⋯ (the `more` part). AEON-1614: Done goals (H) moved into Display › Show with
 // Hidden goals and Waiting on you; the phone ⋯ menu carries the same three rows.
+// v1.2 (the `waiting` part): a person-clock toggle left of the view controls flips the
+// same Waiting on you setting, pressed while the band shows. Its count of open Desk items
+// (the header's) sits on the icon in the Desk badge style and stays while the band is
+// hidden; it overlays the button, so a count that appears or changes moves nothing.
+// Phones keep the ⋯ row, which carries the count.
 import { computed, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import GoalStateIcon from './GoalStateIcon.vue'
 import GoalShowSwitches from './GoalShowSwitches.vue'
 import type { GoalsPage } from './goalsPage'
-import { STATE_FILTERS, STATE_LABEL, type StateFilter } from '../../lib/goals'
+import { useDecisionDesk } from '../../stores/decisionDesk'
+import { useSession } from '../../stores/session'
+import { hideCopy, STATE_FILTERS, STATE_LABEL, type StateFilter } from '../../lib/goals'
 
-const props = defineProps<{ page: GoalsPage; part: 'chips' | 'more' }>()
+const props = defineProps<{ page: GoalsPage; part: 'chips' | 'more' | 'waiting' }>()
+const session = useSession(), desk = useDecisionDesk()
+// Only a person has a Waiting on you band, so only a person gets its toggle.
+const person = computed(() => session.identity?.principal.kind === 'person')
+const waitingCount = computed(() => desk.count)
+const waitingBadge = computed(() => (waitingCount.value ?? 0) > 99 ? '99+' : String(waitingCount.value ?? 0))
 const counts = computed(() => props.page.counts.value)
 const allOpen = computed(() => props.page.allOpen.value)
 const label = (state: StateFilter) => state === 'all' ? 'All' : STATE_LABEL[state]
@@ -45,6 +57,10 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
       <span class="lbl"><span :class="{ off: allOpen }">Expand all</span><span :class="{ off: !allOpen }">Collapse all</span></span>
     </button>
   </template>
+  <button
+    v-else-if="part === 'waiting'" v-show="person" type="button" class="icon-btn wait-toggle" :aria-pressed="page.showWaiting.value"
+    :aria-label="hideCopy.waitingLabel(waitingCount)" :data-tip="hideCopy.waitingTip(waitingCount)" @click="page.toggleWaiting()"
+  ><AppIcon name="person-wait" :size="16" /><span v-if="waitingCount" class="wait-count mono" aria-hidden="true">{{ waitingBadge }}</span></button>
   <template v-else>
     <button
       type="button" class="icon-btn more-btn" aria-haspopup="menu" :aria-expanded="!!moreAnchor" aria-label="More: state filter, show, expand all"
@@ -86,9 +102,15 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
 .lbl > span { grid-area: 1 / 1; }
 .lbl > .off { visibility: hidden; }
 .more-btn { display: none; width: 44px; height: 44px; }
-/* Phones: state chips, Display › Show and Expand all live behind ⋯ (and the 44 px Expand all row). */
+/* Waiting on you: at the view controls' height; pressed while the band shows. */
+.wait-toggle { position: relative; width: 32px; height: 32px; }
+.wait-toggle[aria-pressed="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--chip-teal-line); }
+.wait-toggle:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* The Desk badge's look (the header's count), laid over the icon's corner so it takes no room. */
+.wait-count { position: absolute; top: -6px; right: -7px; display: inline-grid; place-items: center; min-width: 17px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--gold-2); color: var(--gold-on); font-size: 10px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface); pointer-events: none; }
+/* Phones: state chips, Display › Show, Waiting on you and Expand all live behind ⋯ (and the 44 px Expand all row). */
 @media (max-width: 760px) {
-  .chips-sep, .state-seg, .expand-btn { display: none; }
+  .chips-sep, .state-seg, .expand-btn, .wait-toggle { display: none; }
   .more-btn { display: inline-grid; place-items: center; }
 }
 .more-menu { display: grid; padding: 6px; }

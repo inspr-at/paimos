@@ -6,14 +6,19 @@
 // disabled in place while there are none; Waiting on you shows the Desk band. The
 // Display panel uses them as switches, the phone ⋯ Goal display menu as menu items.
 // Rows keep one height and the switch keeps its place, so nothing moves on a flip.
+// v1.2: Waiting on you is the toolbar toggle's setting; on phones, where that toggle
+// steps aside, the ⋯ row carries the count of open Desk items ("Waiting on you · 1").
 import { computed } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import type { GoalsPage } from './goalsPage'
+import { useDecisionDesk } from '../../stores/decisionDesk'
 import { hideCopy } from '../../lib/goals'
 
 const props = defineProps<{ page: GoalsPage; menu?: boolean }>()
 const role = computed(() => props.menu ? 'menuitemcheckbox' : 'switch')
 const count = computed(() => props.page.hiddenCount.value)
+const desk = useDecisionDesk()
+const waitingCount = computed(() => props.menu ? desk.count ?? 0 : 0)
 </script>
 
 <template>
@@ -29,8 +34,8 @@ const count = computed(() => props.page.hiddenCount.value)
     ><AppIcon name="eye-off" :size="14" /><span class="show-name">{{ hideCopy.hiddenGoals(count) }}</span><span class="mini-switch" aria-hidden="true" /></button>
     <button
       type="button" :role="role" class="show-row" data-show="waiting" :aria-checked="page.showWaiting.value"
-      @click="page.setShowWaiting(!page.showWaiting.value)"
-    ><AppIcon name="person-wait" :size="14" /><span class="show-name">{{ hideCopy.waiting }}</span><span class="mini-switch" aria-hidden="true" /></button>
+      @click="page.toggleWaiting()"
+    ><AppIcon name="person-wait" :size="14" /><span class="show-name">{{ hideCopy.waiting }}<span v-if="waitingCount" class="row-count"> ·&nbsp;{{ waitingCount }}</span></span><span class="mini-switch" aria-hidden="true" /></button>
   </div>
 </template>
 
@@ -44,6 +49,7 @@ const count = computed(() => props.page.hiddenCount.value)
 .show-row:disabled { color: var(--ink-3); cursor: default; }
 .show-row:disabled .mini-switch { opacity: .5; }
 .show-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.row-count { color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .show-row .keycap { flex: none; }
 .mini-switch { position: relative; flex: none; width: 34px; height: 20px; border-radius: 999px; background: var(--track); box-shadow: inset 0 1px 3px color-mix(in srgb, var(--shadow-color) 20%, transparent); }
 .mini-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--switch-knob); box-shadow: 0 1px 3px color-mix(in srgb, var(--shadow-color) 30%, transparent); }

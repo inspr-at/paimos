@@ -116,11 +116,13 @@ export const HIDE_COPY = {
   en: {
     hide: 'Hide for me', unhide: 'Unhide', hidden: 'Hidden', toast: 'Goal hidden', undo: 'Undo',
     show: 'Show', doneGoals: 'Done goals', hiddenGoals: (n: number) => `Hidden goals (${n})`, hiddenTip: 'Only hidden in your view', waiting: 'Waiting on you',
+    waitingTip: (n: number | null) => n === null ? 'Waiting on you' : `Waiting on you · ${n} open`, waitingLabel: (n: number | null) => n === null ? 'Waiting on you' : `Waiting on you, ${n} open`,
     allHidden: 'All goals here are hidden for you.', allHiddenHow: 'Show them in', doneHidden: 'Done goals are hidden.', doneHiddenHow: 'Show them in', display: 'Display',
   },
   de: {
     hide: 'Für mich ausblenden', unhide: 'Wieder einblenden', hidden: 'Ausgeblendet', toast: 'Ziel ausgeblendet', undo: 'Rückgängig',
     show: 'Anzeigen', doneGoals: 'Erledigte Ziele', hiddenGoals: (n: number) => `Ausgeblendete Ziele (${n})`, hiddenTip: 'Nur in der eigenen Ansicht ausgeblendet', waiting: 'Offene Entscheidungen',
+    waitingTip: (n: number | null) => n === null ? 'Offene Entscheidungen' : `Offene Entscheidungen (${n})`, waitingLabel: (n: number | null) => n === null ? 'Offene Entscheidungen' : `Offene Entscheidungen (${n})`,
     allHidden: 'Alle Ziele hier sind ausgeblendet.', allHiddenHow: 'Einblenden über', doneHidden: 'Erledigte Ziele sind ausgeblendet.', doneHiddenHow: 'Einblenden über', display: 'Anzeige',
   },
 } as const

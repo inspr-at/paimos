@@ -15,7 +15,7 @@
 // the frame (status note, header) stays, and a read for the other group never lands.
 // AEON-1614: Hide for me. A person hides a goal from their own view (the server keeps
 // it); Display › Show has Done goals (H), Hidden goals ({n}) and Waiting on you, all
-// saved with the Goals preferences. Hidden goals count in the state chips as hidden
+// saved with the Goals preferences. The toolbar's Waiting on you toggle is the same setting. Hidden goals count in the state chips as hidden
 // done goals do. A hide or Undo is bound to the person and goal it was asked for.
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { useSession } from '../../stores/session'
@@ -78,6 +78,8 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   function setShowHidden(value: boolean) { void prefs.save({ ...(prefs.value.value ?? {}), showHidden: value }, 0) }
   const showWaiting = computed(() => prefs.value.value?.showWaiting ?? true)
   function setShowWaiting(value: boolean) { void prefs.save({ ...(prefs.value.value ?? {}), showWaiting: value }, 0) }
+  // The toolbar's Waiting on you toggle and Display › Show flip this one setting (v1.2), so they never disagree.
+  function toggleWaiting() { setShowWaiting(!showWaiting.value) }
   // Only a person hides goals for themselves; agents and keys cannot.
   const canHide = computed(() => session.identity?.principal.kind === 'person')
   // One range for every chart, the one used last (the ViewSwitch rule).
@@ -324,7 +326,7 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
 
   return {
     group, setGroup,
-    filter, sort, dir, hideDone, setHideDone, showHidden, setShowHidden, showWaiting, setShowWaiting, prefsSettled,
+    filter, sort, dir, hideDone, setHideDone, showHidden, setShowHidden, showWaiting, setShowWaiting, toggleWaiting, prefsSettled,
     canHide, hiddenCount, hiding, hide, unhide, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, replacing, loaded, loadingMore, loadMore, read,
     live, updatedAt, statusNote, etaLastSetAt,
     open, charts, folds, isOpen, allOpen, toggle, toggleAll, toggleFold, toggleChart, searchOpens, want, seriesFor, counts, totals, totalsPartial, stop,

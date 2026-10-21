@@ -209,3 +209,9 @@ goal's state.
   when shown, are muted rows marked Hidden. Waiting on you off removes the band
   from the Goals view (decided before the grid paints); the header's Decision
   Desk count stays. Epics cannot be hidden in this version.
+- The Goals toolbar has a Waiting on you toggle (the person-clock icon) just left
+  of the view controls. It is the same setting as Display › Show › Waiting on you,
+  pressed while the band shows, and it carries the count of open Desk items (the
+  header's count) whenever something is open, also while the band is hidden. The
+  count sits on the icon's corner, so it never moves the toolbar. Phones keep the
+  ⋯ row, which reads "Waiting on you · N".

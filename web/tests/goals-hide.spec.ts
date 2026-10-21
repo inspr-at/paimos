@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-1614: Goals › Hide for me and Display › Show, to Tick's spec v1 + v1.1.
+// AEON-1614: Goals › Hide for me and Display › Show, to Tick's spec v1 + v1.1 + v1.2.
 // Risks: a hidden goal that stays on screen, or an Undo that puts it elsewhere; a
 // Display switch that does not persist across reloads, or moves the toolbar or its
 // neighbours; hidden goals that come back without the muted "Hidden" word or without
 // Unhide; Waiting on you that paints and then disappears, or takes the header's Desk
 // count with it; H that stops toggling Done goals; phones without the Show rows or a
-// way to hide. The mock server keeps one hidden set, as the API does. Screenshots and
+// way to hide; a toolbar Waiting on you toggle that disagrees with Display › Show,
+// loses its count of open Desk items while the band is hidden, or moves the toolbar
+// when that count appears or changes; phones without that count in the ⋯ row.
+// The mock server keeps one hidden set, as the API does. Screenshots and
 // one checks.json line per assert go to each test's output directory under AEON-1614/.
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
@@ -33,7 +36,7 @@ function goal(id: string, title: string, state: State) {
 function world() {
   const data = fixtures()
   const goals = [goal('g-r138', 'Release 138 · hide what is not relevant', 'moving'), goal('g-joed', 'JoeDesk rebuild', 'queued'), goal('g-crm', 'CRM import from the old system', 'queued'), goal('g-done', 'Theme picker', 'done')]
-  return { data, goals, hidden: new Set<string>(), generation: 1, writes: [] as string[] }
+  return { data, goals, hidden: new Set<string>(), generation: 1, writes: [] as string[], desk: 1 }
 }
 type World = ReturnType<typeof world>
 
@@ -66,8 +69,11 @@ async function mock(page: Page, w: World) {
   })
   await page.route(/\/api\/goals\/[^/]+\/series\?/, route => route.fulfill({ json: { range: '24h', expansion: 'full', points: [], read_through: 10, generation: 1 } }))
   await page.route(/\/api\/nodes\/g-[a-z0-9]+$/, route => route.fulfill({ json: { id: 'g', key: 'G', kind_id: 'k-goal', title: 'Goal', body: '', fields: {}, state: 'open', parent_id: null, position: 1, created_at: iso(NOW - 100 * 3_600_000), updated_at: iso(NOW) } }))
-  // One open Desk question, so Waiting on you is a real band and the header shows 1.
-  await page.route(/\/api\/decision-desk\/projection/, route => route.fulfill({ json: { items: [{ id: 'q-1', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'Ship the hide switch in r138?', created_at: iso(NOW - 3_600_000), held: false, href: '/decision-desk', source: 'question' }], counts: { open: 1, held: 0, chores: 0 }, has_more: false, as_of: iso(NOW) } }))
+  // Open Desk questions (one unless a test changes w.desk), so Waiting on you is a real band and the header shows the count.
+  await page.route(/\/api\/decision-desk\/projection/, route => route.fulfill({ json: {
+    items: Array.from({ length: w.desk }, (_, i) => ({ id: `q-${i + 1}`, kind: 'question', project_id: 'p-aeon', revision: 1, title: i ? `Open question ${i + 1}` : 'Ship the hide switch in r138?', created_at: iso(NOW - 3_600_000), held: false, href: '/decision-desk', source: 'question' })),
+    counts: { open: w.desk, held: 0, chores: 0 }, has_more: false, as_of: iso(NOW),
+  } }))
 }
 
 const theme = (dark: boolean) => dark ? 'dark' : 'light'
@@ -257,4 +263,94 @@ test(`390 ${theme(dark)}: the ⋯ Goal display menu has the three Show rows; the
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
   check(info, 390, dark, 'phone menu rows; opened-goal hide, Undo, show hidden, Unhide', true)
 })
+}
+
+// v1.2: the toolbar toggle and Display › Show › Waiting on you are one setting.
+for (const dark of [false, true]) {
+  test(`1440 ${theme(dark)}: the toolbar's Waiting on you toggle hides and shows the band, Display › Show follows, and the count stays without moving anything`, async ({ page }, info) => {
+    const w = world()
+    await page.emulateMedia({ colorScheme: dark ? 'dark' : 'light' })
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await openGoals(page, w)
+    const toggle = page.locator('.projects-toolbar .wait-toggle'), count = toggle.locator('.wait-count'), band = page.locator('.goals-view .waiting')
+    const view = page.locator('.projects-toolbar .view-seg'), display = page.locator('.display-btn')
+    // Just left of the view controls, centred on their line.
+    const [t, v] = [(await toggle.boundingBox())!, (await view.boundingBox())!]
+    expect(t.x + t.width).toBeLessThanOrEqual(v.x)
+    expect(v.x - (t.x + t.width)).toBeLessThanOrEqual(12)
+    expect(Math.abs(t.y + t.height / 2 - (v.y + v.height / 2))).toBeLessThanOrEqual(0.5)
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    await expect(toggle).toHaveAttribute('aria-label', 'Waiting on you, 1 open')
+    await expect(toggle).toHaveAttribute('data-tip', 'Waiting on you · 1 open')
+    await expect(count).toHaveText('1')
+    await expect(band).toHaveCount(1)
+    await shot(page, info, 1440, dark, 'waiting-toggle-pressed')
+    const guard = await controlStability(page, { search: page.locator('.project-search'), chips: page.locator('.state-seg'), expand: page.locator('.expand-btn'), toggle, view, display })
+
+    // Off from the toolbar: no band, the count stays on the icon, Display › Show says off.
+    await guard.check(() => toggle.click())
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    await expect(band).toHaveCount(0)
+    await expect(count).toBeVisible()
+    await expect(count).toHaveText('1')
+    await shot(page, info, 1440, dark, 'waiting-toggle-unpressed')
+    await display.click()
+    const sw = page.locator('.display-panel [data-show="waiting"]')
+    await expect(sw).toHaveAttribute('aria-checked', 'false')
+    // On from Display › Show: the toolbar toggle follows.
+    await guard.check(() => sw.click())
+    await expect(sw).toHaveAttribute('aria-checked', 'true')
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    await page.keyboard.press('Escape')
+    await expect(band).toHaveCount(1)
+    check(info, 1440, dark, 'toolbar toggle and Display › Show stay in sync; count visible while the band is hidden', true)
+
+    // The count changes and goes away with the Desk (the header's poll) and moves nothing.
+    w.desk = 2
+    await guard.check(async () => { await page.clock.runFor(31_000); await expect(count).toHaveText('2') })
+    await expect(toggle).toHaveAttribute('aria-label', 'Waiting on you, 2 open')
+    w.desk = 0
+    await guard.check(async () => { await page.clock.runFor(31_000); await expect(count).toHaveCount(0) })
+    guard.done()
+    check(info, 1440, dark, 'count appears, changes and goes without moving the toolbar', 'movementPx 0')
+
+    // The setting is the person's: off survives a reload, in both controls.
+    w.desk = 1
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    await page.reload()
+    await expect(page.locator('.goal-list .goal').first()).toBeVisible()
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    await expect(band).toHaveCount(0)
+    await expect(count).toHaveText('1')
+  })
+
+  test(`390 ${theme(dark)}: the toolbar toggle steps aside; the ⋯ row reads "Waiting on you · 1", hides and shows the band, and keeps the count while hidden`, async ({ page }, info) => {
+    const w = world()
+    await page.emulateMedia({ colorScheme: dark ? 'dark' : 'light' })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await openGoals(page, w)
+    const band = page.locator('.goals-view .waiting')
+    await expect(page.locator('.projects-toolbar .wait-toggle')).toBeHidden()
+    await expect(band).toHaveCount(1)
+    await page.locator('.more-btn').click()
+    const menu = page.getByRole('menu', { name: 'Goal display' })
+    const row = menu.locator('[data-show="waiting"]')
+    await expect(row).toHaveText(/Waiting on you\s·\s1/)
+    await expect(row).toHaveAttribute('aria-checked', 'true')
+    await row.click()
+    await expect(row).toHaveAttribute('aria-checked', 'false')
+    await expect(row).toHaveText(/Waiting on you\s·\s1/)
+    await shot(page, info, 390, dark, 'waiting-row-off')
+    await page.keyboard.press('Escape')
+    await expect(band).toHaveCount(0)
+    await page.locator('.more-btn').click()
+    await expect(row).toHaveAttribute('aria-checked', 'false')
+    await row.click()
+    await expect(row).toHaveAttribute('aria-checked', 'true')
+    await page.keyboard.press('Escape')
+    await expect(band).toHaveCount(1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+    check(info, 390, dark, 'phone ⋯ row carries the count and toggles the band', true)
+  })
 }

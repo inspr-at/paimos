@@ -954,6 +954,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
         <GroupChips v-else-if="ready" class="chips" :chips="chips" :drop-on="dropOn" :creating="!!createAnchor" @toggle="groups.toggleVisible" @create="openCreate" />
         <span v-else class="chips chips-skeleton"><span class="skeleton" /></span>
         <span class="tools">
+          <GoalsToolbar v-if="view === 'goals'" :page="goals" part="waiting" />
           <ViewSwitch class="view-seg" look="seg" label="View" :options="viewOptions" :selected="view" :default-id="viewSwitch.defaultId.value" @select="setView" @set-default="viewSwitch.setDefault" />
           <button
             ref="displayButton" type="button" class="btn sm display-btn" :class="{ on: display.on }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="displayAria"
