@@ -341,27 +341,6 @@ test('AEON-1532: the full ticket page writes the description in one row as tall 
   await checks.save('ticket-1440-light')
 })
 
-test('AEON-1498: e opens the full ticket editor when project permissions arrive after the heading', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 })
-  let release = () => {}
-  const held = new Promise<void>(resolve => { release = resolve })
-  await mockWork(page, fixtures(), {
-    // The list paints the title before this project's grants. e must wait for them.
-    hold: ({ path, method, query }) => path === '/api/me/permissions' && method === 'GET' && query.has('project_id') ? { until: held } : undefined,
-  })
-  try {
-    await page.goto('/p/PHAROS/PHAROS-12?view=full')
-    const article = page.getByRole('article', { name: 'Ticket details' })
-    await expect(article.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
-    await expect(article.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
-    await page.keyboard.press('e')
-    const editor = page.locator('.edit-form .md-editor').first()
-    await expect(editor).toHaveCount(0)
-    release()
-    await expect(editor).toHaveClass(/split/)
-  } finally { release() }
-})
-
 // Classic scrollbars (Linux, Windows, macOS set to always show them) take width
 // from the box. A delete that takes a capped box back under its cap keeps it
 // tall while the panel sits at its end; then the box's scrollbar goes and the

@@ -9,7 +9,7 @@
   },
   "spec": {
     "file": "tests/aeon-1532-editor-steady.spec.ts",
-    "listedTests": 10,
+    "listedTests": 9,
     "weightSeconds": 19.97561,
     "weightSource": "unmeasured-test-rate"
   }
