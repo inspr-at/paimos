@@ -270,27 +270,36 @@ func leadProject(ctx context.Context, tx pgx.Tx, projectID string) (string, erro
 	return authz.ProjectStartReasonTx(ctx, tx, projectID)
 }
 
+// errNotLeadRuntimeAgent refuses an agent that is not the bound lead runtime.
+// It is not an owner-grant failure: callers that map a plain forbidden to
+// owner_revoked must recognize this error first. An unbound lead has no
+// runtime agent yet, so the owner check stands alone.
+var errNotLeadRuntimeAgent = errors.Join(errors.New("lead runtime agent required"), authz.ErrForbidden)
+
 func leadOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, owner string, verifiedAgent ...string) error {
 	if p.Kind == tenant.Agent {
 		if len(verifiedAgent) != 0 {
 			if p.ID != verifiedAgent[0] {
-				return authz.ErrForbidden
+				return errNotLeadRuntimeAgent
 			}
 		} else {
-			var own bool
-			err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_leads l
+			var sessionAgent string
+			var callerPending, anyPending bool
+			err := tx.QueryRow(ctx, `SELECT coalesce(s.agent_principal_id::text,''),
+   EXISTS(SELECT 1 FROM routine_launch_intents i JOIN routine_runs r ON r.tenant_id=i.tenant_id AND r.id=i.routine_run_id
+     WHERE l.session_id IS NULL AND i.tenant_id=l.tenant_id AND i.project_id=l.project_id AND i.owner_principal_id=l.owner_principal_id
+     AND i.kind='lead' AND i.lead_generation=l.generation AND i.state='pending' AND r.execution_principal_id=$4::uuid),
+   EXISTS(SELECT 1 FROM routine_launch_intents i
+     WHERE l.session_id IS NULL AND i.tenant_id=l.tenant_id AND i.project_id=l.project_id AND i.owner_principal_id=l.owner_principal_id
+     AND i.kind='lead' AND i.lead_generation=l.generation AND i.state='pending')
+   FROM project_leads l
    LEFT JOIN harness_sessions s ON s.tenant_id=l.tenant_id AND s.id=l.session_id
-   WHERE l.tenant_id=$1::uuid AND l.project_id=$2::uuid AND l.owner_principal_id=$3::uuid
-   AND (s.agent_principal_id=$4::uuid OR (l.session_id IS NULL AND EXISTS(
-    SELECT 1 FROM routine_launch_intents i JOIN routine_runs r ON r.tenant_id=i.tenant_id AND r.id=i.routine_run_id
-    WHERE i.tenant_id=l.tenant_id AND i.project_id=l.project_id AND i.owner_principal_id=l.owner_principal_id
-    AND i.kind='lead' AND i.lead_generation=l.generation AND i.state='pending'
-    AND r.execution_principal_id=$4::uuid))))`, p.TenantID, projectID, owner, p.ID).Scan(&own)
-			if err != nil {
+   WHERE l.tenant_id=$1::uuid AND l.project_id=$2::uuid AND l.owner_principal_id=$3::uuid`, p.TenantID, projectID, owner, p.ID).Scan(&sessionAgent, &callerPending, &anyPending)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return err
 			}
-			if !own {
-				return authz.ErrForbidden
+			if err == nil && (sessionAgent != "" && sessionAgent != p.ID || sessionAgent == "" && anyPending && !callerPending) {
+				return errNotLeadRuntimeAgent
 			}
 		}
 	}
@@ -360,7 +369,9 @@ func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead, rea
 		l.State, l.Reason = "cannot_start", lifecycle
 		return l, nil
 	}
-	if err = leadOwner(ctx, tx, p, l.ProjectID, l.owner); errors.Is(err, authz.ErrForbidden) {
+	if err = leadOwner(ctx, tx, p, l.ProjectID, l.owner); errors.Is(err, errNotLeadRuntimeAgent) {
+		return l, err
+	} else if errors.Is(err, authz.ErrForbidden) {
 		l.State, l.Reason = "cannot_start", "owner_revoked"
 		return l, nil
 	} else if err != nil {

@@ -341,13 +341,15 @@ func TestPersonCeiling(t *testing.T) {
 				t.Fatalf("hidden visibility %s", vis)
 			}
 		})
-		err := db.InTenant(tenant.WithPrincipal(ctx, legacyP), d.App, tid, func(tx pgx.Tx) error {
-			_, err := db.WorkerRunPrincipalTx(ctx, tx, legacyP, "lease-ambiguous")
-			return err
+		inCeiling(t, d, legacyP, func(tx pgx.Tx) {
+			got, err := db.WorkerRunPrincipalTx(ctx, tx, legacyP, "lease-ambiguous")
+			if err != nil || got.KeyPersonID != "" {
+				t.Fatalf("ambiguous %+v %v", got, err)
+			}
+			if vis := setting(t, ctx, tx); vis != "*" {
+				t.Fatalf("ambiguous lease left %s", vis)
+			}
 		})
-		if err == nil || !strings.Contains(err.Error(), "ambiguous worker generation") {
-			t.Fatalf("ambiguous %v", err)
-		}
 	})
 
 	t.Run("removed grant", func(t *testing.T) {

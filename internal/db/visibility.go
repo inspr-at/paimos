@@ -141,8 +141,8 @@ func RunPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID st
 }
 
 // WorkerRunPrincipalTx resolves the existing harness worker lease to its run.
-// Unknown leases retain the legacy principal; endpoint-specific proof checks
-// still reject them. Only an exact agent+generation match supplies a person.
+// Unknown or shared leases retain the legacy principal; endpoint-specific
+// proof checks still reject them. Only one live session supplies a person.
 //
 // Project row security would hide a session outside the key's current ceiling,
 // and a miss must not keep that wider ceiling. The lookup widens visibility
@@ -175,9 +175,9 @@ func WorkerRunPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, le
 	if err != nil {
 		return p, err
 	}
-	if len(runs) > 1 {
-		return p, errors.New("ambiguous worker generation")
-	}
+	// Several live sessions can share one lease. The endpoint still proves the
+	// lease against its own session. This lookup must not guess a person, and
+	// it must not fail the request: an unresolved lease stays the legacy key.
 	next := p
 	if len(runs) == 1 && runs[0] != nil {
 		next, err = RunPrincipalTx(ctx, tx, p, *runs[0])

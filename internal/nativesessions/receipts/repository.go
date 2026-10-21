@@ -236,6 +236,13 @@ func runContext(ctx context.Context, tx pgx.Tx, p tenant.Principal, b nativecont
 	if p.Kind != tenant.Agent {
 		return ctx, nil
 	}
+	// The write above may already have narrowed visibility, including after a
+	// grant revocation. The session read has to see the bound row so a later
+	// permission check can still report the revocation. The ceiling is put
+	// back before any content is written.
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true)`); err != nil {
+		return ctx, err
+	}
 	var run *string
 	if err := tx.QueryRow(ctx, `SELECT run_id::text FROM harness_sessions WHERE tenant_id=$1::uuid AND id=$2::uuid AND agent_principal_id=$3::uuid`, p.TenantID, b.HarnessSessionID, p.ID).Scan(&run); err != nil {
 		return ctx, err
@@ -244,7 +251,7 @@ func runContext(ctx context.Context, tx pgx.Tx, p tenant.Principal, b nativecont
 		return ctx, nativereceipts.Fail(nativecontract.ReasonIdentityMismatch)
 	}
 	if run == nil {
-		return ctx, nil
+		return ctx, workorders.RefreshPrincipal(ctx, tx, p)
 	}
 	current, err := db.RunPrincipalTx(ctx, tx, p, *run)
 	if err != nil {
