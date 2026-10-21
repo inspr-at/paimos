@@ -4,6 +4,7 @@ package agentd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"reflect"
 
@@ -106,7 +107,7 @@ func (r *nativeRecovery) Read(ctx context.Context, b nativecontract.Binding) (na
 	grant := e.grant
 	e.mu.Unlock()
 	if transport == nil || grant.ExpectedBinding == nil || e.transition != nil || grant.ExpectedBinding.OwnedSessionID != b.OwnedSessionID {
-		return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+		return out, nativeRecoveryUnconfirmed("retained source")
 	}
 	raw, err := e.host.s.state.Read("lead-runtime-"+e.local.Intent.RequestID+".json", 32768)
 	if err != nil {
@@ -114,7 +115,7 @@ func (r *nativeRecovery) Read(ctx context.Context, b nativecontract.Binding) (na
 	}
 	record, err := decodeLeadRecord(raw)
 	if err != nil || !record.Attempted || record.Abandoned || record.ExitObserved || record.Native == nil || record.Native.SessionID != grant.ExpectedBinding.HarnessSessionID || record.Group != e.group {
-		return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+		return out, nativeRecoveryUnconfirmed("owner journal")
 	}
 	identity := transport.Identity()
 	ledger, _, err := e.host.s.ledger.Snapshot()
@@ -123,7 +124,7 @@ func (r *nativeRecovery) Read(ctx context.Context, b nativecontract.Binding) (na
 	}
 	group, ok := ledger.Groups[e.group]
 	if !ok || group.Instance != e.host.s.ledgerBinding.Member.ID || group.Generation != e.host.s.ledgerBinding.Generation || group.State != "running" || group.PID != identity.PID || !group.StartedAt.Equal(identity.StartedAt) {
-		return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+		return out, nativeRecoveryUnconfirmed("shared ledger")
 	}
 	var view nativecontract.SessionView
 	if err = e.call(ctx, "GET", "/api/projects/"+b.ProjectID+"/native-sessions/"+b.OwnedSessionID, nil, &view); err != nil {
@@ -243,3 +244,7 @@ func (r *nativeRecovery) Attempt(ctx context.Context, next nativerecovery.Succes
 }
 
 var _ nativerecovery.Runtime = (*nativeRecovery)(nil)
+
+func nativeRecoveryUnconfirmed(stage string) error {
+	return fmt.Errorf("native recovery %s: %w", stage, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed))
+}
