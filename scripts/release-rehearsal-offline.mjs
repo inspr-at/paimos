@@ -65,6 +65,10 @@ if (process.argv[2] === 'docker') {
     if (args[0] === 'api') {
       const path = args.at(-1);
       if (path === 'repos/inspr-at/paimos/releases?per_page=100') return json([draft ? [draft] : []]);
+      if (path === 'repos/inspr-at/paimos/releases/1') {
+        if (!draft) throw new Error('release completion: gh operation failed');
+        return json(draft);
+      }
       if (path === 'repos/inspr-at/paimos/releases/1/assets?per_page=100') return json([assets]);
       if (/^repos\/inspr-at\/paimos\/releases\/assets\/[1-9][0-9]*$/.test(path)) {
         const asset = assets.find(a => a.id === Number(path.split('/').at(-1)));
@@ -74,7 +78,7 @@ if (process.argv[2] === 'docker') {
       checkGH(args, realGH);
       const body = readFileSync(args[args.indexOf('--notes-file') + 1], 'utf8');
       draft = { id: 1, tag_name: coordinate.tag, draft: true, prerelease: false, body };
-      return Buffer.alloc(0);
+      return Buffer.from('https://api.github.com/repos/inspr-at/paimos/releases/1\n');
     } else if (args[0] === 'release' && args[1] === 'upload' && args[2] === coordinate.tag && draft) {
       const name = args[3].split('/').at(-1);
       if (!ASSETS.includes(name) || uploaded.has(name)) throw new Error('Unexpected rehearsal upload');
