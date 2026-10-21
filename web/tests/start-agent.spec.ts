@@ -158,7 +158,7 @@ test('AEON-1509 inactive Claude login keeps its account pin and deliberate pause
   const inactive = { ...active, id: mock.spareAccountId, label: 'Weiteres Claude-Konto für gemeinsame Entwicklungsprojekte', state: 'unavailable', last_probe_ok: false, available: false, unavailable_reasons: ['state' as const, 'probe' as const], wait: { code: 'sign_in' as const, run_now_allowed: false } }
   const paused = { ...inactive, id: 'ac000000-0000-4000-8000-000000000004', label: 'Paused Claude login', state: 'draining', wait: { code: 'state' as const, run_now_allowed: false } }
   harness.accounts = [active, inactive, paused]
-  await page.setViewportSize({ width: 390, height: 1000 })
+  await page.setViewportSize({ width: 1440, height: 1000 })
   await open(page)
   await readyAccount(page)
   const sheet = dialog(page)
@@ -168,6 +168,9 @@ test('AEON-1509 inactive Claude login keeps its account pin and deliberate pause
   await expect(account.locator(`option[value="${inactive.id}"]`)).toContainText('Inactive login')
   await expect(account.locator(`option[value="${inactive.id}"]`)).not.toContainText('Settings')
   await account.selectOption(inactive.id)
+  // Phone options keep name and plan; the selected login's full advice stays
+  // in the status below the controls.
+  await page.setViewportSize({ width: 390, height: 1000 })
   await expect(sheet.getByRole('status')).toContainText('Inactive login; switch to this account or sign in on the computer to use it')
   await expect(sheet.getByRole('button', { name: 'Run now once', exact: true })).toHaveCount(0)
   await expectStableControls({
