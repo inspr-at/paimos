@@ -358,8 +358,12 @@ test('AEON-1460 choosing Outline retains its expand and status actions on phones
   await page.getByRole('menuitemradio', { name: 'Outline', exact: true }).click()
   const outline = page.getByRole('treegrid', { name: 'Ticket outline', exact: true })
   const twisty = outline.locator('.phone-fold').first(), row = twisty.locator('xpath=ancestor::tr')
+  // Count inside the rendered outline: before it renders, any count of its cells is
+  // zero. Its column head stays in the DOM, hidden, so the count covers the body.
+  await expect(twisty).toBeVisible()
   await expect(page.locator('.table-card')).toHaveClass(/phone-rows/)
-  await expect(outline.locator('.status-btn, .c-prio, .c-estimate')).toHaveCount(0)
+  await expect(outline.locator('thead')).toBeHidden()
+  await expect(outline.locator('tbody').locator('.status-btn, .c-prio, .c-estimate')).toHaveCount(0)
   const target = await box(twisty)
   expect(target.width).toBe(44); expect(target.height).toBe(44)
   const hits = await twisty.evaluate(el => {

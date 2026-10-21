@@ -422,6 +422,8 @@
     ,
     {"kind":"go","package":"cmd/aeon","name":"TestServeShutdownAndBootstrap","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"cmd/aeon","name":"TestServeWiresDeskPushSourceBeforeRun","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon","name":"TestStopServingDrainsBeforeClose","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachApprovalNoticeNamesWhereToApproveAndPrefillsOnlyDigits","tier":"GATED-FULL"}
@@ -2146,6 +2148,18 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSlowManagedControlCannotRestartBudgetAfterLock","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunBudgetExits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunContinuationExits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunExits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunFixFindingsExit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunLaunchHandoff","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunRoutineExits","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestStatuslineOffWithoutExecutable","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStatuslineQuotedExecutableOwnership","tier":"GATED-FULL"}
@@ -2552,6 +2566,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestComputerReportsItsInstallMethod","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestComputerStartAccessUsesPersonRoleBindingsAndAuditsChanges","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestConsentProofVersionUpgradeKeepsPairingKeyAndRejectsV1","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestCoordinatorScopeSetStaysNarrow","tier":"GATED-FULL"}
@@ -2849,6 +2865,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestClaimReleasesObsoleteSiblingLedgerAfterMigration","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestClaimSharedQuotaWindowKeepsDoorOwnership","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestComputerStartCreationAndClaimUseCurrentPersonGrant","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestConcurrentTelemetrySerializesBudgetAndReplay","tier":"GATED-FULL"}
     ,
@@ -3644,6 +3662,8 @@
     ,
     {"kind":"go","package":"internal/approvals","name":"TestLiveGrantRejectsBadIDs","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/approvals","name":"TestNativeConsentRequiresCurrentPersonApproval","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/approvals","name":"TestOptionalDeployTargetRoundTrip","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/approvals","name":"TestProjectScopedApprovalNames","tier":"GATED-FULL"}
@@ -4093,6 +4113,8 @@
     {"kind":"go","package":"internal/authz","name":"TestBuiltinAgentExclusionsDefinition","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestClassicInviteLinking","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/authz","name":"TestComputerStartPermissionIsPersonOnlyAndScopeLimited","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestCoordinatorKeyRecognition","tier":"GATED-FULL"}
     ,
@@ -6068,6 +6090,16 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestCutoverLinksKeepSourceIdentity","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestDeskDeviceOptInOwnershipAndCap","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestDeskPayloadBoundsFirstLine","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestDeskPushDueWindowsAndOptInBacklog","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestDeskPushRecipientsBurstAndGone","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestDeskQuestionCommittedEventWakesSender","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestHeldRequestCanonicalizationDoesNotRepeatNotice","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestKeyTrimProjectionRequiresManageRightsAndKeepsNativeSource","tier":"GATED-FULL"}
@@ -6855,6 +6887,10 @@
     {"kind":"go","package":"internal/harness","name":"TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestAutomaticProvenanceFitsTheRulesBudget","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestComputerStartLeadRuntimeRechecksRunPerson","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestComputerStartRecoveryRechecksRunPerson","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestControlEventBounds","tier":"GATED-FULL"}
     ,
@@ -8666,9 +8702,13 @@
     ,
     {"kind":"go","package":"internal/nativesessions/receipts","name":"TestNativePilotDeliveryPersistsFinalAndKeepsHoldThroughDetach","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativesessions/receipts","name":"TestProductionReceiptAuthorityRechecksConsentAndExactEvidence","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativesessions/receipts","name":"TestReceiptProjectionRejectsQueueAsDeliveryAndScopesPages","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/start","name":"TestStartRequiresDurableClaimAndLocalLaunchFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestComputerStartNativeClaimRechecksAfterObservation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestCoordinatorClaimsReserveQuotaBudgets","tier":"ESSENTIAL"}
     ,

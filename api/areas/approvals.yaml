@@ -11,9 +11,9 @@ paths:
         '200': {description: Approval requests, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}, Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Approval'}}}}}
     post:
       operationId: proposeApproval
-      description: An agent may propose only for itself. Writes approval.proposed event without granting authority.
+      description: "An agent may propose only for itself. Writes approval.proposed without granting authority. harness.control.native.session and harness.control.native.retention are native consent scope families within the existing harness.control key ceiling. Both require native_consent and a project node resource, no run, and expiry within 24 hours. The server appends every consent fact to the displayed rationale. Only a current person session owning the computer and account can approve; the approved facts and grant commit with approval.approved. Retention requires its own separate approval and can be revoked independently."
       security: [{agentKey: []}]
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApprovalProposal'}}}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NativeConsentApprovalProposal'}}}}
       responses:
         '201': {description: Proposal, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
         '403': {$ref: '#/components/responses/Error'}
@@ -53,6 +53,36 @@ components:
   headers:
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
   schemas:
+    NativeConsentApprovalProposal:
+      allOf:
+        - {$ref: '#/components/schemas/ApprovalProposal'}
+        - type: object
+          properties:
+            native_consent:
+              $ref: '#/components/schemas/NativeConsentFacts'
+              description: "Required only for harness.control.native.session and harness.control.native.retention; rejected for other scopes. The existing Approval response and Desk/phone card carry the server-rendered facts in rationale."
+    NativeConsentFacts:
+      type: object
+      additionalProperties: false
+      required: [computer_id, account_id, workspace_id, workspace_root, model_profile_id, tool_set, settings_profile, local_history, retain_finals, revision, maximum_runtime_seconds, maximum_turns, maximum_tokens]
+      properties:
+        computer_id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        workspace_id: {type: string, minLength: 1, maxLength: 128}
+        workspace_root: {type: string, minLength: 1, maxLength: 4096, description: "Exact absolute workspace root, resolved and matched again by the owning local launcher; no credentials."}
+        model_profile_id: {type: string, format: uuid}
+        tool_set:
+          type: array
+          maxItems: 13
+          uniqueItems: true
+          items: {type: string, enum: [aeon_comment, aeon_status, aeon_check_criterion, aeon_evidence, aeon_request_approval, aeon_reply, aeon_terminal, aeon_read, aeon_write, aeon_edit, aeon_glob, aeon_grep, aeon_activity]}
+        settings_profile: {type: string, enum: [lead-confined-v1], description: "Session-local qualified overlay; no inherited settings, plugins or additional directories. Digests are derived by the server."}
+        local_history: {type: string, enum: [vendor_native], description: "Explicit consent to vendor-native local session history."}
+        retain_finals: {type: boolean, description: "Consent to retention of explicit finals in Aeon. Publication additionally requires a separate current harness.control.native.retention approval with identical facts."}
+        revision: {type: integer, enum: [1], description: "Immutable approval revision. Changes require a new approval and grant ID; old intents are never rebound."}
+        maximum_runtime_seconds: {type: integer, minimum: 1, maximum: 86400}
+        maximum_turns: {type: integer, minimum: 1, maximum: 10000}
+        maximum_tokens: {type: integer, minimum: 1, maximum: 10000000}
     ApprovalDecisionWrite:
       type: object
       required: [decision]

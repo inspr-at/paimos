@@ -5,6 +5,7 @@
       "run.claim",
       "run.create",
       "run.read",
+      "run.start_on_computer",
       "run.telemetry"
     ],
     "member": [
@@ -17,6 +18,7 @@
       "run.claim",
       "run.create",
       "run.read",
+      "run.start_on_computer",
       "run.telemetry"
     ],
     "viewer": [
@@ -61,6 +63,18 @@
       "risk": "low"
     },
     {
+      "agent_grantable": false,
+      "description": "Start runs on a computer",
+      "grantable_at": [
+        "workspace",
+        "computer"
+      ],
+      "group": "Run",
+      "key": "run.start_on_computer",
+      "owner_workstation_grantable": false,
+      "risk": "high"
+    },
+    {
       "agent_grantable": true,
       "description": "Telemetry run",
       "grantable_at": [
@@ -76,6 +90,12 @@
   "words": {
     "resources": {
       "run": "runs"
+    },
+    "special": {
+      "run.start_on_computer": "Start runs on a computer"
     }
-  }
+  },
+  "builtin_agent_exclusions": [
+    "run.start_on_computer"
+  ]
 }

@@ -78,6 +78,26 @@ test('permission and fixture records never combine changes into an unreviewed wi
   assert.equal(invoke(t, [addedBase, { ...base }, { ...base, registry: [grant('nodes.write', true)] }], file).status, 1)
 })
 
+test('computer grant stays on the ceiling row and catalog prose cannot', () => {
+  const file = registryPaths[2]
+  const ceiling = JSON.parse(readFileSync(resolve(root, file), 'utf8'))
+  const start = {
+    agent_grantable: false,
+    grantable_at: ['workspace', 'computer'],
+    key: 'run.start_on_computer',
+    owner_workstation_grantable: false,
+  }
+  assert.deepEqual(ceiling.registry.find(row => row.key === start.key), start)
+  const normalized = normalizeRegistry(ceiling, file)
+  assert.deepEqual(normalized.registry.find(row => row.key === start.key), start)
+  const withProse = structuredClone(ceiling)
+  withProse.registry = withProse.registry.map(row => row.key === start.key ? { ...start, description: 'Start runs on a computer', group: 'Run', risk: 'high' } : row)
+  assert.throws(() => normalizeRegistry(withProse, file), /Invalid fields; expected key, grantable_at, agent_grantable/)
+  const unknown = structuredClone(ceiling)
+  unknown.registry = unknown.registry.map(row => row.key === start.key ? { ...start, grantable_at: ['workspace', 'desk'] } : row)
+  assert.throws(() => normalizeRegistry(unknown, file), /Invalid grant location/)
+})
+
 test('privacy columns union by column; classification, locator and deletion disagreements stop', t => {
   const file = registryPaths[3], doc = columns => ({ _license: license, version: 1, tables: [table('records', columns)] })
   const base = doc({ tenant_id: 'metadata', id: 'metadata' })

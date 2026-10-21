@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/nativesessions/consent"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -148,10 +149,10 @@ func (m *Module) propose(ctx context.Context, p tenant.Principal, authorization 
 		err = tx.QueryRow(ctx, `
 			INSERT INTO approval_requests (
 				tenant_id, proposed_by_principal_id, agent_principal_id, run_id,
-				scope, resource_kind, resource_id, rationale, expires_at, target, target_digest_sha256)
-			VALUES ($1::uuid, $2::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7, $8, $9, $10)
+				scope, resource_kind, resource_id, rationale, expires_at, target, target_digest_sha256, native_consent)
+			VALUES ($1::uuid, $2::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7, $8, $9, $10, $11)
 			RETURNING id::text`,
-			p.TenantID, p.ID, in.RunID, in.Scope, in.ResourceKind, in.ResourceID, in.Rationale, in.ExpiresAt, in.Target, nullableDigest(in.TargetDigestSHA256),
+			p.TenantID, p.ID, in.RunID, in.Scope, in.ResourceKind, in.ResourceID, in.Rationale, in.ExpiresAt, in.Target, nullableDigest(in.TargetDigestSHA256), in.NativeConsent,
 		).Scan(&id)
 		if err != nil {
 			return err
@@ -217,6 +218,11 @@ func (m *Module) decideVerified(ctx context.Context, p tenant.Principal, id, dec
 		if expired {
 			return fail(http.StatusConflict, "approval has expired")
 		}
+		if consent.Scope(before.Scope) && decision == "approved" {
+			if err := verifyNativeConsentDecision(ctx, tx, p, before); err != nil {
+				return err
+			}
+		}
 		if verify != nil {
 			if err := verify(tx, before); err != nil {
 				return err
@@ -272,6 +278,11 @@ func (m *Module) decideVerified(ctx context.Context, p tenant.Principal, id, dec
 func (m *Module) revoke(ctx context.Context, p tenant.Principal, id string) (Approval, error) {
 	var out Approval
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		// Use holds this same access fence before grant rows; revoke must enter
+		// it before locking the request or grant.
+		if _, err := tx.Exec(ctx, db.TenantFenceSQL); err != nil {
+			return err
+		}
 		var err error
 		if _, _, err = lockRequest(ctx, tx, id); errors.Is(err, pgx.ErrNoRows) {
 			return fail(http.StatusNotFound, "approval not found")
@@ -404,6 +415,15 @@ func withoutAgentName(a Approval) Approval {
 }
 
 func verifyResource(ctx context.Context, tx pgx.Tx, agentID string, in proposal) error {
+	if consent.Scope(in.Scope) {
+		var project bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug='project')`, in.ResourceID).Scan(&project); err != nil {
+			return err
+		}
+		if !project {
+			return fail(http.StatusForbidden, "native consent requires a live project")
+		}
+	}
 	switch in.ResourceKind {
 	case "node":
 		if err := liveNode(ctx, tx, *in.ResourceID); err != nil {
@@ -530,6 +550,9 @@ func Review(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Appr
 
 // CanDecide applies the same live actor and permission policy used by decision writes.
 func CanDecide(ctx context.Context, tx pgx.Tx, p tenant.Principal, a Approval) error {
+	if consent.Scope(a.Scope) && (p.Kind != tenant.Person || p.KeyID != "" || p.AuthKeyID != "" || p.KeyCreatorID != "") {
+		return fail(http.StatusForbidden, "native consent requires a person session")
+	}
 	if hasRoutineScope(a.Scope) {
 		if !routineApproval(a) {
 			return fail(http.StatusForbidden, "invalid exact-action routine approval")

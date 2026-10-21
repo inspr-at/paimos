@@ -7,6 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -584,4 +587,158 @@ func TestStopServingDrainsBeforeClose(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("shutdown did not finish")
 	}
+}
+
+// Risk: Decision Desk notices stay silent because startup constructs the phone
+// worker without the Desk push source, or starts it before that assignment (AEON-1474).
+func TestServeWiresDeskPushSourceBeforeRun(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "serve.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !serveImports(file, "github.com/inspr-at/paimos/internal/decisiondesk", "decisiondesk") || !serveImports(file, "github.com/inspr-at/paimos/internal/phoneapprovals", "phoneapprovals") {
+		t.Fatal("serve.go must import decisiondesk and phoneapprovals under those names")
+	}
+	serveFn := serveFunc(t, file, "serve")
+	if !serveCalls(serveFn, "serveListener") {
+		t.Fatal("serve does not start through serveListener")
+	}
+	listener := serveFunc(t, file, "serveListener")
+	if !serveCalls(listener, "serveWithPool") {
+		t.Fatal("serveListener does not start through serveWithPool")
+	}
+	wired := serveFunc(t, file, "serveWithPool")
+	newAt := -1
+	for i, stmt := range wired.Body.List {
+		if servePhoneNew(stmt) {
+			if newAt >= 0 {
+				t.Fatal("serveWithPool constructs the phone module more than once")
+			}
+			newAt = i
+		}
+	}
+	if newAt < 0 || newAt+1 >= len(wired.Body.List) {
+		t.Fatal("serveWithPool does not construct phoneMod with phoneapprovals.New")
+	}
+	if !serveDeskPushAssign(wired.Body.List[newAt+1]) {
+		t.Fatalf("%s: statement after phoneapprovals.New must be phoneMod.DeskPush = decisiondesk.PushSource{}", fset.Position(wired.Body.List[newAt+1].Pos()))
+	}
+	assignEnd := wired.Body.List[newAt+1].End()
+	runs := 0
+	var runPos token.Pos
+	ast.Inspect(wired, func(n ast.Node) bool {
+		if n == nil {
+			return true
+		}
+		call, ok := n.(*ast.CallExpr)
+		if !ok || !serveSelector(call.Fun, "phoneMod", "Run") {
+			return true
+		}
+		runs++
+		runPos = call.Pos()
+		return true
+	})
+	if runs != 1 {
+		t.Fatalf("phoneMod.Run calls = %d, want 1", runs)
+	}
+	if runPos <= assignEnd {
+		t.Fatal("phoneMod.Run is not after the Desk push assignment")
+	}
+	assigns := 0
+	ast.Inspect(file, func(n ast.Node) bool {
+		if n == nil {
+			return true
+		}
+		stmt, ok := n.(ast.Stmt)
+		if ok && serveDeskPushAssign(stmt) {
+			assigns++
+		}
+		return true
+	})
+	if assigns != 1 {
+		t.Fatalf("DeskPush assignments = %d, want exactly one", assigns)
+	}
+}
+
+func serveFunc(t *testing.T, file *ast.File, name string) *ast.FuncDecl {
+	t.Helper()
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == name && fn.Recv == nil && fn.Body != nil {
+			return fn
+		}
+	}
+	t.Fatalf("serve.go is missing func %s", name)
+	return nil
+}
+
+func serveImports(file *ast.File, path, name string) bool {
+	want := `"` + path + `"`
+	for _, imp := range file.Imports {
+		if imp.Path.Value != want {
+			continue
+		}
+		if imp.Name != nil {
+			return imp.Name.Name == name
+		}
+		return len(path) > len(name) && path[len(path)-len(name):] == name && path[len(path)-len(name)-1] == '/'
+	}
+	return false
+}
+
+func serveCalls(fn *ast.FuncDecl, name string) bool {
+	found := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if n == nil {
+			return true
+		}
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		id, idOK := call.Fun.(*ast.Ident)
+		if idOK && id.Name == name {
+			found = true
+		}
+		return true
+	})
+	return found
+}
+
+func servePhoneNew(stmt ast.Stmt) bool {
+	as, ok := stmt.(*ast.AssignStmt)
+	if !ok || as.Tok != token.DEFINE || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+		return false
+	}
+	id, ok := as.Lhs[0].(*ast.Ident)
+	return ok && id.Name == "phoneMod" && serveSelector(as.Rhs[0], "phoneapprovals", "New")
+}
+
+func serveDeskPushAssign(stmt ast.Stmt) bool {
+	as, ok := stmt.(*ast.AssignStmt)
+	if !ok || as.Tok != token.ASSIGN || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+		return false
+	}
+	if !serveSelector(as.Lhs[0], "phoneMod", "DeskPush") {
+		return false
+	}
+	lit, ok := as.Rhs[0].(*ast.CompositeLit)
+	if !ok || len(lit.Elts) != 0 || lit.Type == nil {
+		return false
+	}
+	return serveSelector(lit.Type, "decisiondesk", "PushSource")
+}
+
+func serveSelector(expr ast.Expr, pkg, name string) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if ok {
+		expr = call.Fun
+	}
+	sel, ok := expr.(*ast.SelectorExpr)
+	if !ok || sel.Sel == nil || sel.Sel.Name != name {
+		return false
+	}
+	id, ok := sel.X.(*ast.Ident)
+	return ok && id.Name == pkg
 }

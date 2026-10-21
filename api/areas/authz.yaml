@@ -17,6 +17,6 @@ components:
         group: {type: string}
         description: {type: string}
         risk: {type: string, enum: [low, medium, high]}
-        grantable_at: {type: array, items: {type: string, enum: [workspace, project]}}
+        grantable_at: {type: array, items: {type: string, enum: [workspace, project, computer]}}
         agent_grantable: {type: boolean, description: A key may carry this permission. The scope picker is built from this flag.}
         owner_workstation_grantable: {type: boolean, description: A specifically marked owner workstation key may carry this permission within its live role and creator ceilings.}
