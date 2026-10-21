@@ -18152,6 +18152,8 @@
     ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: a cursor at every directory cap returns typed partial rows and the final complete page stays complete","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: a late rate response or failure cannot replace a newer confirmed rate update","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: changing the rate-cache owner retires pending reads and stops queued requests","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > accepts exactly 2,000 rows but rejects a continuation rather than returning a partial list","tier":"GATED-FULL"}

@@ -140,6 +140,24 @@ it('AEON-1417: changing the rate-cache owner retires pending reads and stops que
   expect(store.costUnitsLoading).toBe(false)
 })
 
+it('AEON-1417: a late rate response or failure cannot replace a newer confirmed rate update', async () => {
+  const { store, rates } = costStore([unitNode(0)])
+  for (const fail of [false, true]) {
+    const pending = deferred<import('../src/lib/business').CostRate[]>()
+    rates.mockReturnValue(pending.promise)
+    const loading = store.loadCostUnits(true)
+    await flush()
+    const confirmed = { ...hourlyRate('cu-0'), bill_amount: fail ? '125' : '120' }
+    store.setRates('cu-0', [confirmed])
+    if (fail) pending.reject(new Error('older read failed'))
+    else pending.resolve([hourlyRate('cu-0')])
+    await loading
+    expect(store.costUnit('cu-0')?.rates).toEqual([confirmed])
+    expect(store.costUnit('cu-0')?.ratesError).toBeUndefined()
+    expect(store.costUnitsPartial).toBe(false)
+  }
+})
+
 it('AEON-1417: a cursor at every directory cap returns typed partial rows and the final complete page stays complete', async () => {
   const CRM = sourceModule<typeof import('../src/lib/crm')>('lib/crm.ts', {
     './api.ts': { api, listNodePages }, './toast.ts': { captureToastOwner: () => () => true },

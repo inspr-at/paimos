@@ -167,9 +167,9 @@ export const useBusiness = defineStore('business', () => {
             const unit = pending[next++]!
             try {
               const rates = await listRates(unit.node.id)
-              if (run === generation) setRates(unit.node.id, rates)
+              if (run === generation && costUnit(unit.node.id) === unit) setRates(unit.node.id, rates)
             } catch (e) {
-              if (run === generation) costUnits.value = costUnits.value.map(current => current.node.id === unit.node.id ? { ...current, rates: [], ratesError: e instanceof Error ? e.message : 'Rates could not be loaded.' } : current)
+              if (run === generation) costUnits.value = costUnits.value.map(current => current === unit ? { ...current, rates: [], ratesError: e instanceof Error ? e.message : 'Rates could not be loaded.' } : current)
             }
           }
         }
