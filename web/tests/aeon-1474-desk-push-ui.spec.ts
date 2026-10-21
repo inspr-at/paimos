@@ -173,6 +173,7 @@ test('AEON-1474 Settings and Desk remain still with EN and DE copy at phone tabl
     await card.screenshot({ path: testInfo.outputPath(`settings-${de ? 'de' : 'en'}-${width}-${theme}.png`) })
     const guard = await controlStability(page, { toggle, row: card.locator('.switch-row') })
     await guard.check(async () => { await toggle.click(); await expect(toggle).toHaveAttribute('aria-checked', 'true') })
+    await card.screenshot({ path: testInfo.outputPath(`settings-enabled-${de ? 'de' : 'en'}-${width}-${theme}.png`) })
     await guard.check(async () => { await toggle.click(); await expect(toggle).toHaveAttribute('aria-checked', 'false') })
     guard.done()
     expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
@@ -180,6 +181,10 @@ test('AEON-1474 Settings and Desk remain still with EN and DE copy at phone tabl
     await page.goto('/decision-desk')
     const turnOn = page.getByRole('button', { name: de ? 'Einschalten' : 'Turn on', exact: true })
     await expect(turnOn).toBeVisible()
+    for (const button of await page.locator('.notice-actions').getByRole('button').all()) {
+      const box = (await button.boundingBox())!
+      expect(box.height).toBeGreaterThanOrEqual(44); expect(box.width).toBeGreaterThanOrEqual(44)
+    }
     const header = page.locator('.dp-head'), first = page.locator('[data-testid^="desk-row-"]').first()
     const before = { header: await header.boundingBox(), first: await first.boundingBox() }
     const deskGuard = await controlStability(page, { header, first })

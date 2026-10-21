@@ -756,7 +756,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .notice-offer { display: flex; align-items: center; flex-wrap: wrap; gap: 0 16px; }
 .notice-offer > span { min-width: 0; overflow-wrap: anywhere; }
 .notice-actions { display: flex; flex-wrap: wrap; gap: 0 16px; }
-.notice-actions button { min-height: 44px; padding: 0; color: var(--ink-2); }
+.notice-actions button { min-width: 44px; min-height: 44px; padding: 0; color: var(--ink-2); }
 .notice-feedback { font-size: 12px; line-height: 1.5; color: var(--ink-3); }
 .notice-feedback span { display: block; }
 .desk-heading .reserved { visibility: hidden; pointer-events: none; }
