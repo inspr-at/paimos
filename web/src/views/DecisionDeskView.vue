@@ -352,6 +352,10 @@ async function refresh() {
 }
 // Header polls and live events share the projection read. Hydration also has
 // one flight; an intervening projection gets exactly one trailing hydration.
+// A read that began before this view recorded a decision cannot know it: applied
+// after it, the read put a decided lesson back as open and its toast refused Undo
+// (AEON-1622). Such a read is dropped; the refresh recorded() starts reads again.
+let decisions = 0
 async function hydrate(projection: DeskProjection): Promise<void> {
   const waitingTurn = generation, identity = owner.value
   if (hydration) {
@@ -360,8 +364,8 @@ async function hydrate(projection: DeskProjection): Promise<void> {
     return
   }
   if (projection === hydratedProjection || !session.authenticationCurrent()) return
-  const turn = ++generation
-  const current = () => alive && turn === generation && identity === owner.value && desk.projection === projection && session.authenticationCurrent()
+  const turn = ++generation, seen = decisions
+  const current = () => alive && turn === generation && seen === decisions && identity === owner.value && desk.projection === projection && session.authenticationCurrent()
   now.value = Date.now()
   loading.value = true
   const read = (async () => {
@@ -585,6 +589,7 @@ function stepSettled(item: DeskItem) {
   settledSteps.value = next; recorded(item)
 }
 function recorded(item: DeskItem) {
+  decisions++
   if (item.kind === 'lesson') {
     if (!item.decided && pendingLessonToast?.item.id === item.id) pendingLessonToast = undefined
     if (item.decided && item.undoEvent && item.undoEvent !== items.value.find(row => row.id === item.id)?.undoEvent) {
