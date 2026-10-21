@@ -855,6 +855,17 @@
       "table": "delivery_work_settings"
     },
     {
+      "classification": "personal",
+      "columns": {
+        "summarised_at": "personal"
+      },
+      "locator": {
+        "person_column": "recipient_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "desk_notification_claims"
+    },
+    {
       "classification": "metadata",
       "columns": {
         "actor_principal_id": "personal",
@@ -1661,6 +1672,18 @@
         "tenant_column": "tenant_id"
       },
       "table": "personal_profiles"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "desk_enabled": "personal",
+        "desk_enabled_at": "personal"
+      },
+      "locator": {
+        "person_column": "person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "phone_push_subscriptions"
     },
     {
       "classification": "personal",

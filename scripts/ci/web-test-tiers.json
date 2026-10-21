@@ -16848,6 +16848,8 @@
     ,
     {"kind":"node","file":"tests/palette.test.ts","name":"tickets: search hits skip non-work kinds, deleted nodes and other projects in a scope","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/phone-push.test.ts","name":"Desk push accepts bounded copy and focuses an existing PAIMOS tab","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/phone-push.test.ts","name":"malformed and foreign notification paths remain on the same origin","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/phone-push.test.ts","name":"push exposes no request context or approval actions and never caches responses","tier":"NIGHTLY"}

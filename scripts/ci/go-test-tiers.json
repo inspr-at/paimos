@@ -422,6 +422,8 @@
     ,
     {"kind":"go","package":"cmd/aeon","name":"TestServeShutdownAndBootstrap","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"cmd/aeon","name":"TestServeWiresDeskPushSourceBeforeRun","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon","name":"TestStopServingDrainsBeforeClose","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachApprovalNoticeNamesWhereToApproveAndPrefillsOnlyDigits","tier":"GATED-FULL"}
@@ -6071,6 +6073,16 @@
     {"kind":"go","package":"internal/decisiondesk","name":"TestCoverageFailureExplainsLimit","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestCutoverLinksKeepSourceIdentity","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestDeskDeviceOptInOwnershipAndCap","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestDeskPayloadBoundsFirstLine","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestDeskPushDueWindowsAndOptInBacklog","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestDeskPushRecipientsBurstAndGone","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestDeskQuestionCommittedEventWakesSender","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestHeldRequestCanonicalizationDoesNotRepeatNotice","tier":"GATED-FULL"}
     ,

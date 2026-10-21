@@ -1,20 +1,37 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // No fetch handler or response cache: signed-in context always comes from the server.
+const uuid = '[\\da-f]{8}(-[\\da-f]{4}){3}-[\\da-f]{12}'
+const phonePath = new RegExp(`^/phone-approvals/(approval|attach|stepup)/${uuid}$`, 'i')
+const deskPath = new RegExp(`^/decision-desk(?:\\?item=(?:[qam]:)?${uuid})?$`, 'i')
+const safePath = value => typeof value === 'string' && (phonePath.test(value) || deskPath.test(value)) ? value : '/agents'
 self.addEventListener('push', event => {
-  let path = '/agents'
-  try {
-    const value = event.data.json()
-    if (typeof value.url === 'string' && /^\/phone-approvals\/(approval|attach|stepup)\/[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(value.url)) path = value.url
-  } catch { /* Invalid messages still show a generic notification. */ }
-  event.waitUntil(self.registration.showNotification('Aeon needs your decision', {
-    body: 'Open the app to review the request and verify with your device passkey.',
-    tag: path, data: { path },
+  let value = {}
+  try { value = event.data.json() ?? {} } catch { /* Invalid messages show a generic notification. */ }
+  const path = safePath(value.url)
+  const desk = deskPath.test(path)
+  const title = desk && (value.title === 'PAIMOS · Decision waiting' || /^\d{1,4} decisions waiting$/.test(value.title)) ? value.title : 'Aeon needs your decision'
+  event.waitUntil(self.registration.showNotification(title, {
+    body: desk && typeof value.body === 'string' ? value.body.slice(0, 400) : 'Open the app to review the request and verify with your device passkey.',
+    tag: desk && (value.tag === 'desk-summary' || /^desk-(question|approval|action_request)-[\da-f-]{36}$/i.test(value.tag)) ? value.tag : path,
+    data: { path },
   }))
 })
 self.addEventListener('notificationclick', event => {
   event.notification.close()
-  const raw = event.notification.data?.path
-  const path = typeof raw === 'string' && /^\/phone-approvals\/(approval|attach|stepup)\/[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(raw) ? raw : '/agents'
+  const path = safePath(event.notification.data?.path)
   // A click opens a review; it never calls a decision API or an approval action.
-  event.waitUntil(self.clients.openWindow(new URL(path, self.location.origin).href))
+  event.waitUntil((async () => {
+    const url = new URL(path, self.location.origin).href
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    const existing = clients.find(client => {
+      try { return new URL(client.url).origin === self.location.origin } catch { return false }
+    })
+    if (existing) {
+      try {
+        const navigated = await existing.navigate(url)
+        if (navigated) { await navigated.focus(); return }
+      } catch { /* A tab closed during navigation; open a fresh one. */ }
+    }
+    await self.clients.openWindow(url)
+  })())
 })
