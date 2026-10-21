@@ -52,6 +52,8 @@ func commandValue(c nativecontract.Command) (nativecontract.Binding, string, str
 		b, request, schema, expires, value = c.Take.ExpectedBinding, c.Take.RequestID, "NativeTakeIntent", c.Take.ExpiresAt, *c.Take
 	case c.Kind == "return" && c.Return != nil:
 		b, request, schema, expires, value = c.Return.ExpectedBinding, c.Return.RequestID, "NativeReturnIntent", c.Return.ExpiresAt, *c.Return
+	case c.Kind == "resume" && c.Resume != nil:
+		b, request, schema, value = c.Resume.ExpectedBinding, c.Resume.RequestID, "NativeResumeIntent", *c.Resume
 	default:
 		return b, "", "", expires, nil, fail(400, nativecontract.ReasonUnsupported)
 	}
@@ -65,6 +67,9 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 	b, request, schema, expires, value, err := commandValue(c)
 	if err != nil {
 		return out, err
+	}
+	if c.Kind == "resume" {
+		expires = s.now().Add(20 * time.Second)
 	}
 	if c.Input != nil && len(c.Input.Text) > nativecontract.InputUTF8Bytes || c.Interrupt != nil && len(c.Interrupt.ExpectedTurnRef) > 128 || c.Stop != nil && len(c.Stop.ExpectedProcessIdentityDigest) > 64 {
 		return out, fail(413, nativecontract.ReasonBufferFull)
@@ -131,7 +136,7 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 		if err != nil {
 			return err
 		}
-		control := c.Kind == "take" || c.Kind == "return"
+		control := c.Kind == "take" || c.Kind == "return" || c.Kind == "resume"
 		if p.TenantID != b.TenantID || !control && p.ID != session.Original.ID {
 			return fail(403, nativecontract.ReasonWrongPrincipal)
 		}
@@ -144,6 +149,9 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 			}
 		} else if session.View.State != "running" && session.View.State != "idle" {
 			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
+		if c.Kind == "resume" && session.Policy.ExpiresAt.Before(expires) {
+			expires = session.Policy.ExpiresAt
 		}
 		if !s.now().Before(expires) || expires.After(session.Policy.ExpiresAt) {
 			return fail(403, nativecontract.ReasonGrantExpired)
@@ -271,6 +279,17 @@ func (s *Store) controlTx(ctx context.Context, tx pgx.Tx, session consent.Sessio
 		if session.View.Mode != "terminal" || session.View.State != "taken" {
 			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
 		}
+	case "resume":
+		if c.Resume == nil || c.Resume.Reason != "person_continue" || c.Resume.PolicyID != session.Policy.GrantID || p.ID != session.Original.ID {
+			return fail(403, nativecontract.ReasonGrantMissing)
+		}
+		if session.View.Mode != "structured" || session.View.State != "running" && session.View.State != "idle" && session.View.State != "recovering" {
+			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
+		if c.Resume.ExpectedRevision != session.View.Revision {
+			return fail(409, nativecontract.ReasonStaleRevision)
+		}
+		return nil
 	default:
 		return fail(400, nativecontract.ReasonUnsupported)
 	}
@@ -291,6 +310,11 @@ func queuedControl(c queuedCommand) (nativecontract.Command, error) {
 	case "return":
 		out.Return = new(nativecontract.ReturnIntent)
 		if err := json.Unmarshal(c.command.Params, out.Return); err != nil {
+			return out, err
+		}
+	case "resume":
+		out.Resume = new(nativecontract.ResumeIntent)
+		if err := json.Unmarshal(c.command.Params, out.Resume); err != nil {
 			return out, err
 		}
 	default:
@@ -320,7 +344,7 @@ func (s *Store) Commands(ctx context.Context, d nativecontract.DaemonActor, q na
 	private, _ := ctx.Value(proofKey{}).(daemon.Proof)
 	identity, _, _ := private.Runtime()
 	for _, c := range items {
-		if c.done || c.successor != nil {
+		if c.done || c.successor != nil || c.command.Kind == "resume" {
 			continue
 		}
 		if identity.RuntimeEpoch != "" && c.intent.Receipt.Binding.RuntimeEpoch != identity.RuntimeEpoch {
@@ -423,7 +447,7 @@ func (s *Store) Report(ctx context.Context, d nativecontract.DaemonActor, in nat
 	if err := s.validate("NativeReceipt", in); err != nil {
 		return nativecontract.OperationResult{}, err
 	}
-	if in.Operation == "take" || in.Operation == "return" {
+	if in.Operation == "take" || in.Operation == "return" || in.Operation == "resume" {
 		return s.reportSuccessor(ctx, d, in)
 	}
 	if in.Operation == "start" && in.State == "rejected" {

@@ -164,6 +164,16 @@ func (e *nativeOwned) switchRuntime(ctx context.Context, g nativecontract.ClaimR
 			return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
 		}
 	}
+	spec, err = e.admitSuccessor(ctx, g, i, x, mode)
+	if err != nil {
+		return out, err
+	}
+	return e.openSuccessor(ctx, spec, actor)
+}
+
+func (e *nativeOwned) admitSuccessor(ctx context.Context, g nativecontract.ClaimResult, i nativecontract.NativeIdentity, x nativecontract.ExitEvidence, mode string) (spec nativecontract.LaunchSpec, err error) {
+	h, s := e.host, e.host.s
+	t := e.transition
 	e.mu.Lock()
 	t.previous = e.proof
 	e.mu.Unlock()
@@ -171,11 +181,11 @@ func (e *nativeOwned) switchRuntime(ctx context.Context, g nativecontract.ClaimR
 	t.next = t.previous
 	t.next.WorkerLease, err = randomID()
 	if err != nil {
-		return out, err
+		return spec, err
 	}
 	t.next.SessionRef, err = randomID()
 	if err != nil {
-		return out, err
+		return spec, err
 	}
 	t.next.ObservedAt = s.capacityNow()
 	t.next.ExpiresAt = t.next.ObservedAt.Add(20 * time.Second)
@@ -183,18 +193,37 @@ func (e *nativeOwned) switchRuntime(ctx context.Context, g nativecontract.ClaimR
 	t.claim = nativecontract.Claim{RequestID: uuid.NewString(), OperationID: g.OperationID, DaemonID: s.daemonID, DaemonGeneration: s.generation, LedgerGeneration: s.ledgerBinding.Generation, CapabilityDigest: h.caps.QualificationDigest, ExpectedRevision: g.ExpectedBinding.BindingRevision, ClaimKind: "resume"}
 	started := s.capacityNow()
 	if err = e.successorClaim(ctx, &t.grant); err != nil {
-		return out, err
+		return spec, err
 	}
 	fresh := t.grant.ExpectedBinding
 	if fresh == nil || !t.grant.LaunchAuthorized || t.grant.ClaimKind != "resume" || !sameNativeConversation(*g.ExpectedBinding, *fresh) || fresh.RuntimeEpoch == g.ExpectedBinding.RuntimeEpoch || fresh.HarnessSessionID == g.ExpectedBinding.HarnessSessionID || fresh.BindingRevision <= g.ExpectedBinding.BindingRevision || !reflect.DeepEqual(t.grant.Intent, e.local.Intent) || !sameNativePolicy(g.Policy, t.grant.Policy) || !reflect.DeepEqual(g.LaunchConfig, t.grant.LaunchConfig) {
-		return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
+		return spec, nativeRefusal(nativecontract.ReasonIdentityMismatch)
 	}
 	e.claimDeadline = started.Add(time.Duration(t.grant.AuthorizationTTLMS) * time.Millisecond)
 	t.record.Successor = fresh
 	t.record.Phase = "predecessor_exit_confirmed"
 	if err = e.save("transition"); err != nil {
-		return out, err
+		return spec, err
 	}
+	profile, err := h.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: fresh.TenantID, OwnerPersonID: e.owner.OwnerPersonID, AccountID: e.local.Intent.AccountID, AccountKey: e.local.AccountKey, WorkspaceID: e.local.Intent.WorkspaceID, Harness: Claude, Policy: t.grant.Policy, BindingRevision: e.profile.ProfileBindingRevision})
+	if err != nil {
+		return spec, err
+	}
+	oldProfile := e.profile
+	if !reflect.DeepEqual(profile, oldProfile) {
+		return spec, nativeRefusal(nativecontract.ReasonIdentityMismatch)
+	}
+	spec = nativecontract.LaunchSpec{Binding: *fresh, Profile: profile, Policy: t.grant.Policy, Cwd: e.local.Cwd, ResumeRef: i.NativeSessionRef, Mode: mode, OwnedWriterID: fresh.RuntimeEpoch, Options: t.grant.LaunchConfig, Lifetime: e.lifetime}
+	return spec, nil
+}
+
+func (e *nativeOwned) openSuccessor(ctx context.Context, spec nativecontract.LaunchSpec, actor nativecontract.Actor) (out nativecontract.OperationResult, err error) {
+	h, s := e.host, e.host.s
+	t := e.transition
+	if t == nil || t.record.Phase != "predecessor_exit_confirmed" {
+		return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	g, i, mode, fresh := t.command, t.identity, spec.Mode, t.grant.ExpectedBinding
 	// This releases only the independently confirmed local group. The server
 	// root, quota holds and original runtime deadline remain unchanged.
 	if err = s.ledger.Release(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, e.group); err != nil {
@@ -212,14 +241,7 @@ func (e *nativeOwned) switchRuntime(ctx context.Context, g nativecontract.ClaimR
 		return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
 	}
 	e.group = group
-	profile, err := h.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: fresh.TenantID, OwnerPersonID: e.owner.OwnerPersonID, AccountID: e.local.Intent.AccountID, AccountKey: e.local.AccountKey, WorkspaceID: e.local.Intent.WorkspaceID, Harness: Claude, Policy: t.grant.Policy, BindingRevision: e.profile.ProfileBindingRevision})
-	if err != nil {
-		return out, err
-	}
-	oldProfile := e.profile
-	if !reflect.DeepEqual(profile, oldProfile) {
-		return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
-	}
+	profile := spec.Profile
 	h.mu.Lock()
 	e.mu.Lock()
 	e.grant = t.grant
@@ -294,7 +316,7 @@ func (e *nativeOwned) switchRuntime(ctx context.Context, g nativecontract.ClaimR
 	if err = decodeNativeControl(g.Command.Params, &commandID); err != nil {
 		return out, err
 	}
-	r := nativecontract.Receipt{RequestID: commandID.RequestID, OperationID: g.OperationID, Binding: fresh, Operation: g.Command.Kind, State: "applied", SourceSequence: "0", UpdatedAt: s.capacityNow().UTC()}
+	r := nativecontract.Receipt{RequestID: commandID.RequestID, OperationID: t.grant.OperationID, Binding: fresh, Operation: g.Command.Kind, State: "applied", SourceSequence: "0", UpdatedAt: s.capacityNow().UTC()}
 	if err = e.call(ctx, "POST", "/api/agentd/native-sessions/receipts", r, &out); err != nil {
 		return out, err
 	}

@@ -248,6 +248,36 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 	if accepted.Receipt.OperationID == returned.Receipt.OperationID {
 		t.Fatal("different transitions reused operation")
 	}
+	// An explicit provider-exit observation drives P5 manual recovery. The
+	// retained handle, existing ledger and journal are checked; no saved PID
+	// is adopted and no structured input/decision is reconstructed.
+	c.provider.mu.Lock()
+	c.provider.closed, c.provider.confirmed = true, true
+	c.provider.mu.Unlock()
+	resume := nativecontract.ResumeIntent{RequestID: guuid.NewString(), ExpectedBinding: fresh, ExpectedRevision: returned.Session.Revision, Reason: "person_continue", PolicyID: f.intent.PolicyID}
+	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "resume", Resume: &resume}); err != nil {
+		t.Fatal("authorize explicit recovery", err)
+	}
+	recovered, err := c.config.Host.Resume(t.Context(), resume)
+	if err != nil || recovered.Session == nil || recovered.Session.State != "idle" {
+		t.Fatal("owned recovery", recovered, err)
+	}
+	if recovered.Session.CurrentBinding.RuntimeEpoch == fresh.RuntimeEpoch || recovered.Session.CurrentBinding.OwnedSessionID != fresh.OwnedSessionID {
+		t.Fatal("recovery did not preserve conversation and advance epoch")
+	}
+	opens := c.provider.opens
+	if _, err = c.config.Host.Resume(t.Context(), resume); err != nil || c.provider.opens != opens {
+		t.Fatal("completed recovery was not an exact no-fork replay", err)
+	}
+	stale := resume
+	stale.RequestID = guuid.NewString()
+	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "resume", Resume: &stale}); err == nil {
+		t.Fatal("stale recovery decision accepted")
+	}
+	var recoveryAudit int
+	if err = f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND type='native_session.recovered'`, f.person.TenantID).Scan(&recoveryAudit); err != nil || recoveryAudit != 1 {
+		t.Fatal("recovery audit", recoveryAudit, err)
+	}
 }
 
 func assertNativeReason(t *testing.T, err error, want nativecontract.Reason) {

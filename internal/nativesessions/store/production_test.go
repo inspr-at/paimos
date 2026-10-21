@@ -118,6 +118,7 @@ func (p *compositionProvider) Open(_ context.Context, s nativecontract.LaunchSpe
 	p.identity = nativecontract.NativeIdentity{Provider: "claude", NativeSessionRef: guuid.NewString(), RuntimeEpoch: s.Binding.RuntimeEpoch, PID: 12345, StartedAt: p.now, ProcessIdentityDigest: strings.Repeat("f", 64)}
 	if p.age > 0 {
 		p.opens++
+		p.confirmed, p.closed = false, false
 		p.identity.StartedAt = p.now.Add(-p.age + time.Duration(p.opens)*time.Second)
 		sum := sha256.Sum256([]byte(s.Binding.RuntimeEpoch))
 		p.identity.ProcessIdentityDigest = hex.EncodeToString(sum[:])

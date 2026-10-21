@@ -671,7 +671,7 @@ type nativeOwned struct {
 	active            nativecontract.ClaimResult
 	operations        map[string]string // live input ID -> operation ID
 	mu                sync.Mutex
-	opMu              sync.Mutex
+	opMu              contextMutex
 	attempted, exited bool
 	lastError         error
 	transition        *nativeTransition
@@ -679,6 +679,7 @@ type nativeOwned struct {
 	eventDone         chan struct{}
 	lifetime          context.Context
 	startOperation    string
+	recoveryResults   map[string]nativecontract.OperationResult
 }
 
 type nativeC0Key struct{}
@@ -1667,8 +1668,8 @@ func (h *NativeHost) Close(ctx context.Context) error {
 	}
 	return nil
 }
-func (h *NativeHost) Resume(context.Context, nativecontract.ResumeIntent) (nativecontract.OperationResult, error) {
-	return nativecontract.OperationResult{}, ErrUnsupported
+func (h *NativeHost) Resume(ctx context.Context, in nativecontract.ResumeIntent) (nativecontract.OperationResult, error) {
+	return h.resumeOwned(ctx, in)
 }
 func (h *NativeHost) Attach(context.Context, nativecontract.AttachIntent) (nativecontract.AttachResult, error) {
 	return nativecontract.AttachResult{}, ErrUnsupported

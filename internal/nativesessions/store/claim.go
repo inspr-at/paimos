@@ -413,6 +413,17 @@ func (s *Store) claimSuccessor(ctx context.Context, d nativecontract.DaemonActor
 	s.commandMu.Lock()
 	defer s.commandMu.Unlock()
 	c, ok := s.commands[in.OperationID]
+	if !ok {
+		proof, _ := ctx.Value(proofKey{}).(privateDaemon.Proof)
+		identity, _, _ := proof.Runtime()
+		for operation, candidate := range s.commands {
+			if candidate.command.Kind == "resume" && candidate.intent.Receipt.RequestID == in.OperationID && candidate.intent.Receipt.Binding != nil && candidate.intent.Receipt.Binding.TenantID == d.TenantID && candidate.intent.Receipt.Binding.RuntimeEpoch == identity.RuntimeEpoch {
+				in.OperationID = operation
+				c, ok = candidate, true
+				break
+			}
+		}
+	}
 	if !ok || c.done || c.intent.Receipt.Binding == nil {
 		return out, fail(403, nativecontract.ReasonGrantMissing)
 	}
@@ -576,7 +587,11 @@ func (s *Store) reportSuccessor(ctx context.Context, d nativecontract.DaemonActo
 			return err
 		}
 		out.Session = &view
-		return appendEvent(ctx, tx, c.actor, "native_session.mode_changed", in.Binding.ProjectID, in.OperationID, in.RequestID, view)
+		kind := "native_session.mode_changed"
+		if in.Operation == "resume" {
+			kind = "native_session.recovered"
+		}
+		return appendEvent(ctx, tx, c.actor, kind, in.Binding.ProjectID, in.OperationID, in.RequestID, view)
 	})
 	if err == nil {
 		s.mu.Lock()
