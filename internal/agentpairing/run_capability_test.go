@@ -18,6 +18,7 @@ import (
 // All content markers remain in the fixture while the negative reads run.
 func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 	f := newFixture(t)
+	f.rawTransport = true
 	p := f.propose("codex", "claude")
 	f.approve(p, "connect_only")
 	v := f.redeem(p)
@@ -93,7 +94,7 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 	}
 	source := newRun("retained recovery source", projectB)
 	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET acting_person_id=$2,status='completed',ended_at=clock_timestamp() WHERE id=$1`, source.ID, personB); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET acting_person_id=$2,status='completed',started_at=clock_timestamp()-interval '1 second',ended_at=clock_timestamp() WHERE id=$1`, source.ID, personB); err != nil {
 			return err
 		}
 		var session string
