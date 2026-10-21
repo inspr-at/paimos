@@ -211,6 +211,10 @@ func (r *Relay) Publish(ctx context.Context, request nativecontract.Publish, fen
 type Viewer struct {
 	Query nativecontract.StreamQuery
 	Fence nativestream.Fence
+	// Set only by HTTPHandler, whose ServeEvents holds this same fence through
+	// the actual response write. Queueing must not wait under that fence or a
+	// replay producer can deadlock its consumer's previous-frame delivery.
+	egressFenced bool
 }
 
 type viewerKey struct{}
@@ -305,8 +309,19 @@ func (r *Relay) follow(ctx context.Context, sub *subscription, session *liveSess
 		r.viewers--
 		r.mu.Unlock()
 	}()
+	queue := func(clean nativecontract.StreamEvent) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-r.clock.After(nativecontract.StreamWriteDeadlineSeconds * time.Second):
+			return nativestream.Refuse(nativecontract.ReasonBufferFull)
+		case sub.events <- clean:
+			return nil
+		}
+	}
 	send := func(event nativecontract.StreamEvent) error {
-		return viewer.Fence(ctx, func(access nativecontract.ValidationContext) error {
+		var pending nativecontract.StreamEvent
+		err := viewer.Fence(ctx, func(access nativecontract.ValidationContext) error {
 			if access.Private || access.View != viewer.Query.View {
 				return nativestream.Refuse(nativecontract.ReasonIdentityMismatch)
 			}
@@ -318,15 +333,19 @@ func (r *Relay) follow(ctx context.Context, sub *subscription, session *liveSess
 			if err != nil {
 				return err
 			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-r.clock.After(nativecontract.StreamWriteDeadlineSeconds * time.Second):
-				return nativestream.Refuse(nativecontract.ReasonBufferFull)
-			case sub.events <- clean:
+			if viewer.egressFenced {
+				pending = clean
 				return nil
 			}
+			return queue(clean)
 		})
+		if err != nil {
+			return err
+		}
+		if viewer.egressFenced {
+			return queue(pending)
+		}
+		return nil
 	}
 	if err := send(initial); err != nil {
 		return

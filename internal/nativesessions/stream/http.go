@@ -56,6 +56,7 @@ func (h *HTTPHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		after = last
 	}
 	viewer.Query.After = after
+	viewer.egressFenced = true
 	sub, err := h.relay.SubscribeView(r.Context(), binding, viewer)
 	if err != nil {
 		nativestream.WriteError(w, err)
