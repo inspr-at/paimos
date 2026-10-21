@@ -38,6 +38,9 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/goals/{goalId}/history", reportercontract.WithHeader(reportercontract.Goals, m.history))
 	mux.HandleFunc("POST /api/goals", reportercontract.WithHeader(reportercontract.Goals, m.create))
 	mux.HandleFunc("PATCH /api/goals/{goalId}", reportercontract.WithHeader(reportercontract.Goals, m.patch))
+	// AEON-1614: Hide for me, per person.
+	mux.HandleFunc("PUT /api/me/goals/{goalId}/hidden", m.setHidden(true))
+	mux.HandleFunc("DELETE /api/me/goals/{goalId}/hidden", m.setHidden(false))
 }
 
 type apiFailure struct {
