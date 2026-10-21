@@ -1,0 +1,9 @@
+{
+  "group": "remaining-ui",
+  "spec": {
+    "file": "tests/idle-requests.spec.ts",
+    "listedTests": 2,
+    "weightSeconds": 10,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

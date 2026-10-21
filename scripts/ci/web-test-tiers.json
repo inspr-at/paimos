@@ -10270,6 +10270,10 @@
     ,
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"new-tab response enforces sandbox without the iframe; residual self-navigation is explicit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/idle-requests.spec.ts","name":"AEON-1117 raw ticket readers and quote heartbeats stop while hidden and resume with current screen identity","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/idle-requests.spec.ts","name":"AEON-1117 shares mounted reads and event transport, fences stale answers and recovers missed events and access","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
