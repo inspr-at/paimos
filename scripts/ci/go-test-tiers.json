@@ -8686,7 +8686,11 @@
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestPairedNativeStartAndRevalidationKeepSeparateAuthorities","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestProductionCompositionAbandonedStartReturnsItsQuota","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestProductionCompositionAbandonsStartRefusedBeforeFork","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestProductionCompositionOwnerStopsFaultedSessionAfterWithdrawal","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestProductionCompositionStartsDeliversAndConfirmsExit","tier":"ESSENTIAL"}
     ,

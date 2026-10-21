@@ -113,7 +113,13 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 		if err := agentpairing.Lock(ctx, tx); err != nil {
 			return err
 		}
-		session, err := s.production.consent.SessionTx(ctx, tx, b)
+		// Only the exact owner's stop survives withdrawn consent; a StopOnly
+		// session carries no retention facts, so it issues no final drain.
+		authority := s.production.consent.SessionTx
+		if c.Stop != nil {
+			authority = s.production.consent.StopSessionTx
+		}
+		session, err := authority(ctx, tx, b)
 		if err != nil {
 			return err
 		}
@@ -237,9 +243,18 @@ func (s *Store) Commands(ctx context.Context, d nativecontract.DaemonActor, q na
 		if b.TenantID != d.TenantID || b.DaemonID != d.DaemonID || b.DaemonGeneration != d.DaemonGeneration || r.OperationID <= q.After || !s.now().Before(c.intent.ExpiresAt) {
 			continue
 		}
-		err := s.runtimeTx(ctx, d, b, false, func(context.Context, pgx.Tx, consent.Session, receipts.RuntimeProof) error { return nil })
+		// Withdrawn consent leaves only the exact owner's stop deliverable; the
+		// session's other commands are no longer listed, so they cannot hold it back.
+		withdrawn := false
+		err := s.stopTx(ctx, d, b, false, func(_ context.Context, _ pgx.Tx, session consent.Session, _ receipts.RuntimeProof) error {
+			withdrawn = session.StopOnly
+			return nil
+		})
 		if err != nil {
 			return nativecontract.PendingCommandPage{}, err
+		}
+		if withdrawn && r.Operation != "stop" {
+			continue
 		}
 		if len(out.Items) == q.Limit {
 			out.Truncated = true
@@ -261,7 +276,11 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 		return out, fail(403, nativecontract.ReasonGrantMissing)
 	}
 	b := *c.intent.Receipt.Binding
-	err := s.runtimeTx(ctx, d, b, false, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
+	authority := s.runtimeTx
+	if c.command.Kind == "stop" {
+		authority = s.stopTx
+	}
+	err := authority(ctx, d, b, false, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
 		if in.DaemonID != d.DaemonID || in.DaemonGeneration != d.DaemonGeneration || in.LedgerGeneration != d.LedgerGeneration || in.CapabilityDigest != d.CapabilityDigest || in.ExpectedRevision != b.BindingRevision || proof.Identity.ProcessIdentityDigest != c.intent.ProcessIdentityDigest || proof.Identity.RuntimeEpoch != b.RuntimeEpoch {
 			return fail(409, nativecontract.ReasonIdentityMismatch)
 		}
@@ -311,7 +330,8 @@ func (s *Store) Report(ctx context.Context, d nativecontract.DaemonActor, in nat
 	}
 	if err == nil && in.State == "exit_confirmed" && in.Binding != nil {
 		b := *in.Binding
-		err = s.runtimeTx(ctx, d, b, true, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
+		// Only a stop reaches exit_confirmed; its exit settles without consent.
+		err = s.stopTx(ctx, d, b, true, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
 			if proof.Exit == nil || !proof.Exit.RootExited || !proof.Exit.GroupAbsent {
 				return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
 			}

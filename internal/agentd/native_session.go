@@ -856,7 +856,7 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	e.mu.Lock()
 	e.transport = t
 	e.mu.Unlock()
-	d, err := delivery.New(delivery.DeliveryOptions{Binding: b, Journal: journal, Transport: t, Authority: e, Reports: e, Finals: e, Now: s.capacityNow, Retention: e.retention, Release: e.release})
+	d, err := delivery.New(delivery.DeliveryOptions{Binding: b, Journal: journal, Transport: t, Authority: e, Reports: e, Finals: e, Now: s.capacityNow, Retention: e.retention, Release: e.release, Refused: func(err error) bool { _ = e.fault(err); return e.faulted() != nil }})
 	if err != nil {
 		return out, err
 	}

@@ -31,6 +31,7 @@ type Delivery struct {
 	finals    nativecontract.FinalSink
 	retention func(context.Context, nativecontract.FinalPublish) (nativecontract.FinalDrainGrant, nativereceipts.RetentionApproval, error)
 	release   func(context.Context, nativecontract.Binding, nativecontract.ExitEvidence) error
+	refused   func(error) bool
 	now       func() time.Time
 	validator *nativecontract.Validator
 }
@@ -49,6 +50,9 @@ type DeliveryOptions struct {
 	// Release settles server/local reservations only after owned root/group
 	// exit AND the exit receipt have been persisted. Failure retains the hold.
 	Release func(context.Context, nativecontract.Binding, nativecontract.ExitEvidence) error
+	// Refused reports whether the owner's report delivery is refused for good
+	// (it may record err as that cause). Optional; nil means never.
+	Refused func(error) bool
 	Now     func() time.Time
 }
 
@@ -75,7 +79,7 @@ func New(o DeliveryOptions) (*Delivery, error) {
 		id := *b.RunID
 		b.RunID = &id
 	}
-	return &Delivery{mu: make(chan struct{}, 1), binding: b, identity: i, journal: o.Journal, transport: o.Transport, authority: o.Authority, reports: o.Reports, finals: o.Finals, retention: o.Retention, release: o.Release, now: o.Now, validator: v}, nil
+	return &Delivery{mu: make(chan struct{}, 1), binding: b, identity: i, journal: o.Journal, transport: o.Transport, authority: o.Authority, reports: o.Reports, finals: o.Finals, retention: o.Retention, release: o.Release, refused: o.Refused, now: o.Now, validator: v}, nil
 }
 
 // Send never retries a possible native write. A failed report returns its real
@@ -237,7 +241,7 @@ func (d *Delivery) Close(ctx context.Context, actor, operation string, in native
 	if err != nil {
 		return d.uncertain(ctx, operation, err)
 	}
-	if _, err = d.journal.FlushReports(ctx, d.binding, 100, d.reports); err != nil {
+	if err = d.flushExit(ctx, operation); err != nil {
 		return r, err
 	}
 	return r, d.release(ctx, d.binding, exit)
@@ -256,10 +260,25 @@ func (d *Delivery) ConfirmExit(ctx context.Context, operation string, sequence u
 	if err != nil {
 		return r, err
 	}
-	if _, err = d.journal.FlushReports(ctx, d.binding, 100, d.reports); err != nil {
+	if err = d.flushExit(ctx, operation); err != nil {
 		return r, err
 	}
 	return r, d.release(ctx, d.binding, exit)
+}
+
+// flushExit reports the journal in order, so earlier outcomes reach the server
+// before the exit that stops its session. Once the owner's reports are refused
+// for good (e.g. withdrawn consent), those can never land: only this stop's own
+// reports are flushed, so a refused input cannot hold back the exact exit.
+func (d *Delivery) flushExit(ctx context.Context, operation string) error {
+	_, err := d.journal.FlushReports(ctx, d.binding, 100, d.reports)
+	if err == nil || d.refused == nil || !d.refused(err) {
+		return err
+	}
+	if _, own := d.journal.FlushOperationReports(ctx, d.binding, operation, 100, d.reports); own != nil {
+		return errors.Join(err, own)
+	}
+	return nil
 }
 
 func (d *Delivery) controlIntent(actor, operation, request, kind string, value any, expires time.Time) (nativereceipts.Intent, error) {

@@ -570,4 +570,158 @@ func TestProductionCompositionAbandonsStartRefusedBeforeFork(t *testing.T) {
 	}
 }
 
+// Risk: once consent is withdrawn and the session's reports are refused for
+// good, the production command listing, command claim, stop authorization and
+// exit receipt all require the revoked grant, so the exact owner can never stop
+// the faulted session and its native process, root and ledger hold stay.
+func TestProductionCompositionOwnerStopsFaultedSessionAfterWithdrawal(t *testing.T) {
+	c := composeProduction(t)
+	f, config, provider := c.f, c.config, c.provider
+	f.begin(t)
+	result, err := config.Host.Start(t.Context(), nativecontract.LocalStart{Intent: f.intent, Cwd: c.root, AccountKey: "real-own-account"})
+	if err != nil || result.Session == nil || result.Session.State != "running" {
+		t.Fatal("start", result, err)
+	}
+	b := *result.Session.CurrentBinding
+	var role chat.Role
+	c.personCall(t, "/api/projects/"+f.project+"/chat-roles", chat.RoleCreate{Kind: "lead", SlotKey: "lead"}, &role)
+	var thread chat.Thread
+	c.personCall(t, "/api/projects/"+f.project+"/chat-threads/resolve", chat.ThreadResolve{RoleID: role.ID}, &thread)
+	c.personCall(t, "/api/chat-threads/"+thread.ID+"/binding", chat.BindingWrite{SessionID: b.HarnessSessionID, ExpectedEpoch: "0"}, &thread)
+	c.approve(t, consent.RetentionScope)
+	in := nativecontract.Input{RequestID: guuid.NewString(), InputID: guuid.NewString(), ExpectedBinding: b, Mode: "now", Text: "work before withdrawal", ExpiresAt: f.now.Add(time.Minute)}
+	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "input", Input: &in}); err != nil {
+		t.Fatal("queue", err)
+	}
+	if delivered, err := config.Host.Input(t.Context(), in); err != nil || delivered.Receipt.State != "write_acknowledged" {
+		t.Fatal("input", delivered, err)
+	}
+	// A real person revocation; the next provider report is refused for good.
+	c.personCall(t, "/api/approvals/"+f.intent.PolicyID+"/revoke", nil, nil)
+	provider.turn("turn_started", guuid.NewString(), 2)
+	select {
+	case err := <-c.denials:
+		var v *nativereceipts.Error
+		if !errors.As(err, &v) || v.Reason != nativecontract.ReasonPermissionRevoked {
+			t.Fatal("wrong receipt refusal", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("withdrawn consent accepted receipt")
+	}
+	var status *client.StatusError
+	if err = config.Poll(t.Context()); !errors.As(err, &status) || status.Status != http.StatusForbidden {
+		t.Fatal("the refused report did not fault the session", err)
+	}
+	// Stop only: other new work stays refused for the withdrawn session.
+	interrupt := nativecontract.Interrupt{RequestID: guuid.NewString(), ExpectedBinding: b, ExpectedTurnRef: guuid.NewString(), ExpiresAt: f.now.Add(time.Minute)}
+	var refusal *nativecontract.ValidationError
+	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "interrupt", Interrupt: &interrupt}); !errors.As(err, &refusal) || refusal.Reason != nativecontract.ReasonPermissionRevoked {
+		t.Fatal("withdrawn consent accepted an interrupt", err)
+	}
+	stop := nativecontract.Stop{RequestID: guuid.NewString(), ExpectedBinding: b, Kind: "graceful", ExpectedProcessIdentityDigest: provider.identity.ProcessIdentityDigest, ExpiresAt: f.now.Add(time.Minute)}
+	queued, err := f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "stop", Stop: &stop})
+	if err != nil {
+		t.Fatal("the exact owner could not stop after withdrawal", err)
+	}
+	provider.mu.Lock()
+	provider.confirmed = true
+	provider.mu.Unlock()
+	// The faulted owner's poll lists, claims and executes only the stop; the
+	// refused input report cannot hold back the stop's own exit receipt.
+	if err = config.Poll(t.Context()); err != nil {
+		t.Fatal("faulted poll did not execute the stop", err)
+	}
+	if provider.closes != 1 {
+		t.Fatal("stop was not executed exactly once", provider.closes)
+	}
+	var stopState, inputState, viewState string
+	var released, stopped bool
+	if err = f.d.Admin.QueryRow(t.Context(), `SELECT (SELECT receipt->>'state' FROM native_session_receipts WHERE operation_id=$2),
+ (SELECT receipt->>'state' FROM native_session_receipts WHERE owned_session_id=$1 AND receipt->>'operation'='input'),
+ b.view->>'state',r.released_at IS NOT NULL,h.stopped_at IS NOT NULL FROM native_session_bindings b
+ JOIN native_session_roots r ON r.owned_session_id=b.id JOIN harness_sessions h ON h.id=b.current_harness_session_id WHERE b.id=$1`, b.OwnedSessionID, queued.Receipt.OperationID).Scan(&stopState, &inputState, &viewState, &released, &stopped); err != nil {
+		t.Fatal(err)
+	}
+	if stopState != "exit_confirmed" || viewState != "stopped" || !released || !stopped {
+		t.Fatal("the confirmed exit did not settle the faulted session", stopState, viewState, released, stopped)
+	}
+	if inputState != "write_acknowledged" {
+		t.Fatal("withdrawn consent accepted an input outcome", inputState)
+	}
+	ledger, err := agentsetup.OpenSharedLedger(filepath.Join(c.root, "ledger"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _, err := ledger.Snapshot()
+	_ = ledger.Close()
+	if err != nil || len(data.Groups) != 0 {
+		t.Fatal("the stopped session kept its ledger hold", data.Groups, err)
+	}
+}
+
+// Risk: a verified no-fork abandonment releases the root's slot but keeps its
+// quota holds and its period-usage estimate, so a refused launch that never
+// opened a provider exhausts the quota and the account cannot start again.
+func TestProductionCompositionAbandonedStartReturnsItsQuota(t *testing.T) {
+	for _, unit := range []string{"window", "runs", "requests", "tokens", "percent"} {
+		t.Run(unit, func(t *testing.T) {
+			c := composeProduction(t)
+			f := c.f
+			// Quota for exactly one launch.
+			f.seed(t, func(tx pgx.Tx) error {
+				if unit == "window" {
+					_, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model)
+ VALUES($1,$2,$3::timestamptz-interval '1 hour',$3::timestamptz+interval '1 hour','requests',1,'unrestricted')`, f.person.TenantID, f.intent.AccountID, f.now)
+					return err
+				}
+				amount := int64(1)
+				if unit == "tokens" {
+					amount = 100_000
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO account_limit_rules(tenant_id,account_id,amount,unit,period,created_by) VALUES($1,$2,$3,$4,'day',$5)`, f.person.TenantID, f.intent.AccountID, amount, unit, f.person.ID)
+				return err
+			})
+			reserved := func() int64 {
+				t.Helper()
+				var held int64
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT coalesce(sum(reserved),0)::bigint FROM account_allowance_windows WHERE account_id=$1`, f.intent.AccountID).Scan(&held); err != nil {
+					t.Fatal(err)
+				}
+				return held
+			}
+			f.begin(t)
+			c.profiles.before = func() {
+				if reserved() < 1 {
+					t.Error("the claim did not reserve its quota")
+				}
+				c.personCall(t, "/api/approvals/"+f.intent.PolicyID+"/revoke", nil, nil)
+			}
+			if _, err := c.config.Host.Start(t.Context(), nativecontract.LocalStart{Intent: f.intent, Cwd: c.root, AccountKey: "real-own-account"}); err == nil {
+				t.Fatal("withdrawn consent did not refuse the launch")
+			}
+			if c.provider.binding.RuntimeEpoch != "" {
+				t.Fatal("refused start reached the provider")
+			}
+			var state string
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT hold_state FROM native_session_roots WHERE account_id=$1 AND released_at IS NOT NULL`, f.intent.AccountID).Scan(&state); err != nil || state != "abandoned" {
+				t.Fatal("refused start was not settled as abandoned", state, err)
+			}
+			if held := reserved(); held != 0 {
+				t.Fatal("abandonment kept quota holds", held)
+			}
+			// The retry on the same account fits the same single-launch quota.
+			f.intent.PolicyID = c.approve(t, consent.SessionScope)
+			f.intent.RequestID = guuid.NewString()
+			next := f.begin(t)
+			result, err := c.config.Host.Start(t.Context(), nativecontract.LocalStart{Intent: f.intent, Cwd: c.root, AccountKey: "real-own-account"})
+			if err != nil || result.Session == nil || result.Session.State != "running" || result.Receipt.OperationID != next.Receipt.OperationID {
+				t.Fatalf("the account's %s quota stayed charged by a launch that never opened a provider: %v", unit, err)
+			}
+			if held := reserved(); held < 1 {
+				t.Fatal("the retry did not hold its own quota", held)
+			}
+		})
+	}
+}
+
 func ioNop(raw []byte) io.ReadCloser { return io.NopCloser(bytes.NewReader(raw)) }

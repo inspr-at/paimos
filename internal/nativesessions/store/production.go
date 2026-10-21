@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -242,13 +243,11 @@ func (s *Store) reportAbandoned(ctx context.Context, d nativecontract.DaemonActo
 		if r.view.State != "starting" {
 			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
 		}
+		// No provider opened: the root's occupancy, its exact quota holds and
+		// its period-usage estimate are all returned in this transaction.
 		now := s.now()
-		tag, err := tx.Exec(ctx, `UPDATE native_session_roots SET released_at=$3,hold_state='released' WHERE owned_session_id=$1 AND runtime_epoch=$2 AND released_at IS NULL AND run_id IS NULL`, b.OwnedSessionID, b.RuntimeEpoch, now)
-		if err != nil {
+		if err = agentaccounts.AbandonNativeRootTx(ctx, tx, r.Intent.AccountID, b.OwnedSessionID, b.RuntimeEpoch, now); err != nil {
 			return err
-		}
-		if tag.RowsAffected() != 1 {
-			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
 		}
 		if _, err = tx.Exec(ctx, `UPDATE harness_sessions SET phase='stopped',stopped_at=coalesce(stopped_at,$2),stop_reason=coalesce(stop_reason,'stopped') WHERE id=$1`, b.HarnessSessionID, now); err != nil {
 			return err
@@ -267,6 +266,18 @@ func (s *Store) reportAbandoned(ctx context.Context, d nativecontract.DaemonActo
 }
 
 func (s *Store) runtimeTx(ctx context.Context, d nativecontract.DaemonActor, b nativecontract.Binding, draining bool, fn func(context.Context, pgx.Tx, consent.Session, receipts.RuntimeProof) error) error {
+	return s.runtime(ctx, d, b, draining, false, fn)
+}
+
+// stopTx serves only the exact owner's stop (its listing, claim and exit):
+// withdrawn consent passes fn a StopOnly session instead of a refusal, while
+// the paired lease and worker permission are still required. fn must refuse
+// anything but a stop for a StopOnly session.
+func (s *Store) stopTx(ctx context.Context, d nativecontract.DaemonActor, b nativecontract.Binding, draining bool, fn func(context.Context, pgx.Tx, consent.Session, receipts.RuntimeProof) error) error {
+	return s.runtime(ctx, d, b, draining, true, fn)
+}
+
+func (s *Store) runtime(ctx context.Context, d nativecontract.DaemonActor, b nativecontract.Binding, draining, stop bool, fn func(context.Context, pgx.Tx, consent.Session, receipts.RuntimeProof) error) error {
 	if s.production == nil {
 		return fail(503, nativecontract.ReasonQualificationMissing)
 	}
@@ -280,7 +291,11 @@ func (s *Store) runtimeTx(ctx context.Context, d nativecontract.DaemonActor, b n
 		if err := agentpairing.Lock(ctx, tx); err != nil {
 			return err
 		}
-		session, proof, err := s.production.authority.RuntimeTx(ctx, tx, d, b, draining)
+		authority := s.production.authority.RuntimeTx
+		if stop {
+			authority = s.production.authority.StopRuntimeTx
+		}
+		session, proof, err := authority(ctx, tx, d, b, draining)
 		if err != nil {
 			return err
 		}
@@ -288,8 +303,11 @@ func (s *Store) runtimeTx(ctx context.Context, d nativecontract.DaemonActor, b n
 			if !reflect.DeepEqual(local.LocalStart.Intent, session.Intent) {
 				return fail(403, nativecontract.ReasonIdentityMismatch)
 			}
-			if err := s.production.consent.RequireLocalProfileTx(ctx, tx, session.Actor, session.Intent, session.Policy, nativecontract.LocalProfile{AccountID: session.Intent.AccountID, WorkspaceRoot: local.WorkspaceRoot}, local.LocalStart.Cwd); err != nil {
-				return err
+			// The local profile guards launch and input; a stop-only session has neither.
+			if !session.StopOnly {
+				if err := s.production.consent.RequireLocalProfileTx(ctx, tx, session.Actor, session.Intent, session.Policy, nativecontract.LocalProfile{AccountID: session.Intent.AccountID, WorkspaceRoot: local.WorkspaceRoot}, local.LocalStart.Cwd); err != nil {
+					return err
+				}
 			}
 		}
 
