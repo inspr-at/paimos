@@ -15,8 +15,9 @@
 // the frame (status note, header) stays, and a read for the other group never lands.
 // AEON-1614: Hide for me. A person hides a goal from their own view (the server keeps
 // it); Display › Show has Done goals (H), Hidden goals ({n}) and Waiting on you, all
-// saved with the Goals preferences. The toolbar's Waiting on you toggle is the same setting. Hidden goals count in the state chips as hidden
-// done goals do. A hide or Undo is bound to the person and goal it was asked for.
+// saved with the Goals preferences; the toolbar's Waiting on you toggle is the same
+// setting. Hidden goals count in the state chips as hidden done goals do. A hide or
+// Undo is bound to the person and goal it was asked for.
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { useSession } from '../../stores/session'
 import { scopeOwner } from '../../lib/identityScope'
