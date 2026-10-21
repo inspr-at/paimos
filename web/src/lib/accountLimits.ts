@@ -49,11 +49,13 @@ export function readingSupport(harness: string, support?: AgentAccount['reading_
   if (support === 'every_5_min') return 'Reads every 5 min'
   if (support === 'statusline') return 'Reads from the status line'
   if (harness === 'claude' || harness === 'codex') return 'Reads during runs'
-  return missingQuota(harness, support).short
+  return harness === 'cursor' ? missingQuota(harness, support).short : "Doesn't show its limit"
 }
 /** The honest line for an account without a current window. */
-export function noWindowLine(harness: string, _host: string, support?: AgentAccount['reading_support']): string {
-  return missingQuota(harness, support).detail
+export function noWindowLine(harness: string, host: string, support?: AgentAccount['reading_support']): string {
+  if (harness === 'claude' || harness === 'codex' || harness === 'cursor') return missingQuota(harness, support).detail
+  if (BLIND.has(harness)) return 'Usage unknown · reserve not enforceable'
+  return host ? `Reading your limits on ${host}…` : 'Reading your limits…'
 }
 
 const KIND_RANK: Record<string, number> = { monthly: 0, weekly: 1, other: 2, '5h': 3 }
