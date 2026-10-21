@@ -130,7 +130,7 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request, route nativecontr
 	defer cancel()
 	actor := nativecontract.Actor{TenantID: p.TenantID, PrincipalID: p.ID, PrincipalKind: string(p.Kind), KeyCeiling: p.Scopes}
 	ctx = context.WithValue(ctx, projectKey{}, r.PathValue("projectId"))
-	if len(r.Header.Values(nativeattach.LocalPersonHeader)) == 1 && r.Header.Get(nativeattach.LocalPersonHeader) == nativeattach.LocalPersonVersion && p.Kind == tenant.Person && p.KeyID == "" && p.AuthKeyID == "" && p.KeyCreatorID == "" && r.Header.Get("Authorization") == "" {
+	if len(r.Header.Values(nativeattach.LocalPersonHeader)) == 1 && r.Header.Get(nativeattach.LocalPersonHeader) == nativeattach.LocalPersonVersion && p.BrowserSession && p.Kind == tenant.Person && p.KeyID == "" && p.AuthKeyID == "" && p.KeyCreatorID == "" && r.Header.Get("Authorization") == "" {
 		if len(r.Header.Get(nativecontract.ControlHeader)) > 4096 || len(r.Header.Values(nativecontract.ControlHeader)) > 1 {
 			nativeError(w, invalid(nativecontract.ReasonBufferFull))
 			return

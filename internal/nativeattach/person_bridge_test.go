@@ -196,7 +196,7 @@ func newBootstrap(t *testing.T) (string, *bootstrapStore, *client.Client) {
 			http.Error(w, "person required", http.StatusUnauthorized)
 			return
 		}
-		p := tenant.Principal{ID: s.view.OwnerPersonID, TenantID: b.TenantID, Kind: tenant.Person}
+		p := tenant.Principal{ID: s.view.OwnerPersonID, TenantID: b.TenantID, Kind: tenant.Person, BrowserSession: r.Header.Get("Authorization") == ""}
 		if r.Header.Get("Authorization") == "Bearer synthetic-person-key" {
 			p.KeyID = uuid.NewString()
 			p.AuthKeyID = p.KeyID
