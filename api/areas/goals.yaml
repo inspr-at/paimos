@@ -5,7 +5,7 @@ paths:
     get:
       operationId: listGoals
       summary: List visible goals with current rollup
-      description: "Filters include home and visible contributing projects. Totals ignore search/state/hide-done and span pages. Computed sorts use the displayed ETA or progress. Up to 100 goals share one materialized expansion query; state and ETA reuse the same invoker work scope. Aggregate root/pair/history budgets shrink the returned page with truncated true and a continuation cursor; a singleton that exceeds its budget is counts-only with expansion too_large. Full-filter totals and computed sorts use bounded batches across at most 1000 matching goals; larger sets require narrower project/group filters."
+      description: "Goal nodes are listed as stored. A release is listed only while journey_releases.released_at is unset and it has a live outcome child; that filter precedes totals, paging and project badges. Filters include home and visible contributing projects. Totals ignore search/state/hide-done and span pages. Computed sorts use the displayed ETA or progress. Up to 100 goals share one materialized expansion query; state and ETA reuse the same invoker work scope. Aggregate root/pair/history budgets shrink the returned page with truncated true and a continuation cursor; a singleton that exceeds its budget is counts-only with expansion too_large. Full-filter totals and computed sorts use bounded batches across at most 1000 matching goals; larger sets require narrower project/group filters."
       security: *auth
       parameters:
         - {name: project, in: query, schema: {type: string, maxLength: 64}}
