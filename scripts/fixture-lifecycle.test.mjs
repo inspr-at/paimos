@@ -57,7 +57,7 @@ test('AEON-1064: interrupted fixture runners leave no owned processes in 20 rand
     const completion = new Promise(resolve => child.once('close', code => { exited = true; resolve(code) }))
     let tracker
     try {
-      await until(() => { assert.equal(exited, false, output); return existsSync(join(directory, 'ready')) })
+      await until(() => { assert.equal(exited, false, `${phase} ${signal}: ${output}`); return existsSync(join(directory, 'ready')) }, () => `${phase} ${signal}: ${output}`)
       const ready = JSON.parse(readFileSync(join(directory, 'ready'), 'utf8'))
       assert.notEqual(ready.worker, process.pid)
       assert.ok(ready.groups.length >= (phase === 'apt' ? 1 : 2), 'a real fixture must be alive at the interruption barrier')

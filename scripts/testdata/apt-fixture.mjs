@@ -96,7 +96,8 @@ export function aptFixture({ mode, shells = false }) {
     for (const name of ['fish', 'zsh']) writeFileSync(join(bin, name), '#!/bin/bash\nexit 0\n', { mode: 0o755 })
   }
   return { state, env: {
-    PATH: `${bin}:/usr/bin:/bin`, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
+    // The stubs stay first; Node's ownership preload also needs ps on Nix.
+    PATH: `${bin}:/usr/bin:/bin:${process.env.PATH}`, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
     AEON_STUB_STATE: state, AEON_AS_ROOT: '', GITHUB_WORKSPACE: fileURLToPath(new URL('../..', import.meta.url)),
     AEON_FIXTURE_NODE: process.execPath, AEON_FIXTURE_APT_HOLD: fileURLToPath(new URL('./apt-hold.mjs', import.meta.url)),
   } }

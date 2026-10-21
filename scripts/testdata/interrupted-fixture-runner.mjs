@@ -22,9 +22,9 @@ test('fixture worker interrupted by its owning test', { timeout: 30000 }, async 
     if (phase === 'apt') {
       const { state, env } = aptFixture({ mode: 'hung' })
       const child = fixtures.spawn('bash', ['-c', 'npx playwright install-deps chromium & wait'], { env, stdio: 'ignore' })
-      await until(() => existsSync(join(state, 'hung')))
+      await until(() => { assert.equal(child.exitCode, null, 'apt fixture exited before hanging'); return existsSync(join(state, 'hung')) })
       // The stub must finish exec and install its parent watchdog first.
-      await until(() => existsSync(join(state, 'watching')))
+      await until(() => { assert.equal(child.exitCode, null, 'apt fixture exited before its watchdog'); return existsSync(join(state, 'watching')) })
       writeFileSync(join(directory, 'ready'), JSON.stringify({ worker: process.pid, parent: child.pid, stub: Number(readFileSync(join(state, 'apt.pid'), 'utf8')), groups: fixtures.snapshot() }))
     } else {
       const lock = join(directory, 'suite.lock'), ready = join(directory, 'hang.ready')
