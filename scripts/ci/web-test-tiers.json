@@ -6372,7 +6372,9 @@
     ,
     {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 Settings prompts only on click and independently enables disables and removes Desk devices","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 rejected writes retain the previous state and never announce success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 a browser that already allows notifications shows the Desk without waiting for the offer read","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 rejected writes and refused prompts keep the previous state in place and never announce success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 the Desk decides its offer before the tabs show, without a band or a late offer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
