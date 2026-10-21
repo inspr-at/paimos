@@ -490,36 +490,29 @@ const minTotal = computed(() => columns.value.reduce((sum, column) => sum + colu
 const layoutWidth = computed(() => layoutTableWidth(width.value, minTotal.value, phone.value))
 const widths = computed(() => layoutWidths(ids.value, layoutWidth.value, props.prefs, dragWidths.value, definitions.value, autoWidths.value))
 function colWidth(id: string) { return id === 'title' ? null : widths.value[id] ?? null }
-// A dragged or saved Title is its own column width. As the only unsized column,
-// a fixed table hands it whatever slack or deficit is left, so the header moves
-// against the pointer while the stored width is already the one a reload paints.
-const pinnedTitle = computed(() => {
-  const live = dragWidths.value.title
-  if (typeof live === 'number' && Number.isFinite(live)) return Math.round(live)
-  const saved = props.prefs?.widths?.title
-  return typeof saved === 'number' && Number.isFinite(saved) ? Math.round(saved) : null
-})
-const pinnedTableWidth = computed(() => {
-  const title = pinnedTitle.value
-  if (title === null || phone.value) return null
-  return title + Object.values(widths.value).reduce<number>((sum, w) => sum + (w ?? 0), 0)
-})
-const tableOverflows = computed(() => !phone.value && ((pinnedTableWidth.value ?? 0) > width.value + 1 || layoutWidth.value > width.value + 1))
+// Title takes what the other columns leave. A saved or dragged Title aims for its width (layoutWidths), but a
+// narrower card or a docked panel bounds it like any saved width; the preference itself stays as it was.
+const othersWidth = computed(() => Object.values(widths.value).reduce<number>((sum, w) => sum + (w ?? 0), 0))
+const titleWidth = computed(() => Math.max(0, Math.round(layoutWidth.value - othersWidth.value)))
+// A dragged or saved Title is its own column width, the bounded one above, which is also what its divider
+// reports and resizes from. As the only unsized column, a fixed table would hand it whatever slack or deficit
+// is left, so the header moved against the pointer while the stored width was already the one a reload paints.
+const titleSized = computed(() => !phone.value && (dragWidths.value.title !== undefined || hasSavedWidth('title', props.prefs)))
+const sizedTableWidth = computed(() => titleSized.value ? titleWidth.value + othersWidth.value : null)
+const tableOverflows = computed(() => !phone.value && ((sizedTableWidth.value ?? 0) > width.value + 1 || layoutWidth.value > width.value + 1))
 function columnStyle(id: string) {
-  if (phone.value && id === 'title') return undefined
-  const value = id === 'title' ? pinnedTitle.value : colWidth(id)
+  const value = id === 'title' ? (titleSized.value ? titleWidth.value : null) : colWidth(id)
   return value ? { width: `${value}px` } : undefined
 }
 const tableStyle = computed(() => {
   if (phone.value) return undefined
-  const pinned = pinnedTableWidth.value
-  if (pinned !== null) return { width: `${pinned}px`, minWidth: `${pinned}px` }
+  const sized = sizedTableWidth.value
+  if (sized !== null) return { width: `${sized}px`, minWidth: `${sized}px` }
   return layoutWidth.value > width.value ? { minWidth: `${layoutWidth.value}px` } : undefined
 })
 function nativeRelease(row: ListItem) {
   return releaseCell(props.nativeReleases?.get(row.id))
 }
-const titleWidth = computed(() => Math.max(0, Math.round(layoutWidth.value - Object.values(widths.value).reduce<number>((sum, w) => sum + (w ?? 0), 0))))
 const shownWidth = (id: string) => id === 'title' ? titleWidth.value : colWidth(id) ?? 0
 function bounds(id: string) {
   if (id === 'title') return titleRoom(ids.value, layoutWidth.value, props.prefs, dragWidths.value, definitions.value)
@@ -721,9 +714,14 @@ function resizeStart(event: PointerEvent, id: string) {
   resizing = { id, startX: event.clientX, startWidth: shownWidth(id) }
   ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
 }
+// A column never moves against the pointer or key: at the edge of its room it stays at the width shown.
+function clampToward(id: string, from: number, to: number) {
+  const next = clampColumn(id, to)
+  return to >= from ? Math.max(from, next) : Math.min(from, next)
+}
 function resizeMove(event: PointerEvent) {
   if (!resizing) return
-  dragWidths.value = { ...dragWidths.value, [resizing.id]: clampColumn(resizing.id, resizing.startWidth + event.clientX - resizing.startX) }
+  dragWidths.value = { ...dragWidths.value, [resizing.id]: clampToward(resizing.id, resizing.startWidth, resizing.startWidth + event.clientX - resizing.startX) }
 }
 function resizeEnd() {
   if (!resizing) return
@@ -734,9 +732,9 @@ function resizeEnd() {
   const liveCard = readCardWidth()
   if (liveCard !== null && liveCard > width.value + 0.5) width.value = liveCard
   const value = dragWidths.value[id]
-  // A click on Title's edge, without a drag, leaves it automatic.
+  // A click on Title's edge, without a drag, leaves it automatic, or aiming for its saved width.
   if (value === undefined || (id === 'title' && Math.abs(value - start) < 1)) {
-    if (id === 'title' && typeof props.prefs?.widths?.title !== 'number') {
+    if (id === 'title') {
       const { title: _title, ...rest } = dragWidths.value
       dragWidths.value = rest
     }
@@ -747,7 +745,10 @@ function resizeEnd() {
 function resizeKey(event: KeyboardEvent, id: string) {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
   event.preventDefault()
-  const next = clampColumn(id, shownWidth(id) + (event.key === 'ArrowRight' ? 16 : -16))
+  const shown = shownWidth(id)
+  const next = clampToward(id, shown, shown + (event.key === 'ArrowRight' ? 16 : -16))
+  // A press that moves nothing keeps the saved width, which a wider card may still use.
+  if (next === shown) return
   dragWidths.value = { ...dragWidths.value, [id]: next }
   emit('widths', { ...(props.prefs?.widths ?? {}), [id]: next })
 }

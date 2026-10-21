@@ -15026,6 +15026,8 @@
     ,
     {"kind":"browser","file":"tests/ticket-workers.spec.ts","name":"the compact worker name stays fully visible and clear of Copy","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/title-divider.spec.ts","name":"a saved title wider than its room gives way to a narrower window, and its divider moves from the width shown","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/title-divider.spec.ts","name":"arrow keys resize the focused title divider and aria-valuenow follows","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/title-divider.spec.ts","name":"double-clicking the title divider resets it to automatic","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
