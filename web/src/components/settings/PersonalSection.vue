@@ -18,6 +18,8 @@ import AgentPauseSettings from './AgentPauseSettings.vue'
 import GraphMotionSettings from './GraphMotionSettings.vue'
 import SessionWatchingSettings from './SessionWatchingSettings.vue'
 import PhoneApprovalSettings from './PhoneApprovalSettings.vue'
+import DeskNotificationSettings from './DeskNotificationSettings.vue'
+import { displayLanguage } from '../../lib/displayLanguage'
 import { useSession } from '../../stores/session'
 import { can } from '../../lib/authz'
 // AEON-1182: your own routines live here (#routines), loaded with the section only.
@@ -85,6 +87,10 @@ const KEYS: { keys: string[][]; label: string }[] = [
 
     <SettingsCard v-if="session.identity?.principal.kind === 'person' && can('profile.read')" title="Security" icon="shield" anchor="security">
       <SessionWatchingSettings :key="`${session.identity?.tenant.id}/${session.identity?.principal.id}`" />
+    </SettingsCard>
+
+    <SettingsCard v-if="session.identity?.principal.kind === 'person' && can('profile.read')" :title="displayLanguage(profile?.locale) === 'de' ? 'Benachrichtigungen' : 'Notifications'" icon="shield" anchor="notifications">
+      <DeskNotificationSettings :key="`${session.identity?.tenant.id}/${session.identity?.principal.id}`" />
     </SettingsCard>
 
     <SettingsCard v-if="session.identity?.principal.kind === 'person' && can('profile.read')" title="Phone approvals" icon="shield" anchor="phone-approvals">
