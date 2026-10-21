@@ -478,6 +478,7 @@ watch(() => props.selectable, () => {
 })
 watch(() => [props.loading, phone.value, props.projectId, [...props.rowsById.keys()].join(','), ids.value.join(','), props.outline], fitLoaded, { flush: 'post' })
 const dragWidths = ref<Partial<Record<string, number>>>({})
+let resizing: { id: string; startX: number; startWidth: number } | null = null
 // Every column but Title has a col width; Title takes the rest (about 960px at most
 // on wide tables, where the spare width widens the text columns instead). Dragging
 // Title's edge gives it a width of its own. The columns beside it move within their
@@ -489,10 +490,29 @@ const minTotal = computed(() => columns.value.reduce((sum, column) => sum + colu
 const layoutWidth = computed(() => layoutTableWidth(width.value, minTotal.value, phone.value))
 const widths = computed(() => layoutWidths(ids.value, layoutWidth.value, props.prefs, dragWidths.value, definitions.value, autoWidths.value))
 function colWidth(id: string) { return id === 'title' ? null : widths.value[id] ?? null }
+// Title takes what the other columns leave. A saved or dragged Title aims for its width (layoutWidths), but a
+// narrower card or a docked panel bounds it like any saved width; the preference itself stays as it was.
+const othersWidth = computed(() => Object.values(widths.value).reduce<number>((sum, w) => sum + (w ?? 0), 0))
+const titleWidth = computed(() => Math.max(0, Math.round(layoutWidth.value - othersWidth.value)))
+// A dragged or saved Title is its own column width, the bounded one above, which is also what its divider
+// reports and resizes from. As the only unsized column, a fixed table would hand it whatever slack or deficit
+// is left, so the header moved against the pointer while the stored width was already the one a reload paints.
+const titleSized = computed(() => !phone.value && (dragWidths.value.title !== undefined || hasSavedWidth('title', props.prefs)))
+const sizedTableWidth = computed(() => titleSized.value ? titleWidth.value + othersWidth.value : null)
+const tableOverflows = computed(() => !phone.value && ((sizedTableWidth.value ?? 0) > width.value + 1 || layoutWidth.value > width.value + 1))
+function columnStyle(id: string) {
+  const value = id === 'title' ? (titleSized.value ? titleWidth.value : null) : colWidth(id)
+  return value ? { width: `${value}px` } : undefined
+}
+const tableStyle = computed(() => {
+  if (phone.value) return undefined
+  const sized = sizedTableWidth.value
+  if (sized !== null) return { width: `${sized}px`, minWidth: `${sized}px` }
+  return layoutWidth.value > width.value ? { minWidth: `${layoutWidth.value}px` } : undefined
+})
 function nativeRelease(row: ListItem) {
   return releaseCell(props.nativeReleases?.get(row.id))
 }
-const titleWidth = computed(() => Math.max(0, Math.round(layoutWidth.value - Object.values(widths.value).reduce<number>((sum, w) => sum + (w ?? 0), 0))))
 const shownWidth = (id: string) => id === 'title' ? titleWidth.value : colWidth(id) ?? 0
 function bounds(id: string) {
   if (id === 'title') return titleRoom(ids.value, layoutWidth.value, props.prefs, dragWidths.value, definitions.value)
@@ -575,6 +595,7 @@ function settleCardWidth(viewportGrew = false) {
   const take = () => {
     requestAnimationFrame(() => {
       if (frame !== cardFrame || !columnsAlive) return
+      if (resizing) { finishCardSettle(frame); return }
       samples.push(readCardWidth())
       if (samples.length % 2 === 1) { take(); return }
       const live = readCardWidth()
@@ -600,6 +621,9 @@ function settleCardWidth(viewportGrew = false) {
   take()
 }
 function applyCardSize(entries: ResizeObserverEntry[]) {
+  // A column drag can report a narrower card. That width would stick (AEON-1401)
+  // and squeeze Title, which is the flexible remainder, by more than the drag.
+  if (resizing) return
   const live = readCardWidth()
   if (live === null) return
   let observed = live
@@ -672,7 +696,6 @@ onBeforeUnmount(() => {
   sizer?.disconnect()
 })
 // ---------- Column widths: drag a header edge; double-click fits, or resets Title ----------
-let resizing: { id: string; startX: number; startWidth: number } | null = null
 // Two presses within 350ms on the same edge fit the column (pointerdown's
 // preventDefault keeps the browser from reporting dblclick reliably). Title
 // returns to automatic instead of fitting its content.
@@ -691,19 +714,27 @@ function resizeStart(event: PointerEvent, id: string) {
   resizing = { id, startX: event.clientX, startWidth: shownWidth(id) }
   ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
 }
+// A column never moves against the pointer or key: at the edge of its room it stays at the width shown.
+function clampToward(id: string, from: number, to: number) {
+  const next = clampColumn(id, to)
+  return to >= from ? Math.max(from, next) : Math.min(from, next)
+}
 function resizeMove(event: PointerEvent) {
   if (!resizing) return
-  dragWidths.value = { ...dragWidths.value, [resizing.id]: clampColumn(resizing.id, resizing.startWidth + event.clientX - resizing.startX) }
+  dragWidths.value = { ...dragWidths.value, [resizing.id]: clampToward(resizing.id, resizing.startWidth, resizing.startWidth + event.clientX - resizing.startX) }
 }
 function resizeEnd() {
   if (!resizing) return
   const id = resizing.id
   const start = resizing.startWidth
   resizing = null
+  // The drag is not a viewport shrink. A wider card read is the card.
+  const liveCard = readCardWidth()
+  if (liveCard !== null && liveCard > width.value + 0.5) width.value = liveCard
   const value = dragWidths.value[id]
-  // A click on Title's edge, without a drag, leaves it automatic.
+  // A click on Title's edge, without a drag, leaves it automatic, or aiming for its saved width.
   if (value === undefined || (id === 'title' && Math.abs(value - start) < 1)) {
-    if (id === 'title' && typeof props.prefs?.widths?.title !== 'number') {
+    if (id === 'title') {
       const { title: _title, ...rest } = dragWidths.value
       dragWidths.value = rest
     }
@@ -714,7 +745,10 @@ function resizeEnd() {
 function resizeKey(event: KeyboardEvent, id: string) {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
   event.preventDefault()
-  const next = clampColumn(id, shownWidth(id) + (event.key === 'ArrowRight' ? 16 : -16))
+  const shown = shownWidth(id)
+  const next = clampToward(id, shown, shown + (event.key === 'ArrowRight' ? 16 : -16))
+  // A press that moves nothing keeps the saved width, which a wider card may still use.
+  if (next === shown) return
   dragWidths.value = { ...dragWidths.value, [id]: next }
   emit('widths', { ...(props.prefs?.widths ?? {}), [id]: next })
 }
@@ -1042,10 +1076,10 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :data-card-width-settled="cardWidthSettled ? '1' : '0'" :data-card-epoch="cardEpoch" :class="[density, { selectable, selecting, customised: customised && !phoneRows, 'phone-rows': phoneRows, overflowing: !phone && layoutWidth > width + 1 }]">
-    <table :style="!phone && layoutWidth > width ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="label ?? (outline ? 'Ticket outline' : 'Tickets')" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
+  <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :data-card-width-settled="cardWidthSettled ? '1' : '0'" :data-card-epoch="cardEpoch" :class="[density, { selectable, selecting, customised: customised && !phoneRows, 'phone-rows': phoneRows, overflowing: tableOverflows }]">
+    <table :style="tableStyle" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="label ?? (outline ? 'Ticket outline' : 'Tickets')" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
-        <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
+        <col v-for="column in columns" :key="column.id" :class="column.cls" :style="columnStyle(column.id)" />
       </colgroup>
       <thead>
         <tr>

@@ -973,6 +973,20 @@
     {
       "classification": "personal",
       "columns": {
+        "created_at": "personal",
+        "goal_id": "personal",
+        "principal_id": "personal",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "hidden_goals"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "capability_digest": "secret",
         "consumed_at": "personal",
         "consumed_by": "personal",

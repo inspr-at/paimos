@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { compileStyle, parse } from '@vue/compiler-sfc'
 import { glimpseControlSpot, glimpseOverlaps, glimpsePlaceControls, glimpseTextMask, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpsePaintClears, headerGlimpseWide, nextHeaderGlimpseWide, headerGlimpseViewportWide } from '../src/lib/headerGlimpse.ts'
 
 const on = { enabled: true, reduced: false, wide: true, tickets: 8 }
@@ -106,6 +108,20 @@ test('text exclusion masks are bounded SVG images with hard and feathered cutout
   assert.match(mask, /viewBox="0 0 1100 224"/)
   assert.match(mask, /feGaussianBlur/)
   assert.equal(mask.match(/x="14" y="24" width="212" height="52"/g)?.length, 2)
+})
+
+test('collapsing the header zeroes the glimpse column, not the project page', () => {
+  const source = readFileSync(new URL('../src/components/work/HeaderGlimpse.vue', import.meta.url), 'utf8')
+  const { descriptor, errors: parseErrors } = parse(source)
+  assert.deepEqual(parseErrors, [])
+  const block = descriptor.styles.find(style => style.scoped)
+  assert.ok(block)
+  const { code, errors } = compileStyle({ source: block.content, id: 'data-v-test', filename: 'HeaderGlimpse.vue', scoped: true })
+  assert.deepEqual(errors, [])
+  // Vue drops a descendant that sits outside :global(), so the 0×0 rule would
+  // land on .project-page.header-collapsed and the 1024px search would step 190→150.
+  assert.match(code, /\.project-page\.header-collapsed \.glimpse-col\s*\{[^}]*width:\s*0 !important/)
+  assert.doesNotMatch(code, /\.project-page\.header-collapsed\s*\{[^}]*width:\s*0/)
 })
 
 test('the shared context pages the Tickets query and drops links outside its membership', async () => {

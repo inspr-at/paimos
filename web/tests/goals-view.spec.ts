@@ -135,7 +135,7 @@ async function mockGoals(page: Page, w: World, options: { failList?: boolean } =
   })
   await page.route(/\/api\/decision-desk\/projection/, route => route.fulfill({ json: {
     items: w.desk.open ? [
-      { id: 'q-gate', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'Which identity should agent reviews run as for the gatekeeper go-live?', created_at: iso(NOW - 3 * HOUR), held: true, href: '', source: '', ticket_key: 'AEON-1394' },
+      { id: 'q-gate', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'Which identity should agent reviews run as for the gatekeeper go-live?', created_at: iso(NOW - 3 * HOUR), held: true, href: '', source: '', ticket_key: 'AEON-1394', asked_by: { id: 'p-lead', name: 'AEON-LEAD' } },
       { id: 'q-arp', kind: 'question', project_id: 'p-pharos', revision: 1, title: 'Allow privileged ARP through an Apple entitlement, or stay without it?', created_at: iso(NOW - 2 * HOUR), held: false, href: '', source: '' },
     ].slice(0, w.desk.open) : [],
     counts: { open: w.desk.open, held: w.desk.open ? 1 : 0, chores: 0 }, has_more: false, as_of: iso(NOW),
@@ -190,9 +190,10 @@ test('Goals is the third segment; the filter and group chips stay put; chips cou
   expect(counts).toEqual([21, 3, 10, 1, 7])
   expect(counts[0]).toBe(counts.slice(1).reduce((a, b) => a + b, 0))
   await expect(page.locator('.goal-list .goal')).toHaveCount(4)
-  const hide = page.getByRole('button', { name: 'Hide done' }), expand = page.locator('.expand-btn')
-  await expect(hide).toHaveAttribute('aria-pressed', 'true')
-  const guard = await controlStability(page, { filter, hide, expand, all: chips.getByRole('radio', { name: /^All/ }), views: page.locator('.view-seg'), display: page.locator('.display-btn') })
+  // AEON-1614: Done goals moved from a toolbar button into Display › Show; H still toggles it.
+  const expand = page.locator('.expand-btn')
+  await expect(page.locator('.goals-chips .toggle-btn')).toHaveCount(0)
+  const guard = await controlStability(page, { filter, expand, all: chips.getByRole('radio', { name: /^All/ }), views: page.locator('.view-seg'), display: page.locator('.display-btn') })
   await guard.check(async () => { await page.keyboard.press('h'); await expect(page.locator('.goal-list .goal')).toHaveCount(5) })
   expect(await chips.getByRole('radio').evaluateAll(buttons => buttons.map(b => Number(b.querySelector('.n')?.textContent)))).toEqual(counts)
   expect(listCalls.at(-1)?.get('hide_done')).toBeNull()
@@ -229,8 +230,10 @@ test('Waiting on you lists live Desk items; header labels sort with LANDS first;
   expect(keyClip.max).not.toBe('none')
   await expect(rows.first()).toContainText('Which identity should agent reviews run as')
   await expect(rows.nth(1).locator('.wkey')).toHaveText('PHAROS')
-  await expect(rows.first().locator('.wgoal')).toHaveText('Release 136 · steady and complete')
-  await expect(rows.nth(1).locator('.wgoal')).toHaveText('Pharos')
+  // AEON-1495 (design aeon-1494, decision 2): each line names its asker and ends in Open.
+  await expect(rows.first().locator('.wby')).toHaveText('· asked by AEON-LEAD')
+  await expect(rows.nth(1).locator('.wby')).toHaveCount(0)
+  await expect(rows.locator('.wopen')).toHaveText(['Open', 'Open'])
   await expect(waiting.getByRole('link', { name: /Open Desk/ })).toHaveAttribute('href', '/decision-desk')
   // A warm full tint, never an edge bar.
   const tint = await waiting.evaluate(el => { const s = getComputedStyle(el, '::before'), own = getComputedStyle(el); return { bg: s.backgroundColor, left: own.borderLeftWidth, top: own.borderTopWidth } })
@@ -530,7 +533,7 @@ test('September lands as Sep, a flat pace says no change, and hidden columns sor
       } else {
         await expect(headers).toHaveCount(3)
         await expect(headers.first()).toBeHidden()
-        const more = page.getByRole('button', { name: 'More: state filter, hide done, expand all' })
+        const more = page.getByRole('button', { name: 'More: state filter, show, expand all' })
         const neighbors = width <= 760 ? { search, views, more } : { search, views }
         // Phones hide every header, so Display names every sort there; wider, only the hidden counts.
         expect(await visibleWords(display)).toEqual([width <= 760 ? 'ETA' : 'Display'])
@@ -570,7 +573,7 @@ test('Display keeps one box through every sort at 1024, 820 and 390, shows only 
     const search = page.locator('.project-search')
     const views = page.locator('.view-seg')
     const phone = width <= 760
-    const neighbors = phone ? { search, views, more: page.getByRole('button', { name: 'More: state filter, hide done, expand all' }) } : { search, views }
+    const neighbors = phone ? { search, views, more: page.getByRole('button', { name: 'More: state filter, show, expand all' }) } : { search, views }
     await display.click()
     const menu = page.getByRole('dialog', { name: 'Display options' })
     await expect(menu).toBeVisible()
@@ -621,7 +624,7 @@ for (const [width, height] of [[1440, 900], [1024, 800], [390, 844]] as const) {
         const expandRow = page.locator('.head-expand')
         await expect(expandRow).toBeVisible()
         expect((await box(expandRow)).height).toBeGreaterThanOrEqual(44)
-        const more = page.getByRole('button', { name: 'More: state filter, hide done, expand all' })
+        const more = page.getByRole('button', { name: 'More: state filter, show, expand all' })
         expect((await box(more)).width).toBeGreaterThanOrEqual(44)
         await more.click()
         await expect(page.getByRole('menuitemradio', { name: /Moving/ })).toBeVisible()
