@@ -310,22 +310,6 @@
     ,
     "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 S6: phone rows at 390 stay as they were (light, dark)"
     ,
-    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 a harness that is not signed in shows disabled and is never checked"
-    ,
-    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 add one harness 1280x800 de dark: one sentence, Add or Deny, today's payload"
-    ,
-    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 add one harness 1280x800 de light: one sentence, Add or Deny, today's payload"
-    ,
-    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 add one harness 1280x800 en light: one sentence, Add or Deny, today's payload"
-    ,
-    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 expired and denied 1280 en and de: one sentence and today's command"
-    ,
-    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 first pairing 1280x800 en and de: Pair or Deny with the harness checklist, today's payload"
-    ,
-    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 phone 390 en and de: Add and Deny full width, 44 px, no overflow"
-    ,
-    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 several harnesses 1280x800 en and de: one row per harness under the title"
-    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -5514,6 +5498,8 @@
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"screenshots of the matrix, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"the pairing review never claims nowhere from a partial read of contexts","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"the pairing review shows the rows the rule pre-fills","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 1024 dark › where 1024 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -6380,21 +6366,23 @@
     ,
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: reduced motion changes only the number, visible or in the background","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 a harness that is not signed in shows disabled and is never checked","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 a harness that is not signed in shows disabled and is never checked","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 de dark: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 de dark: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 de light: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 de light: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 en light: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 en light: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 expired and denied 1280 en and de: one sentence and today's command","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 expired and denied 1280 en and de: one sentence and today's command","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 first pairing 1280x800 en and de: Pair or Deny with the harness checklist, today's payload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 first pairing 1280x800 en and de: Pair or Deny with the harness checklist, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 phone 390 en and de: Add and Deny full width, 44 px, no overflow","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 phone 390 en and de: Add and Deny full width, 44 px, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 several harnesses 1280x800 en and de: one row per harness under the title","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 phone 390: a pointer reaches each harness checkbox and toggles it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 several harnesses 1280x800 en and de: one row per harness under the title","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: a queued narrow table resize preserves the columns after the table grows","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -16069,6 +16057,8 @@
     {"kind":"node","file":"tests/arrival.test.ts","name":"content that arrives above the target after the scroll brings it back to the top, and our own scroll keeps the hold","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/arrival.test.ts","name":"the hold is bounded: it ends after its window, when the target leaves, or when the page lets it go","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/attach-copy.test.ts","name":"AEON-1502 an unread rest of contexts is named, never claimed as nowhere","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/attach-copy.test.ts","name":"AEON-1502 where-lines name Accounts in Settings without a text chevron","tier":"ESSENTIAL"}
     ,
