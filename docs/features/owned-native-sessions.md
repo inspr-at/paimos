@@ -42,6 +42,15 @@ source exists in the owned native process/receipt/heartbeat seam: the existing
 daemon heartbeat carries activity/doing, but has no owned-session progress or
 ETA value to forward. No new estimate or progress mechanism is introduced.
 
+HTTP replay queues release their access fence before waiting on the channel;
+the HTTP writer independently acquires that same fence for each actual write.
+Direct subscribers retain fenced channel delivery. The SQL-backed SSE test
+exposed the previous producer/consumer cycle: `9c8b955e3` returned HTTP 408
+before the first frame; the fix in `dc2bc8471` passed replay, authorized SSE,
+visibility/refusal, revocation, expiry and the retained relay tests. This is a
+regression failure on the implementation before the fix, with no weakened
+assertion, sleep, longer timeout or production qualification.
+
 **Incomplete acceptance:** an integrated input → take → terminal → confirmed
 hand-back → fresh epoch → recovery scenario cannot yet run. The production
 store's command selector currently supports only input, interrupt and stop;
@@ -63,7 +72,7 @@ plus the `agentpairing.Lock` caller entries `harness/module.go` and
 `nativesessions/stream/current.go`. The existing `internal/native*/**` audit
 ownership covers the two added stream files. No migration, permission,
 contract-schema or browser-test-identity row is added. The existing browser
-case gains the withheld-capability regression and six viewport/theme captures;
+case gains the withheld-capability regression and six viewport/theme capture calls;
 it keeps its name, tier and timeout. This is wiring of the existing panel;
 the later takeover/Expert UI still needs its approved Opus design and Tick check.
 
@@ -73,7 +82,32 @@ agentaccounts, reportercontract, harness and stream. Agentd and CLI failed
 on the agm2 fallback: `/bin/true` and `/bin/sleep` are absent, with additional
 probe/version/provenance fixture failures. These tests were not changed or
 skipped. Browser and static runs returned exit 3: mbp2606 was not GREEN.
-Final follow-up validation is recorded in `.agent-status.json`; this partial
+The unchanged failing agentd test families were
+`TestACPLauncherProbeFailureCauses`, `TestAttachLinuxExitedProcessIsKernelConfirmed`,
+`TestCodexSeparateHomesBindQuotaAndIdentityToEachProfile`,
+`TestClaudeBillingProbeRespectsEmailFence`,
+`TestClaudeRotatedLoginsKeepOnlyTheirOwnEnrollmentReady`,
+`TestProbeStatusSeparatesSignOutFromUnavailable`, `TestProbeStatusRejectsDuplicateKeys`,
+`TestProbeStatusOutputCap` and
+`TestClaudeSeparateHomesKeepBothLoginsReadyAndFenceOnlyTheChangedHome`.
+The unchanged failing CLI cases were `TestRunHeartbeatLiveOwnerKeepsBeating`,
+`TestRunHeartbeatLiveOwnerAgainstDatabase`,
+`TestHarnessVersionProbeIsBoundedAndOptional` and
+`TestRulesCompareCLIReportsBlockerAndRefusesUnsafeIO`.
+
+The browser refusal was `mbp2606 not available (night/level protocol); wait or
+rely on PR CI`. The static refusal was `remote paused: mbp2606 not GREEN
+(night protocol, OPS host watch); not falling back to a heavy local run;
+retry later or rely on PR CI`. No browser evidence was produced. Local web
+dependencies are absent, so no local TypeScript syntax check was available
+either. Canonical manifest formatting and `git diff --check` passed.
+The follow-up remote run on `dc2bc8471` passed the stream package's relevant
+cases, both new harness tests and the shared-fence inventory, and compiled
+`cmd/aeon` with no matching tests. The complete stream package then passed
+with `-race -count=1` on `6f5108f2c` (5.179 seconds), after synchronizing the
+fake runtime and deriving its timestamps and injected clock from one database
+sample. Final follow-up validation is recorded in
+`.agent-status.json`; this partial
 build must not be treated as completed acceptance or a release qualification.
 
 ## Existing panel behavior
