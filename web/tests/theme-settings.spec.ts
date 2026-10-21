@@ -67,20 +67,22 @@ async function setupPaged(page: Page, options: { admin?: boolean; fail?: number 
 const card = (page: Page) => page.locator('#colours')
 const sections = (page: Page) => page.getByRole('navigation', { name: 'Settings sections' })
 const bar = (page: Page) => page.getByRole('region', { name: 'Unsaved theme changes' })
-// Risk: a bookmarked card rendered by a slow response is never reached, or
+// Risk: a bookmarked card in a slow-loading section is never reached, or
 // subsequent content pushes it away before the arrival hold has started.
 test('AEON-1366: a late Colours deep link scrolls, rings and holds without moving navigation', async ({ page }, testInfo) => {
   await setup(page)
   await page.setViewportSize({ width: 390, height: 950 })
   await page.clock.install()
   let release!: () => void, requested!: () => void
-  const response = new Promise<void>(resolve => { release = resolve })
+  const section = new Promise<void>(resolve => { release = resolve })
   const request = new Promise<void>(resolve => { requested = resolve })
-  await page.route(/\/api\/themes(?:\?|$)/, async route => { requested(); await response; await route.fallback() })
+  // Session restoration reads themes before routing. Hold the section bundle
+  // instead, so Settings is mounted while its destination is still absent.
+  await page.route(/\/src\/components\/settings\/ThemeSection\.vue(?:\?|$)/, async route => { requested(); await section; await route.fallback() })
   await page.goto('/settings/theme#colours')
   await request
   const links = page.getByRole('navigation', { name: 'Theme cards' })
-  await expect(page.locator('#themes')).toBeVisible()
+  await expect(links).toBeVisible()
   await expect(card(page)).toHaveCount(0)
   await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100))
   await page.clock.runFor(3500)
@@ -89,7 +91,7 @@ test('AEON-1366: a late Colours deep link scrolls, rings and holds without movin
     themes: links.getByRole('link', { name: 'Themes', exact: true }),
     colours: links.getByRole('link', { name: 'Colours', exact: true }),
     agents: links.getByRole('link', { name: 'Agents', exact: true }),
-    create: page.getByRole('button', { name: 'New theme', exact: true }),
+    section: page.getByRole('button', { name: 'Section: Theme. Choose another section', exact: true }),
   })
   const heading = card(page).getByRole('heading', { name: 'Colours', exact: true })
   await guard.check(async () => {
