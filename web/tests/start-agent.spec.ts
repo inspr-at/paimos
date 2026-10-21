@@ -165,13 +165,14 @@ test('AEON-1509 inactive Claude login keeps its account pin and deliberate pause
   const account = sheet.getByLabel('Account', { exact: true })
   await expect(account).toHaveValue(active.id)
   await expect(sheet.getByText('Account available', { exact: true })).toBeVisible()
-  await expect(account.locator(`option[value="${inactive.id}"]`)).toContainText('Inactive login')
+  await expect(account.locator(`option[value="${inactive.id}"]`)).toContainText('Inactive login · switch to it on the computer')
   await expect(account.locator(`option[value="${inactive.id}"]`)).not.toContainText('Settings')
   await account.selectOption(inactive.id)
   // Phone options keep name and plan; the selected login's full advice stays
   // in the status below the controls.
   await page.setViewportSize({ width: 390, height: 1000 })
-  await expect(sheet.getByRole('status')).toContainText('Inactive login; switch to this account or sign in on the computer to use it')
+  await expect(sheet.getByRole('status').locator('strong')).toHaveText('Inactive login · switch to it on the computer')
+  await expect(sheet.getByRole('status').locator('p')).toHaveText('Runs start once this login is active on the computer.')
   await expect(sheet.getByRole('button', { name: 'Run now once', exact: true })).toHaveCount(0)
   await expectStableControls({
     controls: {
@@ -185,10 +186,12 @@ test('AEON-1509 inactive Claude login keeps its account pin and deliberate pause
       { name: 'choose deliberately paused login', run: async () => {
         await account.selectOption(paused.id)
         await expect(sheet.getByRole('status')).toContainText('Paused in Settings / Accounts')
+        await expect(sheet.getByRole('status').locator('p')).toHaveText('The run can queue and starts when this account is ready.')
       } },
       { name: 'return to inactive login', run: async () => {
         await account.selectOption(inactive.id)
-        await expect(sheet.getByRole('status')).toContainText('Inactive login')
+        await expect(sheet.getByRole('status').locator('strong')).toHaveText('Inactive login · switch to it on the computer')
+        await expect(sheet.getByRole('status').locator('p')).toHaveText('Runs start once this login is active on the computer.')
         await expect(sheet.getByRole('status')).not.toContainText('Settings')
       } },
     ],

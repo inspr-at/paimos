@@ -4,6 +4,7 @@ import {
   allowanceWindowLabel, authorFamilyFor, chooseStep, displayText, emptyChoice, emptyTouch, fetchAccountCatalog, fillDefaults, isAccountCatalog, presentCascade, publicModelId, sessionReport, workRoleFor,
   type AgentAccountCatalog, type CatalogAccount, type CascadeChoice, type CascadeTouch,
 } from '../src/lib/accountCascade'
+import { WAIT_CODES } from '../src/lib/capacityWait'
 
 const NOW = Date.parse('2026-09-27T12:00:00Z')
 const profileA = 'b1000000-0000-4000-8000-000000000001'
@@ -150,16 +151,24 @@ describe('account catalog contract', () => {
     inactive.hosts[0].harnesses[0].harness = 'claude'
     const login = presented(inactive).view
     for (const text of [login.accounts[0].label, login.notes.account, login.status.label]) {
-      expect(text).toContain('Inactive login; switch to this account or sign in on the computer to use it')
+      expect(text).toContain('Inactive login · switch to it on the computer')
       expect(text).not.toContain('Settings')
     }
     expect(login.profileId).toBe(profileA)
-    expect(login.status.detail).toContain('can queue')
+    expect(login.status.detail).toBe('Runs start once this login is active on the computer.')
     inactive.hosts[0].harnesses[0].accounts[0].wait = { code: 'state', run_now_allowed: false }
     expect(presented(inactive).view.status.label).toContain('Paused in Settings / Accounts')
+    for (const code of WAIT_CODES) {
+      if (code === 'sign_in') continue
+      inactive.hosts[0].harnesses[0].accounts[0].wait = { code, run_now_allowed: false }
+      expect(presented(inactive).view.status.detail, code).toBe('The run can queue and starts when this account is ready.')
+    }
+    inactive.hosts[0].harnesses[0].accounts[0].wait = { code: 'schedule', run_now_allowed: true }
+    expect(presented(inactive).view.status.detail).toBe('Queue it for then, or run this one now.')
     inactive.hosts[0].harnesses[0].harness = 'codex'
     inactive.hosts[0].harnesses[0].accounts[0].wait = { code: 'sign_in', run_now_allowed: false }
     expect(presented(inactive).view.status.label).toBe('Sign in again on the computer')
+    expect(presented(inactive).view.status.detail).toBe('Runs start once this login is active on the computer.')
   })
 
   it('reads the ticket work type and does not guess an author family', () => {

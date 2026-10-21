@@ -342,7 +342,7 @@ function modelLabel(model: CatalogModel, models: CatalogModel[]) {
   return duplicate && family ? `${name} · ${family}` : name
 }
 function accountWaitText(account: CatalogAccount, harness: string, subject = 'Agents') {
-  if (harness === 'claude' && account.wait?.code === 'sign_in') return 'Inactive login; switch to this account or sign in on the computer to use it'
+  if (harness === 'claude' && account.wait?.code === 'sign_in') return 'Inactive login · switch to it on the computer'
   return account.wait ? capacityWaitText(account.wait, subject) : ''
 }
 function accountOptionLabel(account: CatalogAccount, harness: string) {
@@ -447,7 +447,11 @@ function effortNote(choice: CascadeChoice, model: CatalogModel | undefined, effo
 function statusFor(account: CatalogAccount | undefined, accounts: CatalogAccount[], harness: string): CascadeStatus {
   if (!accounts.length) return { label: 'No enrolled account', detail: 'There is no account to pin for this host and harness.', tone: 'warn' }
   if (!account) return { label: 'Choose an account', detail: 'The run is pinned to the account you choose. It does not fall back to another one.', tone: 'warn' }
-  if (account.wait) return { label: accountWaitText(account, harness, `${harnessLabel(harness)} agents`), detail: account.wait.run_now_allowed ? 'Queue it for then, or run this one now.' : 'The run can queue and starts when this account is ready.', tone: 'warn' }
+  if (account.wait) return {
+    label: accountWaitText(account, harness, `${harnessLabel(harness)} agents`),
+    detail: account.wait.code === 'sign_in' ? 'Runs start once this login is active on the computer.' : account.wait.run_now_allowed ? 'Queue it for then, or run this one now.' : 'The run can queue and starts when this account is ready.',
+    tone: 'warn',
+  }
   if (!account.available) {
     return { label: reasonLabel(account), detail: `${account.unavailable_reasons.map(reason => reasonText(account, reason)).join(' ')} The run can still queue. Routing rechecks this account and does not switch to another.`, tone: 'warn' }
   }
