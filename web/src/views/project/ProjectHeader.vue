@@ -30,6 +30,9 @@ const descriptionRoom = ref(0)
 // Compact chrome keeps the project head in the crumb sheet, so the description
 // has no client box and isClipped stays false. More must still exist for a line
 // that would clip once the sheet opens. The probe is removed before paint.
+// A wide fine pointer never shows More while the head is folded, so it does not
+// probe. A nowrap line in the parent document widens scrollable overflow and
+// drops the toolbar container from the 190px search step to 150px (AEON-1622).
 function hiddenDescriptionClipped(element: HTMLElement): boolean {
   const page = element.closest<HTMLElement>('.project-page')
   const text = getComputedStyle(element)
@@ -42,10 +45,12 @@ function hiddenDescriptionClipped(element: HTMLElement): boolean {
   const clamped = clamp !== '' && clamp !== 'none' && clamp !== '0'
   const host = document.createElement('div')
   host.setAttribute('aria-hidden', 'true')
-  host.style.cssText = 'position:fixed;inset:0 auto auto 0;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;'
+  // Same containment as .description-measure: a 0×0 clip box, not an absolute
+  // nowrap line. overflow:hidden on a fixed box does not keep that line out of
+  // the document's scroll width.
+  host.style.cssText = 'position:fixed;inset:0 auto auto 0;width:0;height:0;overflow:clip;contain:strict;clip-path:inset(50%);visibility:hidden;pointer-events:none;'
   const probe = document.createElement('p')
   probe.textContent = element.textContent ?? ''
-  probe.style.position = 'absolute'
   probe.style.boxSizing = 'border-box'
   probe.style.width = `${width}px`
   probe.style.margin = '0'
@@ -73,11 +78,12 @@ function hiddenDescriptionClipped(element: HTMLElement): boolean {
 watch([descriptionText, descriptionProbe, () => project.value?.description], ([element, probe], _, onCleanup) => {
   if (!element) return
   const measure = () => {
-    const hidden = element.clientWidth <= 0 || element.clientHeight <= 0
-    descriptionClipped.value = hidden ? hiddenDescriptionClipped(element) : isClipped(element)
     const rect = element.getBoundingClientRect()
     const room = Math.max(rect.top - 16, innerHeight - rect.bottom - 16)
-    descriptionNeedsPanel.value = innerWidth <= 720 || matchMedia('(pointer: coarse)').matches || (probe?.offsetHeight ?? 0) > room
+    const needsPanel = innerWidth <= 720 || matchMedia('(pointer: coarse)').matches || (probe?.offsetHeight ?? 0) > room
+    descriptionNeedsPanel.value = needsPanel
+    const hidden = element.clientWidth <= 0 || element.clientHeight <= 0
+    descriptionClipped.value = hidden ? needsPanel && hiddenDescriptionClipped(element) : isClipped(element)
     if (!descriptionClipped.value) descriptionExpanded.value = false
   }
   const observer = new ResizeObserver(measure)
