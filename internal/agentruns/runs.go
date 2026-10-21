@@ -704,9 +704,6 @@ func releaseObsoleteClaim(ctx context.Context, tx pgx.Tx, p tenant.Principal, v 
 }
 
 func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	if p.TransportComputerID != "" && p.RunID != r.PathValue("runId") {
-		return nil, workorders.Fail(403, "run_capability_upgrade_required")
-	}
 	var in struct {
 		Daemon       string                    `json:"daemon_id"`
 		Generation   string                    `json:"daemon_generation"`
@@ -720,6 +717,11 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	if !identifier(in.Daemon) || !identifier(in.Generation) || (len(in.Reservations) == 0 && in.Refusal == "") || len(in.Reservations) > 100 {
 		return nil, workorders.Fail(400, "daemon, generation and reservations required")
+	}
+	// A no-launch verification refusal is metadata. Every executable claim
+	// still needs its server proof, including historical unbound runs.
+	if p.TransportComputerID != "" && p.RunID != r.PathValue("runId") && in.Refusal == "" {
+		return nil, workorders.Fail(403, "run_capability_upgrade_required")
 	}
 	seen := map[string]bool{}
 	for _, id := range in.Reservations {

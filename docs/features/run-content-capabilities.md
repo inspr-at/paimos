@@ -42,7 +42,8 @@ Older daemons can still read metadata. Responses advertise
 `Aeon-Run-Content-Policy: run_content_v1`; unsupported callers receive
 `Aeon-Upgrade-Reason: run_capability_upgrade_required`, including an empty poll,
 and corresponding per-run upgrade reasons. They cannot fetch bodies or claim
-runs through the paired transport. Pairing and API-key person migration remain
+runs through the paired transport. A no-launch verification refusal remains a
+metadata operation and does not require content authority. Pairing and API-key person migration remain
 separate rollout concerns.
 
 The exact owned stop/yield/confirm-exit/control-completion safety routes retain

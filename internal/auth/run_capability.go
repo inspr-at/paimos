@@ -25,7 +25,7 @@ func transportMetadataRoute(r *http.Request) bool {
 	case "GET /api/me", "GET /api/status/help", "GET /api/models",
 		"GET /api/runs", "GET /api/runs/queued", "GET /api/runs/{runId}",
 		"GET /api/runs/queued/notifications", "GET /api/runs/daemon-waits", "GET /api/runs/{runId}/daemon-wait",
-		"PUT /api/runs/{runId}/daemon-wait", "POST /api/runs/{runId}/telemetry", "POST /api/runs/{runId}/capability",
+		"PUT /api/runs/{runId}/daemon-wait", "POST /api/runs/{runId}/telemetry", "POST /api/runs/{runId}/capability", "POST /api/runs/{runId}/claim",
 		"GET /api/agent-pairing/self", "POST /api/agent-pairing/self/disconnect", "POST /api/agent-pairing/self/capacity", "POST /api/agent-pairing/self/ledger",
 		"POST /api/agent-pairing/account-link", "POST /api/agent-pairing/attach",
 		"GET /api/agent-accounts", "GET /api/agent-accounts/use", "GET /api/agent-accounts/capacity/next",

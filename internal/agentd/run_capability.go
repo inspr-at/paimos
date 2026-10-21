@@ -30,6 +30,7 @@ func (t capabilityTransport) RoundTrip(req *http.Request) (*http.Response, error
 	copy := req.Clone(req.Context())
 	// Caller-supplied headers cannot select a sibling capability.
 	copy.Header.Del(db.RunCapabilityHeader)
+	copy.Header.Set(db.RunCapabilityPolicyHeader, db.RunCapabilityPolicy)
 	if token != "" {
 		copy.Header.Set(db.RunCapabilityHeader, token)
 	}
@@ -58,9 +59,9 @@ func (r *Remote) PrepareRunContent(ctx context.Context, run Run, daemon, generat
 	}()
 	if run.RunCapabilityRequired {
 		r.mu.RLock()
-		full := len(r.runCapabilities) >= 256 && r.runCapabilities[run.ID] == ""
+		capacityFull := len(r.runCapabilities) >= 256 && r.runCapabilities[run.ID] == ""
 		r.mu.RUnlock()
-		if full {
+		if capacityFull {
 			return Run{}, Node{}, WorkOrder{}, errors.New("run content credential capacity reached")
 		}
 		var grant struct {
