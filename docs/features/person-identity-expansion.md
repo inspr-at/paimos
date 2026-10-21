@@ -50,8 +50,11 @@ Re-entry replaces both settings, and explicit service/no-principal entries clear
 the node setting.
 
 The restrictive node visibility policy adds these IDs only to `USING`; its
-workspace/project `WITH CHECK` stays unchanged. Attachments, embeddings, embedding
-jobs, relations and events follow their existing node-reference RLS policies.
+workspace/project `WITH CHECK` stays unchanged. An empty grant list is a
+non-indexable constant false in that expression, so an ordinary project list
+keeps its child-index walk. Membership is the same once a grant exists.
+Attachments, embeddings, embedding jobs, relations and events follow their
+existing node-reference RLS policies.
 Rule-resource restrictions and outcome/serves visibility still apply. Node
 bindings never enter `readGrants`, so mutation authorization through `RequireTx`
 still requires workspace/project permission. Endpoint permissions such as

@@ -69,6 +69,22 @@ func TestList6000WithProjectVisibility(t *testing.T) {
 			}
 		}
 		t.Logf("%s 6000-node list with visibility: fastest of 3 = %s", who.name, fastest)
+		// The node-grant arm must not turn the scoped walk into a second access
+		// path. A BitmapOr or a sequential scan of nodes inside CTE scope is the
+		// failure TestList6000WithProjectVisibility saw at 2.1s against 600ms.
+		plans := logListPerformancePlans(t, who.p, path)
+		if types := scopeNodesAccess(plans["list"]); badScopeAccess(types) {
+			t.Fatalf("%s list scope access %v; want index lookups, not a sequential scan or BitmapOr", who.name, types)
+		}
+		if types := scopeNodesAccess(plans["facets"]); badScopeAccess(types) {
+			t.Fatalf("%s facet scope access %v; want index lookups, not a sequential scan or BitmapOr", who.name, types)
+		}
+		visits := nodeVisitsInCTE(plans["list"], "CTE scope", false) + nodeVisitsInCTE(plans["facets"], "CTE scope", false)
+		rejected := scopeRejectedPairs(plans["list"], false) + scopeRejectedPairs(plans["facets"], false)
+		t.Logf("%s scope work: visits=%.0f rejected=%.0f", who.name, visits, rejected)
+		if visits <= 0 || visits+rejected > 4*6001 {
+			t.Fatalf("%s scope work = %.0f visits + %.0f rejected pairs; want at most four passes over 6001 nodes", who.name, visits, rejected)
+		}
 		if fastest >= limit {
 			t.Fatalf("%s 6000-node list exceeded %s: %s", who.name, limit, fastest)
 		}
@@ -88,4 +104,44 @@ func TestList6000WithProjectVisibility(t *testing.T) {
 			t.Fatalf("%s projects overview exceeded %s: %s", who.name, 4*limit, elapsed)
 		}
 	}
+}
+
+// scopeNodesAccess lists how the scoped walk reads nodes, plus any BitmapOr
+// inside that CTE. An empty result means the walk was not found.
+func scopeNodesAccess(plan any) []string {
+	var types []string
+	var walk func(value any, inside bool)
+	walk = func(value any, inside bool) {
+		switch value := value.(type) {
+		case []any:
+			for _, item := range value {
+				walk(item, inside)
+			}
+		case map[string]any:
+			inside = inside || value["Subplan Name"] == "CTE scope"
+			if inside {
+				typ, _ := value["Node Type"].(string)
+				if typ == "BitmapOr" || (value["Relation Name"] == "nodes" && typ != "") {
+					types = append(types, typ)
+				}
+			}
+			walk(value["Plan"], inside)
+			walk(value["Plans"], inside)
+		}
+	}
+	walk(plan, false)
+	return types
+}
+
+func badScopeAccess(types []string) bool {
+	if len(types) == 0 {
+		return true
+	}
+	for _, typ := range types {
+		switch typ {
+		case "Seq Scan", "BitmapOr":
+			return true
+		}
+	}
+	return false
 }
