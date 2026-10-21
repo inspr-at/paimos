@@ -8752,6 +8752,10 @@
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestNativeSessionDSARInventoryMatchesSchema","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestOwnedNativeControlRetainsUnconfirmedWriter","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestPairedNativeStartAndRevalidationKeepSeparateAuthorities","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestProductionCompositionAbandonedStartReturnsItsQuota","tier":"ESSENTIAL"}

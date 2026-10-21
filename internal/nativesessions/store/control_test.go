@@ -259,3 +259,54 @@ func assertNativeReason(t *testing.T, err error, want nativecontract.Reason) {
 func nativeRefuse(reason nativecontract.Reason) error {
 	return &nativecontract.ValidationError{Reason: reason, Path: "$"}
 }
+
+// Risk: an uncertain native close is retried, or its root/account reservation
+// is released and a second writer opens. No elapsed-time assertion is used.
+func TestOwnedNativeControlRetainsUnconfirmedWriter(t *testing.T) {
+	pty := &controlPTYFixture{frames: make(chan nativecontract.TerminalFrame, 1)}
+	c := composeProduction(t, compositionOptions{disableRetention: true, configure: func(f *startFixture, a *consent.Authority, config *agentd.NativeSessionConfig) {
+		a.Capabilities.Take = true
+		a.Capabilities.TakeSupported = true
+		if config != nil {
+			pty.now = f.now
+			config.Terminal = pty
+			config.Qualification = qualifiedControlFixture{}
+		}
+	}})
+	f := c.f
+	f.begin(t)
+	started, err := c.config.Host.Start(t.Context(), nativecontract.LocalStart{Intent: f.intent, Cwd: c.root, AccountKey: "real-own-account"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := *started.Session.CurrentBinding
+	controls, err := interaction.New(f.d.App, interaction.Options{Authority: controlTestAuthority{f.s}, Clock: func(context.Context, pgx.Tx) (time.Time, error) { return f.now, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := controls.Attach(f.personCtx(t), f.actor, nativecontract.AttachIntent{RequestID: guuid.NewString(), ExpectedBinding: b, ClientID: guuid.NewString(), Mode: "control", View: "structured"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := nativecontract.TakeIntent{RequestID: guuid.NewString(), ExpectedBinding: b, ControllerEpoch: held.Controller.Epoch, ExpectedRevision: held.Snapshot.Revision, Rows: 36, Cols: 120, ExpiresAt: f.now.Add(20 * time.Second)}
+	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "take", Take: &in}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.config.Host.Take(t.Context(), in); !errors.Is(err, agentd.ErrProcessesUnconfirmed) {
+		t.Fatalf("unconfirmed group exit: %v", err)
+	}
+	if _, err = c.config.Host.Take(t.Context(), in); err == nil {
+		t.Fatal("uncertain native close was replayed")
+	}
+	if c.provider.closes != 1 || pty.opens != 0 {
+		t.Fatal("an uncertain switch repeated a close or opened a successor", c.provider.closes, pty.opens)
+	}
+	current, err := f.s.Read(f.personCtx(t), f.actor, b)
+	if err != nil || !current.CurrentBinding.Equal(b) {
+		t.Fatal("unconfirmed exit advanced binding", current, err)
+	}
+	var roots int
+	if err = f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM native_session_roots WHERE owned_session_id=$1 AND runtime_epoch=$2 AND released_at IS NULL`, b.OwnedSessionID, b.RuntimeEpoch).Scan(&roots); err != nil || roots != 1 {
+		t.Fatal("uncertain writer lost occupancy", roots, err)
+	}
+}

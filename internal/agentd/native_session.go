@@ -1316,7 +1316,13 @@ func (e *nativeOwned) poll(ctx context.Context) error {
 	b := *e.grant.ExpectedBinding
 	var errs []error
 	if e.faulted() == nil {
-		if _, err := e.journal.FlushReports(ctx, b, 100, e); err != nil {
+		// The provider event loop flushes reports under eventMu too. The
+		// journal permits one flusher; an HTTP completion is earlier than its
+		// durable local report-offset update and cannot serve as that fence.
+		e.eventMu.Lock()
+		_, err := e.journal.FlushReports(ctx, b, 100, e)
+		e.eventMu.Unlock()
+		if err != nil {
 			errs = append(errs, e.fault(err))
 		}
 	}
