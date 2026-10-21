@@ -10,6 +10,7 @@
 // same Waiting on you setting, pressed while the band shows. Its count of open Desk items
 // (the header's) sits on the icon in the Desk badge style and stays while the band is
 // hidden; it overlays the button, so a count that appears or changes moves nothing.
+// Like the band, it paints once the person's preferences are known (its slot is held).
 // Phones keep the ⋯ row, which carries the count.
 import { computed, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
@@ -58,7 +59,7 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
     </button>
   </template>
   <button
-    v-else-if="part === 'waiting'" v-show="person" type="button" class="icon-btn wait-toggle" :aria-pressed="page.showWaiting.value"
+    v-else-if="part === 'waiting'" v-show="person" type="button" class="icon-btn wait-toggle" :class="{ pending: page.prefsSettled.value === false }" :aria-pressed="page.showWaiting.value"
     :aria-label="hideCopy.waitingLabel(waitingCount)" :data-tip="hideCopy.waitingTip(waitingCount)" @click="page.toggleWaiting()"
   ><AppIcon name="person-wait" :size="16" /><span v-if="waitingCount" class="wait-count mono" aria-hidden="true">{{ waitingBadge }}</span></button>
   <template v-else>
@@ -102,8 +103,10 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
 .lbl > span { grid-area: 1 / 1; }
 .lbl > .off { visibility: hidden; }
 .more-btn { display: none; width: 44px; height: 44px; }
-/* Waiting on you: at the view controls' height; pressed while the band shows. */
+/* Waiting on you: at the view controls' height; pressed while the band shows. Its slot is
+   held, but it paints once the person's preferences are known, as the band does. */
 .wait-toggle { position: relative; width: 32px; height: 32px; }
+.wait-toggle.pending { visibility: hidden; }
 .wait-toggle[aria-pressed="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--chip-teal-line); }
 .wait-toggle:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 /* The Desk badge's look (the header's count), laid over the icon's corner so it takes no room. */
