@@ -403,7 +403,7 @@ function assign(error: unknown, fallback: string) {
 .sheet, .computer { display: grid; grid-template-columns: minmax(160px, 1.8fr) minmax(110px, 1fr) minmax(96px, .8fr) minmax(72px, .6fr) auto; gap: 6px 14px; align-items: center; }
 .sheet span:nth-child(4), .last-active { min-width: 0; }
 @container computers (max-width: 760px) {
-  .sheet, .computer { grid-template-columns: minmax(140px, 1.6fr) auto auto auto; }
+  .sheet, .computer { grid-template-columns: minmax(140px, 1.6fr) auto minmax(96px, .8fr) auto; }
   .sheet span:nth-child(4), .last-active { display: none; }
 }
 .sheet { padding: 0 10px 6px; color: var(--ink-3); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; font-variant-ligatures: none; }
