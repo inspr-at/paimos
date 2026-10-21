@@ -149,8 +149,8 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		// Receipt projection and final drain (AEON-1271) enter tenant/tree
 		// before refreshing visibility and invoking current authority. Receipt
 		// events follow row writes; final storage follows authority and row locks.
-		{"../nativesessions/receipts/repository.go", "write", "db.LockTree(", "SELECT aeon_enter_principal("},
-		{"../nativesessions/receipts/repository.go", "write", "SELECT aeon_enter_principal(", "return fn(ctx, tx)"},
+		{"../nativesessions/receipts/repository.go", "write", "db.LockTree(", "db.EnterPrincipal("},
+		{"../nativesessions/receipts/repository.go", "write", "db.EnterPrincipal(", "return fn(ctx, tx)"},
 		{"../nativesessions/receipts/repository.go", "Report", "s.write(", "s.authority.ReceiptTx("},
 		{"../nativesessions/receipts/repository.go", "Report", "s.authority.ReceiptTx(", "authz.RequireTx("},
 		{"../nativesessions/receipts/repository.go", "Report", "authz.RequireTx(", "FOR NO KEY UPDATE"},

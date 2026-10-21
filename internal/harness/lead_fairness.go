@@ -300,7 +300,17 @@ func (m *Module) leadScheduleWait(ctx context.Context, tx pgx.Tx, p tenant.Princ
 				if err != nil {
 					return "", err
 				}
-				if err = leadOwner(ctx, step, p, d.project, other.owner); errors.Is(err, authz.ErrForbidden) {
+				otherPrincipal := tenant.Principal{TenantID: p.TenantID, Kind: tenant.Agent}
+				if other.SessionID == nil {
+					continue
+				}
+				if err := step.QueryRow(ctx, `SELECT agent_principal_id::text FROM harness_sessions WHERE id=$1`, *other.SessionID).Scan(&otherPrincipal.ID); err != nil {
+					if errors.Is(err, pgx.ErrNoRows) {
+						continue
+					}
+					return "", err
+				}
+				if err = leadOwner(ctx, step, otherPrincipal, d.project, other.owner); errors.Is(err, authz.ErrForbidden) {
 					continue
 				} else if err != nil {
 					return "", err
@@ -311,7 +321,7 @@ func (m *Module) leadScheduleWait(ctx context.Context, tx pgx.Tx, p tenant.Princ
 				} else if err != nil {
 					return "", err
 				}
-				projected, err := m.projectLead(ctx, step, p, other)
+				projected, err := m.projectLead(ctx, step, otherPrincipal, other)
 				if err != nil {
 					return "", err
 				}

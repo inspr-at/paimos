@@ -67,6 +67,10 @@ func (s *Repository) Receipts(ctx context.Context, actor nativecontract.Actor, b
 		if err := s.authority.ReadTx(ctx, tx, actor, binding); err != nil {
 			return err
 		}
+		ctx, err = runContext(ctx, tx, p, binding)
+		if err != nil {
+			return err
+		}
 		if err := authz.RequireTx(ctx, tx, p, "harness.read", authz.Scope{ProjectID: binding.ProjectID}); err != nil {
 			return err
 		}

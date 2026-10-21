@@ -4166,6 +4166,8 @@
     ,
     {"kind":"go","package":"internal/authz","name":"TestPairedComputerInventoryRouteStaysAccountManage","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/authz","name":"TestPersonCeiling","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/authz","name":"TestPersonIdentityScopeShapesAndGrantIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestPreviewDenialMessagesAndFlags","tier":"GATED-FULL"}
@@ -5916,6 +5918,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestKeyScopeBatchModesAndOrder","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestLegacySchemaEnterPrincipal","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestLockTenantBlocksOnTheCanonicalFenceStatement","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestLockTenantFencesTheCallerTenantWithoutTenantVisibility","tier":"GATED-FULL"}
@@ -6610,6 +6614,8 @@
     ,
     {"kind":"go","package":"internal/dsar","name":"TestParseCommands","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/dsar","name":"TestPersonCeilingDSAR","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/dsar","name":"TestQuarantineInventoryParsesWithWorkflowColumn","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/dsar","name":"TestRuleBudgetSettingsDBAuthoringStaysMetadata","tier":"ESSENTIAL"}
@@ -6677,6 +6683,8 @@
     {"kind":"go","package":"internal/events","name":"TestMutationReceiptIsExactBoundedAndSuccessOnly","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestNodeChangesAreOmittedFromOtherEvents","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestPersonCeilingEvents","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestPositionIsAbsentWhenEventsKeepCommittingDuringTheRead","tier":"GATED-FULL"}
     ,
@@ -6841,6 +6849,8 @@
     {"kind":"go","package":"internal/goals","name":"TestGoalStorageVisibility","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalTooLargeDetailKeepsOnlyVisibleCounts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestPersonCeilingGoals","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestUpdateDigestRetainsPatchIntent","tier":"ESSENTIAL"}
     ,
@@ -7173,6 +7183,10 @@
     {"kind":"go","package":"internal/harness","name":"TestPausedCoordinatorAdoptsPausedChildrenForContinuation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestPendingApprovalStateRespectsProjectVisibility","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestPersonCeilingLeadProjectionKeepsOtherCaller","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestPersonCeilingLeadRefusesAnotherAgent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProcessRunValidation","tier":"GATED-FULL"}
     ,
@@ -8702,6 +8716,8 @@
     ,
     {"kind":"go","package":"internal/nativesessions/receipts","name":"TestNativePilotDeliveryPersistsFinalAndKeepsHoldThroughDetach","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativesessions/receipts","name":"TestPersonCeilingReceipts","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativesessions/receipts","name":"TestProductionReceiptAuthorityRechecksConsentAndExactEvidence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/receipts","name":"TestReceiptProjectionRejectsQueueAsDeliveryAndScopesPages","tier":"ESSENTIAL"}
@@ -9678,6 +9694,8 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestPersistentDueFailureDoesNotStarveTenant","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestPersonCeilingRecurrence","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestProjectOnlyGrantAndIDOR","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestPublicationEventsProductHistoryAndNoDowntimeBurst","tier":"GATED-FULL"}
@@ -10299,6 +10317,8 @@
     {"kind":"go","package":"internal/rules","name":"TestNextVersionAndBatchIdentity","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rules","name":"TestParseComparisonRejectsProseAndCountDrift","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/rules","name":"TestPersonCeilingRules","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/rules","name":"TestPoliciesRulesPublishHandlerPersonRequired","tier":"GATED-FULL"}
     ,
@@ -11267,6 +11287,8 @@
     {"kind":"go","package":"internal/workorders","name":"TestEndpointBodyNetworkDeadline","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/workorders","name":"TestEndpointPositionedBodyNetworkDeadline","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/workorders","name":"TestPersonCeilingRefresh","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/workqueue","name":"TestQueueReadiness","tier":"ESSENTIAL"}
     ,
