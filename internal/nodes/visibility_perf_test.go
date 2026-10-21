@@ -18,10 +18,10 @@ import (
 const (
 	visibilitySamples = 5
 	// Faceted page over the same 50-node page without facets, after one warmup.
-	// agm2-ci measured 8.62 (list 1.49s, baseline 173ms) for unchanged code.
-	// 25 leaves that headroom and still fails a 10× slowdown of the faceted
-	// page alone (ratio about 86). AEON-1601.
-	visibilityListRatio = 25
+	// Quiet agm2-ci count=10 sits at 1.36–1.53. One loaded sample on that host
+	// was 8.62 (list 1.49s, baseline 173ms). 12 passes that sample. Ten times
+	// the faceted page alone then lands near 14 or higher and fails. AEON-1601.
+	visibilityListRatio = 12
 	// Above the slowest non-regression sample on a loaded hosted runner
 	// (8.66s, #798) and still a hard stop: 10× a 1.5s loaded sample, and
 	// about 25× the old 600ms CI budget. Runner-wide slowness is cancelled
