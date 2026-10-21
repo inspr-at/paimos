@@ -1,23 +1,37 @@
 # Native LEAD integration
 
-## Current status — AEON-1346 slice A
+## Current status — AEON-1593 slice B
 
-End-to-end native sessions do not work yet. No host runs one. Production
-server and daemon defaults stay off, and nothing in this branch turns them on.
+End-to-end native sessions are composed and still default-off. No host runs
+one. Production server and daemon defaults stay off. Nothing in this branch
+turns them on.
 
-This branch is **slice A** of AEON-1346. Slice A ships only:
+Slice A (AEON-1346, on origin/main) shipped consent facts in migrations 1386
+and 1387, AEON-29 person approvals, production receipt authority
+(`ReceiptTx`, `ReadTx`, `FinalTx`) and immutable drain grants. This branch is
+slice B. It does not add attach, take, recovery, accounts, dispatch or CLI
+commands (AEON-1291) and it does not change `StartRun` (AEON-1419).
 
-- consent facts in migrations 1386 and 1387
-- AEON-29 person approvals for `harness.control.native.session` and
-  `harness.control.native.retention`
-- production receipt authority (`ReceiptTx`, `ReadTx`, `FinalTx`) against the
-  current grant and those facts
-- immutable, non-renewable final-drain grants
+- Constructor: `nativeintegration.NewFull` in `internal/nativeintegration/full.go`.
+  Off returns the disabled HTTP module and retains no Store, Services or
+  admission authority. On composes consent, the start Store, command and drain
+  registration, receipt and final authority, relay and `RootAuthority`.
+- Server option: `aeon serve --native-sessions` (default false) in
+  `cmd/aeon/serve.go`. Without it, `NewFull` stays disabled.
+- Daemon options: `aeon-agentd serve --native-sessions` and
+  `--native-sessions-profile`. Both are required together, and only with
+  `--setup-root`, in `cmd/aeon-agentd/main.go`. `pairedNativeSessions` returns
+  nil unless that profile is on the context, so `agentd.NativeProduction` is
+  not installed. `StartLocal` is that constructor's start method.
+- A5: `TestProductionCompositionStartsDeliversAndConfirmsExit` runs a
+  person-approved session through the production host. It rechecks consent at
+  start, delivers the exact input, records the exact turn, persists the
+  explicit final, applies an interrupt, keeps detach from releasing the writer,
+  holds an uncertain exit, reconciles one confirmed exit, starts one
+  retained-source successor, and refuses the next input and receipt after
+  withdrawal. The final drain stays inside the separate retention grant.
 
-**Slice B** is a separate ticket and is not started here. Slice B adds
-production composition of the C0 Store, Services, Host and Launcher; daemon
-`StartLocal`; the A5 start-to-confirmed-exit path with those ports installed;
-and the `cmd/aeon-agentd` serve option.
+Automatic LeadRuntime is unchanged.
 
 Earlier sections record round history. A sentence that consent or final-drain
 authorities were absent describes that earlier handoff. It is not the current
@@ -152,8 +166,9 @@ The protected local start handler now decodes C0 exclusively. An installed
 `StartLocal` callback must resolve the exact persisted original person and
 current grant before using the owning supervisor. Enabled calls also re-observe
 the kernel peer; missing qualification refuses, and the old P1a envelope cannot
-act as a fallback. Local body reads have an explicit server deadline. No callback
-is installed by production `servePairedContext`, so this remains unavailable.
+act as a fallback. Local body reads have an explicit server deadline. Production
+`servePairedContext` installs `StartLocal` only when both daemon options are
+set. Without them the callback stays nil.
 
 `nativeintegration.Delivery` composes an **already owned** C0 transport with the
 P3 input/control journal, durable receipt reporter and explicit-final sink. It
@@ -168,26 +183,26 @@ This component does not launch/adopt a process or itself provide a native grant.
 ## Remaining production dependencies
 
 AEON-1346 slice A adds the consent approval, the facts schema and the current
-transaction authorities. It does not make an end-to-end native session work.
-Runtime composition, daemon `StartLocal`, the A5 start-to-exit path and the
-`cmd/aeon-agentd` serve option are **slice B** and are not started on this
-branch. The explicit daemon serve flag also reaches the separately owned
-command parser described below:
+transaction authorities. AEON-1593 slice B composes them. The rows below are
+the I1b boundary after that composition. Both options stay default-off, and
+nothing is enabled on a host. Attach, take, recovery and the CLI commands
+remain AEON-1291.
 
 | Boundary | Remaining work and safety requirement |
 | --- | --- |
-| Current native consent source; `internal/nativesessions/consent`, `internal/nativesessions/store/types.go`, `internal/agentaccounts/native_session.go` | AEON-1346 implements `consent.Authority` for Store authorization and `RequireNativeGrantTx`. The exact `harness.control.native.session` approval anchors immutable facts in migration 1386; only a current person session owning the paired computer/account can approve. Missing or denied approval, revocation, stale revision, another person, changed policy and another computer all fail closed. The existing paired-start regression now uses actual approvals and the production authority. `RequireLocalProfileTx` additionally compares the resolved physical workspace root and cwd to consent; production launch/input composition must install that check. These ports are not enabled on a host. |
-| `internal/nativeintegration/pilot.go`, `cmd/aeon/serve.go` | **Slice B.** Compose the real start Store with command/control, receipt, private daemon-proof, relay and final-drain authorities into C0 `Store`/`Services`. The start store alone lacks the complete command/report interface. The default-off constructor and the owned delivery component are present; production ports remain uninstalled. |
-| `internal/agentd/native_session.go`, `native_transport.go`, `adapters.go`, `claudeassets/bridge.mjs`, `cmd/aeon-agentd/paired_serve.go` | **Slice B.** Install a qualified person-issued C0 Host/Launcher, daemon `StartLocal` and exact native input/turn/event/final adapter, plus the `cmd/aeon-agentd` serve option. The existing core still uses normalized legacy chat relay callbacks; those cannot be borrowed by the issued daemon key for native final publication. SDK input correlation is retained, but no full C0 provider-event/current-final publisher is installed. Exact native evidence must not be inferred from token text. |
-| `internal/nativesessions/receipts/current.go`, `repository.go`, `final.go`, `internal/nativeintegration/pilot.go` | AEON-1346 implements production `CurrentAuthority` for `ReceiptTx`/`ReadTx`/`FinalTx`: original person/current grant, exact binding, issued pairing key, enrollment, generation, worker-lease digest, original operation metadata and exact provider input/turn/exit evidence. Migration 1387 adds immutable content-free operation metadata and non-renewable final-drain grants. Finals independently re-read a separate `harness.control.native.retention` approval. The real daemon proof exporter and command/drain registration callbacks still need composition; `WithRuntimeProof` is private in-memory authority, never a public-body substitute. |
-| `cmd/aeon/openapi_test.go` | The full fresh-checkout command suite needs its generated OpenAPI prerequisite prepared before tests; the file is outside this write set. The generated bundle passes its own parity check; current full static is refused by the night protocol, and the standalone command suite is not reported green. |
-| `internal/nativesessions/start/start.go`, `internal/agentd/native_after_exit.go`, `native_session.go`, `internal/nativeintegration/pilot.go` | **Slice B.** Connect the existing pinned source-exit/one-writer mechanism to C0's resume/after-exit fields and a fresh current claim, including daemon `StartLocal` and the A5 start-to-confirmed-exit path. The owning first-start helper still refuses resume/after-exit; its composition remains pending and must retain exact source identity and confirmed group exit. CLI serialization alone is not self-handover proof. |
+| Current native consent source; `internal/nativesessions/consent`, `internal/nativesessions/store/types.go`, `internal/agentaccounts/native_session.go` | AEON-1346 implements `consent.Authority` for Store authorization and `RequireNativeGrantTx`. The exact `harness.control.native.session` approval anchors immutable facts in migration 1386; only a current person session owning the paired computer/account can approve. Missing or denied approval, revocation, stale revision, another person, changed policy and another computer all fail closed. The existing paired-start regression uses actual approvals and the production authority. Production start resolves the physical workspace and rechecks that current consent before launch; input and receipt recheck it again. These ports are not enabled on a host. |
+| `internal/nativeintegration/full.go`, `pilot.go`, `cmd/aeon/serve.go` | **Slice B, default-off.** `NewFull` composes the real start Store with command/control, receipt, private daemon-proof, relay and final-drain authorities into C0 `Store`/`Services`. `aeon serve --native-sessions` is the only server switch, and it defaults false. Off keeps the disabled module. `pilot.go` remains the earlier disabled constructor. |
+| `internal/agentd/native_session.go`, `native_transport.go`, `adapters.go`, `claudeassets/bridge.mjs`, `cmd/aeon-agentd/main.go`, `paired_serve.go` | **Slice B, default-off.** `NativeProduction` installs a qualified person-issued C0 Host/Launcher, `StartLocal`, and the exact native input/turn/event/final adapter. The daemon options are `--native-sessions` and `--native-sessions-profile`, both required, and only with `--setup-root`. Without them `paired_serve.go` passes a nil config. The issued daemon key still cannot publish a native final from legacy chat text. Exact native evidence comes from the provider event, not from token text. |
+| `internal/nativesessions/receipts/current.go`, `repository.go`, `final.go`, `internal/nativeintegration/full.go` | AEON-1346 implements production `CurrentAuthority` for `ReceiptTx`/`ReadTx`/`FinalTx`. AEON-1593's `BindProduction` registers command and drain issuance and the private daemon-proof observer. Migration 1387 is unchanged. Finals still re-read a separate `harness.control.native.retention` approval. `WithRuntimeProof` stays private in-memory authority, never a public-body substitute. |
+| `cmd/aeon/openapi_test.go` | Unchanged and outside this write set. The full fresh-checkout command suite still needs its generated OpenAPI prerequisite prepared before tests. This slice does not report that suite green. |
+| `internal/nativesessions/start/start.go`, `internal/agentd/native_after_exit.go`, `native_session.go`, `internal/nativeintegration/full.go` | **Slice B.** A successor start requires the exact retained source writer, the confirmed group exit and a fresh current claim. The composition smoke covers that handover. CLI serialization alone is not the proof. |
 
 The delivery smoke begins with a real managed-coordinator database fixture
 and a fake owned transport. It exercises one delivery section with that fake
 transport. It is not an end-to-end native session, and it does not install the
 production first-start Store, Host, Launcher or the P1a SDK/supervisor path.
-The A5 start-to-exit smoke is slice B.
+The A5 start-to-exit smoke is
+`TestProductionCompositionStartsDeliversAndConfirmsExit`.
 
 ## AEON-1346 slice A — consent, receipts and drain grants
 
@@ -221,20 +236,13 @@ separate retention approval, private chat target, deadline and final/byte caps.
 Issuing the same target/retention context returns the existing window. These
 expansions enable no runtime and retain no worker proof or final text.
 
-Slice A does not finish the first build. **Slice B** adds production
-composition, not more consent invention: the real current workspace check, C0
-Host/Launcher and daemon `StartLocal`, the private receipt proof exporter,
-command/drain registration, the exact provider final adapter, the A5
-start-to-confirmed-exit smoke with those ports, and the `cmd/aeon-agentd`
-serve option. `NativeLocalStart` contains the original start request but no
-operation ID, while claim selects the persisted operation ID and the pending
-command contract excludes starts; an owning resolver must bridge this without
-impersonating the person or enlarging the issued daemon key. The serve option
-needs `cmd/aeon-agentd/main.go`, which owns the serve flag parser and rejects
-paired runtime overrides. No flag, environment switch, host restart or
-permissive fallback was introduced. Both existing production defaults remain
-off, and automatic LeadRuntime is unchanged. No end-to-end native session
-works on this branch.
+Slice A does not finish the first build. **Slice B (AEON-1593, current
+status above)** adds that production composition and leaves both options off.
+`NativeLocalStart` contains the original start request but no operation ID,
+while claim selects the persisted operation ID and the pending command
+contract excludes starts; the owning resolver bridges this without
+impersonating the person or enlarging the issued daemon key. No host restart
+or permissive fallback was introduced. Automatic LeadRuntime is unchanged.
 
 Verification at code commit `838d086bae`: guarded `remote-test.sh` with
 `-count=1` exits **0** for `internal/nativesessions/...`,
@@ -283,12 +291,12 @@ R0 additions in this round are exactly:
 
 | Item | Result |
 | --- | --- |
-| A1: C0 Host/Launcher, start Store, relay, receipts/final sink and attach wiring | SLICE A ONLY. Consent and receipt/drain transaction authorities are implemented. Production Store/Host/Launcher composition, private proof and command/drain issuance are slice B. This is not an end-to-end native session. |
-| A2: person-invoked native path separate from automatic LeadRuntime | SLICE A ONLY. The real paired claim keeps original-person authority separate; C0 CLI/local start selects the persisted person-issued intent. Production `StartLocal` and supervisor ports are slice B and remain uninstalled; automatic LeadRuntime stays disabled. |
-| A3: native roots in legacy account/host admission; exact root context | PASS AT THE IMPLEMENTED BOUNDARIES. Prior pairing/harness and guard-removal evidence is retained. The current paired-start regression now uses actual person native approvals and the production grant authority for original-control, native-grant, pairing and exact-issued-key refusals. No live-pilot qualification is claimed. |
-| A4: default account, confined adapter and legacy CLI compatibility; inventories | PASS AT THE IMPLEMENTED BOUNDARIES. Prior CLI/attach compatibility evidence is retained. AEON-1346 adds two ESSENTIAL rows, two expand-only migrations and their DSAR rows; no role/key ceiling, permission or new route changes. Ownership and tier checks pass; current guarded static validation is refused by the night protocol and remains unproven. |
-| A5: fake start/input/exact turn/explicit final/interrupt/confirmed exit; detach survives | NOT END TO END. Slice A adds a production receipt/final-authority regression and strengthens paired start with actual person consent. The older delivery smoke uses a fake transport and is not a native session on a host. Production first-start, daemon `StartLocal` and confirmed-exit composition are slice B. |
-| A6: concrete disabled pilot for coordinator self-handover | SLICE A ONLY. Default-off production mount and refusal test pass. C0 intent/exit-barrier serialization is concrete and current grant ports are implemented. Installing those ports, the daemon serve option and C0 pinned after-exit launch is slice B. No live handover or enablement. |
+| A1: C0 Host/Launcher, start Store, relay, receipts/final sink and attach wiring | COMPOSITION IN, ATTACH OUT. `NewFull` and `NativeProduction` install Store, Services, Host, Launcher, relay, receipts, finals, private proof and command/drain issuance behind the two default-off options. Attach wiring remains AEON-1291. Not enabled on a host. |
+| A2: person-invoked native path separate from automatic LeadRuntime | PASS AT THE FLAG BOUNDARY. `StartLocal` resolves the persisted person-issued intent and is installed only with both daemon options. Automatic LeadRuntime stays disabled. |
+| A3: native roots in legacy account/host admission; exact root context | PASS AT THE IMPLEMENTED BOUNDARIES. Prior pairing/harness and guard-removal evidence is retained. The paired-start regression uses actual person native approvals. Production start, input and receipt recheck current consent. Missing authority, missing consent, the wrong person and the wrong computer keep the existing refusal codes. No live-pilot qualification is claimed. |
+| A4: default account, confined adapter and legacy CLI compatibility; inventories | PASS AT THE IMPLEMENTED BOUNDARIES. AEON-1593 adds ESSENTIAL rows `TestProductionDefaultsOffAndRequiresAuthorities` and `TestProductionCompositionStartsDeliversAndConfirmsExit`, and fence callers `nativeintegration/root/authority.go`, `nativesessions/store/commands.go` and `nativesessions/store/production.go` (the `pilot.go` lock moved with admission). No new permission, migration, DSAR table, route or key ceiling. |
+| A5: fake start/input/exact turn/explicit final/interrupt/confirmed exit; detach survives | PASS IN `TestProductionCompositionStartsDeliversAndConfirmsExit`. The fake owned provider sits behind real person consent and the production host. Detach does not release the writer. Uncertain exit holds the root. Confirmed exit reconciles once. This is not a live session on a host. |
+| A6: concrete disabled pilot for coordinator self-handover | PASS FOR DEFAULT-OFF OPTIONS. Both flags default false, and the disabled constructors retain no authority. The composition smoke covers one pinned retained-source handover. No live handover and no enablement. |
 
 Z1's validated person-only `terminal_viewer_url` remains in the C0 projection
 and is stripped on agent egress. Publishing the pilot URL and connecting the
@@ -508,7 +516,7 @@ permission, role/key ceiling, web-tier or shard row is introduced.
 At the Round 5 handoff, I1 remained below 100% for the production dependencies
 listed above. Slice A later shipped consent facts, AEON-29 approvals, production
 receipt authority and immutable drain grants, with nothing enabled on a host.
-End-to-end native sessions still do not work. Production composition, daemon
-`StartLocal`, the A5 start-to-exit path and the `cmd/aeon-agentd` serve option
-are slice B. No origin push, deployment, model review gate, other model CLI,
+That handoff did not yet compose a session. AEON-1593 is the slice B named
+here; its result is the current-status section. No origin push, deployment,
+model review gate, other model CLI,
 live daemon restart, vendor call or LEAD switch was performed.
