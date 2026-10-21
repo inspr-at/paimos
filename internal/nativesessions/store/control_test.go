@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
+	guuid "github.com/google/uuid"
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativesessions/consent"
@@ -120,14 +120,14 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 		t.Fatal("start", err)
 	}
 	b := *started.Session.CurrentBinding
-	input := nativecontract.Input{RequestID: uuid.NewString(), InputID: uuid.NewString(), ExpectedBinding: b, Mode: "now", Text: "one structured instruction", ExpiresAt: f.now.Add(time.Minute)}
+	input := nativecontract.Input{RequestID: guuid.NewString(), InputID: guuid.NewString(), ExpectedBinding: b, Mode: "now", Text: "one structured instruction", ExpiresAt: f.now.Add(time.Minute)}
 	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "input", Input: &input}); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := c.config.Host.Input(t.Context(), input); err != nil || out.Receipt.State != "write_acknowledged" {
 		t.Fatal("input", out, err)
 	}
-	turn := uuid.NewString()
+	turn := guuid.NewString()
 	c.provider.turn("turn_started", turn, 2)
 	select {
 	case <-c.turnStarted:
@@ -149,14 +149,14 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 	}
 	attach := func(binding nativecontract.Binding) nativecontract.AttachResult {
 		t.Helper()
-		out, err := controls.Attach(f.personCtx(t), f.actor, nativecontract.AttachIntent{RequestID: uuid.NewString(), ExpectedBinding: binding, ClientID: uuid.NewString(), Mode: "control", View: "structured"})
+		out, err := controls.Attach(f.personCtx(t), f.actor, nativecontract.AttachIntent{RequestID: guuid.NewString(), ExpectedBinding: binding, ClientID: guuid.NewString(), Mode: "control", View: "structured"})
 		if err != nil {
 			t.Fatal("attach controller", err)
 		}
 		return out
 	}
 	held := attach(b)
-	take := nativecontract.TakeIntent{RequestID: uuid.NewString(), ExpectedBinding: b, ControllerEpoch: held.Controller.Epoch, ExpectedRevision: held.Snapshot.Revision, Rows: 36, Cols: 120, ExpiresAt: f.now.Add(20 * time.Second)}
+	take := nativecontract.TakeIntent{RequestID: guuid.NewString(), ExpectedBinding: b, ControllerEpoch: held.Controller.Epoch, ExpectedRevision: held.Snapshot.Revision, Rows: 36, Cols: 120, ExpiresAt: f.now.Add(20 * time.Second)}
 	for _, principal := range []tenant.Principal{f.agent, func() tenant.Principal { p := f.person; p.AuthKeyID = f.agent.KeyID; return p }()} {
 		actor := nativecontract.Actor{TenantID: principal.TenantID, PrincipalID: principal.ID, PrincipalKind: string(principal.Kind), KeyCeiling: principal.Scopes}
 		_, err := f.s.Mutate(tenant.WithPrincipal(t.Context(), principal), actor, nativecontract.Command{Kind: "take", Take: &take})
@@ -222,7 +222,7 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 		t.Fatal("old take was replayed")
 	}
 	hand := attach(takenBinding)
-	back := nativecontract.ReturnIntent{RequestID: uuid.NewString(), ExpectedBinding: takenBinding, ControllerEpoch: hand.Controller.Epoch, ExpectedRevision: hand.Snapshot.Revision, ExpiresAt: f.now.Add(20 * time.Second)}
+	back := nativecontract.ReturnIntent{RequestID: guuid.NewString(), ExpectedBinding: takenBinding, ControllerEpoch: hand.Controller.Epoch, ExpectedRevision: hand.Snapshot.Revision, ExpiresAt: f.now.Add(20 * time.Second)}
 	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "return", Return: &back}); err != nil {
 		t.Fatal("queue hand-back", err)
 	}
