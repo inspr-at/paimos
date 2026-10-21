@@ -83,7 +83,7 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,project_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, f.tenantID, personB, projectB); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, f.tenantID, personB, projectB); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,computer_id) SELECT $1,$2,id,'computer',$3 FROM roles WHERE tenant_id=$1 AND key='admin'`, f.tenantID, personB, *v.ComputerID)
@@ -187,6 +187,19 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	call("GET", "/api/runs/"+a.ID, nil, freshA, true, 403)
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1 AND scope_type='project' AND scope_id=$2`, personB, projectB)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	call("GET", "/api/runs/"+b.ID, nil, tokenB, true, 403)
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, f.tenantID, personB, projectB)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// The same token works immediately before the real generation bump and
 	// fails afterwards; no sleep or real-clock boundary is involved.
 	call("GET", "/api/runs/"+b.ID, nil, tokenB, true, 200)
