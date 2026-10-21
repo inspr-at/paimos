@@ -181,8 +181,8 @@ test('AEON-1474 the Desk decides its offer before the tabs show, without a band 
   await read
   await expect(declined.getByTestId('desk-tab-open')).toBeVisible()
   await expect(declined.getByRole('button', { name: 'Turn on', exact: true })).toHaveCount(0)
-  await expect(declined.locator('.notice-feedback')).toHaveCount(0)
   expect(Math.abs(await band(declined)), 'no band, the gap is the section gap').toBeLessThanOrEqual(0.5)
+  await expect(declined.locator('.notice-feedback')).toHaveCount(0)
   await declined.close()
 
   // While the read is held, only the title shows; the offer and the tabs then appear together.
