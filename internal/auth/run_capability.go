@@ -155,5 +155,8 @@ func runCapabilityTarget(r *http.Request, p tenant.Principal) bool {
 }
 
 func revokedRunEnrollment() error {
-	return &agentpairing.Error{Status: 410, Code: "enrollment_revoked", Message: "enrollment revoked; reconcile local cleanup"}
+	// Run clients historically receive this code in error as well as the
+	// status. Keep the cleanup signal identical when a proof is refused before
+	// the run handler's pairingRunError adapter can run.
+	return &agentpairing.Error{Status: 410, Code: "enrollment_revoked", Message: "enrollment_revoked"}
 }
