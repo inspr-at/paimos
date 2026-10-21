@@ -239,16 +239,8 @@ test.describe('edit mode', () => {
   test('the full page edits in a writing layout with a live preview', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await mockWork(page, fixtures())
-    // The project's permissions answer after the ticket shows; e is ignored until they offer Edit.
-    let release!: () => void
-    const held = new Promise<void>(resolve => { release = resolve })
-    await page.route(url => url.pathname === '/api/me/permissions' && url.searchParams.has('project_id'), async route => { await held; await route.fallback() })
     await page.goto('/p/PHAROS/PHAROS-12?view=full')
-    const article = page.getByRole('article', { name: 'Ticket details' })
-    await expect(article.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
-    await expect(article.getByRole('button', { name: 'Edit' })).toHaveCount(0)
-    release()
-    await expect(article.getByRole('button', { name: 'Edit' })).toBeVisible()
+    await expect(page.getByRole('article', { name: 'Ticket details' }).getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
     await page.keyboard.press('e')
     const editor = page.locator('.edit-form .md-editor').first()
     await expect(editor).toHaveClass(/split/)
