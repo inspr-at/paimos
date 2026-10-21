@@ -86,7 +86,8 @@ const selected = computed(() => selectedHarness(rows.value.map(r => r.key), dial
 const selectedRow = computed(() => rows.value.find(r => r.key === selected.value))
 const infoOpen = computed(() => !folded.value && dialPrefs.prefs.info_open)
 const attention = (key: string) => needsAttention(views.value[key]!)
-const tipOf = (row: typeof rows.value[number]) => chipTip(views.value[row.key]!, row.summary)
+const tipOf = (row: typeof rows.value[number]) => views.value[row.key]!.kind === 'none' && usage.value[row.key]!.kind !== 'none'
+  ? `${row.label} · ${row.summary} · ${usage.value[row.key]!.tip || 'Quota not read yet'}` : chipTip(views.value[row.key]!, row.summary)
 const flagIcon = (key: string) => views.value[key]!.kind === 'at_limit' ? 'pause' : 'alert'
 function toggleInfo() {
   // From the folded dial the toggle opens the dial with the area open; open, it shows or hides the area.
@@ -130,7 +131,8 @@ watch(viewer, () => { openUnit.value = '' })
 function rowClick(event: MouseEvent, key: string) {
   if (!(event.target as HTMLElement).closest('.limit, .f-mode')) pick(key)
 }
-const rowWords = (key: string) => stateWords(views.value[key]!, true)
+const rowWords = (key: string) => views.value[key]!.kind === 'none' && usage.value[key]!.kind !== 'none'
+  ? usage.value[key]!.head || 'Quota not read yet' : stateWords(views.value[key]!, true)
 
 // ---------- Usage per harness (AEON-1497): the quota outlook, read while the dial is shown ----------
 const outlook = useQuotaOutlook()
@@ -138,8 +140,15 @@ let releaseOutlook: (() => void) | undefined
 onMounted(() => { releaseOutlook = outlook.use() })
 onBeforeUnmount(() => releaseOutlook?.())
 const tz = computed(() => snapshot.value?.daily_timezone)
-const usageState = computed(() => outlook.state)
-const usage = computed<Record<string, UsageView>>(() => Object.fromEntries(rows.value.map(r => [r.key, usageView(r.key, outlook.groups.get(r.key), outlook.data?.anchor_hour, tz.value, views.value[r.key]!.accounts, usageState.value, !!outlook.data?.truncated, outlook.since)])))
+const usageState = computed(() => agents.accountsState === 'error' || agents.accountsState === 'forbidden' ? 'error' : agents.accountsState !== 'ready' ? 'loading' : outlook.state)
+const knownAccounts = (key: string) => {
+  const own = agents.accounts.filter(a => a.harness === key && ownAccounts.value.has(a.id))
+  const daily = views.value[key]!.accounts
+  return daily.length ? daily.map(a => ({ ...a, reading_support: own.find(r => r.id === a.account_id)?.reading_support }))
+    : own.map(a => ({ account_id: a.id, label: a.label, reading_support: a.reading_support }))
+}
+const usage = computed<Record<string, UsageView>>(() => Object.fromEntries(rows.value.map(r => [r.key, usageView(r.key, outlook.groups.get(r.key), outlook.data?.anchor_hour, tz.value, knownAccounts(r.key), usageState.value, !!outlook.data?.truncated, outlook.since)])))
+const retryUsage = () => Promise.all([agents.refreshAccounts(), outlook.refresh()])
 /** The words a quota-reporting harness adds to its folded unit; nothing while loading or failed. */
 const usageTip = (key: string) => usageState.value === 'ready' && ['fast', 'slow', 'pace', 'unknown'].includes(usage.value[key]!.kind) ? usage.value[key]!.tip : ''
 const usageIcon = (key: string) => (VERDICT_ICON[usage.value[key]!.kind] || 'ring-dashed') as IconName
@@ -316,7 +325,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
               <DialDetail v-for="row in rows" :key="`ghost-${row.key}`" ghost :view="views[row.key]!" :usage="usage[row.key]!" :usage-state="usageState" :usage-failed="outlook.failed" :usage-since="outlook.since" :total="total" :default-points="defaultPoints" :tz="snapshot.daily_timezone" :until="snapshot.daily_until" :pace-open="false" :boost-open="false" :may-manage="mayManage" />
               <DialDetail :key="selectedRow.key" :view="views[selectedRow.key]!" :usage="usage[selectedRow.key]!" :usage-state="usageState" :usage-failed="outlook.failed" :usage-since="outlook.since" :generated-at="outlook.data?.generated_at" :anchor-hour="outlook.data?.anchor_hour" :total="total" :default-points="defaultPoints" :tz="snapshot.daily_timezone" :until="snapshot.daily_until"
                 :pace-open="dialPrefs.foldOpen(selectedRow.key, 'pace')" :boost-open="dialPrefs.foldOpen(selectedRow.key, 'boost')" :may-manage="mayManage"
-                @change="saveDaily" @fold="dialPrefs.toggleFold(selectedRow.key, $event)" @retry="outlook.refresh" />
+                @change="saveDaily" @fold="dialPrefs.toggleFold(selectedRow.key, $event)" @retry="retryUsage" />
             </div>
           </div>
         </div>

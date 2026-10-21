@@ -198,12 +198,12 @@ async function backInPool(account: AgentAccount) {
                   <span class="meta-current">
                     <template v-if="readinessText(a)"><span class="state">{{ readinessText(a) }}</span><span class="sep"> · </span></template>
                     <template v-if="accountPlan(a)"><span class="plan">{{ accountPlan(a) }}</span><span class="sep"> · </span></template>
-                    <span class="reads">{{ readingSupport(a.harness) }}</span>
+                    <span class="reads">{{ readingSupport(a.harness, a.reading_support) }}</span>
                   </span>
                   <span v-if="retainedReadiness.has(a.id)" class="meta-sizer" aria-hidden="true">
                     <span class="state">{{ retainedReadiness.get(a.id) }}</span><span class="sep"> · </span>
                     <template v-if="accountPlan(a)"><span class="plan">{{ accountPlan(a) }}</span><span class="sep"> · </span></template>
-                    <span class="reads">{{ readingSupport(a.harness) }}</span>
+                    <span class="reads">{{ readingSupport(a.harness, a.reading_support) }}</span>
                   </span>
                 </span>
               </div>

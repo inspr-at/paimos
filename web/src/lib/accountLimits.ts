@@ -35,16 +35,25 @@ export const listReadings = (id: string) => request<CapacityReading[]>(`${base(i
 // ---------- How an account is read ----------
 /** Vendors whose limits Aeon cannot see. */
 export const BLIND = new Set(['grok', 'cursor', 'pi'])
-export function readingSupport(harness: string): string {
-  if (harness === 'codex') return 'Reads every 5 min'
-  if (harness === 'claude') return 'Reads during runs'
-  return "Doesn't show its limit"
+/** Missing measurements do not mean a missing account. Only an advertised reader
+ * can promise idle reads; Claude/Codex otherwise need a run (AEON-1511). */
+export function missingQuota(harness: string, support?: AgentAccount['reading_support']): { short: string; detail: string } {
+  const name = HARNESS_NAME[harness] ?? harness
+  if (harness === 'cursor') return { short: 'Quota unavailable for Cursor', detail: 'Cursor has no supported headless quota source. Starting a run does not unlock quota readings.' }
+  if (support === 'statusline') return { short: 'Waiting for the status line', detail: `${name} quota appears when its status line reports it during a run.` }
+  if (support === 'every_5_min') return { short: 'Waiting for a quota reading', detail: 'This account reports quota every five minutes. No reading has arrived yet.' }
+  if (harness === 'claude' || harness === 'codex') return { short: 'Reads after the first run', detail: `${name} quota readings start with a run on this account. Idle quota reading is not available for this helper.` }
+  return { short: 'Quota source unavailable', detail: `${name} has no supported quota source in PAIMOS.` }
+}
+export function readingSupport(harness: string, support?: AgentAccount['reading_support']): string {
+  if (support === 'every_5_min') return 'Reads every 5 min'
+  if (support === 'statusline') return 'Reads from the status line'
+  if (harness === 'claude' || harness === 'codex') return 'Reads during runs'
+  return missingQuota(harness, support).short
 }
 /** The honest line for an account without a current window. */
-export function noWindowLine(harness: string, host: string): string {
-  if (harness === 'claude') return 'Reads with its first run. Agents can start now.'
-  if (BLIND.has(harness)) return 'Usage unknown · reserve not enforceable'
-  return host ? `Reading your limits on ${host}…` : 'Reading your limits…'
+export function noWindowLine(harness: string, _host: string, support?: AgentAccount['reading_support']): string {
+  return missingQuota(harness, support).detail
 }
 
 const KIND_RANK: Record<string, number> = { monthly: 0, weekly: 1, other: 2, '5h': 3 }

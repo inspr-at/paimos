@@ -189,7 +189,7 @@ test('a provisional window is unknown and is not treated as fully unused', async
   await ready(page, true)
   await expect(dialog(page).getByText('Selected because it has the most allowance left.')).toBeVisible()
   const spare = dialog(page).getByRole('option', { name: /Spare account/ })
-  await expect(spare).toContainText('allowance unknown')
+  await expect(spare).toContainText('Reads after the first run')
   await expect(spare).not.toContainText('100%')
 })
 

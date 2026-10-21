@@ -228,13 +228,13 @@ describe('account catalog contract', () => {
     expect(known.filled.accountId).toBe(knownId)
     expect(known.view.notes.account).toContain('most allowance left')
     expect(known.view.notes.account).toContain('30%')
-    expect(known.view.accounts.find(item => item.value === freshId)?.label).toContain('allowance unknown')
+    expect(known.view.accounts.find(item => item.value === freshId)?.label).toContain('Quota source unavailable')
     expect(known.view.accounts.find(item => item.value === freshId)?.label).not.toContain('100%')
     const mixed = account({
       remaining_fraction: null,
       windows: [measured, unmeasured],
     })
-    expect(presented(catalog([mixed])).view.notes.account).toContain('Allowance is unknown.')
+    expect(presented(catalog([mixed])).view.notes.account).toContain('Idle quota reading is not available for this helper.')
     expect(presented(catalog([mixed])).view.notes.account).not.toMatch(/100%|30%/)
     const inflated = structuredClone(nested)
     inflated.hosts[0].harnesses[0].default_account_id = null
@@ -242,10 +242,10 @@ describe('account catalog contract', () => {
     const unranked = presented(inflated)
     expect(unranked.filled.accountId).toBe('')
     expect(unranked.view.notes.account).not.toContain('most allowance left')
-    expect(unranked.view.accounts.find(item => item.value === freshId)?.label).toContain('allowance unknown')
+    expect(unranked.view.accounts.find(item => item.value === freshId)?.label).toContain('Quota source unavailable')
     expect(unranked.view.accounts.find(item => item.value === freshId)?.label).not.toContain('100%')
     const onlyFresh = presented(catalog([account({ remaining_fraction: 1, windows: [unmeasured] })]))
-    expect(onlyFresh.view.notes.account).toContain('Allowance is unknown.')
+    expect(onlyFresh.view.notes.account).toContain('Idle quota reading is not available for this helper.')
     expect(onlyFresh.view.notes.account).not.toContain('most allowance left')
     expect(onlyFresh.view.notes.account).not.toContain('100%')
     const unread = account({ id: accountA, label: 'Unread', remaining_fraction: null, windows: [{ ...window(5), provisional: true }] })

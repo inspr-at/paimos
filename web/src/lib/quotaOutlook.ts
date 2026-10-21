@@ -5,6 +5,8 @@
 // (verdict, safe pace, forecasts). This module only words that answer and lays out its chart.
 import { api, APIError } from './api.ts'
 import { HARNESS_NAME } from './capacity.ts'
+import { missingQuota } from './accountLimits.ts'
+import type { AgentAccount } from './agents.ts'
 
 export type OutlookAccountState = 'active' | 'ready' | 'full' | 'held' | 'not_reported' | 'private'
 export interface OutlookForecast { kind: 'waits' | 'empties' | 'used_up' | 'unused' | 'enough'; at: string | null; refill_at: string | null; unused_percent: number | null }
@@ -102,7 +104,7 @@ function span(ms: number): string {
 export type UsageKind = 'fast' | 'slow' | 'pace' | 'unknown' | 'held' | 'not_reported' | 'none' | 'pending'
 /** The harnesses whose quota readings the server keeps (AEON-1499); others never report. */
 export const QUOTA_HARNESSES = new Set(['claude', 'codex'])
-export interface KnownAccount { account_id: string; label: string }
+export interface KnownAccount { account_id: string; label: string; reading_support?: AgentAccount['reading_support'] }
 export interface UsageView {
   harness: string; name: string; kind: UsageKind; group: OutlookGroup | null
   /** The plan's accounts of this harness: rows to reserve while the outlook is read. */
@@ -133,14 +135,18 @@ export const VERDICT_ICON: Record<UsageKind, string> = { fast: 'alert', slow: 'h
 export function usageView(harness: string, group: OutlookGroup | undefined, anchorHour: string | undefined, tz?: string, known: KnownAccount[] = [], read: 'loading' | 'ready' | 'error' = 'ready', truncated = false, sinceMs?: number): UsageView {
   const name = HARNESS_NAME[harness] ?? harness
   const base: UsageView = { harness, name, kind: 'none', group: group ?? null, known, head: 'No accounts yet', short: 'No accounts yet', tip: '', muted: '', stale: false, verdict: '', paceLine: '', focus: null }
+  const missing = missingQuota(harness, known[0]?.reading_support)
+  const unreported = (accounts: string): UsageView => ({ ...base, kind: 'not_reported', head: missing.short, short: `${missing.short} · ${accounts}`, tip: missing.detail, muted: accounts })
   if (!group || !group.accounts.length) {
-    if (!known.length) return base
+    if (!known.length) return read === 'ready' ? base : { ...base, kind: 'pending', head: '', short: '' }
     const accounts = `${known.length} ${known.length === 1 ? 'account' : 'accounts'}`
-    if (read === 'ready' || !QUOTA_HARNESSES.has(harness)) return { ...base, kind: 'not_reported', head: 'Quota not reported', short: `Quota not reported · ${accounts}`, muted: accounts }
+    if (read === 'ready' || !QUOTA_HARNESSES.has(harness)) return unreported(accounts)
     return { ...base, kind: 'pending', head: '', short: '' }
   }
   const n = group.accounts.length, accounts = `${n} ${n === 1 ? 'account' : 'accounts'}`
-  if (group.state === 'not_reported') return { ...base, kind: 'not_reported', head: 'Quota not reported', short: `Quota not reported · ${accounts}`, muted: accounts }
+  if (group.state === 'not_reported') return group.accounts.every(a => a.state === 'private')
+    ? { ...unreported(accounts), head: 'Quota details are private', short: `Quota details are private · ${accounts}`, tip: 'Quota details are hidden by these accounts’ usage sharing settings.' }
+    : unreported(accounts)
   if (group.state === 'held') return { ...base, kind: 'held', head: n === 1 ? 'The account is held.' : 'Every account is held.', short: 'all accounts held', tip: `${name}: every account is held`, muted: accounts }
   const label = (id: string) => {
     const account = group.accounts.find(a => a.account_id === id)
@@ -205,7 +211,7 @@ export interface AccountRow {
   stateWord: string; stateIcon: string
 }
 export function accountRows(group: OutlookGroup | null, tz?: string, known: KnownAccount[] = [], sinceMs?: number): AccountRow[] {
-  if (!group) return known.map((a, i) => ({ id: a.account_id, name: a.label, shade: shadeOf(known.length, i), state: 'not_reported', left: null, refills: '', forecast: '', tone: '', stateWord: '', stateIcon: '' }))
+  if (!group || !group.accounts.length) return known.map((a, i) => ({ id: a.account_id, name: a.label, shade: shadeOf(known.length, i), state: 'not_reported', left: null, refills: '', forecast: '', tone: '', stateWord: '', stateIcon: '' }))
   const n = group.accounts.length
   return group.accounts.map((a, i) => {
     const row: AccountRow = { id: a.account_id, name: a.state === 'private' ? 'Private account' : a.label, shade: shadeOf(n, i), state: a.state, left: null, refills: '', forecast: '', tone: '', stateWord: '', stateIcon: '' }

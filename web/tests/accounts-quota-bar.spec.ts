@@ -70,8 +70,8 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
       await expect(caption(ACCOUNTS.spare)).toHaveText('Low · 9 % left · agents stopped at the floor')
       await expect(caption(ACCOUNTS.studio)).toHaveText('78 % left · reading out of date')
       // Outside the plan and without a vendor reading: never a guess.
-      await expect(caption(ACCOUNTS.cursor)).toHaveText('Quota not reported')
-      await expect(listRow(page, ACCOUNTS.cursor).locator('[data-quota-bar]')).toHaveAttribute('aria-label', /quota not reported/)
+      await expect(caption(ACCOUNTS.cursor)).toHaveText('Quota unavailable for Cursor')
+      await expect(listRow(page, ACCOUNTS.cursor).locator('[data-quota-bar]')).toHaveAttribute('aria-label', /Cursor has no supported headless quota source/)
       await expect(listRow(page, ACCOUNTS.main).locator('[data-quota-bar]')).toHaveAttribute('aria-label', /58 % used this week; today’s limit 62 %;.*floor 10 %\./)
       await expect(page.locator('.acc-lh [data-quota-legend]')).toBeVisible({ visible: width > 600 })
       await expect(page.locator('#quota-warnings')).toContainText('Warn me when an account is low: at 10 % left, urgently at 3 %. Warnings never stop agents.')

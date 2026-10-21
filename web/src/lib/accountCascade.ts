@@ -7,6 +7,7 @@
 import { api } from './api.ts'
 import { capacityWaitText, isCapacityWait, type CapacityWait } from './capacityWait.ts'
 import { duration, harnessLabel } from './agentState.ts'
+import { missingQuota } from './accountLimits.ts'
 
 export const WORK_ROLES = ['scout', 'mechanical', 'build', 'build-hard', 'review-gate'] as const
 export type WorkRole = typeof WORK_ROLES[number]
@@ -304,14 +305,14 @@ function tightestWindow(account: CatalogAccount) {
   }
   return best?.window ?? null
 }
-function allowanceSentence(account: CatalogAccount) {
-  if (!allowanceKnown(account) || account.remaining_fraction == null) return 'Allowance is unknown.'
+function allowanceSentence(account: CatalogAccount, harness: string) {
+  if (!allowanceKnown(account) || account.remaining_fraction == null) return missingQuota(harness).detail
   const pct = Math.round(Math.min(1, Math.max(0, account.remaining_fraction)) * 100)
   const window = tightestWindow(account)
   return window ? `${pct}% of the ${allowanceWindowLabel(window)} window is left.` : `${pct}% is left.`
 }
-function allowancePhrase(account: CatalogAccount) {
-  if (!allowanceKnown(account) || account.remaining_fraction == null) return 'allowance unknown'
+function allowancePhrase(account: CatalogAccount, harness: string) {
+  if (!allowanceKnown(account) || account.remaining_fraction == null) return missingQuota(harness).short
   const pct = `${Math.round(Math.min(1, Math.max(0, account.remaining_fraction)) * 100)}%`
   const window = tightestWindow(account)
   return window ? `${pct} of ${allowanceWindowLabel(window)} left` : `${pct} left`
@@ -341,9 +342,9 @@ function modelLabel(model: CatalogModel, models: CatalogModel[]) {
   const duplicate = models.filter(item => item.model === model.model).length > 1
   return duplicate && family ? `${name} · ${family}` : name
 }
-function accountOptionLabel(account: CatalogAccount) {
+function accountOptionLabel(account: CatalogAccount, harness: string) {
   const plan = accountPlan(account)
-  const extra = account.wait ? capacityWaitText(account.wait) : account.available ? allowancePhrase(account) : account.unavailable_reasons.map(reason => reasonText(account, reason).replace(/\.$/, '')).join('; ')
+  const extra = account.wait ? capacityWaitText(account.wait) : account.available ? allowancePhrase(account, harness) : account.unavailable_reasons.map(reason => reasonText(account, reason).replace(/\.$/, '')).join('; ')
   return [accountName(account), plan, extra].filter(Boolean).join(' · ')
 }
 
@@ -372,7 +373,7 @@ export function presentCascade(input: CascadeContext, choice: CascadeChoice, tou
   return {
     hosts,
     harnesses: (host?.harnesses ?? []).map(item => ({ value: item.harness, label: harnessLabel(item.harness) })),
-    accounts: accounts.map(item => ({ value: item.id, label: accountOptionLabel(item) })),
+    accounts: accounts.map(item => ({ value: item.id, label: accountOptionLabel(item, choice.harness) })),
     models: models.map(item => ({ value: modelKey(item), label: modelLabel(item, models) })),
     efforts: efforts.map(effort => ({ value: effort.model_profile_id, label: effortLabel(effort.effort) })),
     notes: {
@@ -419,7 +420,7 @@ function accountNote(choice: CascadeChoice, touch: CascadeTouch, accounts: Catal
   if (!account) return 'Choose an account. An unavailable account stays listed with the reason it cannot be the default.'
   if (account.wait) return capacityWaitText(account.wait)
   if (!account.available) return account.unavailable_reasons.map(reason => reasonText(account, reason)).join(' ')
-  const allowance = allowanceSentence(account)
+  const allowance = allowanceSentence(account, choice.harness)
   if (accounts.length === 1) return `Only one account is enrolled here. ${allowance}`
   if (!touch.account && account.id === defaultId && allowanceKnown(account)) return `Selected because it has the most allowance left. ${allowance}`
   return `Only this account will be used. ${allowance}`

@@ -55,7 +55,7 @@ async function setup(page: Page, options: Options = {}) {
     await gated
     return state.outlook === 'error' ? route.fulfill({ status: 500, json: { error: 'unavailable' } }) : route.fulfill({ json: state.outlook })
   })
-  return { state, gate: { release: open } as Gate }
+  return { state, gate: { release: open } as Gate, data, plan }
 }
 const body = (page: Page) => page.locator('.dial-card')
 const control = (page: Page) => page.locator('.cdial')
@@ -74,6 +74,48 @@ function withPrivate(outlook: QuotaOutlook): QuotaOutlook {
   Object.assign(copy.groups[0]!.accounts[1]!, { state: 'private', pooled: false, used_percent: null, limit_percent: null, resets_at: null, read_at: null, reading_age_seconds: null, forecast: null })
   return copy
 }
+
+// R10/R2: an enrolled account without daily/quota rows is still an account;
+// failed inventory reads and someone else's enrollment must not stand in for it.
+test('AEON-1511: enrolled accounts without readings stay visible, with a reason and stable controls', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  const { data, plan } = await setup(page, { outlook: { ...scenarios.fast, groups: [] } })
+  plan.daily_state = {}
+  const own = data.accounts.find(a => a.harness === 'claude')!
+  let failed = true
+  await page.route('**/api/agent-accounts', route => route.fulfill(failed
+    ? { status: 503, json: { error: 'unavailable' } }
+    : { json: [...data.accounts, { ...own, id: 'ac000000-0000-4000-8000-000000000099', owner_person_id: 'another-person', label: 'Another person’s account' }] }))
+  await page.goto('/agents')
+  const claude = detail(page, 'claude')
+  await expect(claude.getByRole('alert')).toContainText('Usage couldn’t be read')
+  await expect(claude).not.toContainText('no account yet')
+  await expect(row(page, 'claude').locator('.sub')).toHaveText('Usage not read')
+  failed = false
+  await claude.getByRole('button', { name: 'Try again' }).click()
+  await expect(claude.getByRole('heading')).toHaveText('Claude · quota')
+  await expect(claude.locator('.ub-acc')).toHaveCount(1)
+  await expect(claude.locator('.ub-name')).toHaveText(own.label)
+  await expect(claude.locator('.ub-nr')).toHaveText('Reads after the first run')
+  await expect(claude.locator('.ub-empty')).toHaveText('Claude quota readings start with a run on this account. Idle quota reading is not available for this helper.')
+  await expect(claude).not.toContainText('Another person’s account')
+  await expect(row(page, 'claude').locator('.f-sel')).not.toHaveAttribute('data-tip', /no account to read/)
+  await expectStableControls({
+    controls: { claude: row(page, 'claude').locator('.f-sel'), cursor: row(page, 'cursor').locator('.f-sel'), limits: row(page, 'claude').locator('.limit') },
+    scrollAreas: { dial: body(page) },
+    interactions: [{ name: 'select Cursor without quota', run: async () => {
+      await row(page, 'cursor').locator('.nm').click()
+      const cursor = detail(page, 'cursor')
+      await expect(cursor.getByRole('heading')).toHaveText('Cursor · quota')
+      await expect(cursor.locator('.ub-nr')).toHaveText('Quota unavailable for Cursor')
+      await expect(cursor.locator('.ub-empty')).toContainText('no supported headless quota source')
+    } }, { name: 'return to the enrolled Claude account', run: async () => {
+      await row(page, 'claude').locator('.nm').click()
+      await expect(claude.locator('.ub-nr')).toHaveText('Reads after the first run')
+    } }],
+  })
+  await body(page).screenshot({ path: info.outputPath('aeon-1511-enrolled-no-readings.png'), animations: 'disabled' })
+})
 
 for (const width of [1440, 1024, 390]) {
   const phone = width < 720
@@ -98,7 +140,7 @@ for (const width of [1440, 1024, 390]) {
     await expect(row(page, 'claude').locator('.sub')).toHaveText(SHORT)
     await expect(row(page, 'claude').locator('.sub .vw')).toHaveAccessibleName('Too fast')
     await expect(row(page, 'codex').locator('.sub')).toHaveText('enough until refill')
-    await expect(row(page, 'cursor').locator('.sub')).toHaveText('Quota not reported · 2 accounts')
+    await expect(row(page, 'cursor').locator('.sub')).toHaveText('Quota unavailable for Cursor · 2 accounts')
     // The headline, the pool in muted ink, the verdict with the safe pace.
     await expect(claude.locator('.ub-hd')).toHaveText(HEAD)
     await expect(claude.locator('.ub-l2')).toHaveText('77 % of the pool used · 3 accounts · sampled 13:10')
@@ -243,11 +285,11 @@ for (const width of [1440, 1024, 390]) {
     // Cursor reports no quota: a quiet chart sentence and dashed rings, never a curve.
     await row(page, 'cursor').locator('.nm').click()
     const cursor = detail(page, 'cursor')
-    await expect(cursor.locator('.ub-hd')).toHaveText('Quota not reported· 2 accounts')
-    await expect(cursor.locator('.ub-empty')).toHaveText('Cursor doesn’t report quota. Burn appears once it does.')
+    await expect(cursor.locator('.ub-hd')).toHaveText('Quota unavailable for Cursor· 2 accounts')
+    await expect(cursor.locator('.ub-empty')).toHaveText('Cursor has no supported headless quota source. Starting a run does not unlock quota readings.')
     await expect(cursor.locator('.ub-plot svg')).toHaveCount(0)
     if (phone) await cursor.locator('.ub-acc-t').click()
-    await expect(cursor.locator('.ub-nr')).toHaveText(['Quota not reported', 'Quota not reported'])
+    await expect(cursor.locator('.ub-nr')).toHaveText(['Quota unavailable for Cursor', 'Quota unavailable for Cursor'])
     await body(page).screenshot({ path: info.outputPath(`${width}-light-cursor.png`), animations: 'disabled' })
     if (phone) {
       // Every new target a finger uses reaches 44 px.

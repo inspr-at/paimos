@@ -37,11 +37,13 @@ test('limits set by hand before the sentence show while they still apply', () =>
 })
 
 test('how an account is read, and its windows and last readings', () => {
-  assert.equal(readingSupport('codex'), 'Reads every 5 min')
+  assert.equal(readingSupport('codex'), 'Reads during runs')
+  assert.equal(readingSupport('codex', 'every_5_min'), 'Reads every 5 min')
+  assert.equal(readingSupport('claude', 'statusline'), 'Reads from the status line')
   assert.equal(readingSupport('claude'), 'Reads during runs')
-  assert.equal(readingSupport('cursor'), "Doesn't show its limit")
-  assert.equal(noWindowLine('claude', 'build-7'), 'Reads with its first run. Agents can start now.')
-  assert.equal(noWindowLine('codex', 'build-7'), 'Reading your limits on build-7…')
+  assert.equal(readingSupport('cursor'), 'Quota unavailable for Cursor')
+  assert.equal(noWindowLine('claude', 'build-7'), 'Claude quota readings start with a run on this account. Idle quota reading is not available for this helper.')
+  assert.equal(noWindowLine('codex', 'build-7'), 'Codex quota readings start with a run on this account. Idle quota reading is not available for this helper.')
   const win = (kind: CapacityReading['window_kind'], bucket = '') => ({ reading: { window_kind: kind, bucket } } as CapacityWindow)
   assert.equal(windowLabel(win('weekly', 'seven_day_opus'), 'claude'), 'Weekly · Opus')
   assert.equal(windowLabel(win('5h', 'codex'), 'codex'), '5-hour')

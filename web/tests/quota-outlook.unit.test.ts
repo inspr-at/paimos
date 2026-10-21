@@ -29,7 +29,7 @@ describe('the answer in words', () => {
     expect(view('fast', 'codex')).toMatchObject({ kind: 'pace', head: 'Enough until the next refill (Tue\u00a009:12).', short: 'enough until refill', tip: 'Codex has enough until the refill Tue\u00a009:12' })
   })
   it('says what is missing instead of inventing it', () => {
-    expect(view('fast', 'cursor')).toMatchObject({ kind: 'not_reported', head: 'Quota not reported', short: 'Quota not reported · 2 accounts', tip: '' })
+    expect(view('fast', 'cursor')).toMatchObject({ kind: 'not_reported', head: 'Quota unavailable for Cursor', short: 'Quota unavailable for Cursor · 2 accounts', tip: 'Cursor has no supported headless quota source. Starting a run does not unlock quota readings.' })
     expect(usageView('grok', undefined, outlooks.fast.anchor_hour, 'UTC')).toMatchObject({ kind: 'none', head: 'No accounts yet', tip: '' })
     const old = structuredClone(group('fast', 'claude'))
     old.pool!.sampled_age_seconds = 3 * 3600
@@ -52,11 +52,18 @@ describe('the answer in words', () => {
     const known = [{ account_id: 'a', label: 'one@' }, { account_id: 'b', label: 'two@' }]
     expect(usageView('claude', undefined, undefined, 'UTC', known, 'loading')).toMatchObject({ kind: 'pending', known })
     expect(usageView('claude', undefined, undefined, 'UTC', known, 'error')).toMatchObject({ kind: 'pending' })
-    expect(usageView('cursor', undefined, undefined, 'UTC', known, 'loading')).toMatchObject({ kind: 'not_reported', short: 'Quota not reported · 2 accounts' })
+    expect(usageView('cursor', undefined, undefined, 'UTC', known, 'loading')).toMatchObject({ kind: 'not_reported', short: 'Quota unavailable for Cursor · 2 accounts' })
     // Read, and still no group: the accounts have no readings, which is not "no accounts".
-    expect(usageView('codex', undefined, undefined, 'UTC', known, 'ready')).toMatchObject({ kind: 'not_reported' })
-    expect(usageView('codex', undefined, undefined, 'UTC', [], 'loading')).toMatchObject({ kind: 'none' })
+    expect(usageView('codex', undefined, undefined, 'UTC', known, 'ready')).toMatchObject({ kind: 'not_reported', head: 'Reads after the first run', tip: 'Codex quota readings start with a run on this account. Idle quota reading is not available for this helper.' })
+    expect(usageView('codex', undefined, undefined, 'UTC', [], 'loading')).toMatchObject({ kind: 'pending' })
+    expect(usageView('codex', undefined, undefined, 'UTC', [], 'error')).toMatchObject({ kind: 'pending' })
+    expect(usageView('codex', undefined, undefined, 'UTC', [], 'ready')).toMatchObject({ kind: 'none' })
+    expect(usageView('claude', undefined, undefined, 'UTC', [{ ...known[0]!, reading_support: 'every_5_min' }], 'ready')).toMatchObject({ head: 'Waiting for a quota reading' })
+    expect(usageView('claude', undefined, undefined, 'UTC', [{ ...known[0]!, reading_support: 'statusline' }], 'ready')).toMatchObject({ head: 'Waiting for the status line' })
     expect(accountRows(null, 'UTC', known).map(r => [r.name, r.state, r.left])).toEqual([['one@', 'not_reported', null], ['two@', 'not_reported', null]])
+    const privateGroup = structuredClone(group('fast', 'cursor'))
+    privateGroup.accounts.forEach(a => { a.state = 'private' })
+    expect(usageView('cursor', privateGroup, undefined)).toMatchObject({ head: 'Quota details are private' })
   })
   it('the default range always reaches the moment the headline names', () => {
     expect(defaultRange(view('fast', 'claude'), false)).toEqual({ past: 3, ahead: 2 })
