@@ -42,3 +42,61 @@ commit together; changed or ended requests, revoked credentials and replayed
 proofs are rejected. Writes are limited to 30 attempts per person per ten minutes,
 with bounded notification batches and delivery retries. Approval and credential
 events remain in the tenant event log under its existing retention policy.
+
+## Decision Desk browser notices
+
+The server adapter requires `phoneMod.DeskPush = decisiondesk.PushSource{}`
+after constructing the phone module and before starting its worker in
+`cmd/aeon/serve.go`. This assignment keeps the existing dependency graph acyclic.
+
+Desk notices reuse the configured VAPID keypair, encrypted subscription vault,
+push-provider allowlist and service worker. Each browser subscription has an
+independent `desk_enabled` flag, off by default. A phone passkey is not required:
+a notice only opens an authenticated Desk item. Phone-approval preferences,
+quiet hours and escalation do not apply to Desk notices. Existing phone-approval
+dispatch continues to require its preferences and passkey.
+
+Only the intended person's opted-in devices receive a notice. Held messages use
+their recipient; linked questions retain that routing. Other questions and
+approvals use the project's human owner (the project lead owner where present,
+then the existing person-step owner resolver), with current read and decision
+permissions checked again. Eligible sources follow the Desk projection's held
+work and near-expiry rules; ordinary non-held questions do not trigger a notice.
+The worker listens for `question.asked` and recovers missed hints and computed
+held moments on its regular scan.
+
+An individual notice reads “PAIMOS · Decision waiting” and contains only the
+first question line and project key, bounded to 240 and 80 UTF-8 bytes. Context,
+findings, attachments, comments and answers are excluded. The encrypted notice
+uses a stable item tag and opens `/decision-desk?item=q:<id>` (or the existing
+`a:`/`m:` source prefix). A click navigates and focuses an existing same-origin
+tab, or opens one. It never decides anything.
+
+The sender waits until the first source's 60-second creation window closes.
+Three or more sources in that window produce one “N decisions waiting” summary
+per device, tagged `desk-summary`, opening the Desk. Remaining items carry an
+explicit summary timestamp on their durable claims. Claims prevent repeat sends
+across replicas and repeated events; failed or ambiguous transport is recorded as
+failed and is not retried. HTTP 404/410 uses the existing subscription revocation
+and audit path. More than 1000 pending source candidates produces an explicit
+coverage error rather than a truncated summary.
+
+The follow-up Settings slice can use the existing authenticated endpoints:
+
+- `GET /api/me/phone-approvals` returns `push_available`, `vapid_public_key` and
+  up to eight active `subscriptions`, each with `id`, `created_at`,
+  `endpoint_hash` and `desk_enabled`. Endpoints and browser keys are omitted.
+- `POST /api/me/phone-approvals/subscriptions` with
+  `{"endpoint":"https://<allowlisted-provider>/…","keys":{"auth":"…","p256dh":"…"},"desk_enabled":true}`
+  creates or refreshes this browser subscription and enables Desk notices.
+  Send the same browser subscription with `desk_enabled:false` to disable Desk
+  notices while retaining it for phone approvals. Both explicit flag values work
+  without a passkey. Omitting the flag retains the existing phone registration
+  requirement and preserves an existing Desk flag. The response includes `id`,
+  `created_at` and `desk_enabled`; the existing eight-device cap applies.
+- `DELETE /api/me/phone-approvals/subscriptions/{subscriptionId}` removes an owned
+  device from both channels (204). Writes require a same-origin person session.
+
+This server slice does not add Settings controls, a permission prompt, the Desk
+offer line or the iOS installation hint. Browser permission remains a deliberate
+user action implemented by the follow-up Settings slice.

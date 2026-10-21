@@ -141,3 +141,26 @@ func TestRulesTLDRDryRunApplyAndTemplate(t *testing.T) {
 		t.Fatal("bad set id")
 	}
 }
+
+// Risk: even an unchanged --apply must refuse a retired authoring store.
+func TestRulesTLDRApplyRefusesDisabledAuthoring(t *testing.T) {
+	disabled := false
+	current := rules.Set{DBAuthoring: &disabled, ID: importSetID, Name: "Git", Revision: 4, Rules: []rules.Rule{}}
+	writes := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writes++
+			w.WriteHeader(500)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(current)
+	}))
+	defer server.Close()
+	connect := func() (*client.Client, error) { return client.New(server.URL, "synthetic-test-token"), nil }
+	file := tldrFixture(t, `{"set":{"en":""}}`)
+	var out bytes.Buffer
+	err := runTLDRCommand(t, []string{"--set", importSetID, "--revision", "4", "--file", file, "--apply"}, &out, connect)
+	if err == nil || !strings.Contains(err.Error(), rules.DBAuthoringDisabled) || writes != 0 {
+		t.Fatalf("wrong refusal err=%v writes=%d", err, writes)
+	}
+}

@@ -382,6 +382,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		vapid = &webpush.Options{VAPIDPublicKey: cfg.PhonePush.PublicKey, VAPIDPrivateKey: cfg.PhonePush.PrivateKey, Subscriber: cfg.PhonePush.Subject}
 	}
 	phoneMod := phoneapprovals.New(pool, pairingMod, cfg.PublicURL, cfg.LinkKey, vapid)
+	phoneMod.DeskPush = decisiondesk.PushSource{}
 	stepupMod := stepup.New(pool, phoneMod, cfg.PublicURL)
 	stepupMod.RecordResultsTx = inbox.RecordResults
 	stepupMod.Reauthenticate = authMod.BeginStepUp
@@ -482,7 +483,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			activity.New(pool),
 			attachmentsMod,
 			greetingsMod,
-			knowledge.New(pool),
+			knowledge.NewWithDoctrine(pool, doctrineMod),
 			projectgroups.New(pool),
 			historyMod,
 			profile.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
@@ -496,7 +497,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			// Native route declarations reuse the authz native-sessions table;
 			// authMod.Middleware applies their envelope before authentication.
 			nativePilot.HTTP,
-			rules.New(pool),
+			rules.NewWithRepositories(pool, cfg.DoctrineRepositories),
 			doctrineMod,
 			ticketwork.New(pool),
 			outcomes.New(pool),

@@ -19,6 +19,9 @@ const text = value => typeof value === 'string' && value.length > 0 && value.len
 const permission = value => text(value) && /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/.test(value)
 const identifier = value => text(value) && /^[a-z][a-z0-9_]*$/.test(value)
 const classes = new Set(['personal', 'metadata', 'secret', 'review'])
+// workspace and project are role bindings. computer is the paired-computer
+// binding for person-only run.start_on_computer; it is not a project grant.
+const grantLocations = new Set(['workspace', 'project', 'computer'])
 const license = 'SPDX-License-Identifier: AGPL-3.0-only'
 export class RegistryInputError extends Error {}
 export class RegistryConflictError extends Error {}
@@ -59,7 +62,7 @@ export function validateRegistry(data, file) {
       fields(row, ['key', 'grantable_at', 'agent_grantable'], ['owner_workstation_grantable'])
       require(permission(row.key) && typeof row.agent_grantable === 'boolean' &&
         (row.owner_workstation_grantable === undefined || typeof row.owner_workstation_grantable === 'boolean'), 'Invalid permission registry row')
-      unique(row.grantable_at, value => { require(['workspace', 'project'].includes(value), 'Invalid grant location'); return value }, 'grantable_at')
+      unique(row.grantable_at, value => { require(grantLocations.has(value), 'Invalid grant location'); return value }, 'grantable_at')
       require(row.grantable_at.length > 0, 'Empty grant locations')
       return row.key
     }, 'registry')

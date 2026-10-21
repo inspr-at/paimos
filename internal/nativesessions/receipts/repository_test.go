@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-package receipts
+package receipts_test
 
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativeintegration"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
+	"github.com/inspr-at/paimos/internal/nativesessions/receipts"
 	"github.com/inspr-at/paimos/internal/nativestream"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -34,28 +36,28 @@ import (
 type testAuthority struct {
 	intent     nativereceipts.Intent
 	intents    map[string]nativereceipts.Intent
-	final      FinalAuthority
+	final      receipts.FinalAuthority
 	owner      string
 	generation string
 	revoked    bool
 }
 
-func (a *testAuthority) ReceiptTx(_ context.Context, _ pgx.Tx, daemon nativecontract.DaemonActor, r nativecontract.Receipt) (ReceiptAuthority, error) {
+func (a *testAuthority) ReceiptTx(_ context.Context, _ pgx.Tx, daemon nativecontract.DaemonActor, r nativecontract.Receipt) (receipts.ReceiptAuthority, error) {
 	if a.revoked {
-		return ReceiptAuthority{}, nativereceipts.Fail(nativecontract.ReasonPermissionRevoked)
+		return receipts.ReceiptAuthority{}, nativereceipts.Fail(nativecontract.ReasonPermissionRevoked)
 	}
 	if daemon.DaemonGeneration != a.generation {
-		return ReceiptAuthority{}, nativereceipts.Fail(nativecontract.ReasonWrongGeneration)
+		return receipts.ReceiptAuthority{}, nativereceipts.Fail(nativecontract.ReasonWrongGeneration)
 	}
 	intent := a.intent
 	if a.intents != nil {
 		var found bool
 		intent, found = a.intents[r.OperationID]
 		if !found {
-			return ReceiptAuthority{}, nativereceipts.Fail(nativecontract.ReasonGrantMissing)
+			return receipts.ReceiptAuthority{}, nativereceipts.Fail(nativecontract.ReasonGrantMissing)
 		}
 	}
-	return ReceiptAuthority{Intent: intent, OwnerPersonID: a.owner}, nil
+	return receipts.ReceiptAuthority{Intent: intent, OwnerPersonID: a.owner}, nil
 }
 func (a *testAuthority) ReadTx(_ context.Context, _ pgx.Tx, actor nativecontract.Actor, b nativecontract.Binding) error {
 	if actor.PrincipalID != a.owner || !b.Equal(a.final.CurrentBinding) {
@@ -63,12 +65,12 @@ func (a *testAuthority) ReadTx(_ context.Context, _ pgx.Tx, actor nativecontract
 	}
 	return nil
 }
-func (a *testAuthority) FinalTx(_ context.Context, _ pgx.Tx, daemon nativecontract.DaemonActor, in nativecontract.FinalPublish) (FinalAuthority, error) {
+func (a *testAuthority) FinalTx(_ context.Context, _ pgx.Tx, daemon nativecontract.DaemonActor, in nativecontract.FinalPublish) (receipts.FinalAuthority, error) {
 	if a.revoked {
-		return FinalAuthority{}, nativereceipts.Fail(nativecontract.ReasonPermissionRevoked)
+		return receipts.FinalAuthority{}, nativereceipts.Fail(nativecontract.ReasonPermissionRevoked)
 	}
 	if daemon.DaemonGeneration != a.generation {
-		return FinalAuthority{}, nativereceipts.Fail(nativecontract.ReasonWrongGeneration)
+		return receipts.FinalAuthority{}, nativereceipts.Fail(nativecontract.ReasonWrongGeneration)
 	}
 	return a.final, nil
 }
@@ -76,7 +78,7 @@ func (a *testAuthority) FinalTx(_ context.Context, _ pgx.Tx, daemon nativecontra
 type fixture struct {
 	d            *dbtest.DB
 	chat         *chat.Module
-	repo         *Repository
+	repo         *receipts.Repository
 	authority    *testAuthority
 	owner, agent tenant.Principal
 	actor        nativecontract.DaemonActor
@@ -87,7 +89,10 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{d: dbtest.Open(t), now: time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)}
+	f := &fixture{d: dbtest.Open(t)}
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&f.now); err != nil {
+		t.Fatal(err)
+	}
 	tid, project := uuid.NewString(), uuid.NewString()
 	_, err := f.d.Admin.Exec(t.Context(), `INSERT INTO tenants(id,slug,name) VALUES($1,$2,'native receipts fixture')`, tid, "native-"+tid)
 	if err != nil {
@@ -124,7 +129,8 @@ func newFixture(t *testing.T) *fixture {
 	var thread chat.Thread
 	call("/api/projects/"+project+"/chat-threads/resolve", chat.ThreadResolve{RoleID: role.ID}, &thread)
 	session := uuid.NewString()
-	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,capabilities,ref_digest,lease_digest) VALUES($1,$2,$3,$4,$5,'claude','fixture','managed','coordinator',ARRAY['chat'],$6,$7)`, tid, session, project, f.agent.ID, f.owner.ID, bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32)); err != nil {
+	lease := sha256.Sum256([]byte("native-receipts-fixture-worker-lease"))
+	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,capabilities,ref_digest,lease_digest) VALUES($1,$2,$3,$4,$5,'claude','fixture','managed','coordinator',ARRAY['chat'],$6,$7)`, tid, session, project, f.agent.ID, f.owner.ID, bytes.Repeat([]byte{1}, 32), lease[:]); err != nil {
 		t.Fatal(err)
 	}
 	call("/api/chat-threads/"+thread.ID+"/binding", chat.BindingWrite{SessionID: session, ExpectedEpoch: "0"}, &thread)
@@ -133,8 +139,8 @@ func newFixture(t *testing.T) *fixture {
 	inputID := uuid.NewString()
 	grant := nativecontract.FinalDrainGrant{GrantID: uuid.NewString(), Binding: f.binding, ConversationRef: "opaque-conversation", ExpiresAt: f.now.Add(24 * time.Hour), MaximumFinals: 64, MaximumBytes: 4 << 20}
 	f.final = nativecontract.FinalPublish{RequestID: uuid.NewString(), ExpectedBinding: f.binding, FinalID: uuid.NewString(), InputID: inputID, TurnRef: "opaque-turn", Text: "explicit final canary", DrainGrantID: grant.GrantID}
-	f.authority = &testAuthority{owner: f.owner.ID, generation: f.actor.DaemonGeneration, intent: nativereceipts.Intent{Receipt: nativecontract.Receipt{RequestID: uuid.NewString(), OperationID: uuid.NewString(), Binding: &f.binding, Operation: "input", State: "accepted", InputID: &inputID, SourceSequence: "0", UpdatedAt: f.now}, ActorID: f.owner.ID, PayloadSHA256: strings.Repeat("b", 64), ExpiresAt: f.now.Add(time.Hour)}, final: FinalAuthority{Grant: grant, CurrentBinding: f.binding, Sender: f.agent, OriginalActor: f.owner, Target: chat.NativeFinalTarget{OwnerPersonID: f.owner.ID, ConversationID: thread.ID, RoleID: role.ID, SessionID: session}, ConversationRef: grant.ConversationRef, IssuedAt: f.now, RetentionApproved: true}}
-	f.repo, err = New(f.d.App, f.authority, f.chat, func() time.Time { return f.now })
+	f.authority = &testAuthority{owner: f.owner.ID, generation: f.actor.DaemonGeneration, intent: nativereceipts.Intent{Receipt: nativecontract.Receipt{RequestID: uuid.NewString(), OperationID: uuid.NewString(), Binding: &f.binding, Operation: "input", State: "accepted", InputID: &inputID, SourceSequence: "0", UpdatedAt: f.now}, ActorID: f.owner.ID, PayloadSHA256: strings.Repeat("b", 64), ExpiresAt: f.now.Add(time.Hour)}, final: receipts.FinalAuthority{Grant: grant, CurrentBinding: f.binding, Sender: f.agent, OriginalActor: f.owner, Target: chat.NativeFinalTarget{OwnerPersonID: f.owner.ID, ConversationID: thread.ID, RoleID: role.ID, SessionID: session}, ConversationRef: grant.ConversationRef, IssuedAt: f.now, RetentionApproved: true}}
+	f.repo, err = receipts.New(f.d.App, f.authority, f.chat, func() time.Time { return f.now })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +390,7 @@ func TestNativePilotDeliveryPersistsFinalAndKeepsHoldThroughDetach(t *testing.T)
 	provider := &pilotTransport{identity: nativecontract.NativeIdentity{Provider: "claude", NativeSessionRef: "exact-conversation", RuntimeEpoch: f.binding.RuntimeEpoch, ProcessIdentityDigest: strings.Repeat("c", 64), PID: 1234, StartedAt: f.now}, running: true, now: f.now}
 	writer := &pilotWriter{f: f}
 	releases := 0
-	delivery, err := nativeintegration.NewDelivery(nativeintegration.DeliveryOptions{Binding: f.binding, Journal: journal, Transport: provider, Authority: writer, Reports: pilotReports{f}, Finals: Sink{Repository: f.repo, Daemon: f.actor}, Now: func() time.Time { return f.now },
+	delivery, err := nativeintegration.NewDelivery(nativeintegration.DeliveryOptions{Binding: f.binding, Journal: journal, Transport: provider, Authority: writer, Reports: pilotReports{f}, Finals: receipts.Sink{Repository: f.repo, Daemon: f.actor}, Now: func() time.Time { return f.now },
 		Retention: func(ctx context.Context, in nativecontract.FinalPublish) (nativecontract.FinalDrainGrant, nativereceipts.RetentionApproval, error) {
 			if f.authority.revoked {
 				return nativecontract.FinalDrainGrant{}, nativereceipts.RetentionApproval{}, nativereceipts.Fail(nativecontract.ReasonPermissionRevoked)

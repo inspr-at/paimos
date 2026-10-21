@@ -116,13 +116,12 @@ func TestCodexQuotaNeutralFallbackUsesOwnedFakeCLI(t *testing.T) {
 	}
 }
 
-// An npm launcher needs the enrolled interpreter even when quota capture runs
-// without a prompt. The fake interpreter has no dependency on host Node.
+// Enrollment probes use the wrapper; idle quota uses its separate executable.
 type idleCapacityTestAPI struct{ *capacityTestAPI }
 
 func (*idleCapacityTestAPI) Queued(context.Context) ([]Run, error) { return nil, nil }
 
-func TestIdleCodexCaptureUsesPinnedInterpreter(t *testing.T) {
+func TestIdleCodexCaptureUsesSeparatePinnedExecutable(t *testing.T) {
 	home := privateHome(t)
 	bin := privateHome(t)
 	node := filepath.Join(bin, "node")
@@ -140,7 +139,11 @@ func TestIdleCodexCaptureUsesPinnedInterpreter(t *testing.T) {
 	a.Nodes = map[string]harnesslaunch.Node{"local": {Path: node, Version: "1.0.0"}}
 	a.SetExpectedEmails(map[string]string{"local": "agent@example.test"})
 	// Qualify only this synthetic fixture; production idle capture stays gated.
-	a.idleUsage = &codexIdleCapability{binaryPath: launcher, binarySHA256: sha256Hex(launcherRaw), nodePath: node, nodeSHA256: sha256Hex(nodeRaw), version: "synthetic-fixture", startupHooks: true, inheritedConfig: true, termination: true}
+	vendorRaw, err := os.ReadFile(vendor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qualifySyntheticCodexPin(a, fixtureCapacityPin(Codex, vendor, vendorRaw, "synthetic-fixture"))
 	s, api, _ := testSupervisor(t)
 	reporter := &idleCapacityTestAPI{&capacityTestAPI{API: api}}
 	s.api, s.adapters[Codex] = reporter, a
@@ -527,5 +530,47 @@ func TestIdleCaptureRespectsReadingFromPreviousDaemon(t *testing.T) {
 	s.captureIdleCapacity(t.Context(), now)
 	if a.calls != 0 {
 		t.Fatal("fresh server reading ignored")
+	}
+}
+
+// Risk: two Codex homes read one profile's quota, or a changed login uses its
+// sibling's identity fence. Only a temporary shell app-server is executed.
+func TestCodexSeparateHomesBindQuotaAndIdentityToEachProfile(t *testing.T) {
+	first, second := privateHome(t), privateHome(t)
+	for home, identity := range map[string]string{first: "first@example.test", second: "second@example.test"} {
+		if err := os.WriteFile(filepath.Join(home, "active-login"), []byte(identity), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reset := time.Now().Add(time.Hour).Unix()
+	path := fakeScript(t, fmt.Sprintf(`identity=$(/bin/cat "$CODEX_HOME/active-login") || exit 10
+used=11
+[ "$identity" != second@example.test ] || used=22
+if [ "$1" = login ]; then echo 'Logged in using ChatGPT'; exit 0; fi
+[ "$1" = app-server ] || exit 11
+while IFS= read -r line; do
+case "$line" in
+*'"id":1'*) printf '{"id":1,"result":{}}\n';;
+*'"id":2'*) printf '{"id":2,"result":{"account":{"type":"chatgpt","email":"%%s"}}}\n' "$identity";;
+*'"id":3'*) printf '{"id":3,"result":{"rateLimits":{"primary":{"usedPercent":%%s,"windowDurationMins":300,"resetsAt":%d}}}}\n' "$used";;
+esac
+done`, reset))
+	a := NewCodexAdapter(path, map[string]string{"first": first, "second": second})
+	a.SetExpectedEmails(map[string]string{"first": "first@example.test", "second": "second@example.test"})
+	qualifyCodexFixture(t, a)
+	for key, used := range map[string]float64{"first": 11, "second": 22} {
+		got := a.CaptureCapacityResult(t.Context(), key)
+		if got.Result != "success" || len(got.Readings) != 1 || got.Readings[0].UsedPercent != used {
+			t.Fatalf("quota escaped %s home: %+v", key, got)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(second, "active-login"), []byte("first@example.test"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.CaptureCapacityResult(t.Context(), "second"); got.Result != "identity_mismatch" || len(got.Readings) != 0 {
+		t.Fatalf("changed Codex home passed fence: %+v", got)
+	}
+	if got := a.CaptureCapacityResult(t.Context(), "first"); got.Result != "success" {
+		t.Fatalf("unchanged sibling blocked: %+v", got)
 	}
 }

@@ -96,6 +96,7 @@ func (*CursorAdapter) CaptureCapacity(context.Context, string) []capacity.Readin
 // are intentionally no production capabilities yet; no configuration flag can
 // turn an unverified schema into a quota reading.
 type grokBillingCapability struct {
+	pin          *capacityPin
 	binaryPath   string
 	binarySHA256 string
 	version      string
@@ -113,7 +114,9 @@ func (a *GrokAdapter) CapacitySupport(key string) string {
 }
 func (a *GrokAdapter) billingSupported(key string) bool {
 	b, ok := a.Bindings[key]
-	return ok && b.PrincipalSHA256 != "" && a.billing != nil && a.billing.decode != nil && a.billing.binaryPath == b.BinaryPath && a.billing.version != "" && exactCapacityBinary(b.BinaryPath, a.billing.binarySHA256)
+	c := a.billing
+	return ok && b.PrincipalSHA256 != "" && c != nil && c.decode != nil &&
+		c.pin.matches(Grok, c.binaryPath, c.binarySHA256, c.version, "", "")
 }
 func (a *GrokAdapter) CanCaptureCapacity(key string) bool {
 	if !a.billingSupported(key) {
@@ -133,7 +136,7 @@ func (a *GrokAdapter) CaptureCapacity(ctx context.Context, key string) []capacit
 		return nil
 	}
 	b := a.Bindings[key]
-	p, err := launchWire(b.BinaryPath, []string{"agent", "stdio"}, home, capacityEnvironment("GROK_HOME", home, b.BinaryPath), "jsonrpc", func(AdapterEvent) {})
+	p, err := launchWire(a.billing.binaryPath, []string{"agent", "stdio"}, home, capacityEnvironment("GROK_HOME", home, a.billing.binaryPath), "jsonrpc", func(AdapterEvent) {})
 	if err != nil {
 		return nil
 	}

@@ -667,10 +667,13 @@ export function tierWeights(manifest, rows) {
 
 // Full mode and non-PR events stay on this fixed bin count so the merge-queue
 // literal matches the plan. Essential PR matrices grow from four up to this cap.
-// Exact overflow shard numbers and predicted seconds live only on the synthetic
-// catalogue in the tier tests. Do not re-pin them when main adds or re-times a
-// spec (AEON-1483). A live shard that no longer fits fails the budget invariant.
-export const fullWebShardCount = 17
+// Eighteen bins (AEON-1603): seventeen still packs origin/main, but the spare
+// file weight is smaller than the next gated spec. The 900s budget and 120s
+// overhead stay the guard. Exact overflow shard numbers and predicted seconds
+// live only on the synthetic catalogue in the tier tests. Do not re-pin them
+// when main adds or re-times a spec (AEON-1483). A live shard that no longer
+// fits fails the budget invariant.
+export const fullWebShardCount = 18
 export const fullWebShards = Array.from({ length: fullWebShardCount }, (_, index) => index + 1)
 
 // Size nightly independently of the PR layout, using the runner's catalogue

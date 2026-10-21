@@ -11,7 +11,8 @@ import (
 )
 
 func TestConfirmationStatusPrintsReadinessAndUpgradeCommand(t *testing.T) {
-	for _, confirmation := range []string{"ready (pairing key pinned)", "needs pairing upgrade"} {
+	missingEntitlement := "Touch ID unavailable: this agentd build lacks the keychain entitlement (AEON-1504). Pairing again will not fix it; Aeon approval is used meanwhile."
+	for _, confirmation := range []string{"ready (pairing key pinned)", "needs pairing upgrade", missingEntitlement} {
 		p := agentsetup.Progress{Stage: "connected", TouchIDConfirmation: confirmation}
 		if confirmation == "needs pairing upgrade" {
 			p.TouchIDUpgradeCommand = "aeon-agentd pair --url 'https://paired.test' --state-root '/tmp/pair-touch-id' --workspace '/tmp/workspace'"
@@ -26,6 +27,16 @@ func TestConfirmationStatusPrintsReadinessAndUpgradeCommand(t *testing.T) {
 		}
 		if !strings.Contains(out.String(), line+"\n") {
 			t.Fatal("status omitted confirmation prerequisite")
+		}
+		if confirmation == missingEntitlement {
+			if strings.Count(out.String(), missingEntitlement) != 1 || strings.Count(out.String(), "keychain entitlement") != 1 {
+				t.Fatal("status repeated the entitlement diagnostic")
+			}
+			for _, advice := range []string{"needs pairing upgrade", "aeon-agentd pair", "-touch-id", "new, empty state folder"} {
+				if strings.Contains(out.String(), advice) {
+					t.Fatal("status suggested re-pairing for a build defect")
+				}
+			}
 		}
 		out.Reset()
 		if err := printSetupProgress(&out, true, p); err != nil {

@@ -71,6 +71,7 @@
     "reviews": "review approvals"
   },
   "special": {
+    "run.start_on_computer": "Start runs on a computer",
     "account.overview.read": "See all enrolled account capacity",
     "agents.create": "Provision messaging assistants",
     "agents.plan.read": "See their agent start plan",

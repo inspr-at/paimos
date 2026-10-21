@@ -13,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/nativesessions/consent"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -40,6 +41,7 @@ type Approval struct {
 }
 
 type proposal struct {
+	NativeConsent      *consent.Facts       `json:"native_consent,omitempty"`
 	Scope              string               `json:"scope"`
 	ResourceKind       string               `json:"resource_kind"`
 	ResourceID         *string              `json:"resource_id"`
@@ -245,6 +247,20 @@ func validateProposal(in *proposal) error {
 		}
 	} else if in.Target != nil {
 		return fail(http.StatusBadRequest, "target is only used for deploy approvals")
+	}
+	if consent.Scope(in.Scope) {
+		if in.NativeConsent == nil || in.ResourceKind != "node" || in.RunID != nil || in.ExpiresAt.Sub(time.Now()) > 24*time.Hour {
+			return fail(http.StatusBadRequest, "native consent requires project facts and an expiry within 24 hours")
+		}
+		if err := in.NativeConsent.Validate(); err != nil {
+			return fail(http.StatusBadRequest, err.Error())
+		}
+		if in.Scope == consent.RetentionScope && !in.NativeConsent.RetainFinals {
+			return fail(http.StatusBadRequest, "retention approval requires explicit final retention")
+		}
+		in.Rationale += in.NativeConsent.Summary(in.Scope)
+	} else if in.NativeConsent != nil {
+		return fail(http.StatusBadRequest, "native_consent is only used for native consent approvals")
 	}
 	return nil
 }

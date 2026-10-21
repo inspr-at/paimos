@@ -21,11 +21,13 @@ import (
 // together before adding a production entry. No production entry is approved
 // yet: live verification belongs to the coordinator, not this fixture build.
 type claudeUsageCapability struct {
+	pin                                        *capacityPin
 	binaryPath, binarySHA256, version          string
 	nodePath, nodeSHA256                       string
 	startupHooks, inheritedConfig, termination bool
-	// capture is the verified exchange; it receives the minimal child env.
-	capture func(context.Context, string, []string) (json.RawMessage, error)
+	// capture is the verified exchange; it receives its own executable and the
+	// minimal child env, never the adapter's wrapper path.
+	capture func(context.Context, string, string, []string) (json.RawMessage, error)
 	decode  func(json.RawMessage, time.Time) []capacity.Reading
 }
 
@@ -86,7 +88,7 @@ func exactCapacityBinary(path, digest string) bool {
 func (a *ClaudeAdapter) CanCaptureCapacity(key string) bool {
 	c := a.usage
 	if c == nil || c.version == "" || c.capture == nil || c.decode == nil || !c.startupHooks || !c.inheritedConfig || !c.termination ||
-		c.binaryPath != a.ClaudePath || c.nodePath != a.NodePath || !exactCapacityBinary(a.ClaudePath, c.binarySHA256) || !exactCapacityBinary(a.NodePath, c.nodeSHA256) {
+		!c.pin.matches(Claude, c.binaryPath, c.binarySHA256, c.version, c.nodePath, c.nodeSHA256) {
 		return false
 	}
 	_, err := localHome(a.Homes, key)
@@ -108,7 +110,12 @@ func (a *ClaudeAdapter) CaptureCapacityResult(ctx context.Context, key string) C
 	if op.Err() != nil {
 		return captureError(op)
 	}
-	raw, err := a.usage.capture(op, home, claudeEnvironment(home, a.NodePath, a.ClaudePath))
+	c := a.usage
+	node := c.nodePath
+	if node == "" {
+		node = c.binaryPath
+	}
+	raw, err := c.capture(op, c.binaryPath, home, claudeEnvironment(home, node, c.binaryPath))
 	if errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) {
 		return CapacityCapture{Result: "launch_failed", CleanupUnconfirmed: true}
 	}

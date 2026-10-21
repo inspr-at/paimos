@@ -288,8 +288,13 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	add("completion-wrong-dependency", "release.yml", "opaque reusable workflow", func(w map[string]any) {
 		mapping(mapping(w["jobs"])["completion"])["needs"] = []any{"image-platform"}
 	})
-	add("completion-secrets-inherited", "release.yml", "opaque reusable workflow", func(w map[string]any) {
-		mapping(mapping(w["jobs"])["completion"])["secrets"] = "inherit"
+	// AEON-1584: the completion call must inherit secrets (release-signing's environment secrets reach the
+	// reusable workflow only that way); dropping it or replacing it with an explicit map stays rejected.
+	add("completion-secrets-dropped", "release.yml", "opaque reusable workflow", func(w map[string]any) {
+		delete(mapping(mapping(w["jobs"])["completion"]), "secrets")
+	})
+	add("completion-secrets-explicit-map", "release.yml", "opaque reusable workflow", func(w map[string]any) {
+		mapping(mapping(w["jobs"])["completion"])["secrets"] = map[string]any{"APPLE_TEAM_ID": "${{ secrets.APPLE_TEAM_ID }}"}
 	})
 	add("completion-opaque-nested-workflow", "release-completion.yml", "opaque reusable workflow", func(w map[string]any) {
 		mapping(w["jobs"])["nested"] = map[string]any{"uses": "./.github/workflows/release-completion.yml"}
@@ -729,9 +734,9 @@ func TestCIClassifiedWebShardMatrix(t *testing.T) {
 	expression := mapping(mapping(shard["strategy"])["matrix"])["shard"].(string)
 	expression = strings.TrimPrefix(expression, "${{ fromJSON(")
 	expression = strings.TrimSuffix(expression, ") }}")
-	// AEON-1389: the planner owns PR sizing. Other events retain all seventeen
+	// AEON-1389: the planner owns PR sizing. Other events retain all eighteen
 	// shards even if a candidate publishes an empty, one-row or essential list.
-	full := "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]"
+	full := "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]"
 	for _, planned := range []string{"", "[1]", "[1,2,3,4]", "[1,2,3,4,5,6]", full} {
 		for _, event := range []string{"pull_request", "merge_group", "push", "workflow_dispatch"} {
 			got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{

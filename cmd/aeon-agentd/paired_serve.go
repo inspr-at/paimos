@@ -695,7 +695,20 @@ func (p *pairedSetup) setup(ctx context.Context, req agentsetup.SetupRequest) (a
 					}
 					return local.Path, nil
 				}}
-			verified, err := d.Detect(ctx, local.Candidate.Harness, local.Identity)
+			// A default profile keeps the default probe, so a vendor-created 0755
+			// mode reaches the polling repair hint. Every other home must
+			// already be a private directory, as `--home` requires.
+			if local.Home != filepath.Join(home, ".claude") {
+				d.ClaudeHome = local.Home
+			}
+			if local.Home != filepath.Join(home, ".codex") {
+				d.CodexHome = local.Home
+			}
+			expected := local.Identity
+			if local.Candidate.Harness == "claude" || local.Candidate.Harness == "codex" {
+				expected = "" // Compare below so a switched login has the enrollment-fence reason.
+			}
+			verified, err := d.Detect(ctx, local.Candidate.Harness, expected)
 			if err != nil {
 				return agentsetup.Progress{}, err
 			}

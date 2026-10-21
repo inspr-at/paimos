@@ -443,3 +443,42 @@ printf '%s\n' '{"loggedIn":true,"email":"a@example.test","authMethod":"claude.ai
 		t.Fatalf("recovery did not run the sign-in command: %v", err)
 	}
 }
+
+// Risk: a profile switch in H2 changes H1 readiness or borrows H1 approval.
+// The real Claude prober uses two independent fake-vendor profile homes.
+func TestClaudeSeparateHomesKeepBothLoginsReadyAndFenceOnlyTheChangedHome(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	defer s.Close(context.Background())
+	first, second := privateHome(t), privateHome(t)
+	for home, identity := range map[string]string{first: "first@example.test", second: "second@example.test"} {
+		if err := os.WriteFile(filepath.Join(home, "active-login"), []byte(identity), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := fakeScript(t, `[ "$HOME" = "$CLAUDE_CONFIG_DIR" ] || exit 9
+printf '{"loggedIn":true,"email":"%s","authMethod":"claude.ai"}\n' "$(cat "$CLAUDE_CONFIG_DIR/active-login")"`)
+	node, sdk := claudeAdapterDependencies(t, path)
+	a := NewClaudeAdapter(node, sdk, path, map[string]string{"first": first, "second": second})
+	a.SetExpectedEmails(map[string]string{"first": "first@example.test", "second": "second@example.test"})
+	accounts := []EnrolledAccount{{ID: "first-account", Key: "first", Harness: Claude, VerifiedIdentity: "first@example.test"}, {ID: "second-account", Key: "second", Harness: Claude, VerifiedIdentity: "second@example.test"}}
+	if err := s.RefreshAccounts(accounts, []Adapter{a}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ProbeOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	v := s.Lifecycle("")
+	if !s.accountAvailable("first-account") || !s.accountAvailable("second-account") || v.AccountLogins["first-account"].Home != first || v.AccountLogins["second-account"].Home != second || !v.AccountLogins["second-account"].Approved {
+		t.Fatalf("parallel homes lost runtime bindings: %+v", v.AccountLogins)
+	}
+	if err := os.WriteFile(filepath.Join(second, "active-login"), []byte("first@example.test"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ProbeOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	v = s.Lifecycle("")
+	if !s.accountAvailable("first-account") || s.accountAvailable("second-account") || v.AccountLogins["second-account"].Approved || v.AccountLogins["second-account"].Home != second || v.AccountLogins["second-account"].ActiveIdentity != "first@example.test" {
+		t.Fatalf("identity fence crossed homes: %+v", v.AccountLogins)
+	}
+}

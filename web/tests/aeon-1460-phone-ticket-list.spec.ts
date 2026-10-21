@@ -301,6 +301,15 @@ async function compactScene(page: Page, withLead = false) {
 }
 
 test('AEON-1460 compact titles retain native links and keyboard full-text disclosure', async ({ page }) => {
+  await page.addInitScript(() => {
+    const calls: string[] = []
+    const native = window.open.bind(window)
+    window.open = ((url?: string | URL, target?: string, features?: string) => {
+      calls.push(String(url ?? ''))
+      return native(url, target, features)
+    }) as typeof window.open
+    ;(window as unknown as { __titleTabs: string[] }).__titleTabs = calls
+  })
   const title = await compactScene(page)
   await expect(page.locator('#row-n-1 .title-text')).toHaveAttribute('data-tip', title)
   await expect(page.locator('#row-n-1 .title-link')).toHaveAttribute('href', /PHAROS-11/)
@@ -319,6 +328,7 @@ test('AEON-1460 compact titles retain native links and keyboard full-text disclo
       // The row links to the ticket's canonical project route (PRJ-17 for Pharos).
       const target = new URL((await link.getAttribute('href'))!, sourceURL).pathname
       expect(target).toBe('/p/PRJ-17/PHAROS-11')
+      const openedBefore = await page.evaluate(() => (window as unknown as { __titleTabs: string[] }).__titleTabs.length)
       const [tab] = await Promise.all([
         page.context().waitForEvent('page'),
         link.click({ modifiers: ['ControlOrMeta'] }),
@@ -326,6 +336,9 @@ test('AEON-1460 compact titles retain native links and keyboard full-text disclo
       await tab.waitForLoadState('domcontentloaded')
       expect(new URL(tab.url()).pathname).toBe(target)
       expect(page.context().pages()).toHaveLength(2)
+      const opened = await page.evaluate(() => (window as unknown as { __titleTabs: string[] }).__titleTabs)
+      expect(opened).toHaveLength(openedBefore + 1)
+      expect(new URL(opened[opened.length - 1], sourceURL).pathname).toBe(target)
       await tab.close()
       await expect(page).toHaveURL(sourceURL)
     } },
@@ -358,8 +371,12 @@ test('AEON-1460 choosing Outline retains its expand and status actions on phones
   await page.getByRole('menuitemradio', { name: 'Outline', exact: true }).click()
   const outline = page.getByRole('treegrid', { name: 'Ticket outline', exact: true })
   const twisty = outline.locator('.phone-fold').first(), row = twisty.locator('xpath=ancestor::tr')
+  // Count inside the rendered outline: before it renders, any count of its cells is
+  // zero. Its column head stays in the DOM, hidden, so the count covers the body.
+  await expect(twisty).toBeVisible()
   await expect(page.locator('.table-card')).toHaveClass(/phone-rows/)
-  await expect(outline.locator('.status-btn, .c-prio, .c-estimate')).toHaveCount(0)
+  await expect(outline.locator('thead')).toBeHidden()
+  await expect(outline.locator('tbody').locator('.status-btn, .c-prio, .c-estimate')).toHaveCount(0)
   const target = await box(twisty)
   expect(target.width).toBe(44); expect(target.height).toBe(44)
   const hits = await twisty.evaluate(el => {

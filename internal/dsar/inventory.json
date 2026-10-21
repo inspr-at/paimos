@@ -152,7 +152,8 @@
     {
       "classification": "personal",
       "columns": {
-        "full_access": "metadata"
+        "full_access": "metadata",
+        "person_id": "personal"
       },
       "locator": {
         "person_column": "created_by_principal_id",
@@ -176,12 +177,24 @@
       "classification": "personal",
       "columns": {
         "routine_launch_id": "metadata",
-        "trace": "personal"
+        "trace": "personal",
+        "acting_person_id": "personal"
       },
       "locator": {
         "tenant_column": "tenant_id"
       },
       "table": "agent_runs"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "native_consent": "personal"
+      },
+      "locator": {
+        "person_column": "proposed_by_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "approval_requests"
     },
     {
       "classification": "personal",
@@ -842,6 +855,17 @@
       "table": "delivery_work_settings"
     },
     {
+      "classification": "personal",
+      "columns": {
+        "summarised_at": "personal"
+      },
+      "locator": {
+        "person_column": "recipient_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "desk_notification_claims"
+    },
+    {
       "classification": "metadata",
       "columns": {
         "actor_principal_id": "personal",
@@ -1387,6 +1411,35 @@
     {
       "classification": "personal",
       "columns": {
+        "account_id": "personal",
+        "agent_principal_id": "personal",
+        "computer_id": "metadata",
+        "created_at": "personal",
+        "grant_id": "metadata",
+        "local_history": "metadata",
+        "maximum_runtime_seconds": "metadata",
+        "maximum_tokens": "metadata",
+        "maximum_turns": "metadata",
+        "model_profile_id": "metadata",
+        "owner_person_id": "personal",
+        "project_id": "metadata",
+        "retain_finals": "metadata",
+        "revision": "metadata",
+        "settings_profile": "metadata",
+        "tenant_id": "metadata",
+        "tool_set": "metadata",
+        "workspace_id": "metadata",
+        "workspace_root": "personal"
+      },
+      "locator": {
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_session_consents"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "actor_person_id": "personal",
         "binding_digest": "metadata",
         "boot_id": "metadata",
@@ -1403,6 +1456,32 @@
         "tenant_column": "tenant_id"
       },
       "table": "native_session_controllers"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "actor_grant_id": "metadata",
+        "actor_grant_revision": "metadata",
+        "binding": "personal",
+        "conversation_id": "metadata",
+        "conversation_ref": "personal",
+        "expires_at": "personal",
+        "grant_id": "metadata",
+        "issued_at": "personal",
+        "maximum_bytes": "metadata",
+        "maximum_finals": "metadata",
+        "owned_session_id": "metadata",
+        "owner_person_id": "personal",
+        "project_id": "metadata",
+        "retention_grant_id": "metadata",
+        "role_id": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_session_drain_grants"
     },
     {
       "classification": "personal",
@@ -1497,6 +1576,23 @@
     {
       "classification": "personal",
       "columns": {
+        "created_at": "personal",
+        "intent": "personal",
+        "operation_id": "metadata",
+        "owned_session_id": "metadata",
+        "owner_person_id": "personal",
+        "project_id": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_session_operations"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "actor_principal_id": "personal",
         "attempts": "metadata",
         "created_at": "personal",
@@ -1576,6 +1672,18 @@
         "tenant_column": "tenant_id"
       },
       "table": "personal_profiles"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "desk_enabled": "personal",
+        "desk_enabled_at": "personal"
+      },
+      "locator": {
+        "person_column": "person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "phone_push_subscriptions"
     },
     {
       "classification": "personal",
@@ -1711,6 +1819,17 @@
         "tenant_column": "tenant_id"
       },
       "table": "review_runs"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "computer_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "principal_id"
+      },
+      "table": "role_bindings"
     },
     {
       "classification": "personal",
@@ -2008,6 +2127,17 @@
         "tenant_column": "tenant_id"
       },
       "table": "routine_runs"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "db_authoring": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "rule_budget_settings"
     },
     {
       "classification": "metadata",

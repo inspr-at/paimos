@@ -5,7 +5,7 @@ import { vClipTip } from '../../directives/clipTip'
 import { formatEstimate, estimateDisplay } from '../../lib/estimates'
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, PARENT_TITLE_WIDTH, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { adoptedCardWidth, CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, cardWidthOnViewportResize, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, PARENT_TITLE_WIDTH, releaseLabel, resizeSampleWidth, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { agentKey, ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
@@ -530,33 +530,71 @@ function readCardWidth(): number | null {
   return el.clientWidth - (Number.isFinite(padding) ? padding : 0)
 }
 let cardFrame = 0
+let lastInner = window.innerWidth
+let viewportGrew = false
+// Set when this resize laid a provisional card out from the viewport delta,
+// before the content box moved. `shrinkBefore` is the card width that estimate
+// started from. The estimate is not a ceiling: a stable measurement that has
+// left that width replaces it, and at the end of the sample window a box that
+// never moved replaces it too (a dock breakpoint or a capped host). Cleared
+// when that settle finishes or the viewport grows.
+let shrinkCeiling: number | null = null
+let shrinkBefore: number | null = null
+// Bumped when a sample window finishes. Readers wait for the next epoch instead of a timer:
+// the list spec installs a clock that stubs requestAnimationFrame, so two of those frames are
+// not two paints (AEON-1594).
+const cardEpoch = ref(0)
+const cardWidthSettled = ref(false)
 function measureWidth() {
   const live = readCardWidth()
   if (live !== null && live > 0) width.value = live
 }
 // clientWidth during a viewport resize can still be the previous frame. One
 // such read lays the wide column set into the card that has already narrowed
-// and crushes Title (AEON-1470). A narrower content box is that frame; a wider
-// one is a stale sample, so the live card wins (AEON-1401). Two agreeing
-// frames then adopt the card, so a queued narrow sample cannot keep Updated
-// hidden after the card has grown, and one stale frame cannot undo the shrink.
-// One disagreeing pair is not a reason to keep the old width: later pairs are
-// read until one agrees. A later wider pair is kept only when the viewport
-// grew. A newer measure bumps cardFrame and cancels this read.
+// and crushes Title (AEON-1470). The viewport delta is a provisional layout
+// until the box moves. Two agreeing frames then adopt the card, so a queued
+// narrow sample cannot keep Updated hidden after the card has grown, and the
+// pre-resize frame cannot undo a real shrink (AEON-1401, AEON-1600). A box
+// that has left that frame replaces the estimate, including when a dock
+// breakpoint made the card wider. One disagreeing pair is not a reason to
+// keep the old width: later pairs are read until one agrees. A newer measure
+// bumps cardFrame and cancels this read.
+function finishCardSettle(frame: number) {
+  if (frame !== cardFrame || !columnsAlive) return
+  shrinkCeiling = null
+  shrinkBefore = null
+  cardEpoch.value++
+  cardWidthSettled.value = true
+}
 function settleCardWidth(viewportGrew = false) {
   const frame = ++cardFrame
+  const ceiling = shrinkCeiling
+  const before = shrinkBefore
+  cardWidthSettled.value = false
   const samples: (number | null)[] = []
   const take = () => {
     requestAnimationFrame(() => {
       if (frame !== cardFrame || !columnsAlive) return
       samples.push(readCardWidth())
       if (samples.length % 2 === 1) { take(); return }
-      const agreed = cardWidthAfterSamples(samples, width.value, viewportGrew)
-      if (agreed === null) {
-        if (samples.length < CARD_WIDTH_SAMPLE_CAP) take()
+      const live = readCardWidth()
+      // The viewport delta is provisional. A pair still showing the pre-resize
+      // width must not replace it: Title would be the crushed remainder until
+      // the box moves (AEON-1600). A pair that has left that width is the card,
+      // even when a dock breakpoint made it wider than the estimate.
+      const chosen = resizeSampleWidth(adoptedCardWidth(cardWidthAfterSamples(samples, width.value, viewportGrew), live, viewportGrew), ceiling, before)
+      if (chosen === null) {
+        if (samples.length < CARD_WIDTH_SAMPLE_CAP) { take(); return }
+        // The window is exhausted. The live box supersedes the estimate: a
+        // capped host may have held the pre-resize width the whole time, and a
+        // dock breakpoint may have grown the card. A null read keeps the estimate.
+        const onScreen = resizeSampleWidth(live, ceiling, before, true)
+        if (onScreen !== null) width.value = onScreen
+        finishCardSettle(frame)
         return
       }
-      width.value = agreed
+      width.value = chosen
+      finishCardSettle(frame)
     })
   }
   take()
@@ -569,18 +607,30 @@ function applyCardSize(entries: ResizeObserverEntry[]) {
     const box = entry.contentRect?.width
     if (typeof box === 'number' && Number.isFinite(box) && box > 0) observed = Math.min(observed, box)
   }
-  if (Math.abs(live - width.value) <= 0.5 && observed < live - 0.5) width.value = observed
-  else if (live > 0) width.value = live
-  settleCardWidth()
+  // A delivery wider than the width just chosen, while the viewport did not
+  // grow, is the previous frame. Taking it lays the wide columns back into the
+  // card that has already narrowed (AEON-1600). A genuinely wider card still
+  // arrives through the frame pair, and a grow may take the wider box now.
+  const candidate = Math.abs(live - width.value) <= 0.5 && observed < live - 0.5 ? observed : live
+  if (candidate > 0) width.value = nextMeasuredCardWidth(width.value, candidate, viewportGrew)
+  settleCardWidth(viewportGrew)
 }
-let lastInner = window.innerWidth
 function measureSoon() {
   const inner = window.innerWidth
-  const grew = inner > lastInner + 0.5
+  const delta = inner - lastInner
+  viewportGrew = delta > 0.5
   lastInner = inner
-  const live = readCardWidth()
-  if (live !== null) width.value = nextMeasuredCardWidth(width.value, live, grew)
-  settleCardWidth(grew)
+  const previous = width.value
+  const next = cardWidthOnViewportResize(previous, readCardWidth(), delta)
+  if (viewportGrew) {
+    shrinkCeiling = null
+    shrinkBefore = null
+  } else if (next + 0.5 < previous) {
+    shrinkCeiling = next
+    shrinkBefore = previous
+  }
+  if (next > 0) width.value = next
+  settleCardWidth(viewportGrew)
 }
 const phoneChange = () => { narrowPhone.value = phoneQuery.matches }
 const coarseChange = () => { coarse.value = coarseQuery.matches }
@@ -900,8 +950,17 @@ function longPress(event: Event, row: ListItem) {
 function linkClick(event: MouseEvent) {
   // Shift-click is the row's range selection. Let it bubble; the row cancels the new window.
   if (event.shiftKey && !event.metaKey && !event.ctrlKey && event.button !== 1) return
-  // One native tab. Stop the row's newTab so it does not open a second window.
-  if (event.metaKey || event.ctrlKey || event.button === 1) { event.stopPropagation(); return }
+  // One tab. Stop the row's newTab, and open the href here: a busy browser can
+  // drop the anchor's own modified-click tab after the gesture goes stale.
+  if (event.metaKey || event.ctrlKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    const href = (event.currentTarget as HTMLAnchorElement | null)?.href
+    if (href) window.open(href, '_blank', 'noopener')
+    return
+  }
+  // Middle-click keeps the browser's own tab and must not add the row's.
+  if (event.button === 1) { event.stopPropagation(); return }
   event.preventDefault()
 }
 const selectableRows = (group: RowGroup) => group.rows.filter(row => props.rowSelectable?.(row) ?? true)
@@ -983,7 +1042,7 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :class="[density, { selectable, selecting, customised: customised && !phoneRows, 'phone-rows': phoneRows, overflowing: !phone && layoutWidth > width + 1 }]">
+  <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :data-card-width-settled="cardWidthSettled ? '1' : '0'" :data-card-epoch="cardEpoch" :class="[density, { selectable, selecting, customised: customised && !phoneRows, 'phone-rows': phoneRows, overflowing: !phone && layoutWidth > width + 1 }]">
     <table :style="!phone && layoutWidth > width ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="label ?? (outline ? 'Ticket outline' : 'Tickets')" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
         <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -177,5 +178,182 @@ func TestAdditionalHarnessEnrollmentRejectsUnverifiedAccountClaims(t *testing.T)
 				}
 			})
 		}
+	}
+}
+
+// harnessHomeFixture contains synthetic identities only. Every process started
+// by these tests is this shell fixture, never an installed vendor executable.
+func harnessHomeFixture(t *testing.T, harness string) (Discovery, string, string) {
+	t.Helper()
+	owner := physicalTemp(t)
+	first := filepath.Join(owner, "."+harness)
+	second := filepath.Join(owner, harness+"-second")
+	for home, identity := range map[string]string{first: "first@example.test", second: "second@example.test"} {
+		if err := os.Mkdir(home, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, "active-login"), []byte(identity), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := `#!/bin/sh
+home="$CODEX_HOME"
+if [ "${0##*/}" = claude ]; then
+  home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  [ -z "$ANTHROPIC_API_KEY$ANTHROPIC_AUTH_TOKEN$NODE_OPTIONS$NODE_PATH" ] || exit 8
+  [ -z "$CLAUDE_CONFIG_DIR" ] || [ "$HOME" = "$CLAUDE_CONFIG_DIR" ] || exit 9
+fi
+identity=$(/bin/cat "$home/active-login") || exit 10
+if [ "$1" = --version ]; then echo 1.2.3; exit 0; fi
+if [ "$1" = auth ]; then printf '{"loggedIn":true,"email":"%s","authMethod":"claude.ai"}\n' "$identity"; exit 0; fi
+if [ "$1" = login ]; then echo 'Logged in using ChatGPT'; exit 0; fi
+[ "$1" = app-server ] || exit 11
+while IFS= read -r line; do
+  case "$line" in
+    *'"id":1'*) printf '{"id":1,"result":{}}\n';;
+    *'"id":2'*) printf '{"id":2,"result":{"account":{"type":"chatgpt","email":"%s"}}}\n' "$identity";;
+  esac
+done
+`
+	path := filepath.Join(owner, harness)
+	if err := os.WriteFile(path, []byte(body), 0700); err != nil {
+		t.Fatal(err)
+	}
+	return Discovery{Home: owner, Workspace: physicalTemp(t), LookPath: func(string) (string, error) { return path, nil }}, first, second
+}
+
+// Risk: setup probes a different login than runtime, or enrolls a public or
+// symlinked profile. The fake vendor answers only from the selected home.
+func TestHarnessDiscoveryPinsExplicitPrivateHomes(t *testing.T) {
+	for _, harness := range []string{"claude", "codex"} {
+		t.Run(harness, func(t *testing.T) {
+			d, first, second := harnessHomeFixture(t, harness)
+			t.Setenv("HOME", d.Home)
+			t.Setenv("CLAUDE_CONFIG_DIR", "/unselected/claude")
+			t.Setenv("CODEX_HOME", "/unselected/codex")
+			t.Setenv("ANTHROPIC_API_KEY", "synthetic-fixture")
+			t.Setenv("ANTHROPIC_AUTH_TOKEN", "synthetic-fixture")
+			t.Setenv("NODE_OPTIONS", "synthetic-fixture")
+			t.Setenv("NODE_PATH", "synthetic-fixture")
+			c, err := d.Detect(t.Context(), harness, "first@example.test")
+			if err != nil || c.Home != first || c.Identity != "first@example.test" {
+				t.Fatalf("default profile: %+v %v", c, err)
+			}
+			if harness == "claude" {
+				d.ClaudeHome = second
+			} else {
+				d.CodexHome = second
+			}
+			c, err = d.Detect(t.Context(), harness, "second@example.test")
+			if err != nil || c.Home != second || c.Identity != "second@example.test" {
+				t.Fatalf("explicit profile: %+v %v", c, err)
+			}
+			if _, err := d.Detect(t.Context(), harness, "first@example.test"); err == nil {
+				t.Fatal("wrong account context accepted")
+			}
+			linked := filepath.Join(d.Home, "linked")
+			if err := os.Symlink(second, linked); err != nil {
+				t.Fatal(err)
+			}
+			public := filepath.Join(d.Home, "public")
+			if err := os.Mkdir(public, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(public, 0755); err != nil {
+				t.Fatal(err)
+			}
+			for _, invalid := range []string{public, linked, "relative", filepath.Join(d.Home, "missing")} {
+				if harness == "claude" {
+					d.ClaudeHome = invalid
+				} else {
+					d.CodexHome = invalid
+				}
+				called := false
+				d.Executor = executorFunc(func(context.Context, Command) ([]byte, error) {
+					called = true
+					return nil, errors.New("must not execute")
+				})
+				if _, err := d.Detect(t.Context(), harness, ""); err == nil || !strings.Contains(err.Error(), "private, user-owned physical") || called {
+					t.Fatalf("unsafe home probed: %s %v", invalid, err)
+				}
+			}
+		})
+	}
+}
+
+// Risk: a second home inherits approval or replaces its sibling; the same
+// subscription in another home must never become another billable account.
+func TestSeparateHarnessHomesRequireTheirOwnApproval(t *testing.T) {
+	for _, harness := range []string{"claude", "codex"} {
+		t.Run(harness, func(t *testing.T) {
+			d, first, second := harnessHomeFixture(t, harness)
+			t.Setenv("HOME", d.Home)
+			e, api, local, opts, _ := engineFixture(t)
+			c, err := d.Detect(t.Context(), harness, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts.Candidates = []Candidate{c}
+			if harness == "claude" {
+				_, opts.NodePath, opts.ClaudeSDKPath = claudeFixture(t)
+			}
+			approveFixture(t, e, api, opts)
+			before, err := ReadRuntimeConfig(e.Store.Path())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if harness == "claude" {
+				d.ClaudeHome = second
+			} else {
+				d.CodexHome = second
+			}
+			c, err = d.Detect(t.Context(), harness, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			api.approved = false
+			p, err := e.AddHarness(t.Context(), []Candidate{c})
+			if err != nil || p.Stage != "awaiting_approval" || api.createCount != 2 {
+				t.Fatalf("approval bypassed: %s %v", p.Stage, err)
+			}
+			pending, err := ReadRuntimeConfig(e.Store.Path())
+			if err != nil || len(pending.Accounts) != 1 || pending.Accounts[0] != before.Accounts[0] {
+				t.Fatal("pending enrollment replaced sibling")
+			}
+			api.approved = true
+			now := e.now().Add(10 * time.Second)
+			e.Now = func() time.Time { return now }
+			if _, err := e.Step(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			after, err := ReadRuntimeConfig(e.Store.Path())
+			if err != nil || len(after.Accounts) != 2 || after.Accounts[0] != before.Accounts[0] || after.Accounts[1].Home != second || after.Accounts[1].Identity != c.Identity {
+				t.Fatalf("per-home runtime binding lost: %v", err)
+			}
+			if after.Accounts[0].Key == after.Accounts[1].Key || after.Accounts[0].AccountID == after.Accounts[1].AccountID {
+				t.Fatal("homes share an account key")
+			}
+			local.states[""] = LocalStatus{DaemonID: "paired-daemon", State: "drained", Ready: true,
+				AccountLogins: map[string]AccountLogin{testAccount: {ActiveIdentity: "first@example.test", Approved: true}, otherAccount: {ActiveIdentity: "second@example.test", Approved: true}}}
+			p, err = e.Status(t.Context())
+			if err != nil || p.AccountLogins[testAccount].Home != first || p.AccountLogins[otherAccount].Home != second {
+				t.Fatalf("status homes missing: %+v %v", p.AccountLogins, err)
+			}
+			raw, _ := json.Marshal(p)
+			if !strings.Contains(string(raw), `"home":`) {
+				t.Fatal("local JSON omitted homes")
+			}
+			// Deliberately vary case: subscription identities are case insensitive.
+			if err := os.WriteFile(filepath.Join(second, "active-login"), []byte("FIRST@example.test"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			c, err = d.Detect(t.Context(), harness, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.AddHarness(t.Context(), []Candidate{c}); err == nil || err.Error() != "this login is already enrolled from "+first || api.createCount != 2 {
+				t.Fatalf("duplicate login reached approval: %v", err)
+			}
+		})
 	}
 }
