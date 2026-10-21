@@ -76,6 +76,7 @@ export const mockOnlyCiJobs = [
   ['full-ui-qa.yml', 'qa-shard'],
   ['agents-dial-ui.yml', 'agents-dial-ui'],
   ['agents-run-kinds.yml', 'execution-column'],
+  ['ci-preflight.yml', 'browser'],
 ]
 
 // These jobs start paimos serve and set AEON_REQUIRE_BACKEND=required.

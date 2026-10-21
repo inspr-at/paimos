@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { readdirSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 import {
   backendMode,
@@ -21,6 +23,7 @@ import {
   waitForHTTP,
   waitForStack,
 } from './stack-ready.mjs'
+import { browserPreflight } from '../ci-preflight-browser.mjs'
 import { runE2eStackSetup } from './e2e-stack-setup.mjs'
 import { runUiStackSetup } from './ui-stack-setup.mjs'
 
@@ -719,4 +722,111 @@ test('backend-dependent CI jobs wait and mock-only jobs opt out', () => {
     assert.match(body, /cat "\$RUNNER_TEMP\/aeon\.log"/)
     assert.doesNotMatch(body, /curl -sf/)
   }
+})
+
+// Job bodies under jobs:, keyed by job id.
+function workflowJobs(text) {
+  const jobs = new Map()
+  let inJobs = false
+  let name = ''
+  for (const line of text.split('\n')) {
+    if (/^[^\s#]/.test(line)) {
+      inJobs = line.startsWith('jobs:')
+      name = ''
+      continue
+    }
+    if (!inJobs) continue
+    const header = /^  ([A-Za-z0-9_-]+):\s*$/.exec(line)
+    if (header) {
+      name = header[1]
+      jobs.set(name, '')
+    } else if (name) {
+      jobs.set(name, jobs.get(name) + line + '\n')
+    }
+  }
+  return jobs
+}
+
+// The job-level env block. GitHub expressions stay as text.
+function jobEnv(body) {
+  const env = {}
+  let inEnv = false
+  for (const line of body.split('\n')) {
+    if (/^    \S/.test(line)) inEnv = line.trim() === 'env:'
+    else if (inEnv) {
+      const entry = /^      ([A-Z0-9_]+):\s*(.*)$/.exec(line)
+      if (entry) env[entry[1]] = entry[2].replace(/^'(.*)'$/, '$1')
+    }
+  }
+  return env
+}
+
+// Commands that start Playwright specs, and so a stack setup. Unit runs and
+// the no-browser safety suite do not.
+const browserSuite = /npx playwright test|\bnpm test\b|npm run e2e\b|cli\.mjs run web(?![^\n]*--unit)|ci-preflight-browser\.mjs/
+
+test('every CI job that starts browser specs is in the backend inventory', () => {
+  const root = new URL('../../.github/workflows/', import.meta.url)
+  const launchers = []
+  for (const file of readdirSync(root)) {
+    if (!file.endsWith('.yml') && !file.endsWith('.yaml')) continue
+    for (const [name, body] of workflowJobs(readFileSync(new URL(file, root), 'utf8'))) {
+      if (browserSuite.test(body)) launchers.push(`${file}:${name}`)
+    }
+  }
+  const inventory = [...mockOnlyCiJobs, ...backendRequiredCiJobs].map(([file, name]) => `${file}:${name}`)
+  assert.ok(launchers.includes('ci-preflight.yml:browser'))
+  assert.deepEqual(launchers.sort(), inventory.sort())
+})
+
+test('the preflight controller hands the workflow exemption to UI setup, which never dials', async () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci-preflight.yml', import.meta.url), 'utf8')
+  const env = jobEnv(workflowJobs(workflow).get('browser'))
+  // Hosted runners set CI=true. Nothing else in this process decides the mode.
+  const keys = ['CI', 'AEON_REQUIRE_BACKEND', 'AEON_STACK_READY_TIMEOUT_MS', ...Object.keys(env)]
+  const saved = keys.map(key => [key, process.env[key]])
+  const output = mkdtempSync(join(tmpdir(), 'aeon-1605-preflight-'))
+  const sha = 'a'.repeat(40)
+  let spawned
+  try {
+    for (const key of keys) delete process.env[key]
+    Object.assign(process.env, { CI: 'true' }, env)
+    const status = browserPreflight({
+      sha, group: 'browser-1', run: 1, attempt: 1, root: '/unused', output,
+      environment: 'github-hosted', runnerClass: 'hosted',
+    }, (command, args, options) => {
+      if (command === 'git') return { status: 0, stdout: `${sha}\n` }
+      spawned = { args, env: options.env }
+      return { status: 0 }
+    })
+    assert.equal(status, 0)
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    rmSync(output, { recursive: true, force: true })
+  }
+  assert.deepEqual(spawned.args.slice(0, 3), ['scripts/test-tiers/cli.mjs', 'run', 'web'])
+  assert.equal(spawned.args.includes('--unit'), false)
+  assert.equal(spawned.env.CI, 'true')
+
+  const time = timerClock()
+  let health = 0
+  const result = await runUiStackSetup({
+    env: spawned.env,
+    cwd: '/tmp/aeon-1605-port',
+    verify: () => {},
+    fetch: async url => {
+      if (!String(url).endsWith('/api/health')) return response(200)
+      health++
+      throw refused()
+    },
+    sleep: time.sleep,
+    now: time.now,
+    schedule: time.schedule,
+  })
+  assert.deepEqual(result, { web: 'up', backend: 'off' })
+  assert.equal(health, 0)
+  assert.equal(time.now(), 0)
 })
