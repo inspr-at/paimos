@@ -147,24 +147,6 @@ async function shownAfterCard(page: Page): Promise<ColumnId[]> {
   await columnsLaidOut(page, null)
   return shownIds(page)
 }
-// A two-frame read can still show the previous column set: the card sampler
-// adopts the live width on a later frame (AEON-1570). The downward scan has to
-// see that adopted set, or it records Updated as gone one pixel early and the
-// settled return check is still short of RETURN_ROOM.
-async function shownForWidth(page: Page): Promise<ColumnId[]> {
-  let last = ''
-  let stable = 0
-  let value: ColumnId[] = []
-  for (let frame = 0; frame < CARD_WIDTH_SAMPLE_CAP + 4; frame++) {
-    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
-    value = await shownIds(page)
-    const key = value.join()
-    stable = key === last ? stable + 1 : 0
-    last = key
-    if (frame >= 5 && stable >= 2) return value
-  }
-  return value
-}
 const headWidths = (page: Page) => grid(page).locator('thead th').evaluateAll(cells => Object.fromEntries(cells.map(cell => [cell.getAttribute('data-column-id'), cell.getBoundingClientRect().width])))
 // Sets the viewport so the table is exactly `target` px wide (the page gutter grows with the window). The next
 // card-width epoch is the layout those pixels belong to; the read waits for that, not for a timer.
@@ -252,21 +234,15 @@ test('AEON-1470 columns leave in the give-way order; sorted by Updated, Updated 
 })
 
 test('AEON-1470 a column that left returns only with 16 px to spare: ±8 px around a threshold keeps the set', async ({ page }, testInfo) => {
-  test.setTimeout(120_000)
   const log = checks(testInfo)
   await open(page)
   await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
   // Narrow the table a pixel at a time until Updated leaves. It starts out shown: the scan finds where it leaves.
   await tableAt(page, 920)
+  expect(await shownIds(page)).toContain('updated')
   let width = 920
-  let set = await shownForWidth(page)
-  expect(set).toContain('updated')
-  while (set.includes('updated')) {
-    width--
-    await tableAt(page, width)
-    expect(width).toBeGreaterThan(721)
-    set = await shownForWidth(page)
-  }
+  while ((await shownIds(page)).includes('updated')) { width--; await tableAt(page, width); expect(width).toBeGreaterThan(721) }
+  const set = await shownIds(page)
   for (const step of [8, -8]) {
     await tableAt(page, width + step)
     expect(await shownAfterCard(page), `left out at ${width + step}`).toEqual(set)
