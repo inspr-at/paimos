@@ -2,14 +2,15 @@
 
 # Run content capabilities
 
-An ordinary paired computer's API credential is transport authority. Existing
-person-approved workstation designations retain their separate live-key, signer
-and confirmation checks. Its run poll, run
-list and run detail expose an explicit metadata projection: identifiers,
+An ordinary paired computer's API credential is transport authority. Its run
+poll, run list and run detail expose an explicit metadata projection: identifiers,
 execution mode, model/account selection, lifecycle, revisions and accounting.
 They do not select or return trace, recovery handover, display labels or
 free-text outcome detail. Content readers and launch claims require a separate
 server-issued credential.
+
+Existing person-approved workstation designations retain their separate
+live-key, signer and confirmation checks.
 
 During agentd's Prepare stage, `POST /api/runs/{runId}/capability` negotiates
 `X-Aeon-Run-Capability-Policy: run_content_v1` and supplies the daemon identity
@@ -34,8 +35,9 @@ targets, node lookups and harness sessions must match the bound run; a content
 credential cannot select another person's run on the same computer.
 
 Agentd acquires the credential and fetches the run context, work-order node and
-criteria only during Prepare. Tools capture their run binding; session calls
-retain that same proof. Credentials stay in daemon memory, outside journals,
+criteria only during Prepare. Tools capture their run binding; session calls,
+chat callbacks and notification streams retain that same proof, including with
+injected HTTP transports. Credentials stay in daemon memory, outside journals,
 prompts and harness child settings. Inherited child environments scrub daemon
 credential variables and aliased Aeon credential values; provider account
 selection keeps its existing policy.
