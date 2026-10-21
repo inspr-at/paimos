@@ -131,6 +131,10 @@ onMounted(async () => { await business.loadPlugins(); if (business.open.costs) v
       <button v-if="business.admin" type="button" class="btn primary" @click="startCreate"><AppIcon name="plus" :size="14" />New cost unit</button>
     </div>
 
+    <div v-if="business.costUnitsError" class="load-status">
+      <p role="status">{{ business.costUnitsLoading ? 'Loading rates…' : business.costUnitsError }}</p>
+      <button type="button" class="btn sm" :disabled="business.costUnitsLoading" @click="business.loadCostUnits()">Retry rates</button>
+    </div>
     <section class="card glass-card" aria-label="Cost units and their rates">
       <div v-if="creating" class="create-row" @keydown.enter.prevent="create" @keydown.esc.stop.prevent="creating = false">
         <AppIcon name="tag" :size="14" class="create-icon" />
@@ -188,13 +192,9 @@ onMounted(async () => { await business.loadPlugins(); if (business.open.costs) v
             </tr>
           </tbody>
         </table>
-        <p v-else class="no-rates">{{ unit.ratesError ? 'Rates could not be loaded. Retry below.' : 'No rate yet, so quotes and hours cannot use it.' }}</p>
+        <p v-else class="no-rates">{{ unit.ratesError ? 'Rates could not be loaded. Use Retry rates above.' : 'No rate yet, so quotes and hours cannot use it.' }}</p>
       </div>
     </section>
-    <div v-if="business.costUnitsError" class="load-status">
-      <p role="status">{{ business.costUnitsLoading ? 'Loading rates…' : business.costUnitsError }}</p>
-      <button type="button" class="btn sm" :disabled="business.costUnitsLoading" @click="business.loadCostUnits()">Retry rates</button>
-    </div>
   </BusinessPage>
 </template>
 

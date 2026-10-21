@@ -68,13 +68,26 @@ test('AEON-1417: rejected rates remain in the hours picker and retry keeps contr
     await page.getByRole('navigation', { name: 'Business', exact: true }).getByRole('link', { name: 'Rates', exact: true }).click()
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     await expect(page.getByRole('status').filter({ hasText: 'Some rates could not be loaded' })).toBeVisible()
-    await expect(page.getByText('Rates could not be loaded. Retry below.')).toBeVisible()
+    await expect(page.getByText('Rates could not be loaded. Use Retry rates above.')).toBeVisible()
     await expect(page.getByRole('table', { name: 'Rates of Entwicklung und langfristige technische Betreuung', exact: true })).toHaveCount(0)
     await expect(page.getByRole('table', { name: 'Rates of Design', exact: true })).toBeVisible()
     const ratesStability = await controlStability(page, {
       search: page.getByRole('searchbox', { name: 'Find a cost unit' }),
       create: page.getByRole('button', { name: 'New cost unit', exact: true }),
     })
+    const filterStability = await controlStability(page, {
+      retry: page.getByRole('button', { name: 'Retry rates', exact: true }),
+      search: page.getByRole('searchbox', { name: 'Find a cost unit' }),
+    })
+    await filterStability.check(async () => {
+      await page.getByRole('searchbox', { name: 'Find a cost unit' }).fill('Entwicklung')
+      await expect(page.getByRole('table', { name: 'Rates of Design', exact: true })).toHaveCount(0)
+    })
+    await filterStability.check(async () => {
+      await page.getByRole('searchbox', { name: 'Find a cost unit' }).fill('')
+      await expect(page.getByRole('table', { name: 'Rates of Design', exact: true })).toBeVisible()
+    })
+    filterStability.done()
     await page.screenshot({ path: testInfo.outputPath(`rates-${width}-${theme}.png`), fullPage: true })
     rejected = false
     await ratesStability.check(async () => {
