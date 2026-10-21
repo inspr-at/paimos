@@ -80,6 +80,29 @@ export function nextMeasuredCardWidth(current: number, live: number, viewportGre
   return current
 }
 
+/** Card width for a viewport resize before the content box has to agree. On a shrink, clientWidth can still be the previous frame. Keeping it lays the wide columns into the card that has already narrowed, and Title — the only column without its own width — is the crushed remainder (AEON-1600: a 903 px card still wearing 788 px of design widths measured 115). The viewport delta is the new card until the content box moves. A box that has already moved is that frame, including a few pixels of scrollbar disagreement. A grow still trusts the live box (AEON-1532). */
+export function cardWidthOnViewportResize(current: number, live: number | null, viewportDelta: number): number {
+  const grew = viewportDelta > 0.5
+  const predicted = viewportDelta < -0.5 && current > 0 ? Math.max(0, current + viewportDelta) : null
+  if (live !== null && live > 0) {
+    if (predicted !== null && live > predicted + 0.5 && live > current - 0.5) return predicted
+    return nextMeasuredCardWidth(current, live, grew)
+  }
+  return predicted ?? current
+}
+
+// The page gutter moves at most (48 − 28) px a side as the viewport crosses
+// 1440, so a shrunk content box can sit this far above the viewport delta and
+// still be the card. The previous frame is the whole delta away (AEON-1600).
+const SHRINK_SAMPLE_SLACK = 48
+
+/** A sample that may replace the width already chosen for this resize. Null keeps the chosen width. A shrink that already laid out at the viewport delta must not take the previous wide frame back (AEON-1600). A box a gutter-swing above that delta is still the shrunk card. Any other sample, including a wider card when nothing set a ceiling, still stands. */
+export function resizeSampleWidth(chosen: number | null, ceiling: number | null): number | null {
+  if (chosen === null || !(chosen > 0)) return null
+  if (ceiling !== null && chosen > ceiling + SHRINK_SAMPLE_SLACK) return null
+  return chosen
+}
+
 /** The first agreeing pair that is safe to adopt. The first pair replaces a stale narrow content box with the live card (AEON-1532). A later pair that is wider is adopted only when the viewport grew, so one disagreeing pair cannot keep a column hidden (AEON-1570) and a stale wide pair cannot undo a shrink (AEON-1401). */
 export function cardWidthAfterSamples(samples: readonly (number | null)[], current: number, viewportGrew: boolean): number | null {
   for (let i = 0; i + 1 < samples.length; i += 2) {

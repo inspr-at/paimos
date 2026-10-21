@@ -5,7 +5,7 @@ import { vClipTip } from '../../directives/clipTip'
 import { formatEstimate, estimateDisplay } from '../../lib/estimates'
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { adoptedCardWidth, CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, PARENT_TITLE_WIDTH, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { adoptedCardWidth, CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, cardWidthOnViewportResize, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, PARENT_TITLE_WIDTH, releaseLabel, resizeSampleWidth, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { agentKey, ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
@@ -530,6 +530,11 @@ function readCardWidth(): number | null {
   return el.clientWidth - (Number.isFinite(padding) ? padding : 0)
 }
 let cardFrame = 0
+let lastInner = window.innerWidth
+let viewportGrew = false
+// Set when this resize already laid out a narrower card than the content box
+// has caught up to. Cleared when that settle finishes or the viewport grows.
+let shrinkCeiling: number | null = null
 // Bumped when a sample window finishes. Readers wait for the next epoch instead of a timer:
 // the list spec installs a clock that stubs requestAnimationFrame, so two of those frames are
 // not two paints (AEON-1594).
@@ -550,11 +555,13 @@ function measureWidth() {
 // grew. A newer measure bumps cardFrame and cancels this read.
 function finishCardSettle(frame: number) {
   if (frame !== cardFrame || !columnsAlive) return
+  shrinkCeiling = null
   cardEpoch.value++
   cardWidthSettled.value = true
 }
 function settleCardWidth(viewportGrew = false) {
   const frame = ++cardFrame
+  const ceiling = shrinkCeiling
   cardWidthSettled.value = false
   const samples: (number | null)[] = []
   const take = () => {
@@ -563,12 +570,17 @@ function settleCardWidth(viewportGrew = false) {
       samples.push(readCardWidth())
       if (samples.length % 2 === 1) { take(); return }
       const live = readCardWidth()
-      const chosen = adoptedCardWidth(cardWidthAfterSamples(samples, width.value, viewportGrew), live, viewportGrew)
+      // A shrink already laid out at the viewport delta. A pair still showing
+      // the previous wide frame must not replace it: Title would be the crushed
+      // remainder until the next resize (AEON-1600).
+      const chosen = resizeSampleWidth(adoptedCardWidth(cardWidthAfterSamples(samples, width.value, viewportGrew), live, viewportGrew), ceiling)
       if (chosen === null) {
         if (samples.length < CARD_WIDTH_SAMPLE_CAP) { take(); return }
         // The pairs never matched the card. Lay out in the box that is on screen,
         // so a stale wide sample cannot leave a column at 0 inside the narrow card.
-        if (live !== null && live > 0) width.value = live
+        // A sample above the shrink ceiling is that previous frame: keep the delta.
+        const onScreen = resizeSampleWidth(live, ceiling)
+        if (onScreen !== null) width.value = onScreen
         finishCardSettle(frame)
         return
       }
@@ -586,18 +598,25 @@ function applyCardSize(entries: ResizeObserverEntry[]) {
     const box = entry.contentRect?.width
     if (typeof box === 'number' && Number.isFinite(box) && box > 0) observed = Math.min(observed, box)
   }
-  if (Math.abs(live - width.value) <= 0.5 && observed < live - 0.5) width.value = observed
-  else if (live > 0) width.value = live
-  settleCardWidth()
+  // A delivery wider than the width just chosen, while the viewport did not
+  // grow, is the previous frame. Taking it lays the wide columns back into the
+  // card that has already narrowed (AEON-1600). A genuinely wider card still
+  // arrives through the frame pair, and a grow may take the wider box now.
+  const candidate = Math.abs(live - width.value) <= 0.5 && observed < live - 0.5 ? observed : live
+  if (candidate > 0) width.value = nextMeasuredCardWidth(width.value, candidate, viewportGrew)
+  settleCardWidth(viewportGrew)
 }
-let lastInner = window.innerWidth
 function measureSoon() {
   const inner = window.innerWidth
-  const grew = inner > lastInner + 0.5
+  const delta = inner - lastInner
+  viewportGrew = delta > 0.5
   lastInner = inner
-  const live = readCardWidth()
-  if (live !== null) width.value = nextMeasuredCardWidth(width.value, live, grew)
-  settleCardWidth(grew)
+  const previous = width.value
+  const next = cardWidthOnViewportResize(previous, readCardWidth(), delta)
+  if (viewportGrew) shrinkCeiling = null
+  else if (next + 0.5 < previous) shrinkCeiling = next
+  if (next > 0) width.value = next
+  settleCardWidth(viewportGrew)
 }
 const phoneChange = () => { narrowPhone.value = phoneQuery.matches }
 const coarseChange = () => { coarse.value = coarseQuery.matches }
