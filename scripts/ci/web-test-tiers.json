@@ -14384,6 +14384,8 @@
     ,
     {"kind":"browser","file":"tests/stability.spec.ts","name":"the approval queue never says nothing waits before it knows","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1510: Sonnet explains a single catalog level and keeps every granted level selectable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"New menu restores its trigger without moving header controls at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"New menu restores its trigger without moving header controls at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

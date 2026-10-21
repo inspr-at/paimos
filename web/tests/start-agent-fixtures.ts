@@ -181,5 +181,5 @@ export async function mockStartAgent(page: Page, options: { wait?: CapacityWait;
       project: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' }, ticket: { id: 'n-1', key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning' }, agent: { id: agentId, name: 'Studio builder' },
     })
   }
-  return { state, calls, claim, account, profile, agentId, spareProfileId, spareAccountId, pins }
+  return { state, calls, claim, account, profile, agentId, spareProfileId, spareAccountId, pins, catalog }
 }
