@@ -11,7 +11,8 @@ import FloatingPanel from '../work/FloatingPanel.vue'
 // beside the menu on hover and focus, the entry's description for screen
 // readers, and a line under the entry once it is tapped or pressed (always on
 // touch screens, which have no hover).
-const props = defineProps<{ anchor: RowMenuAnchor; items: RowAction[]; label: string }>()
+// phoneSheet: on a portrait phone the menu opens as the shared bottom sheet (AEON-1618).
+const props = defineProps<{ anchor: RowMenuAnchor; items: RowAction[]; label: string; phoneSheet?: boolean }>()
 const emit = defineEmits<{ select: [id: string]; close: [restoreFocus: boolean] }>()
 const id = useId()
 const menu = ref<HTMLElement>()
@@ -50,7 +51,7 @@ onMounted(async () => { await nextTick(); focusAt(0) })
 </script>
 
 <template>
-  <FloatingPanel :anchor="element" :width="280" :align="atPointer ? 'start' : 'end'" :label="label" @close="restore => emit('close', restore)">
+  <FloatingPanel :anchor="element" :width="280" :align="atPointer ? 'start' : 'end'" :label="label" :phone-sheet="phoneSheet" @close="restore => emit('close', restore)">
     <div ref="menu" role="menu" class="row-menu" :aria-label="label" @keydown="keys">
       <template v-for="(item, index) in items" :key="item.id">
         <div v-if="index > 0 && item.group !== items[index - 1]!.group" class="row-menu-sep" role="separator" />

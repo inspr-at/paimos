@@ -9414,11 +9414,19 @@
     ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 dark: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 dark: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 light: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 light: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 dark: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 dark: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 light: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 light: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"a person who may not create goals sees no New goal, and no goal offers Link work, Edit or Delete","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

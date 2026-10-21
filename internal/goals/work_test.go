@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"slices"
@@ -266,5 +267,140 @@ func TestGoalPeopleCreateLinkUnlinkDelete(t *testing.T) {
 	}
 	if err := undo(); !errors.Is(err, events.ErrConflict) {
 		t.Fatalf("second undo of a live goal: %v", err)
+	}
+}
+
+// latestGoalEvent is the newest event on a node: its type, its actor and that
+// actor's name, so a test can say who made the change.
+func latestGoalEvent(t *testing.T, f storageFixture, node string) (typ, actor, name string, before, after json.RawMessage) {
+	t.Helper()
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT e.type,e.actor_principal_id::text,p.name,coalesce(e.before,'null'),coalesce(e.after,'null') FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id
+ WHERE e.tenant_id=$1 AND e.node_id=$2 ORDER BY e.id DESC LIMIT 1`, f.writer.TenantID, node).Scan(&typ, &actor, &name, &before, &after); err != nil {
+		t.Fatal(err)
+	}
+	return
+}
+
+// Risk (Tick spec v1.1, part a): a viewer or an API key without nodes.write
+// renames, unlinks or deletes a goal; a refused write still appends an event
+// or changes the goal; a change is recorded without the person who made it;
+// an empty name is stored; Undo of a delete restores less than was there.
+// The key with the scope is the positive control: the scope alone decides.
+func TestGoalPeopleRenameUnlinkDeleteRights(t *testing.T) {
+	f := writerFixture(t)
+	ctx := t.Context()
+	tid := f.writer.TenantID
+	member := tenant.Principal{TenantID: tid, Kind: tenant.Person, Name: "Rename member"}
+	narrow := tenant.Principal{TenantID: tid, Kind: tenant.Agent, Name: "Narrow key", Scopes: []string{"nodes.read"}}
+	var fifth string
+	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Rename member') RETURNING id::text`, tid).Scan(&member.ID); err != nil {
+			return err
+		}
+		bindProjectRole(t, tx, tid, member.ID, f.project, "member")
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Narrow key') RETURNING id::text`, tid).Scan(&narrow.ID); err != nil {
+			return err
+		}
+		bindProjectRole(t, tx, tid, narrow.ID, f.project, "member")
+		fifth = fixtureNode(t, tx, tid, "work", "TKT-5", f.project, nil)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	narrow.KeyCreatorID = member.ID
+	scoped := narrow
+	scoped.Scopes = []string{"nodes.read", "nodes.write"}
+	m := &module{f.db.App, time.Now}
+	calls := 0
+	call := func(p tenant.Principal, method, path, body string) *httptest.ResponseRecorder {
+		calls++
+		return goalRequest(ctx, m, p, method, path, fmt.Sprintf("rights-%d", calls), body)
+	}
+	lands := time.Now().Add(72 * time.Hour).UTC().Truncate(time.Second)
+	body, _ := json.Marshal(map[string]any{"title": "Ship the people path", "project_id": f.project, "eta": map[string]any{"at": lands}})
+	goal := readWriteResult(t, call(member, "POST", "/api/goals", string(body)), 200).ID
+	path := "/api/goals/" + goal
+	readWork(t, call(member, "POST", path+"/work", `{"node_ids":["TKT-1","TKT-5"]}`), 200)
+	refused := func(what string, write func(p tenant.Principal) *httptest.ResponseRecorder) {
+		t.Helper()
+		before, shown := eventCount(t, f), readPeopleGoal(t, call(member, "GET", path, ""))
+		for _, p := range []tenant.Principal{f.reader, narrow} {
+			if r := write(p); r.Code != 403 {
+				t.Fatalf("%s by %s: %d %s", what, p.Name, r.Code, r.Body)
+			}
+		}
+		if eventCount(t, f) != before {
+			t.Fatalf("a refused %s appended events", what)
+		}
+		if after := readPeopleGoal(t, call(member, "GET", path, "")); !reflect.DeepEqual(after, shown) {
+			t.Fatalf("a refused %s changed the goal: %+v", what, after)
+		}
+	}
+
+	// Rename: refused for the viewer and the narrow key, an empty name is refused,
+	// and the event names the person and both names.
+	refused("rename", func(p tenant.Principal) *httptest.ResponseRecorder {
+		return call(p, "PATCH", path, `{"title":"Not yours to rename"}`)
+	})
+	before := eventCount(t, f)
+	if r := call(member, "PATCH", path, `{"title":"   "}`); r.Code != 400 || eventCount(t, f) != before {
+		t.Fatalf("empty name: %d %s", r.Code, r.Body)
+	}
+	readWriteResult(t, call(member, "PATCH", path, `{"title":"Ship the people path, renamed"}`), 200)
+	typ, actor, name, was, now := latestGoalEvent(t, f, goal)
+	var titles [2]struct{ Title string }
+	if json.Unmarshal(was, &titles[0]) != nil || json.Unmarshal(now, &titles[1]) != nil || typ != "goal.renamed" || actor != member.ID || name != "Rename member" ||
+		titles[0].Title != "Ship the people path" || titles[1].Title != "Ship the people path, renamed" {
+		t.Fatalf("rename event %s by %s (%s): %s -> %s", typ, actor, name, was, now)
+	}
+
+	// Unlink: refused alike, allowed for the key with the scope; the person's
+	// unlink is an event with their name.
+	refused("unlink", func(p tenant.Principal) *httptest.ResponseRecorder {
+		return call(p, "DELETE", path+"/work", `{"node_ids":["TKT-5"]}`)
+	})
+	if out := readWork(t, call(scoped, "DELETE", path+"/work", `{"node_ids":["TKT-5"]}`), 200); !out.Changed {
+		t.Fatalf("scoped key unlink %+v", out)
+	}
+	if typ, actor, _, _, _ = latestGoalEvent(t, f, goal); typ != "goal.work_unlinked" || actor != narrow.ID {
+		t.Fatalf("scoped key unlink event %s by %s", typ, actor)
+	}
+	readWork(t, call(member, "POST", path+"/work", `{"node_ids":["TKT-5"]}`), 200)
+	unlinked := readWork(t, call(member, "DELETE", path+"/work", `{"node_ids":["TKT-5"]}`), 200)
+	if !unlinked.Changed || slices.Contains(unlinked.NodeIDs, fifth) {
+		t.Fatalf("unlink %+v", unlinked)
+	}
+	if typ, actor, name, _, _ = latestGoalEvent(t, f, goal); typ != "goal.work_unlinked" || actor != member.ID || name != "Rename member" {
+		t.Fatalf("unlink event %s by %s (%s)", typ, actor, name)
+	}
+	readWork(t, call(member, "POST", path+"/work", `{"node_ids":["TKT-5"]}`), 200)
+
+	// Delete: refused alike; the person's delete is an event with their name, and
+	// Undo through the events API brings back the same goal: name, links, Lands, progress.
+	refused("delete", func(p tenant.Principal) *httptest.ResponseRecorder { return call(p, "DELETE", path, "") })
+	kept := readPeopleGoal(t, call(member, "GET", path, ""))
+	if kept.Title != "Ship the people path, renamed" || !reflect.DeepEqual(linkedLabels(kept), []string{"TKT-1", "TKT-5"}) || kept.ETA.At == nil || !kept.ETA.At.Equal(lands) {
+		t.Fatalf("goal before delete %+v", kept)
+	}
+	deleted := readWork(t, call(member, "DELETE", path, ""), 200)
+	if typ, actor, name, _, _ = latestGoalEvent(t, f, goal); deleted.EventID == nil || typ != "goal.deleted" || actor != member.ID || name != "Rename member" {
+		t.Fatalf("delete event %s by %s (%s), result %+v", typ, actor, name, deleted)
+	}
+	if r := call(member, "GET", path, ""); r.Code != 404 {
+		t.Fatalf("deleted goal read %d", r.Code)
+	}
+	undo := http.NewServeMux()
+	events.New(f.db.App, events.WithUndoHandlers(UndoHandlers())).Mount(undo)
+	req := httptest.NewRequest("POST", fmt.Sprintf("/api/events/%d/undo", *deleted.EventID), nil).WithContext(tenant.WithPrincipal(ctx, member))
+	rec := httptest.NewRecorder()
+	undo.ServeHTTP(rec, req)
+	if rec.Code != 201 {
+		t.Fatalf("undo delete: %d %s", rec.Code, rec.Body)
+	}
+	if restored := readPeopleGoal(t, call(member, "GET", path, "")); !reflect.DeepEqual(restored, kept) {
+		t.Fatalf("Undo restored %+v, want %+v", restored, kept)
+	}
+	if typ, actor, _, _, _ = latestGoalEvent(t, f, goal); typ != "goal.restored" || actor != member.ID {
+		t.Fatalf("undo event %s by %s", typ, actor)
 	}
 }

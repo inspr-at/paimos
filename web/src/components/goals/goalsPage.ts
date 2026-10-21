@@ -15,7 +15,8 @@
 // the frame (status note, header) stays, and a read for the other group never lands.
 // AEON-1618: people create, edit and delete goals and link work to them; the page
 // holds the New goal / Edit goal sheet (the toolbar opens it, GoalsView draws it)
-// and who may do so, by the rule for creating a node in that project.
+// and who may do so, by the rule for creating a node in that project, and which
+// goal is being renamed in place (v1.1).
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { useSession } from '../../stores/session'
 import { useProjects } from '../../stores/projects'
@@ -261,10 +262,12 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   const sheet = shallowRef<{ goal: Goal | null } | null>(null)
   function openSheet(goal: Goal | null = null) { sheet.value = { goal } }
   function closeSheet() { sheet.value = null }
+  // Rename in place (Tick spec v1.1): the goal whose name is a text field now.
+  const renaming = ref<string | null>(null)
 
   // Another person or workspace starts from nothing: no list, no open goals, no series.
   watch(owner, () => {
-    sheet.value = null
+    sheet.value = null; renaming.value = null
     turn++; controller?.abort(); retireSeries(); retirePagination()
     list.value = null; error.value = ''; reading.value = false; replacing.value = false; updatedAt.value = null
     open.clear(); charts.clear(); folds.clear(); series.clear(); filter.value = 'all'; chosenGroup.value = null
@@ -279,7 +282,7 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     filter, sort, dir, hideDone, setHideDone, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, replacing, loaded, loadingMore, loadMore, read,
     live, updatedAt, statusNote, etaLastSetAt,
     open, charts, folds, isOpen, allOpen, toggle, toggleAll, toggleFold, toggleChart, searchOpens, want, seriesFor, counts, totals, totalsPartial, stop,
-    workspaceWrite, writableProjects, canCreate, canEdit, sheet, openSheet, closeSheet,
+    workspaceWrite, writableProjects, canCreate, canEdit, sheet, openSheet, closeSheet, renaming,
   }
 }
 export type GoalsPage = ReturnType<typeof useGoalsPage>

@@ -14,7 +14,10 @@
 // entry checks, and its counts and folds keep their words together (NBSP).
 // AEON-1618: for people who may edit the goal, its opened panel ends in a "Link
 // work" text button, and each linked item has its own ⋯ (Unlink from goal).
-import { computed } from 'vue'
+// Tick spec v1.1: Rename turns the name into a text field over the same box, so
+// nothing moves; Enter saves, Esc cancels and an empty name is refused in place.
+// Phones keep the goal's ⋯ under its Lands, beside the progress bar.
+import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
 import LiveAgents from '../projects/LiveAgents.vue'
@@ -27,9 +30,46 @@ import { doneToday, hoursLeftLine, hoursLeftText, itemGroups, itemMatches, nbsp,
 import { averageRate, projectionText } from '../../lib/goalRate'
 import type { LiveAgent } from '../../lib/liveAgents'
 
-const props = defineProps<{ goal: Goal; page: GoalsPage; now: number; agents: ReadonlyMap<string, LiveAgent>; term: string; menuOpen: boolean; wideItems?: boolean; editable?: boolean; itemMenu?: string | null }>()
-const emit = defineEmits<{ menu: [anchor: HTMLElement]; itemMenu: [item: GoalOutcome, anchor: HTMLElement]; link: [anchor: HTMLElement] }>()
+const props = defineProps<{ goal: Goal; page: GoalsPage; now: number; agents: ReadonlyMap<string, LiveAgent>; term: string; menuOpen: boolean; wideItems?: boolean; editable?: boolean; itemMenu?: string | null; renameBusy?: boolean }>()
+const emit = defineEmits<{ menu: [anchor: HTMLElement]; itemMenu: [item: GoalOutcome, anchor: HTMLElement]; link: [anchor: HTMLElement]; rename: [title: string] }>()
 const linkable = computed(() => !!props.editable && props.goal.kind === 'goal')
+
+// ---------- Rename in place ----------
+const toggleButton = ref<HTMLButtonElement>()
+const nameField = ref<HTMLInputElement>()
+const renaming = computed(() => linkable.value && props.page.renaming?.value === props.goal.id)
+const draft = ref('')
+const refused = ref(false)
+watch(renaming, async on => {
+  if (!on) return
+  draft.value = props.goal.title; refused.value = false
+  await nextTick()
+  nameField.value?.focus(); nameField.value?.select()
+}, { immediate: true })
+function endRename(restore: boolean) {
+  if (props.page.renaming.value === props.goal.id) props.page.renaming.value = null
+  if (restore) toggleButton.value?.focus()
+}
+function commitRename() {
+  if (props.renameBusy) return
+  const title = draft.value.trim()
+  if (!title) { refused.value = true; return }
+  if (title === props.goal.title) endRename(true)
+  else emit('rename', title)
+}
+function renameKey(event: KeyboardEvent) {
+  if (event.isComposing) return
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); endRename(true) }
+  else if (event.key === 'Enter') { event.preventDefault(); commitRename() }
+}
+// Leaving the field keeps a changed name and drops an empty or unchanged one.
+function renameBlur() {
+  if (!renaming.value || props.renameBusy) return
+  const title = draft.value.trim()
+  if (title && title !== props.goal.title) emit('rename', title)
+  else endRename(false)
+}
+watch(draft, value => { if (value.trim()) refused.value = false })
 
 const open = computed(() => props.page.isOpen(props.goal))
 // A goal the server could not expand has no state counts. Zero would say the work is empty.
@@ -90,12 +130,18 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 <template>
   <li class="goal" :data-goal-id="goal.id" :data-open="open ? 1 : 0">
     <div class="goal-row" @click="rowClick">
-      <button type="button" class="goal-toggle" :aria-expanded="open" :aria-controls="`body-${goal.id}`" :aria-labelledby="`gn-${goal.id}`" data-nav @click="page.toggle(goal.id)"><AppIcon name="chevron-right" :size="14" /></button>
+      <button ref="toggleButton" type="button" class="goal-toggle" :aria-expanded="open" :aria-controls="`body-${goal.id}`" :aria-labelledby="`gn-${goal.id}`" data-nav @click="page.toggle(goal.id)"><AppIcon name="chevron-right" :size="14" /></button>
       <span class="goal-keys"><span v-for="badge in keys" :key="badge.id" class="key-badge" :data-tip="badge.name">{{ badge.key }}</span></span>
       <div class="goal-main">
         <div class="goal-title">
           <span class="kind" role="img" :aria-label="kindName" :data-tip="kindName"><AppIcon :name="kindIcon" :size="14" /></span>
-          <span :id="`gn-${goal.id}`" v-clip-tip class="goal-name">{{ goal.title }}</span>
+          <span :id="`gn-${goal.id}`" v-clip-tip class="goal-name" :class="{ renaming }">{{ goal.title }}</span>
+          <input
+            v-if="renaming" ref="nameField" v-model="draft" class="name-field" type="text" maxlength="300" autocomplete="off" spellcheck="false" aria-label="Goal name"
+            :placeholder="refused ? 'A goal needs a name' : 'Name the goal'" :aria-invalid="refused ? 'true' : undefined" :readonly="renameBusy" :aria-busy="renameBusy ? 'true' : undefined"
+            @keydown="renameKey" @blur="renameBlur"
+          >
+          <span v-if="renaming" class="sr-only" role="status">{{ refused ? 'A goal needs a name.' : '' }}</span>
         </div>
         <span v-if="!done && nextText" class="goal-next"><span class="lbl">Next</span><span v-clip-tip class="txt">{{ nextText }}</span></span>
       </div>
@@ -168,10 +214,17 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 @media (prefers-reduced-motion: reduce) { .goal-toggle svg, .fold-btn .f-ic svg { transition: none; } }
 .goal-keys { display: grid; gap: 4px; justify-items: start; align-self: center; }
 .goal-main { display: grid; gap: 3px; min-width: 0; }
-.goal-title { display: flex; align-items: flex-start; gap: 8px; min-width: 0; font-size: 14px; line-height: 1.3; letter-spacing: -.005em; }
+.goal-title { position: relative; display: flex; align-items: flex-start; gap: 8px; min-width: 0; font-size: 14px; line-height: 1.3; letter-spacing: -.005em; }
 .kind { flex: none; display: inline-grid; place-items: center; height: 1.3em; color: var(--ink-3); }
 /* D · The name wraps to two lines rather than ending in "…"; a longer one is clamped and its tip has all of it. */
 .goal-name { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; color: var(--ink); font-weight: 650; }
+/* Rename: the field lies over the name's first line, its text where the name's was; the name keeps its box. */
+.goal-name.renaming { visibility: hidden; }
+.name-field { position: absolute; top: -4px; left: 18px; right: -6px; height: calc(1.3em + 8px); margin: 0; padding: 0 4px; border: 0; border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; font-weight: 650; letter-spacing: inherit; box-shadow: 0 0 0 1px var(--line-2); }
+.name-field:focus { outline: none; box-shadow: var(--focus-ring); }
+.name-field[aria-invalid="true"] { box-shadow: 0 0 0 1px var(--danger), 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent); }
+.name-field[aria-invalid="true"]::placeholder { color: var(--danger); opacity: 1; }
+.name-field::placeholder { color: var(--ink-3); font-weight: 500; }
 .goal-next { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 13px; line-height: 1.35; color: var(--ink-2); }
 .goal-next .lbl { flex: none; color: var(--ink-3); }
 .goal-next .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -239,7 +292,8 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 
 /* Phones: name, ETA and progress; the rest stays in the opened goal. */
 @media (max-width: 760px) {
-  .goal-row > .goal-keys, .goal-row > .stat, .goal-row > .agents, .goal-row > .waits, .goal-row > .row-more, .goal-next, .goal-title .kind { display: none; }
+  .goal-row > .goal-keys, .goal-row > .stat, .goal-row > .agents, .goal-row > .waits, .goal-next, .goal-title .kind { display: none; }
+  .name-field { left: -4px; }
   .goal-row > span:empty { display: none; }
   .goal-row { grid-template-rows: auto auto; min-height: 68px; padding: 10px 0; row-gap: 6px; align-items: center; }
   .goal-toggle { grid-column: 1; grid-row: 1 / 3; width: 44px; height: 44px; align-self: center; }
@@ -247,7 +301,9 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
   .goal-title { font-size: 14.5px; }
   .goal-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .goal-row > .goal-eta { grid-column: 3; grid-row: 1; align-self: start; margin: -4px -6px; padding: 4px 6px; }
-  .goal-row > :deep(.goal-progress) { grid-column: 2 / 4; grid-row: 2; align-self: start; }
+  .goal-row > :deep(.goal-progress) { grid-column: 2 / 3; grid-row: 2; align-self: start; }
+  /* The goal's ⋯ under its Lands: a 44 px target that overhangs the progress line, not the next row. */
+  .goal-row > .row-more { grid-column: 3; grid-row: 2; align-self: center; justify-self: end; width: 44px; height: 44px; margin: -14px -10px -14px 0; opacity: 1; }
   .goal-row::before { inset: 3px -6px; }
   .goal[data-open="1"]::after { inset: 3px -6px 4px -6px; }
   .goal-body { padding: 0 0 8px; }

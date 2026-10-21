@@ -17,6 +17,10 @@
 // the ticket picker, unlink it from an item's ⋯, and edit or delete a goal from its
 // ⋯; each write offers Undo in its toast. The implicit outcome holding the links is
 // never named: linked work shows as the goal's own items.
+// Tick spec v1.1 (part a): the goal's ⋯ in groups (change the goal, work, for me,
+// state): Rename in place (F2), Link work… (L), Delete goal (Del) with Undo and no
+// confirm. People who may not edit a goal see only the "for me" group, and its
+// keys do nothing for them. On phones the ⋯ opens as the shared bottom sheet.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -34,7 +38,7 @@ import { onAction } from '../../lib/shortcuts'
 import { toast } from '../../lib/toast'
 import { plural } from '../../lib/work'
 import { undoEvent } from '../../lib/api'
-import { deleteGoal, linkGoalWork, STATE_FILTERS, unlinkGoalWork, type Goal, type GoalOutcome, type GoalSort } from '../../lib/goals'
+import { deleteGoal, linkGoalWork, STATE_FILTERS, unlinkGoalWork, updateGoal, type Goal, type GoalOutcome, type GoalSort } from '../../lib/goals'
 import type { LiveAgent } from '../../lib/liveAgents'
 import type { RowAction } from '../../lib/rowActions'
 import type { RelatedTicket } from '../../lib/useTicket'
@@ -110,15 +114,18 @@ const menuItems = computed<RowAction[]>(() => {
   if (!goal) return []
   if (menu.value?.item) return [{ id: 'unlink', label: 'Unlink from goal', icon: 'close', group: 1 }]
   const open = props.page.isOpen(goal)
-  const fold: RowAction = { id: 'fold', label: open ? 'Collapse' : 'Expand', icon: open ? 'collapse' : 'expand', group: 1 }
-  const copy: RowAction = { id: 'copy', label: 'Copy link', icon: 'link', group: 2 }
+  const fold: RowAction = { id: 'fold', label: open ? 'Collapse' : 'Expand', icon: open ? 'collapse' : 'expand', group: 3 }
+  const copy: RowAction = { id: 'copy', label: 'Copy link', icon: 'link', group: 3 }
   // Epics have no recorded progress over time to chart.
   if (goal.kind === 'epic') return [fold, copy]
-  const people: RowAction[] = canEdit(goal) ? [
-    { id: 'link', label: 'Link work', icon: 'plus', group: 3 }, { id: 'edit', label: 'Edit goal', icon: 'edit', group: 3 },
-    { id: 'delete', label: 'Delete goal', icon: 'trash', group: 4, danger: true },
-  ] : []
-  return [fold, { id: 'chart', label: props.page.charts.has(goal.id) ? 'Hide progress over time' : 'Show progress over time', icon: 'trending-up', group: 1, reason: goal.expansion !== 'full' ? 'This goal is too large to chart.' : undefined }, copy, ...people]
+  const forMe = [fold, { id: 'chart', label: props.page.charts.has(goal.id) ? 'Hide progress over time' : 'Show progress over time', icon: 'trending-up', group: 3, reason: goal.expansion !== 'full' ? 'This goal is too large to chart.' : undefined }, copy] satisfies RowAction[]
+  if (!canEdit(goal)) return forMe
+  return [
+    { id: 'rename', label: 'Rename', icon: 'edit', group: 1, keys: 'F2' }, { id: 'edit', label: 'Edit goal', icon: 'sliders', group: 1 },
+    { id: 'link', label: 'Link work…', icon: 'plus', group: 2, keys: 'L' },
+    ...forMe,
+    { id: 'delete', label: 'Delete goal', icon: 'trash', group: 4, danger: true, keys: 'Delete' },
+  ]
 })
 function openMenu(goal: Goal, anchor: HTMLElement, item?: GoalOutcome) { menu.value = menu.value?.goal.id === goal.id && menu.value.item?.id === item?.id ? null : { goal, item, anchor } }
 function closeMenu(restore: boolean) { const at = menu.value; menu.value = null; if (restore) at?.anchor.focus() }
@@ -128,6 +135,7 @@ async function menuAction(action: string) {
   menu.value = null
   if (!goal || !at) return
   if (action === 'unlink' && at.item) void unlink(goal, at.item)
+  else if (action === 'rename') startRename(goal)
   else if (action === 'link') openPicker(goal, at.anchor)
   else if (action === 'edit') props.page.openSheet(goal)
   else if (action === 'delete') void remove(goal)
@@ -174,13 +182,45 @@ async function unlink(goal: Goal, item: GoalOutcome) {
     toast(`${item.keys[0] ?? item.label} unlinked`, { action: { label: 'Undo', run: () => { void linkGoalWork(id, [node]).then(() => props.page.read(), cause => failure(cause, 'The link could not be restored.')) } } })
   } catch (cause) { failure(cause, 'The work could not be unlinked.') }
 }
+const toggleOf = (id: string) => root.value?.querySelector<HTMLElement>(`[data-goal-id="${CSS.escape(id)}"] .goal-toggle`) ?? null
+// No confirm: the toast's Undo restores the goal. Focus that was on its row moves to the next goal.
 async function remove(goal: Goal) {
+  const list = goals.value, at = list.findIndex(item => item.id === goal.id)
+  const next = list[at + 1] ?? list[at - 1] ?? null
+  const focused = !!root.value?.querySelector(`[data-goal-id="${CSS.escape(goal.id)}"] .goal-row`)?.contains(document.activeElement)
   try {
     const result = await deleteGoal(goal.id)
-    void props.page.read()
     const event = result.event_id
     toast('Goal deleted', event ? { action: { label: 'Undo', run: () => { void undoEvent(event).then(() => props.page.read(), cause => failure(cause, 'The goal could not be restored.')) } } } : {})
+    await props.page.read()
+    if (focused && next) { await nextTick(); toggleOf(next.id)?.focus() }
   } catch (cause) { failure(cause, 'The goal could not be deleted.') }
+}
+// Rename in place: the row's name becomes a field (GoalRow); the write is bound to the goal it renamed.
+const renameBusy = ref<string | null>(null)
+function startRename(goal: Goal) { if (canEdit(goal)) props.page.renaming.value = goal.id }
+async function rename(goal: Goal, title: string) {
+  if (renameBusy.value) return
+  const id = goal.id, before = goal.title
+  renameBusy.value = id
+  try {
+    await updateGoal(id, { title })
+    await props.page.read()
+    if (props.page.renaming.value === id) { props.page.renaming.value = null; await nextTick(); toggleOf(id)?.focus() }
+    toast('Goal renamed', { action: { label: 'Undo', run: () => { void updateGoal(id, { title: before }).then(() => props.page.read(), cause => failure(cause, 'The name could not be restored.')) } } })
+  } catch (cause) {
+    failure(cause, 'The goal could not be renamed.')
+    // A rename that left the field (blur) ends with the failure; one still in the field can be tried again.
+    if (props.page.renaming.value === id && !(document.activeElement as HTMLElement | null)?.classList.contains('name-field')) props.page.renaming.value = null
+  } finally { if (renameBusy.value === id) renameBusy.value = null }
+}
+// The goal whose row has focus (its toggle or its ⋯), never one of its items.
+function focusedGoal(): Goal | null {
+  const active = document.activeElement as HTMLElement | null
+  const row = active && root.value?.contains(active) ? active.closest('.goal-row') : null
+  const id = row?.closest<HTMLElement>('[data-goal-id]')?.dataset.goalId
+  const goal = id ? goals.value.find(item => item.id === id) ?? null : null
+  return goal && canEdit(goal) ? goal : null
 }
 // After New goal: the row appears where the sort puts it, opens, and Link work has focus.
 async function created(id: string) {
@@ -237,6 +277,9 @@ onMounted(() => {
   stopKeys.push(onAction('goals.toggle_all', () => props.page.toggleAll()))
   stopKeys.push(onAction('goals.next', () => step(1)))
   stopKeys.push(onAction('goals.prev', () => step(-1)))
+  stopKeys.push(onAction('goals.rename', () => { const goal = focusedGoal(); if (!goal) return false; startRename(goal) }))
+  stopKeys.push(onAction('goals.link', () => { const goal = focusedGoal(), anchor = goal && toggleOf(goal.id); if (!goal || !anchor) return false; openPicker(goal, anchor) }))
+  stopKeys.push(onAction('goals.delete', () => { const goal = focusedGoal(); if (!goal) return false; void remove(goal) }))
 })
 onBeforeUnmount(() => { window.removeEventListener('keydown', searchKey, true); stopKeys.forEach(stop => stop()); resized?.disconnect() })
 
@@ -301,8 +344,8 @@ const canClear = computed(() => filtering.value)
           <ul v-else class="goal-list" :aria-busy="page.reading.value">
             <GoalRow
               v-for="goal in goals" :key="goal.id" :class="{ arrived: arrived === goal.id }" :goal="goal" :page="page" :now="now" :agents="agents" :term="term"
-              :menu-open="menu?.goal.id === goal.id && !menu.item" :item-menu="menu?.goal.id === goal.id ? menu.item?.id ?? null : null" :wide-items="wideItems" :editable="canEdit(goal)"
-              @menu="anchor => openMenu(goal, anchor)" @item-menu="(item, anchor) => openMenu(goal, anchor, item)" @link="anchor => openPicker(goal, anchor)"
+              :menu-open="menu?.goal.id === goal.id && !menu.item" :item-menu="menu?.goal.id === goal.id ? menu.item?.id ?? null : null" :wide-items="wideItems" :editable="canEdit(goal)" :rename-busy="renameBusy === goal.id"
+              @menu="anchor => openMenu(goal, anchor)" @item-menu="(item, anchor) => openMenu(goal, anchor, item)" @link="anchor => openPicker(goal, anchor)" @rename="title => rename(goal, title)"
             />
           </ul>
         </template>
@@ -326,7 +369,7 @@ const canClear = computed(() => filtering.value)
         <GoalFreshness :live="page.live.value" :eta-set-at="page.etaLastSetAt.value" :updated-at="page.updatedAt.value" :now="now" />
       </div>
     </template>
-    <RowMenu v-if="menu" :anchor="menu.anchor" :items="menuItems" :label="menu.item ? `${menu.item.keys[0] ?? menu.item.label} in ${menu.goal.title}` : `${menu.goal.kind === 'epic' ? 'Epic' : 'Goal'} ${menu.goal.title}`" @select="menuAction" @close="closeMenu" />
+    <RowMenu v-if="menu" phone-sheet :anchor="menu.anchor" :items="menuItems" :label="menu.item ? `${menu.item.keys[0] ?? menu.item.label} in ${menu.goal.title}` : `${menu.goal.kind === 'epic' ? 'Epic' : 'Goal'} ${menu.goal.title}`" @select="menuAction" @close="closeMenu" />
     <RelationPicker
       v-if="picker && pickMode" :anchor="picker.anchor" :subject="picker.goal.title" :self-id="picker.goal.id" :project-key="pickMode.onlyProject ?? ''"
       :related="[]" :picking="pickMode" @close="closePicker"

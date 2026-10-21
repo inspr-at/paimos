@@ -4,7 +4,11 @@
 // is not opened with Link work focused; the picker links something else than the
 // three items picked, or the rollup ignores the links; Unlink or its Undo loses
 // work; the word "outcome" reaches people; a person who may not create goals sees
-// the button. Screenshots go to each test's output directory.
+// the button. Tick spec v1.1 (part a): Rename moves the row or its controls, Esc
+// does not cancel, an empty name is sent, Delete asks for confirmation instead of
+// offering Undo, Undo does not bring the goal back, the menu does not fit a phone,
+// or a person without edit rights can rename, link or delete by key.
+// Screenshots go to each test's output directory.
 import { test, expect, type Page, type Locator, type TestInfo } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { controlStability } from './control-stability'
@@ -16,7 +20,7 @@ const iso = (ms: number) => new Date(ms).toISOString()
 test.beforeEach(async ({ page }) => { await page.clock.install({ time: new Date(NOW) }) })
 
 type Item = Record<string, unknown> & { id: string; keys: string[]; state: string; linked?: boolean }
-type GoalMock = Record<string, unknown> & { id: string; title: string; project_id: string | null; linked: string[]; outcomes: Item[]; eta: Record<string, unknown> }
+type GoalMock = Record<string, unknown> & { id: string; title: string; project_id: string | null; linked: string[]; outcomes: Item[]; eta: Record<string, unknown>; deleted?: number }
 function world() {
   const data = fixtures()
   const agentGoal: GoalMock = {
@@ -56,7 +60,7 @@ async function mockGoals(page: Page, w: World, options: { readOnly?: boolean } =
       w.goals.push({ id, title: body.title, project_id: body.project_id, linked: [], outcomes: [], eta: body.eta ? { source: 'agent', at: body.eta.at, partial: false } : { source: 'none', partial: false } })
       return written(route, { id, key: id.toUpperCase() })
     }
-    const items = w.goals.map(g => shape(w, g))
+    const items = w.goals.filter(g => !g.deleted).map(g => shape(w, g))
     const totals = { moving: 0, queued: 0, paused: 0, done: 0 }
     for (const g of items) for (const s of ['moving', 'queued', 'paused', 'done'] as const) totals[s] += g.states[s]
     return route.fulfill({ json: { items, totals, totals_partial: false, quiet_projects: { count: 0, keys: [] }, truncated: false, read_through: 10 + w.writes.length, generation: 1 + w.writes.length }, headers: { 'Aeon-Contract': 'goals/1.6' } })
@@ -68,6 +72,28 @@ async function mockGoals(page: Page, w: World, options: { readOnly?: boolean } =
     if (request.method() === 'POST') for (const node of body.node_ids) { if (!goal.linked.includes(node)) goal.linked.push(node) }
     else goal.linked = goal.linked.filter(node => !body.node_ids.includes(node))
     return written(route, { id, key: id.toUpperCase(), node_ids: [...goal.linked], event_id: 40 + w.writes.length })
+  })
+  // Rename (PATCH title) and Delete; a delete's event undoes through the events API.
+  await page.route(/\/api\/goals\/g-[a-z0-9-]+$/, async route => {
+    const request = route.request(), id = new URL(request.url()).pathname.split('/')[3]!
+    const goal = w.goals.find(g => g.id === id)!
+    if (request.method() === 'PATCH') {
+      const body = request.postDataJSON() as { title: string }
+      w.writes.push({ method: 'PATCH', path: `/goals/${id}`, body })
+      goal.title = body.title
+      return written(route, { id, key: id.toUpperCase() })
+    }
+    w.writes.push({ method: request.method(), path: `/goals/${id}`, body: null })
+    goal.deleted = 900 + w.writes.length
+    return written(route, { id, key: id.toUpperCase(), node_ids: [], event_id: goal.deleted })
+  })
+  await page.route(/\/api\/events\/9\d\d\/undo$/, async route => {
+    const event = Number(new URL(route.request().url()).pathname.split('/')[3])
+    w.writes.push({ method: 'POST', path: `/events/${event}/undo`, body: null })
+    const goal = w.goals.find(g => g.deleted === event)
+    if (!goal) return route.fulfill({ status: 409, json: { error: 'conflict' } })
+    goal.deleted = undefined
+    return route.fulfill({ status: 201, json: { id: event + 1, type: 'goal.restored', undo_of: event } })
   })
   await page.route(/\/api\/goals\/[^/]+\/series\?/, route => route.fulfill({ json: { range: '24h', expansion: 'full', points: [], read_through: 10, generation: 1 } }))
   await page.route(/\/api\/goals\/[^/]+\/history/, route => route.fulfill({ json: { items: [], read_through: 10, generation: 1 } }))
@@ -184,6 +210,84 @@ for (const [width, height] of [[1440, 900], [1024, 800], [390, 844]] as const) {
   }
 }
 
+for (const [width, height] of [[1440, 900], [390, 844]] as const) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`${width} ${colorScheme}: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm`, async ({ page }, info) => {
+      await page.setViewportSize({ width, height })
+      await page.emulateMedia({ colorScheme })
+      const errors = watchErrors(page)
+      const w = world()
+      w.goals.push({ id: 'g-second', title: 'Probes run from every region', project_id: 'p-pharos', linked: [], outcomes: [], eta: { source: 'none', partial: false } })
+      await openGoals(page, w)
+      const phone = width <= 760
+      const name = `${width}-${colorScheme}`
+      const goal = goalRow(page, 'g-agent'), row = goal.locator('.goal-row'), toggle = goal.locator('.goal-toggle'), field = goal.locator('.name-field')
+      const openMenu = async () => { if (!phone) await row.hover(); await goal.locator('.row-more').click(); await expect(page.getByRole('menu')).toBeVisible() }
+
+      // The ⋯ in its groups: change the goal, work, for me, state. A sheet on phones, inside the viewport.
+      await openMenu()
+      for (const label of ['Rename', 'Edit goal', 'Link work…', 'Collapse|Expand', 'Copy link', 'Delete goal']) await expect(page.getByRole('menuitem', { name: new RegExp(`^(${label})`) })).toBeVisible()
+      await expect(page.getByRole('menu').locator('.row-menu-sep')).toHaveCount(3)
+      await expect(page.getByRole('menuitem', { name: 'Delete goal' })).toHaveClass(/danger/)
+      const panel = page.locator('.floating').filter({ has: page.getByRole('menu') })
+      const box = (await panel.boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(0)
+      expect(box.y).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(width + 0.5)
+      expect(box.y + box.height).toBeLessThanOrEqual(height + 0.5)
+      if (phone) await expect(panel).toHaveClass(/\bbottom\b/)
+      await shot(page, info, `menu-${name}`)
+
+      // Rename in place: the row, its controls and the next row stay put (±0.5 px).
+      const guard = await controlStability(page, { row, toggle, more: goal.locator('.row-more'), lands: goal.locator('.goal-eta'), next: goalRow(page, 'g-second').locator('.goal-row') })
+      await guard.check(async () => { await page.getByRole('menuitem', { name: /^Rename/ }).click(); await expect(field).toBeFocused() })
+      await expect(field).toHaveValue('Fleet hosts report health on their own')
+      // The field's text starts where the name's did.
+      const [nameBox, fieldBox] = [(await goal.locator('.goal-name').boundingBox())!, (await field.boundingBox())!]
+      expect(Math.abs(fieldBox.x + 4 - nameBox.x)).toBeLessThanOrEqual(0.5)
+      await shot(page, info, `rename-${name}`)
+      await guard.check(async () => { await field.fill('Not this name'); await page.keyboard.press('Escape'); await expect(field).toHaveCount(0) })
+      await expect(toggle).toBeFocused()
+      await expect(goal.locator('.goal-name')).toHaveText('Fleet hosts report health on their own')
+      expect(w.writes.filter(write => write.method === 'PATCH')).toEqual([])
+
+      // F2 on the focused row (keyboards), else the ⋯; an empty name stays in the field, refused.
+      if (phone) { await openMenu(); await page.getByRole('menuitem', { name: /^Rename/ }).click() }
+      else await page.keyboard.press('F2')
+      await expect(field).toBeFocused()
+      await guard.check(async () => { await field.fill('   '); await page.keyboard.press('Enter'); await expect(field).toHaveAttribute('aria-invalid', 'true') })
+      await expect(field).toHaveAttribute('placeholder', 'A goal needs a name')
+      expect(w.writes.filter(write => write.method === 'PATCH')).toEqual([])
+      await shot(page, info, `rename-refused-${name}`)
+      await guard.check(async () => { await field.fill('Fleet hosts report their own health'); await page.keyboard.press('Enter'); await expect(field).toHaveCount(0) })
+      expect(w.writes.at(-1)).toEqual({ method: 'PATCH', path: '/goals/g-agent', body: { title: 'Fleet hosts report their own health' } })
+      await expect(goal.locator('.goal-name')).toHaveText('Fleet hosts report their own health')
+      await expect(toggle).toBeFocused()
+      guard.done()
+      await page.locator('.toast', { hasText: 'Goal renamed' }).getByRole('button', { name: 'Undo' }).click()
+      await expect(goal.locator('.goal-name')).toHaveText('Fleet hosts report health on their own')
+      expect(w.writes.at(-1)).toEqual({ method: 'PATCH', path: '/goals/g-agent', body: { title: 'Fleet hosts report health on their own' } })
+
+      // Delete: Del on the focused row (keyboards), else the ⋯ › Delete goal. No confirm; Undo brings it back.
+      if (phone) { await openMenu(); await page.getByRole('menuitem', { name: 'Delete goal' }).click() }
+      else { await toggle.focus(); await page.keyboard.press('Delete') }
+      await expect(goal).toHaveCount(0)
+      await expect(page.locator('dialog[open], [role="alertdialog"]')).toHaveCount(0)
+      expect(w.writes.at(-1)).toEqual({ method: 'DELETE', path: '/goals/g-agent', body: null })
+      if (!phone) await expect(goalRow(page, 'g-second').locator('.goal-toggle')).toBeFocused()
+      const deletedToast = page.locator('.toast', { hasText: 'Goal deleted' })
+      await expect(deletedToast).toBeVisible()
+      await shot(page, info, `deleted-${name}`)
+      await deletedToast.getByRole('button', { name: 'Undo' }).click()
+      await expect(goal).toHaveCount(1)
+      await expect(goal.locator('.goal-name')).toHaveText('Fleet hosts report health on their own')
+      expect(w.writes.at(-1)!.path).toMatch(/^\/events\/9\d\d\/undo$/)
+      await noOutcome(page, 'rename and delete')
+      expect(errors).toEqual([])
+    })
+  }
+}
+
 test('a person who may not create goals sees no New goal, and no goal offers Link work, Edit or Delete', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const w = world()
@@ -195,5 +299,13 @@ test('a person who may not create goals sees no New goal, and no goal offers Lin
   await goal.locator('.goal-row').hover()
   await goal.locator('.row-more').click()
   await expect(page.getByRole('menuitem', { name: 'Copy link' })).toBeVisible()
-  for (const label of ['Link work', 'Edit goal', 'Delete goal']) await expect(page.getByRole('menuitem', { name: label })).toHaveCount(0)
+  for (const label of ['Rename', 'Link work', 'Edit goal', 'Delete goal']) await expect(page.getByRole('menuitem', { name: label })).toHaveCount(0)
+  // Their keys do nothing either: no field, no picker, no write.
+  await page.keyboard.press('Escape')
+  await goal.locator('.goal-toggle').focus()
+  for (const key of ['F2', 'l', 'Delete']) await page.keyboard.press(key)
+  await expect(goal.locator('.name-field')).toHaveCount(0)
+  await expect(page.locator('.picker.multi')).toHaveCount(0)
+  await expect(goal).toHaveCount(1)
+  expect(w.writes).toEqual([])
 })
