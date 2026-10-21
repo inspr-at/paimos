@@ -106,6 +106,8 @@ func TestPersonCeilingLeadProjectionKeepsOtherCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	dbtest.BindRole(t, d, tid, owner, "owner")
+	dbtest.BindRole(t, d, tid, leadAgent, "member")
+	dbtest.BindRole(t, d, tid, worker, "member")
 	caller := tenant.Principal{ID: worker, TenantID: tid, Kind: tenant.Agent}
 	var view Lead
 	if err := db.InTenant(tenant.WithPrincipal(ctx, caller), d.App, tid, func(tx pgx.Tx) error {

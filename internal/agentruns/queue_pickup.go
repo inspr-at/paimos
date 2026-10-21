@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -600,6 +601,7 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 		return out, workorders.Fail(409, "routing_scan_partial")
 	}
 	out.WaitReason = "no_qualified_route"
+	var routeNotes []string
 	for _, candidate := range candidates {
 		// An unattended wait cannot occupy a slot or advance a turn.
 		host, err := agentpairing.UnattendedForPrincipal(ctx, tx, candidate.Agent)
@@ -608,6 +610,7 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 		}
 		if host.Status != "ready" {
 			out.WaitReason = host.Reason
+			routeNotes = append(routeNotes, host.Status+":"+host.Reason)
 			continue
 		}
 		picked, err := queueTryRouteWith(ctx, tx, p, t, v, candidate, placement, lead, finish, opts.Probe)
@@ -627,6 +630,12 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 			out.WaitReason = ""
 			return out, nil
 		}
+		routeNotes = append(routeNotes, "unpicked")
+	}
+	if out.WaitReason == "no_qualified_route" {
+		var vis string
+		_ = tx.QueryRow(ctx, `SELECT current_setting('aeon.visible_projects',true)`).Scan(&vis)
+		return out, fmt.Errorf("debug no_qualified_route candidates=%d vis=%q notes=%v placement=%s", len(candidates), vis, routeNotes, string(placement))
 	}
 	return out, nil
 }
