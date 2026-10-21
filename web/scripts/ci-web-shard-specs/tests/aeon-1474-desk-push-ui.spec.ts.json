@@ -1,5 +1,9 @@
 {
   "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 20.3,
+    "selectedTests": 5
+  },
   "spec": {
     "file": "tests/aeon-1474-desk-push-ui.spec.ts",
     "listedTests": 5,

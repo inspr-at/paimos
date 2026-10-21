@@ -2,16 +2,36 @@
 import { expect, test, type Page } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
-import { mockDecisionDesk } from './decision-desk-fixtures'
-import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
+import { mockSettings, settingsData } from './settings-fixtures'
+import { fixtures, mockWork } from './work-fixtures'
+
+// One open projection row, every other Desk source empty. Kept here rather
+// than in decision-desk-fixtures.ts, whose importers sit at the helper impact bound.
+async function mockDesk(page: Page, theme?: 'light' | 'dark') {
+  const data = fixtures()
+  if (theme) data.preferences.theme = { choice: theme }
+  await mockWork(page, data)
+  const row = { id: 'accounts-1474', kind: 'account_matrix', revision: 1, title: 'Confirm the shared agent accounts', created_at: '2026-10-17T13:00:00Z', held: false, can_decide: true, href: '/settings/accounts', source: '/api/settings/accounts' }
+  await page.route('**/api/**', route => {
+    const url = new URL(route.request().url()), path = url.pathname, read = route.request().method() === 'GET'
+    if (path === '/api/decision-desk/projection') return route.fulfill({ json: { items: [row], counts: { open: 1, held: 0, chores: 0 }, has_more: false, as_of: '2026-10-17T13:00:00Z' } })
+    if (path === '/api/decision-desk') return route.fulfill({ json: { items: [], has_more: false } })
+    if (path === '/api/approvals') return route.fulfill({ json: [] })
+    if (path === '/api/rules/doctrine/inbox') return route.fulfill({ json: { items: [], pending: 0 } })
+    if (read && (path === '/api/stepup-requests' || path === '/api/key-trim-proposals')) return route.fulfill({ json: { items: [], has_more: false } })
+    if (path === '/api/harness-sessions') return route.fulfill({ json: { items: [], next_cursor: null } })
+    if (read && path.endsWith('/messages')) return route.fulfill({ json: { items: [], next_after: 0 } })
+    return route.fallback()
+  })
+}
 
 const endpoint = 'https://push.example.test/this-browser'
 const hash = createHash('sha256').update(JSON.stringify(endpoint)).digest('hex')
 const device = { id: 'device-current', created_at: '2026-10-01T12:00:00Z', endpoint_hash: hash, desk_enabled: false }
 const other = { id: 'device-other', created_at: '2026-10-01T12:00:00Z', endpoint_hash: 'f'.repeat(64), desk_enabled: true }
 async function setup(page: Page, options: { permission?: NotificationPermission; ios?: boolean; available?: boolean; on?: boolean; supported?: boolean; theme?: 'light' | 'dark'; de?: boolean } = {}) {
-  await mockDecisionDesk(page, { theme: options.theme })
+  await mockDesk(page, options.theme)
   await mockSettings(page, settingsData())
   // The app language policy currently keeps app surfaces English. Exercise the
   // complete German copy here without changing that production-wide policy.
