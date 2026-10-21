@@ -57,10 +57,11 @@ func NewRemote(baseURL, token string) *Remote {
 	c := client.New(baseURL, token)
 	c.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	r := &Remote{Client: c}
-	c.HTTP.Transport = capabilityTransport{remote: r, base: c.HTTP.Transport}
-	if c.HTTP.Transport.(capabilityTransport).base == nil {
-		c.HTTP.Transport = capabilityTransport{remote: r, base: http.DefaultTransport}
+	base := c.HTTP.Transport
+	if base == nil {
+		base = http.DefaultTransport
 	}
+	c.HTTP.Transport = capabilityTransport{remote: r, base: base}
 	return r
 }
 
@@ -299,7 +300,9 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 	if r.sessionRuns == nil {
 		r.sessionRuns = map[string]string{}
 	}
-	r.sessionRuns[result.ID] = runID
+	if r.runCapabilities[runID] != "" {
+		r.sessionRuns[result.ID] = runID
+	}
 	r.mu.Unlock()
 	result.Lease = s.Lease
 	result.Harness = harness
@@ -534,6 +537,8 @@ func (r *Remote) Report(ctx context.Context, runID string, t Telemetry) error {
 // ReportForClaim preserves the durable run's fencing identity across restart
 // or another claim. Possession of these public strings grants no authority.
 func (r *Remote) ReportForClaim(ctx context.Context, runID, daemon, generation string, t Telemetry) error {
+	// Settlement is metadata transport and must survive lost content authority.
+	ctx = context.WithValue(ctx, runCapabilityContextKey{}, "")
 	if daemon == "" || generation == "" {
 		return errors.New("run has no daemon claim")
 	}
@@ -558,6 +563,9 @@ func (r *Remote) ReportForClaim(ctx context.Context, runID, daemon, generation s
 			status.Status == http.StatusConflict && status.Message == "daemon generation conflict" {
 			return fmt.Errorf("%w (HTTP %d)", ErrTelemetryAuthority, status.Status)
 		}
+	}
+	if err == nil && t.Kind == "finished" {
+		r.forgetRunContent(runID)
 	}
 	return err
 }

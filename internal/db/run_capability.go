@@ -8,10 +8,11 @@ import (
 	"errors"
 
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/jackc/pgx/v5"
 )
 
-const RunCapabilityHeader = "X-Aeon-Run-Capability"
+const RunCapabilityHeader = workerlease.RunCapabilityHeader
 const RunCapabilityPolicyHeader = "X-Aeon-Run-Capability-Policy"
 const RunCapabilityPolicy = "run_content_v1"
 
@@ -55,6 +56,7 @@ func RunCapabilityPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
   AND a.registered_by_principal_id=r.agent_principal_id AND a.daemon_id=c.daemon_id
   AND a.last_daemon_generation=r.content_capability_generation
  WHERE r.tenant_id=$1 AND r.agent_principal_id=$2 AND r.content_capability_digest=$3
+  AND r.status IN ('queued','starting','running','waiting')
   AND r.content_capability_person_id=r.acting_person_id
   AND r.content_capability_expires_at>clock_timestamp()
   AND (r.daemon_generation IS NULL OR r.daemon_generation=r.content_capability_generation)

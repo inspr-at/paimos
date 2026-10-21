@@ -3,6 +3,7 @@ package agentd
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -32,7 +33,11 @@ func (t capabilityTransport) RoundTrip(req *http.Request) (*http.Response, error
 	if token != "" {
 		copy.Header.Set(db.RunCapabilityHeader, token)
 	}
-	return t.base.RoundTrip(copy)
+	response, err := t.base.RoundTrip(copy)
+	if response != nil {
+		response.Request = copy
+	}
+	return response, err
 }
 
 func (r *Remote) RunContext(ctx context.Context, runID string) context.Context {
@@ -44,8 +49,20 @@ func (r *Remote) RunContext(ctx context.Context, runID string) context.Context {
 
 // PrepareRunContent is the sole acquisition point. Proofs live only in daemon
 // memory and are never serialized in Run, Record, prompts or child settings.
-func (r *Remote) PrepareRunContent(ctx context.Context, run Run, daemon, generation string) (Run, Node, WorkOrder, error) {
+func (r *Remote) PrepareRunContent(ctx context.Context, run Run, daemon, generation string) (outRun Run, outNode Node, outOrder WorkOrder, resultErr error) {
+	stored := false
+	defer func() {
+		if stored && resultErr != nil {
+			r.forgetRunContent(run.ID)
+		}
+	}()
 	if run.RunCapabilityRequired {
+		r.mu.RLock()
+		full := len(r.runCapabilities) >= 256 && r.runCapabilities[run.ID] == ""
+		r.mu.RUnlock()
+		if full {
+			return Run{}, Node{}, WorkOrder{}, errors.New("run content credential capacity reached")
+		}
 		var grant struct {
 			Capability string `json:"capability"`
 			RunID      string `json:"run_id"`
@@ -67,6 +84,7 @@ func (r *Remote) PrepareRunContent(ctx context.Context, run Run, daemon, generat
 			r.runCapabilities = map[string]string{}
 		}
 		r.runCapabilities[run.ID] = grant.Capability
+		stored = true
 		r.mu.Unlock()
 		ctx = r.RunContext(ctx, run.ID)
 		full, err := r.GetRun(ctx, run.ID)
@@ -112,4 +130,15 @@ func (r runToolRemote) RequestApproval(ctx context.Context, run string, in Appro
 }
 func (r runToolRemote) ReplyInbox(ctx context.Context, id string, target InboxReplyTarget, body, key string) error {
 	return r.Remote.ReplyInbox(r.RunContext(ctx, r.runID), id, target, body, key)
+}
+
+func (r *Remote) forgetRunContent(runID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.runCapabilities, runID)
+	for session, run := range r.sessionRuns {
+		if run == runID {
+			delete(r.sessionRuns, session)
+		}
+	}
 }

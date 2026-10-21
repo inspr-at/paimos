@@ -45,16 +45,30 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 		}
 		return w
 	}
-	newRun := func(title string) agentruns.Run {
+	var projectA, projectB string
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		for _, project := range []struct {
+			key string
+			id  *string
+		}{{"CAPA-1", &projectA}, {"CAPB-1", &projectB}} {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,$2,'Capability project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.tenantID, project.key).Scan(project.id); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	newRun := func(title, project string) agentruns.Run {
 		t.Helper()
 		var order workorders.Order
-		decodeResult(t, f.call("POST", "/api/work-orders", map[string]any{"title": title, "body": "private-work-order-body", "criteria": []string{"private-criterion"}, "assignee_principal_id": *v.PrincipalID}, true, "", 201), &order)
+		decodeResult(t, f.call("POST", "/api/work-orders", map[string]any{"title": title, "parent_id": project, "body": "private-work-order-body", "criteria": []string{"private-criterion"}, "assignee_principal_id": *v.PrincipalID}, true, "", 201), &order)
 		decodeResult(t, f.call("PATCH", "/api/work-orders/"+order.NodeID, map[string]any{"expected_revision": order.Revision, "status": "ready"}, true, "", 200), &order)
 		var run agentruns.Run
 		decodeResult(t, f.call("POST", "/api/work-orders/"+order.NodeID+"/runs", map[string]any{"agent_principal_id": *v.PrincipalID, "model_profile_id": e.ProfileID, "requested_account_id": e.AccountID}, true, "", 201), &run)
 		return run
 	}
-	a, b := newRun("private-person-A"), newRun("private-person-B")
+	a, b := newRun("private-person-A", projectA), newRun("private-person-B", projectB)
 	// B serves another real person; issuer and machine remain unchanged.
 	var personB string
 	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
@@ -68,7 +82,29 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dbtest.BindRole(t, f.db, f.tenantID, personB, "admin")
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,project_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, f.tenantID, personB, projectB); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,computer_id) SELECT $1,$2,id,'computer',$3 FROM roles WHERE tenant_id=$1 AND key='admin'`, f.tenantID, personB, *v.ComputerID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	source := newRun("retained recovery source", projectB)
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET acting_person_id=$2,status='completed',ended_at=clock_timestamp() WHERE id=$1`, source.ID, personB); err != nil {
+			return err
+		}
+		var session string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,work_order_id,ticket_node_id,work_shape,harness,host,management,role,ref_digest,lease_digest) VALUES($1,$2,$3,$4,$5,$5,'ship','codex','fixture-host','managed','worker','\x01','\x02') RETURNING id::text`, f.tenantID, projectB, *v.PrincipalID, source.ID, source.OrderID).Scan(&session); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO harness_recoveries(tenant_id,id,session_id,requested_by,action,observed_revision,expected_ownership,request_digest,context_digest,state,outcome,next_run_id,handover,service_tier,display_label) VALUES($1,gen_random_uuid(),$2,$3,'restart',repeat('a',64),'{}','\x03','\x04','completed','continuation_queued',$4,'{"brief":"retained-handover-content"}','default','retained-private-label')`, f.tenantID, session, personB, b.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	issue := func(run string) string {
 		t.Helper()
 		w := call("POST", "/api/runs/"+run+"/capability", map[string]string{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation"}, "", true, 200)
@@ -83,7 +119,7 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 	}
 	for _, path := range []string{"/api/runs/queued", "/api/runs", "/api/runs/" + b.ID} {
 		w := call("GET", path, nil, "", false, 200)
-		for _, marker := range []string{"retained-trace-content", "private-person", "recovery_brief", "recovery_display_label", "\"trace\""} {
+		for _, marker := range []string{"retained-trace-content", "retained-handover-content", "retained-private-label", "private-person", "recovery_brief", "recovery_display_label", "\"trace\""} {
 			if strings.Contains(w.Body.String(), marker) {
 				t.Fatalf("transport leaked %s", marker)
 			}
@@ -108,6 +144,7 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 	// Old daemons cannot claim even a bound run, and cannot repair an unbound
 	// run by supplying a person/header of their own.
 	call("POST", "/api/runs/"+a.ID+"/claim", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "reservation_ids": []string{uuid(t, f.db)}}, "", false, 403)
+	call("POST", "/api/runs/"+unbound+"/claim", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "reservation_ids": []string{uuid(t, f.db)}}, "", false, 403)
 	tokenA, tokenB := issue(a.ID), issue(b.ID)
 	otherComputer := f.propose("codex")
 	f.approve(otherComputer, "connect_only")
@@ -122,7 +159,7 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 	}
 	call("GET", "/api/nodes/"+a.OrderID, nil, tokenA, true, 200)
 	w := call("GET", "/api/runs/"+b.ID, nil, tokenB, true, 200)
-	if !strings.Contains(w.Body.String(), "retained-trace-content") {
+	if !strings.Contains(w.Body.String(), "retained-trace-content") || !strings.Contains(w.Body.String(), "retained-handover-content") {
 		t.Fatal("authorized content fixture was lost")
 	}
 	call("GET", "/api/runs/"+b.ID, nil, tokenA, true, 403)

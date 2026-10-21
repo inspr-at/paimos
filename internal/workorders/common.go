@@ -178,7 +178,7 @@ func endpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status i
 					return err
 				}
 			}
-			if workerSafety && p.KeyPersonID != "" {
+			if workerSafety && (p.KeyPersonID != "" || p.TransportComputerID != "") {
 				project, session := r.PathValue("projectId"), r.PathValue("sessionId")
 				if !UUID(project) || !UUID(session) || workerlease.Read(r) == "" {
 					return Fail(403, "harness worker proof rejected")

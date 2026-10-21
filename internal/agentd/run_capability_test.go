@@ -21,6 +21,7 @@ func TestPrepareRunContentUsesOnlyItsServerCapability(t *testing.T) {
 	const tokenB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	proofs := map[string]string{"a": tokenA, "b": tokenB}
 	var calls []string
+	reflectFailure := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.Method+" "+r.URL.Path)
 		if r.Header.Get("Authorization") != "Bearer synthetic-transport-key" {
@@ -44,6 +45,11 @@ func TestPrepareRunContentUsesOnlyItsServerCapability(t *testing.T) {
 			return
 		}
 		id = strings.TrimPrefix(id, "order-")
+		if reflectFailure {
+			w.WriteHeader(403)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "refused " + r.Header.Get(db.RunCapabilityHeader)})
+			return
+		}
 		if r.Header.Get(db.RunCapabilityHeader) != proofs[id] {
 			t.Error("work-order proof crossed runs")
 		}
@@ -74,6 +80,11 @@ func TestPrepareRunContentUsesOnlyItsServerCapability(t *testing.T) {
 	_, err := remote.RunToolsFor("a").WorkOrder(context.Background(), "order-a")
 	if err != nil {
 		t.Fatal(err)
+	}
+	reflectFailure = true
+	_, err = remote.RunToolsFor("b").WorkOrder(t.Context(), "order-b")
+	if err == nil || strings.Contains(err.Error(), tokenB) || !strings.Contains(err.Error(), "[redacted]") {
+		t.Fatal("reflected capability escaped error redaction")
 	}
 }
 
