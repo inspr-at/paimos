@@ -103,7 +103,7 @@ for (const width of [1440, 960, 390]) for (const theme of ['light', 'dark']) {
     }))
     expect(geometry.map(item => item.tag)).toContain('span'); expect(geometry.map(item => item.tag)).toContain('svg')
     for (const item of geometry) {
-      expect(item.width).toBeCloseTo(14, 0); expect(item.height).toBeCloseTo(14, 0)
+      expect(item.width).toBeCloseTo(width === 390 ? 16 : 14, 0); expect(item.height).toBeCloseTo(width === 390 ? 16 : 14, 0)
       expect(Math.abs(item.iconLeft - geometry[0].iconLeft)).toBeLessThanOrEqual(.5)
       expect(Math.abs(item.labelLeft - geometry[0].labelLeft)).toBeLessThanOrEqual(.5)
       expect(Math.abs(item.centre)).toBeLessThanOrEqual(1)
@@ -117,7 +117,7 @@ for (const width of [1440, 960, 390]) for (const theme of ['light', 'dark']) {
     // One-offs on the table status and the header counts, measured against moving controls (±0.5 px).
     const guard = await controlStability(page, {
       progress: statusButton(page, 'PHAROS-11'), qa: statusButton(page, 'PHAROS-13'), new: statusButton(page, 'PHAROS-14'),
-      qaIcon: statusButton(page, 'PHAROS-13').locator('.status-icon'), qaLabel: statusButton(page, 'PHAROS-13').locator(':scope > span:not(.status-icon)'),
+      qaIcon: statusButton(page, 'PHAROS-13').locator('.status-icon'), qaLabel: width === 390 ? row(page, 'PHAROS-13').locator('.phone-title-text') : statusButton(page, 'PHAROS-13').locator(':scope > span:not(.status-icon)'),
       open: groupCount(page, 'open'), done: groupCount(page, 'done'),
     })
     let count = await oneOffs(page)

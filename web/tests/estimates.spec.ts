@@ -55,15 +55,12 @@ for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
     }
     if (width === 390) {
       const card = row(page, 'PHAROS-11')
-      // Automatic phone cards keep the key above the title. Estimate stays off
-      // that card until a saved column set asks for it.
-      await expect(card.locator('.c-key .key')).toBeVisible()
-      const keyBox = (await card.locator('.c-key').boundingBox())!
-      const titleBox = (await card.locator('.c-title').boundingBox())!
-      expect(titleBox.y).toBeGreaterThan(keyBox.y + keyBox.height - 1)
-      await expect(card.locator('.c-estimate .mono')).toHaveText('~2h est.')
+      // D11 keeps estimates in the ticket even when desktop columns are saved.
+      await expect(card.locator('.c-estimate, .c-updated')).toHaveCount(0)
+      await expect(card.locator('.phone-meta time')).toBeVisible()
+      expect((await card.boundingBox())!.height).toBe(56)
       await automaticPhoneColumns(page)
-      await expect(card.locator('.c-estimate .mono')).toHaveText('~2h est.')
+      await expect(card.locator('.c-estimate')).toHaveCount(0)
       await expect(card.locator('.title-text')).toBeVisible()
     }
     await fits(page); await shot(page, `list-${width}-${theme}`)
@@ -119,14 +116,9 @@ test('an epic with open children and no hours shows coverage on the empty estima
   await expect(empty).toHaveAttribute('data-tip', '0 of 3 open children estimated · agent hours')
   await expect(empty).toHaveAttribute('aria-label', '0 of 3 open children estimated · agent hours')
   await page.setViewportSize({ width: 390, height: 844 })
-  // Classic cards keep the cell. An empty epic stays off the card and keeps its coverage tip; a valued estimate stays.
-  const phoneEstimate = row(page, 'PHAROS-10').locator('.c-estimate')
-  await expect(phoneEstimate).toBeHidden()
-  await expect(phoneEstimate.locator('.empty')).toHaveAttribute('data-tip', '0 of 3 open children estimated · agent hours')
-  await expect(phoneEstimate.locator('.empty')).toHaveAttribute('aria-label', '0 of 3 open children estimated · agent hours')
+  await expect(row(page, 'PHAROS-10').locator('.c-estimate')).toHaveCount(0)
   await automaticPhoneColumns(page)
-  await expect(phoneEstimate).toBeHidden()
-  await expect(row(page, 'PHAROS-11').locator('.c-estimate .mono')).toHaveText('~2h est.')
+  await expect(row(page, 'PHAROS-11').locator('.c-estimate')).toHaveCount(0)
   await row(page, 'PHAROS-10').locator('.title-link').click()
   const estimate = panel(page).locator('.estimate-prop [data-tip]')
   await expect(estimate).toBeVisible()

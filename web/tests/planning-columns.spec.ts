@@ -396,13 +396,12 @@ test('planning fragment implementation in light and dark; phones retain the card
       await expect(page.locator('.tickets thead')).toBeHidden()
       for (const card of await cards.all()) {
         await expect(card).toHaveCSS('display', 'grid')
-        await expect(card.locator('.c-key .key')).toBeVisible()
+        await expect(card.locator('.phone-meta .key')).toBeVisible()
         await expect(card.locator('.c-title')).toBeVisible()
-        const key = (await card.locator('.c-key').boundingBox())!
-        const title = (await card.locator('.c-title').boundingBox())!
-        expect(title.y).toBeGreaterThan(key.y + key.height - 1)
-        if (mode === 'automatic') await expect(card.locator('.c-model, .c-tokens, .c-list-cost')).toHaveCount(0)
-        else await expect(card.locator('td[data-column-label]').first()).toBeVisible()
+        // D11 ignores desktop metadata on both saved and automatic phone rows.
+        await expect(card.locator('td[data-column-label], .c-estimate, .c-model, .c-tokens, .c-list-cost')).toHaveCount(0)
+        await expect(card.locator('.phone-meta time')).toBeVisible()
+        expect((await card.boundingBox())!.height).toBe(56)
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
       await page.screenshot({ path: join(shots, `planning-phone-${mode === 'saved' ? '' : 'automatic-'}${theme}.png`) })

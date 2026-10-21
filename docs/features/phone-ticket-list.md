@@ -1,20 +1,27 @@
 # Ticket lists on phones
 
-Phones under 720 px and screens at most 500 px high use the same project header
-as the desk. The ticket toolbar keeps the Ticket views tablist (List, Outline,
-Graph), the search field, Filters and New ticket. Display lives in the project
-navigation and, with the header folded, beside New. Filters and Display open
-full-width sheets. Saved views stay on their own row.
+Project ticket lists use the shared compact chrome on phones under 720 px and
+screens at most 500 px high. The toolbar occupies one opaque 44 px line. Saved
+views and layouts open from the view name; search opens over that same line.
+Filter, New and More remain available without moving the toolbar.
 
-The project head is shown unless its density is collapsed. “Show the project
-head” in the project crumb’s sheet toggles that density and saves it for the
-desk as well. Folding does not move the toolbar controls.
+Portrait rows occupy 56 px: status and title above key and update time, with a
+24 px assignee avatar in a reserved 44 px target. A live update (for example
+“Deleted”) follows the update time as plain text on that second line, so the row
+keeps its height; short landscape rows show it in place of the time. Short landscape rows occupy
+44 px and show these facts on one line. Desktop column preferences remain saved;
+phone rows show these essentials regardless of that selection. The whole row
+opens its ticket. Status, priority, labels, estimates and progress remain in the
+ticket itself.
 
-Portrait cards place the key above the title. The title clamps to two lines.
-Status, priority and the update time stay on the card, and a saved release or
-ETA stays in its cell. Outline uses a 36 px twisty with a 44 px hit ring.
-Select is a row under the list when the list can be selected.
+More contains Display, Hide done, Select tickets, Save view as, Copy link and
+Export CSV. Filter and Display use full-width phone sheets. CSV includes every
+matching row up to 5,000 tickets; larger or failed reads produce an error without
+downloading a partial export. Spreadsheet formula prefixes are escaped.
 
-CSV includes every matching row up to 5,000 tickets; larger or failed reads
-produce an error without downloading a partial export. Spreadsheet formula
-prefixes are escaped.
+The project crumb opens its shared sheet. “Show the project head” discloses the
+project counts, sections and lead above the list for that visit, without changing
+the saved desktop header density. Outline keeps its expand actions, and the view
+menu retains access to both Outline and Graph.
+Clipped titles retain full-text disclosure and native links; the status keyboard
+shortcut remains available when the compact row has no status button.

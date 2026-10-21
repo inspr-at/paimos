@@ -133,7 +133,9 @@ for (const width of sizes) for (const theme of ['light', 'dark']) {
     await page.goto('/p/PHAROS/tickets?view=graph&closed=1')
     await expect(page.getByText(/leaves.*parents.*links/).first()).toBeVisible()
     const graphSearch = page.getByRole('searchbox', { name: 'Search tickets in this project' })
-    const layouts = page.getByRole('tablist', { name: 'Ticket views' })
+    // Phones keep search behind its toolbar button and the layouts in the view control (AEON-1460).
+    if (width <= 720) await page.locator('.compact-ticket-toolbar').getByRole('button', { name: 'Search tickets', exact: true }).click()
+    const layouts = width <= 720 ? page.getByRole('button', { name: /^View: .+\. Change the view$/ }) : page.getByRole('tablist', { name: 'Ticket views' })
     const graphGuard = await controlStability(page, { graphSearch, selectors: layouts })
     await graphGuard.check(() => graphSearch.fill('connector'))
     await expect(page.getByText(/^0 leaves · 1 parent · 0 links$/).first()).toBeVisible()

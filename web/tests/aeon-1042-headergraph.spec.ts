@@ -5,7 +5,7 @@
 // header control (AEON-541).
 import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
-import { me } from './work-fixtures'
+import { me, showProjectHead } from './work-fixtures'
 import { headerStorageKey } from '../src/lib/projectHeader'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
 import { controlStability } from './control-stability'
@@ -28,12 +28,16 @@ test.afterEach(async ({ page }) => { expect(errors.get(page), 'no browser runtim
 async function settled(page: Page) { await page.evaluate(async () => { await document.fonts.ready; await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) }) }
 async function capture(page: Page, name: string) { await settled(page); mkdirSync(shots, { recursive: true }); await page.screenshot({ path: `${shots}/${name}.png` }) }
 // Absence only counts once the developer choice has been read and rendered.
+// The compact toolbar opens its search field from a 44 px button (1460 §3); wider windows show the field.
+const search = (page: Page) => page.getByRole('searchbox', { name: 'Search tickets in this project' }).or(page.locator('.compact-ticket-toolbar').getByRole('button', { name: 'Search tickets', exact: true }))
 async function openProject(page: Page) {
   const read = page.waitForResponse(response => new URL(response.url()).pathname === '/api/preferences/developer-ui')
   await page.goto('/p/PHAROS/tickets')
   await read
+  // Compact chrome (AEON-1460, D11): the crumb's sheet shows the project head for the visit.
+  await showProjectHead(page)
   await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
-  await expect(page.getByRole('searchbox', { name: 'Search tickets in this project' })).toBeVisible()
+  await expect(search(page)).toBeVisible()
   await settled(page)
 }
 async function switchGraph(page: Page, world: ReturnType<typeof ticketGraphWorld>, on: boolean) {
@@ -66,7 +70,7 @@ for (const width of [1440, 400]) for (const theme of ['light', 'dark'] as const)
       title: page.locator('#project-title'),
       counts: page.getByRole('group', { name: 'Filter tickets by status' }),
       sections: page.getByRole('tablist', { name: 'Project sections' }),
-      search: page.getByRole('searchbox', { name: 'Search tickets in this project' }),
+      search: search(page),
       create: page.getByRole('button', { name: 'New ticket', exact: true }),
     })
     await guard.check(async () => {

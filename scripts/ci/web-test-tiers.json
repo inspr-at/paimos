@@ -202,6 +202,8 @@
     ,
     "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px light"
     ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:on a phone, ⋯ › Display… opens the same full-width Display sheet as the Filters link"
+    ,
     "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px dark"
     ,
     "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px light"
@@ -209,8 +211,6 @@
     "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px dark"
     ,
     "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px light"
-    ,
-    "browser:tests/aeon-1188-displayhome.spec.ts:with the header folded on a phone, the link opens the Display menu beside New"
     ,
     "browser:tests/aeon-1209-agents-head.spec.ts:390: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable"
     ,
@@ -1074,15 +1074,19 @@
     ,
     "browser:tests/project-header.spec.ts:filter triggers stay still until the popover closes and removals clear real filters"
     ,
-    "browser:tests/project-header.spec.ts:phone Display choices and pinned actions stay still through density changes"
-    ,
-    "browser:tests/project-header.spec.ts:phone Graph retains header density in the Display sheet"
-    ,
     "browser:tests/project-header.spec.ts:phone project crumb touch target › the whole 44px project crumb target accepts taps in dark"
     ,
     "browser:tests/project-header.spec.ts:phone project crumb touch target › the whole 44px project crumb target accepts taps in light"
     ,
+    "browser:tests/project-header.spec.ts:phones use the compact header without a density switch at 390px dark"
+    ,
+    "browser:tests/project-header.spec.ts:phones use the compact header without a density switch at 390px light"
+    ,
     "browser:tests/project-header.spec.ts:scrolling leaves density alone and section changes keep the view settings usable"
+    ,
+    "browser:tests/project-header.spec.ts:tablet Display choices and pinned actions stay still through density changes"
+    ,
+    "browser:tests/project-header.spec.ts:tablet Graph retains header density in the Display sheet"
     ,
     "browser:tests/project-header.spec.ts:three densities preserve controls at 1024px dark"
     ,
@@ -1091,10 +1095,6 @@
     "browser:tests/project-header.spec.ts:three densities preserve controls at 1440px dark"
     ,
     "browser:tests/project-header.spec.ts:three densities preserve controls at 1440px light"
-    ,
-    "browser:tests/project-header.spec.ts:three densities preserve controls at 390px dark"
-    ,
-    "browser:tests/project-header.spec.ts:three densities preserve controls at 390px light"
     ,
     "browser:tests/project-settings.spec.ts:AEON-1233: General edits, lifecycle and legacy links stay on the acted-on project and revision"
     ,
@@ -5788,6 +5788,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"desktop Display buttons open the Display menu at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"on a phone, ⋯ › Display… opens the same full-width Display sheet as the Filters link","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -5795,8 +5797,6 @@
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"with the header folded on a phone, the link opens the Display menu beside New","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"1024: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -6310,13 +6310,13 @@
     ,
     {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 choosing Outline retains its expand and status actions on phones","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 compact project-head disclosure works without changing the desktop preference","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 compact rows retain the keyboard status action without a row status button","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 compact ticket list keeps controls still and all actions reachable; desktop stays unchanged","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 compact titles retain native links and keyboard full-text disclosure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 phone rows keep the status button and the keyboard status action","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 project-head disclosure persists the shared header density","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Columns rows hold still while hidden notes come and go","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -10938,7 +10938,7 @@
     ,
     {"kind":"browser","file":"tests/live-list.spec.ts","name":"field changes patch in place; a regrouped row waits as moved until u","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/live-list.spec.ts","name":"on a phone the marked row, the pill and the deleted selection fit 390 px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/live-list.spec.ts","name":"on a phone the marked row, the text mark and the deleted selection fit 390 px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/live-list.spec.ts","name":"screenshots of the waiting states","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12214,15 +12214,19 @@
     ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"filter triggers stay still until the popover closes and removals clear real filters","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone Display choices and pinned actions stay still through density changes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone Graph retains header density in the Display sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone project crumb touch target › the whole 44px project crumb target accepts taps in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone project crumb touch target › the whole 44px project crumb target accepts taps in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phones use the compact header without a density switch at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phones use the compact header without a density switch at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"scrolling leaves density alone and section changes keep the view settings usable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/project-header.spec.ts","name":"tablet Display choices and pinned actions stay still through density changes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/project-header.spec.ts","name":"tablet Graph retains header density in the Display sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"three densities preserve controls at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12231,10 +12235,6 @@
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"three densities preserve controls at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"three densities preserve controls at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/project-header.spec.ts","name":"three densities preserve controls at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/project-header.spec.ts","name":"three densities preserve controls at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-list.spec.ts","name":"? opens the shortcut sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

@@ -6,7 +6,7 @@
 // click doesn't change or that "No …" groups break, and folds or group order lost on reload or in a saved view.
 // A long epic title must not consume the phone caption: the summary stays wide enough to read and to disclose.
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { fixtures, liveAgent, mockView, mockWork, watchErrors, type Fixtures } from './work-fixtures'
+import { fixtures, liveAgent, mockView, mockWork, watchErrors, type Fixtures, openListFilters } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
@@ -364,8 +364,9 @@ test('AEON-1388 phones: one muted line after the name, at most three facts in or
     scrollAreas: { grid: grid(page) },
   })
   await expect(grid(page).locator('.group-row td.group-fig')).toHaveCount(0)
-  // No column headers on a phone: Filters › Display settings… › Groups is the way to order the groups.
-  await page.getByRole('button', { name: 'Filters', exact: true }).click()
+  // No column headers on a phone: Filter › Display settings… › Groups is the way to order the groups
+  // (the compact toolbar's Filter icon opens the same sheet, AEON-1460 §5).
+  await openListFilters(page)
   await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
   await display(page).getByRole('radiogroup', { name: 'Groups' }).getByRole('radio', { name: 'Reversed' }).click()
   await expect(labels(page)).toHaveText(['QA', 'In progress', 'Backlog', 'New'])

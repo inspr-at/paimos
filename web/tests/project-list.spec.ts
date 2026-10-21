@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, mockWork, watchErrors, type Call, showProjectHead } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, type Call, showProjectHead, openListFilters } from './work-fixtures'
 
 // setSystemTime lets time flow (setFixedTime would freeze Vue's event timestamps).
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
@@ -472,11 +472,14 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.goto('/p/PHAROS'); await showProjectHead(page)
     await expect(rows(page)).toHaveCount(5)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    // The project ticket list uses 1460's rows (Tick's v1.1 ruling for AEON-1615): 56 px, the title on
+    // line 1 and "KEY · when" on line 2.
     const first = rows(page).first()
-    const key = await first.locator('.c-key').boundingBox(), title = await first.locator('.c-title').boundingBox()
-    expect(title!.y).toBeGreaterThan(key!.y + key!.height - 1)
+    const line1 = await first.locator('.phone-title').boundingBox(), line2 = await first.locator('.phone-meta').boundingBox()
+    expect(line2!.y).toBeGreaterThan(line1!.y + line1!.height - 1)
+    expect(Math.abs((await first.boundingBox())!.height - 56), 'a 56 px row').toBeLessThanOrEqual(1)
     await expect(page.getByRole('toolbar').getByRole('button', { name: 'Status', exact: true })).toBeHidden()
-    await page.getByRole('button', { name: /^Filters/ }).click()
+    await openListFilters(page)
     const sheet = page.getByRole('dialog', { name: 'Filters' })
     await expect(sheet).toBeVisible()
     await sheet.locator('.facet-option').filter({ hasText: 'Backlog' }).click()

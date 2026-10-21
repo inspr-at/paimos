@@ -347,9 +347,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await epic.getByRole('button', { name: 'Expand PHAROS-10' }).click()
     await expect(page).toHaveURL('/p/PHAROS/tickets?view=outline&closed=1')
     const child = row(page, 'PHAROS-11')
-    // The phone card leads with the key; the title is the line below it.
-    const key = (await child.locator('.c-key .key').boundingBox())!, title = (await child.locator('.title-link').boundingBox())!
-    expect(title.y).toBeGreaterThan(key.y + key.height - 1)
+    // D11 (AEON-1460): the title leads; the key and update time form the second line.
+    const key = (await child.locator('.phone-meta .key').boundingBox())!, title = (await child.locator('.title-link').boundingBox())!
+    expect(key.y).toBeGreaterThan(title.y + title.height - 1)
     // Selection space shares the card inset; depth still adds ten pixels.
     const parentInset = await epic.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))
     expect(await child.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))).toBe(parentInset + 10)
@@ -750,7 +750,11 @@ for (const view of ['outline', 'list']) for (const audience of ['viewer', 'empty
       const box = (await pill.boundingBox())!
       expect(Math.abs(box.x + box.width / 2 - 195)).toBeLessThan(1)
       expect(box.height).toBeGreaterThanOrEqual(44)
-      for (const control of await page.locator('.toolbar-wrap button, .toolbar-wrap input, .bulk-bar, .app-footer').all()) {
+      // Tick's v1.1 ruling (AEON-1615): "385 fix2 chip: invariants kept, control list rewritten to 1460's DOM
+      // (no phone footer)". The controls are the 44 px compact toolbar's and the bulk bar; phones have no footer.
+      await expect(page.locator('.app-footer')).toHaveCount(0)
+      expect(Math.abs((await page.locator('.compact-ticket-toolbar').boundingBox())!.height - 44)).toBeLessThanOrEqual(.5)
+      for (const control of await page.locator('.compact-ticket-toolbar button, .compact-ticket-toolbar input, .bulk-bar, .bulk-bar button').all()) {
         if (!await control.isVisible()) continue
         const other = (await control.boundingBox())!
         const overlap = box.x < other.x + other.width && box.x + box.width > other.x && box.y < other.y + other.height && box.y + box.height > other.y
@@ -764,19 +768,18 @@ for (const view of ['outline', 'list']) for (const audience of ['viewer', 'empty
       mkdirSync(process.env.OUTLINE_SHOTS_DIR, { recursive: true })
       await page.screenshot({ path: `${process.env.OUTLINE_SHOTS_DIR}/chip-${view}-${audience}-390-${scheme}.png` })
     }
-    const search = page.getByRole('searchbox', { name: 'Search tickets in this project' })
+    // D11 (AEON-1460): search opens over the compact toolbar line; Esc leaves the field, then closes it.
+    const bar = page.locator('.compact-ticket-toolbar'), search = bar.getByRole('searchbox', { name: 'Search tickets in this project' })
+    await bar.getByRole('button', { name: 'Search tickets', exact: true }).click()
     await search.click(); await expect(search).toBeFocused()
     await expect(pill).toBeVisible()
-    // A filled field (the empty audience arrives on q=Zebra) clears on the first Escape and blurs on the second.
-    if ((await search.inputValue()).length > 0) {
-      await page.keyboard.press('Escape')
-      await expect(search).toHaveValue('')
-      await expect(search).toBeFocused()
-      await expect(search).toBeVisible()
-    }
+    // The first Escape leaves the field and keeps the search line open; the second closes it.
     await page.keyboard.press('Escape')
     await expect(search).toBeVisible()
     await expect(search).not.toBeFocused()
+    await expect(pill).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(bar.getByRole('search')).toHaveCount(0)
     await openListFilters(page)
     await page.keyboard.press('Escape')
     await page.getByRole('button', { name: 'New ticket', exact: true }).click()

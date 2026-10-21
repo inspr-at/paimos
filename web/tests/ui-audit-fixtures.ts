@@ -21,6 +21,7 @@ import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 import { groupsWorld, mockProjectGroups } from './project-groups-fixtures'
 import { JONAS as ACCESS_JONAS, ME as ACCESS_ME, accessWorld, mockAccess } from './access-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { isCompact } from './helpers/compact'
 
 type Finding = Raw & { id: string; route: string; state: string; viewport: string; theme: string; screenshot: string }
 type Setup = 'default' | 'editor' | 'public' | 'signed-out' | 'groups' | 'cards' | 'views' | 'live' | 'live-list'
@@ -32,6 +33,13 @@ const editor = `${quote}/${QUOTE_ID}`
 const history = releaseHistory()
 const signedOut: Scenario['act'] = async page => { await expect(page.getByLabel('Email address')).toBeVisible() }
 const visible = (selector: string): Scenario['act'] => async page => { await expect(page.locator(selector).first()).toBeVisible() }
+// U22's state on the compact chrome (AEON-1460, D11 §3): no saved-view strip, so the open view control
+// with the changed saved view checked is the state audited there (Tick's v1.1 ruling for AEON-1615).
+const savedViews: Scenario['act'] = async page => {
+  if (!isCompact(page)) return visible('.view-bar .changes .save')(page)
+  await page.locator('.compact-ticket-toolbar .phone-view').click()
+  await expect(page.getByRole('menu', { name: 'Ticket views' }).getByRole('menuitemradio', { checked: true })).toBeVisible()
+}
 const listContent = (text: string): Scenario['act'] => async page => { await expect(page.getByText(text, { exact: false }).first()).toBeVisible() }
 const inspectorTab = (name: string): Scenario['act'] => async page => {
   await visible('.quote-document')(page)
@@ -112,7 +120,7 @@ const scenarios: Scenario[] = [
   { state: 'projects display', route: '/', setup: 'groups', act: async page => { await visible('.group-head')(page); await page.getByRole('button', { name: /^Display/ }).click(); await expect(page.getByRole('dialog', { name: 'Display options' })).toBeVisible() } },
   { state: 'projects move dialog', route: '/', setup: 'cards', act: async page => { await visible('.card')(page); await page.locator('.card-link').first().focus(); await page.keyboard.press('m'); await expect(page.getByRole('dialog', { name: /^Move .* to a group$/ })).toBeVisible() } },
   // U22: the view bar with an own view that has changes (Save) and a shared one.
-  { state: 'project saved views', route: `/p/PHAROS?priority=high,medium&v=${AUDIT_VIEW}`, setup: 'views', act: visible('.view-bar .changes .save') },
+  { state: 'project saved views', route: `/p/PHAROS?priority=high,medium&v=${AUDIT_VIEW}`, setup: 'views', act: savedViews },
   { state: 'projects selection', route: '/', setup: 'cards', act: async page => { await visible('.card')(page); await page.locator('.card-link').first().focus(); await page.keyboard.press('x'); await expect(page.getByRole('toolbar', { name: /selected project/ })).toBeVisible() } },
   // AEON-148: Settings -> Access on the mocked authz contract.
   { state: 'access people', route: '/settings/access/people', act: visible('table.people') },

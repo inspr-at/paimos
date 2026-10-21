@@ -33,7 +33,7 @@ for (const width of [320, 360, 390, 1440]) {
     await mockWork(page, data)
     await page.goto('/p/PHAROS')
     await expect(rows(page)).toHaveCount(5)
-    const phone = false
+    const phone = width <= 719
     await expect(grid(page).locator(phone ? '.phone-meta .key' : '.c-key .key', { hasText: /^PHAROS-14530$/ })).toBeVisible()
     for (const colorScheme of SCHEMES) {
       await page.emulateMedia({ colorScheme })
@@ -134,21 +134,30 @@ for (const width of [320, 360, 390, 1440]) {
       // Squeezed further, the date is next to give way. The key and the
       // status icon stay whole, and nothing leaves the card. The squeeze leaves the
       // long key's date half its text on any platform font, never wider than 228px.
-      await grid(page).evaluate(el => { (el.closest('.table-card') as HTMLElement).style.width = '228px' })
+      const longRow = rows(page).filter({ has: page.locator('.phone-meta .key', { hasText: /^PHAROS-14530$/ }) })
+      const squeezed = await longRow.evaluate(tr => {
+        const meta = tr.querySelector<HTMLElement>('.phone-meta')!, date = meta.querySelector<HTMLElement>('time')!
+        // The date grows to fill the line, so its text, not its box, sets the squeeze.
+        const range = document.createRange()
+        range.selectNodeContents(date)
+        const needed = [...meta.children].reduce((sum, el) => sum + (el === date ? range.getBoundingClientRect().width / 2 : el.getBoundingClientRect().width), 0)
+        return Math.floor(tr.closest('.table-card')!.getBoundingClientRect().width - (meta.clientWidth - needed))
+      })
+      await grid(page).evaluate((el, width) => { (el.closest('.table-card') as HTMLElement).style.width = `${width}px` }, Math.min(228, squeezed))
       let datesGivingWay = 0
       for (const row of await rows(page).all()) {
-        const keyFit = await wholeKey(row.locator('.c-key .key'), 'tr')
+        const keyFit = await wholeKey(row.locator('.phone-meta .key'), 'tr')
         expect(keyFit, `squeezed ${keyFit.why}`).toMatchObject({ lines: 1, clipped: false, inside: true })
         const fit = await row.evaluate(tr => {
-          const icon = tr.querySelector<HTMLElement>('.status-btn .status-icon')!.getBoundingClientRect()
-          const box = tr.querySelector<HTMLElement>('.status-btn')!.getBoundingClientRect()
-          const date = tr.querySelector<HTMLElement>('.c-updated time, .c-eta time')!
+          const icon = tr.querySelector<HTMLElement>('.phone-state [role="img"] .status-icon')!.getBoundingClientRect()
+          const box = tr.querySelector<HTMLElement>('.phone-state')!.getBoundingClientRect()
+          const date = tr.querySelector<HTMLElement>('.phone-meta time')!
           return {
             card: tr.getBoundingClientRect().right - parseFloat(getComputedStyle(tr).paddingRight),
             date: date.getBoundingClientRect().right,
             dateWhole: date.scrollWidth <= date.clientWidth + 1,
             chipWhole: icon.width >= 1 && icon.left >= box.left - .5 && icon.right <= box.right + .5,
-            why: `${tr.querySelector('.c-key .key')!.textContent}: columns ${getComputedStyle(tr).gridTemplateColumns}`,
+            why: `${tr.querySelector('.phone-meta .key')!.textContent}: columns ${getComputedStyle(tr).gridTemplateColumns}`,
           }
         })
         expect(fit.chipWhole, `squeezed: the status icon stays whole; ${fit.why}`).toBe(true)

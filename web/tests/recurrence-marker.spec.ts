@@ -49,7 +49,9 @@ test('extreme primary accents keep recurrence glyphs readable without moving con
   await expect.poll(() => page.locator('#aeon-theme').textContent()).toContain('--primary: #000000;')
   for (const width of [390, 1024, 1440]) for (const mode of ['dark', 'light'] as const) {
     await page.setViewportSize({ width, height: 1000 })
-    await page.goto(width === 390 ? '/p/PHAROS/PHAROS-11' : '/p/PHAROS?sort=key&group=none')
+    // One load per width: both modes reuse it, so the six samples fit the test's 30 s budget (AEON-1615;
+    // AEON-1460's per-sample reload ran out of time in the nightly).
+    if (mode === 'dark') await page.goto(width === 390 ? '/p/PHAROS/PHAROS-11' : '/p/PHAROS?sort=key&group=none')
     await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
     const icon = width === 390 ? workspace(page).locator('.recurring-pill') : row(page).locator('.ticket-type-icon')
     const marker = icon.locator(width === 390 ? '.recurring-pill-mark' : '.recurrence-dot'), glyph = marker.locator('svg')
@@ -169,6 +171,16 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     const { data, errors, recurrenceReads } = await setup(page, true, locale)
     const label = 'Routine · every Monday · #4'
     await page.goto('/p/PHAROS?sort=key&group=none')
+    if (width === 390) {
+      await expect(row(page).locator('.ticket-type-icon, .recurrence-dot')).toHaveCount(0)
+      const title = row(page).locator('.title-link'), status = row(page).locator('.phone-state')
+      expect((await row(page).boundingBox())!.height).toBe(56)
+      await expectStableControls({ controls: { title, status, row: row(page) }, interactions: [
+        { name: 'read compact title', run: () => title.hover() },
+        { name: 'routine removed while compact facts stay still', run: async () => { data.nodes.find(node => node.id === 'n-1')!.recurrence = undefined; await page.reload(); await expect(row(page).locator('.recurrence-dot')).toHaveCount(0) } },
+        { name: 'routine restored without growing compact row', run: async () => { data.nodes.find(node => node.id === 'n-1')!.recurrence = structuredClone(provenance); await page.reload(); expect((await row(page).boundingBox())!.height).toBe(56) } },
+      ] })
+    } else {
     await expect(row(page).getByRole('img', { name: label, exact: true })).toBeVisible()
     await expect(page.locator('#row-n-4 .recurrence-dot')).toHaveCount(0)
     for (const icon of await page.locator('.ticket-row .ticket-type-icon').all()) {
@@ -191,6 +203,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       ],
       scrollAreas: { list: page.locator('.table-card') },
     })
+    }
     expect(recurrenceReads).toEqual([])
     await page.goto('/p/PHAROS/PHAROS-11')
     const pill = workspace(page).getByRole('link', { name: label, exact: true })

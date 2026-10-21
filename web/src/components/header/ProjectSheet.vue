@@ -21,7 +21,7 @@ import { PROJECT_SECTIONS, projectSection, type ProjectSection } from '../work/p
 const props = defineProps<{ anchor: HTMLElement; project: Project }>()
 const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const route = useRoute(), router = useRouter()
-const { headerDensity, toggleHeader } = useProjectHeader()
+const { compactHeadShown, toggleHeader } = useProjectHeader()
 const key = computed(() => props.project.routeKey)
 const label = computed(() => `${key.value} · ${props.project.title}`)
 const sections = computed(() => PROJECT_SECTIONS.filter(item => item.id !== 'delivery' || can('delivery.read', props.project.id)))
@@ -75,8 +75,8 @@ function keys(event: KeyboardEvent) {
         <button
           v-for="section in sections" :key="section.id" type="button" class="prj-item" role="menuitemradio" :aria-checked="here === section.id" @click="go(section.id)"
         ><AppIcon :name="section.icon" :size="16" /><span class="prj-t">{{ section.label }}</span><AppIcon v-if="here === section.id" name="check" :size="14" class="prj-on" /></button>
-        <button v-if="ticketList" type="button" class="prj-item" role="menuitemcheckbox" :aria-checked="headerDensity !== 'collapsed'" @click="fold">
-          <AppIcon :name="headerDensity !== 'collapsed' ? 'chevron-up' : 'chevron'" :size="16" /><span class="prj-t">Show the project head</span><span class="prj-d2">above the tickets</span>
+        <button v-if="ticketList" type="button" class="prj-item" role="menuitemcheckbox" :aria-checked="compactHeadShown" @click="fold">
+          <AppIcon :name="compactHeadShown ? 'chevron-up' : 'chevron'" :size="16" /><span class="prj-t">Show the project head</span><span class="prj-d2">above the tickets</span>
         </button>
       </div>
       <template v-if="band.state !== 'none'">

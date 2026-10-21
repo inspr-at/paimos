@@ -58,11 +58,13 @@ for (const width of [390, 768, 1024, 1440]) {
       await page.goto('/p/PHAROS?sort=title')
       await expect(rows(page)).toHaveCount(5)
       const sheet = width <= 900
-      const opener = page.getByRole('button', { name: sheet ? 'Filters' : 'Display: Display', exact: true })
+      const compact = width < 720
+      const opener = page.getByRole('button', { name: compact ? 'More view actions' : sheet ? 'Filters' : 'Display: Display', exact: true })
       await expect(opener).toBeVisible()
       await opener.click()
       // AEON-1188: the Filters sheet keeps filtering and links to the one Display menu, here a sheet.
-      if (sheet) await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
+      if (compact) await page.getByRole('menuitem', { name: 'Display…', exact: true }).click()
+      else if (sheet) await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
       const dialog = page.getByRole('dialog', { name: 'Display options', exact: true })
       const scroll = sheet ? dialog.locator('.menu-body') : dialog
       const pinned = sheet ? { frame: dialog, header: dialog.locator('header'), done: dialog.locator('footer button') } : {}
@@ -217,8 +219,8 @@ test('phone cards render saved column visibility and order at 390px', async ({ p
   const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
   const columns = sheet.getByRole('list', { name: 'Columns', exact: true })
   const openDisplay = async () => {
-    await page.getByRole('button', { name: 'Filters', exact: true }).click()
-    await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
+    await page.getByRole('button', { name: 'More view actions', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Display…', exact: true }).click()
     await expect(sheet).toBeVisible()
   }
   await expect(card).toBeVisible()
@@ -226,23 +228,22 @@ test('phone cards render saved column visibility and order at 390px', async ({ p
   await openDisplay()
   const cost = columns.getByRole('checkbox', { name: 'Cost unit', exact: true })
   await expectStableControls({ controls: { sheet, done: sheet.locator('footer button'), columns, cost }, scrollAreas: { body: sheet.locator('.menu-body') }, interactions: [
-    { name: 'save Cost unit onto the phone card', run: async () => { await cost.check(); await expect(cost).toBeChecked(); await expect(card.locator('.c-cost')).toContainText('Mandantenübergreifende Berechtigungsverwaltung') } },
+    { name: 'save Cost unit for desktop without adding phone metadata', run: async () => { await cost.check(); await expect(cost).toBeChecked(); await expect(card.locator('.c-cost')).toHaveCount(0) } },
   ] })
   await sheet.locator('footer button').click()
   await page.reload()
   await expect(card).toBeVisible()
-  await expect(card.locator('.c-cost')).toContainText('Mandantenübergreifende Berechtigungsverwaltung')
-  await expect(card.locator('.status-btn')).toBeVisible()
-  const saved = (await card.boundingBox())!
-  expect(saved.height).toBeGreaterThan(before.height)
+  await expect(card.locator('.c-cost, .c-prio, .c-estimate, .c-progress, .status-btn')).toHaveCount(0)
+  await expect(card.locator('.phone-assignee')).toBeVisible()
+  expect((await card.boundingBox())!.height).toBe(56)
   await openDisplay()
   await expect(cost).toBeChecked()
   await sheet.locator('footer button').click()
   await page.setViewportSize({ width: 1440, height: 900 })
   await expect(card.locator('.c-cost')).toContainText('Mandantenübergreifende Berechtigungsverwaltung')
   await page.setViewportSize({ width: 390, height: 900 })
-  await expect(card.locator('.c-cost')).toContainText('Mandantenübergreifende Berechtigungsverwaltung')
-  expect((await card.boundingBox())!.height).toBe(saved.height)
+  await expect(card.locator('.c-cost')).toHaveCount(0)
+  expect((await card.boundingBox())!.height).toBe(before.height)
   expect(await page.locator('.table-card').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
 })
 
@@ -256,7 +257,8 @@ for (const width of [390, 768]) {
     await page.goto('/p/PHAROS')
     await expect(rows(page)).toHaveCount(2)
     if (width <= 720) {
-      await page.getByRole('button', { name: 'Select', exact: true }).click()
+      await page.getByRole('button', { name: 'More view actions', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Select tickets', exact: true }).click()
       await page.getByRole('checkbox', { name: 'Select PHAROS-11', exact: true }).click()
     } else {
       await rows(page).first().hover()
@@ -306,7 +308,8 @@ test.describe('fix3: phone regressions', () => {
     })
     await page.goto('/p/PHAROS')
     await expect(rows(page)).toHaveCount(25)
-    await page.getByRole('button', { name: 'Select', exact: true }).click()
+    await page.getByRole('button', { name: 'More view actions', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Select tickets', exact: true }).click()
     await page.getByRole('checkbox', { name: 'Select PHAROS-11', exact: true }).click()
     const dock = page.getByRole('toolbar', { name: '1 selected ticket', exact: true })
     await expect(dock.getByRole('button')).toHaveCount(9)
@@ -360,7 +363,7 @@ test.describe('fix3: phone regressions', () => {
       const data = germanWorld('light')
       await mockWork(page, data)
       await page.goto('/p/PHAROS')
-      await page.getByRole('button', { name: 'Filters', exact: true }).tap()
+      await page.getByRole('button', { name: width < 720 ? 'Filter tickets' : 'Filters', exact: true }).tap()
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
       await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).tap()
       const sheet = page.getByRole('dialog', { name: 'Display options', exact: true }), columns = sheet.getByRole('list', { name: 'Columns', exact: true })
@@ -391,14 +394,21 @@ test.describe('fix3: phone regressions', () => {
       await mockWork(page, data)
       await page.goto('/p/PHAROS')
       const card = page.locator('#row-n-1')
-      await page.getByRole('button', { name: 'Select', exact: true }).tap()
+      await expect(card.locator('.c-estimate, .progress-read')).toHaveCount(0)
+      await page.getByRole('button', { name: 'More view actions', exact: true }).tap()
+      await page.getByRole('menuitem', { name: 'Select tickets', exact: true }).tap()
       await card.getByRole('checkbox', { name: 'Select PHAROS-11', exact: true }).tap()
-      const check = card.locator('.c-check'), title = card.locator('.c-title')
+      const check = card.locator('.phone-state'), title = card.locator('.c-title')
       await expectStableControls({ controls: { card, check, title }, scrollAreas: { table: page.locator('.table-card') }, interactions: [
         { name: 'toggle the selected card', run: async () => { await check.getByRole('checkbox').tap(); await expect(check.getByRole('checkbox')).toHaveAttribute('aria-checked', 'false') } },
         { name: 'select the card again', run: async () => { await check.getByRole('checkbox').tap(); await expect(check.getByRole('checkbox')).toHaveAttribute('aria-checked', 'true') } },
       ] })
+      const layout = await card.evaluate(el => ({ tracks: getComputedStyle(el).gridTemplateColumns.split(' ').length, areas: getComputedStyle(el).gridTemplateAreas }))
+      expect(layout.tracks, 'compact rows have status, title and the reserved avatar slot').toBe(3)
+      expect((await card.boundingBox())!.height).toBe(56)
       for (const cell of await card.locator('td').all()) await inFrame(cell, card)
+      const cardBox = (await card.boundingBox())!, titleBox = (await title.boundingBox())!
+      expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width - 44)
       for (const width of [390, 1024, 1440]) {
         await page.setViewportSize({ width, height: 900 })
         for (const theme of ['light', 'dark']) {

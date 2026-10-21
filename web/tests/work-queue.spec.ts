@@ -16,6 +16,7 @@ const now = '2026-10-01T18:00:00Z'
 const agent = '33333333-3333-4333-8333-333333333333', account = '44444444-4444-4444-8444-444444444444', profile = '55555555-5555-4555-8555-555555555555'
 // Resizing to a phone applies the compact list asynchronously; disclose its head only once it has.
 async function showPhoneHead(page: Page) {
+  await expect(page.locator('.project-page')).toHaveClass(/compact-list/)
   await showProjectHead(page)
 }
 // D11 (AEON-1460): compact phone rows name their key in the metadata line instead of a copy button.
@@ -393,12 +394,11 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 1, work_hours: 0, warning: false } } }))
     await page.goto('/p/PHAROS?sort=key&closed=1')
     if (width === 390) {
-      // Saved ticks draw on the classic card, Suggested included. The ticket panel repeats the same facts.
+      // D11 (AEON-1460): compact rows carry no planning columns; each ticket keeps its suggested release.
       const ticket = page.getByRole('complementary', { name: 'Ticket details' }), close = ticket.getByRole('button', { name: 'Close ticket details', exact: true })
       const open = async (key: string) => { await row(page, key).locator('.title-link').click(); await expect(ticket.getByRole('button', { name: `Copy ${key}`, exact: true })).toBeVisible(); return ticket.locator('.plan-rel') }
-      await expect(row(page, 'PHAROS-15').locator('.c-suggested .plan-rel')).toHaveText('—')
-      await expect(row(page, 'PHAROS-13').locator('.c-suggested .plan-rel')).toHaveText('~Next release')
-      await expect(row(page, 'PHAROS-16').locator('.c-suggested .plan-rel')).toContainText('Cloud City')
+      await expect(row(page, 'PHAROS-15')).toBeVisible()
+      await expect(page.locator('.tickets .ticket-row .c-suggested')).toHaveCount(0)
       const parentSuggestion = await open('PHAROS-15')
       await expect(parentSuggestion).toHaveText('—')
       await expect(parentSuggestion).toHaveAccessibleDescription('Releases are suggested for leaf work; a parent’s leaves can span releases')
@@ -688,7 +688,7 @@ test('stale progress hints and ticket actions stay still in both themes at phone
       for (const dismiss of await page.locator('.toast-close').all()) await dismiss.click()
       const title = ticket.locator('.title-text')
       // D11 (AEON-1460): compact phone rows keep progress hints and queue actions in the ticket.
-      const compactRow = false
+      const compactRow = width === 390
       // The reserved person-waiting slot must leave a real title target in a
       // narrow saved layout, including a long name beside its parent chip.
       const geometry = await ticket.locator(compactRow ? '.c-title.phone-title' : '.c-title .title-cell').evaluate(cell => [...cell.children].map(child => ({ class: child.className, width: child.getBoundingClientRect().width })))

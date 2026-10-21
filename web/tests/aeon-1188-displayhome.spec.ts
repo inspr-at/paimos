@@ -6,7 +6,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
-import { toggleProjectHead } from './helpers/compact'
 
 const errors = new WeakMap<Page, string[]>()
 test.beforeEach(async ({ page }) => {
@@ -17,7 +16,9 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ page }) => { expect(errors.get(page), 'no browser runtime errors').toEqual([]) })
 
 const toolbar = (page: Page) => page.getByRole('toolbar', { name: 'Ticket list controls' })
-const filters = (page: Page) => page.getByRole('button', { name: 'Filters', exact: true })
+// Under 720 px the compact toolbar's Filter icon opens the sheet (AEON-1460, D11 §5); wider windows keep Filters.
+const filters = (page: Page) => page.getByRole('button', { name: 'Filters', exact: true }).or(toolbar(page).locator('.phone-filter'))
+const more = (page: Page) => toolbar(page).getByRole('button', { name: 'More view actions', exact: true })
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'Filters', exact: true })
 const link = (page: Page) => sheet(page).getByRole('button', { name: 'Display settings…', exact: true })
 const menu = (page: Page) => page.getByRole('dialog', { name: 'Display options', exact: true })
@@ -64,12 +65,19 @@ for (const width of [390, 768]) {
       await expect(sheet(page)).toBeHidden()
       await expect(menu(page).locator('.display-menu.as-sheet')).toBeVisible()
       await expect(menu(page).getByRole('heading', { name: 'Display', exact: true })).toBeVisible()
-      // AEON-1559 step 4 reuses the collapsed Display menu so Hide stays reachable.
-      // The header-nav slot comes with that menu. Tick's ladder text says "Display
-      // menu" and the phone evidence checks the Hide switch; sections in the same
-      // menu are what shipped in #785. A Hide-only menu would be a follow-up.
-      await expect(menu(page).getByRole('navigation').first()).toBeVisible()
-      await expect(menu(page).getByRole('checkbox', { name: /^Hide / })).toBeVisible()
+      if (width < 720) {
+        // Compact chrome (1460 §3–§5): sections sit in the crumb's sheet and Hide done in ⋯, so the
+        // phone's Display sheet carries the display settings only.
+        await expect(menu(page).getByRole('navigation')).toHaveCount(0)
+        await expect(menu(page).getByRole('checkbox', { name: /^Hide / })).toHaveCount(0)
+      } else {
+        // AEON-1559 step 4 reuses the collapsed Display menu so Hide stays reachable.
+        // The header-nav slot comes with that menu. Tick's ladder text says "Display
+        // menu" and the phone evidence checks the Hide switch; sections in the same
+        // menu are what shipped in #785. A Hide-only menu would be a follow-up.
+        await expect(menu(page).getByRole('navigation').first()).toBeVisible()
+        await expect(menu(page).getByRole('checkbox', { name: /^Hide / })).toBeVisible()
+      }
       for (const name of SETTINGS) await expect(menu(page).getByRole('radiogroup', { name, exact: true })).toBeVisible()
       await expect(menu(page).getByRole('list', { name: 'Columns', exact: true })).toBeVisible()
       if (width === 390) {
@@ -81,7 +89,8 @@ for (const width of [390, 768]) {
       await expect.poll(() => data.preferences['list:display']?.density).toBe('compact')
       await page.keyboard.press('Escape')
       await expect(menu(page)).toBeHidden()
-      const display = page.locator('#project-view-settings .display-btn')
+      // Focus returns to the Display button in sight, or on a phone to the Filter icon the sheet came from.
+      const display = width < 720 ? filters(page) : page.locator('#project-view-settings .display-btn')
       await expect(display).toBeFocused()
       await expect(page.locator('.table-card')).toHaveClass(/compact/)
       // Done closes it the same way.
@@ -94,22 +103,22 @@ for (const width of [390, 768]) {
   }
 }
 
-test('with the header folded on a phone, the link opens the Display menu beside New', async ({ page }) => {
+// AEON-1615 per Tick's v1.1 ruling: "1188: full-width sheets from Filter and ⋯ › Display…".
+test('on a phone, ⋯ › Display… opens the same full-width Display sheet as the Filters link', async ({ page }) => {
   await open(page, 390)
-  // The project crumb's sheet folds the project head on phones (AEON-1459, D11).
-  await toggleProjectHead(page)
-  await expect(projectPage(page)).toHaveClass(/header-collapsed/)
-  await filters(page).click()
-  await link(page).click()
-  await expect(sheet(page)).toBeHidden()
+  await expect(toolbar(page).getByRole('button', { name: /^Display:/ })).toHaveCount(0)
+  await more(page).click()
+  await page.getByRole('menu', { name: 'More view actions', exact: true }).getByRole('menuitem', { name: 'Display…', exact: true }).click()
   await expect(menu(page).locator('.display-menu.as-sheet')).toBeVisible()
-  // The collapsed header's menu: what the header hides, above the same display settings.
-  await expect(menu(page).getByRole('button', { name: 'Knowledge' })).toBeVisible()
-  await expect(menu(page).locator('.menu-hide')).toBeVisible()
+  const frame = (await menu(page).boundingBox())!
+  expect([frame.x, frame.y, frame.width, frame.height], 'a full-height phone sheet').toEqual([0, 0, 390, 900])
   for (const name of SETTINGS) await expect(menu(page).getByRole('radiogroup', { name, exact: true })).toBeVisible()
-  await menu(page).getByRole('button', { name: /^Done/ }).click()
+  await expect(menu(page).getByRole('list', { name: 'Columns', exact: true })).toBeVisible()
+  const done = menu(page).getByRole('button', { name: /^Done/ })
+  expect((await done.boundingBox())!.height, 'a 44px target').toBeGreaterThanOrEqual(44)
+  await done.click()
   await expect(menu(page)).toBeHidden()
-  await expect(toolbar(page).getByRole('button', { name: /^Display:/ })).toBeFocused()
+  await expect(more(page)).toBeFocused()
 })
 
 test('Outline on a phone: Expand all from the Display sheet closes it and returns focus', async ({ page }) => {
@@ -120,8 +129,8 @@ test('Outline on a phone: Expand all from the Display sheet closes it and return
   await expect(menu(page).getByRole('radiogroup', { name: 'Group by', exact: true })).toHaveCount(0)
   await menu(page).getByRole('button', { name: 'Expand all', exact: true }).click()
   await expect(menu(page)).toBeHidden()
-  // The Display button is in sight at step 4, so focus returns to it.
-  await expect(page.locator('#project-view-settings .display-btn')).toBeFocused()
+  // The sheet came from the compact toolbar's Filter icon (1460 §5), so focus returns there.
+  await expect(filters(page)).toBeFocused()
 })
 
 for (const theme of ['light', 'dark'] as const) {
