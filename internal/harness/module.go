@@ -257,6 +257,7 @@ func (s *nativeSessionStore) project(ctx context.Context, actor nativecontract.A
 			// Starts without a runtime advertise no native controls or exports.
 			view.Capabilities = nativecontract.Capabilities{Steer: "unsupported", Quota: "unsupported", QualificationDigest: view.Capabilities.QualificationDigest}
 			view.TerminalViewerURL = nil
+			view.Quota = nil
 			return nil
 		}
 		if err := authz.RequireTx(ctx, tx, p, "harness.read", authz.Scope{ProjectID: project}); err != nil {
@@ -282,6 +283,10 @@ func (s *nativeSessionStore) project(ctx context.Context, actor nativecontract.A
 		}
 		// Public v1 is read-only for native terminal handoff.
 		view.Capabilities.Take, view.Capabilities.TakeSupported = false, false
+		// This composition has no qualified owner watch-export adapter. A
+		// stored capability or URL cannot substitute for that current authority.
+		view.Capabilities.Expert, view.Capabilities.TerminalView = false, false
+		view.TerminalViewerURL = nil
 		view.Capabilities.ChatSupported = view.Capabilities.ChatSupported && s.authority.consent.Capabilities.ChatSupported
 		view.Capabilities.Input = view.Capabilities.Input && view.Capabilities.ChatSupported
 		if _, err := s.authority.SessionTx(ctx, tx, *view.CurrentBinding); err != nil {
@@ -292,6 +297,7 @@ func (s *nativeSessionStore) project(ctx context.Context, actor nativecontract.A
 			}
 			view.Capabilities = nativecontract.Capabilities{Steer: "unsupported", Quota: "unsupported", QualificationDigest: view.Capabilities.QualificationDigest}
 			view.TerminalViewerURL = nil
+			view.Quota = nil
 		}
 		return nil
 	})

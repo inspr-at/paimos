@@ -192,6 +192,24 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 				if allowed && !strings.Contains(w.Body.String(), `"kind":"`+view+`"`) {
 					t.Fatalf("authorized view did not receive its actual frame: %s", w.Body.String())
 				}
+				if allowed {
+					r := request(p, view, id, "stream")
+					q := r.URL.Query()
+					q.Set("after", "1:0")
+					r.URL.RawQuery = q.Encode()
+					ctx, cancel := context.WithCancel(r.Context())
+					defer cancel()
+					sse := &streamRecorder{ResponseRecorder: httptest.NewRecorder(), flushed: make(chan struct{}, 8)}
+					done := make(chan struct{})
+					go func() { mux.ServeHTTP(sse, r.WithContext(ctx)); close(done) }()
+					barrier(t, sse.flushed) // Authorized snapshot.
+					barrier(t, sse.flushed) // The actual selected native frame.
+					cancel()
+					barrier(t, done)
+					if sse.Code != 200 || !strings.Contains(sse.Body.String(), "event: "+view+"\n") {
+						t.Fatalf("authorized SSE withheld its selected frame: %d %s", sse.Code, sse.Body.String())
+					}
+				}
 				if !allowed && (w.Code != 403 || !strings.Contains(w.Body.String(), `"reason":"wrong_principal"`)) {
 					t.Fatalf("wrong visibility refusal: %d %s", w.Code, w.Body.String())
 				}
