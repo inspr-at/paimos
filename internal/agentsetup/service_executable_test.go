@@ -204,3 +204,54 @@ func TestForeignUnitRefusedBeforeAndAfterApproval(t *testing.T) {
 		}
 	}
 }
+
+// Risk: rewriting the unit for a new exit code makes Install reject every
+// receipt saved before that edit, so add-harness on a stopped daemon returns
+// service_conflict. Both the logged and the legacy text must stay put.
+func TestInstalledServiceUnitMatchesReceipt(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(root, "agentd")
+	const plistTail = `<key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict><key>Umask</key><integer>63</integer></dict></plist>`
+	for _, logs := range []bool{false, true} {
+		for _, platform := range []Platform{{OS: "darwin", Arch: "arm64"}, {OS: "linux", Arch: "amd64"}} {
+			raw, err := (ServiceManager{Platform: platform, Home: root, Executable: exe}).definitionLogs(root, logs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(raw)
+			if strings.Contains(text, "SuccessExitStatus") || strings.Contains(text, "AEON-1596") || strings.Contains(text, "<!--") {
+				t.Fatalf("logs=%v os=%s drifted from installed receipts", logs, platform.OS)
+			}
+			if platform.OS == "darwin" {
+				glue := "</array>"
+				if logs {
+					glue = "stderr.log</string>"
+					if !strings.Contains(text, "<key>StandardOutPath</key>") || !strings.Contains(text, "<key>StandardErrorPath</key>") {
+						t.Fatal("log paths missing")
+					}
+				} else if strings.Contains(text, "StandardOutPath") || strings.Contains(text, "StandardErrorPath") {
+					t.Fatal("legacy unit gained log paths")
+				}
+				if !strings.Contains(text, glue+plistTail) {
+					t.Fatalf("logs=%v launchd receipt mismatch", logs)
+				}
+				continue
+			}
+			quoted := make([]string, 0, 4)
+			for _, arg := range []string{exe, "serve", "--setup-root", root} {
+				q, quoteErr := unitQuote(arg)
+				if quoteErr != nil {
+					t.Fatal(quoteErr)
+				}
+				quoted = append(quoted, q)
+			}
+			want := "[Unit]\nDescription=Aeon paired computer\n[Service]\nType=simple\nExecStart=" + strings.Join(quoted, " ") + "\nRestart=on-failure\nUMask=0077\nKillMode=none\nTimeoutStopSec=infinity\n[Install]\nWantedBy=default.target\n"
+			if text != want {
+				t.Fatalf("logs=%v systemd receipt mismatch:\n%s", logs, text)
+			}
+		}
+	}
+}

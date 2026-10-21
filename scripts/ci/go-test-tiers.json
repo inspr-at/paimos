@@ -486,6 +486,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestDisconnectPollsReconciliationUntilDrained","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestDispatchDeniedServeNamesReasonAndExit","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestHarnessHomeFlagRejectsAmbiguousOrUnsafeSelection","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestHistoricalFencePreservesUnconfirmedProcessEvidence","tier":"GATED-FULL"}
@@ -3251,6 +3253,8 @@
     {"kind":"go","package":"internal/agentsetup","name":"TestInstallMethodNamesOnlyAnEntryPointThatReachesTheDaemon","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestInstallMethodNegotiatesAndSurvivesServerDowngrade","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestInstalledServiceUnitMatchesReceipt","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestLaunchdPrivateDiagnosticPaths","tier":"GATED-FULL"}
     ,
