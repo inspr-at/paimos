@@ -39,7 +39,7 @@ type Full struct {
 // operator's qualification of a binary. Those remain local launch requirements.
 func Capabilities() nativecontract.Capabilities {
 	sum := sha256.Sum256([]byte("aeon-native-composition/1"))
-	return nativecontract.Capabilities{Input: true, Steer: "unsupported", Interrupt: true, Stop: true, CorrelatedReceipts: true, Quota: "unsupported", QualificationDigest: hex.EncodeToString(sum[:]), EventsSupported: true, InterruptSupported: true, ChatSupported: true}
+	return nativecontract.Capabilities{Input: true, Steer: "unsupported", Interrupt: true, Stop: true, CorrelatedReceipts: true, Quota: "unsupported", QualificationDigest: hex.EncodeToString(sum[:]), EventsSupported: false, InterruptSupported: true, ChatSupported: true}
 }
 
 // NewFull composes the production consent, start, command, receipt, final and

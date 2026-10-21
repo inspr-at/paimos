@@ -116,7 +116,6 @@ type nativeC0Transport struct {
 	events   chan nativecontract.ProviderEvent
 	sequence uint64
 	pending  map[string]*nativeC0Input
-	evidence map[string]nativecontract.NativeEvidence
 	exit     *nativecontract.ExitEvidence
 	fault    error
 }
@@ -127,7 +126,7 @@ type nativeC0Input struct {
 }
 
 func newNativeC0Transport(owner *nativeOwned, spec nativecontract.LaunchSpec, caps nativecontract.Capabilities) *nativeC0Transport {
-	return &nativeC0Transport{owner: owner, spec: spec, caps: caps, events: make(chan nativecontract.ProviderEvent, 256), pending: map[string]*nativeC0Input{}, evidence: map[string]nativecontract.NativeEvidence{}}
+	return &nativeC0Transport{owner: owner, spec: spec, caps: caps, events: make(chan nativecontract.ProviderEvent, 256), pending: map[string]*nativeC0Input{}}
 }
 func (t *nativeC0Transport) Capabilities() nativecontract.Capabilities { return t.caps }
 func (t *nativeC0Transport) Identity() nativecontract.NativeIdentity {
@@ -136,12 +135,6 @@ func (t *nativeC0Transport) Identity() nativecontract.NativeIdentity {
 	return t.identity
 }
 func (t *nativeC0Transport) Events() <-chan nativecontract.ProviderEvent { return t.events }
-func (t *nativeC0Transport) nextSequence() uint64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.sequence++
-	return t.sequence
-}
 func (t *nativeC0Transport) beforeInput(ctx context.Context, id, digest string) error {
 	t.owner.mu.Lock()
 	active := t.owner.active
@@ -318,7 +311,6 @@ func (t *nativeC0Transport) observe(raw json.RawMessage) {
 			stage = "applied"
 		}
 		p.ackEvidence = t.newEvidence(p, stage)
-		t.evidence[stage+"/"+p.request] = p.ackEvidence
 	case "turn_started":
 		if f.Turn != "" && len(f.Turn) <= 128 {
 			if p.turn != "" && p.turn != f.Turn {
@@ -360,7 +352,6 @@ func (t *nativeC0Transport) newEvidence(p *nativeC0Input, stage string) nativeco
 }
 func (t *nativeC0Transport) emitReceipt(p *nativeC0Input, stage string) {
 	e := t.newEvidence(p, stage)
-	t.evidence[stage+"/"+p.request] = e
 	id, turn := p.input, p.turn
 	r := nativecontract.Receipt{RequestID: p.request, InputID: &id, TurnRef: &turn, State: stage, SourceSequence: strconv.FormatUint(e.SourceSequence, 10)}
 	t.emit(nativecontract.ProviderEvent{SourceSequence: e.SourceSequence, Identity: t.identity, Receipt: &r})
@@ -372,21 +363,6 @@ func (t *nativeC0Transport) emit(e nativecontract.ProviderEvent) {
 		t.fault = nativeRefusal(nativecontract.ReasonBufferFull)
 	}
 }
-func (t *nativeC0Transport) evidenceFor(r nativecontract.Receipt) nativecontract.NativeEvidence {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.evidence[r.State+"/"+r.RequestID]
-}
-func (t *nativeC0Transport) proofFor(r *nativecontract.Receipt) (nativecontract.NativeIdentity, nativecontract.NativeEvidence, *nativecontract.ExitEvidence) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	var e nativecontract.NativeEvidence
-	if r != nil {
-		e = t.evidence[r.State+"/"+r.RequestID]
-	}
-	return t.identity, e, t.exit
-}
-
 func verifyNativePin(pin nativecontract.BinaryPin) error {
 	f, err := os.Open(pin.Path)
 	if err != nil {

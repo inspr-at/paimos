@@ -121,6 +121,8 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 	}
 	f, a := newPairedStartFixture(t, consent.Facts{WorkspaceRoot: root, RetainFinals: true})
 	a.Capabilities.Input = true
+	a.Capabilities.ChatSupported = true
+	a.Capabilities.InterruptSupported = true
 	a.Capabilities.Interrupt = true
 	a.Capabilities.Stop = true
 	a.Capabilities.CorrelatedReceipts = true

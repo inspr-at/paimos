@@ -2,6 +2,7 @@
 package agentd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -603,6 +604,8 @@ type NativeHost struct {
 	entries  map[string]*nativeOwned
 }
 type nativeOwned struct {
+	pendingEvents []nativecontract.ProviderEvent
+	eventMu       sync.Mutex
 	claimDeadline time.Time
 	released      chan struct{}
 	releaseOnce   sync.Once
@@ -1062,15 +1065,14 @@ func (h *NativeHost) Poll(ctx context.Context) error {
 	for _, e := range entries {
 		e.mu.Lock()
 		live := e.transport != nil && e.delivery != nil && !e.exited
-		last := e.lastError
 		e.mu.Unlock()
 		if !live {
 			continue
 		}
-		if last != nil {
-			return last
-		}
 		if _, err := e.journal.FlushReports(ctx, *e.grant.ExpectedBinding, 100, e); err != nil {
+			return err
+		}
+		if err := e.flushEvents(ctx); err != nil {
 			return err
 		}
 		for _, f := range e.journal.FinalStatuses() {
@@ -1160,51 +1162,75 @@ func (e *nativeOwned) events(ctx context.Context) {
 			if !ok {
 				return
 			}
-			e.mu.Lock()
-			operation := ""
-			if event.Receipt != nil && event.Receipt.InputID != nil {
-				operation = e.operations[*event.Receipt.InputID]
-			}
-			if event.Final != nil {
-				operation = e.operations[event.Final.InputID]
-			}
-			var grant *nativecontract.FinalDrainGrant
-			if event.Final != nil {
-				if g, ok := e.drains[event.Final.InputID]; ok {
-					grant = &g
-				}
-			}
-			e.mu.Unlock()
-			if operation == "" {
-				continue
-			}
-			var err error
-			if event.Receipt != nil {
-				ev := nativecontract.NativeEvidence{Stage: event.Receipt.State, RequestID: event.Receipt.RequestID, SourceSequence: event.SourceSequence, ObservedAt: e.host.s.capacityNow()}
-				if event.Receipt.InputID != nil {
-					ev.InputID = *event.Receipt.InputID
-				}
-				if event.Receipt.TurnRef != nil {
-					ev.TurnRef = *event.Receipt.TurnRef
-				}
+			if event.Final != nil && len(event.Final.Text) > nativereceipts.MaxTextBytes {
 				e.mu.Lock()
-				e.observations[ev.Stage+"/"+ev.RequestID] = ev
-				e.mu.Unlock()
-				_, err = e.delivery.Observe(ctx, operation, event.Identity, ev)
-			}
-			if event.Final != nil && grant != nil {
-				f := *event.Final
-				f.DrainGrantID = grant.GrantID
-				_, err = e.delivery.Final(ctx, operation, f)
-			}
-			if err != nil {
-				e.mu.Lock()
-				e.lastError = err
+				e.lastError = nativeRefusal(nativecontract.ReasonBufferFull)
 				e.mu.Unlock()
 				return
 			}
+			e.eventMu.Lock()
+			if len(e.pendingEvents) >= 128 {
+				e.eventMu.Unlock()
+				e.mu.Lock()
+				e.lastError = nativeRefusal(nativecontract.ReasonBufferFull)
+				e.mu.Unlock()
+				return
+			}
+			e.pendingEvents = append(e.pendingEvents, event)
+			e.eventMu.Unlock()
+			// A failed HTTP report retains this bounded transient observation. Poll
+			// retries metadata/outbox delivery without replaying input into the provider.
+			_ = e.flushEvents(ctx)
 		}
 	}
+}
+func (e *nativeOwned) flushEvents(ctx context.Context) error {
+	e.eventMu.Lock()
+	defer e.eventMu.Unlock()
+	for len(e.pendingEvents) > 0 {
+		event := e.pendingEvents[0]
+		e.mu.Lock()
+		operation := ""
+		if event.Receipt != nil && event.Receipt.InputID != nil {
+			operation = e.operations[*event.Receipt.InputID]
+		}
+		var grant *nativecontract.FinalDrainGrant
+		if event.Final != nil {
+			operation = e.operations[event.Final.InputID]
+			if g, ok := e.drains[event.Final.InputID]; ok {
+				grant = &g
+			}
+		}
+		e.mu.Unlock()
+		var err error
+		if operation != "" && event.Receipt != nil {
+			ev := nativecontract.NativeEvidence{Stage: event.Receipt.State, RequestID: event.Receipt.RequestID, SourceSequence: event.SourceSequence, ObservedAt: e.host.s.capacityNow()}
+			if event.Receipt.InputID != nil {
+				ev.InputID = *event.Receipt.InputID
+			}
+			if event.Receipt.TurnRef != nil {
+				ev.TurnRef = *event.Receipt.TurnRef
+			}
+			e.mu.Lock()
+			e.observations[ev.Stage+"/"+ev.RequestID] = ev
+			e.mu.Unlock()
+			_, err = e.delivery.Observe(ctx, operation, event.Identity, ev)
+		}
+		if operation != "" && event.Final != nil && grant != nil {
+			f := *event.Final
+			f.DrainGrantID = grant.GrantID
+			_, err = e.delivery.Final(ctx, operation, f)
+		}
+		if err != nil {
+			return err
+		}
+		e.pendingEvents[0] = nativecontract.ProviderEvent{}
+		e.pendingEvents = e.pendingEvents[1:]
+	}
+	e.mu.Lock()
+	err := e.lastError
+	e.mu.Unlock()
+	return err
 }
 
 // Local commands select an already person-authorized pending command; daemon
@@ -1228,6 +1254,15 @@ func (h *NativeHost) localCommand(ctx context.Context, b nativecontract.Binding,
 	}
 	for _, item := range page.Items {
 		if item.RequestID == request && item.Kind == kind {
+			claim := nativecontract.Claim{RequestID: uuid.NewString(), OperationID: item.OperationID, DaemonID: h.s.daemonID, DaemonGeneration: h.s.generation, LedgerGeneration: h.s.ledgerBinding.Generation, CapabilityDigest: h.caps.QualificationDigest, ExpectedRevision: b.BindingRevision, ClaimKind: "command"}
+			var current nativecontract.ClaimResult
+			if err := e.call(ctx, "POST", "/api/agentd/native-sessions/claim", claim, &current); err != nil {
+				return nativecontract.OperationResult{}, err
+			}
+			expected, _ := json.Marshal(value)
+			if current.Command == nil || !bytes.Equal(bytes.TrimSpace(current.Command.Params), bytes.TrimSpace(expected)) {
+				return nativecontract.OperationResult{}, nativeRefusal(nativecontract.ReasonIdentityMismatch)
+			}
 			return e.execute(ctx, item)
 		}
 	}
