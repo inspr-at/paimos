@@ -126,7 +126,11 @@ func (m *module) list(w http.ResponseWriter, r *http.Request) {
 		}
 		// Candidate discovery is bounded before expansion. Oversized scans fail
 		// explicitly; totals and computed sorts are never silently sampled.
+		// journey_releases.released_at is set exactly for released and
+		// superseded releases. An unshipped release is listed only with a
+		// live outcome, before the cap, totals and pages.
 		rows, err := tx.Query(ctx, `SELECT `+nodeColumns+` FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.kind_id=ANY(ARRAY(SELECT id FROM node_kinds WHERE slug IN ('goal','release'))) AND k.slug IN ('goal','release') AND n.deleted_at IS NULL
+ AND (k.slug='goal' OR (k.slug='release' AND EXISTS(SELECT 1 FROM nodes o JOIN node_kinds ok ON ok.tenant_id=o.tenant_id AND ok.id=o.kind_id AND ok.slug='outcome' WHERE o.parent_id=n.id AND o.deleted_at IS NULL) AND NOT EXISTS(SELECT 1 FROM journey_releases r WHERE r.tenant_id=n.tenant_id AND r.release_node_id=n.id AND r.released_at IS NOT NULL)))
  AND ($1='' OR EXISTS(SELECT 1 FROM nodes project WHERE (project.id=n.project_id OR project.id IN (SELECT t.project_id FROM nodes o JOIN node_kinds ok ON ok.tenant_id=o.tenant_id AND ok.id=o.kind_id AND ok.slug='outcome' CROSS JOIN LATERAL aeon_outcome_serves(o.id) r JOIN nodes t ON t.id=r.target_node_id WHERE o.parent_id=n.id AND o.deleted_at IS NULL)) AND (project.id::text=$1 OR project.key=$1 OR project.fields->>'project_key'=$1)))
  AND ($2='' OR EXISTS(SELECT 1 FROM nodes project JOIN node_kinds pk ON pk.tenant_id=project.tenant_id AND pk.id=project.kind_id AND pk.slug='project' WHERE (project.id=n.project_id OR project.id IN (SELECT t.project_id FROM nodes o JOIN node_kinds ok ON ok.tenant_id=o.tenant_id AND ok.id=o.kind_id AND ok.slug='outcome' CROSS JOIN LATERAL aeon_outcome_serves(o.id) r JOIN nodes t ON t.id=r.target_node_id WHERE o.parent_id=n.id AND o.deleted_at IS NULL)) AND (EXISTS(SELECT 1 FROM project_group_members gm WHERE gm.project_id=project.id AND gm.group_id::text=$2) OR $2='none' AND NOT EXISTS(SELECT 1 FROM project_group_members gm WHERE gm.project_id=project.id))))
  ORDER BY n.id LIMIT 1001`, l.project, l.group)
