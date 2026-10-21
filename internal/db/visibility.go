@@ -220,6 +220,30 @@ func WorkerRunPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, le
 	return next, nil
 }
 
+// WorkerSessionPrincipalTx resolves safety controls from the exact target
+// session's existing lease. Other sessions sharing the same transport proof
+// cannot make a stop ambiguous, and never supply its acting person. The caller
+// exposes only metadata if this person no longer has live authority.
+func WorkerSessionPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, session, lease string) (tenant.Principal, error) {
+	if p.Kind != tenant.Agent || !uuidLike(project) || !uuidLike(session) || lease == "" {
+		return p, errors.New("invalid safety worker")
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true)`); err != nil {
+		return p, err
+	}
+	sum := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
+	var person *string
+	err := tx.QueryRow(ctx, `SELECT r.acting_person_id::text FROM harness_sessions s LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id AND r.agent_principal_id=s.agent_principal_id WHERE s.tenant_id=$1::uuid AND s.agent_principal_id=$2::uuid AND s.project_id=$3::uuid AND s.id=$4::uuid AND s.lease_digest=$5`, p.TenantID, p.ID, project, session, sum[:]).Scan(&person)
+	if err != nil {
+		return p, err
+	}
+	next, err := applyRunPerson(p, person)
+	if err != nil {
+		return p, err
+	}
+	return next, reenterActingPrincipal(ctx, tx, next)
+}
+
 // reenterActingPrincipal installs this principal's own ceiling. It passes the
 // resolved key person explicitly: a context principal from an earlier resolver
 // must not disagree with the value this call just returned.

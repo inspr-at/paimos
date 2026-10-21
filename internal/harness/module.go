@@ -477,11 +477,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		handler := workorders.Endpoint(m.pool, route.scope, route.agent, route.status, func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 			return workqueue.PersonAdmissionTx(r.Context(), tx, p, route.pattern, func(step pgx.Tx) (any, error) { return route.fn(r, step, p) })
 		})
-		switch route.pattern {
-		case "POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield",
-			"POST /api/projects/{projectId}/harness-sessions/{sessionId}/stop",
-			"POST /api/projects/{projectId}/harness-sessions/{sessionId}/confirm-exit",
-			"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete":
+		if workerlease.SafetyRoute(&http.Request{Pattern: route.pattern}) {
 			handler = workorders.WorkerSafetyEndpoint(m.pool, route.status, safetyHandler(route.fn))
 		}
 		if route.pattern == "GET /api/projects/{projectId}/harness-sessions/{sessionId}" || route.pattern == "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat" {

@@ -10,6 +10,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -32,6 +33,9 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 		}
 		if !live {
 			return &agentpairing.Error{Status: 410, Code: "pairing_revoked", Message: "pairing revoked or setup not redeemed"}
+		}
+		if workerlease.SafetyRoute(r) && workerlease.Read(r) != "" {
+			return nil // Exact own-session proof and metadata projection live in the control handler.
 		}
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		deny := &agentpairing.Error{Status: 403, Code: "forbidden", Message: "outside this computer's runtime authority"}

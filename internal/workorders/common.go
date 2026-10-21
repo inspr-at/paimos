@@ -165,7 +165,11 @@ func endpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status i
 			// Replacing it with the bearer row can widen secondary permissions or
 			// hide the target before that check reports a revoked grant.
 			if lease := workerlease.Read(r); lease != "" {
-				p, err = db.WorkerRunPrincipalTx(r.Context(), tx, p, lease)
+				if workerSafety {
+					p, err = db.WorkerSessionPrincipalTx(r.Context(), tx, p, r.PathValue("projectId"), r.PathValue("sessionId"), lease)
+				} else {
+					p, err = db.WorkerRunPrincipalTx(r.Context(), tx, p, lease)
+				}
 				if err != nil {
 					return Fail(403, "run principal rejected")
 				}
