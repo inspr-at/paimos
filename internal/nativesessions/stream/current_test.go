@@ -202,8 +202,18 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 					sse := &streamRecorder{ResponseRecorder: httptest.NewRecorder(), flushed: make(chan struct{}, 8)}
 					done := make(chan struct{})
 					go func() { mux.ServeHTTP(sse, r.WithContext(ctx)); close(done) }()
-					barrier(t, sse.flushed) // Authorized snapshot.
-					barrier(t, sse.flushed) // The actual selected native frame.
+					flushed := func() {
+						t.Helper()
+						select {
+						case <-sse.flushed:
+						case <-done:
+							t.Fatalf("SSE ended before delivery: %d %s", sse.Code, sse.Body.String())
+						case <-time.After(5 * time.Second):
+							t.Fatal("SSE delivery barrier did not arrive")
+						}
+					}
+					flushed() // Authorized snapshot.
+					flushed() // The actual selected native frame.
 					cancel()
 					barrier(t, done)
 					if sse.Code != 200 || !strings.Contains(sse.Body.String(), "event: "+view+"\n") {
