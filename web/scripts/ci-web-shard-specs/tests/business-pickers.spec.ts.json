@@ -1,5 +1,10 @@
 {
   "group": "remaining-ui",
+  "nightlyTiming": {
+    "basis": "AEON-1417: conservative full-file scheduling estimate for four acceptance cases, including the viewport and theme matrix; no hosted nightly measurement is claimed.",
+    "seconds": 80,
+    "selectedTests": 4
+  },
   "spec": {
     "file": "tests/business-pickers.spec.ts",
     "listedTests": 4,
