@@ -765,6 +765,7 @@ type chatRelayRequest struct {
 }
 
 func (r *Remote) chatWorker(ctx context.Context, s HarnessSession, path string, body, dest any) error {
+	ctx = r.sessionContentContext(ctx, s.ID)
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	headers := map[string]string{}

@@ -4,6 +4,8 @@ package agentd
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -24,8 +26,32 @@ func TestPrepareRunContentUsesOnlyItsServerCapability(t *testing.T) {
 	reflectFailure := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.Method+" "+r.URL.Path)
-		if r.Header.Get("Authorization") != "Bearer synthetic-transport-key" {
+		if r.Header.Get("Authorization") != "Bearer synthetic-transport-key" && !strings.HasPrefix(r.Header.Get("Authorization"), "Aeon-Worker synthetic-transport-key ") {
 			t.Error("transport credential missing")
+		}
+		if r.URL.Path == "/api/projects/project/harness-sessions" {
+			var in struct {
+				RunID string `json:"run_id"`
+			}
+			if json.NewDecoder(r.Body).Decode(&in) != nil || proofs[in.RunID] == "" || r.Header.Get(db.RunCapabilityHeader) != proofs[in.RunID] {
+				t.Error("registration lost its prepared run proof")
+			}
+			_ = json.NewEncoder(w).Encode(HarnessSession{ID: "session-" + in.RunID, ProjectID: "project"})
+			return
+		}
+		if strings.Contains(r.URL.Path, "/harness-sessions/") {
+			parts := strings.Split(r.URL.Path, "/")
+			id := strings.TrimPrefix(parts[4], "session-")
+			if proofs[id] == "" || r.Header.Get(db.RunCapabilityHeader) != proofs[id] {
+				t.Error("session call crossed run proofs")
+			}
+			if strings.HasSuffix(r.URL.Path, "/notifications") {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, "event: harness.wake\ndata: {}\n\n")
+			} else {
+				w.WriteHeader(http.StatusNoContent)
+			}
+			return
 		}
 		parts := strings.Split(r.URL.Path, "/")
 		id := parts[len(parts)-1]
@@ -76,9 +102,26 @@ func TestPrepareRunContentUsesOnlyItsServerCapability(t *testing.T) {
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("content read outside Prepare order: %v", calls)
 	}
+	// Session callbacks and SSE also start with fresh contexts. Exercise both
+	// through the injected transport after preparing two different people.
+	sessionA, err := remote.RegisterHarness(t.Context(), HarnessSession{ProjectID: "project", Lease: strings.Repeat("l", 32)}, "agent", "a", "order-a", Codex, "fixture", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionB, err := remote.RegisterHarness(t.Context(), HarnessSession{ProjectID: "project", Lease: strings.Repeat("m", 32)}, "agent", "b", "order-b", Codex, "fixture", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.chatWorker(context.Background(), sessionA, harnessPath(sessionA)+"/chat", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	woke := false
+	if err := remote.WatchHarness(t.Context(), sessionB, func() { woke = true }); !errors.Is(err, io.EOF) || !woke {
+		t.Fatal("session notification lost prepared authority", err)
+	}
 	// Tool callbacks have fresh contexts; their identity remains the captured
 	// run rather than the most recent preparation on the shared Remote.
-	_, err := remote.RunToolsFor("a").WorkOrder(context.Background(), "order-a")
+	_, err = remote.RunToolsFor("a").WorkOrder(context.Background(), "order-a")
 	if err != nil {
 		t.Fatal(err)
 	}
