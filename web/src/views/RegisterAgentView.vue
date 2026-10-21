@@ -644,10 +644,10 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
           <h1 ref="reviewTitle" tabindex="-1" class="ask-title" data-review-title><template v-for="(part, index) in titleParts" :key="index"><span v-if="part.kind === 'account'" class="acct">{{ part.text }}</span><span v-else-if="part.kind === 'computer'" class="host">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></h1>
           <button type="button" class="btn sm ghost" :disabled="!!busy" @click="resetCode">{{ words.otherCode }}</button>
         </header>
-        <ul v-if="addRequest && accountGroups.length > 1" class="who">
+        <ul v-if="addRequest && accountGroups.length > 1" class="harness-list">
           <li v-for="group in accountGroups" :key="group.harness"><HarnessMark :harness="group.harness" :size="16" /><span class="name">{{ harnessLabel(group.harness) }}</span><span class="acct">{{ accountName(group.harness) }}</span></li>
         </ul>
-        <ul v-else-if="!addRequest" class="who checklist">
+        <ul v-else-if="!addRequest" class="harness-list checklist">
           <li v-for="group in accountGroups" :key="group.harness" class="harness" :class="{ off: signedOut(current, group.harness) }">
             <label class="check">
               <input type="checkbox" :checked="!!selectedKey(group.harness) && !signedOut(current, group.harness)" :disabled="signedOut(current, group.harness)" :aria-label="words.connectHarness(harnessLabel(group.harness))" @change="toggleHarness(group.harness, group.accounts, ($event.target as HTMLInputElement).checked)" />
@@ -836,10 +836,11 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .ask-title:focus { outline: none; }
 .ask-title .acct { font: 500 .66em/1.3 var(--font); letter-spacing: 0; color: var(--ink-2); }
 .ask-title .host { font: 500 .8em/1.3 var(--mono); letter-spacing: 0; }
-.who { display: grid; gap: 2px; margin: 12px 0 0; padding: 0; list-style: none; }
-.who li { display: flex; align-items: center; gap: 10px; min-height: 32px; min-width: 0; font-size: 14px; }
-.who .name { font-weight: 600; }
-.who .acct { min-width: 0; overflow-wrap: anywhere; color: var(--ink-2); font-size: 13px; }
+/* Not .who: base.css gives .who a phone touch overlay that would sit over these checkboxes. */
+.harness-list { display: grid; gap: 2px; margin: 12px 0 0; padding: 0; list-style: none; }
+.harness-list li { display: flex; align-items: center; gap: 10px; min-height: 32px; min-width: 0; font-size: 14px; }
+.harness-list .name { font-weight: 600; }
+.harness-list .acct { min-width: 0; overflow-wrap: anywhere; color: var(--ink-2); font-size: 13px; }
 .checklist .check { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 36px; cursor: pointer; }
 .checklist .off .check { cursor: default; color: var(--ink-3); }
 .checklist .off .name { color: var(--ink-3); }

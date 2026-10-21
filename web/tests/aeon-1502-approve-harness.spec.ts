@@ -213,7 +213,7 @@ test('AEON-1502 several harnesses 1280x800 en and de: one row per harness under 
     const copy = COPY[language]
     const { review } = await open(page, language, addTwo)
     await expect(review.locator('[data-review-title]')).toHaveText(copy.addTwo)
-    await expect(review.locator('.who li')).toHaveText([/Claude Code\s*ada@example\.com/, /Codex\s*codex@example\.com/])
+    await expect(review.locator('.harness-list li')).toHaveText([/Claude Code\s*ada@example\.com/, /Codex\s*codex@example\.com/])
     const fit = await fitsWithoutScrolling(page, review)
     expect(fit.bottom).toBeLessThanOrEqual(fit.viewport)
     expect(await sentences(review)).toEqual([copy.factsOn, copy.role])
@@ -271,6 +271,31 @@ test('AEON-1502 phone 390 en and de: Add and Deny full width, 44 px, no overflow
     expect(await overflowing(review)).toEqual([])
     record(`phone 390 ${language}`, { addAndDenyFullWidth: true, minHeight: 44, horizontalOverflow: 0 })
   })
+})
+
+// Fails on 39ea42fe: the checklist carried .who, whose phone touch overlay (base.css) lay over its checkboxes.
+test('AEON-1502 phone 390: a pointer reaches each harness checkbox and toggles it', async ({ page }) => {
+  const { calls, review } = await open(page, 'en', {}, { width: 390, height: 844 })
+  const boxes = review.locator('.checklist input[type=checkbox]')
+  await expect(boxes).toHaveCount(2)
+  // The element under each checkbox's centre is the checkbox itself, not an overlay.
+  for (const box of await boxes.all()) {
+    expect(await box.evaluate(el => {
+      const r = el.getBoundingClientRect()
+      return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === el
+    })).toBe(true)
+  }
+  // A tap on the harness name toggles it through its label, off and on again.
+  const codex = review.locator('.checklist li').filter({ hasText: 'Codex' })
+  await codex.locator('.name').click()
+  await expect(codex.getByRole('checkbox')).not.toBeChecked()
+  await codex.locator('.name').click()
+  await expect(codex.getByRole('checkbox')).toBeChecked()
+  await codex.getByRole('checkbox').click()
+  await expect(codex.getByRole('checkbox')).not.toBeChecked()
+  await review.getByRole('button', { name: 'Pair', exact: true }).click()
+  await expect.poll(() => approvals(calls).length).toBe(1)
+  expect((approvals(calls)[0]!.body as { selected_account_keys: string[] }).selected_account_keys).toEqual(['cursor-1'])
 })
 
 test("AEON-1502 expired and denied 1280 en and de: one sentence and today's command", async ({ browser, page }, testInfo) => {
