@@ -69,7 +69,7 @@ test('AEON-1337 missing full builds, legacy shard layouts and saturated budgets 
   const snapshot=slotFixture();
   assert.equal(analyzeSlotDemand({...snapshot,runs:snapshot.runs.slice(0,4)}).capacity_budget.max_entries_to_build,null);
   assert.equal(analyzeSlotDemand(snapshot,{slots:10}).capacity_budget.max_entries_to_build,null);
-  for(const run of snapshot.runs.filter(run=>run.event==='merge_group'))run.attempts[0].jobs=run.attempts[0].jobs.filter(job=>job.name!=='web-shard (17)');
+  for(const run of snapshot.runs.filter(run=>run.event==='merge_group'))run.attempts[0].jobs=run.attempts[0].jobs.filter(job=>job.name!=='web-shard (18)');
   assert.equal(analyzeSlotDemand(snapshot).full_build_samples,0,'a previous twelve-shard layout is not the current full build');
   const unknown=slotFixture(); unknown.runs[0].attempts[0].jobs[0].labels=['unknown-large-runner'];
   assert.throws(()=>analyzeSlotDemand(unknown),/unknown runner class/);

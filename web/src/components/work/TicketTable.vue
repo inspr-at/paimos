@@ -950,8 +950,17 @@ function longPress(event: Event, row: ListItem) {
 function linkClick(event: MouseEvent) {
   // Shift-click is the row's range selection. Let it bubble; the row cancels the new window.
   if (event.shiftKey && !event.metaKey && !event.ctrlKey && event.button !== 1) return
-  // One native tab. Stop the row's newTab so it does not open a second window.
-  if (event.metaKey || event.ctrlKey || event.button === 1) { event.stopPropagation(); return }
+  // One tab. Stop the row's newTab, and open the href here: a busy browser can
+  // drop the anchor's own modified-click tab after the gesture goes stale.
+  if (event.metaKey || event.ctrlKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    const href = (event.currentTarget as HTMLAnchorElement | null)?.href
+    if (href) window.open(href, '_blank', 'noopener')
+    return
+  }
+  // Middle-click keeps the browser's own tab and must not add the row's.
+  if (event.button === 1) { event.stopPropagation(); return }
   event.preventDefault()
 }
 const selectableRows = (group: RowGroup) => group.rows.filter(row => props.rowSelectable?.(row) ?? true)
