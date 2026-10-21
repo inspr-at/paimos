@@ -19,6 +19,8 @@ import { can, onAccessRevalidate } from '../lib/authz'
 import { useProfile } from '../stores/profile'
 import { definitionDeskWords } from '../lib/definitions'
 import { displayLanguage } from '../lib/displayLanguage'
+import { deskOfferDismissed, deskOfferEligible, deskPushBrowser, deviceSubscriptionHash, dismissDeskOffer, phoneSettings, setDeskSubscription, type PhoneSettings } from '../lib/phoneApprovals'
+import { useIdentityScope } from '../lib/useIdentityScope'
 import { useSession } from '../stores/session'
 import { useAgents } from '../stores/agents'
 import type { KeyTrimCursors } from '../lib/keyTrim'
@@ -31,6 +33,59 @@ import deskLight from '../assets/desk/desk-empty-light.webp'
 import deskDark from '../assets/desk/desk-empty-dark.webp'
 
 const session = useSession(), profile = useProfile()
+const noticeDe = computed(() => displayLanguage(profile.profile?.locale) === 'de')
+const noticeText = (en: string, de: string) => noticeDe.value ? de : en
+const noticeWords = computed(() => ({
+  offer: noticeText('Get a browser notification when a decision waits', 'Browser-Benachrichtigung erhalten, wenn eine Entscheidung wartet'),
+  failed: noticeText('Notifications could not be turned on. Check the browser permission.', 'Benachrichtigungen konnten nicht eingeschaltet werden. Browser-Berechtigung prüfen.'),
+}))
+const noticeSettings = ref<PhoneSettings | null>(null), noticeHash = ref(''), noticeDismissed = ref(deskOfferDismissed())
+const noticeBusy = ref(false), noticeOn = ref(false), noticeError = ref(false), noticeBrowser = ref(deskPushBrowser())
+const noticeScope = useIdentityScope(() => session.identity?.principal.kind === 'person' && can('profile.read') && can('profile.write'))
+const noticeReads = noticeScope.lane()
+const showNotice = computed(() => !!noticeSettings.value && deskOfferEligible(noticeSettings.value, noticeHash.value, noticeBrowser.value, noticeDismissed.value))
+// The offer is decided before anything below the title shows, so it never arrives above the tabs later, and a Desk
+// without it keeps the subtitle's own height (AEON-1448: no band). A read slower than the bound leaves the offer out
+// for this visit. Once shown, the offer keeps its slot for the visit; later states swap their words in place.
+const NOTICE_WAIT_MS = 800
+// A browser that already granted notifications never waits for the read: it is opted in or chose elsewhere (Tick).
+const noticePossible = () => { const browser = deskPushBrowser(); return browser.supported && !browser.homeScreenRequired && browser.permission === 'default' && !deskOfferDismissed() }
+const noticeDeciding = ref(noticePossible()), noticeHeld = ref(false)
+// A failed Turn on keeps the offer, with the failure in its sentence, even once the browser reports a refusal.
+const offerShown = computed(() => noticeHeld.value && !noticeOn.value && (noticeError.value || showNotice.value))
+let noticeTimer: ReturnType<typeof setTimeout> | undefined
+function decideNotice() {
+  if (!noticeDeciding.value) return
+  clearTimeout(noticeTimer)
+  noticeHeld.value = showNotice.value; noticeDeciding.value = false
+}
+function loadNotice() {
+  if (!noticePossible()) { decideNotice(); return }
+  return noticeReads.run(({ after, signal }) => after(Promise.all([phoneSettings(signal), deviceSubscriptionHash()]), ([value, hash]) => {
+    noticeSettings.value = value; noticeHash.value = hash; noticeBrowser.value = deskPushBrowser()
+  }), { failed: () => { noticeSettings.value = null }, settled: decideNotice })
+}
+function turnNoticeOn() {
+  if (noticeBusy.value || !offerShown.value || !noticeSettings.value || !noticeScope.owner.value) return
+  // Keep the browser's user activation: never request permission during load.
+  const permission = Notification.requestPermission(), publicKey = noticeSettings.value.vapid_public_key
+  noticeReads.cancel(); noticeBusy.value = true; noticeError.value = false
+  void noticeScope.run(({ after, signal }) => after(setDeskSubscription(true, publicKey, permission, signal), () => {
+    noticeOn.value = true; noticeSettings.value = null
+  }), { failed: () => { noticeError.value = true }, settled: () => { noticeBusy.value = false; noticeBrowser.value = deskPushBrowser() } })
+}
+function dismissNotice() { noticeDismissed.value = true; noticeError.value = false; dismissDeskOffer() }
+function resetNotice() {
+  noticeSettings.value = null; noticeHash.value = ''; noticeBusy.value = false; noticeOn.value = false; noticeError.value = false
+  noticeDismissed.value = deskOfferDismissed()
+}
+watch(noticeScope.owner, () => { resetNotice(); void loadNotice() }, { flush: 'sync' })
+const stopNoticeAccess = onAccessRevalidate({ reset: resetNotice, refresh: () => { void loadNotice() } })
+onBeforeUnmount(() => { stopNoticeAccess(); clearTimeout(noticeTimer) })
+onMounted(() => {
+  if (noticeDeciding.value) noticeTimer = setTimeout(() => { noticeReads.cancel(); decideNotice() }, NOTICE_WAIT_MS)
+  void loadNotice()
+})
 const definitionLanguage = computed(() => displayLanguage(profile.profile?.locale, 'definitions'))
 const titleOf = (item: DeskItem) => item.definitionChange ? definitionDeskWords(item.definitionChange.project_key,item.definitionChange.pending_count,definitionLanguage.value) : item.title
 const agents = useAgents()
@@ -594,9 +649,27 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 </script>
 
 <template>
-  <main class="desk-page decision-desk" aria-labelledby="desk-title">
+  <main class="desk-page decision-desk" :class="{ deciding: noticeDeciding }" :aria-busy="noticeDeciding || undefined" aria-labelledby="desk-title">
     <header class="dp-head">
-      <div><h1 id="desk-title" tabindex="-1">Decision Desk</h1><p class="head-note">Agents keep working unless something is held up.</p></div>
+      <div class="desk-heading"><h1 id="desk-title" tabindex="-1">Decision Desk</h1>
+        <div class="head-note desk-notice" data-testid="desk-notice">
+          <!-- Once shown, the offer keeps its wrapping geometry through dismissal, success and later reads. -->
+          <div v-if="noticeHeld" class="notice-offer" :class="{ reserved: !offerShown }" :aria-hidden="!offerShown || undefined" :inert="!offerShown || undefined">
+            <!-- The offer and its failure share one slot sized to the longer sentence, so a failure moves nothing. -->
+            <span class="notice-sentence">
+              <span class="notice-size" aria-hidden="true">{{ noticeWords.offer }}</span>
+              <span class="notice-size" aria-hidden="true">{{ noticeWords.failed }}</span>
+              <span aria-live="polite" data-testid="desk-notice-sentence">{{ noticeError ? noticeWords.failed : noticeWords.offer }}</span>
+            </span>
+            <div class="notice-actions">
+              <button type="button" class="linkish notice-on" :disabled="noticeBusy" @click="turnNoticeOn">{{ noticeText('Turn on', 'Einschalten') }}</button>
+              <button type="button" class="linkish notice-later" :disabled="noticeBusy" @click="dismissNotice">{{ noticeText('Not now', 'Nicht jetzt') }}</button>
+            </div>
+          </div>
+          <p v-if="noticeOn" role="status">{{ noticeText('Notifications on for this browser', 'Benachrichtigungen für diesen Browser an') }}</p>
+          <p v-else-if="!offerShown">{{ noticeText('Agents keep working unless something is held up.', 'Agenten arbeiten weiter, solange nichts aufgehalten wird.') }}</p>
+        </div>
+      </div>
     </header>
     <!-- AEON-1448 (Tick): "Answer one by one" sits at the tab row's end, only while the (scoped) open round has items.
          It is never taller than the tabs, so arriving or leaving fades it in place and moves nothing else. -->
@@ -703,6 +776,21 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .dp-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 24px; margin-bottom: 18px; }
 .dp-head h1 { margin: 0; font: 300 clamp(28px, 3.4vw, 36px)/1.1 var(--serif); letter-spacing: -.025em; outline: none; }
 .dp-head .head-note { margin: 8px 0 0; font-size: 13px; color: var(--ink-3); }
+.desk-heading { width: 100%; min-width: 0; }
+.desk-notice { display: grid; align-items: center; }
+.desk-notice > * { grid-area: 1 / 1; margin: 0; }
+.notice-offer { display: flex; align-items: center; flex-wrap: wrap; gap: 0 16px; }
+.notice-sentence { display: grid; min-width: 0; }
+.notice-sentence > span { grid-area: 1 / 1; overflow-wrap: anywhere; }
+.notice-sentence .notice-size { visibility: hidden; }
+.notice-actions { display: flex; flex-wrap: wrap; gap: 0 16px; }
+/* Quiet actions: the way on in link ink, the way out muted, both in the sentence's own weight. */
+.notice-actions .linkish { min-width: 44px; min-height: 44px; padding: 0; font-weight: 400; }
+.notice-actions .notice-on { color: var(--primary-ink); }
+.notice-actions .notice-later { color: var(--ink-3); }
+.desk-heading .reserved { visibility: hidden; pointer-events: none; }
+/* Until the offer is decided only the title shows; the rest appears once, in its final place. */
+.deciding .desk-notice, .deciding .dp-tabrow, .deciding .scope-line, .deciding .trim-pages, .deciding .queue, .deciding .arrival-line { visibility: hidden; }
 /* AEON-1448 (Tick): one tab row at every width: the tabs at its start, "Answer one by one" at its end. On a narrow row
    the Decided stamp filter takes a line of its own; the button keeps the first, so it never wraps or adds height. */
 .dp-tabrow { container: desk-tabs / inline-size; }
