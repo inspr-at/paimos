@@ -1,13 +1,13 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 24,
-    "selectedTests": 4
+    "seconds": 36,
+    "selectedTests": 6
   },
   "spec": {
     "file": "tests/goals-waiting-instances.spec.ts",
-    "listedTests": 4,
-    "weightSeconds": 8.878049,
+    "listedTests": 6,
+    "weightSeconds": 13.317073,
     "weightSource": "unmeasured-test-rate"
   }
 }

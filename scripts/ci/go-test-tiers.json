@@ -3834,6 +3834,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestDeployRecordAgentKeyCeiling","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestDeskPeekClearFollowsBrowserCookiePath","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestDeskPeekCookieReadsOnlyTheOwnerSummaryFromASibling","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestDevIdentitySubjectPreservesUnicodeMailbox","tier":"GATED-FULL"}

@@ -19,23 +19,37 @@ const SUMMARY = `${SIBLING}/api/decision-desk/owner-summary`
 test.beforeEach(async ({ page }) => { await page.clock.install({ time: new Date(NOW) }) })
 
 type Sibling = 'ok' | 'down'
-async function mockBand(page: Page, options: { owner: boolean; sibling: Sibling }) {
+const keptGoal = {
+  id: 'g-wait', key: 'G-WAIT', title: 'Keep the header still', kind: 'goal', project_id: 'p-aeon', workspace: false, expansion: 'full',
+  counts: { outcomes: 1, tickets: 1 }, items: [], steps: [], next_step: null,
+  projects: [{ id: 'p-aeon', key: 'AEON', name: 'Aeon', group_ids: [] }], waits: { count: 0, question_ids: [] },
+  progress: { pct: 0, computed_pct: 0, source: 'computed', basis: 'count', total: 1, done: 0, items_without_estimate: 0, items_partially_estimated: 0 },
+  eta: { source: 'none', partial: false }, passed: false, states: { moving: 1, queued: 0, paused: 0, done: 0 }, done: false,
+  stall: { stalled: false, since: iso(NOW) }, read_through: 1, generation: 1,
+}
+async function mockBand(page: Page, options: { owner: boolean; sibling: Sibling; lines?: number; goal?: boolean; instances?: Sibling; desk?: 'items' | 'empty' }) {
   const reads = { sibling: 0, origins: [] as string[] }
   let state = options.sibling
+  let instances: Sibling = options.instances ?? 'ok'
+  const lines = options.lines ?? 1
+  const deskItems = options.desk === 'empty' ? [] : [
+    { id: '00000000-0000-4000-8000-000000000001', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'Which identity should agent reviews run as for the gatekeeper go-live?', created_at: iso(NOW - 3 * HOUR), held: false, href: '', source: '', ticket_key: 'AEON-1394', asked_by: { id: 'p-lead', name: 'AEON-LEAD' } },
+    { id: '00000000-0000-4000-8000-000000000002', kind: 'question', project_id: 'p-pharos', revision: 1, title: 'Run the 60-minute voice soak test on the Aithema test host?', created_at: iso(NOW - 2 * HOUR), held: true, href: '', source: '', asked_by: { id: 'p-ops', name: 'OPS' } },
+    { id: '00000000-0000-4000-8000-000000000003', kind: 'approval', project_id: 'p-aeon', revision: 1, title: 'Approval · nodes.write', created_at: iso(NOW - HOUR), held: false, href: '', source: '' },
+  ]
   await mockWork(page, fixtures())
   await page.route(/\/api\/goals(\?.*)?$/, route => route.fulfill({ json: {
-    items: [], totals: { moving: 0, queued: 0, paused: 0, done: 0 }, totals_partial: false, quiet_projects: { count: 0, keys: [] }, truncated: false, read_through: 1, generation: 1,
+    items: options.goal ? [keptGoal] : [], totals: options.goal ? { moving: 1, queued: 0, paused: 0, done: 0 } : { moving: 0, queued: 0, paused: 0, done: 0 }, totals_partial: false, quiet_projects: { count: 0, keys: [] }, truncated: false, read_through: 1, generation: 1,
   }, headers: { 'Aeon-Contract': 'goals/1.5' } }))
   await page.route(/\/api\/decision-desk\/projection/, route => route.fulfill({ json: {
-    items: [
-      { id: '00000000-0000-4000-8000-000000000001', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'Which identity should agent reviews run as for the gatekeeper go-live?', created_at: iso(NOW - 3 * HOUR), held: false, href: '', source: '', ticket_key: 'AEON-1394', asked_by: { id: 'p-lead', name: 'AEON-LEAD' } },
-      { id: '00000000-0000-4000-8000-000000000002', kind: 'question', project_id: 'p-pharos', revision: 1, title: 'Run the 60-minute voice soak test on the Aithema test host?', created_at: iso(NOW - 2 * HOUR), held: true, href: '', source: '', asked_by: { id: 'p-ops', name: 'OPS' } },
-      { id: '00000000-0000-4000-8000-000000000003', kind: 'approval', project_id: 'p-aeon', revision: 1, title: 'Approval · nodes.write', created_at: iso(NOW - HOUR), held: false, href: '', source: '' },
-    ],
-    counts: { open: 3, held: 1, chores: 0 }, has_more: false, as_of: iso(NOW),
+    items: deskItems,
+    counts: options.desk === 'empty' ? { open: 0, held: 0, chores: 0 } : { open: 3, held: 1, chores: 0 }, has_more: false, as_of: iso(NOW),
     upcoming: [{ node_id: 'n-ait', check_id: 'human', project_id: 'p-aeon', ticket_key: 'AIT-140', label: 'Your Aithema test session (~20 min, whenever you like)' }],
   } }))
-  await page.route(/\/api\/decision-desk\/instances$/, route => route.fulfill({ json: { here: 'ppm', siblings: options.owner ? [{ tag: 'pma', origin: SIBLING }] : [] } }))
+  await page.route(/\/api\/decision-desk\/instances$/, route => {
+    if (instances === 'down') return route.fulfill({ status: 503, json: { error: 'unavailable' } })
+    return route.fulfill({ json: { here: 'ppm', siblings: options.owner ? [{ tag: 'pma', origin: SIBLING }] : [] } })
+  })
   await page.route(SUMMARY, route => {
     reads.sibling++
     const origin = route.request().headers().origin ?? ''
@@ -43,11 +57,15 @@ async function mockBand(page: Page, options: { owner: boolean; sibling: Sibling 
     const cors = { 'access-control-allow-origin': origin, 'access-control-allow-credentials': 'true', vary: 'Origin' }
     if (state === 'down') return route.fulfill({ status: 401, json: { error: 'authentication required' }, headers: cors })
     return route.fulfill({ headers: cors, json: {
-      instance: 'pma', counts: { open: 1, held: 0 }, as_of: iso(NOW),
-      items: [{ id: '00000000-0000-4000-8000-0000000000a1', kind: 'question', project_key: 'PORTAL', title: 'Deploy the new sign-in flow to the second test host?', asked_by: 'PORTAL', held: false, href: '/decision-desk?item=q:00000000-0000-4000-8000-0000000000a1' }],
+      instance: 'pma', counts: { open: lines, held: 0 }, as_of: iso(NOW),
+      items: Array.from({ length: lines }, (_, index) => ({
+        id: `00000000-0000-4000-8000-0000000000a${index + 1}`, kind: 'question', project_key: 'PORTAL', asked_by: 'PORTAL', held: false,
+        title: index === 0 ? 'Deploy the new sign-in flow to the second test host?' : 'Confirm the second host’s backup before the window?',
+        href: `/decision-desk?item=q:00000000-0000-4000-8000-0000000000a${index + 1}`,
+      })),
     } })
   })
-  return { reads, set: (next: Sibling) => { state = next } }
+  return { reads, set: (next: Sibling) => { state = next }, setInstances: (next: Sibling) => { instances = next } }
 }
 async function openBand(page: Page) {
   await page.goto('/?view=goals')
@@ -137,6 +155,54 @@ test('an unreadable sibling is one quiet line in the same slot; Try again reads 
   expect(deskAfter).toEqual(desk)
   expect(firstAfter).toEqual(first)
   expect(mock.reads.sibling).toBe(2)
+})
+
+const still = (before: { x: number; y: number; width: number; height: number }, after: { x: number; y: number; width: number; height: number }) => {
+  for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(before[key] - after[key])).toBeLessThanOrEqual(0.5)
+}
+
+test('two sibling lines keep the goals controls still when a refresh fails and recovers', async ({ page }) => {
+  for (const width of [1440, 390] as const) {
+    await page.setViewportSize({ width, height: width > 760 ? 900 : 844 })
+    const mock = await mockBand(page, { owner: true, sibling: 'ok', lines: 2, goal: true })
+    const band = await openBand(page)
+    await expect(band.locator('a.waiting-item')).toHaveCount(5)
+    const head = page.locator('.goal-head')
+    const control = width > 760 ? head.getByRole('button', { name: /Sort by lands/i }) : head.locator('.head-expand')
+    await expect(control).toBeVisible()
+    const [beforeHead, beforeControl] = await Promise.all([box(head), box(control)])
+    mock.set('down')
+    await page.clock.fastForward(60_000)
+    const slots = band.locator('.w-err-li')
+    await expect(slots).toHaveCount(2)
+    await expect(slots.first()).toContainText(/couldn’t be read/)
+    const [duringHead, duringControl] = await Promise.all([box(head), box(control)])
+    still(beforeHead, duringHead)
+    still(beforeControl, duringControl)
+    mock.set('ok')
+    await slots.first().getByRole('button', { name: 'Try again' }).click()
+    await expect(band.locator('a.waiting-item')).toHaveCount(5)
+    await expect(band.locator('.w-err-li')).toHaveCount(0)
+    const [afterHead, afterControl] = await Promise.all([box(head), box(control)])
+    still(beforeHead, afterHead)
+    still(beforeControl, afterControl)
+  }
+})
+
+test('unknown coverage is not an empty desk', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const mock = await mockBand(page, { owner: true, sibling: 'ok', instances: 'down', desk: 'empty' })
+  await page.goto('/?view=goals')
+  const band = page.getByRole('region', { name: 'Waiting on you' })
+  await expect(band).toContainText('Other instances couldn’t be read')
+  await expect(band).not.toContainText('Nothing waits on you')
+  await expect(band.locator('a.waiting-item')).toHaveCount(0)
+  expect(mock.reads.sibling).toBe(0)
+  mock.setInstances('ok')
+  await band.getByRole('button', { name: 'Try again' }).click()
+  await expect(band.locator('a.waiting-item')).toContainText('Deploy the new sign-in flow')
+  await expect(band).not.toContainText('Other instances couldn’t be read')
+  await expect(band).not.toContainText('Nothing waits on you')
 })
 
 test('a person who is not the owner never reads a sibling and sees no instance tags', async ({ page }) => {

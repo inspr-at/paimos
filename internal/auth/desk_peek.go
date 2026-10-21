@@ -47,9 +47,11 @@ func (m *Module) deskPeekOnly(r *http.Request) bool {
 }
 
 // IssueDeskPeek copies the request's browser session into the peek cookie when
-// owner is true and siblings are configured; otherwise it clears a peek cookie
-// the browser still holds. Callers pass owner only after a live workspace-owner
-// check in the same request.
+// owner is true and siblings are configured; otherwise it clears one. Callers
+// pass owner only after a live workspace-owner check in the same request.
+// The cookie's path is only the summary route, so a browser never sends it to
+// discovery. Clear it anyway: Set-Cookie matches on that path, not on the
+// request path, and a non-owner must not keep an older identity's copy.
 func (m *Module) IssueDeskPeek(w http.ResponseWriter, r *http.Request, owner bool) {
 	session, err := r.Cookie(sessionCookieName)
 	if owner && err == nil && len(m.deskPeekOrigins) > 0 {
@@ -61,9 +63,15 @@ func (m *Module) IssueDeskPeek(w http.ResponseWriter, r *http.Request, owner boo
 		})
 		return
 	}
-	if _, held := r.Cookie(deskPeekCookieName); held == nil {
-		m.clearDeskPeek(w)
-	}
+	m.clearDeskPeek(w)
+}
+
+// replaceSessionCookie installs a new browser session and drops the summary
+// copy. Login does not receive that copy (its path is the summary route), so
+// the previous identity's copy would otherwise keep working after the swap.
+func (m *Module) replaceSessionCookie(w http.ResponseWriter, token string) {
+	m.setSessionCookie(w, token)
+	m.clearDeskPeek(w)
 }
 
 func (m *Module) clearDeskPeek(w http.ResponseWriter) {

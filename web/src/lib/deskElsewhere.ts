@@ -13,11 +13,14 @@ export interface DeskSibling { tag: string; origin: string }
 export interface DeskInstances { here: string; siblings: DeskSibling[] }
 export interface ElsewhereLine { id: string; projectKey: string; title: string; askedBy: string; held: boolean; url: string }
 export interface ElsewhereSummary { lines: ElsewhereLine[]; open: number; held: number; upcoming: string }
-export interface ElsewhereRead extends DeskSibling { state: 'reading' | 'ok' | 'error'; summary: ElsewhereSummary | null }
+export interface ElsewhereRead extends DeskSibling { state: 'reading' | 'ok' | 'error'; summary: ElsewhereSummary | null; shown: number }
+export type ElsewhereDiscovery = 'pending' | 'known' | 'unknown'
 
 const TAG = /^[a-z][a-z0-9-]{0,15}$/
-const SUMMARY_LINES = 5, TITLE_MAX = 200, NAME_MAX = 120, READ_TIMEOUT = 8_000
+const SUMMARY_LINES = 5, TITLE_MAX = 200, NAME_MAX = 120, READ_TIMEOUT = 8_000, SIBLING_BODY_MAX = 64_000
 export const ELSEWHERE_REFRESH = 60_000
+// Lines one sibling may occupy in the band. The band keeps this many slots when a read fails.
+export const ELSEWHERE_LINES = 2
 
 const text = (value: unknown, max: number) => typeof value === 'string' ? value.trim().slice(0, max) : ''
 function origin(value: unknown): string {
@@ -52,6 +55,31 @@ export function parseSummary(sibling: DeskSibling, body: unknown): ElsewhereSumm
   return { lines, open: open as number, held: held as number, upcoming: text(raw.upcoming?.label, TITLE_MAX) }
 }
 
+// Count the bytes actually read. A missing or smaller Content-Length must not admit the rest of the body.
+async function boundedJSON(response: Response, limit: number): Promise<unknown> {
+  const declared = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > limit) {
+    await response.body?.cancel()
+    throw new Error('too much')
+  }
+  if (!response.body) throw new Error('empty body')
+  const reader = response.body.getReader(), chunks: Uint8Array[] = []
+  let size = 0
+  try {
+    for (;;) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      size += chunk.value.byteLength
+      if (size > limit) { await reader.cancel(); throw new Error('too much') }
+      chunks.push(chunk.value)
+    }
+  } finally { reader.releaseLock() }
+  const bytes = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+}
+
 /** One sibling read with the owner's session there. No retry loop: Try again is the person's. */
 export async function readSibling(sibling: DeskSibling, signal?: AbortSignal): Promise<ElsewhereSummary> {
   const timeout = AbortSignal.timeout(READ_TIMEOUT)
@@ -60,9 +88,13 @@ export async function readSibling(sibling: DeskSibling, signal?: AbortSignal): P
     headers: { Accept: 'application/json' }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   })
   if (!response.ok) throw new Error(`${sibling.tag} answered ${response.status}`)
-  const length = Number(response.headers.get('content-length') ?? 0)
-  if (length > 64_000) throw new Error(`${sibling.tag} answered too much`)
-  const summary = parseSummary(sibling, await response.json())
+  let body: unknown
+  try { body = await boundedJSON(response, SIBLING_BODY_MAX) }
+  catch (error) {
+    if (error instanceof Error && error.message === 'too much') throw new Error(`${sibling.tag} answered too much`)
+    throw new Error(`${sibling.tag} answered an unknown shape`)
+  }
+  const summary = parseSummary(sibling, body)
   if (!summary) throw new Error(`${sibling.tag} answered an unknown shape`)
   return summary
 }
@@ -70,34 +102,79 @@ export async function readSibling(sibling: DeskSibling, signal?: AbortSignal): P
 /** The person's sibling reads, reset on every identity change; stale answers are dropped. */
 export function useDeskElsewhere(options: { refreshEvery?: number } = {}) {
   const session = useSession()
-  const here = ref(''), reads = ref<ElsewhereRead[]>([]), settled = ref(false)
-  let turn = 0, abort: AbortController | undefined, timer: ReturnType<typeof setInterval> | undefined
+  const here = ref(''), reads = ref<ElsewhereRead[]>([]), settled = ref(false), discovery = ref<ElsewhereDiscovery>('pending')
+  let turn = 0, discovering = false, abort: AbortController | undefined, timer: ReturnType<typeof setInterval> | undefined
   const who = () => session.identity?.principal.kind === 'person' ? `${session.identity.tenant.id}:${session.identity.principal.id}` : ''
-  function reset() { turn++; abort?.abort(); abort = undefined; here.value = ''; reads.value = []; settled.value = false }
+  const shownLines = (summary: ElsewhereSummary) => Math.min(ELSEWHERE_LINES, summary.lines.length)
+  function reset() {
+    turn++; abort?.abort(); abort = undefined; discovering = false
+    here.value = ''; reads.value = []; settled.value = false; discovery.value = 'pending'
+  }
   async function readOne(sibling: DeskSibling, at: number, signal: AbortSignal) {
     const current = () => at === turn && !signal.aborted
-    const update = (patch: Partial<ElsewhereRead>) => { reads.value = reads.value.map(read => read.tag === sibling.tag ? { ...read, ...patch } : read) }
-    try { const summary = await readSibling(sibling, signal); if (current()) update({ state: 'ok', summary }) }
-    catch { if (current()) update({ state: 'error', summary: null }) }
+    try {
+      const summary = await readSibling(sibling, signal)
+      if (current()) reads.value = reads.value.map(read => read.tag === sibling.tag ? { ...read, state: 'ok', summary, shown: shownLines(summary) } : read)
+    } catch {
+      // Keep shown: the band holds the slots the last successful read occupied.
+      if (current()) reads.value = reads.value.map(read => read.tag === sibling.tag ? { ...read, state: 'error', summary: null } : read)
+    }
+  }
+  async function readBatch(siblings: DeskSibling[], at: number, signal: AbortSignal): Promise<ElsewhereRead[] | undefined> {
+    const next: ElsewhereRead[] = siblings.map(sibling => ({ ...sibling, state: 'reading', summary: null, shown: 1 }))
+    await Promise.all(next.map(async row => {
+      try {
+        const summary = await readSibling(row, signal)
+        if (at !== turn || signal.aborted) return
+        row.state = 'ok'; row.summary = summary; row.shown = shownLines(summary)
+      } catch {
+        if (at !== turn || signal.aborted) return
+        row.state = 'error'; row.summary = null
+      }
+    }))
+    if (at !== turn || signal.aborted) return undefined
+    return next
   }
   async function load() {
     const identity = who()
     reset()
-    if (!identity) { settled.value = true; return }
+    if (!identity) { discovery.value = 'known'; settled.value = true; return }
     const at = turn, controller = new AbortController(); abort = controller
+    discovering = true
     try {
       const instances = await readInstances(controller.signal)
       if (at !== turn || identity !== who()) return
       here.value = instances.here
-      reads.value = instances.siblings.map(sibling => ({ ...sibling, state: 'reading', summary: null }))
-      await Promise.all(instances.siblings.map(sibling => readOne(sibling, at, controller.signal)))
-    } catch { /* Without the list there is nothing across instances to show; this instance's band stands alone. */ }
-    finally { if (at === turn) settled.value = true }
+      const next = await readBatch(instances.siblings, at, controller.signal)
+      if (!next || at !== turn || identity !== who()) return
+      reads.value = next
+      discovery.value = 'known'
+    } catch {
+      // The list itself failed. That is unknown coverage, not a confirmed empty sibling list.
+      if (at === turn) { discovery.value = 'unknown'; reads.value = [] }
+    } finally { if (at === turn) { discovering = false; settled.value = true } }
   }
-  /** Re-read every sibling (the periodic refresh) without blanking lines that are shown. */
+  async function retryDiscovery() {
+    const identity = who(), at = turn, signal = abort?.signal
+    if (!identity || !signal || signal.aborted || discovering || discovery.value === 'known') return
+    discovering = true
+    try {
+      const instances = await readInstances(signal)
+      if (at !== turn || identity !== who() || signal.aborted) return
+      here.value = instances.here
+      const next = await readBatch(instances.siblings, at, signal)
+      if (!next || at !== turn || identity !== who()) return
+      reads.value = next
+      discovery.value = 'known'
+    } catch {
+      if (at === turn && identity === who()) discovery.value = 'unknown'
+    } finally { if (at === turn) discovering = false }
+  }
+  /** Re-read every sibling (the periodic refresh) without blanking lines that are shown. A failed list is read again. */
   function refreshSiblings() {
     const at = turn, signal = abort?.signal
-    if (!signal || !settled.value) return
+    if (!signal || signal.aborted || !settled.value) return
+    if (discovery.value !== 'known') { void retryDiscovery(); return }
     for (const read of reads.value) void readOne(read, at, signal)
   }
   /** Try again for one sibling: its line reads again in place. */
@@ -111,5 +188,5 @@ export function useDeskElsewhere(options: { refreshEvery?: number } = {}) {
   const every = options.refreshEvery ?? ELSEWHERE_REFRESH
   if (every > 0 && typeof window !== 'undefined') timer = setInterval(() => { if (document.visibilityState !== 'hidden') refreshSiblings() }, every)
   onScopeDispose(() => { clearInterval(timer); turn++; abort?.abort() })
-  return { here, reads, settled, retry, refresh: refreshSiblings }
+  return { here, reads, settled, discovery, retry, refresh: refreshSiblings }
 }

@@ -17,7 +17,7 @@ import { vClipTip } from '../../lib/clipTip'
 import { useDecisionDesk } from '../../stores/decisionDesk'
 import { useProjects } from '../../stores/projects'
 import { deskItemID, deskLinkOut, deskListKey, type DeskProjectionItem } from '../../lib/decisionDesk'
-import { useDeskElsewhere } from '../../lib/deskElsewhere'
+import { ELSEWHERE_LINES, useDeskElsewhere } from '../../lib/deskElsewhere'
 import type { Goal } from '../../lib/goals'
 
 defineProps<{ goals: readonly Goal[] }>()
@@ -38,9 +38,10 @@ const rows = computed(() => items.value.slice(0, 3).map((item: DeskProjectionIte
   }
 }))
 const away = computed(() => elsewhere.reads.value.map(read => ({
-  tag: read.tag, state: read.state, open: read.summary?.open ?? 0,
-  lines: heldFirst(read.summary?.lines ?? []).slice(0, 2),
+  tag: read.tag, state: read.state, open: read.summary?.open ?? 0, shown: read.shown,
+  lines: heldFirst(read.summary?.lines ?? []).slice(0, ELSEWHERE_LINES),
 })))
+const unknown = computed(() => elsewhere.discovery.value === 'unknown')
 const awayOpen = computed(() => away.value.reduce((sum, read) => sum + (read.state === 'ok' ? read.open : 0), 0))
 const split = computed(() => away.value.filter(read => read.state === 'ok' && read.open > 0).map(read => `${read.open} on ${read.tag}`).join(' · '))
 const hereCount = computed(() => desk.count)
@@ -69,7 +70,7 @@ const reading = computed(() => hereCount.value === null || !elsewhere.settled.va
   <section v-else-if="reading" class="waiting is-empty is-reading" aria-label="Waiting on you" aria-busy="true">
     <div class="waiting-head"><span class="w-ic"><AppIcon name="person-wait" :size="15" /></span><span class="w-line"><span class="skeleton" /></span></div>
   </section>
-  <section v-else-if="count === 0 && !away.some(read => read.state !== 'ok')" class="waiting is-empty is-clear" aria-label="Waiting on you">
+  <section v-else-if="count === 0 && !unknown && !away.some(read => read.state !== 'ok')" class="waiting is-empty is-clear" aria-label="Waiting on you">
     <div class="waiting-head">
       <span class="w-ic"><AppIcon name="check" :size="15" /></span>
       <span class="w-line"><span>Nothing waits on you</span><span v-if="coming" v-clip-tip class="coming"><b>Coming</b> · {{ comingLabel }}</span></span>
@@ -105,16 +106,24 @@ const reading = computed(() => hereCount.value === null || !elsewhere.settled.va
             </a>
           </li>
         </template>
-        <li v-else class="w-err-li">
-          <div class="waiting-item w-err" role="status" :data-state="read.state" :data-tip="read.state === 'error' ? `Sign in on ${read.tag} and open Goals there once; then this browser can read it.` : undefined">
-            <span class="wtag mono">{{ read.tag }}</span>
-            <span class="werr">
-              <template v-if="read.state === 'reading'">Reading…</template>
-              <template v-else>couldn’t be read<span aria-hidden="true">·</span><button type="button" class="w-retry" @click="elsewhere.retry(read.tag)">Try again</button></template>
-            </span>
-          </div>
-        </li>
+        <template v-else>
+          <li v-for="slot in Math.max(read.shown, 1)" :key="`${read.tag}:${slot}`" class="w-err-li">
+            <div v-if="slot === 1" class="waiting-item w-err" role="status" :data-state="read.state" :data-tip="read.state === 'error' ? `Sign in on ${read.tag} and open Goals there once; then this browser can read it.` : undefined">
+              <span class="wtag mono">{{ read.tag }}</span>
+              <span class="werr">
+                <template v-if="read.state === 'reading'">Reading…</template>
+                <template v-else>couldn’t be read<span aria-hidden="true">·</span><button type="button" class="w-retry" @click="elsewhere.retry(read.tag)">Try again</button></template>
+              </span>
+            </div>
+            <div v-else class="waiting-item w-hold" aria-hidden="true" />
+          </li>
+        </template>
       </template>
+      <li v-if="unknown" class="w-coverage">
+        <div class="waiting-item w-err" role="status">
+          <span class="werr">Other instances couldn’t be read<span aria-hidden="true">·</span><button type="button" class="w-retry" @click="elsewhere.refresh()">Try again</button></span>
+        </div>
+      </li>
     </ul>
     <RouterLink v-if="more" class="w-more" to="/decision-desk">{{ more }}</RouterLink>
     <p v-if="coming" v-clip-tip class="coming"><b>Coming</b> · {{ comingLabel }}</p>
@@ -183,8 +192,8 @@ const reading = computed(() => hereCount.value === null || !elsewhere.settled.va
   .wline { display: block; flex: 1 1 auto; }
   .wq { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; font-size: 14px; line-height: 1.35; }
   .waiting-list > li:nth-child(n+2) { display: none; }
-  .waiting-list > li.w-err-li { display: block; }
-  .w-err { min-height: 44px; padding: 0; align-items: center; }
+  .waiting-list > li.w-coverage { display: block; }
+  .w-err { padding: 0; align-items: center; }
   .werr { display: flex; }
   .w-more { position: relative; display: flex; align-items: center; min-height: 44px; margin: 0; font-size: 13px; color: var(--ink-3); }
   .coming { margin: 4px 0 0; font-size: 13px; }
