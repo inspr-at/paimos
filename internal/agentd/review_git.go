@@ -4,7 +4,6 @@ package agentd
 import (
 	"bytes"
 	"context"
-	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"io"
 	"os"
 	"os/exec"
@@ -13,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 )
 
 type boundedReviewBuffer struct {

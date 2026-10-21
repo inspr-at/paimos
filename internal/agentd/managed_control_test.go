@@ -280,7 +280,7 @@ func TestSteerMidTurnStaysQueued(t *testing.T) {
 	}
 	p.mu2.Lock()
 	defer p.mu2.Unlock()
-	if len(p.texts) != 1 || p.texts[0] != "later" {
+	if len(p.texts) != 1 || p.texts[0] != labelledMessage("", "later") {
 		t.Fatalf("texts %v", p.texts)
 	}
 	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "busy-steer:applied:queued_next_turn" {

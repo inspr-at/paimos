@@ -70,7 +70,7 @@ func TestManagedControlsIdentityReplayPrivacyAndExpiry(t *testing.T) {
 	w = f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease)
 	expect(t, w, 200)
 	controls := decode(t, w)["controls"].([]any)
-	if len(controls) != 1 || controls[0].(map[string]any)["text"] != "private steer fixture" {
+	if len(controls) != 1 || controls[0].(map[string]any)["text"] != "private steer fixture" || controls[0].(map[string]any)["author_principal_id"] != f.person.ID {
 		t.Fatal(w.Body.String())
 	}
 	w = f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease)

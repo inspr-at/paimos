@@ -173,26 +173,15 @@ func (a *packStartAdapter) Start(context.Context, StartRequest, func(AdapterEven
 func TestPinnedRulesLaunchRefusesBeforeAdapter(t *testing.T) {
 	for _, oversized := range []bool{false, true} {
 		t.Run(fmt.Sprint(oversized), func(t *testing.T) {
-			s, a, _ := testSupervisor(t)
-			r := newLaunchedRepo(t)
-			r.run("remote", "add", "origin", "https://github.com/fixture/repository.git")
-			id := func(n string) string { return "00000000-0000-4000-8000-00000000000" + n }
-			c := rules.Context{TenantID: id("1"), ProjectID: id("2"), PersonID: id("3"), AgentID: id("4"), TaskID: id("5"), Role: "builder", Harness: "claude-code"}
-			sum := sha256.Sum256([]byte(rules.SessionHeader))
-			m := rules.Merged{Context: c, Body: rules.SessionHeader, ByteSize: len(rules.SessionHeader), SHA256: hex.EncodeToString(sum[:]), Version: "floor-only"}
+			s, api, _ := testPinnedSupervisor(t)
+			a := api.fakeAPI
 			want := ErrRulesPinMissing
+			api.bundle.PinnedFiles = nil
 			if oversized {
-				m.PinnedFiles = []doctrine.PinnedFile{packFile("public", "fixture/company", "docs/KERNEL.md", strings.Repeat("R", 64001))}
+				api.bundle.PinnedFiles = []doctrine.PinnedFile{packFile("public", "fixture/company", "docs/KERNEL.md", strings.Repeat("R", 64001))}
 				want = ErrRulesPackTooLarge
 			}
-			api := &packStartAPI{managedRulesFixture: &managedRulesFixture{fakeAPI: a, bundle: m}, context: c}
 			adapter := &packStartAdapter{}
-			s.api = api
-			s.tenantID = c.TenantID
-			s.principalID = c.AgentID
-			s.workspace = r.dir
-			a.run.AgentPrincipalID = c.AgentID
-			a.run.WorkOrderID = c.TaskID
 			a.profile.Harness = Claude
 			s.accounts[0].Harness = Claude
 			s.adapters = map[string]Adapter{Claude: adapter}
@@ -204,4 +193,40 @@ func TestPinnedRulesLaunchRefusesBeforeAdapter(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (a *packStartAPI) Identity(context.Context) (string, string, error) {
+	return a.context.TenantID, a.context.AgentID, nil
+}
+
+// A real pinned repository and canonical scope keep dispatch fixtures past the
+// instruction boundary without bypassing the same checks used in production.
+func testPinnedSupervisor(t *testing.T) (*Supervisor, *packStartAPI, *fakeProcess) {
+	t.Helper()
+	r := newLaunchedRepo(t)
+	r.run("remote", "add", "origin", "https://github.com/fixture/repository.git")
+	id := func(n string) string { return "00000000-0000-4000-8000-00000000000" + n }
+	c := rules.Context{TenantID: id("1"), ProjectID: id("2"), PersonID: id("3"), AgentID: id("4"), TaskID: id("5"), Role: "builder", Harness: "claude-code"}
+	sum := sha256.Sum256([]byte(rules.SessionHeader))
+	m := rules.Merged{Context: c, Body: rules.SessionHeader, ByteSize: len(rules.SessionHeader), SHA256: hex.EncodeToString(sum[:]), Version: "floor-only", PinnedFiles: []doctrine.PinnedFile{packFile("public", "fixture/company", "docs/KERNEL.md", "Company rules.\n")}}
+	base := &fakeAPI{run: Run{ID: "run", WorkOrderID: c.TaskID, AgentPrincipalID: c.AgentID, ModelProfileID: "profile", Status: "queued"}, profile: Profile{ID: "profile", Harness: Codex, Model: "model", Effort: "high"}}
+	api := &packStartAPI{managedRulesFixture: &managedRulesFixture{fakeAPI: base, bundle: m}, context: c}
+	process := &fakeProcess{stopped: make(chan struct{})}
+	s, err := NewSupervisor(context.Background(), Config{API: api, StateRoot: t.TempDir(), DaemonID: "daemon", Workspace: r.dir, Adapters: []Adapter{&fakeAdapter{proc: process}}, EstimatedUnits: map[string]int64{"requests": 1}, Accounts: []EnrolledAccount{{ID: "account", Key: "local", Harness: Codex}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = process.Stop(context.Background())
+		for _, entry := range s.runs {
+			entry.mu.Lock()
+			done := entry.monitorDone
+			entry.mu.Unlock()
+			if done != nil {
+				<-done
+			}
+		}
+		_ = s.Close(context.Background())
+	})
+	return s, api, process
 }

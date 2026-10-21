@@ -149,6 +149,9 @@ func (s *Supervisor) prepareClaudeRules(ctx context.Context, entry *owned, run R
 	if entry.managedPolicy && tools == nil {
 		return "", errors.New("bound tools required for managed controls")
 	}
+	if _, ok := s.api.(managedContextAPI); !ok {
+		return "", errors.New("managed rules API unavailable")
+	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	var repository repositoryRules
