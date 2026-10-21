@@ -3858,6 +3858,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestFullAccessModelsV2SimpleRead","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestGoalAgentKeyCeiling","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestHarnessProbeRoutesThroughPairedRuntimeMiddleware","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestHasScopeAcceptsDotAndColon","tier":"GATED-FULL"}
