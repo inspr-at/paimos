@@ -743,8 +743,15 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	if !g.LaunchAuthorized || g.ExpectedBinding == nil || !reflect.DeepEqual(g.Intent, local.Intent) || g.ExpectedBinding.DaemonID != s.daemonID || g.ExpectedBinding.DaemonGeneration != s.generation || g.ExpectedBinding.TenantID != s.tenantID {
 		return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
 	}
-	e.owner = nativecontract.CommandActor{TenantID: s.tenantID, PrincipalID: h.owner, OwnerPersonID: h.owner, GrantID: g.Policy.GrantID, GrantRevision: g.Policy.GrantRevision}
 	b := *g.ExpectedBinding
+	var currentView nativecontract.SessionView
+	if err = e.call(ctx, "GET", "/api/projects/"+b.ProjectID+"/native-sessions/"+b.OwnedSessionID, nil, &currentView); err != nil {
+		return out, err
+	}
+	if currentView.CurrentBinding == nil || !currentView.CurrentBinding.Equal(b) || currentView.OwnerPersonID != h.owner {
+		return out, nativeRefusal(nativecontract.ReasonWrongPrincipal)
+	}
+	e.owner = nativecontract.CommandActor{TenantID: s.tenantID, PrincipalID: currentView.OwnerPersonID, OwnerPersonID: currentView.OwnerPersonID, GrantID: g.Policy.GrantID, GrantRevision: g.Policy.GrantRevision}
 	profile, err := h.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: s.tenantID, OwnerPersonID: e.owner.OwnerPersonID, AccountID: local.Intent.AccountID, AccountKey: local.AccountKey, WorkspaceID: local.Intent.WorkspaceID, Harness: Claude, Policy: g.Policy, BindingRevision: b.BindingRevision})
 	if err != nil {
 		return out, err

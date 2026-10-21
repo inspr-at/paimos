@@ -268,10 +268,10 @@ func (s *Store) Report(ctx context.Context, d nativecontract.DaemonActor, in nat
 			if _, err := tx.Exec(ctx, `UPDATE native_session_roots SET released_at=coalesce(released_at,$3),hold_state='released' WHERE owned_session_id=$1 AND runtime_epoch=$2`, b.OwnedSessionID, b.RuntimeEpoch, proof.Exit.ObservedAt); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `UPDATE harness_sessions SET stopped_at=coalesce(stopped_at,$2) WHERE id=$1`, b.HarnessSessionID, proof.Exit.ObservedAt); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE harness_sessions SET phase='stopped',stopped_at=coalesce(stopped_at,$2),stop_reason=coalesce(stop_reason,'completed') WHERE id=$1`, b.HarnessSessionID, proof.Exit.ObservedAt); err != nil {
 				return err
 			}
-			session.View.State = "exited"
+			session.View.State = "stopped"
 			session.View.Revision++
 			raw, _ := json.Marshal(session.View)
 			_, err := tx.Exec(ctx, `UPDATE native_session_bindings SET view=$2 WHERE id=$1`, b.OwnedSessionID, raw)
