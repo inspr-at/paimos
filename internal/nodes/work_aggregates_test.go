@@ -898,7 +898,7 @@ func TestListSortAggregatesReuseSnapshot(t *testing.T) {
 			t.Errorf("%s: sorted estimate/ETA differ from the original root facts: estimate=%+v eta=%+v", item.Key, item.Estimate, item.Eta)
 		}
 	}
-	for _, sort := range []string{"estimate", "-estimate", "progress", "-progress", "eta_ready", "-eta_ready", "progress,-estimate", "key"} {
+	for _, sort := range []string{"estimate", "-estimate", "progress", "-progress", "eta_ready", "-eta_ready", "progress,-estimate", "estimate,tokens", "key"} {
 		t.Run(sort, func(t *testing.T) {
 			q.Sort, q.Cursor = nil, ""
 			for _, key := range strings.Split(sort, ",") {
@@ -933,6 +933,25 @@ func TestListSortAggregatesReuseSnapshot(t *testing.T) {
 				t.Fatalf("cursor coverage=%d, want %d", len(seen), len(ids))
 			}
 		})
+	}
+	for _, sort := range []string{"estimate", "progress", "eta_ready"} {
+		q.Sort, q.Cursor, q.OmitRollups = []sortKey{{Name: sort}}, "", true
+		trace.aggregateReads = 0
+		page, err := mod.listNodes(ctx, w.admin.TenantID, q)
+		if err != nil || len(page.Items) != 2 || trace.aggregateReads != 1 {
+			t.Fatalf("omit rollups for %s: err=%v rows=%d aggregate reads=%d", sort, err, len(page.Items), trace.aggregateReads)
+		}
+		for _, item := range page.Items {
+			if item.Estimate != nil || item.Eta != nil {
+				t.Fatal("sort projection ignored omit_rollups")
+			}
+		}
+		q.IDs, q.OmitRollups = []string{deleted.ID}, false
+		empty, err := mod.listNodes(ctx, w.admin.TenantID, q)
+		if err != nil || len(empty.Items) != 0 || empty.NextCursor != nil {
+			t.Fatalf("empty aggregate sort for %s: %v", sort, err)
+		}
+		q.IDs = nil
 	}
 	// Commit changes after sorting has finished, before page hydration. The
 	// query-end hook establishes the interleaving without a timing assumption.
