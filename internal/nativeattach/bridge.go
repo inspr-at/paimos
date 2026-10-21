@@ -28,9 +28,21 @@ import (
 type PersonBridge struct {
 	nativecontract.Host
 	origin, tenant string
+	local          LocalIdentity
 	http           *http.Client
 	validator      *nativecontract.Validator
 }
+
+// LocalIdentity is supplied once by the owning supervisor before ServeLocal.
+// Runtime identity is observed locally, never accepted from a socket request.
+type LocalIdentity interface {
+	TenantID() string
+	DaemonID() string
+	Generation() string
+}
+
+// BindLocal is a construction hook, called before the socket is published.
+func (b *PersonBridge) BindLocal(identity LocalIdentity) { b.local = identity }
 
 type personRequest struct {
 	bridge          *PersonBridge
@@ -121,6 +133,9 @@ func (b *PersonBridge) WithAccess(ctx context.Context, actor nativecontract.Acto
 	binding := in.ExpectedBinding
 	if binding == nil || binding.TenantID != b.tenant || binding.OwnedSessionID != in.OwnedSessionID {
 		return bridgeRefuse(nativecontract.ReasonIdentityMismatch)
+	}
+	if b.local == nil || b.local.TenantID() != b.tenant || binding.DaemonID != b.local.DaemonID() || binding.DaemonGeneration != b.local.Generation() {
+		return bridgeRefuse(nativecontract.ReasonWrongGeneration)
 	}
 	view, err := b.Snapshot(ctx, *binding)
 	if err != nil {

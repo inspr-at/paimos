@@ -13,7 +13,9 @@ cookie separately. The existing agentd wrapper verifies the bearer and the
 current kernel peer. `nativeattach.PersonBridge` then verifies the cookie
 against the daemon's configured instance and tenant, using a bounded,
 redirect-refusing request to `/api/me`. The caller cannot select that instance
-or supply the authenticated person's ID. Cookies and control capabilities are
+or supply the authenticated person's ID. The bridge also binds the target to
+the owning supervisor's locally observed daemon and current generation before
+any server mutation. Cookies and control capabilities are
 invocation/request scoped, excluded from DTOs and redacted in diagnostics.
 Neither socket possession nor the paired agent becomes person authority.
 
@@ -52,8 +54,8 @@ store/consent implementation. None of those files or qualification flags are
 changed in this delivery. The public interaction integration adds one
 `control_claim` authorization hook inside the existing controller-acquisition
 transaction in `internal/nativesessions/interaction/leases.go`; it reuses the
-core's person/owner/project-admin check. A terminal attach also requires its real owner export
-consent; person authentication alone cannot provide it.
+core's person/owner/project-admin check. A terminal attach also requires its
+real owner export consent; person authentication alone cannot provide it.
 
 `TestNativePersonBootstrapAttachTakeHandBack` uses the real protected socket
 and kernel-peer wrapper, real public module and both CLI wire implementations
@@ -66,7 +68,8 @@ SQL transition test separately proves its existing audit/ownership semantics.
 
 ## Validation
 
-The guarded runner refused mbp2606 as YELLOW and used its approved agm2 lane.
+The guarded runner refused the primary host as YELLOW and used its approved
+secondary test lane.
 The protected-socket scenario passed on `81c2e3443`; targeted race checks of
 that scenario, the native CLI commands, the unchanged independent-person
 socket anchor and both SQL control scenarios passed on `5c5e2323f`.
@@ -79,7 +82,7 @@ That negative change is absent from the work branch.
 
 The full harness and reporter-contract packages passed on `e34a75bd2`; the
 latter's response-schema pins remain unchanged. The full CLI run was red in
-unchanged agm2 fixtures: `TestRunHeartbeatLiveOwnerKeepsBeating`,
+unchanged fixtures on the secondary lane: `TestRunHeartbeatLiveOwnerKeepsBeating`,
 `TestRunHeartbeatLiveOwnerAgainstDatabase` (missing `/bin/sleep`),
 `TestHarnessVersionProbeIsBoundedAndOptional`, and
 `TestRulesCompareCLIReportsBlockerAndRefusesUnsafeIO`. The full agentd command
@@ -94,5 +97,5 @@ refusals and the PTY socket person/generation case. Existing ownership globs
 cover all new source files. Optional header additions are confined to the
 native-session authored contract and regenerated through `api/generate.mjs`.
 No new permission, route, response schema, migration or secret is introduced.
-The static wrapper returned exit 3 because mbp2606 is not GREEN; static
+The static wrapper returned exit 3 because the primary test host is not GREEN; static
 qualification remains incomplete and needs coordinator/PR CI evidence.

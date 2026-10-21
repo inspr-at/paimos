@@ -483,5 +483,12 @@ func pairedNativeSessions(ctx context.Context, remote *agentd.Remote, c agentset
 		return nil
 	}
 	config.Host, config.LocalAuthority, config.Projector = bridge, bridge, projector
+	bind := config.Bind
+	config.Bind = func(s *agentd.Supervisor) {
+		if bind != nil {
+			bind(s)
+		}
+		bridge.BindLocal(s)
+	}
 	return config
 }
