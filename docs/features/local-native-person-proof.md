@@ -49,7 +49,10 @@ Finishing interactive attach and take requires the owning-host integration in
 qualified terminal, stream/export and consent adapters in the production
 composition. AEON-1626's brief excludes `internal/agentd/**` and the core's
 store/consent implementation. None of those files or qualification flags are
-changed in this delivery. A terminal attach also requires its real owner export
+changed in this delivery. The public interaction integration adds one
+`control_claim` authorization hook inside the existing controller-acquisition
+transaction in `internal/nativesessions/interaction/leases.go`; it reuses the
+core's person/owner/project-admin check. A terminal attach also requires its real owner export
 consent; person authentication alone cannot provide it.
 
 `TestNativePersonBootstrapAttachTakeHandBack` uses the real protected socket
@@ -60,3 +63,36 @@ session refusal, web/local projection separation and denial at the final
 server write before host execution. It proves bootstrap/control transport,
 not real-provider PTY qualification or interactive terminal I/O. The core's
 SQL transition test separately proves its existing audit/ownership semantics.
+
+## Validation
+
+The guarded runner refused mbp2606 as YELLOW and used its approved agm2 lane.
+The protected-socket scenario passed on `81c2e3443`; targeted race checks of
+that scenario, the native CLI commands, the unchanged independent-person
+socket anchor and both SQL control scenarios passed on `5c5e2323f`.
+The full native attach, PTY, interaction and public-module packages passed
+with `-race -count=1` on `90f3e77fe`. This includes the PTY socket's person,
+viewer and generation regression. Removing just the independent person-cookie
+forwarding on the isolated negative-control branch (`4a49b5d8a`) made the
+protected-socket scenario fail at its initial attach with `grant_missing`.
+That negative change is absent from the work branch.
+
+The full harness and reporter-contract packages passed on `e34a75bd2`; the
+latter's response-schema pins remain unchanged. The full CLI run was red in
+unchanged agm2 fixtures: `TestRunHeartbeatLiveOwnerKeepsBeating`,
+`TestRunHeartbeatLiveOwnerAgainstDatabase` (missing `/bin/sleep`),
+`TestHarnessVersionProbeIsBoundedAndOptional`, and
+`TestRulesCompareCLIReportsBlockerAndRefusesUnsafeIO`. The full agentd command
+package was red in `TestRunningEnrollmentFencesTheCandidatesOwnHome`,
+`TestRunningEnrollmentKeepsDefaultProfileRepair` (fixture launcher execution),
+and `TestReleaseExistingDraftGuardFailsClosed` (missing `/bin/bash`). Those
+assertions and fixtures are unchanged; no failure is skipped or loosened.
+
+The ownership audit passed all 33 checks and canonical manifest/diff checks
+passed. New ESSENTIAL rows are the socket bootstrap scenario, CLI person-session
+refusals and the PTY socket person/generation case. Existing ownership globs
+cover all new source files. Optional header additions are confined to the
+native-session authored contract and regenerated through `api/generate.mjs`.
+No new permission, route, response schema, migration or secret is introduced.
+The static wrapper returned exit 3 because mbp2606 is not GREEN; static
+qualification remains incomplete and needs coordinator/PR CI evidence.
