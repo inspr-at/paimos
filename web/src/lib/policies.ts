@@ -26,6 +26,7 @@ export const AGENT_ASKS: Readonly<Record<AskRisk, readonly AgentAsk[]>> = {
     { title: 'Publish agent rules', keys: ['rules.publish'] },
     { title: 'Change workspace settings', keys: ['settings.manage'] },
     { title: 'Stop, recover or watch a harness', keys: ['harness.force_stop', 'harness.recover', 'harness.watch'] },
+    { title: 'Start runs on a computer', keys: ['run.start_on_computer'] },
   ],
   medium: [
     { title: 'Connect a chat', keys: ['chat.bind'] },

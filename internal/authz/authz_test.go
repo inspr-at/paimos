@@ -110,6 +110,12 @@ func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
 	}
 	for _, key := range builtinAgentExclusions {
 		permission, ok := Lookup(key)
+		if key == StartOnComputer {
+			if !ok || permission.AgentGrantable || permission.OwnerWorkstationGrantable || contains(builtinPermissions("member"), key) || !contains(builtinPermissions("owner"), key) || !contains(builtinPermissions("admin"), key) {
+				t.Fatal("computer start must remain person-only and explicit outside workspace Owner/Admin")
+			}
+			continue
+		}
 		if !ok || !permission.AgentGrantable {
 			t.Fatal("an explicit custom-role permission must remain agent-grantable")
 		}

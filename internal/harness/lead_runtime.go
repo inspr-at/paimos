@@ -321,6 +321,9 @@ func (m *Module) claimLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principal
 		if err = authz.RequireTx(ctx, tx, p, "run.claim", authz.Scope{ProjectID: in.Demand.ProjectID}); err != nil {
 			return nil, err
 		}
+		if err = authz.RequireRunStartOnComputerTx(ctx, tx, p, saved.Launch.Grant.AgentRunID); err != nil {
+			return nil, err
+		}
 		// Recovery returns immutable evidence even after expiry/revocation. It
 		// never renews the grant; preflight remains required before native start.
 		return saved.Launch, nil
@@ -358,6 +361,9 @@ func (m *Module) claimLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principal
 		return nil, workorders.Fail(409, "fresh_lead_required")
 	}
 	if err = m.validateLeadLaunch(ctx, tx, p, in, launch); err != nil {
+		return nil, err
+	}
+	if err = authz.RequireRunStartOnComputerTx(ctx, tx, p, launch.Grant.AgentRunID); err != nil {
 		return nil, err
 	}
 	candidate := Session{ProjectID: launch.Grant.ProjectID, AgentPrincipalID: p.ID, OwnerPrincipalID: &launch.Grant.OwnerID, RunID: &launch.Grant.AgentRunID, Harness: launch.Harness, Role: "coordinator"}

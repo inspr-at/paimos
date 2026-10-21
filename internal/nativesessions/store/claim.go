@@ -163,6 +163,14 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 		if err != nil {
 			return err
 		}
+		if grant.RunID != nil {
+			if err = authz.RequireRunStartOnComputerTx(ctx, tx, p, *grant.RunID); err != nil {
+				if errors.Is(err, authz.ErrForbidden) {
+					return fail(403, nativecontract.ReasonPermissionRevoked)
+				}
+				return err
+			}
+		}
 		if grant.OwnerPersonID != r.OwnerPersonID || !samePolicy(grant.Policy, r.policy) || !reflect.DeepEqual(grant.Launch, r.launch) || !reflect.DeepEqual(grant.RunID, r.runID) {
 			return fail(409, nativecontract.ReasonIdentityMismatch)
 		}

@@ -503,12 +503,17 @@ func projectCheck(p tenant.Principal, own grants, creator, person *grants) Proje
 // ProjectGrantable reports whether a registry permission may be granted by a
 // project binding.
 func ProjectGrantable(key string) bool {
+	return GrantableAt(key, "project")
+}
+
+// GrantableAt reports the registry's explicit binding locations.
+func GrantableAt(key, scope string) bool {
 	p, ok := Lookup(key)
 	if !ok {
 		return false
 	}
 	for _, at := range p.GrantableAt {
-		if at == "project" {
+		if at == scope {
 			return true
 		}
 	}
