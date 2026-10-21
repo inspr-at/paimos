@@ -173,6 +173,18 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		case credAgent:
 			httpapi.MarkAuthentication(r)
+			if lease := workerlease.Read(r); lease != "" {
+				ctx := tenant.WithPrincipal(r.Context(), p)
+				err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+					var err error
+					p, err = db.WorkerRunPrincipalTx(ctx, tx, p, lease)
+					return err
+				})
+				if err != nil {
+					authz.WriteForbidden(w, authz.ErrForbidden)
+					return
+				}
+			}
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		}
 		if kind != credSession && kind != credAgent && protectedRequest(r) {

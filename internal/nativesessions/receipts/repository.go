@@ -128,7 +128,7 @@ func (s *Repository) write(ctx context.Context, p tenant.Principal, fn func(cont
 		if p.KeyCreatorID != "" {
 			creator = p.KeyCreatorID
 		}
-		if _, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, p.TenantID, p.ID, creator); err != nil {
+		if _, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, p.TenantID, p.ID, creator, db.ActingPersonID(ctx, p)); err != nil {
 			return err
 		}
 		return fn(ctx, tx)
@@ -152,6 +152,10 @@ func (s *Repository) Report(ctx context.Context, daemon nativecontract.DaemonAct
 	}
 	err = s.write(ctx, p, func(ctx context.Context, tx pgx.Tx) error {
 		a, err := s.authority.ReceiptTx(ctx, tx, daemon, in)
+		if err != nil {
+			return err
+		}
+		ctx, err = runContext(ctx, tx, p, *in.Binding)
 		if err != nil {
 			return err
 		}
@@ -225,3 +229,27 @@ func (s *Repository) Report(ctx context.Context, daemon nativecontract.DaemonAct
 }
 
 func sameID(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
+
+// runContext follows the authority-checked harness binding, never an owner or
+// person supplied by a daemon. Human receipt readers keep their own ceiling.
+func runContext(ctx context.Context, tx pgx.Tx, p tenant.Principal, b nativecontract.Binding) (context.Context, error) {
+	if p.Kind != tenant.Agent {
+		return ctx, nil
+	}
+	var run *string
+	if err := tx.QueryRow(ctx, `SELECT run_id::text FROM harness_sessions WHERE tenant_id=$1::uuid AND id=$2::uuid AND agent_principal_id=$3::uuid`, p.TenantID, b.HarnessSessionID, p.ID).Scan(&run); err != nil {
+		return ctx, err
+	}
+	if !sameID(run, b.RunID) {
+		return ctx, nativereceipts.Fail(nativecontract.ReasonIdentityMismatch)
+	}
+	if run == nil {
+		return ctx, nil
+	}
+	current, err := db.RunPrincipalTx(ctx, tx, p, *run)
+	if err != nil {
+		return ctx, err
+	}
+	ctx = tenant.WithPrincipal(ctx, current)
+	return ctx, workorders.RefreshPrincipal(ctx, tx, current)
+}

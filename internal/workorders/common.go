@@ -144,6 +144,16 @@ func EndpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status i
 			// principal and visibility until their own final authorization check.
 			// Replacing it with the bearer row can widen secondary permissions or
 			// hide the target before that check reports a revoked grant.
+			if lease := workerlease.Read(r); lease != "" {
+				p, err = db.WorkerRunPrincipalTx(r.Context(), tx, p, lease)
+				if err != nil {
+					return Fail(403, "run principal rejected")
+				}
+				r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
+				if err := RefreshPrincipal(r.Context(), tx, p); err != nil {
+					return err
+				}
+			}
 			result, err = fn(r, tx, p)
 			return err
 		})
@@ -297,7 +307,7 @@ func RefreshPrincipal(ctx context.Context, tx pgx.Tx, p tenant.Principal) error 
 	if UUID(p.KeyCreatorID) {
 		creator = p.KeyCreatorID
 	}
-	_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, p.TenantID, p.ID, creator)
+	_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, p.TenantID, p.ID, creator, db.ActingPersonID(ctx, p))
 	return err
 }
 

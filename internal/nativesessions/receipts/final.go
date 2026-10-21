@@ -82,6 +82,10 @@ func (s *Repository) Persist(ctx context.Context, daemon nativecontract.DaemonAc
 		if err != nil {
 			return err
 		}
+		ctx, err = runContext(ctx, tx, p, a.CurrentBinding)
+		if err != nil {
+			return err
+		}
 		if err = nativereceipts.Validate(s.validator, "NativeFinalDrainGrant", a.Grant); err != nil {
 			return err
 		}

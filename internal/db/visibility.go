@@ -4,6 +4,8 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -71,7 +73,7 @@ func enterTenant(ctx context.Context, tx pgx.Tx, tenantID string) error {
 		if uuidLike(p.KeyCreatorID) {
 			creator = p.KeyCreatorID
 		}
-		_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, tenantID, p.ID, creator)
+		_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, tenantID, p.ID, creator, ActingPersonID(ctx, p))
 		return err
 	}
 	_, err := tx.Exec(ctx, `SELECT set_config($1,$2,true),set_config($3,'',true),set_config('aeon.principal_ids','',true),set_config('aeon.system','',true)`,
@@ -96,4 +98,110 @@ func uuidLike(s string) bool {
 		}
 	}
 	return true
+}
+
+// ActingPersonID returns the server-resolved request ceiling, or the API key's
+// explicit binding. An internal run resolver may only narrow the same caller.
+// nil preserves the legacy no-person contract at SQL entry.
+func ActingPersonID(ctx context.Context, p tenant.Principal) any {
+	if p.Kind != tenant.Agent {
+		return nil
+	}
+	if current, ok := tenant.PrincipalFrom(ctx); ok && current.ID == p.ID && current.TenantID == p.TenantID && current.KeyPersonID != "" {
+		if p.KeyPersonID != "" && p.KeyPersonID != current.KeyPersonID {
+			return "00000000-0000-0000-0000-000000000000"
+		}
+		return current.KeyPersonID
+	}
+	if p.KeyPersonID != "" {
+		return p.KeyPersonID
+	}
+	return nil
+}
+
+// RunPrincipalTx binds only a server-verified run of this authenticated agent.
+// It reads no owner/issuer fallback: null remains legacy until S1-07. Conflicting
+// key and run bindings fail closed instead of replacing the key's ceiling.
+func RunPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID string) (tenant.Principal, error) {
+	if p.Kind != tenant.Agent || !uuidLike(runID) {
+		return p, errors.New("invalid run principal")
+	}
+	var person *string
+	err := tx.QueryRow(ctx, `SELECT acting_person_id::text FROM agent_runs WHERE tenant_id=$1::uuid AND id=$2::uuid AND agent_principal_id=$3::uuid`, p.TenantID, runID, p.ID).Scan(&person)
+	if err != nil {
+		return p, err
+	}
+	if person != nil {
+		if p.KeyPersonID != "" && p.KeyPersonID != *person {
+			return p, errors.New("conflicting run person")
+		}
+		p.KeyPersonID = *person
+	}
+	return p, nil
+}
+
+// WorkerRunPrincipalTx resolves the existing harness worker lease to its run.
+// Unknown leases retain the legacy principal; endpoint-specific proof checks
+// still reject them. Only an exact agent+generation match supplies a person.
+//
+// Project row security would hide a session outside the key's current ceiling,
+// and a miss must not keep that wider ceiling. The lookup widens visibility
+// for this read only. Every success re-enters the resolved principal before
+// return. A lookup or conflict error leaves the transaction for the caller to
+// roll back, so the widened setting does not survive.
+func WorkerRunPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, lease string) (tenant.Principal, error) {
+	if p.Kind != tenant.Agent || lease == "" {
+		return p, nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true)`); err != nil {
+		return p, err
+	}
+	sum := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
+	rows, err := tx.Query(ctx, `SELECT run_id::text FROM harness_sessions WHERE tenant_id=$1::uuid AND agent_principal_id=$2::uuid AND lease_digest=$3 AND archived_at IS NULL LIMIT 2`, p.TenantID, p.ID, sum[:])
+	if err != nil {
+		return p, err
+	}
+	var runs []*string
+	for rows.Next() {
+		var run *string
+		if err := rows.Scan(&run); err != nil {
+			rows.Close()
+			return p, err
+		}
+		runs = append(runs, run)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return p, err
+	}
+	if len(runs) > 1 {
+		return p, errors.New("ambiguous worker generation")
+	}
+	next := p
+	if len(runs) == 1 && runs[0] != nil {
+		next, err = RunPrincipalTx(ctx, tx, p, *runs[0])
+		if err != nil {
+			return p, err
+		}
+	}
+	if err = reenterActingPrincipal(ctx, tx, next); err != nil {
+		return p, err
+	}
+	return next, nil
+}
+
+// reenterActingPrincipal installs this principal's own ceiling. It passes the
+// resolved key person explicitly: a context principal from an earlier resolver
+// must not disagree with the value this call just returned.
+func reenterActingPrincipal(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	var creator, person any
+	if uuidLike(p.KeyCreatorID) {
+		creator = p.KeyCreatorID
+	}
+	if uuidLike(p.KeyPersonID) {
+		person = p.KeyPersonID
+	}
+	_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, p.TenantID, p.ID, creator, person)
+	return err
 }

@@ -28,6 +28,15 @@ const ownerQuery = `SELECT EXISTS (SELECT 1 FROM principals p JOIN role_bindings
 	WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid AND p.kind='person' AND p.status='active' AND p.linked_to IS NULL
 	AND b.scope_type='workspace' AND r.builtin AND r.key='owner')`
 
+// enterSubjectVisibility caps the export to the subject person. There is no
+// key creator and no acting person: the operator's ceiling must not remain.
+func enterSubjectVisibility(ctx context.Context, tx pgx.Tx, tenantID, subjectID string) error {
+	if _, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,NULL,NULL::uuid)`, tenantID, subjectID); err != nil {
+		return errors.New("set subject visibility failed")
+	}
+	return nil
+}
+
 type Subject struct {
 	ID      string   `json:"principal_id"`
 	Aliases []string `json:"principal_ids"`
@@ -115,9 +124,8 @@ func Collect(ctx context.Context, pool *pgxpool.Pool, opts Options) (Report, err
 	if !opts.Erase {
 		// Project visibility belongs to the subject, not the operator. Private
 		// preferences for linked aliases still belong to this same person.
-		if _, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,NULL)`,
-			tenantID, subject.ID); err != nil {
-			return report, errors.New("set subject visibility failed")
+		if err := enterSubjectVisibility(ctx, tx, tenantID, subject.ID); err != nil {
+			return report, err
 		}
 	}
 	// Erase planning keeps the operator's project visibility. Both paths use

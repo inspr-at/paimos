@@ -164,7 +164,7 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 				if workorders.UUID(p.KeyCreatorID) {
 					creator = p.KeyCreatorID
 				}
-				if _, err = tx.Exec(r.Context(), `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, p.TenantID, p.ID, creator); err != nil {
+				if _, err = tx.Exec(r.Context(), `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, p.TenantID, p.ID, creator, db.ActingPersonID(r.Context(), p)); err != nil {
 					return err
 				}
 				if owner, err = actorOwner(r.Context(), tx, p); err != nil {

@@ -270,7 +270,30 @@ func leadProject(ctx context.Context, tx pgx.Tx, projectID string) (string, erro
 	return authz.ProjectStartReasonTx(ctx, tx, projectID)
 }
 
-func leadOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, owner string) error {
+func leadOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, owner string, verifiedAgent ...string) error {
+	if p.Kind == tenant.Agent {
+		if len(verifiedAgent) != 0 {
+			if p.ID != verifiedAgent[0] {
+				return authz.ErrForbidden
+			}
+		} else {
+			var own bool
+			err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_leads l
+   LEFT JOIN harness_sessions s ON s.tenant_id=l.tenant_id AND s.id=l.session_id
+   WHERE l.tenant_id=$1::uuid AND l.project_id=$2::uuid AND l.owner_principal_id=$3::uuid
+   AND (s.agent_principal_id=$4::uuid OR (l.session_id IS NULL AND EXISTS(
+    SELECT 1 FROM routine_launch_intents i JOIN routine_runs r ON r.tenant_id=i.tenant_id AND r.id=i.routine_run_id
+    WHERE i.tenant_id=l.tenant_id AND i.project_id=l.project_id AND i.owner_principal_id=l.owner_principal_id
+    AND i.kind='lead' AND i.lead_generation=l.generation AND i.state='pending'
+    AND r.execution_principal_id=$4::uuid))))`, p.TenantID, projectID, owner, p.ID).Scan(&own)
+			if err != nil {
+				return err
+			}
+			if !own {
+				return authz.ErrForbidden
+			}
+		}
+	}
 	var canonical string
 	err := tx.QueryRow(ctx, `SELECT c.id::text FROM principals p JOIN principals c ON c.tenant_id=p.tenant_id AND c.id=coalesce(p.linked_to,p.id) WHERE p.id=$1 AND p.kind='person' AND p.status='active' AND c.kind='person' AND c.status='active'`, owner).Scan(&canonical)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -585,9 +608,6 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if lifecycle != "" {
 		return nil, workorders.Fail(409, lifecycle)
 	}
-	if err = leadOwner(ctx, tx, p, id, l.owner); err != nil {
-		return nil, err
-	}
 	if in.SessionRef != "" {
 		err = tx.QueryRow(ctx, `SELECT id::text FROM harness_sessions WHERE project_id=$1 AND agent_principal_id=$2 AND ref_digest=$3 AND stopped_at IS NULL AND archived_at IS NULL`, id, p.ID, digest("ref", in.SessionRef)).Scan(&in.SessionID)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -604,6 +624,9 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	if s.Role != "coordinator" || s.ParentID != nil || s.OwnerPrincipalID == nil || *s.OwnerPrincipalID != l.owner {
 		return nil, workorders.Fail(403, "proven owned root coordinator required")
+	}
+	if err = leadOwner(ctx, tx, p, id, l.owner, s.AgentPrincipalID); err != nil {
+		return nil, err
 	}
 	var fresh bool
 	if err = tx.QueryRow(ctx, `SELECT `+leadReportingFreshSQL+` FROM harness_sessions WHERE id=$1`, s.ID).Scan(&fresh); err != nil {
