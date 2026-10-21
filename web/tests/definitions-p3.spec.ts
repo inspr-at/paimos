@@ -330,10 +330,10 @@ test('AEON-1609 a de-AT browser and German profile keep Definitions in English',
     try{
       const {world,errors}=await setup(page,'light','de')
       await page.goto('/p/PRJ-26/settings/definitions')
-      const card=page.locator('#definitions'),date=definitionDate(world.workspace.revision)
+      const card=page.locator('#definitions'),date=definitionDate(world.workspace.revision),copied=definitionDate(world.context.definition!.created_at)
       await expect(card.locator('.notice-copy > span').first()).toHaveText(definitionNotice('PRJ-26',3,date))
       const snapshot:Record<string,unknown>={notice:await card.locator('.notice-copy > span').first().textContent(),rows:[]}
-      await expect(card.locator('.origin')).toContainText(`Copied from the workspace default on ${date}.`);snapshot.origin=await card.locator('.origin').innerText()
+      await expect(card.locator('.origin')).toContainText(`Copied from the workspace default on ${copied}.`);snapshot.origin=await card.locator('.origin').innerText()
       for(const change of changes){const row=card.locator(`[data-check="${change.check_id}"]`);await expect(row).toContainText(definitionChangeWords(change,date));for(const word of definitionDecisionWords(change,change.before??undefined))await expect(row.getByRole('button',{name:word,exact:true})).toBeVisible();(snapshot.rows as unknown[]).push(await row.innerText())}
       await englishSurface(card)
       for (const label of ['Ready','QA','Done']) await expect(card.locator('.db-head h3').filter({hasText:label}).first()).toBeVisible()
@@ -477,7 +477,9 @@ test('AEON-1528 definitions remeasure resize locale and longer decisions without
   await page.setViewportSize({width:390,height:1000});await fitsNatural(notice);await fitsNatural(origin);await contained()
   await switchDefinitionLocale(page,'de-AT');await expect(card.getByRole('heading',{name:'Definitions',exact:true})).toBeVisible();await fitsNatural(notice);await fitsNatural(origin);await contained()
   for(const id of ['acceptance_present','no_active_build']){await card.locator(`[data-check="${id}"] [data-decision="keep"]`).click();await expect(card.locator(`[data-check="${id}"]`)).toHaveAttribute('data-waiting','false')}
-  const reserved=await height(notice);await switchDefinitionLocale(page,'en-GB');await expect(notice).toHaveText('All changes decided.');await fitsNatural(notice);expect(Math.abs(await height(notice)-reserved)).toBeLessThanOrEqual(.5)
+  // A locale switch is not a language change, so the taller waiting-notice
+  // reservation stays. The copy and the height stay with it.
+  const reserved=await height(notice);await switchDefinitionLocale(page,'en-GB');await expect(notice).toHaveText('All changes decided.');expect(Math.abs(await height(notice)-reserved)).toBeLessThanOrEqual(.5)
   expect(world.context.definition!.checks.in_progress!.find(rule=>rule.id==='estimate_set')!.labels).toHaveLength(16)
   expect(errors).toEqual([])
   await evidence([{assert:'NB3 resize and locale stay at natural height in one language; NB4 longer decided text grows and stays contained; identical saves preserve controls',width:390,theme:'light',locale:'de-AT',passed:true}])
