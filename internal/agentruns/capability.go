@@ -45,7 +45,11 @@ func (m *module) capability(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 	if err != nil {
 		return nil, workorders.Fail(403, "run_person_rejected")
 	}
-	if err := authz.RequireTx(ctx, tx, bound, "run.read", authz.Scope{AnyProject: true}); err != nil {
+	var project string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(project_id::text,'') FROM nodes WHERE tenant_id=$1 AND id=$2`, p.TenantID, v.OrderID).Scan(&project); err != nil {
+		return nil, err
+	}
+	if err := authz.RequireTx(ctx, tx, bound, "run.read", authz.Scope{ProjectID: project}); err != nil {
 		return nil, err
 	}
 	var computer, account string

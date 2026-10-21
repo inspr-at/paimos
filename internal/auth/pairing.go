@@ -137,6 +137,9 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 				}
 			}
 		case "nodes":
+			if p.RunID != "" && r.Method == http.MethodPost && len(parts) == 4 && parts[2] == p.RunWorkOrderID && parts[3] == "comments" {
+				return nil
+			}
 			if r.Method != "GET" || len(parts) != 3 {
 				return deny
 			}

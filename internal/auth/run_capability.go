@@ -88,6 +88,9 @@ func (m *Module) runContentBoundary(r *http.Request, p tenant.Principal) (*http.
 		if err := authz.RequireTx(ctx, tx, current, "nodes.read", authz.Scope{ProjectID: current.RunProjectID}); err != nil {
 			return err
 		}
+		if err := authz.RequireTx(ctx, tx, current, "run.read", authz.Scope{ProjectID: current.RunProjectID}); err != nil {
+			return err
+		}
 		if strings.Contains(r.Pattern, "{sessionId}") {
 			var own bool
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE tenant_id=$1 AND id=$2 AND run_id=$3 AND agent_principal_id=$4)`, tid, strings.Split(strings.Trim(r.URL.Path, "/"), "/")[4], p.RunID, p.ID).Scan(&own); err != nil {
@@ -106,6 +109,25 @@ func runCapabilityTarget(r *http.Request, p tenant.Principal) bool {
 	// Middleware can run before PathValue is available on the outer server;
 	// use the matched declaration plus bounded URL components as elsewhere.
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 3 {
+		return false
+	}
+	switch parts[1] {
+	case "runs", "nodes", "work-orders":
+	case "agent-accounts":
+		if r.Pattern != "POST /api/agent-accounts/route" {
+			return false
+		}
+	case "projects":
+		if len(parts) < 4 || parts[3] != "harness-sessions" {
+			return false
+		}
+		if len(parts) == 4 && r.Method != http.MethodPost {
+			return false
+		}
+	default:
+		return false
+	}
 	if len(parts) >= 3 && parts[1] == "runs" && parts[2] != p.RunID {
 		return false
 	}
