@@ -3834,6 +3834,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestDeployRecordAgentKeyCeiling","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestDeskPeekCookieReadsOnlyTheOwnerSummaryFromASibling","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestDevIdentitySubjectPreservesUnicodeMailbox","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestDevLoginAndAgentKeys","tier":"GATED-FULL"}
@@ -5724,6 +5726,8 @@
     ,
     {"kind":"go","package":"internal/config","name":"TestReviewWebhookSecretFile","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/config","name":"TestSiblingInstancesAreExactOrigins","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/config","name":"TestStatusAutopilotServerMode","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/credentialguard","name":"TestContainsCaseObfuscatedCredentials","tier":"ESSENTIAL"}
@@ -6127,6 +6131,8 @@
     {"kind":"go","package":"internal/decisiondesk","name":"TestMixedOrderCountsFanInAndKeyset","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestNotificationPointersAndNormalBriefingItem","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestOwnerSummaryStaysWithTheOwnerAndCarriesFirstLinesOnly","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestPersonStepProjectionIgnoresIrrelevantCoverage","tier":"ESSENTIAL"}
     ,

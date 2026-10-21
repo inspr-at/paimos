@@ -52,16 +52,17 @@ func TestOwnerSummaryStaysWithTheOwnerAndCarriesFirstLinesOnly(t *testing.T) {
 		t.Fatalf("upcoming human check %+v", page.Upcoming)
 	}
 	// Another person never sees the owner's upcoming step.
-	if w = get(reader, "/api/decision-desk/projection", ""); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &page) != nil || len(page.Upcoming) != 0 {
-		t.Fatalf("reader projection %d upcoming %+v", w.Code, page.Upcoming)
+	var readerPage Page
+	if w = get(reader, "/api/decision-desk/projection", ""); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &readerPage) != nil || len(readerPage.Upcoming) != 0 {
+		t.Fatalf("reader projection %d upcoming %+v", w.Code, readerPage.Upcoming)
 	}
 
 	// Siblings are named to the owner only.
-	var listed Instances
+	var listed, readerListed Instances
 	if w = get(owner, "/api/decision-desk/instances", ""); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &listed) != nil || listed.Here != "ppm" || !slices.Equal(listed.Siblings, []config.Sibling{sibling}) {
 		t.Fatalf("owner instances %d %s", w.Code, w.Body.String())
 	}
-	if w = get(reader, "/api/decision-desk/instances", ""); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &listed) != nil || len(listed.Siblings) != 0 {
+	if w = get(reader, "/api/decision-desk/instances", ""); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &readerListed) != nil || readerListed.Here != "ppm" || len(readerListed.Siblings) != 0 {
 		t.Fatalf("reader learned the siblings: %s", w.Body.String())
 	}
 
