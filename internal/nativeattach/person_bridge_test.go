@@ -53,6 +53,13 @@ func (s *bootstrapStore) View(_ context.Context, a nativecontract.Actor, project
 	}
 	return s.view, nil
 }
+func (s *bootstrapStore) ByHarness(ctx context.Context, actor nativecontract.Actor, project, harness string) (nativecontract.SessionView, error) {
+	view := s.snapshot()
+	if view.CurrentBinding.HarnessSessionID != harness {
+		return nativecontract.SessionView{}, nativestream.Refuse(nativecontract.ReasonIdentityMismatch)
+	}
+	return s.View(ctx, actor, project, view.OwnedSessionID)
+}
 func (s *bootstrapStore) Attach(ctx context.Context, a nativecontract.Actor, in nativecontract.AttachIntent) (nativecontract.AttachResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -254,6 +261,27 @@ func TestNativePersonBootstrapAttachTakeHandBack(t *testing.T) {
 	}
 	ctx := t.Context()
 	view := store.snapshot()
+	var projection nativecontract.SessionView
+	if err = person.Do(ctx, http.MethodGet, apiPath(*view.CurrentBinding, ""), nil, &projection); err != nil {
+		t.Fatal(err)
+	}
+	if projection.Capabilities.Take || projection.Capabilities.TakeSupported {
+		t.Fatal("ordinary web projection advertised take")
+	}
+	if err = person.DoWithHeaders(ctx, http.MethodGet, apiPath(*view.CurrentBinding, ""), nil, &projection, map[string]string{nativeattach.LocalPersonHeader: nativeattach.LocalPersonVersion}); err != nil {
+		t.Fatal(err)
+	}
+	if !projection.Capabilities.Take || !projection.Capabilities.TakeSupported {
+		t.Fatal("local person projection lost qualified take")
+	}
+	agent := client.NewSession(person.BaseURL, strings.Repeat("a", 64))
+	if err = agent.DoWithHeaders(ctx, http.MethodGet, apiPath(*view.CurrentBinding, ""), nil, &projection, map[string]string{nativeattach.LocalPersonHeader: nativeattach.LocalPersonVersion}); err != nil {
+		t.Fatal(err)
+	}
+	if projection.Capabilities.Take || projection.Capabilities.TakeSupported || projection.Capabilities.TerminalView {
+		t.Fatal("forged local selector granted an agent terminal capabilities")
+	}
+
 	attached, err := nativeattach.Open(ctx, socket, nativeattach.Options{Snapshot: view, PersonProof: proof})
 	if err != nil {
 		t.Fatal(err)
