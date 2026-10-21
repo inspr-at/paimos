@@ -385,7 +385,9 @@ export function presentCascade(input: CascadeContext, choice: CascadeChoice, tou
       model: modelNote(choice, touch, account, models, input.role.role),
       effort: effortNote(choice, model, efforts, selectedEffort, account),
     },
-    accountNotes: accounts.flatMap(item => [accountNote(choice, touch, accounts, item, defaultId), accountNote(choice, { ...touch, account: true }, accounts, item, defaultId)]),
+    accountNotes: [accountNote(choice, touch, accounts, undefined, defaultId), ...accounts.flatMap(item => [
+      accountNote(choice, { ...touch, account: false }, accounts, item, defaultId), accountNote(choice, { ...touch, account: true }, accounts, item, defaultId),
+    ])],
     roleNote,
     profileId: selectedEffort?.model_profile_id ?? '',
     agentId: account?.registered_by_principal_id ?? '',
