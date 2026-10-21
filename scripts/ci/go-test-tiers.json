@@ -7342,6 +7342,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestRunKindsRegisterBeatAndAggregate","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestRunPersonRevocationKeepsOnlyOwnedSafetyControls","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestRunningWrapUpUsesItsRemainingLevelBudget","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestSessionAcceptsFullAccountCatalogLabels","tier":"GATED-FULL"}

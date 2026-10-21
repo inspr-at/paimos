@@ -160,7 +160,7 @@ paths:
     post:
       operationId: confirmHarnessExit
       security: *auth
-      description: Requires current harness.worker authority and the exact generation's agent and lease. The owned executor reports confirmed process exit after an uncertain stop, including lost ownership, heartbeat loss or administrative archive/removal. Active generations are rejected. Persists the confirmed reason and emits harness.stop_confirmed; exact replay is idempotent and divergent replay returns 409. Retains stopped_at, archived_at, recovery receipts and historical bindings; archived worker APIs still return 410. No process is signalled or generation revived. The original recovery_process_state remains the administrative action's observation, not this later executor report.
+      description: "Requires a live harness.worker transport key and the exact generation's agent and lease. The owned executor reports confirmed process exit after an uncertain stop, including lost ownership, heartbeat loss or administrative archive/removal. Active generations are rejected. Persists the confirmed reason and emits harness.stop_confirmed; exact replay is idempotent and divergent replay returns 409. Retains stopped_at, archived_at, recovery receipts and historical bindings; archived worker APIs still return 410. No process is signalled or generation revived. The original recovery_process_state remains the administrative action's observation, not this later executor report. After run-person revocation, only the metadata safety receipt is returned; handovers and planned pause content are refused. No start, input or export authority is granted."
       requestBody:
         required: true
         content:
@@ -172,7 +172,7 @@ paths:
               properties:
                 reason: {type: string, enum: [process_exited, process_failed, force_stopped]}
       responses:
-        '200': {description: Confirmed closed generation, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '200': {description: Confirmed closed generation, content: {application/json: {schema: {anyOf: [{$ref: '#/components/schemas/HarnessSession'}, {$ref: '#/components/schemas/HarnessSafetySession'}]}}}}
         '400': {description: Invalid exit reason}
         '403': {description: Exact worker proof and current harness.worker authority required}
         '409': {description: Generation is active or exit confirmation conflicts}
@@ -738,7 +738,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: markHarnessStopped
-      description: Exact worker lease required. Reason paused requires a planned cooperative stop and a handover; persists the note on the session and bound ticket atomically, then closes the old generation. Exact paused-stop replays are idempotent. No process is signalled by this endpoint.
+      description: "Exact worker lease required. Reason paused requires a planned cooperative stop and a handover; persists the note on the session and bound ticket atomically, then closes the old generation. Exact paused-stop replays are idempotent. No process is signalled by this endpoint. After run-person revocation, only the metadata safety receipt is returned; handovers and planned pause content are refused. No start, input or export authority is granted."
       requestBody:
         required: true
         content:
@@ -751,7 +751,7 @@ paths:
                 reason: {type: string, enum: [stopped, process_exited, process_failed, ownership_lost, force_stopped, token_budget_exhausted, turn_budget_exhausted, paused]}
                 handover: {$ref: '#/components/schemas/HarnessHandover'}
       responses:
-        '200': {description: Closed generation, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '200': {description: Closed generation, content: {application/json: {schema: {anyOf: [{$ref: '#/components/schemas/HarnessSession'}, {$ref: '#/components/schemas/HarnessSafetySession'}]}}}}
         '400': {description: Invalid stop reason or handover}
         '403': {description: Exact worker proof required}
         '409': {description: Missing planned pause or divergent replay}
@@ -942,7 +942,7 @@ paths:
     post:
       security: *auth
       operationId: yieldHarnessSession
-      description: 'Managed worker claims pending owned controls in sequence. Cooperative stop controls with request_payload.pause=true are delivered by heartbeat and claimed only by pause-plan; they never authorize an immediate process signal. Expired controls are settled first and omitted. expires_in_ms is the remaining authorization on the database clock, rounded down and capped at 45000. Workers anchor that budget to the monotonic start of this request and fail closed when it is missing or zero.'
+      description: "Managed worker claims pending owned controls in sequence. Cooperative stop controls with request_payload.pause=true are delivered by heartbeat and claimed only by pause-plan; they never authorize an immediate process signal. Expired controls are settled first and omitted. expires_in_ms is the remaining authorization on the database clock, rounded down and capped at 45000. Workers anchor that budget to the monotonic start of this request and fail closed when it is missing or zero. After run-person revocation, exact worker proof and a live transport key retain metadata-only yield and stop delivery. This response excludes task/session content, steer, settings and handovers; it grants no start, input or export authority."
       requestBody:
         required: true
         content:
@@ -957,7 +957,7 @@ paths:
                 type: object
                 required: [session, controls]
                 properties:
-                  session: {$ref: '#/components/schemas/HarnessSession'}
+                  session: {anyOf: [{$ref: '#/components/schemas/HarnessSession'}, {$ref: '#/components/schemas/HarnessSafetySession'}]}
                   controls: {type: array, items: {$ref: '#/components/schemas/HarnessYieldedControl'}}
         '400': {description: Invalid JSON}
         '403': {description: Worker proof rejected}
@@ -967,6 +967,17 @@ components:
   headers:
     HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum. Version 3 adds projection_unavailable to the closed warning code enum for isolated heartbeat receipts. Version 3.1 adds an optional value-free inbox binding refusal code. Version 3.2 adds the public parallel reason and initiating principal. Version 3.3 adds delivery continuation admission metadata.", schema: {type: string, enum: ['harness-session/3.3']}}
   schemas:
+    HarnessSafetySession:
+      type: object
+      additionalProperties: false
+      description: "Exact-worker safety receipt after run-person revocation; carries no task content or new authority."
+      required: [id, project_id, phase, stopped_at, stop_reason]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        phase: {type: string, enum: [starting, working, yielded, stopping, stopped]}
+        stopped_at: {type: [string, 'null'], format: date-time}
+        stop_reason: {type: [string, 'null']}
     InboxBindingError:
       type: [string, 'null']
       enum: [instance_mismatch, principal_mismatch, worker_proof_rejected, hook_cli_mismatch, hook_instance_mismatch, hook_unavailable, hook_index_mismatch, daemon_unavailable, process_unverified, harness_identity_mismatch, generation_mismatch, pairing_unavailable, daemon_refused, null]

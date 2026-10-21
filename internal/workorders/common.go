@@ -76,6 +76,26 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 // EndpointPrepared decodes/prepares before acquiring the final transaction's
 // fences. The request shares one deadline across both phases.
 func EndpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status int, prepare func(*http.Request, tenant.Principal) (*http.Request, error), fn func(*http.Request, pgx.Tx, tenant.Principal) (any, error)) http.HandlerFunc {
+	return endpointPrepared(pool, scope, agentOnly, status, prepare, fn, false)
+}
+
+type workerSafetyKey struct{}
+
+// WorkerSafetyOnly marks the exact worker stop/yield fallback. Its handlers
+// must prove the target lease and return only allowlisted control metadata.
+func WorkerSafetyOnly(ctx context.Context) bool {
+	value, _ := ctx.Value(workerSafetyKey{}).(bool)
+	return value
+}
+
+// WorkerSafetyEndpoint retains live transport-key admission, but lets an exact
+// worker stop or yield after its run person loses authority. No other endpoint
+// may use this exception; content and new execution remain person-bound.
+func WorkerSafetyEndpoint(pool *pgxpool.Pool, status int, fn func(*http.Request, pgx.Tx, tenant.Principal) (any, error)) http.HandlerFunc {
+	return endpointPrepared(pool, "harness.worker", true, status, nil, fn, true)
+}
+
+func endpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status int, prepare func(*http.Request, tenant.Principal) (*http.Request, error), fn func(*http.Request, pgx.Tx, tenant.Principal) (any, error), workerSafety bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		p, ok := tenant.PrincipalFrom(r.Context())
@@ -152,6 +172,23 @@ func EndpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status i
 				r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 				if err := RefreshPrincipal(r.Context(), tx, p); err != nil {
 					return err
+				}
+			}
+			if workerSafety && p.KeyPersonID != "" {
+				project, session := r.PathValue("projectId"), r.PathValue("sessionId")
+				if !UUID(project) || !UUID(session) || workerlease.Read(r) == "" {
+					return Fail(403, "harness worker proof rejected")
+				}
+				if err := authz.RequireTx(r.Context(), tx, p, scope, authz.Scope{ProjectID: project}); err != nil {
+					if !errors.Is(err, authz.ErrForbidden) {
+						return err
+					}
+					// This view exists only inside an allowlisted safety handler.
+					// Its exact target lease is still required before any mutation.
+					if _, err := tx.Exec(r.Context(), `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.visible_nodes','',true)`, "{"+project+"}"); err != nil {
+						return err
+					}
+					r = r.WithContext(context.WithValue(r.Context(), workerSafetyKey{}, true))
 				}
 			}
 			result, err = fn(r, tx, p)

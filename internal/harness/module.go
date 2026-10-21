@@ -477,6 +477,13 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		handler := workorders.Endpoint(m.pool, route.scope, route.agent, route.status, func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 			return workqueue.PersonAdmissionTx(r.Context(), tx, p, route.pattern, func(step pgx.Tx) (any, error) { return route.fn(r, step, p) })
 		})
+		switch route.pattern {
+		case "POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield",
+			"POST /api/projects/{projectId}/harness-sessions/{sessionId}/stop",
+			"POST /api/projects/{projectId}/harness-sessions/{sessionId}/confirm-exit",
+			"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete":
+			handler = workorders.WorkerSafetyEndpoint(m.pool, route.status, safetyHandler(route.fn))
+		}
 		if route.pattern == "GET /api/projects/{projectId}/harness-sessions/{sessionId}" || route.pattern == "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat" {
 			handler = reportercontract.WithHeader(reportercontract.HarnessSession, handler)
 		} else if route.pattern == "GET /api/projects/{projectId}/lead" {
@@ -867,6 +874,9 @@ func worker(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal)
 	return s, proof(s, r, p)
 }
 func record(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, kind string, before, after any) error {
+	if workorders.WorkerSafetyOnly(ctx) {
+		before, after = safetyMetadata(before), safetyMetadata(after)
+	}
 	if batch, ok := ctx.Value(controlEventKey{}).(*controlEventBatch); ok {
 		return batch.add(p, s, kind, before, after)
 	}
@@ -2015,6 +2025,9 @@ func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	case "stopped", "process_exited", "process_failed", "ownership_lost", "force_stopped", "token_budget_exhausted", "turn_budget_exhausted", "paused":
 	default:
 		return nil, workorders.Fail(400, "invalid stop reason")
+	}
+	if safetyOnly(r.Context()) && (in.Handover != nil || in.Reason == "paused") {
+		return nil, workorders.Fail(403, "safety stop cannot carry a handover")
 	}
 	ctx := r.Context()
 	s, err := worker(ctx, tx, r, p)
