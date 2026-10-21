@@ -107,7 +107,7 @@ func (a CurrentAuthority) ReceiptTx(ctx context.Context, tx pgx.Tx, daemon nativ
 		return out, currentFailure(nativecontract.ReasonIdentityMismatch)
 	}
 	b := *in.Binding
-	s, err := a.Consent.SessionTx(ctx, tx, b)
+	s, err := a.sessionTx(ctx, tx, b, in.Operation)
 	if err != nil {
 		return out, currentError(err)
 	}
@@ -225,7 +225,7 @@ func (a CurrentAuthority) RegisterOperationTx(ctx context.Context, tx pgx.Tx, in
 	if err = nativereceipts.Validate(v, "NativeReceipt", in.Receipt); err != nil {
 		return err
 	}
-	s, err := a.Consent.SessionTx(ctx, tx, *in.Receipt.Binding)
+	s, err := a.sessionTx(ctx, tx, *in.Receipt.Binding, in.Receipt.Operation)
 	if err != nil {
 		return currentError(err)
 	}
@@ -331,4 +331,48 @@ func (a CurrentAuthority) IssueDrainTx(ctx context.Context, tx pgx.Tx, b nativec
 	raw, _ := json.Marshal(b)
 	_, err = tx.Exec(ctx, `INSERT INTO native_session_drain_grants(tenant_id,grant_id,owned_session_id,project_id,owner_person_id,actor_grant_id,actor_grant_revision,retention_grant_id,binding,conversation_ref,conversation_id,role_id,issued_at,expires_at,maximum_finals,maximum_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, b.TenantID, out.GrantID, b.OwnedSessionID, b.ProjectID, s.OwnerPersonID, s.GrantID, s.Revision, retentionID, raw, out.ConversationRef, conversation, role, now, expiry, out.MaximumFinals, out.MaximumBytes)
 	return out, err
+}
+
+// sessionTx requires current consent except for a stop operation: the exact
+// owner's stop needs only the exact binding and owner (consent.StopSessionTx).
+// The caller still matches the operation against the registered intent.
+func (a CurrentAuthority) sessionTx(ctx context.Context, tx pgx.Tx, b nativecontract.Binding, operation string) (consent.Session, error) {
+	if operation == "stop" {
+		return a.Consent.StopSessionTx(ctx, tx, b)
+	}
+	return a.Consent.SessionTx(ctx, tx, b)
+}
+
+// RuntimeTx revalidates the exact original consent and current paired lease
+// for the owning composition. It issues no launch or person authority.
+func (a CurrentAuthority) RuntimeTx(ctx context.Context, tx pgx.Tx, d nativecontract.DaemonActor, b nativecontract.Binding, draining bool) (consent.Session, RuntimeProof, error) {
+	return a.runtimeTx(ctx, tx, d, b, draining, "")
+}
+
+// StopRuntimeTx is RuntimeTx for the exact owner's stop: the paired lease is
+// required, current consent is not (a StopOnly session reports its absence).
+// The caller grants nothing but a stop's listing, claim, receipts and exit.
+func (a CurrentAuthority) StopRuntimeTx(ctx context.Context, tx pgx.Tx, d nativecontract.DaemonActor, b nativecontract.Binding, draining bool) (consent.Session, RuntimeProof, error) {
+	return a.runtimeTx(ctx, tx, d, b, draining, "stop")
+}
+
+func (a CurrentAuthority) runtimeTx(ctx context.Context, tx pgx.Tx, d nativecontract.DaemonActor, b nativecontract.Binding, draining bool, operation string) (consent.Session, RuntimeProof, error) {
+	s, err := a.sessionTx(ctx, tx, b, operation)
+	if err != nil {
+		return s, RuntimeProof{}, currentError(err)
+	}
+	_, proof, err := a.pairedTx(ctx, tx, d, b, s, draining)
+	return s, proof, err
+}
+
+// AbandonTx authenticates only the exact paired owner and worker lease of a
+// claimed binding. Verified no-fork abandonment needs no current person consent
+// (its withdrawal is a cause): it settles occupancy and grants no launch, input
+// or final. A settled retry finds its harness stopped, so liveness is not read.
+func (a CurrentAuthority) AbandonTx(ctx context.Context, tx pgx.Tx, d nativecontract.DaemonActor, b nativecontract.Binding, intent nativecontract.StartIntent, view nativecontract.SessionView) error {
+	if d.DaemonID != b.DaemonID || d.DaemonGeneration != b.DaemonGeneration {
+		return currentFailure(nativecontract.ReasonPermissionRevoked)
+	}
+	_, _, err := a.pairedTx(ctx, tx, d, b, consent.Session{Intent: intent, View: view}, true)
+	return err
 }

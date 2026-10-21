@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -115,7 +116,17 @@ const shutdownBudget = 15 * time.Second
 // new requests before Shutdown closes the port. It is included in shutdownBudget.
 const drainFor = 2 * time.Second
 
+type nativeServeKey struct{}
+
 func serve() error {
+	f := flag.NewFlagSet("serve", flag.ContinueOnError)
+	enabled := f.Bool("native-sessions", false, "enable person-consented native composition; owning daemon must also opt in")
+	if err := f.Parse(os.Args[2:]); err != nil {
+		return err
+	}
+	if len(f.Args()) != 0 {
+		return errors.New("unexpected serve arguments")
+	}
 	cfg, err := config.FromEnv()
 	if err != nil {
 		return err
@@ -124,7 +135,7 @@ func serve() error {
 	defer stop()
 	// Bind after init. A port open during migrations accepts TCP that nothing
 	// reads until Serve, which is a hung backend rather than "not ready".
-	return serveListener(ctx, cfg, nil)
+	return serveListener(context.WithValue(ctx, nativeServeKey{}, *enabled), cfg, nil)
 }
 
 func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) error {
@@ -448,7 +459,8 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	startWorker(func() { deliveryMod.RunAudit(workerCtx) })
 	// Person-invoked native integration is an explicit default-off composition.
 	// The automatic routine LeadRuntime remains independently unqualified.
-	nativePilot, err := nativeintegration.New(nativeintegration.Options{})
+	nativeEnabled, _ := ctx.Value(nativeServeKey{}).(bool)
+	nativePilot, err := nativeintegration.NewFull(nativeintegration.FullOptions{Enabled: nativeEnabled, Pool: pool, Chat: chat.New(pool, chat.Options{Enabled: cfg.ChatEnabled})})
 	if err != nil {
 		return err
 	}

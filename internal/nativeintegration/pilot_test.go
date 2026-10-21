@@ -58,3 +58,15 @@ func TestPilotDefaultsOffAndRejectsIncompleteQualification(t *testing.T) {
 		t.Fatalf("incomplete pilot did not refuse qualification_missing: %v", err)
 	}
 }
+
+func TestProductionDefaultsOffAndRequiresAuthorities(t *testing.T) {
+	full, err := nativeintegration.NewFull(nativeintegration.FullOptions{})
+	if err != nil || full.HTTP == nil || full.Store != nil || full.Admission != nil || full.Services.Qualified {
+		t.Fatalf("production defaults retained active authority: %v", err)
+	}
+	_, err = nativeintegration.NewFull(nativeintegration.FullOptions{Enabled: true})
+	var refusal *nativecontract.ValidationError
+	if !errors.As(err, &refusal) || refusal.Reason != nativecontract.ReasonQualificationMissing {
+		t.Fatalf("missing authorities: %v", err)
+	}
+}
