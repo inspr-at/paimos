@@ -7,12 +7,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -171,13 +175,19 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	}
 	// The independent lifecycle proof must be usable before runtime Me. A
 	// revoked key cannot prevent cold-start tombstone discovery/fencing.
-	permitted, err := pairedPreflight(ctx, root, c.Origin, nil)
+	permitted, denial, err := pairedPreflightResult(ctx, root, c.Origin, nil)
 	if err != nil {
 		return fmt.Errorf("paired lifecycle preflight %s: %w", root, err)
 	}
 	if !permitted {
-		return nil
-	} // successful intentional exit; helper owns cleanup
+		if denial == "" {
+			return errors.New("dispatch denial unavailable")
+		}
+		// Fail closed. The helper still owns cleanup. The status is 78, except
+		// a launchd parent exits 0 so KeepAlive does not hot-loop. See
+		// dispatchDeniedExitCode.
+		return &dispatchDeniedError{reason: denial}
+	}
 	c, key, err := agentsetup.ReadRuntime(root)
 	if err != nil {
 		return fmt.Errorf("load paired runtime %s: %w", root, err)
@@ -734,11 +744,73 @@ func installMethod() string {
 	return agentsetup.InstallMethod(executable, home)
 }
 
+// dispatchDeniedExitCode is the status of an intentional fail-closed serve
+// after SyncFences when dispatch is not permitted. It is neither a crash (1)
+// nor a clean stop (0).
+//
+// systemd Restart=on-failure does not restart it: the unit sets
+// SuccessExitStatus=78. launchd KeepAlive SuccessfulExit=false restarts every
+// non-zero status and cannot exempt one code, so a serve whose parent is
+// launchd exits 0 after the same stderr line. That is the status the shipped
+// plist does not restart. Foreground and systemd runs exit 78.
+const dispatchDeniedExitCode = 78
+
+type dispatchDeniedError struct{ reason string }
+
+func (e *dispatchDeniedError) Error() string {
+	return "agentd serve: dispatch not permitted: " + e.reason
+}
+
+// denialStatus maps a dispatch denial to the process status for this parent.
+// parent is the supervisor command name only, never an argument list.
+func denialStatus(err error, parent string) (code int, line string, ok bool) {
+	var denied *dispatchDeniedError
+	if !errors.As(err, &denied) || denied.reason == "" || strings.ContainsAny(denied.reason, "\r\n") {
+		return 0, "", false
+	}
+	code = dispatchDeniedExitCode
+	if filepath.Base(strings.TrimSpace(parent)) == "launchd" {
+		code = 0
+	}
+	return code, denied.Error(), true
+}
+
+func writeDispatchDenial(stderr io.Writer, err error, parent string) (int, bool) {
+	code, line, ok := denialStatus(err, parent)
+	if !ok {
+		return 0, false
+	}
+	fmt.Fprintln(stderr, line)
+	return code, true
+}
+
+// launchdParentName reports the parent command name. It is empty when the
+// parent is not launchd or the name cannot be read. The name is not logged.
+func launchdParentName(ppid int) string {
+	if runtime.GOOS != "darwin" || ppid <= 0 {
+		return ""
+	}
+	out, err := exec.Command("/bin/ps", "-o", "comm=", "-p", strconv.Itoa(ppid)).Output()
+	if err != nil || len(out) == 0 || len(out) > 256 {
+		return ""
+	}
+	name := strings.TrimSpace(string(out))
+	if filepath.Base(name) != "launchd" {
+		return ""
+	}
+	return name
+}
+
 // pairedPreflight injects the public lifecycle transport in cold-start tests.
 func pairedPreflight(ctx context.Context, root, origin string, api agentsetup.PairingAPI) (bool, error) {
+	permitted, _, err := pairedPreflightResult(ctx, root, origin, api)
+	return permitted, err
+}
+
+func pairedPreflightResult(ctx context.Context, root, origin string, api agentsetup.PairingAPI) (bool, string, error) {
 	store, err := agentsetup.OpenStore(root, false)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	defer store.Close()
 	if api == nil {
@@ -746,9 +818,17 @@ func pairedPreflight(ctx context.Context, root, origin string, api agentsetup.Pa
 	}
 	e := agentsetup.Engine{Store: store, API: api, Local: localPairing{root: root}, InstallMethod: installMethod()}
 	if err = e.SyncFences(ctx); err != nil {
-		return false, err
+		return false, "", err
 	}
-	return e.DispatchPermitted()
+	permitted, err := e.DispatchPermitted()
+	if err != nil || permitted {
+		return permitted, "", err
+	}
+	denial, err := e.DispatchDenial()
+	if err != nil {
+		return false, "", err
+	}
+	return false, denial, nil
 }
 
 // A repair can add/renew only identities derived from the approved account

@@ -45,7 +45,11 @@ type registry struct {
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
-		// serve logs its failure before returning, including startup failures.
+		// A dispatch denial is one stderr line and its own status. serve does
+		// not also log it. Every other serve failure was logged before return.
+		if code, ok := writeDispatchDenial(os.Stderr, err, launchdParentName(os.Getppid())); ok {
+			os.Exit(code)
+		}
 		if len(os.Args) < 2 || os.Args[1] != "serve" {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -93,7 +97,8 @@ func privateFile(path string, maximum int64) ([]byte, error) {
 
 func serve(args []string) (resultErr error) {
 	defer func() {
-		if resultErr != nil {
+		var denied *dispatchDeniedError
+		if resultErr != nil && !errors.As(resultErr, &denied) {
 			slog.Error("agentd serve failed", "error", resultErr)
 		}
 	}()
