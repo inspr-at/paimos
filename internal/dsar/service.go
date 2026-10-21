@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -31,7 +32,7 @@ const ownerQuery = `SELECT EXISTS (SELECT 1 FROM principals p JOIN role_bindings
 // enterSubjectVisibility caps the export to the subject person. There is no
 // key creator and no acting person: the operator's ceiling must not remain.
 func enterSubjectVisibility(ctx context.Context, tx pgx.Tx, tenantID, subjectID string) error {
-	if _, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,NULL,NULL::uuid)`, tenantID, subjectID); err != nil {
+	if err := db.EnterPrincipal(ctx, tx, tenantID, subjectID, nil, nil); err != nil {
 		return errors.New("set subject visibility failed")
 	}
 	return nil

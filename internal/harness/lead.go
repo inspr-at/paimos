@@ -278,14 +278,23 @@ var errNotLeadRuntimeAgent = errors.Join(errors.New("lead runtime agent required
 
 func leadOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, owner string, verifiedAgent ...string) error {
 	if p.Kind == tenant.Agent {
-		if len(verifiedAgent) != 0 {
-			if p.ID != verifiedAgent[0] {
-				return errNotLeadRuntimeAgent
-			}
-		} else {
-			var sessionAgent string
-			var callerPending, anyPending bool
-			err := tx.QueryRow(ctx, `SELECT coalesce(s.agent_principal_id::text,''),
+		if err := requireLeadRuntimeAgent(ctx, tx, p, projectID, owner, verifiedAgent...); err != nil {
+			return err
+		}
+	}
+	return leadOwnerGrants(ctx, tx, p, projectID, owner)
+}
+
+func requireLeadRuntimeAgent(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, owner string, verifiedAgent ...string) error {
+	if len(verifiedAgent) != 0 {
+		if p.ID != verifiedAgent[0] {
+			return errNotLeadRuntimeAgent
+		}
+		return nil
+	}
+	var sessionAgent string
+	var callerPending, anyPending bool
+	err := tx.QueryRow(ctx, `SELECT coalesce(s.agent_principal_id::text,''),
    EXISTS(SELECT 1 FROM routine_launch_intents i JOIN routine_runs r ON r.tenant_id=i.tenant_id AND r.id=i.routine_run_id
      WHERE l.session_id IS NULL AND i.tenant_id=l.tenant_id AND i.project_id=l.project_id AND i.owner_principal_id=l.owner_principal_id
      AND i.kind='lead' AND i.lead_generation=l.generation AND i.state='pending' AND r.execution_principal_id=$4::uuid),
@@ -295,14 +304,19 @@ func leadOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, ow
    FROM project_leads l
    LEFT JOIN harness_sessions s ON s.tenant_id=l.tenant_id AND s.id=l.session_id
    WHERE l.tenant_id=$1::uuid AND l.project_id=$2::uuid AND l.owner_principal_id=$3::uuid`, p.TenantID, projectID, owner, p.ID).Scan(&sessionAgent, &callerPending, &anyPending)
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
-			if err == nil && (sessionAgent != "" && sessionAgent != p.ID || sessionAgent == "" && anyPending && !callerPending) {
-				return errNotLeadRuntimeAgent
-			}
-		}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
 	}
+	if err == nil && (sessionAgent != "" && sessionAgent != p.ID || sessionAgent == "" && anyPending && !callerPending) {
+		return errNotLeadRuntimeAgent
+	}
+	return nil
+}
+
+// leadOwnerGrants checks the owner's live lead permissions. A projection uses
+// this rather than leadOwner: a worker start and another project's turn read
+// are not that lead's runtime, and mistaking them for one is not a revoked owner.
+func leadOwnerGrants(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, owner string) error {
 	var canonical string
 	err := tx.QueryRow(ctx, `SELECT c.id::text FROM principals p JOIN principals c ON c.tenant_id=p.tenant_id AND c.id=coalesce(p.linked_to,p.id) WHERE p.id=$1 AND p.kind='person' AND p.status='active' AND c.kind='person' AND c.status='active'`, owner).Scan(&canonical)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -369,9 +383,7 @@ func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead, rea
 		l.State, l.Reason = "cannot_start", lifecycle
 		return l, nil
 	}
-	if err = leadOwner(ctx, tx, p, l.ProjectID, l.owner); errors.Is(err, errNotLeadRuntimeAgent) {
-		return l, err
-	} else if errors.Is(err, authz.ErrForbidden) {
+	if err = leadOwnerGrants(ctx, tx, p, l.ProjectID, l.owner); errors.Is(err, authz.ErrForbidden) {
 		l.State, l.Reason = "cannot_start", "owner_revoked"
 		return l, nil
 	} else if err != nil {

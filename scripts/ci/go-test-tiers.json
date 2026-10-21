@@ -5900,6 +5900,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestKeyScopeBatchModesAndOrder","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestLegacySchemaEnterPrincipal","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestLockTenantBlocksOnTheCanonicalFenceStatement","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestLockTenantFencesTheCallerTenantWithoutTenantVisibility","tier":"GATED-FULL"}
@@ -7153,6 +7155,8 @@
     {"kind":"go","package":"internal/harness","name":"TestPausedCoordinatorAdoptsPausedChildrenForContinuation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestPendingApprovalStateRespectsProjectVisibility","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestPersonCeilingLeadProjectionKeepsOtherCaller","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestPersonCeilingLeadRefusesAnotherAgent","tier":"ESSENTIAL"}
     ,

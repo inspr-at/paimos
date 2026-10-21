@@ -73,8 +73,7 @@ func enterTenant(ctx context.Context, tx pgx.Tx, tenantID string) error {
 		if uuidLike(p.KeyCreatorID) {
 			creator = p.KeyCreatorID
 		}
-		_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, tenantID, p.ID, creator, ActingPersonID(ctx, p))
-		return err
+		return EnterPrincipal(ctx, tx, tenantID, p.ID, creator, ActingPersonID(ctx, p))
 	}
 	_, err := tx.Exec(ctx, `SELECT set_config($1,$2,true),set_config($3,'',true),set_config('aeon.principal_ids','',true),set_config('aeon.system','',true)`,
 		TenantSetting, tenantID, VisibleProjectsSetting)
@@ -98,6 +97,21 @@ func uuidLike(s string) bool {
 		}
 	}
 	return true
+}
+
+// EnterPrincipal installs this transaction's tenant and project visibility.
+// A nil acting person uses the three-argument function. That function is the
+// legacy contract, and it is the only one present on a schema that has not
+// applied migration 1397. A present person needs the four-argument function;
+// the two forms agree when the person is absent, so callers do not pass NULL
+// in its place.
+func EnterPrincipal(ctx context.Context, tx pgx.Tx, tenantID, principalID string, creator, person any) error {
+	if person == nil {
+		_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, tenantID, principalID, creator)
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, tenantID, principalID, creator, person)
+	return err
 }
 
 // ActingPersonID returns the server-resolved request ceiling, or the API key's
@@ -202,6 +216,5 @@ func reenterActingPrincipal(ctx context.Context, tx pgx.Tx, p tenant.Principal) 
 	if uuidLike(p.KeyPersonID) {
 		person = p.KeyPersonID
 	}
-	_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, p.TenantID, p.ID, creator, person)
-	return err
+	return EnterPrincipal(ctx, tx, p.TenantID, p.ID, creator, person)
 }

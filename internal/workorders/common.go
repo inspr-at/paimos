@@ -307,8 +307,7 @@ func RefreshPrincipal(ctx context.Context, tx pgx.Tx, p tenant.Principal) error 
 	if UUID(p.KeyCreatorID) {
 		creator = p.KeyCreatorID
 	}
-	_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, p.TenantID, p.ID, creator, db.ActingPersonID(ctx, p))
-	return err
+	return db.EnterPrincipal(ctx, tx, p.TenantID, p.ID, creator, db.ActingPersonID(ctx, p))
 }
 
 func WriteError(w http.ResponseWriter, err error) {

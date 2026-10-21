@@ -391,7 +391,7 @@ func (m *module) subscriptionRead(ctx context.Context, p tenant.Principal, after
 			if p.KeyCreatorID != "" {
 				creator = p.KeyCreatorID
 			}
-			if _, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid,$4::uuid)`, p.TenantID, p.ID, creator, db.ActingPersonID(ctx, p)); err != nil {
+			if err := db.EnterPrincipal(ctx, tx, p.TenantID, p.ID, creator, db.ActingPersonID(ctx, p)); err != nil {
 				return err
 			}
 			visible, err := tx.Query(ctx, `SELECT id FROM events WHERE id=ANY($1::bigint[])`, goalEventIDs)

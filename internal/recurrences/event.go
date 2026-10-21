@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workstate"
@@ -274,8 +275,7 @@ func (m *Module) consumeSource(ctx context.Context, tx pgx.Tx, actor tenant.Prin
 // service caller is not a key or a run, so both key-creator and acting-person
 // arguments stay null. sourceContext restores service visibility afterwards.
 func enterOwnerCeiling(ctx context.Context, tx pgx.Tx, tenantID, ownerID string) error {
-	_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,NULL::uuid,NULL::uuid)`, tenantID, ownerID)
-	return err
+	return db.EnterPrincipal(ctx, tx, tenantID, ownerID, nil, nil)
 }
 
 // The service discovers only event IDs and times. Payload inspection then uses the
