@@ -575,6 +575,7 @@ func TestTicketQueuePermissionsIsolationAuditAndConcurrentAdd(t *testing.T) {
 	f.call(t, worker, "POST", "/api/queue", map[string]string{"node_id": id}, 403, nil)
 	coordinator := f.other
 	coordinator.Scopes = authz.CoordinatorKeyScopes
+	coordinator.KeyPersonID = f.person.ID
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		var role string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'queue_coordinator','Queue coordinator') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {

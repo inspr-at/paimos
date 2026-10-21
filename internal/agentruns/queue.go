@@ -439,10 +439,15 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	personRule, personSource := "personal", ""
 	// A configured project lead owns agent-submitted queue work. The caller
 	// has already passed the coordinator's project admission above.
-	if p.Kind == tenant.Agent {
-		personRule = "lead"
-		if t.ProjectID != nil {
-			personSource = *t.ProjectID
+	if p.Kind == tenant.Agent && p.KeyPersonID == "" && t.ProjectID != nil {
+		// Only this project's bound lead may use its policy owner. A different
+		// coordinator cannot select that person's ceiling by naming the project.
+		var ownsLead bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_leads l JOIN harness_sessions s ON s.tenant_id=l.tenant_id AND s.id=l.session_id WHERE l.tenant_id=$1 AND l.project_id=$2 AND s.agent_principal_id=$3 AND s.archived_at IS NULL)`, p.TenantID, *t.ProjectID, p.ID).Scan(&ownsLead); err != nil {
+			return queuePrepared{}, err
+		}
+		if ownsLead {
+			personRule, personSource = "lead", *t.ProjectID
 		}
 	}
 	actingPerson, err := workqueue.ResolveRunPersonTx(ctx, tx, p, personRule, personSource)

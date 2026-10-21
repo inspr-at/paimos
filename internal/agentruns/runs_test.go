@@ -159,11 +159,19 @@ func (f *fixture) run(t *testing.T, o workorders.Order) agentruns.Run {
 
 // New bound runs require a paired claiming computer. Legacy tests still seed
 // unbound rows explicitly; this fixture gives ordinary starts their real grant.
-func (f *fixture) pairedRunComputer(t *testing.T) (string, string) {
+func (f *fixture) pairedRunComputer(t *testing.T, principals ...tenant.Principal) (string, string) {
+	agent := f.agent
+	if len(principals) == 1 {
+		agent = principals[0]
+	}
+	daemon, userCode := "daemon-test", "123456789"
+	if agent.ID != f.agent.ID {
+		daemon, userCode = "daemon-other", "123456780"
+	}
 	t.Helper()
 	var computer, request string
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		err := tx.QueryRow(t.Context(), `SELECT id::text,request_id::text FROM agent_pairing_computers WHERE principal_id=$1`, f.agent.ID).Scan(&computer, &request)
+		err := tx.QueryRow(t.Context(), `SELECT id::text,request_id::text FROM agent_pairing_computers WHERE principal_id=$1`, agent.ID).Scan(&computer, &request)
 		if err == nil {
 			return nil
 		}
@@ -172,10 +180,10 @@ func (f *fixture) pairedRunComputer(t *testing.T) (string, string) {
 		}
 		computer, request = uuid(), uuid()
 		fingerprint := strings.ReplaceAll(uuid()+uuid(), "-", "")
-		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,'123456789',$3,$3,$3,'{"platform":"darwin","arch":"arm64"}',$3,'redeemed',$4)`, f.person.TenantID, request, fingerprint, f.person.ID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,$5,$3,$3,$3,'{"platform":"darwin","arch":"arm64"}',$3,'redeemed',$4)`, f.person.TenantID, request, fingerprint, f.person.ID, userCode); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) SELECT $1,$2,$3,$4,id,'daemon-test',$5 FROM agent_keys WHERE principal_id=$4 ORDER BY created_at LIMIT 1`, f.person.TenantID, computer, request, f.agent.ID, fingerprint); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) SELECT $1,$2,$3,$4,id,$6,$5 FROM agent_keys WHERE principal_id=$4 ORDER BY created_at LIMIT 1`, f.person.TenantID, computer, request, agent.ID, fingerprint, daemon); err != nil {
 			return err
 		}
 		_, err = tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,computer_id) SELECT $1,$2,id,'computer',$3 FROM roles WHERE key='admin' ON CONFLICT DO NOTHING`, f.person.TenantID, f.person.ID, computer)
@@ -208,6 +216,17 @@ func (f *fixture) reserve(t *testing.T, v agentruns.Run) []string {
 	roundTheClock(t, f, v.ID)
 	return []string{reservation}
 }
+
+// Tests of mutable legacy account settings retain the computer's separate
+// start grant, while modeling an account outside immutable enrollment.
+func (f *fixture) legacyAccount(t *testing.T, run string) {
+	t.Helper()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `DELETE FROM agent_pairing_enrollments WHERE account_id=(SELECT account_id FROM agent_runs WHERE id=$1)`, run)
+		return err
+	})
+}
+
 func claimBody(ids []string) map[string]any {
 	return map[string]any{"daemon_id": "daemon-test", "daemon_generation": "generation-1", "reservation_ids": ids}
 }
@@ -334,6 +353,7 @@ func TestRunClaimTelemetryReplayAndBudget(t *testing.T) {
 	if len(queued) != 1 {
 		t.Fatal("queued run missing")
 	}
+	f.pairedRunComputer(t)
 	f.call(t, f.agent, "POST", path+"/claim", claimBody([]string{uuid()}), 409, nil)
 	ids := f.reserve(t, v)
 	f.call(t, f.agent, "POST", path+"/claim", claimBody([]string{uuid()}), 409, nil)

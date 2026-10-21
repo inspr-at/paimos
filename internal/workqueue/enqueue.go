@@ -78,11 +78,15 @@ func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID st
 	}
 	// The occurrence's saved recurrence identifies its owner, independently
 	// of the service principal executing the schedule.
-	var recurrence string
+	var recurrence *string
 	if err := tx.QueryRow(ctx, `SELECT fields->>'recurrence_id' FROM nodes WHERE id=$1`, nodeID).Scan(&recurrence); err != nil {
 		return nil, err
 	}
-	person, err := ResolveRunPersonTx(ctx, tx, p, "routine", recurrence)
+	rule, source := "personal", ""
+	if recurrence != nil {
+		rule, source = "routine", *recurrence
+	}
+	person, err := ResolveRunPersonTx(ctx, tx, p, rule, source)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +108,7 @@ func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID st
 	if err != nil {
 		return nil, err
 	}
-	personBinding, err := SetActingPersonTx(ctx, tx, p.TenantID, runID, person, "routine")
+	personBinding, err := SetActingPersonTx(ctx, tx, p.TenantID, runID, person, rule)
 	if err != nil {
 		return nil, err
 	}

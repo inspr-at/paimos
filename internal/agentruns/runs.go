@@ -264,6 +264,9 @@ func bindRunPerson(ctx context.Context, tx pgx.Tx, p tenant.Principal, v *Run, p
 		return err
 	}
 	v.ActingPersonID = &person
+	if err := tx.QueryRow(ctx, `SELECT row_version FROM agent_runs WHERE tenant_id=$1 AND id=$2`, p.TenantID, v.ID).Scan(&v.RowVersion); err != nil {
+		return err
+	}
 	if change != nil {
 		*pending = append(*pending, *change)
 	}

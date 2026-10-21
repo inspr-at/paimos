@@ -8,6 +8,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -57,6 +58,9 @@ func PersonAdmissionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, sourc
 // ResolveRunPersonTx accepts only explicit server provenance. An API key's
 // issuer, the pairing approver and model preferences are never candidates.
 func ResolveRunPersonTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, rule, sourceID string) (string, error) {
+	if rule != "personal" && !workorders.UUID(sourceID) {
+		return "", &PersonAdmissionError{Code: "run_person_unresolved"}
+	}
 	var person *string
 	var err error
 	switch rule {
