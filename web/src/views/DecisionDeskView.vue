@@ -40,14 +40,27 @@ const noticeBusy = ref(false), noticeOn = ref(false), noticeError = ref(false), 
 const noticeScope = useIdentityScope(() => session.identity?.principal.kind === 'person' && can('profile.read') && can('profile.write'))
 const noticeReads = noticeScope.lane()
 const showNotice = computed(() => !!noticeSettings.value && deskOfferEligible(noticeSettings.value, noticeHash.value, noticeBrowser.value, noticeDismissed.value))
+// The offer is decided before anything below the title shows, so it never arrives above the tabs later, and a Desk
+// without it keeps the subtitle's own height (AEON-1448: no band). A read slower than the bound leaves the offer out
+// for this visit. Once shown, the offer keeps its slot for the visit; later states swap their words in place.
+const NOTICE_WAIT_MS = 800
+const noticePossible = () => { const browser = deskPushBrowser(); return browser.supported && !browser.homeScreenRequired && browser.permission !== 'denied' && !deskOfferDismissed() }
+const noticeDeciding = ref(noticePossible()), noticeHeld = ref(false)
+const offerShown = computed(() => noticeHeld.value && showNotice.value && !noticeOn.value)
+let noticeTimer: ReturnType<typeof setTimeout> | undefined
+function decideNotice() {
+  if (!noticeDeciding.value) return
+  clearTimeout(noticeTimer)
+  noticeHeld.value = showNotice.value; noticeDeciding.value = false
+}
 function loadNotice() {
-  if (!deskPushBrowser().supported || deskPushBrowser().homeScreenRequired || deskOfferDismissed()) return
+  if (!noticePossible()) { decideNotice(); return }
   return noticeReads.run(({ after, signal }) => after(Promise.all([phoneSettings(signal), deviceSubscriptionHash()]), ([value, hash]) => {
     noticeSettings.value = value; noticeHash.value = hash; noticeBrowser.value = deskPushBrowser()
-  }), { failed: () => { noticeSettings.value = null } })
+  }), { failed: () => { noticeSettings.value = null }, settled: decideNotice })
 }
 function turnNoticeOn() {
-  if (noticeBusy.value || !showNotice.value || !noticeScope.owner.value) return
+  if (noticeBusy.value || !offerShown.value || !noticeScope.owner.value) return
   // Keep the browser's user activation: never request permission during load.
   const permission = Notification.requestPermission(), publicKey = noticeSettings.value!.vapid_public_key
   noticeReads.cancel(); noticeBusy.value = true; noticeError.value = false
@@ -62,8 +75,11 @@ function resetNotice() {
 }
 watch(noticeScope.owner, () => { resetNotice(); void loadNotice() }, { flush: 'sync' })
 const stopNoticeAccess = onAccessRevalidate({ reset: resetNotice, refresh: () => { void loadNotice() } })
-onBeforeUnmount(stopNoticeAccess)
-onMounted(() => { void loadNotice() })
+onBeforeUnmount(() => { stopNoticeAccess(); clearTimeout(noticeTimer) })
+onMounted(() => {
+  if (noticeDeciding.value) noticeTimer = setTimeout(() => { noticeReads.cancel(); decideNotice() }, NOTICE_WAIT_MS)
+  void loadNotice()
+})
 const definitionLanguage = computed(() => displayLanguage(profile.profile?.locale, 'definitions'))
 const titleOf = (item: DeskItem) => item.definitionChange ? definitionDeskWords(item.definitionChange.project_key,item.definitionChange.pending_count,definitionLanguage.value) : item.title
 const agents = useAgents()
@@ -627,12 +643,12 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 </script>
 
 <template>
-  <main class="desk-page decision-desk" aria-labelledby="desk-title">
+  <main class="desk-page decision-desk" :class="{ deciding: noticeDeciding }" :aria-busy="noticeDeciding || undefined" aria-labelledby="desk-title">
     <header class="dp-head">
       <div class="desk-heading"><h1 id="desk-title" tabindex="-1">Decision Desk</h1>
         <div class="head-note desk-notice" data-testid="desk-notice">
-          <!-- Keep the full offer's wrapping geometry through load, dismissal and success. -->
-          <div class="notice-offer" :class="{ reserved: !showNotice || noticeOn }" :aria-hidden="!showNotice || noticeOn || undefined" :inert="!showNotice || noticeOn || undefined">
+          <!-- Once shown, the offer keeps its wrapping geometry through dismissal, success and later reads. -->
+          <div v-if="noticeHeld" class="notice-offer" :class="{ reserved: !offerShown }" :aria-hidden="!offerShown || undefined" :inert="!offerShown || undefined">
             <span>{{ noticeText('Get a browser notification when a decision waits', 'Browser-Benachrichtigung erhalten, wenn eine Entscheidung wartet') }}</span>
             <div class="notice-actions">
               <button type="button" class="linkish" :disabled="noticeBusy" @click="turnNoticeOn">{{ noticeText('Turn on', 'Einschalten') }}</button>
@@ -640,9 +656,9 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
             </div>
           </div>
           <p v-if="noticeOn" role="status">{{ noticeText('Notifications on for this browser', 'Benachrichtigungen für diesen Browser an') }}</p>
-          <p v-else-if="!showNotice">{{ noticeText('Agents keep working unless something is held up.', 'Agenten arbeiten weiter, solange nichts aufgehalten wird.') }}</p>
+          <p v-else-if="!offerShown">{{ noticeText('Agents keep working unless something is held up.', 'Agenten arbeiten weiter, solange nichts aufgehalten wird.') }}</p>
         </div>
-        <div class="notice-feedback" aria-live="polite"><span :class="{ reserved: !noticeError }">{{ noticeText('Notifications could not be enabled. Check the browser permission and try again.', 'Benachrichtigungen konnten nicht eingeschaltet werden. Browser-Berechtigung prüfen und erneut versuchen.') }}</span></div>
+        <div v-if="noticeHeld" class="notice-feedback" aria-live="polite"><span :class="{ reserved: !noticeError }">{{ noticeText('Notifications could not be enabled. Check the browser permission and try again.', 'Benachrichtigungen konnten nicht eingeschaltet werden. Browser-Berechtigung prüfen und erneut versuchen.') }}</span></div>
       </div>
     </header>
     <!-- AEON-1448 (Tick): "Answer one by one" sits at the tab row's end, only while the (scoped) open round has items.
@@ -760,6 +776,8 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .notice-feedback { font-size: 12px; line-height: 1.5; color: var(--ink-3); }
 .notice-feedback span { display: block; }
 .desk-heading .reserved { visibility: hidden; pointer-events: none; }
+/* Until the offer is decided only the title shows; the rest appears once, in its final place. */
+.deciding .desk-notice, .deciding .notice-feedback, .deciding .dp-tabrow, .deciding .scope-line, .deciding .trim-pages, .deciding .queue, .deciding .arrival-line { visibility: hidden; }
 /* AEON-1448 (Tick): one tab row at every width: the tabs at its start, "Answer one by one" at its end. On a narrow row
    the Decided stamp filter takes a line of its own; the button keeps the first, so it never wraps or adds height. */
 .dp-tabrow { container: desk-tabs / inline-size; }

@@ -6,8 +6,8 @@
   },
   "spec": {
     "file": "tests/aeon-1474-desk-push-ui.spec.ts",
-    "listedTests": 5,
-    "weightSeconds": 11.097561,
+    "listedTests": 6,
+    "weightSeconds": 13.317073,
     "weightSource": "unmeasured-test-rate"
   }
 }

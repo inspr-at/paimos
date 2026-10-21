@@ -121,7 +121,7 @@ test('AEON-1474 unavailable blocked unsupported and iOS states never prompt or e
   for (const state of [
     { available: false, line: "Browser notifications aren't available on this instance." },
     { permission: 'denied' as const, line: "Notifications are blocked for this site. Allow them in the browser's site settings." },
-    { ios: true, line: 'On iPhone, add PAIMOS to the Home Screen first (Share › Add to Home Screen), then turn this on there.' },
+    { ios: true, line: 'On iPhone, add PAIMOS to the Home Screen first (in the Share menu: Add to Home Screen), then turn this on there.' },
     { supported: false, line: 'This browser does not support push notifications.' },
   ]) {
     const page = await context.newPage()
@@ -161,6 +161,67 @@ test('AEON-1474 Desk dismissal persists and an enabled browser gets no offer', a
   await expect(enabledPage.getByRole('heading', { name: 'Decision Desk', exact: true })).toBeVisible()
   await expect(enabledPage.getByRole('button', { name: 'Turn on', exact: true })).toHaveCount(0)
   await enabledPage.close()
+})
+
+// The tabs below the subtitle, less the header's own section gap: 0 means no band (AEON-1448).
+const band = (page: Page) => page.evaluate(() => {
+  const note = [...document.querySelectorAll('p')].find(p => p.textContent === 'Agents keep working unless something is held up.')!
+  const tabs = document.querySelector('[role="radiogroup"][aria-label="Show"]')!
+  return tabs.getBoundingClientRect().top - note.getBoundingClientRect().bottom - parseFloat(getComputedStyle(note.closest('header')!).marginBottom)
+})
+const T0 = Date.parse('2026-10-21T08:00:00Z')
+
+// Risks: an empty band reserved above the tabs when no offer comes (AEON-1448); an offer that
+// arrives after the tabs show and pushes them down; a hung read that keeps the Desk hidden.
+test('AEON-1474 the Desk decides its offer before the tabs show, without a band or a late offer', async ({ context }) => {
+  const declined = await context.newPage()
+  await setup(declined, { available: false })
+  const read = declined.waitForResponse('**/api/me/phone-approvals')
+  await declined.goto('/decision-desk')
+  await read
+  await expect(declined.getByTestId('desk-tab-open')).toBeVisible()
+  await expect(declined.getByRole('button', { name: 'Turn on', exact: true })).toHaveCount(0)
+  await expect(declined.locator('.notice-feedback')).toHaveCount(0)
+  expect(Math.abs(await band(declined)), 'no band, the gap is the section gap').toBeLessThanOrEqual(0.5)
+  await declined.close()
+
+  // While the read is held, only the title shows; the offer and the tabs then appear together.
+  const page = await context.newPage()
+  await setup(page)
+  let answer!: () => void
+  const answered = new Promise<void>(resolve => { answer = resolve })
+  await page.route('**/api/me/phone-approvals', async route => { if (route.request().method() === 'GET') await answered; return route.fallback() })
+  await page.goto('/decision-desk')
+  await expect(page.getByRole('heading', { name: 'Decision Desk', exact: true })).toBeVisible()
+  await expect(page.locator('main.decision-desk')).toHaveAttribute('aria-busy', 'true')
+  await expect(page.getByTestId('desk-tab-open')).toBeAttached()
+  await expect(page.getByTestId('desk-tab-open')).toBeHidden()
+  answer()
+  await expect(page.getByTestId('desk-tab-open')).toBeVisible()
+  expect(await page.getByRole('button', { name: 'Turn on', exact: true }).isVisible(), 'the offer shows with the tabs').toBe(true)
+  await page.close()
+
+  // A read that never answers: the bound on the page's clock shows the Desk without the offer and drops the read.
+  const hung = await context.newPage()
+  await setup(hung)
+  await hung.route('**/api/me/phone-approvals', route => route.request().method() === 'GET' ? undefined : route.fallback())
+  await hung.clock.install({ time: T0 })
+  await hung.goto('/')
+  await expect(hung.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible()
+  await hung.clock.pauseAt(T0 + 10_000)
+  const dropped = hung.waitForEvent('requestfailed', request => new URL(request.url()).pathname === '/api/me/phone-approvals')
+  await hung.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: /^Decision Desk/ }).click()
+  await expect(hung.getByRole('heading', { name: 'Decision Desk', exact: true })).toBeVisible()
+  await expect(hung.locator('main.decision-desk')).toHaveAttribute('aria-busy', 'true')
+  await expect(hung.getByTestId('desk-tab-open')).toBeAttached()
+  await expect(hung.getByTestId('desk-tab-open')).toBeHidden()
+  await hung.clock.runFor(800)
+  await dropped
+  await expect(hung.getByTestId('desk-tab-open')).toBeVisible()
+  await expect(hung.locator('main.decision-desk')).not.toHaveAttribute('aria-busy', 'true')
+  await expect(hung.getByRole('button', { name: 'Turn on', exact: true })).toHaveCount(0)
+  expect(Math.abs(await band(hung)), 'no band after the bound').toBeLessThanOrEqual(0.5)
+  await hung.close()
 })
 
 test('AEON-1474 rejected writes retain the previous state and never announce success', async ({ page }) => {

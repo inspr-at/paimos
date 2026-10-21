@@ -6374,6 +6374,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 rejected writes retain the previous state and never announce success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 the Desk decides its offer before the tabs show, without a band or a late offer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 unavailable blocked unsupported and iOS states never prompt or expose a dead iPhone switch","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: a queued narrow table resize preserves the columns after the table grows","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
