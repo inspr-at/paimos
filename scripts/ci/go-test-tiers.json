@@ -6838,6 +6838,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalHandedOverReadAndConflict","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalHideForMePerPersonTenantAndKeys","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalHistoryCancellationReturnsTooLarge","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalHistoryIgnoresUnrelatedEvents","tier":"ESSENTIAL"}
