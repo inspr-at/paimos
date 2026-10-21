@@ -20,15 +20,15 @@ function holdProjectPermissions() {
   }
 }
 
-// The project list and the ticket lookup both read GET /api/nodes; holding it
-// keeps the workspace on its loading state.
+// The ticket list and the ticket lookup both read GET /api/nodes; holding them
+// keeps the workspace on its loading state. The project catalogue still answers.
 function holdTicketLookups() {
   let release = () => {}
   const held = new Promise<void>(resolve => { release = resolve })
   return {
     release: () => release(),
-    hold: ({ path, method }: { path: string; method: string }) =>
-      path === '/api/nodes' && method === 'GET' ? { until: held } : undefined,
+    hold: ({ path, method, query }: { path: string; method: string; query: URLSearchParams }) =>
+      path === '/api/nodes' && method === 'GET' && query.get('kind') !== 'project' ? { until: held } : undefined,
   }
 }
 
