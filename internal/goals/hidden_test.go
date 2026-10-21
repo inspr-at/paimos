@@ -127,7 +127,11 @@ func TestGoalHideForMePerPersonTenantAndKeys(t *testing.T) {
 		t.Fatalf("B's count %v", *got.HiddenCount)
 	}
 	// GOAL-5 (no items) moves to a project B cannot read: it leaves B's count, and B cannot hide it again.
-	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE nodes SET project_id=$2 WHERE id=$1`, f.emptyGoal, f.otherProject); err != nil {
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, f.emptyGoal, f.otherProject)
+		return err
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if got := list(f.reader, "?hidden=include"); *got.HiddenCount != 1 {
@@ -186,7 +190,7 @@ func TestGoalHideForMePerPersonTenantAndKeys(t *testing.T) {
 
 	// A goal deleted for good drops its hidden rows.
 	hiddenWrite(t, goalRequest(t.Context(), m, f.writer, "PUT", "/api/me/goals/GOAL-5/hidden", "", ""), 200)
-	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `DELETE FROM nodes WHERE id=$1`, f.emptyGoal)
 		return err
 	})
