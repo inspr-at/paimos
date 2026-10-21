@@ -10204,6 +10204,8 @@
     ,
     {"kind":"browser","file":"tests/hide-states.spec.ts","name":"shared view membership › default and Reset Graph Hide honour kind categories at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/hours-edit.spec.ts","name":"AEON-1416: the first Hours Undo cannot reverse a later deletion cycle","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/hours-edit.spec.ts","name":"Delete removes an entry with a six-second undo that reverses it on the server","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/hours-edit.spec.ts","name":"a conflict shows the newer entry and keeps the draft","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -18083,6 +18085,12 @@
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: a mutation between rows and digest retries the entire snapshot","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: attachment Undo keeps its own receipt across two deletion cycles","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: deletion receipts keep exact IDs and refuse missing or ambiguous receipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: upload cleanup revokes each preview once and rejects late completions","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a finished fallback group scan shows the scanned project, count and facets","tier":"ESSENTIAL"}
     ,

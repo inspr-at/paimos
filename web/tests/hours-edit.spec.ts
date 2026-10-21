@@ -132,8 +132,7 @@ test('Delete removes an entry with a six-second undo that reverses it on the ser
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect(row(page, 'e-4')).toBeVisible()
   await expect(page.getByText('Restored 1h 30m on PHAROS-12.')).toBeVisible()
-  const scan = calls.find(c => c.path === '/api/events')!
-  expect(scan.query.get('node_id')).toBe('n-2')
+  expect(calls.filter(c => c.path === '/api/events')).toEqual([])
   expect(calls.some(c => c.path === '/api/events/500/undo' && c.method === 'POST')).toBe(true)
   await expect.poll(() => data.entries.some(e => e.id === 'e-4')).toBe(true)
   await expect(row(page, 'e-4')).toBeFocused()
@@ -143,6 +142,27 @@ test('Delete removes an entry with a six-second undo that reverses it on the ser
   await expect(row(page, 'e-4')).toHaveCount(0)
   expect(calls.filter(c => c.method === 'DELETE')).toHaveLength(2)
   expect(errors).toEqual([])
+})
+
+test('AEON-1416: the first Hours Undo cannot reverse a later deletion cycle', async ({ page }) => {
+  const { data, calls } = await setup(page)
+  await openWeek(page)
+  await row(page, 'e-4').focus()
+  await page.keyboard.press('Delete')
+  await expect.poll(() => data.events.length).toBe(1)
+  const first = data.events[0]
+  const toast = page.locator('.toast').filter({ hasText: 'Deleted 1h 30m on PHAROS-12.' })
+  await expect(toast).toBeVisible()
+  // Another actor restored and deleted the same entry while this toast stayed
+  // open. Its old event is already undone; only the later deletion is live.
+  data.events.push({ ...first, id: 501, before: null, after: first.before, undo_of: first.id })
+  data.events.push({ ...first, id: 502 })
+  await toast.getByRole('button', { name: 'Undo' }).click()
+  await expect(page.getByText('The entry could not be restored: its period was approved or it changed meanwhile.')).toBeVisible()
+  await expect(row(page, 'e-4')).toHaveCount(0)
+  expect(data.entries.some(e => e.id === 'e-4')).toBe(false)
+  expect(calls.filter(c => c.path === '/api/events')).toEqual([])
+  expect(calls.filter(c => c.path.endsWith('/undo')).map(c => c.path)).toEqual(['/api/events/500/undo'])
 })
 
 test('a conflict shows the newer entry and keeps the draft', async ({ page }) => {

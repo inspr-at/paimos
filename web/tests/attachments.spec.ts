@@ -89,6 +89,7 @@ test('delete reaches the server at once; Undo in the toast undoes it on the serv
   await expect(tiles(page)).toHaveCount(4)
   await expect(tiles(page).first()).toHaveAttribute('data-attachment-id', 'att-1')
   await expect.poll(() => writes(calls, 'POST', '/api/events/').map(c => c.path)).toEqual(['/api/events/1/undo'])
+  expect(calls.filter(c => c.path === '/api/events')).toEqual([])
   expect(data.attachments['n-1'].map(a => a.id)).toContain('att-1')
   // From the keyboard, and without Undo: the delete stands.
   await tiles(page).nth(2).focus()

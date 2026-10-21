@@ -3,9 +3,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { APIError, getNode, listNodes } from '../../lib/api'
-import { conflictEntry, createEntry, createPeriod, deleteEntry, findEntryEvent, listEntries, listPeriods, PERIOD_HISTORY_START, undoEntryEvent, updateEntry, type EntryPatch, type TimeEntry, type TimePeriod } from '../../lib/business'
+import { conflictEntry, createEntry, createPeriod, deleteEntry, listEntries, listPeriods, PERIOD_HISTORY_START, undoEntryEvent, updateEntry, type EntryPatch, type TimeEntry, type TimePeriod } from '../../lib/business'
 import { command, consume } from '../../lib/commands'
-import { dismiss, toast } from '../../lib/toast'
+import { captureToastOwner, dismiss, toast } from '../../lib/toast'
 import { absoluteTime, plural } from '../../lib/work'
 import { addDays, dayKey, isoWeek, parseDayKey, periodLabel, startOfWeek, timeOfDay, weekDays, weekLabel, WEEKDAYS } from '../../lib/week'
 import { formatClock, formatSpan } from '../../components/business/duration'
@@ -254,7 +254,10 @@ async function save(patch: EntryPatch, ticket: LogTicket) {
     toast(`Not saved: ${correctionProblem(e)}`, { tone: 'error' })
   } finally { saving.value = false }
 }
-type Deletion = 'deleted' | 'gone' | 'failed'
+type Deletion = { status: 'deleted'; eventId: string | null } | { status: 'gone' | 'failed' }
+let deletionView = 0
+watch([person, me, weekStart, view], () => { deletionView++ }, { flush: 'sync' })
+onBeforeUnmount(() => { deletionView++ })
 function remove(listed: TimeEntry) {
   const base = editing.value === listed.id && editBase.value ? editBase.value : listed
   const reason = lockReason(base)
@@ -264,38 +267,47 @@ function remove(listed: TimeEntry) {
   if (editing.value === base.id) { editing.value = null; editBase.value = null; conflict.value = null }
   dropEntry(base)
   const key = keyOf(base)
+  const owner = captureToastOwner(), started = deletionView
+  const here = () => owner() && started === deletionView
   let toastId = 0
-  const done: Promise<Deletion> = deleteEntry(base).then(() => { bump(base.period_id); return 'deleted' as const }, err => {
+  const done: Promise<Deletion> = deleteEntry(base).then(eventId => {
+    if (here()) bump(base.period_id)
+    return { status: 'deleted', eventId }
+  }, err => {
     dismiss(toastId)
-    if (err instanceof APIError && err.status === 404) return 'gone' as const
+    if (!owner()) return { status: 'failed' }
+    if (err instanceof APIError && err.status === 404) return { status: 'gone' }
     const newer = conflictEntry(err)
-    if (newer) { putEntry(newer); toast('This entry changed meanwhile, so it was not deleted. The newer version is shown.', { tone: 'error' }); return 'failed' as const }
-    putEntry(base)
-    if (approvedMeanwhile(err)) { toast('The period was approved meanwhile, so this entry is locked.', { tone: 'error' }); void loadWeek() }
+    if (newer) { if (here()) putEntry(newer); toast('This entry changed meanwhile, so it was not deleted. The newer version is shown.', { tone: 'error' }); return { status: 'failed' } }
+    if (here()) putEntry(base)
+    if (approvedMeanwhile(err)) { toast('The period was approved meanwhile, so this entry is locked.', { tone: 'error' }); if (here()) void loadWeek() }
     else toast(`Not deleted: ${correctionProblem(err)}`, { tone: 'error' })
-    return 'failed' as const
+    return { status: 'failed' }
   })
-  toastId = toast(`Deleted ${formatSpan(base.duration_seconds)} on ${key}.`, { timeout: UNDO_MS, action: { label: 'Undo', run: () => void undoRemove(base, done, toastId) } })
+  let undoStarted = false
+  toastId = toast(`Deleted ${formatSpan(base.duration_seconds)} on ${key}.`, { timeout: UNDO_MS, action: { label: 'Undo', run: () => {
+    if (undoStarted) return
+    undoStarted = true
+    void undoRemove(base, done, toastId, { owner, here, key })
+  } } })
   void focusEntry(after)
 }
-// Undo shows the entry again at once and reverses the deletion on the server.
-async function undoRemove(e: TimeEntry, done: Promise<Deletion>, toastId: number) {
+// Only the confirmed deletion's receipt can bring this entry back.
+async function undoRemove(e: TimeEntry, done: Promise<Deletion>, toastId: number, context: { owner: () => boolean; here: () => boolean; key: string }) {
   dismiss(toastId)
-  putEntry(e)
   try {
     const outcome = await done
-    if (outcome === 'gone') { dropEntry(e); return }
-    if (outcome === 'failed') return
-    const event = await findEntryEvent(e.node_id, e.id, 'time_entry.deleted')
-    if (event === null) throw new Error('no deletion to undo')
-    const restored = await undoEntryEvent(event)
-    putEntry(restored ?? e); bump(e.period_id)
-    toast(`Restored ${formatSpan(e.duration_seconds)} on ${keyOf(e)}.`)
-    void focusEntry(e.id)
+    if (outcome.status !== 'deleted' || !context.owner()) return
+    if (!outcome.eventId) throw new Error('The exact deletion receipt is unavailable. Reload to check the entry.')
+    const restored = await undoEntryEvent(outcome.eventId)
+    if (!context.owner()) return
+    if (!restored || restored.id !== e.id || restored.period_id !== e.period_id || restored.principal_id !== e.principal_id || restored.node_id !== e.node_id) throw new Error('The restored entry could not be confirmed.')
+    if (context.here()) { putEntry(restored); bump(e.period_id); void focusEntry(e.id) }
+    toast(`Restored ${formatSpan(e.duration_seconds)} on ${context.key}.`)
   } catch (err) {
-    dropEntry(e)
-    toast(err instanceof APIError && err.status === 409 ? 'The entry could not be restored: its period was approved or it changed meanwhile.' : 'The entry could not be restored.', { tone: 'error' })
-    void loadWeek()
+    if (!context.owner()) return
+    toast(err instanceof APIError && err.status === 409 ? 'The entry could not be restored: its period was approved or it changed meanwhile.' : `The entry could not be restored: ${err instanceof Error ? err.message : 'unknown error'}`, { tone: 'error' })
+    if (context.here()) void loadWeek()
   }
 }
 function rowKey(event: KeyboardEvent, e: TimeEntry) {
