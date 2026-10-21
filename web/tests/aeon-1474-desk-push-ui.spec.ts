@@ -23,11 +23,11 @@ async function setup(page: Page, options: { permission?: NotificationPermission;
       Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' })
       Object.defineProperty(navigator, 'standalone', { value: false })
     }
-    if (!supported) { Reflect.deleteProperty(window, 'PushManager'); return }
     Object.defineProperty(window, 'Notification', { configurable: true, value: class {
       static get permission() { return state.permission }
       static async requestPermission() { state.permissionCalls++; state.permission = 'granted'; return 'granted' }
     } })
+    if (!supported) { Reflect.deleteProperty(window, 'PushManager'); return }
     Object.defineProperty(window, 'PushManager', { configurable: true, value: class {} })
     const subscription = { endpoint, toJSON: () => ({ endpoint, expirationTime: null, keys: { auth: 'AQID', p256dh: 'BAUG' } }) }
     let subscribed = false
@@ -88,6 +88,12 @@ test('AEON-1474 Settings prompts only on click and independently enables disable
   await row.getByRole('button', { name: 'Remove' }).click()
   await expect(row).toHaveCount(0)
   expect(world.deletes).toEqual([other.id])
+  await guard.check(async () => { await toggle.click(); await expect(toggle).toHaveAttribute('aria-checked', 'true') })
+  const current = card.getByRole('listitem').filter({ hasText: 'This browser' })
+  await current.getByRole('button', { name: 'Remove' }).click()
+  await expect(current).toHaveCount(0)
+  await expect(toggle).toHaveAttribute('aria-checked', 'false')
+  expect(world.deletes).toEqual([other.id, device.id])
   guard.done()
 })
 
@@ -190,5 +196,9 @@ test('AEON-1474 Settings and Desk remain still with EN and DE copy at phone tabl
     checks.push({ language: de ? 'de' : 'en', theme, width, movementPx, overflow: false, minimumTargetHeight: 44 })
     await page.close()
   }
-  await writeFile(testInfo.outputPath('checks.json'), JSON.stringify(checks, null, 2))
+  const evidence = JSON.stringify(checks, null, 2)
+  await writeFile(testInfo.outputPath('checks.json'), evidence)
+  // The guarded remote runner transfers PNG/MD files; retain the same checks
+  // as Markdown for artifact transport, then collect checks.json locally.
+  await writeFile(testInfo.outputPath('checks.md'), evidence)
 })

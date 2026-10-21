@@ -19,12 +19,14 @@ const writes = useIdentityScope(() => person() && can('profile.read') && can('pr
 const enabled = computed(() => !!hash.value && !!settings.value?.subscriptions.some(sub => sub.endpoint_hash === hash.value && sub.desk_enabled))
 const devices = computed(() => [...(settings.value?.subscriptions.filter(sub => sub.desk_enabled) ?? [])].sort((a, b) => Number(b.endpoint_hash === hash.value) - Number(a.endpoint_hash === hash.value)))
 const state = computed(() => {
-  if (failed.value) return text('Notifications could not be updated. Please try again.', 'Benachrichtigungen konnten nicht aktualisiert werden. Bitte erneut versuchen.')
-  if (!settings.value) return text('Loading notifications…', 'Benachrichtigungen werden geladen…')
+  if (!settings.value) return failed.value
+    ? text('Notifications could not be loaded. Please try again.', 'Benachrichtigungen konnten nicht geladen werden. Bitte erneut versuchen.')
+    : text('Loading notifications…', 'Benachrichtigungen werden geladen…')
   if (!settings.value.push_available) return text("Browser notifications aren't available on this instance.", 'Browser-Benachrichtigungen sind auf dieser Instanz nicht verfügbar.')
   if (browser.value.homeScreenRequired) return text('On iPhone, add PAIMOS to the Home Screen first (Share › Add to Home Screen), then turn this on there.', 'Auf dem iPhone PAIMOS zuerst zum Home-Bildschirm hinzufügen (Teilen › Zum Home-Bildschirm), dann dort einschalten.')
   if (browser.value.permission === 'denied') return text("Notifications are blocked for this site. Allow them in the browser's site settings.", 'Benachrichtigungen sind für diese Seite blockiert. In den Website-Einstellungen des Browsers erlauben.')
   if (!browser.value.supported) return text('This browser does not support push notifications.', 'Dieser Browser unterstützt keine Push-Benachrichtigungen.')
+  if (failed.value) return text('Notifications could not be updated. Please try again.', 'Benachrichtigungen konnten nicht aktualisiert werden. Bitte erneut versuchen.')
   return enabled.value ? text('Notifications on for this browser', 'Benachrichtigungen für diesen Browser an') : ''
 })
 function load() {
