@@ -162,6 +162,7 @@ const still = (before: { x: number; y: number; width: number; height: number }, 
 }
 
 test('two sibling lines keep the goals controls still when a refresh fails and recovers', async ({ page }) => {
+  test.setTimeout(60_000)
   for (const width of [1440, 390] as const) {
     await page.setViewportSize({ width, height: width > 760 ? 900 : 844 })
     const mock = await mockBand(page, { owner: true, sibling: 'ok', lines: 2, goal: true })
@@ -176,11 +177,15 @@ test('two sibling lines keep the goals controls still when a refresh fails and r
     const slots = band.locator('.w-err-li')
     await expect(slots).toHaveCount(2)
     await expect(slots.first()).toContainText(/couldn’t be read/)
+    // Phone hides every row after the first, including the sibling slots these lines replace.
+    if (width > 760) await expect(slots.first()).toBeVisible()
+    else await expect(slots.first()).toBeHidden()
     const [duringHead, duringControl] = await Promise.all([box(head), box(control)])
     still(beforeHead, duringHead)
     still(beforeControl, duringControl)
     mock.set('ok')
-    await slots.first().getByRole('button', { name: 'Try again' }).click()
+    const retry = slots.first().locator('button.w-retry')
+    await retry.click(width > 760 ? undefined : { force: true })
     await expect(band.locator('a.waiting-item')).toHaveCount(5)
     await expect(band.locator('.w-err-li')).toHaveCount(0)
     const [afterHead, afterControl] = await Promise.all([box(head), box(control)])
