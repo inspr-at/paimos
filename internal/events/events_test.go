@@ -42,6 +42,56 @@ func fixture(t *testing.T) (*dbtest.DB, tenant.Principal, tenant.Principal) {
 	return d, ps[0], ps[1]
 }
 
+// Risk: replay of a shared node's event leaks a sibling or a hidden reference.
+func TestNodeGrantEventIsolation(t *testing.T) {
+	d, actor, _ := fixture(t)
+	ctx := t.Context()
+	var reader tenant.Principal
+	reader.TenantID, reader.Kind = actor.TenantID, tenant.Person
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Recipient') RETURNING id::text`, actor.TenantID).Scan(&reader.ID); err != nil {
+		t.Fatal(err)
+	}
+	var project, shared, sibling string
+	var visibleID int64
+	base := logPosition(t, d, actor)
+	err := db.InTenant(dbtest.Seed(ctx), d.App, actor.TenantID, func(tx pgx.Tx) error {
+		for _, row := range []struct {
+			slug, key string
+			parent    any
+			id        *string
+		}{{"project", "PRJ-1", nil, &project}, {"work", "NODE-1", &project, &shared}, {"work", "NODE-2", &project, &sibling}} {
+			if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,$2,$2,$3 FROM node_kinds WHERE tenant_id=$1 AND slug=$4 RETURNING id::text`, actor.TenantID, row.key, row.parent, row.slug).Scan(row.id); err != nil {
+				return err
+			}
+		}
+		for _, node := range []string{shared, sibling} {
+			e, err := Append(ctx, tx, actor, Change{NodeID: &node, Type: "comment.created", After: map[string]any{"body_markdown": "fixture"}})
+			if err != nil {
+				return err
+			}
+			if node == shared {
+				visibleID = e.ID
+			}
+		}
+		_, err := Append(ctx, tx, actor, Change{NodeID: &shared, Type: "node.updated", After: map[string]any{"related_node_id": sibling}})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'node',$3 FROM roles WHERE tenant_id=$1 AND key='viewer'`, actor.TenantID, reader.ID, shared); err != nil {
+		t.Fatal(err)
+	}
+	mod := &module{pool: d.App}
+	page, err := mod.read(ctx, reader, "", base, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != visibleID {
+		t.Fatalf("node grant replay leaks or hides events: %+v", page.Items)
+	}
+}
+
 // Bootstrap writes are audited too. Tests assert their own event sequence from
 // the observed starting position rather than depending on an empty tenant log.
 func logPosition(t *testing.T, d *dbtest.DB, p tenant.Principal) int64 {

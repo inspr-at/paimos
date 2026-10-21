@@ -130,6 +130,78 @@ func TestLexicalPaginationFiltersAndTenants(t *testing.T) {
 	}
 }
 
+// Risk: either lexical or vector candidates expose siblings of a shared node.
+func TestNodeGrantSearchIsolation(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx := t.Context()
+	const tid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa82"
+	const project = "00000000-0000-4000-8000-000000000081"
+	const shared = "00000000-0000-4000-8000-000000000082"
+	const sibling = "00000000-0000-4000-8000-000000000083"
+	seedTenant(t, d, tid, "node-search")
+	reader := seedPerson(t, d, tid, "cccccccc-cccc-4ccc-8ccc-cccccccccc82", "Recipient")
+	insertNode(t, d.App, tid, project, "PRJ-1", "project", "Project", "", "open")
+	for i, id := range []string{shared, sibling} {
+		insertNode(t, d.App, tid, id, []string{"NODE-1", "NODE-2"}[i], "work", "zebra signal", "searchable body", "open")
+	}
+	vec := make([]float32, embedding.Dimensions)
+	vec[0] = 1
+	err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET parent_id=$1 WHERE id=ANY($2::uuid[])`, project, []string{shared, sibling}); err != nil {
+			return err
+		}
+		for _, id := range []string{shared, sibling} {
+			if _, err := tx.Exec(ctx, `INSERT INTO node_embeddings(tenant_id,node_id,model,content_hash,embedding) VALUES($1,$2,'node-grant-model',$3,$4::real[]::halfvec(1536))`, tid, id, embedding.ContentHash("zebra signal", "searchable body"), pgtype.FlatArray[float32](vec)); err != nil {
+				return err
+			}
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM node_embedding_jobs WHERE node_id=ANY($1::uuid[])`, []string{shared, sibling})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lexical, semantic := http.NewServeMux(), http.NewServeMux()
+	New(d.App, nil).Mount(lexical)
+	New(d.App, fixedProvider{model: "node-grant-model", vec: vec}).Mount(semantic)
+	checks := []struct {
+		name, query string
+		mux         *http.ServeMux
+	}{{"lexical", "zebra", lexical}, {"vector only", "absentlexicaltoken", semantic}}
+	for _, check := range checks {
+		status, raw := call(check.mux, &reader, "/api/search?q="+check.query)
+		if page := mustOK(t, status, raw); len(page.Items) != 2 {
+			t.Fatalf("%s fixture must include both nodes: %+v", check.name, page)
+		}
+	}
+	if _, err := d.Admin.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, reader.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Search permission is independent of node visibility; no workspace nodes.read.
+	var role string
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'node_search','Search') RETURNING id::text`, tid).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'search.read')`, tid, role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, tid, reader.ID, role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'node',$3 FROM roles WHERE tenant_id=$1 AND key='viewer'`, tid, reader.ID, shared); err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			status, raw := call(check.mux, &reader, "/api/search?q="+check.query)
+			page := mustOK(t, status, raw)
+			if len(page.Items) != 1 || page.Items[0].Node.ID != shared {
+				t.Fatalf("node grant search leaked or hid a hit: %+v", page)
+			}
+		})
+	}
+}
+
 func TestHybridMaskFallbackAndWorker(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx := t.Context()

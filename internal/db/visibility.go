@@ -19,6 +19,11 @@ import (
 // for none. Nothing project-scoped is visible unless InTenant sets it.
 const VisibleProjectsSetting = "aeon.visible_projects"
 
+// VisibleNodesSetting contains only individually readable node IDs after the
+// principal, key creator and acting person ceilings have been intersected.
+// It adds reads to project visibility and never grants a write permission.
+const VisibleNodesSetting = "aeon.visible_nodes"
+
 type visibilityKey struct{}
 
 type visibility struct {
@@ -64,8 +69,8 @@ func enterTenant(ctx context.Context, tx pgx.Tx, tenantID string) error {
 		return err
 	}
 	if v, ok := ctx.Value(visibilityKey{}).(visibility); ok {
-		_, err := tx.Exec(ctx, `SELECT set_config($1,$2,true),set_config($3,$4,true),set_config('aeon.principal_ids','',true),set_config('aeon.system','on',true)`,
-			TenantSetting, tenantID, VisibleProjectsSetting, v.value)
+		_, err := tx.Exec(ctx, `SELECT set_config($1,$2,true),set_config($3,$4,true),set_config($5,'',true),set_config('aeon.principal_ids','',true),set_config('aeon.system','on',true)`,
+			TenantSetting, tenantID, VisibleProjectsSetting, v.value, VisibleNodesSetting)
 		return err
 	}
 	if p, ok := tenant.PrincipalFrom(ctx); ok && p.TenantID == tenantID && uuidLike(p.ID) && uuidLike(tenantID) {
@@ -75,8 +80,8 @@ func enterTenant(ctx context.Context, tx pgx.Tx, tenantID string) error {
 		}
 		return EnterPrincipal(ctx, tx, tenantID, p.ID, creator, ActingPersonID(ctx, p))
 	}
-	_, err := tx.Exec(ctx, `SELECT set_config($1,$2,true),set_config($3,'',true),set_config('aeon.principal_ids','',true),set_config('aeon.system','',true)`,
-		TenantSetting, tenantID, VisibleProjectsSetting)
+	_, err := tx.Exec(ctx, `SELECT set_config($1,$2,true),set_config($3,'',true),set_config($4,'',true),set_config('aeon.principal_ids','',true),set_config('aeon.system','',true)`,
+		TenantSetting, tenantID, VisibleProjectsSetting, VisibleNodesSetting)
 	return err
 }
 
@@ -99,7 +104,7 @@ func uuidLike(s string) bool {
 	return true
 }
 
-// EnterPrincipal installs this transaction's tenant and project visibility.
+// EnterPrincipal installs this transaction's tenant and project/node visibility.
 // A nil acting person uses the three-argument function. That function is the
 // legacy contract, and it is the only one present on a schema that has not
 // applied migration 1397. A present person needs the four-argument function;
