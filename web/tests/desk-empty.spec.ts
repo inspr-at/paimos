@@ -375,26 +375,30 @@ async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: numb
   await documentFonts(page)
   await page.screenshot({ path: testInfo.outputPath(`AEON-1631-failed-${width}-${theme}.png`) })
 
+  // The shared stability guard waits for animation frames, which a paused clock never paints, so the boxes are
+  // read directly here and must not move at all.
+  const boxes = (controls: Record<string, Locator>) => Promise.all(Object.entries(controls).map(async ([name, control]) => [name, await control.boundingBox()] as const))
   const still = { open: page.getByTestId('desk-tab-open'), decided: page.getByTestId('desk-tab-decided'), retry, icon: panel.locator('svg').first() }
-  await expectStableControls({ controls: still, scrollAreas: { page: page.locator('html') }, interactions: [
-    { name: 'the 3 s retry reads a count without its rows', run: async () => {
-      mode = 'partial'
-      const before = reads
-      await page.clock.runFor(1999); expect(reads, 'no retry before 3 s').toBe(before)
-      await page.clock.runFor(1); await expect.poll(() => reads, 'one retry at 3 s').toBe(before + 1)
-      await expect(panel.locator('.failed-line')).toHaveText('2 items are waiting, but the list couldn’t be loaded.')
-      // The tab shows the badge's own count beside the panel that says the list did not load.
-      await expect(page.getByTestId('desk-tab-open')).toHaveText(/^Open\s*2$/)
-      await expect(retrying).toBeVisible()
-      await neverClear('badge two, list empty')
-      await page.screenshot({ path: testInfo.outputPath(`AEON-1631-count-${width}-${theme}.png`) })
-    } },
-  ] })
+  const panelAt = await boxes(still)
+  mode = 'partial'
+  const beforeCount = reads
+  await page.clock.runFor(1999); expect(reads, 'no retry before 3 s').toBe(beforeCount)
+  await page.clock.runFor(1); await expect.poll(() => reads, 'one retry at 3 s').toBe(beforeCount + 1)
+  await expect(panel.locator('.failed-line')).toHaveText('2 items are waiting, but the list couldn’t be loaded.')
+  // The tab shows the badge's own count beside the panel that says the list did not load.
+  await expect(page.getByTestId('desk-tab-open')).toHaveText(/^Open\s*2$/)
+  await expect(retrying).toBeVisible()
+  await expect(retry).toBeEnabled()
+  await neverClear('badge two, list empty')
+  expect(await boxes(still), 'the count sentence moves neither Try again nor the tabs').toEqual(panelAt)
+  await noSideways(page, 'E count')
+  await page.screenshot({ path: testInfo.outputPath(`AEON-1631-count-${width}-${theme}.png`) })
   // The 10 s retry fills the rows; the list starts where the panel did.
   mode = 'good'
   const listAt = (await box(page.getByTestId('desk-list'))).y, before = reads
   await page.clock.runFor(9999); expect(reads, 'no retry before 10 s').toBe(before)
   await page.clock.runFor(1); await expect.poll(() => reads, 'one retry at 10 s').toBe(before + 1)
+  expect(await boxes({ open: still.open, decided: still.decided }), 'the tabs stay while rows replace the panel').toEqual(panelAt.slice(0, 2))
   const first = page.getByTestId('desk-row-u:accounts-1'), second = page.getByTestId('desk-row-u:accounts-2')
   await expect(first).toBeVisible(); await expect(second).toBeVisible()
   await expect(panel).toHaveCount(0)
@@ -403,26 +407,29 @@ async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: numb
   await page.screenshot({ path: testInfo.outputPath(`AEON-1631-filled-${width}-${theme}.png`) })
 
   // Rows from this visit stay when a later read misses the desk, with a quiet note in its reserved slot.
-  const stale = page.getByTestId('desk-stale')
-  await expectStableControls({ controls: { open: still.open, list: page.getByTestId('desk-list'), first, second, slot: page.getByTestId('desk-refresh-slot') }, scrollAreas: { page: page.locator('html') }, interactions: [
-    { name: 'a read without the desk keeps the rows and shows their time', run: async () => {
-      mode = 'partial'
-      const at = reads
-      await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-      await expect.poll(() => reads).toBeGreaterThan(at)
-      await expect(stale).toBeVisible()
-      await expect(stale).toHaveText(/^Showing the list from \d{2}:\d{2}\s*·\s*Try again$/)
-      await expect(stale.getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
-      await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
-      await expect(first).toBeVisible()
-      await page.screenshot({ path: testInfo.outputPath(`AEON-1631-stale-${width}-${theme}.png`) })
-    } },
-    { name: 'the 3 s retry clears the note in place', run: async () => {
-      mode = 'good'
-      const at = reads
-      await page.clock.runFor(3000); await expect.poll(() => reads).toBeGreaterThan(at)
-      await expect(stale).toHaveCount(0)
-      await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
-    } },
-  ] })
+  const stale = page.getByTestId('desk-stale'), list = page.getByTestId('desk-list')
+  const rows = { open: still.open, list, first, second, slot: page.getByTestId('desk-refresh-slot') }
+  await expect(list).toHaveAttribute('aria-busy', 'false')
+  const rowsAt = await boxes(rows)
+  mode = 'partial'
+  const staleCount = reads
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect.poll(() => reads).toBeGreaterThan(staleCount)
+  await expect(stale).toBeVisible()
+  await expect(stale).toHaveText(/^Showing the list from \d{2}:\d{2}\s*·\s*Try again$/)
+  await expect(stale.getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
+  await expect(list).toHaveAttribute('aria-busy', 'false')
+  await expect(first).toBeVisible(); await expect(second).toBeVisible()
+  await neverClear('stale rows')
+  expect(await boxes(rows), 'the stale note takes its reserved slot').toEqual(rowsAt)
+  await noSideways(page, 'E stale')
+  await page.screenshot({ path: testInfo.outputPath(`AEON-1631-stale-${width}-${theme}.png`) })
+  // The 3 s retry reads the desk again and the note leaves its slot as quietly.
+  mode = 'good'
+  const goodCount = reads
+  await page.clock.runFor(2999); expect(reads, 'no stale retry before 3 s').toBe(goodCount)
+  await page.clock.runFor(1); await expect.poll(() => reads, 'one stale retry at 3 s').toBe(goodCount + 1)
+  await expect(stale).toHaveCount(0)
+  await expect(list).toHaveAttribute('aria-busy', 'false')
+  expect(await boxes(rows), 'the note leaves without moving the rows').toEqual(rowsAt)
 }
