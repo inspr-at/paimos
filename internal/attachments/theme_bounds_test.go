@@ -3,6 +3,9 @@ package attachments
 
 import (
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -12,6 +15,78 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// Risk: a shared file exposes another attachment in its otherwise hidden project.
+func TestNodeGrantAttachmentIsolation(t *testing.T) {
+	d, p, shared := setup(t)
+	ctx := t.Context()
+	var project, sibling string
+	files := make([]string, 2)
+	err := db.InTenant(dbtest.Seed(ctx), d.App, p.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'PRJ-1','Project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, p.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET parent_id=$1 WHERE id=$2`, project, shared); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'ATT-2','Sibling',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, p.TenantID, project).Scan(&sibling); err != nil {
+			return err
+		}
+		for i, node := range []string{shared, sibling} {
+			if err := tx.QueryRow(ctx, `INSERT INTO attachments(tenant_id,node_id,sha256,name,content_type,size,created_by) VALUES($1,$2,repeat('a',64),'file','text/plain',4,$3) RETURNING id::text`, p.TenantID, node, p.ID).Scan(&files[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := Store{FilesDir: t.TempDir()}
+	path, err := store.path(p.TenantID, strings.Repeat("a", 64), "original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("test"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	mux := (&httpapi.Server{Pool: d.App, Modules: []httpapi.Module{New(d.App, store)}}).Handler()
+	for _, id := range files {
+		if w := request(t, mux, p, "GET", "/api/attachments/"+id+"/content", "", nil); w.Code != 200 || w.Body.String() != "test" {
+			t.Fatalf("fixture content missing: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if _, err := d.Admin.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	var role string
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'file_reader','Files') RETURNING id::text`, p.TenantID).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'attachments.read')`, p.TenantID, role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, p.TenantID, p.ID, role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'node',$3 FROM roles WHERE tenant_id=$1 AND key='viewer'`, p.TenantID, p.ID, shared); err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range files {
+		for _, suffix := range []string{"", "/content"} {
+			want := 200
+			if i == 1 {
+				want = 404
+			}
+			if w := request(t, mux, p, "GET", "/api/attachments/"+id+suffix, "", nil); w.Code != want {
+				t.Fatalf("attachment %d %s: status %d want %d: %s", i, suffix, w.Code, want, w.Body.String())
+			}
+		}
+	}
+}
 
 func TestMetadataLookupHonorsNodeVisibilityAndDeletion(t *testing.T) {
 	d, p, node := setup(t)

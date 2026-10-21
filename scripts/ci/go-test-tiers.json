@@ -3730,6 +3730,8 @@
     ,
     {"kind":"go","package":"internal/attachments","name":"TestMetadataLookupHonorsNodeVisibilityAndDeletion","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/attachments","name":"TestNodeGrantAttachmentIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/attachments","name":"TestSandboxHostBoundary","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestSandboxOrigin","tier":"GATED-FULL"}
@@ -4171,6 +4173,8 @@
     {"kind":"go","package":"internal/authz","name":"TestMissingScopeNamesLabelAndCodeOnlyAfterAuthentication","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestModelLineAndSimplePreferenceRoutes","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/authz","name":"TestNodeGrantVisibility","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestOperatorProjectBindingsUseRLSStoreAndEvents","tier":"GATED-FULL"}
     ,
@@ -6695,6 +6699,8 @@
     {"kind":"go","package":"internal/events","name":"TestMutationReceiptIsExactBoundedAndSuccessOnly","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestNodeChangesAreOmittedFromOtherEvents","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestNodeGrantEventIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestPersonCeilingEvents","tier":"ESSENTIAL"}
     ,
@@ -10771,6 +10777,8 @@
     {"kind":"go","package":"internal/search","name":"TestHybridMaskFallbackAndWorker","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/search","name":"TestLexicalPaginationFiltersAndTenants","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/search","name":"TestNodeGrantSearchIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/search","name":"TestPageHits","tier":"GATED-FULL"}
     ,
