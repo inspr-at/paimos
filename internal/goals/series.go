@@ -563,10 +563,23 @@ func (p *historicalProjection) values(ctx context.Context) (int, string, map[str
 		outcomeIDs = append(outcomeIDs, id)
 	}
 	sort.Strings(outcomeIDs)
+	live := []storedNode{}
 	for _, outcomeID := range outcomeIDs {
 		outcome := p.outcomes[outcomeID]
 		if outcome.Deleted || outcome.Parent != p.goal {
 			continue
+		}
+		outcome.ID = outcomeID
+		live = append(live, outcome)
+	}
+	// AEON-1618: people's linked items count one by one, as the current read
+	// does; a linked item whose work is gone has left the goal.
+	for _, outcome := range splitLinked(live) {
+		outcomeID := outcome.ID
+		if isLinkedItem(outcome) {
+			if n, ok := p.nodes[outcomeID]; !ok || !n.Present {
+				continue
+			}
 		}
 		facts := StateFacts{HandedOver: fieldString(outcome, "handed_over_at") != "", StateSet: State(fieldString(outcome, "state_set"))}
 		leaves := []LeafEstimate{}
@@ -614,7 +627,10 @@ func (p *historicalProjection) values(ctx context.Context) (int, string, map[str
 		}
 		sort.Slice(leaves, func(i, j int) bool { return leaves[i].ID < leaves[j].ID })
 		state := DeriveState(facts).State
-		states[outcomeID] = historicalState{Key: outcome.Key, State: string(state)}
+		// A linked item's key is its work item's, already tracked by its leaves.
+		if !isLinkedItem(outcome) {
+			states[outcomeID] = historicalState{Key: outcome.Key, State: string(state)}
+		}
 		inputs = append(inputs, ProgressOutcome{State: state, Leaves: leaves})
 	}
 	rollup := ComputeRollup(inputs)

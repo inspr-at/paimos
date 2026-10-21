@@ -84,6 +84,9 @@ type OutcomeView struct {
 	// only the first 20, and its latest unmerged pull request state.
 	KeysTotal int           `json:"keys_total,omitempty"`
 	Delivery  *EpicDelivery `json:"delivery,omitempty"`
+	// AEON-1618: a work item a person linked to the goal. Its id is the work
+	// item's id; it can be unlinked and has no ETA history of its own.
+	Linked bool `json:"linked,omitempty"`
 }
 type GoalView struct {
 	ID         string         `json:"id"`
@@ -273,6 +276,10 @@ func expandGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, out GoalView
 	if err != nil {
 		return out, err
 	}
+	children = splitLinked(children)
+	if len(children) > MaxOutcomes {
+		return out, invalid("items", "at most 200 items")
+	}
 	roots := []string{}
 	for _, n := range children {
 		roots = append(roots, n.Targets...)
@@ -290,11 +297,18 @@ func expandGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, out GoalView
 	if err != nil {
 		return out, err
 	}
-	keys, err := targetIdentities(ctx, tx, roots)
+	linked, err := linkedETAs(ctx, tx, children)
 	if err != nil {
 		return out, err
 	}
-	out, movingTargets := deriveGoal(out, children, facts, etas, keys, now)
+	for id, value := range linked {
+		etas[id] = value
+	}
+	keys, titles, err := targetIdentities(ctx, tx, roots)
+	if err != nil {
+		return out, err
+	}
+	out, movingTargets := deriveGoal(out, children, facts, etas, keys, titles, now)
 	out.Projects, err = projectBadges(ctx, tx, out.node.Project, out.targets)
 	if err != nil {
 		return out, err
@@ -314,11 +328,19 @@ func expandGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, out GoalView
 
 // deriveGoal is shared by detail, revalidation and the page-wide projection.
 // Database reads and visibility checks are completed before deriving values.
-func deriveGoal(out GoalView, children []storedNode, facts map[string][]leafFact, etas map[string]EffectiveETA, targetKeys map[string]string, now time.Time) (GoalView, []string) {
+// Callers split the implicit outcome first (splitLinked) and supply each
+// linked item's ETA under its id; titles name the linked work items.
+func deriveGoal(out GoalView, children []storedNode, facts map[string][]leafFact, etas map[string]EffectiveETA, targetKeys, titles map[string]string, now time.Time) (GoalView, []string) {
+	// A deleted linked work item leaves the goal; an outcome is hidden as a
+	// whole when any of its ends is, so a missing key always means deleted.
+	children = slices.DeleteFunc(slices.Clone(children), func(n storedNode) bool { return isLinkedItem(n) && targetKeys[n.ID] == "" })
 	sort.Slice(children, func(i, j int) bool {
 		a, _ := Position(children[i].Position).decimal()
 		b, _ := Position(children[j].Position).decimal()
 		if a.Cmp(b) == 0 {
+			if isLinkedItem(children[i]) && isLinkedItem(children[j]) && targetKeys[children[i].ID] != targetKeys[children[j].ID] {
+				return targetKeys[children[i].ID] < targetKeys[children[j].ID]
+			}
 			return children[i].ID < children[j].ID
 		}
 		return a.Cmp(b) < 0
@@ -383,6 +405,9 @@ func deriveGoal(out GoalView, children []storedNode, facts map[string][]leafFact
 		sort.Strings(keys)
 		value := etas[n.ID]
 		item := OutcomeView{ID: n.ID, Ref: fieldString(n, "outcome_ref"), Label: n.Title, Note: fieldString(n, "note"), Position: Position(n.Position), Keys: keys, EffectiveState: state, ETA: value, Passed: Passed(value.At, state.State, now), HandedOver: f.HandedOver}
+		if isLinkedItem(n) {
+			item.Label, item.Linked = titles[n.ID], true
+		}
 		if item.Note != "" && fieldString(n, "note_by") != "" {
 			item.NoteBy = fieldString(n, "note_by")
 			if at := fieldTime(n, "note_at"); !at.IsZero() {
@@ -469,21 +494,21 @@ func filterWorkRoots(ctx context.Context, tx pgx.Tx, ids []string) ([]string, er
 	}
 	return out, rows.Err()
 }
-func targetIdentities(ctx context.Context, tx pgx.Tx, ids []string) (map[string]string, error) {
-	out := map[string]string{}
-	rows, err := tx.Query(ctx, `SELECT id::text,key FROM nodes WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL ORDER BY key`, ids)
+func targetIdentities(ctx context.Context, tx pgx.Tx, ids []string) (map[string]string, map[string]string, error) {
+	keys, titles := map[string]string{}, map[string]string{}
+	rows, err := tx.Query(ctx, `SELECT id::text,key,title FROM nodes WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL ORDER BY key`, ids)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id, key string
-		if err := rows.Scan(&id, &key); err != nil {
-			return nil, err
+		var id, key, title string
+		if err := rows.Scan(&id, &key, &title); err != nil {
+			return nil, nil, err
 		}
-		out[id] = key
+		keys[id], titles[id] = key, title
 	}
-	return out, rows.Err()
+	return keys, titles, rows.Err()
 }
 func projectBadges(ctx context.Context, tx pgx.Tx, home string, targets []string) ([]ProjectBadge, error) {
 	out := []ProjectBadge{}

@@ -12,6 +12,9 @@ func init() {
 		"POST /api/goals":                 "nodes.write",
 		"PATCH /api/goals/{goalId}":       "nodes.write",
 		"PATCH /api/goals/status-note":    "nodes.write",
+		"DELETE /api/goals/{goalId}":      "nodes.write",
+		"POST /api/goals/{goalId}/work":   "nodes.write",
+		"DELETE /api/goals/{goalId}/work": "nodes.write",
 	})
 	registerDeclarations("goals", "project_filtered", ProjectFilteredRoutes, map[string]bool{
 		"GET /api/goals":                  true,
@@ -21,7 +24,10 @@ func init() {
 		"GET /api/goals/{goalId}/series":  true,
 	})
 	registerDeclarations("goals", "project_decided", ProjectDecidedRoutes, map[string]bool{
-		"POST /api/goals":           true,
-		"PATCH /api/goals/{goalId}": true,
+		"POST /api/goals":                 true,
+		"PATCH /api/goals/{goalId}":       true,
+		"DELETE /api/goals/{goalId}":      true,
+		"POST /api/goals/{goalId}/work":   true,
+		"DELETE /api/goals/{goalId}/work": true,
 	})
 }
