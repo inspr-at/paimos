@@ -227,6 +227,7 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 .link-work .f-ic { flex: none; display: inline-grid; place-items: center; width: 20px; margin-right: 2px; }
 .link-work:hover { background: var(--row-hover); }
 .link-work:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+@media (pointer: coarse) { .link-work { height: 44px; } }
 .fold-btn[aria-expanded="true"] .f-ic svg { transform: rotate(90deg); }
 
 /* Tablet and small laptops: the badge keeps only its faces; below 1200 the counts step aside. */
