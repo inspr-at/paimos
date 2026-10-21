@@ -202,6 +202,8 @@
     ,
     "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px light"
     ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:on a phone, ⋯ › Display… opens the same full-width Display sheet as the Filters link"
+    ,
     "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px dark"
     ,
     "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px light"
@@ -209,8 +211,6 @@
     "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px dark"
     ,
     "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px light"
-    ,
-    "browser:tests/aeon-1188-displayhome.spec.ts:with the header folded on a phone, the link opens the Display menu beside New"
     ,
     "browser:tests/aeon-1209-agents-head.spec.ts:390: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable"
     ,
@@ -1074,15 +1074,19 @@
     ,
     "browser:tests/project-header.spec.ts:filter triggers stay still until the popover closes and removals clear real filters"
     ,
-    "browser:tests/project-header.spec.ts:phone Display choices and pinned actions stay still through density changes"
-    ,
-    "browser:tests/project-header.spec.ts:phone Graph retains header density in the Display sheet"
-    ,
     "browser:tests/project-header.spec.ts:phone project crumb touch target › the whole 44px project crumb target accepts taps in dark"
     ,
     "browser:tests/project-header.spec.ts:phone project crumb touch target › the whole 44px project crumb target accepts taps in light"
     ,
+    "browser:tests/project-header.spec.ts:phones use the compact header without a density switch at 390px dark"
+    ,
+    "browser:tests/project-header.spec.ts:phones use the compact header without a density switch at 390px light"
+    ,
     "browser:tests/project-header.spec.ts:scrolling leaves density alone and section changes keep the view settings usable"
+    ,
+    "browser:tests/project-header.spec.ts:tablet Display choices and pinned actions stay still through density changes"
+    ,
+    "browser:tests/project-header.spec.ts:tablet Graph retains header density in the Display sheet"
     ,
     "browser:tests/project-header.spec.ts:three densities preserve controls at 1024px dark"
     ,
@@ -1091,10 +1095,6 @@
     "browser:tests/project-header.spec.ts:three densities preserve controls at 1440px dark"
     ,
     "browser:tests/project-header.spec.ts:three densities preserve controls at 1440px light"
-    ,
-    "browser:tests/project-header.spec.ts:three densities preserve controls at 390px dark"
-    ,
-    "browser:tests/project-header.spec.ts:three densities preserve controls at 390px light"
     ,
     "browser:tests/project-settings.spec.ts:AEON-1233: General edits, lifecycle and legacy links stay on the acted-on project and revision"
     ,
@@ -5790,6 +5790,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"desktop Display buttons open the Display menu at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"on a phone, ⋯ › Display… opens the same full-width Display sheet as the Filters link","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -5797,8 +5799,6 @@
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"with the header folded on a phone, the link opens the Display menu beside New","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"1024: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -12248,15 +12248,19 @@
     ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"filter triggers stay still until the popover closes and removals clear real filters","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone Display choices and pinned actions stay still through density changes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone Graph retains header density in the Display sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone project crumb touch target › the whole 44px project crumb target accepts taps in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone project crumb touch target › the whole 44px project crumb target accepts taps in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phones use the compact header without a density switch at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phones use the compact header without a density switch at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"scrolling leaves density alone and section changes keep the view settings usable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/project-header.spec.ts","name":"tablet Display choices and pinned actions stay still through density changes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/project-header.spec.ts","name":"tablet Graph retains header density in the Display sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"three densities preserve controls at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12265,10 +12269,6 @@
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"three densities preserve controls at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"three densities preserve controls at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/project-header.spec.ts","name":"three densities preserve controls at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/project-header.spec.ts","name":"three densities preserve controls at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-list.spec.ts","name":"? opens the shortcut sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

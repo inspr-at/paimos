@@ -1322,7 +1322,7 @@ defineExpose({
                 <span v-if="!entry.tree?.hasChildren || (selectable && selecting)" class="phone-status" :aria-label="statusMeta(entry.row.state).label" role="img" data-status-motion><StatusIcon :state="entry.row.state" :size="16" /></span>
               </td>
               <td class="c-title phone-title" data-column-id="title"><a class="title-link phone-title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text phone-title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a><TicketWorkers v-if="assigneeWorkers(entry.row).length" class="title-workers" variant="cue" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" /></td>
-              <td class="phone-meta"><span class="key">{{ entry.row.key }}</span><span class="phone-separator" aria-hidden="true">{{ '\u00a0·\u00a0' }}</span><span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span><time v-else :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }).replace(/(\d)([mhd])\b/g, '$1\u00a0$2').replace(/(\d)\s+(?=\S)/g, '$1\u00a0') }}</time></td>
+              <td class="phone-meta"><span class="key">{{ entry.row.key }}</span><span class="phone-separator" aria-hidden="true">{{ '\u00a0·\u00a0' }}</span><time :class="{ 'has-live': liveLabels?.has(entry.row.id) }" :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }).replace(/(\d)([mhd])\b/g, '$1\u00a0$2').replace(/(\d)\s+(?=\S)/g, '$1\u00a0') }}</time><template v-if="liveLabels?.has(entry.row.id)"><span class="phone-separator" aria-hidden="true">{{ '\u00a0·\u00a0' }}</span><span class="live-label">{{ liveLabels.get(entry.row.id) }}</span></template></td>
               <td class="phone-owner"><button type="button" class="assignee-btn phone-assignee" :disabled="!mayAssign(entry.row)" :aria-label="`Assignee: ${entry.row.assignee?.name ?? 'Unassigned'}. Change assignee of ${entry.row.key}`" aria-haspopup="menu" @click.stop="emit('assignee', entry.row, $event.currentTarget as HTMLElement)"><PersonAvatar v-if="entry.row.assignee" :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="24" /></button></td>
             </template>
             <template v-else>
@@ -1379,7 +1379,7 @@ defineExpose({
                   type="button" class="status-btn" :aria-label="`Status: ${statusMeta(entry.row.state).label}${queued(entry.row) ? `, queued #${queued(entry.row)!.position}` : ''}. Change status of ${entry.row.key}`" aria-haspopup="menu"
                   :data-tip="narrowStatus ? `${statusMeta(entry.row.state).label}${queued(entry.row) ? ` · #${queued(entry.row)!.position}` : ''}` : undefined" @click.stop="statusClick($event, entry.row)"
                 >
-                  <StatusIcon :state="entry.row.state" />
+                  <StatusIcon :state="entry.row.state" :name="phone ? statusMeta(entry.row.state).label : undefined" />
                   <span>{{ statusMeta(entry.row.state).label }}</span><span v-if="queued(entry.row)" class="q-pos">· #{{ queued(entry.row)!.position }}</span>
                 </button><QueueStaleHint :row="entry.row" /></div>
               </td>
@@ -1970,6 +1970,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
      so a third line never shows through the reach below (AEON-140). */
   /* The whole card opens the ticket, so the title needs no padded reach of its own. */
   .title-link { flex: 1 1 calc(100% - 30px - var(--person-wait-room, 0px)); min-width: 0; white-space: normal; font-size: 14.5px; line-height: 1.35; }
+  /* A live label shares the title line. The default basis is nearly the full row, which wrapped the 20px pill and grew the card. */
+  .title-cell:has(.live-label) .title-link { flex: 1 1 0%; min-width: 0; }
   .title-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
   .child-count { display: none; }
   .row-actions { display: none; }
@@ -1984,11 +1986,16 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .guide { display: none; }
   /* The chevron area sits left of the title with a generous tap target. */
   .tree-row .title-cell { position: relative; padding-left: 0; }
+  /* display:contents hoisted the twisty out of a stacking context, so the epic
+     line painted over the bottom of the 44px ring (z-index on the twisty alone
+     did not). A flex tree keeps the 36px control and paints that ring above it. */
+  .tree-row .tree { display: flex; width: auto !important; position: relative; z-index: 2; overflow: visible; align-self: flex-start; }
   /* Centre the shared hit area on the arrow; desktop indentation is already
      represented by the card's padding, so it must not offset the phone arrow. */
-  .twisty { position: relative; inset: auto; flex: none; width: 36px; height: 36px; margin: 4px; }
+  .twisty { position: relative; inset: auto; z-index: 1; flex: none; width: 36px; height: 36px; margin: 4px; }
+  .twisty::before { width: 44px; height: 44px; transform: none; top: 50%; left: 50%; margin: -22px 0 0 -22px; }
   .twisty-spacer { display: block; flex-shrink: 0; width: 44px; }
-  .tree-row .tree { display: contents; }
+  .tree-row .epic-progress { position: relative; z-index: 0; }
   /* The arrow slot (44), type marker (22) and two gaps (16) share one line.
      Reserve all three so a long title cannot wrap under the arrow's reach. */
   .tree-row .title-link { flex-basis: calc(100% - 82px - var(--person-wait-room, 0px)); }
@@ -2094,8 +2101,10 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .phone-rows .ticket-row .phone-meta { grid-area: meta; display: flex !important; align-items: center; min-width: 0; white-space: nowrap; line-height: 16px; color: var(--ink-3); font-size: 11.5px; }
 .phone-meta .key { flex: none; color: var(--teal-ink); font-size: 11.5px; line-height: 16px; }
 .phone-meta .phone-separator { flex: none; }
-.phone-meta .live-label { height: 16px; min-width: 0; padding: 0; overflow: hidden; text-overflow: ellipsis; background: transparent; border-radius: 0; box-shadow: none; font-size: 11.5px; line-height: 16px; }
+.phone-meta .live-label { flex: 0 1 auto; height: 16px; min-width: 0; padding: 0; overflow: hidden; text-overflow: ellipsis; background: transparent; border-radius: 0; box-shadow: none; font-size: 11.5px; line-height: 16px; }
 .phone-meta time { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+/* A live mark is plain text after "KEY · when" on line 2 (Tick's AEON-1615 ruling): no pill, and the row keeps its 56 px. */
+.phone-meta time.has-live { flex: 0 1 auto; }
 .phone-rows .ticket-row .phone-owner { grid-area: owner; align-self: center; }
 .phone-assignee { display: grid; place-items: center; width: 44px; height: 44px; margin: 0; border: 0; padding: 0; background: transparent; border-radius: 8px; }
 .phone-assignee:disabled { opacity: 1; }
@@ -2125,6 +2134,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .phone-meta .key { grid-area: key; font-size: 12px; }
   .phone-meta .phone-separator { display: none; }
   .phone-meta time, .phone-meta .live-label { grid-area: when; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; text-align: right; }
+  /* One line has one "when" slot: the live mark takes it. */
+  .phone-meta time.has-live { display: none; }
   .phone-rows .phone-check, .phone-fold { top: -13px; }
   .phone-rows .ghost td.c-key { grid-area: key; }
   .phone-rows .list-foot.end.phone-only { display: none; }

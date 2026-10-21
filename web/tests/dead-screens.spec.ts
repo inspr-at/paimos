@@ -3,7 +3,7 @@
 // and captures of the existing UI at phone, tablet and desktop sizes.
 import { expect, test, type Page } from '@playwright/test'
 import { agentData, mockAgents } from './agents-fixtures'
-import { fixtures, me, mockWork } from './work-fixtures'
+import { fixtures, me, mockWork, showProjectHead } from './work-fixtures'
 import { HOST_A, mockLeadFlow } from './lead-flow-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
@@ -46,6 +46,8 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
     })
     await page.goto('/p/PHAROS')
     await theme(page, look)
+    // Compact chrome (AEON-1460, D11): the lead band is in the project head, shown from the crumb's sheet.
+    await showProjectHead(page)
     const band = page.locator('section.lead')
     const computers = band.getByRole('button', { name: 'Check computers' })
     await expectStableControls({ controls: { computers }, scrollAreas: { band }, interactions: [

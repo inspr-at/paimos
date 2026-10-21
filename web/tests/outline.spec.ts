@@ -750,7 +750,11 @@ for (const view of ['outline', 'list']) for (const audience of ['viewer', 'empty
       const box = (await pill.boundingBox())!
       expect(Math.abs(box.x + box.width / 2 - 195)).toBeLessThan(1)
       expect(box.height).toBeGreaterThanOrEqual(44)
-      for (const control of await page.locator('.toolbar-wrap button, .toolbar-wrap input, .bulk-bar, .app-footer').all()) {
+      // Tick's v1.1 ruling (AEON-1615): "385 fix2 chip: invariants kept, control list rewritten to 1460's DOM
+      // (no phone footer)". The controls are the 44 px compact toolbar's and the bulk bar; phones have no footer.
+      await expect(page.locator('.app-footer')).toHaveCount(0)
+      expect(Math.abs((await page.locator('.compact-ticket-toolbar').boundingBox())!.height - 44)).toBeLessThanOrEqual(.5)
+      for (const control of await page.locator('.compact-ticket-toolbar button, .compact-ticket-toolbar input, .bulk-bar, .bulk-bar button').all()) {
         if (!await control.isVisible()) continue
         const other = (await control.boundingBox())!
         const overlap = box.x < other.x + other.width && box.x + box.width > other.x && box.y < other.y + other.height && box.y + box.height > other.y
@@ -769,7 +773,12 @@ for (const view of ['outline', 'list']) for (const audience of ['viewer', 'empty
     await bar.getByRole('button', { name: 'Search tickets', exact: true }).click()
     await search.click(); await expect(search).toBeFocused()
     await expect(pill).toBeVisible()
-    await page.keyboard.press('Escape'); await page.keyboard.press('Escape')
+    // The first Escape leaves the field and keeps the search line open; the second closes it.
+    await page.keyboard.press('Escape')
+    await expect(search).toBeVisible()
+    await expect(search).not.toBeFocused()
+    await expect(pill).toBeVisible()
+    await page.keyboard.press('Escape')
     await expect(bar.getByRole('search')).toHaveCount(0)
     await openListFilters(page)
     await page.keyboard.press('Escape')

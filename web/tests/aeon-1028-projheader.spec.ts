@@ -6,7 +6,7 @@
 // the other two header views changing; the removed ticket count coming back.
 import { mkdirSync } from 'node:fs'
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { fixtures, mockWork, mockView } from './work-fixtures'
+import { fixtures, mockWork, mockView, openListDisplay } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { toggleProjectHead } from './helpers/compact'
 
@@ -25,6 +25,13 @@ const display = (page: Page) => toolbar(page).getByRole('button', { name: /^Disp
 const create = (page: Page) => toolbar(page).getByRole('button', { name: 'New ticket', exact: true })
 const search = (page: Page) => page.getByRole('searchbox', { name: 'Search tickets in this project' })
 const menu = (page: Page) => page.getByRole('dialog', { name: 'Display options' })
+// AEON-1460 (D11, Tick's v1.1 ruling for AEON-1615): under 720 px the project ticket list uses the compact
+// toolbar. Display… lives in ⋯, the saved views and Needs attention in the view control, and the crumb's
+// sheet shows the project head for the visit without changing the desktop density.
+const phoneTools = (page: Page) => toolbar(page).locator('.phone-ticket-tools')
+const more = (page: Page) => toolbar(page).getByRole('button', { name: 'More view actions', exact: true })
+const viewControl = (page: Page) => toolbar(page).getByRole('button', { name: /^View: / })
+const head = (page: Page) => page.locator('#project-header-fold')
 const density = (page: Page, name: string) => page.getByRole('radio', { name: `${name} project header`, exact: true })
 const projectPage = (page: Page) => page.locator('.project-page')
 const mac = (page: Page) => page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
@@ -58,18 +65,27 @@ async function open(page: Page, width: number, theme = 'light', height = 900, ur
   await mockWork(page, data)
   await page.goto(url)
   await expect(projectPage(page)).toHaveClass(/header-compact/)
-  await expect(search(page)).toBeVisible()
+  await expect(width < 720 ? phoneTools(page) : search(page)).toBeVisible()
   await settled(page)
 }
 // The phone folds the header from the project crumb's sheet (AEON-1459, D11); wider windows with the header switch.
 async function fold(page: Page, width: number, to: 'collapsed' | 'compact' | 'comfortable' = 'collapsed') {
-  if (width < 720) { if (await projectPage(page).evaluate((el, name) => el.classList.contains(`header-${name}`), to)) return; await toggleProjectHead(page) }
-  else await density(page, to === 'collapsed' ? 'Collapsed' : to === 'compact' ? 'Compact' : 'Comfortable').click()
+  if (width < 720) {
+    // Compact chrome has no density switch: the head is hidden ("collapsed") or shown for the visit.
+    const shown = to !== 'collapsed'
+    if (await head(page).isVisible() !== shown) await toggleProjectHead(page)
+    if (shown) await expect(head(page)).toBeVisible(); else await expect(head(page)).toBeHidden()
+    await expect(projectPage(page), 'the desktop density is left alone').toHaveClass(/header-compact/)
+    await settled(page)
+    return
+  }
+  await density(page, to === 'collapsed' ? 'Collapsed' : to === 'compact' ? 'Compact' : 'Comfortable').click()
   await expect(projectPage(page)).toHaveClass(new RegExp(`header-${to}`))
   await settled(page)
 }
 async function openMenu(page: Page) {
-  await display(page).click()
+  if (await phoneTools(page).count()) await openListDisplay(page)
+  else await display(page).click()
   await expect(menu(page)).toBeVisible()
   // The menu counts its columns when it opens, before it is placed.
   await expect(menu(page).locator('.menu-body')).toHaveAttribute('data-columns', /\d/)
@@ -106,6 +122,21 @@ test.describe('the All tickets pill', () => {
   for (const width of [1440, 400]) {
     test(`ends with the same room as it starts with at ${width}px`, async ({ page }) => {
       await open(page, width)
+      if (width < 720) {
+        // No saved-view strip on compact (D11 §3): the view control lists the views as full 44 px rows.
+        await expect(page.locator('.view-bar')).toBeHidden()
+        await viewControl(page).click()
+        const views = page.getByRole('menu', { name: 'Ticket views' })
+        for (const name of ['All open', 'Laufende Betriebsprüfung und Berechtigungsverwaltung']) {
+          const item = views.getByRole('menuitemradio', { name, exact: true })
+          await expect(item).toBeVisible()
+          const rect = (await item.boundingBox())!
+          expect(rect.height, `${name}: a 44px row`).toBeGreaterThanOrEqual(44)
+          expect(rect.x, `${name}: inside the window`).toBeGreaterThanOrEqual(0)
+          expect(rect.x + rect.width, `${name}: inside the window`).toBeLessThanOrEqual(width)
+        }
+        return
+      }
       const pill = page.locator('.view-bar .view-tab.plain')
       await expect(pill).toBeVisible()
       const { left, right } = await pill.evaluate(el => { const style = getComputedStyle(el); return { left: parseFloat(style.paddingLeft), right: parseFloat(style.paddingRight) } })
@@ -132,8 +163,10 @@ test.describe('the ticket count', () => {
         await expect(toolbar(page).locator('.count-live'), `${mode}: no count slot`).toHaveCount(0)
         await expect(toolbar(page), `${mode}: no count text`).not.toContainText(/\d+ tickets?/)
         if (width < 720) {
+          await expect(phoneTools(page).locator('.phone-count'), `${mode}: portrait keeps the count off the toolbar`).toBeHidden()
           await expect(page.locator('footer.app-footer'), `${mode}: no footer bar`).toHaveCount(0)
-          await expect(page.locator('.list-foot.end'), `${mode}: the list's end keeps the count`).toHaveText(/^\d+ tickets?$/i)
+          // D11 §4: "{N} tickets" with a no-break space.
+          await expect(page.locator('.list-foot.end'), `${mode}: the list's end keeps the count`).toHaveText(/^\d+\stickets?$/i)
         } else await expect(page.locator('footer.app-footer .sum'), `${mode}: the footer keeps the count`).toHaveAttribute('aria-label', /\d+ tickets?/)
       }
     })
@@ -156,6 +189,26 @@ test.describe('collapsed header: Display beside New', () => {
         await open(page, width, theme, height)
         await expect(display(page), 'compact header: the toolbar shows no Display of its own').toHaveCount(0)
         await fold(page, width)
+        if (width < 720) {
+          // Phones (D11 §3, 1460 §3): Display… is in ⋯, which ends the one 44 px line right after New.
+          const dots = (await more(page).boundingBox())!, added = (await create(page).boundingBox())!
+          expect(added.x + added.width, 'New ends before ⋯ starts').toBeLessThanOrEqual(dots.x + .5)
+          expect(dots.x - (added.x + added.width), 'nothing between them').toBeLessThanOrEqual(16)
+          expect(Math.abs(dots.y + dots.height / 2 - (added.y + added.height / 2)), 'same line').toBeLessThanOrEqual(1)
+          for (const target of [dots, added]) { expect(target.width).toBeGreaterThanOrEqual(44); expect(target.height).toBeGreaterThanOrEqual(44) }
+          await expect(viewControl(page)).toBeVisible()
+          await expect(toolbar(page).getByRole('button', { name: /^Filter(?: tickets|:)/ })).toBeVisible()
+          await viewControl(page).click()
+          for (const name of ['List', 'Outline', 'Graph']) await expect(page.getByRole('menu', { name: 'Ticket views' }).getByRole('menuitemradio', { name, exact: true })).toBeVisible()
+          await page.keyboard.press('Escape')
+          await capture(page, `${width}-${theme}-collapsed`)
+          await more(page).click()
+          await expect(page.getByRole('menu', { name: 'More view actions' }).getByRole('menuitem', { name: 'Display…', exact: true })).toBeVisible()
+          await page.keyboard.press('Escape')
+          await openMenu(page)
+          await capture(page, `${width}-${theme}-collapsed-menu`)
+          return
+        }
         await expect(page.locator('#project-header-fold')).toBeHidden()
         await expect(display(page)).toBeVisible()
         const shown = (await display(page).boundingBox())!, added = (await create(page).boundingBox())!
@@ -520,17 +573,29 @@ test.describe('collapsed header: the menu never scrolls', () => {
     })
     await done.click()
     await expect(menu(page)).toBeHidden()
-    await expect(display(page)).toBeFocused()
+    // Opened from ⋯ › Display… on a phone (1460 §5), so focus goes back to ⋯.
+    await expect(more(page)).toBeFocused()
   })
 
   test('phone targets are 44px', async ({ page }) => {
     await open(page, 400, 'light', 800)
     await fold(page, 400)
+    // On the compact chrome the same destinations sit where 1460 puts them: sections in the crumb's
+    // sheet, Needs attention and the saved views in the view control, Hide done in ⋯, Group by in Display….
+    const measure = async (target: Locator) => { await expect(target).toBeVisible(); expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(43.5) }
+    await page.locator('.app-header .crumb-sheet').click()
+    await measure(page.getByRole('menuitemradio', { name: 'Knowledge' }))
+    await page.keyboard.press('Escape')
+    await viewControl(page).click()
+    const views = page.getByRole('menu', { name: 'Ticket views' })
+    await measure(views.getByRole('menuitem', { name: 'Needs attention' }))
+    await measure(views.getByRole('menuitemradio', { name: 'All open', exact: true }))
+    await page.keyboard.press('Escape')
+    await more(page).click()
+    await measure(page.getByRole('menu', { name: 'More view actions' }).getByRole('menuitemcheckbox', { name: 'Hide done' }))
+    await page.keyboard.press('Escape')
     await openMenu(page)
-    for (const target of [menu(page).getByRole('button', { name: 'Knowledge' }), menu(page).getByRole('link', { name: 'Needs attention' }), menu(page).getByRole('link', { name: 'All tickets' }), menu(page).getByRole('button', { name: 'Choose what Hide hides' }), menu(page).getByRole('radio', { name: 'Status', exact: true })]) {
-      const rect = (await target.boundingBox())!
-      expect(rect.height).toBeGreaterThanOrEqual(43.5)
-    }
+    await measure(menu(page).getByRole('radio', { name: 'Status', exact: true }))
   })
 })
 
@@ -567,10 +632,10 @@ test.describe('folding and unfolding the header', () => {
     test(`moves nothing in the toolbar at ${width}px (±0.5px)`, async ({ page }) => {
       await open(page, width)
       const bar = toolbar(page)
-      const controls: Record<string, Locator> = {
-        views: bar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), new: create(page),
-        ...(width <= 600 ? { filters: bar.getByRole('button', { name: 'Filters', exact: true }) } : { filter: bar.getByRole('button', { name: 'Add a filter' }), facets: bar.locator('.facets') }),
-      }
+      // Phones measure the compact toolbar's own controls (D11 §3); wider windows the classic bar.
+      const controls: Record<string, Locator> = width < 720
+        ? { views: viewControl(page), search: bar.getByRole('button', { name: 'Search tickets', exact: true }), filter: bar.getByRole('button', { name: /^Filter(?: tickets|:)/ }), new: create(page), more: more(page) }
+        : { views: bar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), new: create(page), filter: bar.getByRole('button', { name: 'Add a filter' }), facets: bar.locator('.facets') }
       await fold(page, width)
       // The folded header is the baseline; every other view and the way back must match it.
       const steps = width <= 600
@@ -622,6 +687,21 @@ test.describe('folding and unfolding the header', () => {
       const sections = menu(page).getByRole('navigation', { name: 'Project sections' })
       const group = menu(page).getByRole('radiogroup', { name: 'Group by' })
       const hide = menu(page).getByRole('checkbox', { name: /^Hide / })
+      if (width < 720) {
+        // The phone's Display… sheet (1460 §5) carries the display choices; sections, views and Hide done
+        // live in the crumb's sheet, the view control and ⋯. Its own controls and pinned Done stay still.
+        await expect(menu(page).locator('.display-menu.as-sheet')).toBeVisible()
+        await expectStableControls({
+          controls: { frame: menu(page), title: menu(page).getByRole('heading', { name: 'Display' }), done: menu(page).getByRole('button', { name: /^Done/ }), group, none: group.getByRole('radio', { name: 'None', exact: true }), status: group.getByRole('radio', { name: 'Status', exact: true }) },
+          scrollAreas: { body: menu(page).locator('.menu-body') },
+          interactions: [
+            { name: 'group by status', run: async () => { await group.getByRole('radio', { name: 'Status', exact: true }).click(); await expect(page).toHaveURL(/group=status/) } },
+            { name: 'group by none', run: async () => { await group.getByRole('radio', { name: 'None', exact: true }).click(); await expect(page).not.toHaveURL(/group=/) } },
+            { name: 'group by status again', run: async () => { await group.getByRole('radio', { name: 'Status', exact: true }).click(); await expect(page).toHaveURL(/group=status/) } },
+          ],
+        })
+        return
+      }
       await expectStableControls({
         controls: {
           frame: menu(page), sections, tickets: sections.getByRole('button', { name: 'Tickets' }), knowledge: sections.getByRole('button', { name: 'Knowledge' }), attention: sections.getByRole('link', { name: 'Needs attention' }),

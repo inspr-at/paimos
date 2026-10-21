@@ -6,7 +6,9 @@ views and layouts open from the view name; search opens over that same line.
 Filter, New and More remain available without moving the toolbar.
 
 Portrait rows occupy 56 px: status and title above key and update time, with a
-24 px assignee avatar in a reserved 44 px target. Short landscape rows occupy
+24 px assignee avatar in a reserved 44 px target. A live update (for example
+“Deleted”) follows the update time as plain text on that second line, so the row
+keeps its height; short landscape rows show it in place of the time. Short landscape rows occupy
 44 px and show these facts on one line. Desktop column preferences remain saved;
 phone rows show these essentials regardless of that selection. The whole row
 opens its ticket. Status, priority, labels, estimates and progress remain in the

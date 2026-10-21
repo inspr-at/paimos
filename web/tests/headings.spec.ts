@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { mkdirSync } from 'node:fs'
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { fixtures, me, mockView, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, me, mockView, mockWork, watchErrors, showProjectHead } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
@@ -184,7 +184,17 @@ test.describe('bounded heading reader', () => {
     }
   }
 })
-function projectControls(page: Page, width: number) {
+function projectControls(page: Page, width: number): Record<string, Locator> {
+  // Compact chrome (AEON-1460, D11): one 44 px toolbar line; saved views and layouts live in its view control.
+  if (width < 720) {
+    const bar = page.locator('.compact-ticket-toolbar')
+    return {
+      tabs: page.getByRole('tablist', { name: 'Project sections' }),
+      view: bar.getByRole('button', { name: /^View: / }), search: bar.getByRole('button', { name: 'Search tickets', exact: true }),
+      filter: bar.getByRole('button', { name: /^Filter(?: tickets|:)/ }), add: page.getByRole('button', { name: 'New ticket', exact: true }),
+      overflow: bar.getByRole('button', { name: 'More view actions', exact: true }),
+    }
+  }
   return {
     tabs: page.getByRole('tablist', { name: 'Project sections' }),
     views: page.getByRole('navigation', { name: 'Saved views' }),
@@ -283,6 +293,8 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     Object.assign(data.projects[0]!, { title: longTitle, description: projectDescription })
     await mockWork(page, data)
     await page.goto('/p/PHAROS/tickets')
+    // Compact chrome (AEON-1460, D11): the crumb's sheet shows the project head for the visit.
+    await showProjectHead(page)
     // AEON-639's compact title keeps two lines and exposes the full identity.
     const title = page.locator('#project-title')
     await expect(title).toHaveAttribute('data-tip', longTitle)
@@ -657,6 +669,7 @@ test.describe('touch full-text reveal', () => {
       data.projects[0]!.description = text
       await mockWork(page, data)
       await page.goto('/p/PHAROS/tickets')
+      await showProjectHead(page)
       const more = page.locator('.description-more'), full = page.locator('#project-description-full')
       await expectStableControls({
         controls: { more, ...projectControls(page, 390) },

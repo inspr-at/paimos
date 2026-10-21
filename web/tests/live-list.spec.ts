@@ -339,17 +339,27 @@ test('a list read that fails is tried again', async ({ browser }) => {
   } finally { await close() }
 })
 
+// Tick's v1.1 ruling (AEON-1615): "live-list:342: row 56 +-1, the live mark as text on line 2 (no pill), fits 390."
+// Keep the historical case title ("the pill"): the immutable CI replay corpus
+// pins its identity, and a renamed drift case widens the full gate to the file.
 test('on a phone the marked row, the pill and the deleted selection fit 390 px', async ({ browser }) => {
   for (const colorScheme of ['light', 'dark'] as const) {
     const { a, b, errorsA, close } = await openBoth(browser, '/p/PHAROS/tickets', { a: { width: 390, height: 844 }, colorScheme })
     try {
       await startTicketSelection(a)
       for (const key of ['PHAROS-11', 'PHAROS-14']) await a.getByRole('checkbox', { name: `Select ${key}` }).click()
-      const row = a.locator('#row-n-4'), bulk = bulkBar(a)
-      await expectStableControls({ controls: { row, title: row.locator('.title-link'), clear: bulk.getByRole('button', { name: 'Clear the selection', exact: true }), status: bulk.getByRole('button', { name: 'Status', exact: true }) }, interactions: [
+      const row = a.locator('#row-n-4'), bulk = bulkBar(a), other = a.locator('#row-n-1')
+      await expectStableControls({ controls: { row, other, title: row.locator('.title-link'), clear: bulk.getByRole('button', { name: 'Clear the selection', exact: true }), status: bulk.getByRole('button', { name: 'Status', exact: true }) }, interactions: [
         { name: 'remote deletion keeps the row and selection actions still', run: async () => {
           await deleteInPanel(b, 'PHAROS-14')
           await expect(row.locator('.live-label')).toHaveText('Deleted')
+          // The mark is text after "KEY · when" on line 2, without a pill, and the row keeps 56 px.
+          const mark = row.locator('.phone-meta .live-label')
+          await expect(row.locator('.phone-meta')).toHaveText(/^PHAROS-14\s·\s.+\s·\sDeleted$/)
+          expect(await mark.evaluate(el => { const style = getComputedStyle(el); return { background: style.backgroundColor, shadow: style.boxShadow, radius: style.borderRadius } })).toEqual({ background: 'rgba(0, 0, 0, 0)', shadow: 'none', radius: '0px' })
+          const metaBox = (await row.locator('.phone-meta').boundingBox())!, markBox = (await mark.boundingBox())!
+          expect(markBox.y + markBox.height, 'the mark stays on line 2').toBeLessThanOrEqual(metaBox.y + metaBox.height + .5)
+          expect(Math.abs((await row.boundingBox())!.height - 56), 'a 56 px row').toBeLessThanOrEqual(1)
           await expect(bulk).toHaveAccessibleName('2 selected tickets')
           await expect(bulk.locator('.gone')).toHaveText('1 selected ticket was deleted')
         } },
