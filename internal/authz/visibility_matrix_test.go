@@ -112,7 +112,8 @@ func TestNodeGrantVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = db.InTenant(tenant.WithPrincipal(ctx, person), w.d.App, w.tid, func(tx pgx.Tx) error {
-		if err := RequireTx(ctx, tx, person, "nodes.write", Scope{ProjectID: w.projectA}); !errors.Is(err, ErrForbidden) {
+		var denied *denial
+		if err := RequireTx(ctx, tx, person, "nodes.write", Scope{ProjectID: w.projectA}); !errors.Is(err, ErrForbidden) || !errors.As(err, &denied) || denied.reason != "missing_project_access" {
 			t.Fatalf("node grant authorized write, or wrong error: %v", err)
 		}
 		// Re-entry must remove a previous principal's individual grants too.
@@ -142,7 +143,7 @@ func TestNodeGrantVisibility(t *testing.T) {
 	// Explicit sharing must still obey both independent restrictive policies.
 	var rule, outcome string
 	err = db.InTenant(dbtest.Seed(ctx), w.d.App, w.tid, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.rules_write','on',true)`); err != nil {
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.rules_write','on',true),set_config('aeon.rules_access','on',true)`); err != nil {
 			return err
 		}
 		for _, slug := range []string{"aeon_rule", "outcome"} {
