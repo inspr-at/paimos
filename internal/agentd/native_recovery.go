@@ -161,7 +161,7 @@ func (r *nativeRecovery) ProveAbsent(ctx context.Context, w nativecontract.Write
 	if err != nil {
 		return nativerecovery.Absence{}, err
 	}
-	digest, err := nativereceipts.Digest([]any{w.Binding, w.AttemptID, x})
+	digest, err := nativeAbsenceDigest(w, x)
 	if err != nil {
 		return nativerecovery.Absence{}, err
 	}
@@ -172,7 +172,7 @@ func (r *nativeRecovery) ConfirmAbsent(ctx context.Context, w nativecontract.Wri
 	if err != nil {
 		return err
 	}
-	expected, err := nativereceipts.Digest([]any{w.Binding, w.AttemptID, a.Evidence})
+	expected, err := nativeAbsenceDigest(w, a.Evidence)
 	if err != nil {
 		return err
 	}
@@ -246,4 +246,10 @@ var _ nativerecovery.Runtime = (*nativeRecovery)(nil)
 
 func nativeRecoveryUnconfirmed(stage string) error {
 	return fmt.Errorf("native recovery %s: %w", stage, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed))
+}
+
+func nativeAbsenceDigest(w nativecontract.WriterRecord, x nativecontract.ExitEvidence) (string, error) {
+	// Hash bounded, content-free facts without serializing a local authority
+	// type. ExitEvidence intentionally refuses public JSON marshaling.
+	return nativereceipts.Digest([]any{w.Binding, w.AttemptID, x.ProcessIdentityDigest, x.RootExited, x.GroupAbsent, x.ObservedAt, x.Reason})
 }
