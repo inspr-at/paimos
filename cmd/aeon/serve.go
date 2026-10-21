@@ -473,6 +473,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		Brand:                   &productBrand,
 		PublicURL:               cfg.PublicURL,
 		AttachmentSandboxOrigin: attachmentsMod.Sandbox.Origin(),
+		SiblingOrigins:          cfg.Instances.Origins(),
 		// AEON-430: the footer names the running release from /api/version.
 		Codename: historyMod.CodenameOf,
 		Web:      webFS,

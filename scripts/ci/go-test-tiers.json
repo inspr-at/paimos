@@ -7646,6 +7646,8 @@
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestRequestOnCancelledConnectionClosesIt","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/httpapi","name":"TestSiblingOriginsJoinConnectSrcOnAppDocumentsOnly","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/httpapi","name":"TestSlowBodyRouteClassesCloseConnection","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestTransportCountersAndConnectionLog","tier":"ESSENTIAL"}

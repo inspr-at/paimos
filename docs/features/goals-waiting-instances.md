@@ -55,7 +55,10 @@ there. No server ever talks to another instance, and no key, token or secret is 
    `Access-Control-Allow-Origin` with credentials. Signing out clears it, a revoked
    session revokes it, and a non-owner who still holds one has it cleared on their next Goals
    visit. A stale copy never clears the session cookie of the instance it was read from.
-5. **Limit.** Browsers that block third-party cookies (Safari, Firefox's strict mode,
+5. Application documents add the sibling origins to their Content-Security-Policy
+   `connect-src` (portal documents and the API keep theirs), so the browser may make
+   these reads at all.
+6. **Limit.** Browsers that block third-party cookies (Safari, Firefox's strict mode,
    Chromium with third-party cookies off) never send the copy, so the sibling shows its
    quiet "couldn't be read" line. That is the honest result, not an error.
 
