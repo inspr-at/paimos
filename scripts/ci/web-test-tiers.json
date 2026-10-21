@@ -6442,6 +6442,18 @@
     ,
     {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e remembered for one ticket does not edit the ticket opened next","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Escape closes an open peek menu before the ticket and keeps the memo draft","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: the peek opens the ticket’s full page at its canonical address","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -17725,6 +17737,8 @@
     {"kind":"vitest","file":"tests/accounts-needs.unit.test.ts","name":"the Accounts part > lists a low quota by the workspace thresholds, and nothing else when the matrix reports nothing","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/accounts-needs.unit.test.ts","name":"the Accounts part > lists a new account that asks first and one row for projects in Unassigned","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/aeon-1632-no-work-id-links.unit.test.ts","name":"AEON-1632: no web source builds a /work/<id> link","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agent-appearance.unit.test.ts","name":"personal behaviour writes preserve stored accessibility choices while a theme is active","tier":"GATED-FULL"}
     ,
