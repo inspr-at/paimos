@@ -2,7 +2,8 @@
 // AEON-1406 (Tick's approved design): the empty Open tab is a calm picture with one line.
 // Risks: the card jumps between reading (D), all clear (A) and a silent source (B); a silent
 // source still reads as all clear; both theme pictures show; a narrow phone scrolls sideways.
-import { expect, test, type Locator, type Page } from '@playwright/test'
+// AEON-1631: a desk that did not answer shows the all-clear art while the badge counts items.
+import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test'
 import { expectStableControls } from './helpers/stable'
 import { fixtures, mockWork } from './work-fixtures'
 
@@ -53,7 +54,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
       await expect.poll(() => reads).toBeGreaterThan(before)
       await expect(list).toHaveAttribute('aria-busy', 'false')
       await expect(row).toBeVisible()
-      await expect(page.getByTestId('desk-first-error')).toHaveCount(0)
+      await expect(page.getByTestId('desk-failed')).toHaveCount(0)
       await expect(page.getByTestId('desk-empty')).toHaveCount(0)
     }
     await documentFonts(page)
@@ -215,7 +216,8 @@ test('AEON-1477 a genuinely failed first load never claims an empty desk', async
   await mockEmptyDesk(page, 'light')
   await page.route(url => url.pathname === '/api/decision-desk/projection', route => route.fulfill({ status: 500, json: { error: 'Unavailable' } }))
   await page.goto('/decision-desk')
-  await expect(page.getByTestId('desk-first-error')).toContainText('The desk couldn’t be loaded')
+  await expect(page.getByTestId('desk-failed')).toContainText('The desk couldn’t be loaded.')
+  await expect(page.getByTestId('desk-clear')).toHaveCount(0)
   await expect(page.getByTestId('desk-empty')).toHaveCount(0)
   await expect(page.getByTestId('desk-refresh-hint')).toHaveCount(0)
   await expect(page.getByTestId('desk-tab-open')).toContainText('?')
@@ -256,8 +258,9 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     let release!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
     await page.route(url => url.pathname === '/api/decision-desk/projection', async route => { await held; await route.fallback() })
-    let approvalsFail = false
-    await page.route(url => url.pathname === '/api/approvals', route => approvalsFail ? route.fulfill({ status: 503, json: { error: 'Unavailable' } }) : route.fallback())
+    // B is for a minor source only (AEON-1631): key trims are read by the Desk alone.
+    let trimsFail = false
+    await page.route(url => url.pathname === '/api/key-trim-proposals', route => trimsFail ? route.fulfill({ status: 503, json: { error: 'Unavailable' } }) : route.fallback())
     await page.goto('/decision-desk')
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
     const frame = page.getByTestId('desk-clear'), quiet = page.getByTestId('desk-unanswered')
@@ -294,11 +297,11 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       controls: { ...still, art: frame.locator('.art'), line: page.getByTestId('desk-empty'), slot: quiet },
       scrollAreas: { page: page.locator('html') },
       interactions: [
-        { name: 'A → B a source did not answer', run: async () => {
-          approvalsFail = true
+        { name: 'A → B a minor source did not answer', run: async () => {
+          trimsFail = true
           await refreshDesk(page, reads)
           await expect(frame).toHaveAttribute('data-state', 'incomplete')
-          await expect(quiet).toHaveText(/^Approvals didn’t answer, so this may be incomplete\s*·\s*Try again$/)
+          await expect(quiet).toHaveText(/^Key trims didn’t answer, so this may be incomplete\s*·\s*Try again$/)
           // The calm line replaces the source list; there is one Try again, and no alert look.
           await expect(page.getByRole('button', { name: 'Try again', exact: true })).toHaveCount(1)
           await expect(page.locator('.source-warnings')).toHaveCount(0)
@@ -308,7 +311,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
           await page.screenshot({ path: testInfo.outputPath(`B-${width}-${theme}.png`) })
         } },
         { name: 'B Try again → A', run: async () => {
-          approvalsFail = false
+          trimsFail = false
           await page.getByRole('button', { name: 'Try again', exact: true }).click()
           await expect(frame).toHaveAttribute('data-state', 'clear')
           await expect(quiet).toHaveText('')
@@ -329,5 +332,104 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await page.screenshot({ path: testInfo.outputPath(`C-${width}-${theme}.png`) })
     await showAll.click()
     await expect(page.getByTestId('desk-clear')).toHaveAttribute('data-state', 'clear')
+
+    await failedDeskFillsItself(page, testInfo, width, theme)
   })
+}
+
+// AEON-1631 (Tick's failed-desk design), state E of the cases above: a desk that did not answer never looks clear
+// and reads itself again. Risks: the badge counts items while the Open tab shows the all-clear art; the retry never
+// comes, comes early or stacks; Try again, the tabs or the rows move when the panel, its note or the stale note change.
+// It runs inside the AEON-1406 cases (same widths and themes), so the file keeps its pinned case count (AEON-1619).
+const accountRow = (n: number) => ({ id: `accounts-${n}`, kind: 'account_matrix', revision: 1, title: `Confirm the shared agent accounts ${n}`, created_at: '2026-10-21T17:00:00Z', held: false, can_decide: true, href: '/settings/accounts', source: '/api/settings/accounts' })
+async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: number, theme: 'light' | 'dark') {
+  // Time stands still unless the test moves it: every retry below happens at a known instant.
+  const at = new Date('2026-10-21T17:47:00Z')
+  await page.clock.install({ time: at })
+  await page.clock.pauseAt(new Date(at.getTime() + 1000))
+  // The empty desk stays mocked from the case above; this route answers the projection first.
+  // fail: the read errors; partial: the badge counts two items the list does not carry; good: both rows.
+  let mode: 'fail' | 'partial' | 'good' = 'fail', reads = 0
+  await page.route(url => url.pathname === '/api/decision-desk/projection', route => {
+    reads++
+    if (mode === 'fail') return route.fulfill({ status: 503, json: { error: 'Unavailable' } })
+    return route.fulfill({ json: { items: mode === 'good' ? [accountRow(1), accountRow(2)] : [], counts: { open: 2, held: 0, chores: 0 }, has_more: false, as_of: at.toISOString() } })
+  })
+  await page.goto('/decision-desk')
+  await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+  const panel = page.getByTestId('desk-failed'), retry = panel.getByRole('button', { name: 'Try again', exact: true })
+  const retrying = panel.getByText('Retrying automatically', { exact: true }), stillNot = panel.getByText('Still not loading. Your items are safe; try again later.', { exact: true })
+  const neverClear = async (step: string) => {
+    await expect(page.getByTestId('desk-clear'), `${step}: no all-clear frame`).toHaveCount(0)
+    await expect(page.getByText('Nothing waits for you'), `${step}: no all-clear line`).toHaveCount(0)
+    await expect(page.getByTestId('desk-list').locator('img'), `${step}: no all-clear art`).toHaveCount(0)
+  }
+  await expect(panel).toHaveAttribute('data-retry', 'retrying')
+  // The notice offer decides within its own bound before the list shows; move past it once.
+  await page.clock.runFor(1000)
+  await expect(panel.locator('.failed-line')).toHaveText('The desk couldn’t be loaded.')
+  await expect(retrying).toBeVisible()
+  await expect(stillNot).toBeHidden()
+  await expect(retry).toBeEnabled()
+  await neverClear('first read failed')
+  await documentFonts(page)
+  await page.screenshot({ path: testInfo.outputPath(`AEON-1631-failed-${width}-${theme}.png`) })
+
+  // The shared stability guard waits for animation frames, which a paused clock never paints, so the boxes are
+  // read directly here and must not move at all.
+  const boxes = (controls: Record<string, Locator>) => Promise.all(Object.entries(controls).map(async ([name, control]) => [name, await control.boundingBox()] as const))
+  const still = { open: page.getByTestId('desk-tab-open'), decided: page.getByTestId('desk-tab-decided'), retry, icon: panel.locator('svg').first() }
+  const panelAt = await boxes(still)
+  mode = 'partial'
+  const beforeCount = reads
+  await page.clock.runFor(1999); expect(reads, 'no retry before 3 s').toBe(beforeCount)
+  await page.clock.runFor(1); await expect.poll(() => reads, 'one retry at 3 s').toBe(beforeCount + 1)
+  await expect(panel.locator('.failed-line')).toHaveText('2 items are waiting, but the list couldn’t be loaded.')
+  // The tab shows the badge's own count beside the panel that says the list did not load.
+  await expect(page.getByTestId('desk-tab-open')).toHaveText(/^Open\s*2$/)
+  await expect(retrying).toBeVisible()
+  await expect(retry).toBeEnabled()
+  await neverClear('badge two, list empty')
+  expect(await boxes(still), 'the count sentence moves neither Try again nor the tabs').toEqual(panelAt)
+  await noSideways(page, 'E count')
+  await page.screenshot({ path: testInfo.outputPath(`AEON-1631-count-${width}-${theme}.png`) })
+  // The 10 s retry fills the rows; the list starts where the panel did.
+  mode = 'good'
+  const listAt = (await box(page.getByTestId('desk-list'))).y, before = reads
+  await page.clock.runFor(9999); expect(reads, 'no retry before 10 s').toBe(before)
+  await page.clock.runFor(1); await expect.poll(() => reads, 'one retry at 10 s').toBe(before + 1)
+  expect(await boxes({ open: still.open, decided: still.decided }), 'the tabs stay while rows replace the panel').toEqual(panelAt.slice(0, 2))
+  const first = page.getByTestId('desk-row-u:accounts-1'), second = page.getByTestId('desk-row-u:accounts-2')
+  await expect(first).toBeVisible(); await expect(second).toBeVisible()
+  await expect(panel).toHaveCount(0)
+  await neverClear('rows arrived')
+  expect((await box(page.getByTestId('desk-list'))).y).toBe(listAt)
+  await page.screenshot({ path: testInfo.outputPath(`AEON-1631-filled-${width}-${theme}.png`) })
+
+  // Rows from this visit stay when a later read misses the desk, with a quiet note in its reserved slot.
+  const stale = page.getByTestId('desk-stale'), list = page.getByTestId('desk-list')
+  const rows = { open: still.open, list, first, second, slot: page.getByTestId('desk-refresh-slot') }
+  await expect(list).toHaveAttribute('aria-busy', 'false')
+  const rowsAt = await boxes(rows)
+  mode = 'partial'
+  const staleCount = reads
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect.poll(() => reads).toBeGreaterThan(staleCount)
+  await expect(stale).toBeVisible()
+  await expect(stale).toHaveText(/^Showing the list from \d{2}:\d{2}\s*·\s*Try again$/)
+  await expect(stale.getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
+  await expect(list).toHaveAttribute('aria-busy', 'false')
+  await expect(first).toBeVisible(); await expect(second).toBeVisible()
+  await neverClear('stale rows')
+  expect(await boxes(rows), 'the stale note takes its reserved slot').toEqual(rowsAt)
+  await noSideways(page, 'E stale')
+  await page.screenshot({ path: testInfo.outputPath(`AEON-1631-stale-${width}-${theme}.png`) })
+  // The 3 s retry reads the desk again and the note leaves its slot as quietly.
+  mode = 'good'
+  const goodCount = reads
+  await page.clock.runFor(2999); expect(reads, 'no stale retry before 3 s').toBe(goodCount)
+  await page.clock.runFor(1); await expect.poll(() => reads, 'one stale retry at 3 s').toBe(goodCount + 1)
+  await expect(stale).toHaveCount(0)
+  await expect(list).toHaveAttribute('aria-busy', 'false')
+  expect(await boxes(rows), 'the note leaves without moving the rows').toEqual(rowsAt)
 }

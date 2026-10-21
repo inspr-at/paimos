@@ -6,7 +6,7 @@ import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
 import PersonStepRequest from '../components/agents/PersonStepRequest.vue'
 import DoctrineProposalDialog from '../components/rules/DoctrineProposalDialog.vue'
 import { getDoctrine, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineInboxItem, type DoctrineProposal } from '../lib/doctrine'
-import { arrivals, deskEmptyState, deskItemID, deskLinkItem, deskReadAborted, deskRefreshNotice, deskSourceLines, deskUnansweredLine, draftFor, kindLabels, newRound, outcomeLabels, retainDecidedLessons, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskSource, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
+import { arrivals, deskAutoRetry, deskEmptyState, deskFailedWords, deskItemID, deskLinkItem, deskReadAborted, deskRefreshNotice, deskSourceLines, deskUnansweredLine, draftFor, kindLabels, newRound, outcomeLabels, retainDecidedLessons, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskRetryPhase, type DeskSource, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import KeyCap from '../components/KeyCap.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
@@ -117,6 +117,8 @@ let capabilityGeneration = 0
 let currentRead: DeskRead | undefined
 let hydratedProjection: DeskProjection | undefined, hydration: Promise<void> | undefined
 const lastGoodAt = ref<number | null>(null), hydrationFailures = ref(0), hydrationFailedSince = ref<number | null>(null)
+// AEON-1631: good rows kept from this visit while a later read missed the canonical desk, and the automatic retries' phase.
+const stale = ref(false), retryPhase = ref<DeskRetryPhase>('idle')
 const linkError = ref(''), revoked = ref(new Set<string>()), settledSteps = ref(new Set<string>()), pendingSteps = ref(new Set<string>())
 const ruleEdit = ref<{ item: DeskItem; draft: DoctrineInboxItem; source: DoctrineSource; file: DoctrineFile; rule: DoctrineRule; owner: string }>()
 let followed = ''
@@ -170,7 +172,8 @@ const openSourceIDs = computed(() => desk.projection ? new Set(desk.projection.i
 const openItems = computed(() => items.value.filter(item => !item.decided && inScope(item)
   && (!item.personStep || !openSourceIDs.value || openSourceIDs.value.has(item.id))))
 // The first read shows no count yet (AEON-1406); the empty slot keeps the tab width.
-const reading = computed(() => state.value === 'loading' && !items.value.length && !desk.error)
+// Once a read failed, its panel holds through the retries instead of returning to the reading frame (AEON-1631).
+const reading = computed(() => state.value === 'loading' && !items.value.length && !desk.error && retryPhase.value === 'idle')
 const openCountLabel = computed(() => {
   if (reading.value) return ''
   if (!scopeActive.value) return desk.count ?? '?'
@@ -305,15 +308,35 @@ function rowFormKeys(event: KeyboardEvent, item: DeskItem) {
 // Failed sources say so in one calm line each, at the end of the card; truncation stays explicit.
 const sourceLines = computed(() => deskSourceLines(warnings.value, linkError.value !== ''))
 const failedLines = computed(() => deskSourceLines(warnings.value).filter(line => line.retry))
-// AEON-1406: the empty Open tab. Any source that did not answer gives B, never A.
-const emptyState = computed(() => filter.value === 'open' ? deskEmptyState({ reading: reading.value, open: visible.value.length, scoped: scopeActive.value, unanswered: unanswered.value, failed: failedLines.value.length > 0 }) : null)
+// A first projection read that failed leaves nothing to list: the desk itself did not answer (AEON-1631).
+const silent = computed<DeskSource[]>(() => !desk.projection && desk.error && !unanswered.value.includes('desk') ? [...unanswered.value, 'desk'] : unanswered.value)
+// AEON-1406: the empty Open tab. A minor source that did not answer gives B, never A. AEON-1631: the desk, its
+// questions or its approvals not answering, or a badge count beside an empty list, is never all clear.
+const emptyState = computed(() => filter.value === 'open' ? deskEmptyState({ reading: reading.value, open: visible.value.length, scoped: scopeActive.value, unanswered: silent.value, failed: failedLines.value.length > 0,
+  waiting: desk.count, checking: (loading.value || desk.loading) && retryPhase.value === 'idle' }) : null)
 // Reading, all clear and a silent source share one frame, so switching between them moves nothing.
 const clearFrame = computed(() => !scopeActive.value && (emptyState.value === 'reading' || emptyState.value === 'clear' || emptyState.value === 'incomplete'))
 const unansweredLine = computed(() => deskUnansweredLine(unanswered.value))
+// AEON-1631 (Tick): a desk that did not answer takes the list's first-row slot with the count the badge knows.
+const failedPanel = computed(() => (!desk.projection && !!desk.error) || emptyState.value === 'failed')
+const failedWords = computed(() => deskFailedWords(scopeActive.value ? null : desk.count, noticeDe.value))
 // In that frame the quiet line names the failed sources once; truncation and link lines stay listed below.
-const listedLines = computed(() => clearFrame.value ? sourceLines.value.filter(line => !failedLines.value.some(failed => failed.text === line.text)) : sourceLines.value)
+// The failed panel already says the list did not load, so it lists nothing more.
+const listedLines = computed(() => failedPanel.value ? [] : clearFrame.value ? sourceLines.value.filter(line => !failedLines.value.some(failed => failed.text === line.text)) : sourceLines.value)
 // A project scope says its name and Show all in the empty line itself (design C), so the scope line steps aside.
-const scopeInCard = computed(() => filter.value === 'open' && !visible.value.length && !!scopeProject.value && !scopeKind.value)
+const scopeInCard = computed(() => filter.value === 'open' && !visible.value.length && !!scopeProject.value && !scopeKind.value && !failedPanel.value)
+// A failed read is retried on its own, 3, 10 and 30 s apart, one at a time; the 30 s poll goes on after that.
+const failing = computed(() => failedPanel.value || stale.value)
+const autoRetry = deskAutoRetry(() => refresh(), () => alive && failing.value, phase => { retryPhase.value = phase })
+watch(failing, now => { if (now) autoRetry.start(); else autoRetry.reset() })
+// A person's Try again restarts the schedule; a read already under way is joined, never doubled.
+async function tryAgain() {
+  autoRetry.stop()
+  await refresh()
+  if (!alive) return
+  if (failing.value) autoRetry.start()
+  else autoRetry.reset()
+}
 function allowed(item: DeskItem) { return person.value && decisionPermission(item, sources, can, adapters) }
 const refreshFailures = computed(() => Math.max(desk.failures, hydrationFailures.value))
 const refreshHint = computed(() => {
@@ -377,7 +400,14 @@ async function hydrate(projection: DeskProjection): Promise<void> {
         } catch { result.warnings.push('The linked approval could not be read. Retry before reviewing it.') }
       }
       if (!current()) return
-      applyRead(result)
+      // AEON-1631: a read whose canonical desk did not answer never replaces good open rows from this visit.
+      // They stay actionable (the server decides every write), with a quiet note naming their time. A missing
+      // question or approval source still lists every canonical row, so that read applies with its own line.
+      if (result.unanswered?.includes('desk') && currentRead && !currentRead.unanswered?.includes('desk') && items.value.some(item => !item.decided)) {
+        stale.value = true
+        return
+      }
+      applyRead(result); stale.value = false
       hydratedProjection = projection
       lastGoodAt.value = Date.now(); hydrationFailures.value = 0; hydrationFailedSince.value = null
       followLink()
@@ -583,6 +613,7 @@ function resetDesk() {
   lastGoodAt.value = null; hydrationFailures.value = 0; hydrationFailedSince.value = null
   phoneVerification.value = undefined; capabilityError.value = ''; stepupMethod.value = 'Passkey or sign-in'
   warnings.value = []; unanswered.value = []; more.value = { open: false, answered: false }; loading.value = false
+  stale.value = false; autoRetry.reset()
   state.value = 'loading'
 }
 watch(owner, () => {
@@ -646,7 +677,7 @@ let clockTimer: ReturnType<typeof setInterval> | undefined
 let poll: ReturnType<typeof setInterval> | undefined
 const focus = () => { if (!loading.value) void refresh() }
 onMounted(() => { window.addEventListener('focus', focus); poll = setInterval(() => { if (!document.hidden && !loading.value) void refresh() }, 30_000); clockTimer = setInterval(() => { now.value = Date.now() }, 1000) })
-onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess(); clearInterval(poll); clearInterval(clockTimer); window.removeEventListener('focus', focus) })
+onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.stop(); stopAccess(); clearInterval(poll); clearInterval(clockTimer); window.removeEventListener('focus', focus) })
 </script>
 
 <template>
@@ -682,6 +713,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
         </div>
         <div class="refresh-slot" data-testid="desk-refresh-slot">
           <p v-if="refreshHint" class="refresh-hint" :class="{ escalated: refreshEscalated }" role="status" data-testid="desk-refresh-hint"><span class="refresh-copy"><AppIcon name="refresh" :size="12" /><span>{{ refreshEscalated ? `The desk hasn't refreshed since ${lastGoodTime}` : `Refresh failed\u00a0· retrying\u00a0· showing ${lastGoodTime}` }}</span>&nbsp;<span class="refresh-retry" :class="{ shown: refreshEscalated }"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="refresh">Try again</button></span></span></p>
+          <p v-else-if="stale" class="refresh-hint" role="status" data-testid="desk-stale"><span class="refresh-copy"><AppIcon name="history" :size="12" /><span>{{ failedWords.stale(lastGoodTime) }}</span>&nbsp;<span class="refresh-retry shown"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="tryAgain">{{ failedWords.retry }}</button></span></span></p>
         </div>
         <!-- On Open the stamp filter keeps its box unseen, so switching tabs moves nothing below the row (AEON-1477). -->
         <div class="seg dec-filter" :class="{ reserved: filter !== 'decided' }" role="radiogroup" aria-label="Stamp" :aria-hidden="filter !== 'decided' || undefined" :inert="filter !== 'decided' || undefined">
@@ -697,7 +729,16 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
     <section class="queue glass-card list-only" :class="{ clear: filter !== 'open' || !visible.length }" :aria-label="filter === 'open' ? 'Open' : 'Decided'" :aria-busy="loading || desk.loading" data-testid="desk-list">
       <!-- AEON-1406 (Tick's approved design): D reading, A all clear and B a silent source share this frame;
            B's line has its slot in A and D, so none of them moves the card. -->
-      <p v-if="!desk.projection && desk.error" class="empty-line" role="status" data-testid="desk-first-error"><AppIcon name="refresh" :size="14" /><span>The desk couldn’t be loaded · <button type="button" class="linkish" :disabled="desk.loading" @click="refresh">Try again</button></span></p>
+      <!-- AEON-1631 (Tick): a desk that did not answer is never the all-clear art. The note under the sentence swaps in
+           a slot sized to the longer text, and Try again stays where it is through every retry. -->
+      <div v-if="failedPanel" class="desk-failed" :data-retry="retryPhase" data-testid="desk-failed">
+        <AppIcon name="cloud-off" :size="18" />
+        <div class="failed-text" role="status">
+          <p class="failed-line">{{ failedWords.sentence }}</p>
+          <p class="failed-note"><span :class="{ off: retryPhase === 'exhausted' }" :aria-hidden="retryPhase === 'exhausted' || undefined">{{ failedWords.retrying }}</span><span :class="{ off: retryPhase !== 'exhausted' }" :aria-hidden="retryPhase !== 'exhausted' || undefined">{{ failedWords.exhausted }}</span></p>
+        </div>
+        <button type="button" class="btn sm failed-retry" :disabled="loading || desk.loading" @click="tryAgain">{{ failedWords.retry }}</button>
+      </div>
       <div v-else-if="clearFrame" class="all-clear" :class="{ reading: emptyState === 'reading' }" :data-state="emptyState" data-testid="desk-clear">
         <span class="art" aria-hidden="true"><template v-if="emptyState !== 'reading'"><img class="light" :src="deskLight" alt="" width="840" height="560" decoding="async" loading="lazy"><img class="dark" :src="deskDark" alt="" width="840" height="560" decoding="async" loading="lazy"></template></span>
         <p class="line" :data-testid="emptyState === 'reading' ? undefined : 'desk-empty'"><template v-if="emptyState !== 'reading'"><AppIcon name="check" :size="16" />Nothing waits for you</template></p>
@@ -944,6 +985,18 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
 .linkish:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .empty-line { display: flex; align-items: center; gap: 8px; margin: 0; padding: 26px 22px; font-size: 14px; color: var(--ink-2); }
 .empty-line svg { flex: none; color: var(--ok); }
+/* AEON-1631 (Tick): a desk that did not answer, in the list's first-row slot: a muted icon, the sentence in ink-2 and
+   Try again on its first line at every width, so a sentence that changes with the count never moves it. Never red. */
+.desk-failed { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 22px 22px 24px; }
+.desk-failed > svg { margin-top: 2px; color: var(--ink-3); }
+.failed-text { display: grid; gap: 2px; min-width: 0; }
+.failed-line { margin: 0; font-size: 14px; line-height: 22px; color: var(--ink-2); text-wrap: pretty; overflow-wrap: anywhere; }
+.failed-note { display: grid; margin: 0; font-size: 12.5px; line-height: 20px; color: var(--ink-3); }
+.failed-note > span { grid-area: 1 / 1; text-wrap: pretty; }
+.failed-note > .off { visibility: hidden; }
+.failed-retry { margin-top: -3px; }
+@media (pointer: coarse) { .failed-retry { height: 44px; margin-top: -11px; } }
+@media (max-width: 560px) { .desk-failed { gap: 10px; padding: 18px 16px 20px; } }
 /* AEON-1406: the calm empty desk. The picture sits above one line; a silent source adds a quiet line in its reserved slot. */
 .all-clear { position: relative; display: grid; justify-items: center; gap: 10px; padding: 28px 22px 30px; text-align: center; }
 .all-clear .art { display: block; width: min(100%, 340px); aspect-ratio: 3 / 2; }
