@@ -2,9 +2,12 @@
 // AEON-1604: e or c pressed while this project's grants are still in flight is
 // kept for that ticket. e opens the editor once the person may edit and the
 // ticket itself has loaded. c focuses the comment box once they may comment.
-// A reader, or a ticket they have since left, gets neither. The press itself
-// adds nothing to the page, so the heading stays where it is until the editor opens.
-import { expect, test, type Page } from '@playwright/test'
+// A reader, or a ticket they have since left, gets neither. Neither does a key
+// whose wait a field or a dialog interrupted, or one a refreshed denial spent.
+// The press itself adds nothing to the page, so the heading stays where it is
+// until the editor opens.
+import { expect, test, type Page, type Route } from '@playwright/test'
+import { mockEffectivePermissions } from './authz-fixtures'
 import { fixtures, mockWork } from './work-fixtures'
 
 const article = (page: Page) => page.getByRole('article', { name: 'Ticket details' })
@@ -143,4 +146,88 @@ test('AEON-1604: e pressed while the ticket loads opens the editor when the tick
     lookups.release()
     await expect(page.locator('.edit-form .md-editor').first()).toHaveClass(/split/)
   } finally { gate.release(); lookups.release() }
+})
+
+test('AEON-1604: c is spent when the person enters and leaves a field before permissions load', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const gate = holdProjectPermissions()
+  try {
+    await mockWork(page, fixtures(), { hold: gate.hold })
+    await page.goto('/p/PHAROS/PHAROS-13')
+    const details = panel(page)
+    await expect(details.getByRole('heading', { name: 'Run the disposable Hetzner end-to-end check' })).toBeVisible()
+    const composer = details.getByLabel('Add a comment')
+    await expect(composer).toBeDisabled()
+    await page.keyboard.press('c')
+    const search = page.getByRole('searchbox', { name: 'Search tickets in this project' })
+    await search.click()
+    await expect(search).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(search).not.toBeFocused()
+    const answer = page.waitForResponse(response => response.url().includes('/api/me/permissions') && response.url().includes('project_id='))
+    gate.release()
+    await answer
+    await expect(composer).toBeEnabled()
+    await painted(page)
+    await expect(composer).not.toBeFocused()
+  } finally { gate.release() }
+})
+
+test('AEON-1604: e is spent when a dialog opens and closes before permissions load', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const gate = holdProjectPermissions()
+  try {
+    await mockWork(page, fixtures(), { hold: gate.hold })
+    await page.goto('/p/PHAROS/PHAROS-12')
+    const details = panel(page)
+    const heading = details.getByRole('heading', { name: 'Add an Oracle Cloud connector' })
+    await expect(heading).toBeVisible()
+    await expect(details.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
+    await page.keyboard.press('e')
+    await page.keyboard.press('Shift+F')
+    const menu = page.getByRole('dialog', { name: 'Add a filter' })
+    await expect(menu).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(menu).toHaveCount(0)
+    await expect(heading).toBeVisible()
+    gate.release()
+    await expect(details.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
+    await painted(page)
+    await expect(page.locator('.edit-form')).toHaveCount(0)
+  } finally { gate.release() }
+})
+
+test('AEON-1604: e is spent by a refreshed denial that lands after the request it waited on, so a later grant opens nothing', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  // Every project grant request waits here until this test answers it.
+  const asked: Route[] = []
+  await page.route(url => url.pathname === '/api/me/permissions' && url.searchParams.has('project_id'), route => { asked.push(route) })
+  const answer = async (route: Route, role: 'member' | 'viewer') => {
+    const projectId = new URL(route.request().url()).searchParams.get('project_id') ?? undefined
+    const landed = page.waitForResponse(response => response.request() === route.request())
+    await route.fulfill({ json: mockEffectivePermissions(role, projectId) })
+    await landed
+    await painted(page)
+  }
+  await page.goto('/p/PHAROS/PHAROS-12?view=full')
+  const details = article(page)
+  await expect(details.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
+  await expect.poll(() => asked.length).toBe(1)
+  await page.keyboard.press('e')
+  // Window focus asks again; the request e waited on no longer counts.
+  await page.evaluate(() => { window.dispatchEvent(new Event('focus')) })
+  await expect.poll(() => asked.length).toBe(2)
+  await answer(asked[0], 'member')
+  await expect(details.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
+  await answer(asked[1], 'viewer')
+  await expect(details.getByRole('note')).toContainText('You can read this ticket but not change it.')
+  await expect(page.locator('.edit-form')).toHaveCount(0)
+  // A later grant arrives without another key press.
+  await page.evaluate(() => { window.dispatchEvent(new Event('focus')) })
+  await expect.poll(() => asked.length).toBe(3)
+  await answer(asked[2], 'member')
+  await expect(details.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
+  await painted(page)
+  await expect(page.locator('.edit-form')).toHaveCount(0)
 })

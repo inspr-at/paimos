@@ -49,7 +49,8 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
   }
   // The title and the comment box can be on screen while this project's grants
   // are still in flight. One e or one c is kept for that ticket and that person.
-  // Another ticket, person, field, dialog, or the other of those two keys spends it.
+  // Another ticket, person, field, dialog, or the other of those two keys spends it,
+  // even when the person has left that field or closed that dialog again.
   type PendingShortcut = { key: string; projectId: string; owner: string; epoch: number }
   let editEpoch = 0
   let pendingEdit: PendingShortcut | null = null
@@ -59,11 +60,37 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     if (!pendingEdit) return
     pendingEdit = null
     editEpoch++
+    stopInterruptions()
   }
   function clearPendingComment() {
     if (!pendingComment) return
     pendingComment = null
     commentEpoch++
+    stopInterruptions()
+  }
+  // Checking for a field or dialog only when grants arrive misses one the person
+  // has already left. While a key waits, entering a field or opening a dialog spends it.
+  const blockers = 'dialog[open], .floating'
+  let interruptions: MutationObserver | null = null
+  function interrupted() { clearPendingEdit(); clearPendingComment() }
+  function fieldEntered(event: FocusEvent) { if (typing(event.target)) interrupted() }
+  function dialogOpened(records: MutationRecord[]) {
+    const opened = !!document.querySelector(blockers) || records.some(record => record.type === 'attributes'
+      ? record.target instanceof HTMLDialogElement
+      : [...record.addedNodes].some(node => node instanceof Element && (node.matches(blockers) || !!node.querySelector(blockers))))
+    if (opened) interrupted()
+  }
+  function watchInterruptions() {
+    if (interruptions) return
+    document.addEventListener('focusin', fieldEntered, true)
+    interruptions = new MutationObserver(dialogOpened)
+    interruptions.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['open'] })
+  }
+  function stopInterruptions() {
+    if (!interruptions || pendingEdit || pendingComment) return
+    document.removeEventListener('focusin', fieldEntered, true)
+    interruptions.disconnect()
+    interruptions = null
   }
   function samePersonTicket(pending: PendingShortcut) {
     return ticketKey.value === pending.key && projectId.value === pending.projectId
@@ -80,8 +107,7 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
   function openRememberedEdit(pending: PendingShortcut) {
     const workspace = panel.value
     if (pending.epoch !== editEpoch || pendingEdit !== pending || !workspace?.startEdit || !ticketShown(pending) || shortcutBlocked()) return false
-    editEpoch++
-    pendingEdit = null
+    clearPendingEdit()
     void workspace.startEdit()
     return true
   }
@@ -113,10 +139,10 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     if (pending.epoch !== commentEpoch || pendingComment !== pending || shortcutBlocked()) return false
     const field = commentField()
     if (!field || field.disabled) return false
+    // The focus enters a field, which already spends this c; clearing again changes nothing.
     panel.value?.focusComposer()
     if (document.activeElement !== field) return false
-    commentEpoch++
-    pendingComment = null
+    clearPendingComment()
     return true
   }
   async function applyPendingComment(pending: PendingShortcut) {
@@ -141,6 +167,7 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     if (permissionsKnown(id) && !commentable?.value) return
     const pending: PendingShortcut = { key, projectId: id, owner, epoch: ++commentEpoch }
     pendingComment = pending
+    watchInterruptions()
     if (permissionsKnown(id) && commentable?.value) {
       if (!openRememberedComment(pending)) void applyPendingComment(pending)
       return
@@ -156,6 +183,7 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     if (permissionsKnown(id) && !writable.value) return
     const pending: PendingShortcut = { key, projectId: id, owner, epoch: ++editEpoch }
     pendingEdit = pending
+    watchInterruptions()
     // Grants already on screen: edit in this turn, as a press after the button exists does.
     if (permissionsKnown(id) && writable.value) {
       if (!openRememberedEdit(pending)) void applyPendingEdit(pending)
@@ -263,8 +291,11 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
     if (edit) void applyPendingEdit(edit)
     if (comment) void applyPendingComment(comment)
   })
-  watch(writable, () => { const pending = pendingEdit; if (pending) void applyPendingEdit(pending) })
-  watch(() => commentable?.value ?? false, () => { const pending = pendingComment; if (pending) void applyPendingComment(pending) })
+  // A refresh can replace the request a key waits on. The answer that lands then
+  // may change no grant at all, so arriving grants settle the key as well.
+  const grantsKnown = () => !!projectId.value && permissionsKnown(projectId.value)
+  watch([grantsKnown, writable], () => { const pending = pendingEdit; if (pending) void applyPendingEdit(pending) })
+  watch([grantsKnown, () => commentable?.value ?? false], () => { const pending = pendingComment; if (pending) void applyPendingComment(pending) })
   watch(ticketKey, key => {
     if (pendingEdit && key !== pendingEdit.key) clearPendingEdit()
     if (pendingComment && key !== pendingComment.key) clearPendingComment()
