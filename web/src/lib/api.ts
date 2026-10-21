@@ -160,6 +160,8 @@ export interface WorkNode {
   position: string; created_at: string; updated_at: string; deleted_at?: string | null
 }
 export interface Page<T> { items: T[]; next_cursor: string | null }
+// Bounded directory reads must distinguish their retained rows from a complete list.
+export interface ListResult<T> { items: T; partial: boolean }
 export interface NodeRecurrence {
   id: string; project_id: string; project_key: string; number: number
   trigger: import('./recurrences').RecurrenceTrigger
@@ -304,6 +306,22 @@ export const listNodes = async (params: ListQuery, options: { signal?: AbortSign
   const page = await json<ListPage>(`/nodes${listQuery(params)}`, 'GET', undefined, {}, options.signal, response => { position = parsePosition(response) })
   learnPictures(page.items.map(item => item.assignee))
   return stampAt(page, { position, start }, 2)
+}
+// At most 20 pages, with the caller's bounded page size. A cursor at the cap
+// (or one that repeats) means the directory is partial, even on an empty page.
+export async function listNodePages(params: ListQuery): Promise<ListResult<ListItem[]>> {
+  const items: ListItem[] = []
+  const seen = new Set<string>()
+  let cursor = params.cursor
+  for (let page = 0; page < 20; page++) {
+    const result = await listNodes({ ...params, cursor })
+    items.push(...result.items)
+    if (!result.next_cursor) return { items, partial: false }
+    if (seen.has(result.next_cursor)) return { items, partial: true }
+    seen.add(result.next_cursor)
+    cursor = result.next_cursor
+  }
+  return { items, partial: true }
 }
 // AEON-1368/1358 view figures (api/areas/project-figures.yaml): the header work bar and the column hover figures of
 // one list view, over every matching row. The server ignores Hide closed, sort, facets and paging; they are left out

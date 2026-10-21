@@ -20,14 +20,14 @@ export const useQuotes = defineStore('quotes', () => {
 
   function load(force = false): Promise<void> {
     if (request) return request
-    if (items.value && !force) return Promise.resolve()
+    if (items.value && !error.value && !force) return Promise.resolve()
     loading.value = true
     const run = generation
     request = (async () => {
       try {
         const list = await fetchQuotes()
         if (run !== generation) return
-        items.value = list; error.value = ''; status.value = 0
+        items.value = list.items; error.value = list.partial ? 'Only part of the quote list was loaded. Some quotes may be missing.' : ''; status.value = 0
       } catch (e) {
         if (run !== generation) return
         error.value = e instanceof Error ? e.message : 'Quotes could not be loaded.'

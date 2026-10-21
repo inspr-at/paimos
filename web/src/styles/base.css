@@ -254,6 +254,9 @@ mark { padding: 0 1px; border-radius: 3px; background: var(--mark-hl); color: in
 }
 .center-stage { display: grid; place-items: center; min-height: 100%; padding: 32px 24px; }
 .error { color: var(--danger); font-size: 13px; }
+.load-status { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px 12px; margin-block: 8px; font-size: 13px; color: var(--warn-ink); }
+.load-status > p { flex: 1; min-width: min(100%, 20ch); overflow-wrap: anywhere; }
+.load-status > .btn { flex-shrink: 0; min-height: 44px; }
 /* ---------- Disclosures ---------- */
 /* The browser's text triangle never shows: a disclosure draws its own SVG
    chevron (.disclosure-chev), centred on the label and turned down when open. */

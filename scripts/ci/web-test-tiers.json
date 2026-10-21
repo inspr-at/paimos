@@ -7762,6 +7762,10 @@
     ,
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"the bulk bar and its menus have no axe violations in light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: partial customer quote contact and project lists show retry beside retained results","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: rejected rates remain in the hours picker and retry keeps controls still","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"a partly set up overview shows status only, and its one link to Settings › Business stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"a role that manages plugins but not settings switches the parts in Settings › Business","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -18139,6 +18143,12 @@
     {"kind":"vitest","file":"tests/authz.unit.test.ts","name":"can() > review r2: a 401 latches until a later 200, and never refetches by itself","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/authz.unit.test.ts","name":"can() > unions project and workspace permissions only for that project","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: 200 units use at most six rate reads and a rejected unit remains visible until retry succeeds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: a cursor at every directory cap returns typed partial rows and the final complete page stays complete","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: changing the rate-cache owner retires pending reads and stops queued requests","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > accepts exactly 2,000 rows but rejects a continuation rather than returning a partial list","tier":"GATED-FULL"}
     ,

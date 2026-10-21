@@ -996,6 +996,10 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
         </FloatingPanel>
       </div>
 
+      <div v-if="view !== 'goals' && store.partial" class="load-status">
+        <p role="status">{{ store.error }}</p>
+        <button type="button" class="btn sm" :disabled="store.loading" @click="store.load(true)">Try again</button>
+      </div>
       <GoalsView v-if="view === 'goals'" :page="goals" :term="term" :now="now" :hidden-groups="goals.hiddenByGroups.value" @clear="clearGoalFilters" />
       <div v-else-if="store.error && !store.loaded" class="state" role="alert">
         <AppIcon name="alert" :size="20" />

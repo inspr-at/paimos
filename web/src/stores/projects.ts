@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
-import { getProjects, listNodes, updateNode, type ProjectPerson, type ProjectSummary, type WorkNode } from '../lib/api'
+import { getProjects, listNodePages, updateNode, type ProjectPerson, type ProjectSummary, type WorkNode } from '../lib/api'
 import { projectProgressPercent } from '../lib/projectColumns'
 import { compareRevision } from '../lib/liveUpdates'
 import { preferenceOwner } from '../lib/preferences'
@@ -29,11 +29,12 @@ export const useProjects = defineStore('projects', () => {
   const loaded = ref(false)
   const loading = ref(false)
   const error = ref('')
+  const partial = ref(false)
   let request: Promise<void> | undefined
   let loadedAt = 0, generation = 0
   watch(owner, () => {
     generation++; summaries.value = []; details.value = new Map(); loaded.value = false
-    loading.value = false; error.value = ''; loadedAt = 0; request = undefined
+    loading.value = false; error.value = ''; partial.value = false; loadedAt = 0; request = undefined
     if (owner.value) void load()
   }, { flush: 'sync' })
 
@@ -58,13 +59,13 @@ export const useProjects = defineStore('projects', () => {
     if (!owner.value) return Promise.resolve()
     const started = generation
     if (request) return request
-    if (loaded.value && !force && Date.now() - loadedAt < 60_000) return Promise.resolve()
+    if (loaded.value && !partial.value && !force && Date.now() - loadedAt < 60_000) return Promise.resolve()
     const knownIDs = new Set(summaries.value.map(project => project.id))
     loading.value = true
     if (!loaded.value) error.value = ''
     request = (async () => {
       try {
-        const [summary, nodes] = await Promise.all([getProjects(true), listNodes({ kind: ['project'], limit: 500 })])
+        const [summary, nodes] = await Promise.all([getProjects(true), listNodePages({ kind: ['project'], limit: 500 })])
         if (started !== generation) return
         const map = new Map<string, { routeKey: string; description: string; updatedAt: string }>()
         const current = new Map(summaries.value.map(item => [item.id, item]))
@@ -93,7 +94,8 @@ export const useProjects = defineStore('projects', () => {
         details.value = map
         loaded.value = true
         loadedAt = Date.now()
-        error.value = ''
+        partial.value = nodes.partial
+        error.value = nodes.partial ? 'Only part of the project details was loaded. Some project keys and descriptions may be missing.' : ''
       } catch (e) {
         if (started === generation) error.value = e instanceof Error ? e.message : 'Projects could not be loaded'
       } finally {
@@ -151,5 +153,5 @@ export const useProjects = defineStore('projects', () => {
     }
   }
 
-  return { projects, loaded, loading, error, load, byRouteKey, byId, setState, applyNode, addCreatedProject }
+  return { projects, loaded, loading, error, partial, load, byRouteKey, byId, setState, applyNode, addCreatedProject }
 })

@@ -116,6 +116,7 @@ onMounted(async () => { await business.loadPlugins(); if (business.open.costs) v
   <BusinessPage title="Rates" area="costs">
     <template #summary>
       <span v-if="business.costUnitsLoaded">{{ business.costUnits.length ? `${plural(business.costUnits.length - retiredCount, 'cost unit')} · ${plural(inForce, 'rate')} in force` : 'No cost units yet' }}</span>
+      <span v-else-if="business.costUnitsError">Cost units could not be loaded</span>
       <span v-else class="skeleton summary-skeleton" />
     </template>
 
@@ -137,8 +138,8 @@ onMounted(async () => { await business.loadPlugins(); if (business.open.costs) v
         <button type="button" class="btn sm" @click="creating = false">Cancel</button>
         <button type="button" class="btn sm on" :disabled="!newName.trim() || busy" @click="create">Add</button>
       </div>
-      <div v-if="!business.costUnitsLoaded" class="sk" aria-hidden="true"><span v-for="i in 4" :key="i" class="skeleton" /></div>
-      <div v-else-if="!shown.length && !creating" class="state">
+      <div v-if="business.costUnitsLoading && !business.costUnitsLoaded" class="sk" aria-hidden="true"><span v-for="i in 4" :key="i" class="skeleton" /></div>
+      <div v-else-if="!shown.length && !creating && !business.costUnitsError" class="state">
         <span class="state-icon"><AppIcon name="tag" :size="18" /></span>
         <h2>{{ term ? `No cost unit matches “${term}”` : retiredCount ? 'No cost unit in use' : 'No cost units yet' }}</h2>
         <p v-if="!term && retiredCount">{{ plural(retiredCount, 'retired cost unit') }} {{ retiredCount === 1 ? 'is' : 'are' }} hidden. Show {{ retiredCount === 1 ? 'it' : 'them' }} with Retired, or add one for current work.</p>
@@ -187,9 +188,13 @@ onMounted(async () => { await business.loadPlugins(); if (business.open.costs) v
             </tr>
           </tbody>
         </table>
-        <p v-else class="no-rates">No rate yet, so quotes and hours cannot use it.</p>
+        <p v-else class="no-rates">{{ unit.ratesError ? 'Rates could not be loaded. Retry below.' : 'No rate yet, so quotes and hours cannot use it.' }}</p>
       </div>
     </section>
+    <div v-if="business.costUnitsError" class="load-status">
+      <p role="status">{{ business.costUnitsLoading ? 'Loading rates…' : business.costUnitsError }}</p>
+      <button type="button" class="btn sm" :disabled="business.costUnitsLoading" @click="business.loadCostUnits()">Retry rates</button>
+    </div>
   </BusinessPage>
 </template>
 

@@ -196,14 +196,18 @@ defineExpose({ open })
         <button type="button" class="btn" @click="close">Cancel</button>
         <button type="submit" class="btn primary" :disabled="busy || settings !== 'ready'"><AppIcon name="plus" :size="14" />{{ busy ? 'Creating…' : 'Create quote' }}</button>
       </footer>
+      <div v-if="!fixedCustomer && customers.error" class="load-status">
+        <p role="status">{{ customers.error }}</p>
+        <button type="button" class="btn sm" :disabled="customers.loading" @click="customers.load(true)">Retry customers</button>
+      </div>
     </form>
   </dialog>
 </template>
 
 <style scoped>
-.create { width: min(var(--dialog-m), calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.create { --create-top: min(8dvh, 4rem); margin: var(--create-top) auto 0; width: min(var(--dialog-m), calc(100vw - 24px)); max-height: calc(100dvh - var(--create-top) - 12px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .create::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
-.create-card { display: grid; gap: 16px; max-height: calc(100dvh - 24px); overflow: auto; padding: 20px 22px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
+.create-card { display: grid; gap: 16px; max-height: calc(100dvh - var(--create-top) - 12px); overflow: auto; padding: 20px 22px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 .create-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 h2 { font-size: 18px; }
 .lead { margin-top: 4px; max-width: 46ch; font-size: 13px; color: var(--ink-2); }

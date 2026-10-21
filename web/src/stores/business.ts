@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
-import { getKinds, listNodes, type Kind, type ListItem } from '../lib/api'
+import { getKinds, listNodePages, type Kind, type ListItem } from '../lib/api'
 import { listPrincipals, listRates, type CostRate, type Principal, type Unit } from '../lib/business'
 import { availability, configurePlugin, installationWrite, listPlugins, type BusinessPlugin } from '../components/business/catalog'
 import { can } from '../lib/authz'
@@ -10,7 +10,7 @@ import { api } from '../lib/api'
 import { useSession } from './session'
 
 export type AreaId = 'costs' | 'crm' | 'quotes' | 'hours'
-export interface CostUnit { node: ListItem; rates: CostRate[] }
+export interface CostUnit { node: ListItem; rates: CostRate[]; ratesError?: string }
 
 // Tenant kinds the business screens create when an admin sets Business up.
 // Kinds are tenant configuration: contacts get email, phone and role besides
@@ -40,6 +40,12 @@ export const useBusiness = defineStore('business', () => {
   const principals = ref<Principal[]>([])
   const costUnits = ref<CostUnit[]>([])
   const costUnitsLoaded = ref(false)
+  const costUnitsLoading = ref(false)
+  const costUnitsListPartial = ref(false)
+  const costUnitsListError = ref('')
+  const costUnitsPartial = computed(() => costUnitsListPartial.value || !!costUnitsListError.value || costUnits.value.some(unit => !!unit.ratesError))
+  const costUnitsError = computed(() => costUnitsListError.value || (costUnitsListPartial.value ? 'Only part of the cost unit list was loaded. Some choices may be missing.' : costUnits.value.some(unit => !!unit.ratesError) ? 'Some rates could not be loaded. Their cost units remain listed.' : ''))
+  let generation = 0
   const admin = computed(() => can('plugins.manage'))
   const staff = computed(() => can('crm.write'))
 
@@ -71,16 +77,18 @@ export const useBusiness = defineStore('business', () => {
   function loadPlugins(force = false): Promise<void> {
     if (pluginRequest) return pluginRequest
     if (plugins.value && !force) return Promise.resolve()
+    const run = generation
     pluginRequest = (async () => {
-      try { plugins.value = await listPlugins(); pluginsError.value = '' }
-      catch (e) { pluginsError.value = e instanceof Error ? e.message : 'Business settings could not be loaded.'; if (!plugins.value) plugins.value = null }
-      finally { pluginRequest = null }
+      try { const items = await listPlugins(); if (run === generation) { plugins.value = items; pluginsError.value = '' } }
+      catch (e) { if (run === generation) pluginsError.value = e instanceof Error ? e.message : 'Business settings could not be loaded.' }
+      finally { if (run === generation) pluginRequest = null }
     })()
     return pluginRequest
   }
   async function loadKinds(force = false) {
     if (kinds.value.length && !force) return
-    kinds.value = (await getKinds()).items
+    const run = generation, items = (await getKinds()).items
+    if (run === generation) kinds.value = items
   }
   const kindBySlug = (slug: string) => kinds.value.find(kind => kind.slug === slug)
   function fieldsOf(slug: string): string[] {
@@ -121,7 +129,8 @@ export const useBusiness = defineStore('business', () => {
   function loadPrincipals(force = false) {
     if (principalsRequest) return principalsRequest
     if (principals.value.length && !force) return Promise.resolve()
-    principalsRequest = listPrincipals().then(items => { principals.value = items }).catch(() => undefined).finally(() => { principalsRequest = null })
+    const run = generation
+    principalsRequest = listPrincipals().then(items => { if (run === generation) principals.value = items }).catch(() => undefined).finally(() => { if (run === generation) principalsRequest = null })
     return principalsRequest
   }
   function nameOf(principalId: string | null | undefined): string {
@@ -137,25 +146,50 @@ export const useBusiness = defineStore('business', () => {
   let costRequest: Promise<void> | null = null
   function loadCostUnits(force = false) {
     if (costRequest) return costRequest
-    if (costUnitsLoaded.value && !force) return Promise.resolve()
+    if (costUnitsLoaded.value && !costUnitsPartial.value && !force) return Promise.resolve()
+    const run = generation
+    costUnitsLoading.value = true
     costRequest = (async () => {
       try {
-        const page = await listNodes({ kind: ['cost_unit'], sort: 'key', limit: 200 })
-        const withRates = await Promise.all(page.items.map(async node => ({ node, rates: await listRates(node.id).catch(() => [] as CostRate[]) })))
-        costUnits.value = withRates
+        if (!costUnitsLoaded.value || costUnitsListPartial.value || costUnitsListError.value || force) {
+          const result = await listNodePages({ kind: ['cost_unit'], sort: 'key', limit: 200 })
+          if (run !== generation) return
+          const before = new Map(costUnits.value.map(unit => [unit.node.id, unit]))
+          costUnits.value = result.items.map(node => ({ node, rates: before.get(node.id)?.rates ?? [], ratesError: force ? 'Rates are being refreshed.' : before.get(node.id)?.ratesError ?? (before.has(node.id) ? undefined : 'Rates have not been loaded.') }))
+          costUnitsListPartial.value = result.partial
+          costUnitsListError.value = ''
+        }
         costUnitsLoaded.value = true
-      } finally { costRequest = null }
+        const pending = costUnits.value.filter(unit => !!unit.ratesError)
+        let next = 0
+        async function worker() {
+          while (run === generation && next < pending.length) {
+            const unit = pending[next++]!
+            try {
+              const rates = await listRates(unit.node.id)
+              if (run === generation) setRates(unit.node.id, rates)
+            } catch (e) {
+              if (run === generation) costUnits.value = costUnits.value.map(current => current.node.id === unit.node.id ? { ...current, ratesError: e instanceof Error ? e.message : 'Rates could not be loaded.' } : current)
+            }
+          }
+        }
+        await Promise.all(Array.from({ length: Math.min(6, pending.length) }, worker))
+      } catch (e) {
+        if (run === generation) costUnitsListError.value = e instanceof Error ? e.message : 'Cost units could not be loaded.'
+      } finally { if (run === generation) { costRequest = null; costUnitsLoading.value = false } }
     })()
     return costRequest
   }
   function setRates(costUnitId: string, rates: CostRate[]) {
-    costUnits.value = costUnits.value.map(unit => unit.node.id === costUnitId ? { ...unit, rates } : unit)
+    costUnits.value = costUnits.value.map(unit => unit.node.id === costUnitId ? { ...unit, rates, ratesError: undefined } : unit)
   }
   function addCostUnit(node: ListItem) { costUnits.value = [...costUnits.value, { node, rates: [] }] }
   const costUnit = (id: string) => costUnits.value.find(unit => unit.node.id === id)
   // The bill rate in force on a UTC date (YYYY-MM-DD): half-open [from, until).
   function rateOn(costUnitId: string, unit: Unit, currency: string, day = new Date().toISOString().slice(0, 10)): CostRate | null {
-    const rates = costUnit(costUnitId)?.rates ?? []
+    const entry = costUnit(costUnitId)
+    if (entry?.ratesError) return null
+    const rates = entry?.rates ?? []
     return rates.filter(rate => rate.unit === unit && rate.currency === currency && rate.effective_from <= day && (!rate.effective_until || rate.effective_until > day))
       .sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0] ?? null
   }
@@ -163,18 +197,20 @@ export const useBusiness = defineStore('business', () => {
   // Cost units usable today for a unit and currency (live, not cancelled, with a rate).
   function usable(unit: Unit | null, currency: string | null, day?: string) {
     return costUnits.value.filter(entry => !['cancelled', 'archived', 'done'].includes(entry.node.state)
-      && entry.rates.some(rate => (!unit || rate.unit === unit) && (!currency || rate.currency === currency) && rate.effective_from <= (day ?? new Date().toISOString().slice(0, 10)) && (!rate.effective_until || rate.effective_until > (day ?? new Date().toISOString().slice(0, 10)))))
+      && (!!entry.ratesError || entry.rates.some(rate => (!unit || rate.unit === unit) && (!currency || rate.currency === currency) && rate.effective_from <= (day ?? new Date().toISOString().slice(0, 10)) && (!rate.effective_until || rate.effective_until > (day ?? new Date().toISOString().slice(0, 10))))))
   }
 
   function reset() {
-    plugins.value = null; kinds.value = []; principals.value = []; costUnits.value = []; costUnitsLoaded.value = false
+    generation++; pluginRequest = null; principalsRequest = null; costRequest = null; costUnitsLoading.value = false; costUnitsListPartial.value = false; costUnitsListError.value = ''
+    plugins.value = null; pluginsError.value = ''; kinds.value = []; principals.value = []; costUnits.value = []; costUnitsLoaded.value = false
   }
+  watch(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '', reset, { flush: 'sync' })
 
   return {
     plugins, pluginsError, open, anyOpen, placeOpen, placeKnown, allOpen, admin, staff, loadPlugins, enable, disable,
     kinds, loadKinds, kindBySlug, fieldsOf,
     principals, loadPrincipals, nameOf, people, timeKeepers,
-    costUnits, costUnitsLoaded, loadCostUnits, setRates, addCostUnit, costUnit, rateOn, currencies, usable,
+    costUnits, costUnitsLoaded, costUnitsLoading, costUnitsPartial, costUnitsError, loadCostUnits, setRates, addCostUnit, costUnit, rateOn, currencies, usable,
     reset,
   }
 })
