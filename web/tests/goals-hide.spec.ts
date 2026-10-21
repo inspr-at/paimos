@@ -210,8 +210,10 @@ test('1440 light: Waiting on you off leaves no band, keeps the header Desk count
   check(info, 1440, false, 'all-hidden empty state links to Display', true)
 })
 
-test('390 light: the ⋯ Goal display menu has the three Show rows; the opened goal hides and Undo restores', async ({ page }, info) => {
+for (const dark of [false, true]) {
+test(`390 ${theme(dark)}: the ⋯ Goal display menu has the three Show rows; the opened goal hides, Undo restores, Hidden goals shows it and Unhide brings it back`, async ({ page }, info) => {
   const w = world()
+  await page.emulateMedia({ colorScheme: dark ? 'dark' : 'light' })
   await page.setViewportSize({ width: 390, height: 844 })
   await openGoals(page, w)
   const before = await ids(page)
@@ -225,7 +227,7 @@ test('390 light: the ⋯ Goal display menu has the three Show rows; the opened g
   }
   // No hidden goals yet: the row is disabled in place.
   await expect(menu.locator('[data-show="hidden"]')).toBeDisabled()
-  await shot(page, info, 390, false, 'goal-display-menu')
+  await shot(page, info, 390, dark, 'goal-display-menu')
   await page.keyboard.press('Escape')
   // Phones have no row ⋯: the opened goal ends with Hide for me.
   await page.locator('.goal[data-goal-id="g-crm"] .goal-toggle').click()
@@ -236,6 +238,23 @@ test('390 light: the ⋯ Goal display menu has the three Show rows; the opened g
   await expect(page.locator('.goal[data-goal-id="g-crm"]')).toHaveCount(0)
   await page.locator('.toast').filter({ hasText: 'Goal hidden' }).getByRole('button', { name: 'Undo' }).click()
   await expect.poll(() => ids(page)).toEqual(before)
+  // Hide again, show hidden goals from the ⋯ menu: the row is muted and its opened goal offers Unhide.
+  await page.locator('.goal[data-goal-id="g-crm"] .hide-btn').click()
+  await expect(page.locator('.goal[data-goal-id="g-crm"]')).toHaveCount(0)
+  await page.locator('.more-btn').click()
+  await expect(menu.locator('[data-show="hidden"]')).toContainText('Hidden goals (1)')
+  await menu.locator('[data-show="hidden"]').click()
+  await expect(menu.locator('[data-show="hidden"]')).toHaveAttribute('aria-checked', 'true')
+  await page.keyboard.press('Escape')
+  const muted = page.locator('.goal[data-goal-id="g-crm"]')
+  await expect(muted).toHaveAttribute('data-hidden', '1')
+  await expect(muted.locator('.hidden-mark')).toHaveText('Hidden')
+  if (!(await muted.getAttribute('data-open') === '1')) await muted.locator('.goal-toggle').click()
+  await shot(page, info, 390, dark, 'hidden-shown')
+  await muted.locator('.hide-btn').click()
+  await expect(muted).not.toHaveAttribute('data-hidden', '1')
+  expect(w.hidden.size).toBe(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
-  check(info, 390, false, 'phone menu rows and opened-goal hide with Undo', true)
+  check(info, 390, dark, 'phone menu rows; opened-goal hide, Undo, show hidden, Unhide', true)
 })
+}
