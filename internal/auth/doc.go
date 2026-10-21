@@ -47,6 +47,10 @@
 //	/api/knowledge: knowledge.read or knowledge.write.
 //	/api/projects/{id}/journey|requirements|releases:
 //	  journey.read for reads; agent writes have no mapping.
+//	POST /api/projects/{id}/deploys: releases.deploy. The key scope is only
+//	  an outer ceiling. A person grants it on the existing key-scope path;
+//	  the grant is audited, and new keys do not receive it. The handler
+//	  rechecks the project permission, linked repository and ancestry.
 //	/api/approvals: approvals.read for list, approvals.request for proposal;
 //	  decisions and revocations have no agent mapping.
 //	/api/inbox, /api/projects/{id}/messages|message-targets|message-deliveries:

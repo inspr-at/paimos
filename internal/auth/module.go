@@ -549,6 +549,13 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			if len(parts) == 3 && read {
 				return "harness.read", true
 			}
+		case "deploys":
+			// Outer key-scope ceiling only. recordDeploy still rechecks
+			// project releases.deploy, the linked repository and ancestry.
+			// The scope is person-granted and is not on new keys.
+			if len(parts) == 3 && validRouteUUID(parts[1]) && r.Method == http.MethodPost {
+				return "releases.deploy", true
+			}
 		case "release-memberships":
 			if len(parts) == 3 && read {
 				return "releases.read", true
