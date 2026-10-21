@@ -70,16 +70,16 @@ it('AEON-1213: shared preference reads retry failures, coalesce recovery and acc
   expect(fetch).toHaveBeenCalledTimes(3)
 })
 
-// The goals toolbar saves with delay 0. The channel posts, then a reload can
-// discard the document before that message reaches fetch. The pagehide listener
-// must already have sent the value in hand, with keepalive and no abort signal.
-it('AEON-1614: a delay-0 save still queued on its channel is written with keepalive when the page hides', async () => {
+// The goals toolbar saves with delay 0 and the spec reloads on the next turn.
+// A channel macrotask loses that race: pagehide's fetch is not what the next
+// document reads. The write has to start from the click's own task, with
+// keepalive, and pagehide must not send a second copy of the same value.
+// A debounced save that has not reached its timer still leaves with the page.
+it('AEON-1614: a delay-0 save is on the wire with keepalive before the page hides', async () => {
   const calls: RequestInit[] = []
-  const messages: (() => void)[] = []
   const hides: Array<(event: Event) => void> = []
   vi.stubGlobal('MessageChannel', class {
-    port1 = { onmessage: (() => {}) as () => void, close() {} }
-    port2 = { close() {}, postMessage: () => messages.push(() => this.port1.onmessage()) }
+    constructor() { throw new Error('a delay-0 save must not wait on a channel') }
   })
   vi.stubGlobal('window', {
     addEventListener: (type: string, listener: (event: Event) => void) => { if (type === 'pagehide') hides.push(listener) },
@@ -95,18 +95,28 @@ it('AEON-1614: a delay-0 save still queued on its channel is written with keepal
   await flush()
   calls.length = 0
   const saving = pref.save({ showWaiting: false }, 0)
-  expect(messages).toHaveLength(1)
-  expect(calls.filter(init => init.method === 'PUT')).toHaveLength(0)
+  const puts = () => calls.filter(init => init.method === 'PUT')
+  expect(puts()).toHaveLength(0)
+  await flush()
+  expect(puts()).toHaveLength(1)
+  expect(puts()[0]!.keepalive).toBe(true)
+  expect(puts()[0]!.signal).toBeUndefined()
+  expect(String(puts()[0]!.body)).toContain('"showWaiting":false')
   expect(hides).toHaveLength(1)
   hides[0]!(new Event('pagehide'))
   await flush()
-  const puts = calls.filter(init => init.method === 'PUT')
-  expect(puts).toHaveLength(1)
-  expect(puts[0]!.keepalive).toBe(true)
-  expect(puts[0]!.signal).toBeUndefined()
-  expect(String(puts[0]!.body)).toContain('"showWaiting":false')
-  messages.splice(0).forEach(run => run())
-  await flush()
-  expect(calls.filter(init => init.method === 'PUT')).toHaveLength(1)
+  expect(puts()).toHaveLength(1)
   expect(await saving).toBe(true)
+
+  calls.length = 0
+  vi.useFakeTimers()
+  const later = pref.save({ showWaiting: true }, 400)
+  expect(puts()).toHaveLength(0)
+  hides[0]!(new Event('pagehide'))
+  await flush()
+  expect(puts()).toHaveLength(1)
+  expect(puts()[0]!.keepalive).toBe(true)
+  expect(puts()[0]!.signal).toBeUndefined()
+  expect(String(puts()[0]!.body)).toContain('"showWaiting":true')
+  expect(await later).toBe(true)
 })

@@ -9,10 +9,12 @@ type Owner = { tenant: { id: string }; principal: { id: string } } | null
 interface Preference {
   key: string; owner: string; epoch: number; value: Ref<Json | null>; ready: Promise<void>
   loaded: boolean; reading?: Promise<boolean>
-  timer?: ReturnType<typeof setTimeout>; channel?: MessageChannel; tail?: Promise<boolean>
+  timer?: ReturnType<typeof setTimeout>; tail?: Promise<boolean>
   // The promise for a delay-0 save that has not reached the network yet, and the
   // resolvers for a save a newer one replaced or a sign-out cancelled.
   soon?: Promise<boolean>; settle?: (ok: boolean | Promise<boolean>) => void; delaySettle?: (ok: boolean | Promise<boolean>) => void
+  // The object a keepalive write already handed to fetch. pagehide must not send it again.
+  inflightBody?: Json; tailKeepalive?: boolean
 }
 const owner = shallowRef('')
 // Read-only ownership fence for caches that follow the same authentication epoch.
@@ -44,10 +46,7 @@ export function setPreferenceOwner(who: Owner, current = () => true) {
     if (pref.timer !== undefined) clearTimeout(pref.timer)
     pref.timer = undefined
     pref.delaySettle?.(false); pref.delaySettle = undefined
-    const channel = pref.channel
-    pref.channel = undefined
     pref.settle?.(false); pref.settle = undefined; pref.soon = undefined
-    channel?.port1.close(); channel?.port2.close()
   }
   for (const flight of flights) flight.abort()
   flights.clear(); cache.clear(); owner.value = next
@@ -122,34 +121,37 @@ function preference(key: string): Preference | null {
 }
 // A slow move must finish before its Undo is sent. The tail checks ownership
 // when it actually starts, not only when it is enqueued.
-function persist(pref: Preference): Promise<boolean> {
+// keepalive is the delay-0 path: the request has to survive a reload. The body
+// is marked only once that job actually starts, so a same-turn sign-out still
+// cancels it, and a later pagehide can see the value already on the wire.
+function persist(pref: Preference, keepalive = false): Promise<boolean> {
   const job = (pref.tail ?? Promise.resolve(false)).catch(() => false).then(async (): Promise<boolean> => {
     if (!owned(pref)) return false
     const value = pref.value.value
     if (!value) return false
-    const saved = await writePreference(pref.key, value)
+    if (keepalive) { pref.inflightBody = value; pref.tailKeepalive = true }
+    else pref.tailKeepalive = false
+    const saved = await writePreference(pref.key, value, keepalive)
+    if (pref.tail === job && pref.inflightBody === value) pref.inflightBody = undefined
     if (owned(pref)) { if (saved) preferenceSaves.failed.delete(`${pref.owner}/${pref.key}`); else preferenceSaves.failed.add(`${pref.owner}/${pref.key}`) }
     return saved && owned(pref)
-  }).finally(() => { if (pref.tail === job) pref.tail = undefined })
+  }).finally(() => { if (pref.tail === job) { pref.tail = undefined; pref.tailKeepalive = false } })
   pref.tail = job
   return job
 }
+// A delay-0 save leaves on a microtask, with keepalive. A channel macrotask was
+// still queued when the goals spec reloaded, and pagehide's fetch is not what
+// the next document reads. Same-turn saves share `soon` until that microtask.
 function writeSoon(pref: Preference): Promise<boolean> {
   if (pref.soon) return pref.soon
   pref.soon = new Promise(resolve => {
     pref.settle = resolve
-    const channel = pref.channel = new MessageChannel()
-    channel.port1.onmessage = () => {
-      // pagehide already took this channel and sent the value in hand.
-      if (pref.channel !== channel) return
-      channel.port1.close(); channel.port2.close(); pref.channel = undefined
+    queueMicrotask(() => {
+      if (pref.settle !== resolve) return
       pref.soon = undefined; pref.settle = undefined
-      if (owned(pref) && pref.timer === undefined) resolve(persist(pref))
-      else resolve(false)
-    }
-    ;(channel.port1 as MessagePort & { unref?: () => void }).unref?.()
-    ;(channel.port2 as MessagePort & { unref?: () => void }).unref?.()
-    channel.port2.postMessage(undefined)
+      if (!owned(pref) || pref.timer !== undefined) { resolve(false); return }
+      resolve(persist(pref, true))
+    })
   })
   return pref.soon
 }
@@ -198,29 +200,31 @@ export function usePreference<T extends object>(key: string) {
   return { value, get ready() { return preference(key)?.ready ?? Promise.resolve() }, ensureLoaded, save, done }
 }
 // Registered on the first save so a test that stubs window is seen then, not at import.
-// Node tests have no window; the hook stays off and the channel path is unchanged.
+// Node tests have no window; the hook stays off.
 let leaveHooked = false
 function ensureLeaveHook() {
   if (leaveHooked || typeof window === 'undefined') return
   leaveHooked = true
   window.addEventListener('pagehide', flushLeaving)
 }
-// Navigation can discard a delay-0 save before its channel message reaches fetch,
-// or abort a write already in flight. Send the value in hand before the document goes.
+// A debounced save that has not reached its timer still leaves with the page.
+// A delay-0 value already on a keepalive wire is left there: sending it again
+// races the copy the next document will read.
 function flushLeaving() {
   for (const pref of cache.values()) {
     if (!owned(pref) || !pref.value.value) continue
-    if (pref.timer === undefined && !pref.soon && !pref.tail) continue
+    const waiting = pref.timer !== undefined || pref.soon !== undefined
+    if (!waiting && !pref.tail) continue
+    if (!waiting && pref.tailKeepalive && pref.inflightBody === pref.value.value) continue
     if (pref.timer !== undefined) clearTimeout(pref.timer)
     pref.timer = undefined
     const delaySettle = pref.delaySettle
     pref.delaySettle = undefined
-    const channel = pref.channel
     const settle = pref.settle
-    pref.channel = undefined
     pref.soon = undefined
     pref.settle = undefined
-    const request = writePreference(pref.key, pref.value.value, true)
+    const value = pref.value.value
+    const request = writePreference(pref.key, value, true)
     const tracked = request.then(saved => {
       if (owned(pref)) {
         const id = `${pref.owner}/${pref.key}`
@@ -228,12 +232,12 @@ function flushLeaving() {
         else preferenceSaves.failed.add(id)
       }
       return saved && owned(pref)
-    }).finally(() => { if (pref.tail === tracked) pref.tail = undefined })
+    }).finally(() => { if (pref.tail === tracked) { pref.tail = undefined; pref.tailKeepalive = false } })
     pref.tail = tracked
+    pref.tailKeepalive = true
+    pref.inflightBody = value
     settle?.(tracked)
     delaySettle?.(tracked)
-    channel?.port1.close()
-    channel?.port2.close()
   }
 }
 // Saves again what a preference holds now, where its last write failed.
