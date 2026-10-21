@@ -1571,6 +1571,9 @@ func (h *NativeHost) localCommand(ctx context.Context, b nativecontract.Binding,
 	if e == nil {
 		return nativecontract.OperationResult{}, ErrNotOwned
 	}
+	if refused := e.faulted(); refused != nil && kind != "stop" {
+		return nativecontract.OperationResult{}, refused // As Poll: its outcome could not be reported.
+	}
 	var page nativecontract.PendingCommandPage
 	if err := e.call(ctx, "GET", "/api/agentd/native-sessions/commands?limit=50", nil, &page); err != nil {
 		return nativecontract.OperationResult{}, err

@@ -462,8 +462,8 @@ func TestNativeHostPollIsolatesSessionWithRefusedReports(t *testing.T) {
 	if faultedProvider.closed() != 1 || healthyProvider.closed() != 1 {
 		t.Fatal("a person's stop was not executed", faultedProvider.closed(), healthyProvider.closed())
 	}
-	if faultedProvider.received(withheld.InputID) {
-		t.Fatal("input was written while its receipts are refused")
+	if _, err := f.h.Input(t.Context(), withheld); !errors.As(err, &status) || status.Status != http.StatusForbidden || faultedProvider.received(withheld.InputID) {
+		t.Fatal("input was written while its receipts are refused", err)
 	}
 	// Only the healthy exit was reported; the unreported exit keeps its hold.
 	if f.groups(t) != 1 {
