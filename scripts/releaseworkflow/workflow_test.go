@@ -152,8 +152,40 @@ func TestImageDoesNotWaitForClients(t *testing.T) {
 	if len(w.On) != 1 || w.On["push"] == nil {
 		t.Fatal("publishing must remain tag-push only")
 	}
-	if len(w.Jobs["image-platform"].Needs) != 0 || !reflect.DeepEqual(w.Jobs["image"].Needs, []string{"image-platform"}) || w.Jobs["image"].If != "" {
+	if !reflect.DeepEqual(w.Jobs["image-platform"].Needs, []string{"publication"}) || w.Jobs["image-platform"].If != "needs.publication.outputs.publish == 'true'" || !reflect.DeepEqual(w.Jobs["image"].Needs, []string{"image-platform"}) || w.Jobs["image"].If != "" {
 		t.Fatal("server image waits for another job")
+	}
+	publication := w.Jobs["publication"]
+	if len(publication.Needs) != 0 || publication.If != "" || publication.Environment != "" || publication.TimeoutMinutes != 10 ||
+		!reflect.DeepEqual(publication.Permissions, map[string]string{"contents": "write", "packages": "read", "attestations": "read"}) ||
+		publication.Outputs["publish"] != "${{ steps.publication.outputs.publish }}" {
+		t.Fatal("tag publication preflight must precede every build without signing or package publication authority")
+	}
+	_, guard := named(t, publication, "Verify publication state for this tag")
+	if guard.ID != "publication" || guard.If != "" || guard.ContinueOnError || guard.Run != "node scripts/release-publication.mjs" ||
+		!reflect.DeepEqual(guard.Env, map[string]string{"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}", "RELEASE_TAG": "${{ github.ref_name }}"}) {
+		t.Fatal("tag publication preflight can skip verification")
+	}
+	if len(publication.Steps) != 4 || publication.Steps[0].With["persist-credentials"] != "false" ||
+		publication.Steps[2].Uses != "docker/login-action@dbcb813823bdd20940b903addbd779551569679f" ||
+		publication.Steps[2].If != "" || publication.Steps[2].ContinueOnError ||
+		!reflect.DeepEqual(publication.Steps[2].With, map[string]string{"registry": "ghcr.io", "username": "${{ github.actor }}", "password": "${{ secrets.GITHUB_TOKEN }}"}) {
+		t.Fatal("publication verification must authenticate read-only registry inspection with the existing workflow token")
+	}
+	var policy struct {
+		Concurrency struct {
+			Group  string
+			Cancel bool `yaml:"cancel-in-progress"`
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows/release.yml"))
+	if err != nil || yaml.Unmarshal(data, &policy) != nil || policy.Concurrency.Group != "release-${{ github.ref }}" || policy.Concurrency.Cancel {
+		t.Fatal("duplicate tag runs must serialize without cancelling the original publisher")
+	}
+	cmd := exec.Command("node", "--test", "--test-name-pattern=duplicate tag publication", "scripts/release-completion.test.mjs")
+	cmd.Dir = root(t)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("duplicate tag publication regression: %v\n%s", err, output)
 	}
 	if !reflect.DeepEqual(w.Jobs["completion"].Needs, []string{"image"}) || w.Jobs["completion"].Uses != "./.github/workflows/release-completion.yml" {
 		t.Fatal("completion must follow the verified index")
@@ -715,9 +747,13 @@ func TestNativePlatformsAndIndexPublication(t *testing.T) {
 			t.Fatal("incorrect native runner mapping")
 		}
 	}
-	for _, j := range []job{platform, dryPlatform} {
-		if j.RunsOn != "${{ matrix.runner }}" || j.If != "" {
-			t.Fatal("platform jobs must always run on the native matrix")
+	for i, j := range []job{platform, dryPlatform} {
+		wantIf := ""
+		if i == 0 {
+			wantIf = "needs.publication.outputs.publish == 'true'"
+		}
+		if j.RunsOn != "${{ matrix.runner }}" || j.If != wantIf {
+			t.Fatal("fresh coordinates and rehearsals must run on the native matrix")
 		}
 		probeIndex, probe := named(t, j, "Require native platform")
 		buildIndex, build := named(t, j, "Build cached smoke image")

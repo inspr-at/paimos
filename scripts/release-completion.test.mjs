@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { ASSETS, BINARIES, STATIC_BINARIES, REPOSITORY, complete, prepare, restore, checksumMap } from './release-completion.mjs';
+import { publication, recordPublication } from './release-publication.mjs';
 
 const version = '261002120000.0.0', tag = `v${version}`, source = 'a'.repeat(40), tooling = 'b'.repeat(40);
 const digest = `sha256:${'c'.repeat(64)}`;
@@ -19,7 +20,7 @@ function fixture(names = [], { published = false } = {}) {
   for (const name of BINARIES) writeFileSync(join(dir, name), bytes.get(name));
   const makeAsset = name => ({ id: ASSETS.indexOf(name) + 1, name, state: 'uploaded', size: bytes.get(name).length, digest: `sha256:${sha(bytes.get(name))}` });
   const state = {
-    release: names.length ? { id: 99, tag_name: tag, draft: !published, prerelease: false, body: `Digest: ${digest}` } : null,
+    release: names.length ? { id: 99, tag_name: tag, draft: !published, prerelease: false, body: `Digest: ${digest}\nSource commit: ${source}` } : null,
     assets: names.map(makeAsset), refType: 'tag', tagSource: source, ancestry: 'ahead', indexDigest: digest,
     index: { schemaVersion: 2, mediaType: 'application/vnd.oci.image.index.v1+json', manifests: [] },
   };
@@ -45,7 +46,7 @@ function fixture(names = [], { published = false } = {}) {
       if (path.endsWith('/git/ref/heads/main')) return json({ ref: 'refs/heads/main', object: { type: 'commit', sha: tooling } });
       if (path.includes('/compare/')) return json({ status: state.ancestry, base_commit: { sha: source }, merge_base_commit: { sha: source } });
       if (path.includes('/contents/version.json')) return json({ type: 'file', encoding: 'base64', content: Buffer.from(JSON.stringify({ product: 'PAIMOS AEON', version: state.version ?? version, version_scheme: 'inspr-calver-3', ...(path.endsWith(tooling) ? { unpublished_reservations: state.retired ?? [], withdrawn_releases: state.withdrawn ?? [] } : {}) })).toString('base64') });
-      if (path.startsWith('orgs/')) return json([[{ name: state.indexDigest, metadata: { container: { tags: [version] } } }]]);
+      if (path.startsWith('orgs/')) return json([state.indexPresent === false ? [] : [{ name: state.indexDigest, metadata: { container: { tags: [version] } } }]]);
       if (path.includes('/releases/assets/')) return bytes.get(ASSETS[Number(path.split('/').at(-1)) - 1]);
       if (path.includes('/releases/99/assets')) return json([state.assets]);
       if (path === `repos/${REPOSITORY}/releases/tags/${tag}`) throw new Error('release completion: gh operation failed');
@@ -284,4 +285,70 @@ test('checksum parser rejects duplicates and unexpected entries', () => {
   assert.equal(checksumMap(text).size, 8);
   assert.throws(() => checksumMap(text + text.split('\n')[0] + '\n'));
   assert.throws(() => checksumMap(text.replace(BINARIES[0], '../bad')));
+});
+
+// Risk: duplicate tag events repeat image/attestation/release/pin writes, or an
+// incomplete/conflicting publication is falsely reported as complete.
+test('duplicate tag publication verifies immutable state and performs no writes', async t => {
+  const input = { ...env(), GITHUB_EVENT_NAME: 'push', GITHUB_REF: `refs/tags/${tag}`, GITHUB_SHA: source };
+  const f = fixture();
+  f.state.indexPresent = false;
+  assert.deepEqual(publication(input, f.run), { publish: true, tag, version });
+  assert.deepEqual(writes(f), []);
+  const freshOutput = join(f.dir, 'fresh-output');
+  recordPublication(publication(input, f.run), { GITHUB_OUTPUT: freshOutput });
+  assert.equal(readFileSync(freshOutput, 'utf8'), 'publish=true\n');
+  // The first run publishes through the existing completion path. Delivering
+  // the identical trigger afterwards must only read and verify those bytes.
+  f.state.indexPresent = true;
+  complete(release, f.dir, { write: true }, f.run);
+  for (const published of [false, true]) {
+    f.state.release.draft = !published;
+    const before = JSON.stringify(f.state), offset = f.calls.length;
+    const result = publication(input, f.run);
+    assert.deepEqual(result, { publish: false, ...release });
+    assert.equal(JSON.stringify(f.state), before);
+    const calls = f.calls.slice(offset);
+    assert.ok(calls.some(call => call[1] === 'attestation' && call.includes('--signer-digest') && call.includes(source) && call.includes(`refs/tags/${tag}`)));
+    assert.ok(calls.some(call => call[0] === 'docker' && call.slice(1, 5).join(' ') === 'buildx imagetools inspect --raw'));
+    assert.ok(calls.every(call => call[0] === 'docker' ? call[3] === 'inspect' :
+      call[1] === 'api' ? call[call.indexOf('--method') + 1] === 'GET' : call[1] === 'attestation' && call[2] === 'verify'));
+    const output = join(f.dir, 'publication-output'), summary = join(f.dir, 'publication-summary');
+    writeFileSync(output, ''); writeFileSync(summary, '');
+    recordPublication(result, { GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary });
+    assert.equal(readFileSync(output, 'utf8'), 'publish=false\n');
+    assert.match(readFileSync(summary, 'utf8'), /duplicate trigger performs no publication/);
+  }
+  for (const [name, mutate, reason] of [
+    ['missing release', f => { f.state.release = null; }, /partial publication/],
+    ['missing index', f => { f.state.indexPresent = false; }, /partial publication/],
+    ['missing asset', f => { f.state.assets.pop(); }, /incomplete release assets/],
+    ['changed digest', f => { f.state.indexDigest = `sha256:${'f'.repeat(64)}`; }, /different index/],
+    ['changed source', f => { f.state.tagSource = tooling; }, /source differs/],
+    ['wrong source notes', f => { f.state.release.body = `Digest: ${digest}\nSource commit: ${tooling}`; }, /different source/],
+    ['missing attestation', f => { f.state.unattested = true; }, /attestation rejected/],
+    ['incomplete index', f => { f.state.index.manifests.pop(); }, /provenance/],
+    ['retired coordinate', f => { f.state.retired = [version]; }, /retired/],
+    ['withdrawn digest', f => { f.state.withdrawn = [{ version, digest }]; }, /withdrawn/],
+    ['asset changed', f => { f.state.assets[0].digest = `sha256:${'f'.repeat(64)}`; }, /checksum differs/],
+    ['missing checksum metadata', f => { delete f.state.assets[0].digest; }, /checksum differs/],
+    ['missing sums digest', f => { delete f.state.assets.at(-1).digest; }, /checksum differs/],
+    ['corrupt sums', f => { f.bytes.set('SHA256SUMS', Buffer.from('corrupt')); }, /asset integrity failed/],
+    ['duplicate asset', f => { f.state.assets.push(f.state.assets[0]); }, /duplicate/],
+    ['unfinished upload', f => { f.state.assets[0].state = 'starter'; }, /unfinished asset/],
+    ['oversized checksums', f => { f.state.assets.at(-1).size = 65537; }, /oversized/],
+    ['lookup error', f => { f.state.before = () => { throw new Error('fixture API down'); }; }, /API down/],
+  ]) await t.test(name, () => {
+    const bad = fixture(ASSETS); mutate(bad);
+    assert.throws(() => publication(input, bad.run), reason);
+    assert.deepEqual(writes(bad), []);
+  });
+  for (const change of [
+    { GITHUB_EVENT_NAME: 'workflow_dispatch' }, { GITHUB_REF: 'refs/heads/main' },
+    { GITHUB_REPOSITORY: 'other/repo' }, { GITHUB_SHA: 'short' }, { RELEASE_TAG: 'v260231120000.0.0' },
+  ]) {
+    const bad = fixture();
+    assert.throws(() => publication({ ...input, ...change }, bad.run), /exact release tag push/);
+    assert.equal(bad.calls.length, 0);
+  }
 });
