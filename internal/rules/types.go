@@ -175,6 +175,7 @@ type Layer struct {
 	Scope Scope  `json:"scope"`
 }
 type Set struct {
+	DBAuthoring      *bool  `json:"db_authoring,omitempty"`
 	ID               string `json:"id"`
 	LayerID          string `json:"layer_id"`
 	Scope            Scope  `json:"scope"`

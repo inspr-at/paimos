@@ -6,7 +6,7 @@
 // label. Phone rows stay as they were. Evidence: aeon1470-<width>-<theme>-<state>.png and aeon1470-checks.json (.md).
 import { test, expect, type Locator, type Page, type TestInfo } from '@playwright/test'
 import { writeFileSync } from 'node:fs'
-import { CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, GIVE_WAY, RETURN_ROOM, type ColumnId } from '../src/lib/columns'
+import { COLUMN_BY_ID, GIVE_WAY, RETURN_ROOM, type ColumnId } from '../src/lib/columns'
 import { SORT_LABELS } from '../src/lib/work'
 import { controlStability } from './control-stability'
 import { fixtures, liveAgent, mockWork, watchErrors, type Fixtures } from './work-fixtures'
@@ -103,38 +103,61 @@ async function open(page: Page, options: { width?: number; theme?: 'light' | 'da
   await page.evaluate(() => document.fonts.ready)
   // Group figures have landed: Priority never steps aside, so some group's priority mix shows.
   if (width > 720) await expect(grid(page).locator('tr.group-row td[data-group-column="priority"] .gf-text').filter({ hasText: /\S/ }).first()).toBeVisible()
-  await settled(page)
+  await columnsLaidOut(page, null)
   return { errors, data: d }
 }
 async function settled(page: Page) { await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))) }
+// The spec's clock stubs requestAnimationFrame, so a frame wait is not a paint. Poll the card's
+// own settled epoch (and reject a column that laid out at 0) until two reads agree. `epochBefore`
+// is the epoch from before this resize; null waits only for the current settle.
+async function columnsLaidOut(page: Page, epochBefore: string | null) {
+  let last = ''
+  let hits = 0
+  await expect.poll(async () => {
+    const snap = await page.evaluate(() => {
+      const card = document.querySelector('.table-card')
+      const thead = document.querySelector('.tickets thead')
+      const shown = !!thead && getComputedStyle(thead).display !== 'none'
+      const cells = [...document.querySelectorAll('.tickets thead th')]
+      const zero = shown && cells.some(cell => cell.getBoundingClientRect().width < 1)
+      return {
+        epoch: card?.getAttribute('data-card-epoch') ?? '',
+        settled: card?.getAttribute('data-card-width-settled') === '1' && card?.getAttribute('data-columns-settled') === '1',
+        zero,
+        ids: cells.map(cell => cell.getAttribute('data-column-id')).join(','),
+      }
+    })
+    const ready = snap.settled && !snap.zero && (epochBefore === null || snap.epoch !== epochBefore)
+    const sig = `${snap.epoch}|${snap.zero}|${snap.ids}`
+    if (ready && sig === last) hits++
+    else hits = 0
+    last = sig
+    if (hits >= 2) return 'stable'
+    if (!snap.settled) return 'settling'
+    if (snap.zero) return `zero ${snap.ids}`
+    return `epoch ${snap.epoch}`
+  }, { timeout: 8_000, intervals: [0, 0, 16, 32, 64, 100] }).toBe('stable')
+}
 type Box = { x: number; y: number; width: number; height: number }
 const boxOf = (locator: Locator) => locator.evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } })
 const tableWidth = (page: Page) => page.locator('.table-card').evaluate(el => el.clientWidth)
 const shownIds = (page: Page) => grid(page).locator('thead th').evaluateAll(cells => cells.map(cell => cell.getAttribute('data-column-id') as ColumnId))
-// A growth is adopted only after two frames agree, and a disagreeing pair is retried up to the sample cap.
-// Read after that window. A set that never changes is still returned, and the assertion judges it.
+// Read the column set only after the card width that produced it has settled.
 async function shownAfterCard(page: Page): Promise<ColumnId[]> {
-  for (let frame = 0; frame < CARD_WIDTH_SAMPLE_CAP + 4; frame++) {
-    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
-  }
-  let last = await shownIds(page)
-  for (let frame = 0; frame < 12; frame++) {
-    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
-    const next = await shownIds(page)
-    if (next.join() === last.join()) return next
-    last = next
-  }
-  return last
+  await columnsLaidOut(page, null)
+  return shownIds(page)
 }
 const headWidths = (page: Page) => grid(page).locator('thead th').evaluateAll(cells => Object.fromEntries(cells.map(cell => [cell.getAttribute('data-column-id'), cell.getBoundingClientRect().width])))
-// Sets the viewport so the table is exactly `target` px wide (the page gutter grows with the window). The resize
-// observer and the render it triggers land before the second frame.
+// Sets the viewport so the table is exactly `target` px wide (the page gutter grows with the window). The next
+// card-width epoch is the layout those pixels belong to; the read waits for that, not for a timer.
 async function tableAt(page: Page, target: number) {
   let viewport = page.viewportSize()!.width + target - await tableWidth(page)
   let actual = await tableWidth(page)
   for (let step = 0; step < 8; step++) {
-    await page.setViewportSize({ width: viewport, height: 900 })
-    await settled(page)
+    const epoch = await page.locator('.table-card').getAttribute('data-card-epoch')
+    const same = viewport === page.viewportSize()!.width
+    if (!same) await page.setViewportSize({ width: viewport, height: 900 })
+    await columnsLaidOut(page, same ? null : epoch)
     actual = await tableWidth(page)
     if (actual === target) break
     viewport += target - actual

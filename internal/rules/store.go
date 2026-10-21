@@ -190,6 +190,11 @@ func (m *Module) getSet(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
+	enabled, err := DBAuthoring(r.Context(), tx)
+	if err != nil {
+		return nil, err
+	}
+	s.DBAuthoring = &enabled
 	return present(s), nil
 }
 

@@ -52,6 +52,8 @@ var ticketKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,15}-[1-9][0-9]{0,8}$
 // optional: without it the proposal is against the rule at the current pin.
 // Without tldr the rule keeps its current TL;DR.
 type InboxInput struct {
+	Operation  string     `json:"operation,omitempty"`
+	Section    string     `json:"section,omitempty"`
 	RequestID  string     `json:"request_id"`
 	SourceID   string     `json:"source_id,omitempty"`
 	Repository string     `json:"repository,omitempty"`
@@ -519,7 +521,7 @@ func (m *Module) inboxItems(ctx context.Context, actor tenant.Principal, full bo
 			if found {
 				item.Base, item.BaseSHA = sourceBody(rule.Source), rule.SHA256
 			}
-			item.Outdated = item.State == "pending" && (!found || rule.SHA256 != item.BaseRuleSHA)
+			item.Outdated = item.State == "pending" && ((item.Operation == "add" && found) || (item.Operation != "add" && (!found || rule.SHA256 != item.BaseRuleSHA)))
 			if hasDraft {
 				item.Proposed, item.Why = sourceBody(d.Source), d.Why
 				item.TLDR = &TLDR{EN: d.EN, DE: d.DE}
@@ -597,7 +599,7 @@ func (m *Module) submitInbox(r *http.Request, actor tenant.Principal) (any, erro
 		if err != nil {
 			return err
 		}
-		in = ProposalInput{RequestID: id, SourceID: p.SourceID, Path: p.Path, RuleKey: p.RuleKey, RuleSHA: p.BaseRuleSHA, Source: d.Source, Explanation: d.Why}
+		in = ProposalInput{Operation: p.Operation, Section: p.Section, RequestID: id, SourceID: p.SourceID, Path: p.Path, RuleKey: p.RuleKey, RuleSHA: p.BaseRuleSHA, Source: d.Source, Explanation: d.Why}
 		in.TLDR.EN, in.TLDR.DE = d.EN, d.DE
 		if body.Source != nil {
 			in.Source = *body.Source
@@ -633,7 +635,7 @@ func (m *Module) submitInbox(r *http.Request, actor tenant.Principal) (any, erro
 	if p.PRNumber > 0 {
 		return p, nil
 	}
-	if edited && body.RuleSHA != "" {
+	if edited && body.RuleSHA != "" && in.Operation != "add" {
 		// The person edited against the rule at the current pin.
 		rule, ok := ruleByDigest(Render(source.Repository, source.Commit, source.Visibility == "private", files), in.Path, body.RuleSHA)
 		if !ok {

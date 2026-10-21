@@ -301,3 +301,15 @@ test('axe: agent rules', async ({ page }) => {
   const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 6).map(n => `  ${n.target.join(' ')} — ${n.html.slice(0, 180)}`).join('\n')}`)
   expect(summary, summary.join('\n')).toEqual([])
 })
+
+// AEON-1588: the workspace authoring switch disables every local editor entry.
+test('database authoring off preserves reads and offers doctrine proposals', async ({ page }) => {
+  const rules = await setup(page, { dbAuthoring: false })
+  await page.goto('/settings/agent-rules')
+  await expect(page.getByRole('link', { name: 'Propose a change' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Import', exact: true })).toBeDisabled()
+  await openSet(page, 'Secrets')
+  await page.getByRole('button', { name: 'Actions for Secrets' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Edit rules' })).toBeDisabled()
+  expect(rulesCalls(rules.calls).every(call => call.method === 'GET')).toBe(true)
+})

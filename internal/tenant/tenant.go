@@ -28,6 +28,7 @@ type Principal struct {
 	Scopes                []string // authenticated agent key's outer permission ceiling
 	FullAccess            bool     // dynamic agent-grantable key ceiling, independent of workstation designation
 	KeyCreatorID          string   // creator's live binding further narrows an agent key
+	KeyPersonID           string   // explicit API-key person binding; empty for unbound legacy keys
 	KeyID                 string   `json:"-"` // authenticating key metadata ID; never a prefix or credential
 	OwnerWorkstation      bool     // explicit designation; authz rechecks live binding
 	WorkstationComputerID string

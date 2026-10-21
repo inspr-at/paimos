@@ -3,7 +3,10 @@
 package knowledge
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -16,8 +19,11 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // learningDraftAudit is knowledge.learning_drafted. Undo reads rule back out
@@ -60,6 +66,20 @@ func (m *module) handleDraftLearning(w http.ResponseWriter, r *http.Request) {
 	raw, err := readObject(w, r)
 	if err != nil {
 		writeErr(w, err)
+		return
+	}
+	if _, ok := raw["doctrine"]; ok {
+		in, confirm, err := parseLearningProposal(raw)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		result, err := m.proposeLearning(ctx, p, r.PathValue("learningId"), nodeID, commentID, comment, in, confirm)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
 		return
 	}
 	layerID, setID, confirm, err := parseDraft(raw)
@@ -327,4 +347,104 @@ func undoRuleErr(err error) error {
 		return events.ErrConflict
 	}
 	return err
+}
+
+// A target is explicit: project/person/role layers must never silently choose
+// a public repository. Without a target the ordinary writer returns the stable
+// disabled code, directing the person to the existing doctrine proposal entry.
+type learningDoctrine interface {
+	RecordLearningDraftTx(context.Context, pgx.Tx, tenant.Principal, doctrine.InboxInput) (string, []events.Change, error)
+}
+
+func NewWithDoctrine(pool *pgxpool.Pool, proposals *doctrine.Module) httpapi.Module {
+	if proposals == nil {
+		return New(pool)
+	}
+	return &module{pool: pool, doctrine: proposals}
+}
+func (m *module) proposeLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, in doctrine.InboxInput, confirm bool) (any, error) {
+	var out any
+	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := fenceLearningWrite(ctx, tx, p, nodeID); err != nil {
+			return err
+		}
+		enabled, err := rules.DBAuthoring(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if enabled {
+			return fail(409, "invalid_request", "Database authoring is enabled; use the existing layer and set draft target.")
+		}
+		if m.doctrine == nil {
+			return asKnowledgeRule(rules.RequireDBAuthoring(ctx, tx))
+		}
+		if err = lockLearning(ctx, tx, p.TenantID, publicID); err != nil {
+			return err
+		}
+		if err = ensureUndecided(ctx, tx, p.TenantID, publicID); err != nil {
+			return err
+		}
+		item, err := loadOpen(ctx, tx, p.TenantID, nodeID, commentID, comment)
+		if err != nil {
+			return err
+		}
+		if _, err = sensitiveCheck(append(sensitiveRanges("text", item.Text), sensitiveRanges("title", item.Title)...), confirm); err != nil {
+			return err
+		}
+		rule, err := learningRule(item, publicID, nodeID, commentID, comment)
+		if err != nil {
+			return err
+		}
+		in.Operation = "add"
+		in.RuleSHA = ""
+		in.RuleKey = rule.Identity
+		if len(in.RuleKey) > 64 {
+			sum := sha256.Sum256([]byte(publicID))
+			in.RuleKey = "learn." + hex.EncodeToString(sum[:20])
+		}
+		in.Source = "<!-- aeon-rule: " + in.RuleKey + " -->\n- " + rule.Text + "\n"
+		in.Why = rule.Why
+		if in.TLDR == nil {
+			in.TLDR = &doctrine.InboxTLDR{EN: clipBytes(rule.Text, 300)}
+		}
+		id, changes, err := m.doctrine.RecordLearningDraftTx(ctx, tx, p, in)
+		if err != nil {
+			code, message := doctrine.DeskFailure(err)
+			return fail(409, code, message)
+		}
+		var eventID int64
+		for _, change := range changes {
+			ev, err := events.Append(ctx, tx, p, change)
+			if err != nil {
+				return err
+			}
+			eventID = ev.ID
+		}
+		out = map[string]any{"id": publicID, "decision": "proposed", "proposal_id": id, "event_id": eventID, "code": rules.DBAuthoringDisabled}
+		return nil
+	})
+	return out, err
+}
+
+func parseLearningProposal(raw map[string]json.RawMessage) (doctrine.InboxInput, bool, error) {
+	for key := range raw {
+		if key != "doctrine" && key != "confirm_not_sensitive" {
+			return doctrine.InboxInput{}, false, fail(400, "invalid_request", "Choose either a database draft or a doctrine proposal target.")
+		}
+	}
+	var target struct {
+		RequestID  string              `json:"request_id"`
+		SourceID   string              `json:"source_id,omitempty"`
+		Repository string              `json:"repository,omitempty"`
+		Path       string              `json:"path"`
+		Section    string              `json:"section"`
+		TLDR       *doctrine.InboxTLDR `json:"tldr,omitempty"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw["doctrine"]))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&target); err != nil {
+		return doctrine.InboxInput{}, false, fail(400, "invalid_request", "doctrine must name an add-proposal target; rule text comes from the learning")
+	}
+	confirm, err := confirmField(raw)
+	return doctrine.InboxInput{RequestID: target.RequestID, SourceID: target.SourceID, Repository: target.Repository, Path: target.Path, Section: target.Section, TLDR: target.TLDR}, confirm, err
 }

@@ -1,6 +1,51 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # aeon:owner internal/rules/doctrine
 paths:
+  /rules/authoring:
+    get:
+      operationId: "getRulesDBAuthoring"
+      description: "rules.read. Reads the tenant switch rules.db_authoring; absent or null storage means on. Delivery and published snapshots are independent of this switch."
+      responses:
+        '200':
+          description: "Current authoring switch"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RulesDBAuthoring'}
+        '403': {description: "Permission denied"}
+    put:
+      operationId: "setRulesDBAuthoring"
+      description: "Workspace settings.manage. Sets rules.db_authoring under the access fence. Defaults to on; this endpoint does not migrate, delete or publish rule text. Off refuses the seven database HTTP writers and CLI applies with 409 rules_db_authoring_disabled and directs callers to /api/rules/doctrine/inbox. Learning drafts with an explicit doctrine target become inbox add proposals."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [db_authoring]
+              properties:
+                db_authoring: {type: boolean}
+      responses:
+        '200':
+          description: "Saved authoring switch"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RulesDBAuthoring'}
+        '403': {description: "Permission denied"}
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+  /rules/export:
+    get:
+      operationId: "exportPublishedRules"
+      description: "Workspace settings.manage plus existing scoped rules.read and ownership. Deterministically exports all caller-visible published node-authored history, one JSON file per layer plus a manifest, with ids, revisions, publication authors, original snapshot digests and SHA-256 of text, why and details. No drafts, no tenant or private-ownership bypass, no clock-dependent export fields; audit contains only counts and bundle digest. Company targets propose the configured public doctrine repository; private kernel origins propose the configured private repository; project targets propose that project's AGENTS.md; person, role, named-agent and task targets say needs decision. Targets are proposals only. No selectors. Entire exports exceeding 10000 nodes, 100 authors per resource or 16 MiB fail rather than truncate."
+      responses:
+        '200':
+          description: "Deterministic published rule bundle"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RulesExportBundle'}
+        '403': {description: "Workspace administration or scoped rule access denied"}
+        '413': {description: "rules_export_too_large; nothing exported"}
+        '409': {description: "snapshot_integrity; published data did not verify"}
   /rules/budget:
     get:
       operationId: "getRuleBudget"
@@ -15,7 +60,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or rules_db_authoring_disabled (use /api/rules/doctrine/inbox)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
     put:
       operationId: "setRuleBudget"
@@ -444,7 +489,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules. A named-agent preview the caller could already see may return not_key_creator, key_revoked, key_expired, or agent_inactive (as GET /rules/merged); every other caller receives forbidden.","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or rules_db_authoring_disabled (use /api/rules/doctrine/inbox)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"The snapshots for this session exceed 2,000 rules or 2 MiB of rule text","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
@@ -508,7 +553,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or rules_db_authoring_disabled (use /api/rules/doctrine/inbox)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
     post:
@@ -524,7 +569,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or rules_db_authoring_disabled (use /api/rules/doctrine/inbox)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       requestBody:
@@ -548,7 +593,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules. GET /rules/merged and GET /rules/explained are the only rules routes that return not_key_creator, key_revoked, key_expired, or agent_inactive, and only when the caller could already see that agent (members.read, so GET /members lists it, or they created its key). Every other caller, and a missing agent, receives forbidden.","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or rules_db_authoring_disabled (use /api/rules/doctrine/inbox)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap, or the snapshots for this session exceed 2,000 rules or 2 MiB of rule text","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
@@ -638,7 +683,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or rules_db_authoring_disabled (use /api/rules/doctrine/inbox)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
@@ -662,7 +707,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or rules_db_authoring_disabled (use /api/rules/doctrine/inbox)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       requestBody:
@@ -693,7 +738,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or rules_db_authoring_disabled (use /api/rules/doctrine/inbox)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
@@ -718,7 +763,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or rules_db_authoring_disabled (use /api/rules/doctrine/inbox)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
@@ -815,7 +860,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or rules_db_authoring_disabled (use /api/rules/doctrine/inbox)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
         -
@@ -851,7 +896,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or rules_db_authoring_disabled (use /api/rules/doctrine/inbox)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
@@ -876,7 +921,7 @@ paths:
         "400": {"description":"Invalid scope, rule, context or calendar version","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "403": {"description":"Permission or scoped ownership denied; agents never publish or edit company rules","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "404": {"description":"Resource unavailable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        "409": {"description":"Revision/version conflict or ambiguous same-rank identity","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
+        "409": {"description":"Revision/version conflict, ambiguous same-rank identity, or rules_db_authoring_disabled (use /api/rules/doctrine/inbox)","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "422": {"description":"Rendered rules exceed the workspace budget (default 12000 UTF-8 bytes) or a layer cap; reduce always-on text or move content to details","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
         "401": {"description":"Authentication required","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
       parameters:
@@ -1016,6 +1061,8 @@ components:
       additionalProperties: false
       required: [request_id, path, rule_key, source, why]
       properties:
+        operation: {type: string, enum: [edit, add], description: "Defaults to edit; add creates one new explicit rule in an existing section or a new file selected by configured doctrine roots"}
+        section: {type: string, maxLength: 200, description: "Required for add; existing indexed section key, or the heading title for a new file. No rule_sha256 for add."}
         request_id: {type: string, format: uuid}
         source_id: {type: string, format: uuid, description: "The doctrine source; or name it by repository"}
         repository: {type: string, description: "inspr-modules, inspr-doctrine-private, or the full owner/name"}
@@ -1085,6 +1132,8 @@ components:
       type: object
       required: [id, source_id, repository, path, rule_key, state, head_sha, pr_number, pr_url, proposed_by, created_at, gate_ready, pinned_machines]
       properties:
+        operation: {type: string, enum: [edit, add]}
+        section: {type: string}
         id: {type: string, format: uuid}
         source_id: {type: string, format: uuid}
         repository: {type: string}
@@ -1124,8 +1173,20 @@ components:
     DoctrineProposalInput:
       type: object
       additionalProperties: false
-      required: [request_id, source_id, path, rule_key, rule_sha256, source, tldr, explanation]
+      required: [request_id, source_id, path, rule_key, source, tldr, explanation]
+      allOf:
+        - if:
+            required: [operation]
+            properties:
+              operation: {const: add}
+          then:
+            required: [section]
+            not: {required: [rule_sha256]}
+          else:
+            required: [rule_sha256]
       properties:
+        operation: {type: string, enum: [edit, add], description: "Defaults to edit; add creates one new explicit rule in an existing section or a new file selected by configured doctrine roots"}
+        section: {type: string, maxLength: 200, description: "Required for add; existing indexed section key, or the heading title for a new file. No rule_sha256 for add."}
         request_id: {type: string, format: uuid}
         source_id: {type: string, format: uuid}
         path: {type: string, maxLength: 300}
@@ -1546,6 +1607,7 @@ components:
       type: "object"
       additionalProperties: false
       properties:
+        db_authoring: {type: boolean, description: "Present on GET set; false refuses CLI applies including unchanged plans"}
         id:
           type: "string"
           format: "uuid"
@@ -1742,3 +1804,79 @@ components:
           maxItems: 16
           description: "Comparison limits. Tokens only; no paths or instruction text."
           items: {type: string, pattern: "^[a-z][a-z0-9_]{0,63}$"}
+
+    RulesDBAuthoring:
+      type: object
+      additionalProperties: false
+      required: [db_authoring, proposal_path]
+      properties:
+        db_authoring: {type: boolean}
+        proposal_path: {type: string, const: /api/rules/doctrine/inbox}
+    RulesExportTarget:
+      type: object
+      required: [target]
+      properties:
+        target: {type: string, enum: [doctrine repository, project repository, needs decision]}
+        repository: {type: string}
+        path: {type: string}
+        project_id: {type: string, format: uuid}
+    RulesExportText:
+      type: object
+      required: [identity, sha256, why_sha256, details_sha256, proposed_git_target]
+      properties:
+        identity: {type: string}
+        node_id: {type: string, format: uuid}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        why_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        details_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        proposed_git_target: {$ref: '#/components/schemas/RulesExportTarget'}
+    RulesExportVersion:
+      type: object
+      required: [id, set_id, revision, authors, snapshot, texts]
+      properties:
+        id: {type: string, format: uuid}
+        set_id: {type: string, format: uuid}
+        revision: {type: integer}
+        authors: {type: array, maxItems: 100, items: {type: string, format: uuid}}
+        snapshot: {$ref: '#/components/schemas/RuleSnapshot'}
+        texts: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/RulesExportText'}}
+    RulesExportSet:
+      type: object
+      required: [id, revision, authors, published_version, versions]
+      properties:
+        id: {type: string, format: uuid}
+        revision: {type: integer}
+        authors: {type: array, maxItems: 100, items: {type: string, format: uuid}}
+        published_version: {type: string}
+        versions: {type: array, maxItems: 10000, items: {$ref: '#/components/schemas/RulesExportVersion'}}
+    RulesExportLayer:
+      type: object
+      required: [id, scope, authors, proposed_git_target, sets]
+      properties:
+        id: {type: string, format: uuid}
+        scope: {$ref: '#/components/schemas/RuleScope'}
+        authors: {type: array, maxItems: 100, items: {type: string, format: uuid}}
+        proposed_git_target: {$ref: '#/components/schemas/RulesExportTarget'}
+        sets: {type: array, maxItems: 10000, items: {$ref: '#/components/schemas/RulesExportSet'}}
+    RulesExportBundle:
+      type: object
+      required: [manifest, files]
+      properties:
+        manifest:
+          type: object
+          required: [format, tenant_id, coverage, layers]
+          properties:
+            format: {type: string, const: aeon.rules-export.v1}
+            tenant_id: {type: string, format: uuid}
+            coverage: {type: string}
+            layers: {type: array, maxItems: 10000, items: {$ref: '#/components/schemas/RulesExportLayer'}}
+        files:
+          type: array
+          maxItems: 10000
+          items:
+            type: object
+            required: [path, sha256, content]
+            properties:
+              path: {type: string}
+              sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+              content: {type: string}

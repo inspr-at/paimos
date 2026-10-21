@@ -5,6 +5,9 @@ package authz
 // Route and scope declarations for rules.
 func init() {
 	registerRoutes("rules", map[string]string{
+ "GET /api/rules/export": "settings.manage",
+ "GET /api/rules/authoring": "rules.read",
+ "PUT /api/rules/authoring": "settings.manage",
 		"GET /api/rules/budget":                          "rules.read",
 		"GET /api/rules/channels":                        "rules.read",
 		"GET /api/rules/comparisons":                     "rules.read",
@@ -26,6 +29,7 @@ func init() {
 		"PUT /api/rules/sets/{setId}/tldr":               "rules.write",
 	})
 	registerDeclarations("rules", "project_decided", ProjectDecidedRoutes, map[string]bool{
+ "GET /api/rules/authoring": true,
 		"GET /api/rules/budget":                          true,
 		"GET /api/rules/channels":                        true,
 		"GET /api/rules/comparisons":                     true,

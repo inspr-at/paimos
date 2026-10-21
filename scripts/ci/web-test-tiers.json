@@ -386,6 +386,8 @@
     ,
     "browser:tests/agent-pause.spec.ts:without control permission pause actions and wind-down are hidden"
     ,
+    "browser:tests/agent-rules.spec.ts:database authoring off preserves reads and offers doctrine proposals"
+    ,
     "browser:tests/agents-cleanup.spec.ts:Queued folds per person, says what waits, and a run link opens it without changing the preference"
     ,
     "browser:tests/agents-cleanup.spec.ts:Queued keeps the page section gap below Sessions; folding and emptying move nothing above it"
@@ -6917,6 +6919,8 @@
     {"kind":"browser","file":"tests/agent-rules.spec.ts","name":"an agent cannot publish or import","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-rules.spec.ts","name":"axe: agent rules","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-rules.spec.ts","name":"database authoring off preserves reads and offers doctrine proposals","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-rules.spec.ts","name":"layout holds at 1600 and 390 in light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -16293,6 +16297,8 @@
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470: a docked table stays inside its card; from 721 px the never-leaving minimums may scroll","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1570 a growing card is adopted after a disagreeing frame pair, and a shrink ignores a later wide pair","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1594 a shrink does not adopt a sample wider than the card now","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: a loaded fit keeps the designed width until the value is wider","tier":"GATED-FULL"}
     ,
