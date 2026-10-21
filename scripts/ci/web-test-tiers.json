@@ -16558,6 +16558,8 @@
     ,
     {"kind":"node","file":"tests/goal-rate.test.ts","name":"the stall line counts whole hours; the point line names the bucket and what changed","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a glimpse frame paints only while its measured box is connected and non-empty","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a hit-bitmap pixel belongs to a node only when it is opaque and holds its index colour","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a ticket adapter needs no knowledge schema and engines cannot mutate the source","tier":"GATED-FULL"}
@@ -18615,6 +18617,12 @@
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > keeps the empty desk incomplete when session discovery fails, until a successful retry","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > names the source that did not answer, so an empty read is never all clear","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > never calls the desk clear when the desk, its questions or its approvals did not answer, or the badge counts items","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > retries a failed desk 3, 10 and 30 s apart, one at a time, then hands over to the normal refresh","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > says the count the badge knows, in English and impersonal German","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Denied permission and an identity abort between browser work and POST cannot persist a Desk subscription","tier":"ESSENTIAL"}
     ,

@@ -48,11 +48,29 @@ function fixture(names = [], { published = false } = {}) {
       if (path.startsWith('orgs/')) return json([[{ name: state.indexDigest, metadata: { container: { tags: [version] } } }]]);
       if (path.includes('/releases/assets/')) return bytes.get(ASSETS[Number(path.split('/').at(-1)) - 1]);
       if (path.includes('/releases/99/assets')) return json([state.assets]);
-      if (path.includes('/releases?')) return json([state.release ? [state.release] : []]);
+      if (path === `repos/${REPOSITORY}/releases/tags/${tag}`) throw new Error('release completion: gh operation failed');
+      if (path === `repos/${REPOSITORY}/releases/99`) {
+        if (!state.release) throw new Error('release completion: gh operation failed');
+        return json(state.release);
+      }
+      if (path.includes('/releases?')) {
+        // The first list after create omits the new draft when listLag is set.
+        if (state.release && state.listLag > 0) { state.listLag -= 1; return json([[]]); }
+        return json([state.release ? [state.release] : []]);
+      }
+    }
+    if (args[0] === 'release' && args[1] === 'view') {
+      if (args[2] !== tag || args[args.indexOf('--repo') + 1] !== REPOSITORY) throw new Error(`unexpected fixture command: ${program} ${args.join(' ')}`);
+      if (!state.release?.draft) throw new Error('release completion: gh operation failed');
+      return json({ databaseId: state.release.id, isDraft: true, tagName: state.release.tag_name });
     }
     if (args[0] === 'release' && args[1] === 'create') {
-      state.release = { id: 99, tag_name: tag, draft: true, prerelease: false, body: readFileSync(args[args.indexOf('--notes-file') + 1], 'utf8') };
-      return Buffer.alloc(0);
+      if (!state.missingDraft) state.release = { id: 99, tag_name: tag, draft: true, prerelease: false, body: readFileSync(args[args.indexOf('--notes-file') + 1], 'utf8') };
+      // gh prints an HTML URL with no numeric id. An API URL is accepted when one is returned.
+      const url = state.htmlCreate || state.missingDraft
+        ? `https://github.com/${REPOSITORY}/releases/tag/untagged-ff5db9c82066f19c0ce6`
+        : `https://api.github.com/repos/${REPOSITORY}/releases/99`;
+      return Buffer.from(`${url}\n`);
     }
     if (args[0] === 'release' && args[1] === 'upload') {
       const name = args[3].split('/').at(-1);
@@ -231,6 +249,33 @@ test('publication between planning and upload fails closed', () => {
   };
   assert.throws(() => complete(release, f.dir, { write: true }, f.run), /changed during completion/);
   assert.deepEqual(writes(f), []);
+});
+
+test('draft create is found by id when the release list lags one call', () => {
+  const f = fixture();
+  f.state.htmlCreate = true;
+  f.state.listLag = 1;
+  let sleeps = 0;
+  assert.equal(complete(release, f.dir, { write: true, sleep: () => { sleeps += 1; } }, f.run).status, 'complete');
+  assert.equal(f.state.listLag, 1);
+  assert.equal(sleeps, 0);
+  assert.ok(f.calls.some(call => call.at(-1) === `repos/${REPOSITORY}/releases/tags/${tag}`));
+  assert.ok(f.calls.some(call => call[1] === 'release' && call[2] === 'view' && call[3] === tag));
+  assert.ok(f.calls.some(call => call.at(-1) === `repos/${REPOSITORY}/releases/99`));
+  assert.equal(f.state.release.draft, true);
+  assert.equal(f.state.assets.length, ASSETS.length);
+});
+
+test('a truly missing draft fails closed without uploads', () => {
+  const f = fixture();
+  f.state.missingDraft = true;
+  let sleeps = 0;
+  assert.throws(() => complete(release, f.dir, { write: true, sleep: () => { sleeps += 1; } }, f.run), /draft creation did not produce a draft/);
+  assert.equal(writes(f).filter(call => call[2] === 'upload').length, 0);
+  assert.equal(writes(f).filter(call => call[2] === 'create').length, 1);
+  assert.equal(sleeps, 4);
+  assert.equal(f.calls.filter(call => call[1] === 'release' && call[2] === 'view').length, 5);
+  assert.equal(f.state.release, null);
 });
 
 test('checksum parser rejects duplicates and unexpected entries', () => {
