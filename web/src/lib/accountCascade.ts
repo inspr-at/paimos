@@ -24,6 +24,7 @@ const EFFORT_LABEL: Record<string, string> = {
 const FAMILY_LABEL: Record<AuthorFamily, string> = { openai: 'OpenAI', anthropic: 'Anthropic', xai: 'xAI', cursor: 'Cursor', google: 'Google', local: 'Local' }
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
+const HOST_PROBE_FRESH_MS = 2 * 60_000
 const NAMED_SPANS = [
   { ms: 5 * HOUR, tol: 5 * 60_000, label: '5-hour' },
   { ms: DAY, tol: 20 * 60_000, label: 'Daily' },
@@ -239,7 +240,8 @@ function preferredHost(catalog: AgentAccountCatalog) {
   let best: { host: string; fraction: number; id: string } | null = null
   let only = ''
   let runnable = 0
-  for (const host of catalog.hosts) {
+  const online = catalog.hosts.filter(host => hostConnection(host, catalog.as_of).state === 'online')
+  for (const host of online.length ? online : catalog.hosts) {
     const harness = harnessOf(host, preferredHarness(host))
     const account = defaultAccount(harness)
     if (!account) continue
@@ -335,6 +337,43 @@ function reasonLabel(account: CatalogAccount) {
 function hostLabel(host: CatalogHost) {
   return displayText(host.label) ?? displayText(host.daemon_id) ?? 'Unlabeled host'
 }
+// Match the computer view's two-minute successful-probe signal, independently
+// of quota or capacity. A fresh failed sign-in still proves the daemon reported;
+// missing/invalid evidence cannot establish that a computer is offline.
+function hostConnection(host: CatalogHost, asOf: string) {
+  const now = Date.parse(asOf)
+  let checkedAt = -Infinity
+  let online = false
+  for (const harness of host.harnesses) for (const account of harness.accounts) {
+    const at = Date.parse(account.last_probe_at ?? '')
+    if (!Number.isFinite(at) || at > now || !Number.isFinite(now)) continue
+    checkedAt = Math.max(checkedAt, at)
+    if (account.last_probe_ok === true && at > now - HOST_PROBE_FRESH_MS) online = true
+  }
+  if (online) return { state: 'online', label: 'Online', rank: 0, checkedAt }
+  if (checkedAt > now - HOST_PROBE_FRESH_MS) return { state: 'sign-in', label: 'Sign-in unavailable', rank: 1, checkedAt }
+  if (Number.isFinite(checkedAt)) return { state: 'offline', label: 'Offline', rank: 3, checkedAt }
+  return { state: 'unknown', label: 'Status unknown', rank: 2, checkedAt }
+}
+function hostOptions(catalog: AgentAccountCatalog | null): CascadeOption[] {
+  if (!catalog) return []
+  const hosts = catalog.hosts.map(host => ({ host, name: hostLabel(host), connection: hostConnection(host, catalog.as_of) }))
+  const pairings = new Map<string, string[]>()
+  for (const { host, name } of hosts) {
+    const ids = pairings.get(name) ?? []
+    ids.push(host.daemon_id)
+    pairings.set(name, ids)
+  }
+  for (const ids of pairings.values()) ids.sort()
+  return hosts.sort((a, b) => a.connection.rank - b.connection.rank || b.connection.checkedAt - a.connection.checkedAt || a.host.daemon_id.localeCompare(b.host.daemon_id))
+    .map(({ host, name, connection }) => {
+      const ids = pairings.get(name)!
+      // A name is not an identity: retain every enrollment, including two live
+      // machines with the same name. Ordinals avoid exposing opaque daemon IDs.
+      const suffix = ids.length > 1 ? ` · pairing ${ids.indexOf(host.daemon_id) + 1}` : ''
+      return { value: host.daemon_id, label: `${name}${ids.length > 1 || connection.state !== 'online' ? ` · ${connection.label}` : ''}${suffix}` }
+    })
+}
 function modelLabel(model: CatalogModel, models: CatalogModel[]) {
   const name = publicModelId(model.model) ?? 'Unrecognized model'
   const family = displayText(model.family)
@@ -361,7 +400,7 @@ export function presentCascade(input: CascadeContext, choice: CascadeChoice, tou
     return rank || a.effort.localeCompare(b.effort)
   })
   const selectedEffort = efforts.find(effort => effort.model_profile_id === choice.profileId)
-  const hosts = (catalog?.hosts ?? []).map(item => ({ value: item.daemon_id, label: hostLabel(item) }))
+  const hosts = hostOptions(catalog)
   const requestedAccount = account ? [accountName(account), accountPlan(account)].filter(Boolean).join(' · ') : 'Not selected'
   const defaultId = harness?.default_account_id
   const roleNote = input.role.source === 'default'

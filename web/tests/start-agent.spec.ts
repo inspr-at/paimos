@@ -257,6 +257,47 @@ test('changing host replaces the granted model', async ({ page }) => {
   await expect(dialog(page).getByLabel('Thinking', { exact: true }).locator('option:checked')).toHaveText('Medium')
 })
 
+test('same-name hosts distinguish offline pairings and queue only the chosen account', async ({ page }, info) => {
+  const mock = await mockStartAgent(page, { catalog: 'same-name-hosts' })
+  await open(page, true)
+  const frame = dialog(page)
+  const host = frame.getByLabel('Host', { exact: true })
+  const account = frame.getByLabel('Account', { exact: true })
+  await expect(host.locator('option')).toHaveText(['Choose a host', 'Work Mac · Online · pairing 1', 'Work Mac · Offline · pairing 2'])
+  await expect(host).toHaveValue('workstation')
+  await expect(account).toHaveValue(mock.account.id)
+  await host.selectOption('workstation-old')
+  await expect(account).not.toHaveValue(mock.account.id)
+  const oldAccount = await account.inputValue()
+  expect(oldAccount).not.toBe(mock.account.id)
+  await expect(account.locator('option').filter({ hasText: 'Workspace account' })).toHaveCount(1)
+  await expectStableControls({
+    controls: {
+      host, hostGroup: frame.locator('.pair').first(), account,
+      harness: frame.getByLabel('Harness', { exact: true }), model: frame.getByLabel('Model', { exact: true }),
+      thinking: frame.getByLabel('Thinking', { exact: true }),
+      queue: frame.getByRole('button', { name: 'Queue run', exact: true }), cancel: frame.getByRole('button', { name: 'Cancel', exact: true }),
+    },
+    scrollAreas: { frame },
+    interactions: ['workstation', 'workstation-old', 'workstation'].map(id => ({ name: `choose ${id}`, run: async () => {
+      await host.selectOption(id)
+      await expect(account).toHaveValue(id === 'workstation' ? mock.account.id : oldAccount)
+    } })),
+  })
+  // Evidence is local to this run, with no visual equality assertions.
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    await frame.screenshot({ path: info.outputPath(`same-name-hosts-${width}-${theme}.png`) })
+  }
+  await frame.getByRole('button', { name: 'Queue run', exact: true }).click()
+  await expect(frame.getByRole('heading', { name: 'Queued', exact: true })).toBeVisible()
+  await expect(frame.locator('.requested')).toContainText('Work Mac · Online · pairing 1')
+  const launches = mock.calls.filter(call => call.method === 'POST' && call.path.endsWith('/runs'))
+  expect(launches).toHaveLength(1)
+  expect(launches[0].body?.requested_account_id).toBe(mock.account.id)
+})
+
 test('failed prerequisites keep launch disabled and read-only people have no action', async ({ page }) => {
   await mockStartAgent(page, { forbidden: true })
   await open(page)
