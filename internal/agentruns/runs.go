@@ -383,13 +383,12 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 		Profile          string  `json:"model_profile_id"`
 		Account          *string `json:"requested_account_id"`
 		Retry            *string `json:"retry_of_run_id"`
-		ParentRun        *string `json:"parent_run_id"`
 		CapacityOverride string  `json:"capacity_override"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
-	if !workorders.UUID(in.Agent) || !workorders.UUID(in.Profile) || (in.Account != nil && !workorders.UUID(*in.Account)) || (in.Retry != nil && !workorders.UUID(*in.Retry)) || (in.ParentRun != nil && !workorders.UUID(*in.ParentRun)) {
+	if !workorders.UUID(in.Agent) || !workorders.UUID(in.Profile) || (in.Account != nil && !workorders.UUID(*in.Account)) || (in.Retry != nil && !workorders.UUID(*in.Retry)) {
 		return nil, workorders.Fail(400, "agent and model profile required")
 	}
 	if in.CapacityOverride != "" && in.CapacityOverride != "now" {
@@ -539,36 +538,32 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 	if in.Retry != nil {
 		personRule, source = "recovery", *in.Retry
 	}
-	if in.ParentRun != nil {
-		if in.Retry != nil {
-			return nil, workorders.Fail(400, "parent and retry are mutually exclusive")
-		}
-		var parentAgent, parentProject, parentStatus string
-		if err := tx.QueryRow(ctx, `SELECT r.agent_principal_id::text,coalesce(n.project_id::text,''),r.status FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id WHERE r.tenant_id=$1 AND r.id=$2`, p.TenantID, *in.ParentRun).Scan(&parentAgent, &parentProject, &parentStatus); err != nil {
-			return nil, err
-		}
-		projectID := ""
-		if project != nil {
-			projectID = *project
-		}
-		if p.Kind != tenant.Agent || parentAgent != p.ID || parentProject != projectID || (parentStatus != "running" && parentStatus != "starting" && parentStatus != "waiting") {
-			return nil, authz.ErrForbidden
-		}
-		// A shared computer's run id is not authority. Bind this request to its
-		// existing worker lease before deriving the parent's person.
-		lease := workerlease.Read(r)
-		if lease == "" {
-			return nil, authz.ErrForbidden
-		}
+	if lease := workerlease.Read(r); in.Retry == nil && p.Kind == tenant.Agent && lease != "" {
+		// The existing worker proof identifies its parent run. No caller-chosen
+		// person, run-identity header or additional request field is accepted.
 		sum := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
-		var ownsParent bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE tenant_id=$1 AND agent_principal_id=$2 AND run_id=$3 AND lease_digest=$4 AND archived_at IS NULL AND stopped_at IS NULL)`, p.TenantID, p.ID, *in.ParentRun, sum[:]).Scan(&ownsParent); err != nil {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT r.id::text FROM harness_sessions s JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id WHERE s.tenant_id=$1 AND s.agent_principal_id=$2 AND r.agent_principal_id=$2 AND s.lease_digest=$3 AND s.archived_at IS NULL AND s.stopped_at IS NULL AND r.status IN ('running','starting','waiting') AND coalesce(n.project_id::text,'')=$4 ORDER BY r.id LIMIT 2`, p.TenantID, p.ID, sum[:], projectID)
+		if err != nil {
 			return nil, err
 		}
-		if !ownsParent {
-			return nil, authz.ErrForbidden
+		var parents []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			parents = append(parents, id)
 		}
-		personRule, source = "child", *in.ParentRun
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		if len(parents) != 1 {
+			return nil, &workqueue.PersonAdmissionError{Code: "run_person_unresolved"}
+		}
+		personRule, source = "child", parents[0]
 	}
 	actingPerson, err := workqueue.ResolveRunPersonTx(ctx, tx, p, personRule, source)
 	if err != nil {

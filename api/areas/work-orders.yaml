@@ -85,10 +85,6 @@ components:
         recovery_brief: {type: string, maxLength: 20000, description: Last recorded handover for a person-requested restart; task context only}
         recovery_service_tier: {type: string, enum: [default, fast, fastest]}
         recovery_display_label: {type: [string, 'null']}
-        parent_run_id:
-          type: [string, 'null']
-          format: uuid
-          description: 'Optional live parent run of the authenticated agent in the same project. The server derives the child person from that run; mutually exclusive with retry_of_run_id.'
         retry_of_run_id:
           type: [string, 'null']
           format: uuid

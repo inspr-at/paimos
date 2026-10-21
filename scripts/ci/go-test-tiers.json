@@ -3008,6 +3008,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunNowIsPersonOnlyAuditedAndRunScoped","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunPersonFinalClaimCeiling","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunPersonRecoveryAndChildInheritServerRun","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunPersonStartPathSourcesAndUnresolvedRefusal","tier":"ESSENTIAL"}

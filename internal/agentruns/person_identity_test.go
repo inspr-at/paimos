@@ -201,7 +201,7 @@ func TestRunPersonRecoveryAndChildInheritServerRun(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, childOrder.NodeID, project)
 		return err
 	})
-	raw, _ := json.Marshal(map[string]string{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile, "parent_run_id": original.ID})
+	raw, _ := json.Marshal(map[string]string{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile})
 	call := func(proof string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPost, "/api/work-orders/"+childOrder.NodeID+"/runs", strings.NewReader(string(raw))).WithContext(tenant.WithPrincipal(context.Background(), f.agent))
 		if proof != "" {
@@ -214,7 +214,7 @@ func TestRunPersonRecoveryAndChildInheritServerRun(t *testing.T) {
 		return w
 	}
 	for _, proof := range []string{"", strings.Repeat("wrong-child-proof", 3)} {
-		if w := call(proof); w.Code != 403 {
+		if w := call(proof); w.Code != 409 || !strings.Contains(w.Body.String(), "run_person_unresolved") {
 			t.Fatalf("unproven parent accepted: %d %s", w.Code, w.Body.String())
 		}
 	}
@@ -228,5 +228,61 @@ func TestRunPersonRecoveryAndChildInheritServerRun(t *testing.T) {
 	}
 	if child.ActingPersonID == nil || *child.ActingPersonID != f.person.ID {
 		t.Fatal("child person not inherited")
+	}
+}
+
+// Risk: daemon admission keeps serving a person after project access or person
+// activity changes. The machine's principal and computer grant remain valid.
+func TestRunPersonFinalClaimCeiling(t *testing.T) {
+	for _, mode := range []string{"active", "project_revoked", "person_deactivated"} {
+		t.Run(mode, func(t *testing.T) {
+			f := setup(t)
+			project := uuid()
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title) SELECT $1,$2,id,'PERSON-3','Claim ceiling' FROM node_kinds WHERE tenant_id=$1 AND slug='project'`, f.person.TenantID, project)
+				return err
+			})
+			order := f.order(t, nil)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, order.NodeID, project)
+				return err
+			})
+			run := f.run(t, order)
+			reservations := f.reserve(t, run)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1 AND scope_type='workspace'`, f.person.ID); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE key='admin'`, f.person.TenantID, f.person.ID, project); err != nil {
+					return err
+				}
+				switch mode {
+				case "project_revoked":
+					_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1 AND scope_type='project'`, f.person.ID)
+					return err
+				case "person_deactivated":
+					_, err := tx.Exec(t.Context(), `UPDATE principals SET status='deactivated' WHERE id=$1`, f.person.ID)
+					return err
+				}
+				return nil
+			})
+			raw, _ := json.Marshal(claimBody(reservations))
+			w := f.request(f.agent, "POST", "/api/runs/"+run.ID+"/claim", string(raw), f.token)
+			want := 200
+			if mode != "active" {
+				want = 403
+			}
+			if w.Code != want || want == 403 && !strings.Contains(w.Body.String(), `"code":"permission_revoked"`) {
+				t.Fatalf("%s claim: %d %s", mode, w.Code, w.Body.String())
+			}
+			if want == 403 {
+				if n := f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='queued' AND acting_person_id=$2`, run.ID, f.person.ID); n != 1 {
+					t.Fatal("revoked claim mutated the run")
+				}
+				if n := f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.admission_refused' AND after->>'reason'='permission_revoked'`); n != 1 {
+					t.Fatal("revocation audit was not committed")
+				}
+			}
+		})
 	}
 }
