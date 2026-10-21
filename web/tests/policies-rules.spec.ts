@@ -66,10 +66,10 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       await expect(root.getByRole('tab')).toHaveCount(0)
       await expect(page.locator('.settings-page dialog')).toHaveCount(0)
       await expect(root.locator('.settings-card h2')).toHaveText(['Cross-family review', 'Definitions', 'What agents must ask you for', 'Rules that live elsewhere'])
-      // agents.create is its own high-risk ask (AEON-1373). The folded head counts it
-      // and names it; a stale "10" is the failure this assertion exists to catch.
+      // agents.create is its own high-risk ask (AEON-1373). run.start_on_computer is the
+      // twelfth (AEON-1586). A stale "11" drops the computer-start ask from the head.
       await expect(root.locator('.risk-head')).toHaveText([
-        /^High risk · 11 · Approve or deny what agents ask for, answer questions agents ask, change roles and members, transfer workspace ownership, create and revoke API keys, provision messaging assistants,/,
+        /^High risk · 12 · Approve or deny what agents ask for, answer questions agents ask, change roles and members, transfer workspace ownership, create and revoke API keys, provision messaging assistants,/,
         /^Medium risk · 3 · Connect a chat/,
         /^Low risk · 3 · Read the audit log/,
       ])
@@ -82,7 +82,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
         controls: { intro: root.locator('.intro a'), desk, high: head('high'), save: page.locator('#cross-family-review').getByRole('button', { name: /Save rule/ }) },
         scrollAreas: { page: page.locator('main') },
         interactions: [
-          { name: 'open High risk', run: async () => { await head('high').click(); await expect(head('high')).toHaveAttribute('aria-expanded', 'true'); await expect(root.locator('#agent-asks-high .ask')).toHaveCount(11); await expect(root.locator('#agent-asks-high .ask').filter({ hasText: 'Provision messaging assistants' })).toContainText('agents.create'); await expect(root.locator('#agent-asks-high .ask').last()).toBeVisible() } },
+          { name: 'open High risk', run: async () => { await head('high').click(); await expect(head('high')).toHaveAttribute('aria-expanded', 'true'); await expect(root.locator('#agent-asks-high .ask')).toHaveCount(12); await expect(root.locator('#agent-asks-high .ask').filter({ hasText: 'Provision messaging assistants' })).toContainText('agents.create'); await expect(root.locator('#agent-asks-high .ask').filter({ hasText: 'Start runs on a computer' })).toContainText('run.start_on_computer'); await expect(root.locator('#agent-asks-high .ask').last()).toBeVisible() } },
           { name: 'close High risk', run: async () => { await head('high').click(); await expect(head('high')).toHaveAttribute('aria-expanded', 'false'); await expect(root.locator('#agent-asks-high .ask').first()).toBeHidden() } },
         ],
       })

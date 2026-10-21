@@ -3,6 +3,12 @@
   "words": {
     "resources": {
       "run": "runs"
+    },
+    "special": {
+      "run.start_on_computer": "Start runs on a computer"
     }
-  }
+  },
+  "builtin_agent_exclusions": [
+    "run.start_on_computer"
+  ]
 }

@@ -41,6 +41,9 @@
     "POST /api/agent-pairing/self/ledger": "run.claim",
     "PUT /api/agent-pairing/computers/{computerId}/capacity": "account.manage",
     "PUT /api/agent-pairing/computers/{computerId}/name": "account.manage",
-    "PUT /api/me/security/session-watching": "profile.write"
+    "PUT /api/me/security/session-watching": "profile.write",
+    "GET /api/agent-pairing/computers/{computerId}/access": "account.read",
+    "PUT /api/agent-pairing/computers/{computerId}/access/{principal_id}": "members.manage",
+    "DELETE /api/agent-pairing/computers/{computerId}/access/{principal_id}": "members.manage"
   }
 }

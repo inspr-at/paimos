@@ -399,6 +399,11 @@ func (m *Module) claimAgentRecoveries(r *http.Request, tx pgx.Tx, p tenant.Princ
 		if err = authz.RequireTx(r.Context(), tx, p, "harness.worker", authz.Scope{ProjectID: s.ProjectID}); err != nil {
 			return nil, err
 		}
+		if s.RunID != nil {
+			if err = authz.RequireRunStartOnComputerTx(r.Context(), tx, p, *s.RunID); err != nil {
+				return nil, err
+			}
+		}
 		if _, err = recoveryActor(r.Context(), tx, p, q); err != nil {
 			if !errors.Is(err, authz.ErrForbidden) {
 				return nil, err
