@@ -33,13 +33,15 @@ const rows = computed(() => {
   return tickable(m.contexts).map(c => ({ id: c.id, name: c.name, allowed: yes.has(c.id), never: c.new_accounts_override === 'deny' }))
 })
 // At most three names; the rest is a count, and the first page of contexts is all that was read.
+// Nowhere is said only when "ask first" or a complete read proves it; unread contexts may allow them.
 const value = computed(() => {
   if (!allowed.value) return words.value.whereRule
   if (failed.value) return words.value.whereFailed
-  if (!matrix.value) return words.value.whereReading
+  const m = matrix.value
+  if (!m) return words.value.whereReading
   const yes = rows.value.filter(r => r.allowed).map(r => r.name)
-  if (!yes.length) return words.value.whereNowhere
-  return words.value.whereSome(yes.slice(0, 3), Math.max(0, yes.length - 3), !!matrix.value.next_context)
+  if (!yes.length) return m.rules.new_accounts === 'allow' && m.next_context ? words.value.whereNoneRead(m.contexts.length) : words.value.whereNowhere
+  return words.value.whereSome(yes.slice(0, 3), Math.max(0, yes.length - 3), !!m.next_context)
 })
 </script>
 

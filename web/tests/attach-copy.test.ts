@@ -52,3 +52,11 @@ test('AEON-1502 where-lines name Accounts in Settings without a text chevron', (
   ])
   assert.equal(lines.some(line => /[‹›]/.test(line)), false)
 })
+
+// Fails on 39ea42fe, which said "Nowhere yet" when only the first page of contexts was read.
+test('AEON-1502 an unread rest of contexts is named, never claimed as nowhere', () => {
+  const en = pairingCopy('en', 'PAIMOS'), de = pairingCopy('de', 'PAIMOS')
+  assert.equal(en.whereNoneRead(200), 'Not in the first 200 contexts; the rest were not read · check Accounts in Settings')
+  assert.equal(de.whereNoneRead(200), 'In keinem der ersten 200 Kontexte; weitere nicht gelesen · unter Konten in Einstellungen prüfen')
+  for (const line of [en.whereNoneRead(200), de.whereNoneRead(200)]) assert.doesNotMatch(line, /Nowhere|nirgends/)
+})

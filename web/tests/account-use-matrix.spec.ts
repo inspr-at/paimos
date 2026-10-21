@@ -513,6 +513,32 @@ test('the pairing review shows the rows the rule pre-fills', async ({ page }) =>
   expect(w.writes).toEqual([])
 })
 
+// AEON-1502 risk: the first page of contexts allows nothing, so the row claimed "Nowhere yet" although
+// unread contexts may allow the new accounts. Nowhere stands only where "ask first" proves it.
+test('the pairing review never claims nowhere from a partial read of contexts', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-27T20:00:00.000Z') })
+  await mockWork(page, fixtures())
+  await mockPairing(page)
+  await grant(page)
+  // The page read holds only a "never" context and Unassigned; next_context says more exist.
+  const w = useWorld({ rules: { ...useWorld().rules, new_accounts: 'allow' }, contexts: useWorld().contexts.filter(c => c.id === C.beta || c.id === C.hold), truncated: true })
+  await mockUse(page, w)
+  await page.goto('/agents/register-agent')
+  const review = page.getByRole('region', { name: 'Pairing review' })
+  const lookUp = async () => {
+    await page.getByLabel('Pairing code').fill('123-456-789')
+    await page.getByRole('button', { name: 'Look up code' }).click()
+    await review.locator('details.more > summary').click()
+    return review.locator('[data-pairing-use] dd')
+  }
+  await expect(await lookUp()).toHaveText('Not in the first 2 contexts; the rest were not read · check Accounts in Settings')
+  // "Ask first" ticks no context for a new account, read in full or not: nowhere is proven.
+  w.rules.new_accounts = 'ask'
+  await review.getByRole('button', { name: 'Use a different code' }).click()
+  await expect(await lookUp()).toHaveText('Nowhere yet · allow on Accounts in Settings before first use')
+  expect(w.writes).toEqual([])
+})
+
 test('screenshots of the matrix, light and dark', async ({ page }, testInfo) => {
   test.skip(!process.env.AEON1054_SHOTS, 'evidence run only')
   await setup(page, { rules: { ...useWorld().rules, confirmation_required: true }, running: [{ run_id: RUN, account_id: ACCOUNTS.main, node_id: null }] })

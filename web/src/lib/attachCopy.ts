@@ -130,6 +130,10 @@ export function pairingCopy(language: DisplayLanguage, product: string) {
     where: de ? 'Wo die Konten arbeiten dürfen' : 'Where accounts may work',
     // The place is spelled out. A text chevron would stand in for an icon.
     whereNowhere: de ? 'Noch nirgends · vor der ersten Nutzung unter Konten in Einstellungen erlauben' : 'Nowhere yet · allow on Accounts in Settings before first use',
+    // None of the contexts read, but more were not read and may allow them: never claimed as nowhere.
+    whereNoneRead: (read: number) => de
+      ? `In keinem der ersten ${read} Kontexte; weitere nicht gelesen · unter Konten in Einstellungen prüfen`
+      : `Not in the first ${read} contexts; the rest were not read · check Accounts in Settings`,
     // Only the first page of contexts was read when `partial`: the count is a lower bound.
     whereSome: (names: readonly string[], more: number, partial: boolean) => {
       const rest = more > 0 ? `${more}${partial ? '+' : ''} ${de ? 'weitere' : 'more'}` : partial ? (de ? 'weitere' : 'more') : ''
