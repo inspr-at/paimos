@@ -18,12 +18,17 @@ import (
 // All content markers remain in the fixture while the negative reads run.
 func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex")
+	p := f.propose("codex", "claude")
 	f.approve(p, "connect_only")
 	v := f.redeem(p)
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
-	e := v.Enrollments[0]
+	e, sibling := v.Enrollments[0], v.Enrollments[1]
+	if e.Harness != "codex" {
+		e, sibling = sibling, e
+	}
 	f.probe(v, e, key, 200)
+	f.probe(v, sibling, key, 200)
+	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/capacity/approve", nil, true, "", 204)
 	call := func(method, path string, body any, proof string, modern bool, status int) *httptest.ResponseRecorder {
 		t.Helper()
 		r := f.request(method, path, body, false, key)
@@ -83,7 +88,7 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 				t.Fatalf("transport leaked %s", marker)
 			}
 		}
-		if !strings.Contains(w.Body.String(), "run_capability_upgrade_required") {
+		if !strings.Contains(w.Body.String(), "run_capability_upgrade_required") && w.Header().Get("Aeon-Upgrade-Reason") != "run_capability_upgrade_required" {
 			t.Fatal("old daemon did not receive upgrade reason")
 		}
 	}
@@ -93,10 +98,26 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 			t.Fatal("content refused for wrong reason")
 		}
 	}
+	var unbound string
+	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_account_id) SELECT tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_account_id FROM agent_runs WHERE id=$1 RETURNING id::text`, a.ID).Scan(&unbound); err != nil {
+		t.Fatal(err)
+	}
+	call("POST", "/api/runs/"+unbound+"/capability", map[string]string{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation"}, "", true, 403)
 	// Old daemons cannot claim even a bound run, and cannot repair an unbound
 	// run by supplying a person/header of their own.
 	call("POST", "/api/runs/"+a.ID+"/claim", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "reservation_ids": []string{uuid(t, f.db)}}, "", false, 403)
 	tokenA, tokenB := issue(a.ID), issue(b.ID)
+	otherComputer := f.propose("codex")
+	f.approve(otherComputer, "connect_only")
+	otherView := f.redeem(otherComputer)
+	otherKey := "aeon_" + otherView.RuntimePrefix + "_" + otherComputer.runtime
+	wrongComputer := f.request("GET", "/api/runs/"+a.ID, nil, false, otherKey)
+	wrongComputer.Header.Set(db.RunCapabilityHeader, tokenA)
+	wrongResponse := httptest.NewRecorder()
+	f.h.ServeHTTP(wrongResponse, wrongComputer)
+	if wrongResponse.Code != 403 {
+		t.Fatalf("wrong computer accepted: %d", wrongResponse.Code)
+	}
 	call("GET", "/api/nodes/"+a.OrderID, nil, tokenA, true, 200)
 	w := call("GET", "/api/runs/"+b.ID, nil, tokenB, true, 200)
 	if !strings.Contains(w.Body.String(), "retained-trace-content") {
@@ -118,13 +139,18 @@ func TestRunCapabilitySeparatesTransportAndBindsContent(t *testing.T) {
 	// The same token works immediately before the real generation bump and
 	// fails afterwards; no sleep or real-clock boundary is involved.
 	call("GET", "/api/runs/"+b.ID, nil, tokenB, true, 200)
-	call("POST", "/api/agent-accounts/"+e.AccountID+"/probe", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "next-generation", "available": true}, "", false, 200)
+	call("POST", "/api/agent-accounts/"+sibling.AccountID+"/probe", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "next-generation", "available": true}, "", false, 200)
+	call("GET", "/api/runs/"+b.ID, nil, tokenB, true, 403)
+	call("POST", "/api/agent-accounts/"+sibling.AccountID+"/probe", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "available": true}, "", false, 200)
 	call("GET", "/api/runs/"+b.ID, nil, tokenB, true, 403)
 	// Person deactivation cannot be bypassed by issuing another capability.
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE principals SET status='deactivated' WHERE id=$1`, personB); err != nil {
 		t.Fatal(err)
 	}
-	call("POST", "/api/runs/"+b.ID+"/capability", map[string]string{"daemon_id": *v.DaemonID, "daemon_generation": "next-generation"}, "", true, 403)
+	denied := call("POST", "/api/runs/"+b.ID+"/capability", map[string]string{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation"}, "", true, 403)
+	if !strings.Contains(denied.Body.String(), "permission_revoked") {
+		t.Fatal("revoked person refused for wrong reason")
+	}
 	var retained string
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT trace->>'private_trace' FROM agent_runs WHERE id=$1`, b.ID).Scan(&retained); err != nil || retained != "retained-trace-content" {
 		t.Fatal("negative fixture was destroyed")

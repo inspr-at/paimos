@@ -445,7 +445,7 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	}
 	v.VerificationCapabilities = verificationCapabilities(rec.Details.Platform, rec.Details.Arch)
 	v.VerificationHelperVersion = version.Version
-	v.ServerCapabilities = []string{LedgerCapability, InstallCapability, hostcapacity.UnattendedCapability}
+	v.ServerCapabilities = []string{LedgerCapability, InstallCapability, hostcapacity.UnattendedCapability, db.RunCapabilityPolicy}
 	var err error
 	v.LedgerMode, err = LedgerMode(ctx, tx)
 	if err != nil {

@@ -182,6 +182,12 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 				}
 				return
 			}
+			if p.TransportComputerID != "" && p.RunID == "" {
+				w.Header().Set("Aeon-Run-Content-Policy", db.RunCapabilityPolicy)
+				if r.Header.Get(db.RunCapabilityPolicyHeader) != db.RunCapabilityPolicy {
+					w.Header().Set("Aeon-Upgrade-Reason", "run_capability_upgrade_required")
+				}
+			}
 			if lease := workerlease.Read(r); lease != "" && !workerlease.SafetyRoute(r) {
 				ctx := tenant.WithPrincipal(r.Context(), p)
 				err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {

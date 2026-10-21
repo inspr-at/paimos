@@ -4,6 +4,7 @@ package agentd
 import (
 	"bytes"
 	"context"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"io"
 	"os"
 	"os/exec"
@@ -37,7 +38,7 @@ func reviewGit(ctx context.Context, repo string, args ...string) (string, error)
 	cmd := exec.CommandContext(ctx, "git", append(flags, args...)...)
 	cmd.Dir = repo
 	cmd.Env = []string{}
-	for _, entry := range os.Environ() {
+	for _, entry := range harnesslaunch.WithoutTransportCredentials(os.Environ()) {
 		if !strings.HasPrefix(entry, "GIT_") && !strings.HasPrefix(entry, "LC_ALL=") {
 			cmd.Env = append(cmd.Env, entry)
 		}

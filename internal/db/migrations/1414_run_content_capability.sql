@@ -8,8 +8,15 @@ ALTER TABLE agent_runs
   ADD COLUMN content_capability_account_id uuid,
   ADD COLUMN content_capability_daemon_id text,
   ADD COLUMN content_capability_generation text,
+  ADD COLUMN content_capability_epoch bigint,
   ADD COLUMN content_capability_expires_at timestamptz;
 
 CREATE INDEX agent_runs_content_capability_lookup
   ON agent_runs (tenant_id, content_capability_digest)
   WHERE content_capability_digest IS NOT NULL;
+
+-- The computer-wide epoch prevents a probe on another account, or a replayed
+-- generation string, from reviving a previously issued run credential.
+ALTER TABLE agent_pairing_computers
+  ADD COLUMN content_daemon_generation text,
+  ADD COLUMN content_capability_epoch bigint;

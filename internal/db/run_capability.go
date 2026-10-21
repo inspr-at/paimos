@@ -46,6 +46,8 @@ func RunCapabilityPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
   AND person.kind='person' AND person.status='active' AND person.linked_to IS NULL
  JOIN agent_pairing_computers c ON c.tenant_id=r.tenant_id AND c.id=r.content_capability_computer_id
   AND c.principal_id=r.agent_principal_id AND c.daemon_id=r.content_capability_daemon_id AND c.state='connected'
+  AND c.content_daemon_generation=r.content_capability_generation
+  AND c.content_capability_epoch=r.content_capability_epoch
  JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id AND q.state='redeemed'
  JOIN agent_pairing_enrollments e ON e.tenant_id=c.tenant_id AND e.computer_id=c.id
   AND e.account_id=r.content_capability_account_id AND e.state='connected'

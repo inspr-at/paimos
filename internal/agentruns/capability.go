@@ -55,6 +55,7 @@ func (m *module) capability(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
  JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id
  JOIN model_profiles m ON m.id=$5 AND m.harness=a.harness
  WHERE c.tenant_id=$1 AND c.principal_id=$2 AND c.state='connected' AND c.daemon_id=$3
+ AND (c.content_daemon_generation IS NULL OR c.content_daemon_generation=$4)
  AND a.registered_by_principal_id=$2 AND a.daemon_id=$3 AND a.last_daemon_generation=$4
  AND ($6::uuid IS NULL OR a.id=$6) AND ($7::uuid IS NULL OR a.id=$7)
  ORDER BY a.id LIMIT 1`, p.TenantID, p.ID, in.Daemon, in.Generation, v.ProfileID, v.AccountID, v.RequestedAccountID).Scan(&computer, &account)
@@ -67,6 +68,12 @@ func (m *module) capability(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 	if v.DaemonID != nil && *v.DaemonID != in.Daemon || v.Generation != nil && *v.Generation != in.Generation {
 		return nil, workorders.Fail(403, "run_generation_rejected")
 	}
+	var epoch int64
+	if err := tx.QueryRow(ctx, `UPDATE agent_pairing_computers SET
+ content_daemon_generation=$2,content_capability_epoch=CASE WHEN content_daemon_generation IS NULL THEN coalesce(content_capability_epoch,0)+1 ELSE content_capability_epoch END
+ WHERE id=$1 RETURNING content_capability_epoch`, computer, in.Generation).Scan(&epoch); err != nil {
+		return nil, err
+	}
 	var random [32]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return nil, err
@@ -76,8 +83,8 @@ func (m *module) capability(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 	var expires time.Time
 	err = tx.QueryRow(ctx, `UPDATE agent_runs SET content_capability_digest=$2,content_capability_person_id=acting_person_id,
  content_capability_computer_id=$3,content_capability_account_id=$4,content_capability_daemon_id=$5,
- content_capability_generation=$6,content_capability_expires_at=clock_timestamp()+interval '24 hours'
- WHERE id=$1 RETURNING content_capability_expires_at`, v.ID, digest[:], computer, account, in.Daemon, in.Generation).Scan(&expires)
+ content_capability_generation=$6,content_capability_epoch=$7,content_capability_expires_at=clock_timestamp()+interval '24 hours'
+ WHERE id=$1 RETURNING content_capability_expires_at`, v.ID, digest[:], computer, account, in.Daemon, in.Generation, epoch).Scan(&expires)
 	if err != nil {
 		return nil, err
 	}
