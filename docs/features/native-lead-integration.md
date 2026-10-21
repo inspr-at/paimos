@@ -30,6 +30,18 @@ commands (AEON-1291) and it does not change `StartRun` (AEON-1419).
   holds an uncertain exit, reconciles one confirmed exit, starts one
   retained-source successor, and refuses the next input and receipt after
   withdrawal. The final drain stays inside the separate retention grant.
+- Refused before fork: a C0 start refused after its claim but before its
+  possible-fork marker frees the local ledger slot and host entry, marks its
+  lead record abandoned and settles the server root with a rejected start
+  receipt. The server accepts that receipt only from the exact paired owner,
+  only for a start never reported running, and without current consent,
+  because withdrawn consent is one of its causes. It grants nothing.
+  `TestProductionCompositionAbandonsStartRefusedBeforeFork` withdraws consent
+  before the final launch re-check, then starts the same account again.
+- The daemon poll services each session independently. Once a session's
+  reports are refused for good, it executes only that session's stop. The 32
+  sessions, 128 operations and 128 pending provider writes count live work:
+  exited owners stay only as bounded successor sources.
 
 Automatic LeadRuntime is unchanged.
 
@@ -294,7 +306,7 @@ R0 additions in this round are exactly:
 | A1: C0 Host/Launcher, start Store, relay, receipts/final sink and attach wiring | COMPOSITION IN, ATTACH OUT. `NewFull` and `NativeProduction` install Store, Services, Host, Launcher, relay, receipts, finals, private proof and command/drain issuance behind the two default-off options. Attach wiring remains AEON-1291. Not enabled on a host. |
 | A2: person-invoked native path separate from automatic LeadRuntime | PASS AT THE FLAG BOUNDARY. `StartLocal` resolves the persisted person-issued intent and is installed only with both daemon options. Automatic LeadRuntime stays disabled. |
 | A3: native roots in legacy account/host admission; exact root context | PASS AT THE IMPLEMENTED BOUNDARIES. Prior pairing/harness and guard-removal evidence is retained. The paired-start regression uses actual person native approvals. Production start, input and receipt recheck current consent. Missing authority, missing consent, the wrong person and the wrong computer keep the existing refusal codes. No live-pilot qualification is claimed. |
-| A4: default account, confined adapter and legacy CLI compatibility; inventories | PASS AT THE IMPLEMENTED BOUNDARIES. AEON-1593 adds ESSENTIAL rows `TestProductionDefaultsOffAndRequiresAuthorities` and `TestProductionCompositionStartsDeliversAndConfirmsExit`, and fence callers `nativeintegration/root/authority.go`, `nativesessions/store/commands.go` and `nativesessions/store/production.go` (the `pilot.go` lock moved with admission). No new permission, migration, DSAR table, route or key ceiling. |
+| A4: default account, confined adapter and legacy CLI compatibility; inventories | PASS AT THE IMPLEMENTED BOUNDARIES. AEON-1593 adds ESSENTIAL rows `TestProductionDefaultsOffAndRequiresAuthorities`, `TestProductionCompositionStartsDeliversAndConfirmsExit`, `TestProductionCompositionAbandonsStartRefusedBeforeFork`, `TestNativeHostAbandonsStartRefusedBeforeFork`, `TestNativeHostPollIsolatesSessionWithRefusedReports`, `TestNativeHostLimitsCountOnlyLiveWork` and `TestNativeC0TransportCountsOnlyLiveWork`, and fence callers `nativeintegration/root/authority.go`, `nativesessions/store/commands.go` and `nativesessions/store/production.go` (the `pilot.go` lock moved with admission). No new permission, migration, DSAR table, route or key ceiling. |
 | A5: fake start/input/exact turn/explicit final/interrupt/confirmed exit; detach survives | PASS IN `TestProductionCompositionStartsDeliversAndConfirmsExit`. The fake owned provider sits behind real person consent and the production host. Detach does not release the writer. Uncertain exit holds the root. Confirmed exit reconciles once. This is not a live session on a host. |
 | A6: concrete disabled pilot for coordinator self-handover | PASS FOR DEFAULT-OFF OPTIONS. Both flags default false, and the disabled constructors retain no authority. The composition smoke covers one pinned retained-source handover. No live handover and no enablement. |
 
