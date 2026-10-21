@@ -410,6 +410,22 @@ test('shard configs keep the waiter in front of specs and leave perf on its own 
   assert.match(readFileSync(new URL('./e2e-stack-setup.mjs', import.meta.url), 'utf8'), /backend: 'required'|e2eStackTarget/)
 })
 
+// vue-tsc reads stack-ready.d.mts, not the module. A name vite.config.ts
+// imports without a declaration fails web typecheck in CI.
+test('the declarations cover every name vite.config.ts imports from the module', async () => {
+  const vite = readFileSync(new URL('../../web/vite.config.ts', import.meta.url), 'utf8')
+  const declared = readFileSync(new URL('./stack-ready.d.mts', import.meta.url), 'utf8')
+  const imported = /import \{([^}]+)\} from '\.\.\/scripts\/ci\/stack-ready\.mjs'/.exec(vite)
+  assert.ok(imported, 'vite.config.ts imports the readiness module')
+  const names = imported[1].split(',').map(name => name.trim()).filter(Boolean)
+  assert.ok(names.length > 0)
+  const module = await import('./stack-ready.mjs')
+  for (const name of names) {
+    assert.equal(typeof module[name], 'function', `${name} is a module export`)
+    assert.match(declared, new RegExp(`^export function ${name}\\(`, 'm'), `${name} is declared`)
+  }
+})
+
 test('a stalled probe is cancelled at the deadline and a late 2xx is not readiness', async () => {
   const time = timerClock()
   const wall = Date.now()

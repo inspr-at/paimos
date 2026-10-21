@@ -18,6 +18,13 @@ export function createBackendProxyGate(options: { check: () => Promise<boolean> 
 
 export function healthIsReady(url: string, fetchImpl?: (url: string) => Promise<{ status: number }>): Promise<boolean>
 
+// off never dials. Every other mode returns one bounded health check per call.
+export function proxyReadyCheck(
+  env: Record<string, string | undefined>,
+  url: string,
+  fetchImpl?: (url: string) => Promise<{ status: number }>,
+): () => Promise<boolean>
+
 export function backendProxyBypass(
   gate: ProxyGate,
   req: { url?: string },
