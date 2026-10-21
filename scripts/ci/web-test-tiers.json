@@ -18290,6 +18290,8 @@
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 shows the hint after two failures and escalates strictly after sixty seconds or at five failures","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1622 a decided lesson replaces the unconfirmed open row of a projection read before the decision","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"connection chores preserve consent scope, exact expiry and readable history","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"drops a previous person read even if transport ignores abort, and resets the count synchronously","tier":"ESSENTIAL"}

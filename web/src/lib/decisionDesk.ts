@@ -253,12 +253,16 @@ export function deskRefreshNotice(failures: number, failedSince: number | null, 
 // A decided lesson leaves the pending projection. Keep the row and the learning
 // this visit already confirmed, so Undo re-checks that same record. Omitting
 // the learning makes the decision look unauthorized the moment the list refreshes.
+// A projection read before the decision still lists the lesson as open while its
+// source no longer offers it; that placeholder row gives way to the decision (AEON-1622).
 export function retainDecidedLessons(previous: readonly DeskItem[], nextItems: DeskItem[], lessons: Map<string, MethodLearning>) {
-  const present = new Set(nextItems.map(item => item.id))
+  const present = new Map(nextItems.map((item, index) => [item.id, index]))
   for (const item of previous) {
-    if (item.kind !== 'lesson' || !item.decided || present.has(item.id)) continue
-    nextItems.push(item)
-    present.add(item.id)
+    if (item.kind !== 'lesson' || !item.decided) continue
+    const at = present.get(item.id), listed = at === undefined ? undefined : nextItems[at]
+    if (listed && (listed.decided || lessons.has(item.id))) continue
+    if (at === undefined) { present.set(item.id, nextItems.length); nextItems.push(item) }
+    else nextItems[at] = item
     const learning = item.lesson?.learning
     if (learning && !lessons.has(item.id)) lessons.set(item.id, learning)
   }
