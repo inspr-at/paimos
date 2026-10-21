@@ -286,8 +286,72 @@ for (const theme of ['light', 'dark']) {
     expect(result.violations).toEqual([])
     expect(await dialog(page).evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
     await page.keyboard.press('Escape')
+    await expect(dialog(page)).toBeVisible()
+    await expect(dialog(page).getByLabel('Harness', { exact: true })).not.toBeFocused()
+    await page.keyboard.press('Escape')
     await expect(dialog(page)).not.toBeVisible()
     await expect(newAgent(page)).toBeFocused()
+  })
+}
+
+for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+  test(`AEON-1508: lead queue replaces manual setup and keeps controls still at ${width} ${theme}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    const mock = await mockStartAgent(page, { theme, ticketTitle: 'Agentensteuerung für gemeinsame Entwicklungsprojekte und zuverlässige Übergaben an den Projektverantwortlichen' })
+    await page.route('**/api/projects/p-pharos/lead', route => route.fulfill({ json: {
+      project_id: 'p-pharos', revision: 4, generation: 1, session_id: null, state: 'paused', reason: 'admission_not_configured', process_active: false, automatic_launch_enabled: false,
+    } }))
+    const queuePosts: unknown[] = []
+    let refuse = true
+    await page.route('**/api/queue**', async route => {
+      if (route.request().method() === 'GET') return route.fulfill({ json: { items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 0, work_hours: null, warning: false } } })
+      queuePosts.push(route.request().postDataJSON())
+      if (refuse) return route.fulfill({ status: 503, json: { error: 'The lead queue is unavailable. Try again.' } })
+      return route.fulfill({ json: { node_id: 'n-1', key: 'PHAROS-11', queued: { run_id: 'lead-demand', target_agent_id: null } } })
+    })
+    await open(page)
+    const sheet = dialog(page), actions = sheet.locator('footer'), primary = actions.locator('button[type="submit"]')
+    const catalogsBefore = mock.calls.filter(call => call.path === '/api/agent-accounts/catalog').length
+    await sheet.getByRole('searchbox').fill('PHAROS-11')
+    await expectStableControls({
+      controls: { close: sheet.getByRole('button', { name: 'Close start agent' }), cancel: actions.getByRole('button', { name: 'Cancel', exact: true }) },
+      scrollAreas: { body: sheet.locator('.launch-body') },
+      interactions: [{ name: 'choose configured work', run: async () => {
+        await sheet.getByRole('button', { name: /^PHAROS-11 Agentensteuerung/ }).click()
+        await expect(sheet.getByText('This project starts work through its lead.', { exact: true })).toBeVisible()
+        await expect(primary).toHaveAccessibleName('Queue for lead')
+      } }],
+    })
+    await expect(sheet.getByLabel('Host', { exact: true })).toHaveCount(0)
+    await expect(sheet.getByLabel('Harness', { exact: true })).toHaveCount(0)
+    await expect(sheet.getByText('Automatic launch is not enabled for this workspace yet. Queued work stays queued.', { exact: true })).toBeVisible()
+    await expect(primary).toBeEnabled()
+    expect(mock.calls.filter(call => call.path === '/api/agent-accounts/catalog')).toHaveLength(catalogsBefore)
+    await sheet.screenshot({ path: info.outputPath(`AEON-1508-lead-hint-${width}-${theme}.png`) })
+    await expectStableControls({
+      controls: { actions, primary, cancel: actions.getByRole('button', { name: 'Cancel', exact: true }), change: sheet.getByRole('button', { name: 'Change ticket', exact: true }), ...(width === 390 ? { frame: sheet } : {}) },
+      scrollAreas: { body: sheet.locator('.launch-body') },
+      interactions: [
+        { name: 'failed queue request', run: async () => {
+          await primary.click()
+          await expect(sheet.getByRole('alert')).toHaveText('The lead queue is unavailable. Try again.')
+          await expect(primary).toBeEnabled()
+        } },
+        { name: 'successful retry', run: async () => {
+          refuse = false
+          const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
+          await primary.focus()
+          await page.keyboard.press(mac ? 'Meta+Enter' : 'Control+Enter')
+          await expect(sheet.getByText('Queued for the lead. Nothing has started yet.', { exact: true })).toBeVisible()
+          await expect(primary).toHaveAccessibleName('Queued')
+          await expect(primary).toBeDisabled()
+        } },
+      ],
+    })
+    expect(queuePosts).toEqual([{ node_id: 'n-1' }, { node_id: 'n-1' }])
+    expect(mock.calls.filter(call => call.method !== 'GET' && (call.path.startsWith('/api/work-orders') || call.path === '/api/agent-accounts/pins'))).toEqual([])
+    await sheet.screenshot({ path: info.outputPath(`AEON-1508-queued-${width}-${theme}.png`) })
   })
 }
 

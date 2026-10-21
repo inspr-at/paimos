@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
-import { listNodes, type WorkNode } from '../../lib/api'
-import { can } from '../../lib/authz'
+import { listNodes, type ListItem, type ListProject, type WorkNode } from '../../lib/api'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import { deletePin, listPins, putPin, message, type AgentRun, type HarnessSession } from '../../lib/agents'
 import { getRun, listAllSessions, runNowOnce } from '../../lib/agentRows'
@@ -14,18 +14,30 @@ import { wroteSince, writeMark } from '../../lib/position'
 import { launchState, staleGrantRejection, startAgent } from '../../lib/startAgent'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
+import { canLaunchLead, leadLaunchReason, LEAD_WORDS, readLead, type ProjectLead } from '../../lib/lead'
+import { useWorkQueue } from '../../stores/workQueue'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 
 // Shared by /agents and TicketWorkspace. The cascade is host, harness, account,
 // model, then thinking. Each later step is filled only from the catalog grant.
 const agents = useAgents()
+const queue = useWorkQueue()
 const session = useSession()
+const w = LEAD_WORDS
+const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const uid = useId()
 const dialog = ref<HTMLDialogElement>()
 const searchInput = ref<HTMLInputElement>()
 const hostSelect = ref<HTMLSelectElement>()
 const tickets = ref<WorkNode[]>([])
-const ticket = ref<WorkNode | null>(null)
+type StartTicket = WorkNode & Partial<Pick<ListItem, 'project'>>
+const ticket = ref<StartTicket | null>(null)
+const dispatchMode = ref<'manual' | 'checking' | 'lead' | 'failed'>('manual')
+const dispatchProject = ref<ListProject | null>(null)
+const projectLead = ref<ProjectLead | null>(null)
+const dispatchError = ref('')
+const queuedForLead = ref(false)
 const query = ref('')
 const searching = ref(false)
 const searchError = ref('')
@@ -59,12 +71,13 @@ let opener: HTMLElement | null = null
 let generation = 0
 let searchGeneration = 0
 let catalogGeneration = 0
+let dispatchGeneration = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 const poll = usePoller(() => { now.value = Date.now(); if (run.value) return refresh() }, 3000, { enabled: () => visible.value && !!run.value })
 const role = computed(() => workRoleFor(ticket.value))
 const view = computed(() => presentCascade({ catalog: catalog.value, role: role.value, authorFamily: authorFamily.value }, choice.value, touch.value))
 const piModelBound = computed(() => choice.value.harness === 'pi' && view.value.models.length === 1)
-const cascadeLocked = computed(() => loading.value || catalogGap.value === 'failed' || catalogGap.value === 'forbidden' || catalogGap.value === 'family')
+const cascadeLocked = computed(() => dispatchMode.value !== 'manual' || loading.value || catalogGap.value === 'failed' || catalogGap.value === 'forbidden' || catalogGap.value === 'family')
 const state = computed(() => run.value ? launchState(run.value) : null)
 const sessionConnected = computed(() => !!managed.value && managed.value.phase !== 'stopped')
 const reported = computed(() => sessionConnected.value && managed.value && requested.value ? sessionReport(managed.value, requested.value) : null)
@@ -84,7 +97,64 @@ narrowQuery?.addEventListener('change', onNarrow)
 const accountLabel = (label: string) => narrow.value ? label.split(' · ').slice(0, 2).join(' · ') : label
 const selectedWait = computed(() => catalog.value?.hosts.find(h => h.daemon_id === choice.value.hostId)?.harnesses.find(h => h.harness === choice.value.harness)?.accounts.find(a => a.id === choice.value.accountId)?.wait)
 const mayRunNow = computed(() => permitted.value && session.identity?.principal.kind === 'person')
-const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && ticket.value?.is_leaf === true && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
+const canSubmit = computed(() => dispatchMode.value === 'manual' && permitted.value && !loading.value && !busy.value && !run.value && ticket.value?.is_leaf === true && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
+const mayQueueForLead = computed(() => session.identity?.principal.kind === 'person' && !!dispatchProject.value && can('run.create', dispatchProject.value.id))
+const canQueueForLead = computed(() => dispatchMode.value === 'lead' && mayQueueForLead.value && !busy.value && !queue.busy && !queuedForLead.value && ticket.value?.is_leaf === true)
+
+// Read the selected project's policy before asking for manual launch choices.
+// A delayed answer belongs only to this ticket revision and dialog opening.
+async function checkDispatch() {
+  const selected = ticket.value, turn = ++dispatchGeneration
+  dispatchMode.value = selected ? 'checking' : 'manual'
+  dispatchProject.value = null; projectLead.value = null; dispatchError.value = ''; queuedForLead.value = false; error.value = ''; grantStale.value = false
+  catalogGeneration++; catalog.value = null; loading.value = false
+  if (!selected) return
+  const { id, updated_at: revision } = selected
+  const current = () => turn === dispatchGeneration && visible.value && ticket.value?.id === id && ticket.value?.updated_at === revision
+  try {
+    // Search rows already carry the project; node-only entry points resolve it
+    // with one bounded list read rather than guessing from a key or parent.
+    let project = selected.project
+    if (project === undefined) {
+      const page = await listNodes({ ids: [selected.id], shape: ['leaf'], limit: 1, rollups: 'omit' })
+      if (!current()) return
+      project = page.items.find(item => item.id === selected.id && item.is_leaf === true)?.project
+      if (project === undefined) throw new Error('The ticket’s project could not be read. Choose the ticket again.')
+    }
+    if (project) {
+      const lead = await readLead(project.id)
+      if (!current()) return
+      if (lead.project_id !== project.id || !Number.isSafeInteger(lead.revision) || lead.revision < 0) throw new Error('The project’s start settings could not be read.')
+      dispatchProject.value = project
+      projectLead.value = lead
+      if (lead.revision > 0) { dispatchMode.value = 'lead'; return }
+    }
+    if (!current()) return
+    dispatchMode.value = 'manual'
+    void loadCatalog()
+  } catch (e) {
+    if (!current()) return
+    dispatchMode.value = 'failed'
+    dispatchError.value = `Start settings could not be checked. ${message(e)}`
+  }
+}
+
+async function queueForLead() {
+  if (!canQueueForLead.value || !ticket.value || !dispatchProject.value) return
+  const { id, updated_at: revision } = ticket.value, project = dispatchProject.value.id, turn = generation
+  const identity = () => `${session.identity?.tenant?.id}:${session.identity?.principal.id}`
+  const actor = identity()
+  const current = () => turn === generation && visible.value && identity() === actor && ticket.value?.id === id && ticket.value?.updated_at === revision && dispatchProject.value?.id === project
+  busy.value = true; error.value = ''
+  try {
+    const result = await queue.add(project, id)
+    if (!current()) return
+    if (!result || result.node_id !== id) throw new Error('The queue addition could not be confirmed. Reload before trying again.')
+    queuedForLead.value = true
+    void agents.afterWrite()
+  } catch (e) { if (current()) error.value = message(e) }
+  finally { if (turn === generation) busy.value = false }
+}
 
 async function search(more = false) {
   const turn = ++searchGeneration
@@ -133,15 +203,15 @@ function setFamily(value: string) {
   choice.value = emptyChoice()
   void loadCatalog()
 }
-function selectTicket(item: WorkNode) {
-  if (item.is_leaf !== true) return
+function selectTicket(item: StartTicket) {
+  if (busy.value || item.is_leaf !== true) return
   ticket.value = item
   authorFamily.value = authorFamilyFor(item)
   touch.value = emptyTouch()
   choice.value = emptyChoice()
   remember.value = false
   remembered.value = ''
-  void loadCatalog()
+  void checkDispatch()
 }
 let pinGeneration = 0
 watch([() => ticket.value?.id, () => choice.value.harness, catalog], async () => {
@@ -159,7 +229,7 @@ watch([() => ticket.value?.id, () => choice.value.harness, catalog], async () =>
     remember.value = true
   } catch { /* A missing pin leaves the checkbox clear. */ }
 })
-async function open(initial?: WorkNode) {
+async function open(initial?: StartTicket) {
   if (busy.value) return
   opener = document.activeElement as HTMLElement
   generation++; visible.value = true
@@ -171,7 +241,8 @@ async function open(initial?: WorkNode) {
   runId.value = ''; requested.value = null; managedId.value = ''; reused.value = false
   error.value = ''; checkError.value = ''; searchError.value = ''; grantStale.value = false
   dialog.value?.showModal()
-  void loadCatalog()
+  void checkDispatch()
+  if (!ticket.value) void loadCatalog()
   if (!ticket.value) void search()
   poll.start()
   await nextTick()
@@ -180,7 +251,7 @@ async function open(initial?: WorkNode) {
 }
 function close() {
   if (busy.value) return
-  generation++; searchGeneration++; catalogGeneration++; visible.value = false
+  generation++; searchGeneration++; catalogGeneration++; dispatchGeneration++; visible.value = false
   poll.stop(); clearTimeout(searchTimer)
   dialog.value?.close(); opener?.focus({ preventScroll: true })
 }
@@ -191,11 +262,13 @@ function changeTicket() {
   choice.value = emptyChoice()
   remember.value = false
   remembered.value = ''
+  void checkDispatch()
   void loadCatalog()
   void search()
   void nextTick(() => searchInput.value?.focus())
 }
 async function submit(runNow = false) {
+  if (dispatchMode.value === 'lead') { if (!runNow) await queueForLead(); return }
   if (!canSubmit.value || !ticket.value) return
   busy.value = true; error.value = ''
   const pinned = { ...view.value.requested }
@@ -246,12 +319,21 @@ async function refresh() {
   } catch { if (turn === generation) checkError.value = 'Status could not be refreshed. The last reported state is shown.' }
   finally { checking.value = false }
 }
-onBeforeUnmount(() => { narrowQuery?.removeEventListener('change', onNarrow); generation++; searchGeneration++; catalogGeneration++; poll.stop(); clearTimeout(searchTimer) })
+function keydown(event: KeyboardEvent) {
+  const field = (event.target as HTMLElement).matches('input,textarea,select,[contenteditable="true"]')
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (field) (event.target as HTMLElement).blur(); else close() }
+  else if (event.key === 'Enter' && (mac ? event.metaKey : event.ctrlKey) && !event.altKey && !event.shiftKey) { event.preventDefault(); event.stopPropagation(); void submit() }
+}
+const stopAccess = onAccessRevalidate({ reset: () => {
+  busy.value = false; close()
+  ticket.value = null; dispatchProject.value = null; projectLead.value = null; dispatchMode.value = 'manual'; queuedForLead.value = false
+} })
+onBeforeUnmount(() => { stopAccess(); narrowQuery?.removeEventListener('change', onNarrow); generation++; searchGeneration++; catalogGeneration++; dispatchGeneration++; poll.stop(); clearTimeout(searchTimer) })
 defineExpose({ open })
 </script>
 
 <template>
-  <dialog ref="dialog" class="launch-dialog" :aria-labelledby="`${uid}-title`" @cancel.prevent="close">
+  <dialog ref="dialog" class="launch-dialog" :aria-labelledby="`${uid}-title`" @cancel.prevent="close" @keydown="keydown">
     <form class="launch-card" @submit.prevent="submit()">
       <header class="launch-head">
         <h2 :id="`${uid}-title`">Start agent</h2>
@@ -259,6 +341,7 @@ defineExpose({ open })
       </header>
 
       <template v-if="!run">
+        <div class="launch-body">
         <fieldset :disabled="busy" class="launch-fields">
           <legend class="sr-only">Run setup</legend>
           <div class="ticket-field">
@@ -282,6 +365,7 @@ defineExpose({ open })
               </div>
             </template>
           </div>
+          <template v-if="dispatchMode === 'manual'">
           <p v-if="view.roleNote && role.source !== 'default'" class="note role-note">{{ view.roleNote }}</p>
           <div v-if="role.role === 'review-gate'" class="select-field">
             <label :for="`${uid}-family`">Author family</label>
@@ -338,17 +422,28 @@ defineExpose({ open })
             <p v-if="notes.effort" :id="`${uid}-effort-note`" class="note">{{ notes.effort }}</p>
           </div>
           </div>
+          </template>
         </fieldset>
 
-        <div v-if="!loading && !catalogGap && catalog" class="dispatch-status" :class="{ warn: view.status.tone === 'warn' }" role="status"><AppIcon :name="view.status.tone === 'warn' ? 'clock' : 'info'" :size="17" /><div><strong>{{ view.status.label }}</strong><p>{{ view.status.detail }}</p></div></div>
-        <div v-if="catalogGap === 'failed' || catalogGap === 'forbidden'" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
+        <div v-if="dispatchMode === 'lead'" class="lead-notice" role="status">
+          <strong>This project starts work through its {{ w.l }}.</strong>
+          <p>{{ queuedForLead ? `Queued for the ${w.l}. Nothing has started yet.` : `Queue this ticket for the ${w.l}; it chooses the host, harness, account, model and thinking when dispatching work.` }}</p>
+          <p v-if="!canLaunchLead(projectLead)">{{ leadLaunchReason(projectLead) }} Queued work stays queued.</p>
+          <p v-else-if="projectLead?.state === 'paused'">The {{ w.l }} is paused. Queued work waits until it resumes.</p>
+          <p v-if="!mayQueueForLead">Queueing for the {{ w.l }} requires a person with permission to queue work in this project.</p>
+        </div>
+        <p v-else-if="dispatchMode === 'checking'" class="note" role="status">Checking how this project starts work…</p>
+        <div v-else-if="dispatchMode === 'failed'" class="error" role="alert"><p>{{ dispatchError }}</p><button type="button" class="btn sm" @click="checkDispatch">Retry start settings</button></div>
+        <div v-if="dispatchMode === 'manual' && !loading && !catalogGap && catalog" class="dispatch-status" :class="{ warn: view.status.tone === 'warn' }" role="status"><AppIcon :name="view.status.tone === 'warn' ? 'clock' : 'info'" :size="17" /><div><strong>{{ view.status.label }}</strong><p>{{ view.status.detail }}</p></div></div>
+        <div v-if="dispatchMode === 'manual' && (catalogGap === 'failed' || catalogGap === 'forbidden')" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
         <div v-if="error" class="error" role="alert"><p>{{ error }}</p><button v-if="grantStale" type="button" class="btn sm" @click="loadCatalog">Refresh catalog</button></div>
-        <p v-if="!permitted" class="note">Starting an agent requires work-order write and run-create permission.</p>
-        <footer><button type="button" class="btn" :disabled="busy" @click="close">Cancel</button><button v-if="mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">Run now once</button><button type="submit" class="btn primary" :disabled="!canSubmit"><AppIcon :name="busy ? 'clock' : 'arrow'" :size="15" />{{ busy ? 'Queueing…' : 'Queue run' }}</button></footer>
+        <p v-if="dispatchMode === 'manual' && !permitted" class="note">Starting an agent requires work-order write and run-create permission.</p>
+        </div>
+        <footer><button type="button" class="btn" :disabled="busy" @click="close">Cancel<KeyCap k="Esc" class="hint" aria-hidden="true" /></button><button v-if="dispatchMode === 'manual' && mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">Run now once</button><button type="submit" class="btn primary" :disabled="dispatchMode === 'lead' ? !canQueueForLead : !canSubmit"><AppIcon :name="busy ? 'clock' : dispatchMode === 'lead' ? 'queue-add' : 'arrow'" :size="15" /><span class="queue-label"><span>{{ dispatchMode === 'lead' ? queuedForLead ? 'Queued' : busy ? 'Queueing…' : `Queue for ${w.l}` : busy ? 'Queueing…' : 'Queue run' }}</span><span aria-hidden="true">Queue for {{ w.l }}</span><span aria-hidden="true">Queue run</span><span aria-hidden="true">Queueing…</span></span><KeyCap k="mod" class="hint" aria-hidden="true" /><KeyCap k="enter" class="hint" aria-hidden="true" /></button></footer>
       </template>
 
       <template v-else>
-        <div class="run-result" data-result tabindex="-1" role="status">
+        <div class="launch-body run-result" data-result tabindex="-1" role="status">
           <span class="result-icon"><AppIcon :name="managed ? 'check' : 'clock'" :size="24" /></span>
           <p class="eyebrow">{{ reused ? 'Existing run' : 'Run created' }}</p>
           <h3>{{ sessionConnected ? 'Managed session connected' : state?.label }}</h3>
@@ -385,10 +480,16 @@ defineExpose({ open })
 </template>
 
 <style scoped>
-.launch-dialog { width: min(var(--dialog-l), calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: auto; scrollbar-gutter: stable; }
+.launch-dialog { width: min(var(--dialog-l), calc(100vw - 24px)); max-height: calc(100dvh - 64px); margin: 32px auto 0; padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: hidden; }
 .launch-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(5px); }
-.launch-card { padding: 22px 24px 20px; }
-.launch-head { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }
+.launch-card { display: flex; flex-direction: column; max-height: inherit; padding: 22px 24px 20px; }
+.launch-head { display: flex; flex: none; gap: 12px; align-items: center; margin-bottom: 18px; }
+.launch-body { order: 2; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
+.lead-notice { margin-top: 18px; font-size: 14px; line-height: 1.6; }
+.lead-notice p { margin-top: 8px; color: var(--ink-2); }
+.queue-label { display: inline-grid; }
+.queue-label > span { grid-area: 1 / 1; }
+.queue-label > [aria-hidden] { visibility: hidden; }
 .launch-head h2 { font-size: 21px; letter-spacing: -.4px; }
 .launch-head .icon-btn { margin-left: auto; flex-shrink: 0; }
 .result-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--row-selected); color: var(--teal-ink); flex-shrink: 0; }
@@ -422,7 +523,7 @@ label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; c
 .error { color: var(--danger); background: var(--danger-bg); border-radius: 10px; padding: 12px; margin-top: 14px; font-size: 13px; line-height: 1.5; }
 .error .btn { margin-top: 8px; }
 .bad { color: var(--danger); }
-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+footer { order: 1; display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
 footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
 @media (pointer: coarse), (max-width: 600px) { footer .btn { min-height: 44px; } }
 .run-result { display: grid; justify-items: center; text-align: center; padding: 14px 0; gap: 12px; outline: none; }
@@ -442,13 +543,14 @@ footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
 .pair.pi-bound { grid-template-columns: minmax(0, 1fr) 130px; }
 .field.pinned-model { font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; }
 @media (max-width: 600px) {
-  .launch-dialog { max-height: calc(100dvh - 16px); width: calc(100vw - 16px); border-radius: 18px; }
-  .launch-card { padding: 20px 16px; }
+  .launch-dialog { height: 100dvh; max-height: 100dvh; width: 100vw; max-width: 100vw; margin: 0; border-radius: 0; }
+  .launch-card { height: 100%; padding: max(20px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); }
+  .launch-body { flex: 1; }
   .pair, .pair.pi-bound { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .launch-head { margin-bottom: 14px; }
   .launch-fields { gap: 14px; }
   .dispatch-status { margin-top: 16px; }
-  footer { margin-top: 18px; padding-top: 16px; }
+  footer { order: 3; margin: 16px 0 0; padding: 16px 0 0; border-bottom: 0; border-top: 1px solid var(--line); }
   .launch-head .icon-btn { width: 44px; height: 44px; }
   .chosen-ticket { flex-wrap: wrap; }
   .chosen-ticket .btn { min-height: 44px; }
