@@ -1,5 +1,9 @@
 {
   "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 5.209,
+    "selectedTests": 2
+  },
   "spec": {
     "file": "tests/idle-requests.spec.ts",
     "listedTests": 2,
