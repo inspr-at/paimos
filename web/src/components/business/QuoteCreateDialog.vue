@@ -233,10 +233,10 @@ h2 { font-size: 18px; }
 .create-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .create-foot .f-hint { flex: 1; }
 @media (max-width: 600px) {
-  .create { --create-top: 0px; margin: 0; width: 100%; height: 100dvh; max-height: 100dvh; }
+  .create { --create-top: 0px; margin: 0; width: 100%; max-width: 100%; height: 100dvh; max-height: 100dvh; }
   .create-card { display: flex; flex-direction: column; height: 100%; max-height: 100%; overflow: hidden; border-radius: 0; padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
   .create-head { flex-shrink: 0; }
-  .create-body { flex: 1; min-height: 0; overflow-y: auto; align-content: start; }
+  .create-body { flex: 1; min-height: 0; overflow-y: auto; align-content: start; padding: 3px; margin: -3px; }
   .create-card > .load-status { order: 2; flex-shrink: 0; }
   .create-foot { order: 3; flex-shrink: 0; flex-wrap: wrap; }
   .create-foot .f-hint { display: none; }

@@ -143,6 +143,7 @@ test('AEON-1417: partial customer quote contact and project lists show retry bes
         const dialog = page.getByRole('dialog', { name: 'New quote', exact: true })
         await expect(dialog.getByRole('status').filter({ hasText: 'Only part of the customer list' })).toBeVisible()
         await expect(dialog.getByRole('button', { name: 'Create quote', exact: true })).toBeEnabled()
+        if (width === 390) expect(await dialog.evaluate(el => Math.abs(el.getBoundingClientRect().width - innerWidth))).toBeLessThanOrEqual(.5)
         const dialogStable = await controlStability(page, {
           ...(width === 390 ? { frame: dialog } : {}),
           customer: dialog.getByRole('combobox', { name: 'Customer', exact: true }),
