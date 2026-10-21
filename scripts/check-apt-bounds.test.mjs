@@ -17,7 +17,6 @@ const historical = `for i in 1 2 3; do
   timeout 240 npx playwright install-deps chromium && break
 done`
 
-
 const fixtures = fixtureOwner()
 afterEach(() => fixtures.cleanup())
 

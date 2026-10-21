@@ -11,6 +11,7 @@ const fixtures = fixtureOwner()
 afterEach(() => fixtures.cleanup())
 const directory = process.env.AEON_FIXTURE_SCENARIO_DIR
 const phase = process.env.AEON_FIXTURE_PHASE
+const ending = process.env.AEON_FIXTURE_ENDING
 async function until(check) {
   const deadline = Date.now() + 15000
   while (!check()) { assert.ok(Date.now() < deadline, 'fixture readiness timed out'); await pause(10) }
@@ -42,6 +43,12 @@ test('fixture worker interrupted by its owning test', { timeout: 30000 }, async 
       }
       writeFileSync(join(directory, 'ready'), JSON.stringify({ worker: process.pid, groups: fixtures.snapshot() }))
     }
-    await new Promise(resolve => t.signal.addEventListener('abort', resolve, { once: true }))
+    if (['return', 'failure', 'timeout'].includes(ending)) {
+      await until(() => existsSync(join(directory, 'release')))
+      if (ending === 'failure') throw new Error('Intentional fixture failure')
+      if (ending === 'timeout') await t.test('intentional fixture timeout', { timeout: 1 }, async subtest => {
+        await new Promise(resolve => subtest.signal.addEventListener('abort', resolve, { once: true }))
+      })
+    } else await new Promise(resolve => t.signal.addEventListener('abort', resolve, { once: true }))
   } finally { fixtures.cleanup() }
 })

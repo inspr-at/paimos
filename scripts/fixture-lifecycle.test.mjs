@@ -42,10 +42,11 @@ test('AEON-1064: interrupted fixture runners leave no owned processes in 20 rand
     const other = randomInt(index + 1)
     ;[rounds[index], rounds[other]] = [rounds[other], rounds[index]]
   }
-  for (const { phase, signal } of [...rounds, { phase: 'apt', signal: 'parent-death' }]) {
+  for (const { phase, signal } of [...rounds, { phase: 'apt', signal: 'parent-death' }, ...['return', 'failure', 'timeout'].map(signal => ({ phase: 'running', signal }))]) {
     const directory = mkdtempSync(join(tmpdir(), 'aeon-fixture-interrupt-'))
+    const sentinel = fixtures.spawn(process.execPath, [new URL('./testdata/playwright/hang.mjs', import.meta.url).pathname], { stdio: 'ignore' })
     const child = fixtures.spawn(process.execPath, ['--test', new URL('./testdata/interrupted-fixture-runner.mjs', import.meta.url).pathname], {
-      env: { ...process.env, AEON_FIXTURE_SCENARIO_DIR: directory, AEON_FIXTURE_PHASE: phase, ...(signal === 'SIGKILL' ? { AEON_FIXTURE_TIMEOUT_MS: '5000' } : {}) },
+      env: { ...process.env, AEON_FIXTURE_SCENARIO_DIR: directory, AEON_FIXTURE_PHASE: phase, AEON_FIXTURE_ENDING: signal, ...(signal === 'SIGKILL' ? { AEON_FIXTURE_TIMEOUT_MS: '5000' } : {}) },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let output = '', exited = false
@@ -64,9 +65,15 @@ test('AEON-1064: interrupted fixture runners leave no owned processes in 20 rand
         process.kill(ready.parent, 'SIGKILL')
         await until(() => { try { process.kill(ready.stub, 0); return false } catch (error) { assert.equal(error.code, 'ESRCH'); return true } })
         process.kill(ready.worker, 'SIGTERM')
-      } else process.kill(ready.worker, signal)
-      assert.notEqual(await completion, 0, `${phase} ${signal} must report an interrupted test`)
+      } else if (['return', 'failure', 'timeout'].includes(signal)) writeFileSync(join(directory, 'release'), 'ready')
+      else process.kill(ready.worker, signal)
+      const code = await completion
+      if (signal === 'return') assert.equal(code, 0, output)
+      else assert.notEqual(code, 0, `${phase} ${signal} must report an interrupted test`)
+      if (signal === 'failure') assert.match(output, /Intentional fixture failure/)
+      if (signal === 'timeout') assert.match(output, /timed out/)
       await until(() => ready.groups.every(row => groupProcesses(row.pid).length === 0))
+      process.kill(sentinel.pid, 0)
     } finally {
       tracker?.signal('SIGKILL')
       fixtures.cleanup()

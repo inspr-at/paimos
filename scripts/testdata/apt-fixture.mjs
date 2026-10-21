@@ -87,7 +87,6 @@ exec "\$AEON_FIXTURE_NODE" "\$AEON_FIXTURE_APT_HOLD" "\$PPID"
   return bin
 }
 
-
 export function aptFixture({ mode, shells = false }) {
   const state = mkdtempSync(join(tmpdir(), 'aeon-apt-'))
   writeFileSync(join(state, 'mode'), mode)

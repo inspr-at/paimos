@@ -6,7 +6,7 @@ import { appendFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { recordSpawnedGroup, trackGroups } from '../playwright-processes.mjs'
+import { groupProcesses, recordSpawnedGroup, trackGroups } from '../playwright-processes.mjs'
 
 export const maxFixtureMs = 10 * 60_000
 export function boundFixture({ timeoutMs = Number(process.env.AEON_FIXTURE_TIMEOUT_MS ?? maxFixtureMs), parent,
@@ -24,6 +24,9 @@ export function boundFixture({ timeoutMs = Number(process.env.AEON_FIXTURE_TIMEO
 if (process.env.AEON_FIXTURE_GROUP_LOG) {
   boundFixture()
   const append = row => appendFileSync(process.env.AEON_FIXTURE_GROUP_LOG, JSON.stringify(row) + '\n')
+  // Publish before work even if the spawning worker died between spawn and
+  // recording. A removed journal directory makes this preload fail closed.
+  if (groupProcesses(process.pid).some(row => row.pid === process.pid)) recordSpawnedGroup({ pid: process.pid }, append)
   const spawn = childProcess.spawn, fork = childProcess.fork
   const record = (child, options) => options?.detached ? recordSpawnedGroup(child, append) : child
   childProcess.spawn = function (command, args, options) { return record(spawn.call(this, command, args, options), Array.isArray(args) ? options : args) }
@@ -36,12 +39,17 @@ export function fixtureOwner() {
   const cleanup = () => {
     const errors = []
     for (const entry of owned) {
-      errors.push(...entry.tracker.signal('SIGKILL'))
-      if (!errors.length) { owned.delete(entry); rmSync(entry.directory, { recursive: true, force: true }) }
+      const failures = entry.tracker.signal('SIGKILL')
+      // Re-read after stopping the roots to include a concurrent spawn that
+      // published while the first snapshot was being signalled.
+      failures.push(...entry.tracker.signal('SIGKILL'))
+      if (entry.tracker.snapshot().unverified.length) failures.push(new Error('Unverified fixture group retained'))
+      errors.push(...failures)
+      if (!failures.length) { owned.delete(entry); rmSync(entry.directory, { recursive: true, force: true }) }
     }
     if (errors.length) throw new AggregateError(errors, 'Could not clean up owned test fixtures')
   }
-  const onExit = () => { try { cleanup() } catch (error) { console.error(error.message) } }
+  const onExit = () => { try { cleanup() } catch (error) { console.error(error.message); process.exitCode = 1 } }
   process.on('exit', onExit)
   for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) process.on(signal, () => {
     onExit()
