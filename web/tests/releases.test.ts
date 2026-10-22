@@ -98,11 +98,14 @@ test('features and fixes are one block per visible ticket; the rest stay in othe
   assert.deepEqual(en.fixes.map(line => [line.key, line.commits.map(c => c.commit)]), [['AEON-274', ['3', '6']]])
   assert.deepEqual(en.other.map(c => c.commit), ['4', '5'])
   assert.equal(plainSubject(en.other[1].subject, en.other[1].tickets), 'No visible ticket')
-  const de = presentChanges(changes, 'de-AT')
+  const de = presentChanges(changes, 'de')
   assert.equal(de.features[0].pill, 'Sitzungschat')
   assert.equal(de.features[0].benefit, 'Der Chat bleibt.')
   assert.equal(de.features[0].pillLang, 'de')
-  const fallback = presentChanges([{ ...changes[0], linked_tickets: [{ ...chat, pill_de: ' ', benefit_de: '' }] }], 'de-DE')
+  const regional = presentChanges(changes, 'de-AT')
+  assert.equal(regional.features[0].pill, 'Session chat')
+  assert.equal(regional.features[0].pillLang, 'en')
+  const fallback = presentChanges([{ ...changes[0], linked_tickets: [{ ...chat, pill_de: ' ', benefit_de: '' }] }], 'de')
   assert.equal(fallback.features[0].pill, 'Session chat')
   assert.equal(fallback.features[0].pillLang, 'en')
   const hidden = presentChanges([{ ...change('8', 'fix', 'fix: private'), group: 'fixes' as const, linked_tickets: [{ key: 'AEON-1', pill_en: ' ', pill_de: '', benefit_en: '', benefit_de: '' }] }])
@@ -403,8 +406,8 @@ test('a history cached before the deploy still says a newer version is live', ()
   assert.equal(liveServer(SERVER, 'dev'), SERVER)
 })
 
-test('language and view: the address, then the remembered choice, then the profile; Highlights by default', () => {
-  assert.equal(releaseLang(undefined, 'de-AT'), 'de')
+test('language and view: the address, then the remembered choice, then the app language; Highlights by default', () => {
+  assert.equal(releaseLang(undefined, 'de-AT'), 'en')
   assert.equal(releaseLang('en', 'de-AT', 'de'), 'en')
   assert.equal(releaseLang(undefined, 'de-AT', 'en'), 'en')
   assert.equal(releaseLang(undefined, 'en-GB', 'de'), 'de')
@@ -422,6 +425,7 @@ test('language and view: the address, then the remembered choice, then the profi
 
 test('a missing translation falls back to the other language, never blank, and says which', () => {
   assert.deepEqual(pickText('Wide lists', 'Breite Listen', 'de'), { text: 'Breite Listen', lang: 'de' })
+  assert.deepEqual(pickText('Wide lists', 'Breite Listen', 'de-AT'), { text: 'Wide lists', lang: 'en' })
   assert.deepEqual(pickText('Wide lists', '  ', 'de-AT'), { text: 'Wide lists', lang: 'en' })
   assert.deepEqual(pickText('', 'Breite Listen', 'en'), { text: 'Breite Listen', lang: 'de' })
   assert.deepEqual(pickText(' ', '', 'de'), { text: '', lang: 'de' })
@@ -532,5 +536,6 @@ test('empty and compare lines follow the chosen language', () => {
   assert.equal(en.noMatchText(12, ''), 'Nothing in 12 releases fits these filters.')
   // Every line exists in both languages and differs.
   for (const key of Object.keys(en) as (keyof typeof en)[]) assert.notDeepEqual(String(en[key]), String(de[key]), key)
-  assert.equal(releaseCopy('de-AT').comparePick, 'Zweites Release wählen')
+  assert.equal(releaseCopy('de-AT').comparePick, 'Pick a second release')
+  assert.equal(releaseCopy('de').comparePick, 'Zweites Release wählen')
 })

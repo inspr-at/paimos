@@ -99,7 +99,7 @@ func (m *Module) guide(w http.ResponseWriter, r *http.Request) {
 	}
 	guide["homebrew_command"] = homebrewCommand(m.origin)
 	guide["agent_compatibility"] = agentcompat.Supported()
-	guide["server_capabilities"] = []string{LedgerCapability}
+	guide["server_capabilities"] = []string{LedgerCapability, db.RunCapabilityPolicy}
 	reply(w, guide)
 }
 

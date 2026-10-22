@@ -148,6 +148,7 @@ func TestManualReceiptsOverlapProvenanceAndQueue(t *testing.T) {
 	f := setup(t)
 	in := f.input()
 	in.QueueEach = true
+	in.Definition = &Definition{Scope: DefinitionScope{Kind: "project", ProjectID: f.project}, OwnerPrincipalID: f.p.ID}
 	tag := f.node("tag", nil, "Health")
 	in.Template.Tags = []string{tag}
 	r := f.create(in)
@@ -665,6 +666,7 @@ func TestQueueFailureRollsBackOccurrenceAndAudit(t *testing.T) {
 	f := setup(t)
 	in := f.input()
 	in.QueueEach = true
+	in.Definition = &Definition{Scope: DefinitionScope{Kind: "project", ProjectID: f.project}, OwnerPrincipalID: f.p.ID}
 	r := f.create(in)
 	// A tenant kind rule refuses the work-order child after the ticket has been
 	// inserted. The entire composite occurrence, receipt and audit must roll back.

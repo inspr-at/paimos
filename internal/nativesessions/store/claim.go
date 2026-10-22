@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/nativesessions/stream"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -191,8 +192,26 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 				}
 			}
 		}
+		owner := r.OwnerPersonID
+		if !workorders.UUID(owner) {
+			return &workqueue.PersonAdmissionError{Code: "run_person_unresolved"}
+		}
+		if owner != grant.OwnerPersonID {
+			return fail(409, nativecontract.ReasonIdentityMismatch)
+		}
+		if err := authz.RequireTx(ctx, tx, tenant.Principal{TenantID: p.TenantID, ID: owner, Kind: tenant.Person}, "nodes.read", authz.Scope{ProjectID: r.ProjectID}); err != nil {
+			return fail(403, nativecontract.ReasonPermissionRevoked)
+		}
 		if grant.RunID != nil {
-			if err = authz.RequireRunStartOnComputerTx(ctx, tx, p, *grant.RunID); err != nil {
+			var runPerson *string
+			if err := tx.QueryRow(ctx, `SELECT acting_person_id::text FROM agent_runs WHERE tenant_id=$1 AND id=$2`, p.TenantID, *grant.RunID).Scan(&runPerson); err != nil {
+				return err
+			}
+			if runPerson != nil && *runPerson != owner {
+				return fail(409, nativecontract.ReasonIdentityMismatch)
+			}
+
+			if err = workqueue.RequireRunPersonTx(ctx, tx, p, *grant.RunID); err != nil {
 				if errors.Is(err, authz.ErrForbidden) {
 					return fail(403, nativecontract.ReasonPermissionRevoked)
 				}

@@ -36,6 +36,7 @@ type startRunExitAPI struct {
 	refusalReason                                string
 	refusalErr                                   error
 	routine                                      *routineReplayAPI
+	onStop, onReport                             func(context.Context)
 }
 
 func (a *startRunExitAPI) Profiles(ctx context.Context) ([]Profile, error) {
@@ -102,6 +103,18 @@ func (a *startRunExitAPI) HeartbeatHarness(ctx context.Context, session HarnessS
 	_ = a.fakeAPI.HeartbeatHarness(ctx, session, phase)
 	return a.heartbeatErr
 }
+func (a *startRunExitAPI) StopHarness(ctx context.Context, session HarnessSession, reason string) error {
+	if a.onStop != nil {
+		a.onStop(ctx)
+	}
+	return a.fakeAPI.StopHarness(ctx, session, reason)
+}
+func (a *startRunExitAPI) ReportForClaim(ctx context.Context, run, daemon, generation string, report Telemetry) error {
+	if a.onReport != nil {
+		a.onReport(ctx)
+	}
+	return a.claimFaultAPI.ReportForClaim(ctx, run, daemon, generation, report)
+}
 func (a *startRunExitAPI) RouteRoutine(ctx context.Context, id, daemon string, accounts []string, estimates map[string]int64, pickup agentsetup.RoutinePickup) (Route, error) {
 	a.routine.pickups = append(a.routine.pickups, pickup)
 	return a.Route(ctx, id, daemon, accounts, estimates)
@@ -134,6 +147,7 @@ type startRunExitAdapter struct {
 	startErr     error
 	request      StartRequest
 	onStart      func(func(AdapterEvent))
+	startProcess func(context.Context, StartRequest, func(AdapterEvent)) (Process, error)
 }
 
 func (a *startRunExitAdapter) Name() string                                         { return a.harness }
@@ -141,7 +155,7 @@ func (a *startRunExitAdapter) VerificationSupported() bool                      
 func (a *startRunExitAdapter) ManagedControlSupported() bool                        { return a.managed }
 func (*startRunExitAdapter) RoutineExecutionSupported(agentsetup.RoutineGrant) bool { return true }
 func (*startRunExitAdapter) RoutineToolsSupported(agentsetup.RoutineGrant) bool     { return true }
-func (a *startRunExitAdapter) Start(_ context.Context, request StartRequest, observe func(AdapterEvent)) (Process, error) {
+func (a *startRunExitAdapter) Start(ctx context.Context, request StartRequest, observe func(AdapterEvent)) (Process, error) {
 	a.starts++
 	a.request = request
 	if a.onStart != nil {
@@ -149,6 +163,9 @@ func (a *startRunExitAdapter) Start(_ context.Context, request StartRequest, obs
 	}
 	if a.startErr != nil {
 		return nil, a.startErr
+	}
+	if a.startProcess != nil {
+		return a.startProcess(ctx, request, observe)
 	}
 	return a.proc, nil
 }
@@ -180,8 +197,8 @@ func newStartRunExitFixture(t *testing.T) *startRunExitFixture {
 	f := &startRunExitFixture{t: t, s: s, api: api, adapter: adapter, process: process, ctx: t.Context(), run: base.run}
 	f.power = &fakeRunPower{releaseDone: make(chan struct{}, 4)}
 	s.power = f.power
-	// Assertions run before fixture cleanup; this closes deliberately retained
-	// listeners afterwards without concealing the current production leaks.
+	// Assertions run before fixture cleanup, so a leaked listener still fails
+	// the test while a failed assertion cannot leave a server behind.
 	t.Cleanup(func() {
 		for _, entry := range s.runs {
 			_ = entry.tools.Close()
@@ -227,7 +244,7 @@ type startRunExitWant struct {
 
 // Risk: moving stage boundaries changes refusal precedence, duplicates claim
 // settlement, releases disputed ownership, or changes resource cleanup. All
-// assertions below describe StartRun before the extraction, including its leaks.
+// assertions below preserve refusal precedence and enforce one cleanup owner.
 // Pre-claim refusals have ZERO settlements: inventing one would change behavior.
 // A claimed, proven-unlaunched exit has exactly ONE finished report. An unknown
 // fork has ZERO final reports and retains its ownership fence.
@@ -239,7 +256,7 @@ func TestStartRunExits(t *testing.T) {
 	}
 	registered := func(message string) startRunExitWant {
 		w := claimed(message)
-		w.registrations = 1
+		w.registrations, w.stops = 1, 1
 		return w
 	}
 	tests := []struct {
@@ -370,9 +387,8 @@ func TestStartRunExits(t *testing.T) {
 			f.s.prepareScratch = func(string) (string, error) { return "", fault }
 		}, func() startRunExitWant { w := claimed(""); w.err, w.checkout = fault, false; return w }()},
 		{"project", func(f *startRunExitFixture) { f.api.projectErr = fault }, func() startRunExitWant { w := claimed(""); w.err = fault; return w }()},
-		{"harness_registration", func(f *startRunExitFixture) { f.api.registerErr = fault }, func() startRunExitWant { w := registered(""); w.err = fault; return w }()},
-		// AEON-1419 s2: single cleanup owner. These registered harnesses are
-		// currently retained even though the never-launched run is settled.
+		{"harness_registration", func(f *startRunExitFixture) { f.api.registerErr = fault }, func() startRunExitWant { w := registered(""); w.err, w.stops = fault, 0; return w }()},
+		// Every successful registration is closed once on a pre-launch refusal.
 		{"recovery_tier_invalid", func(f *startRunExitFixture) { f.run.RecoveryTier = "invalid" }, registered("invalid recovery service tier")},
 		{"recovery_tier_unoffered", func(f *startRunExitFixture) { f.run.RecoveryTier = "fastest" }, registered("recovery service tier no longer offered")},
 		{"tier_report", func(f *startRunExitFixture) { f.api.tierErr = fault }, func() startRunExitWant { w := registered(""); w.err = fault; return w }()},
@@ -395,10 +411,10 @@ func TestStartRunExits(t *testing.T) {
 			w.reports, w.stops, w.tools, w.chat = 0, 1, "closed", "closed"
 			return w
 		}()},
-		// AEON-1419 s2: single cleanup owner. Start errors close tools and chat,
-		// but leave the harness and disputed checkout; no final report is safe.
-		{"start_unconfirmed", func(f *startRunExitFixture) { f.tools("fixture-local-capability"); f.adapter.startErr = fault }, startRunExitWant{err: fault, routes: 1, claims: 1, registrations: 1, starts: 1, state: "ownership_lost", launch: launchAttempted, tools: "closed", chat: "closed", checkout: true}},
-		{"model_invalid_start", func(f *startRunExitFixture) { f.adapter.startErr = errModelInvalid }, startRunExitWant{err: errModelInvalid, routes: 1, claims: 1, registrations: 1, starts: 1, state: "ownership_lost", launch: launchAttempted, chat: "closed", checkout: true}},
+		// Start errors close ephemeral resources but retain disputed checkout
+		// ownership. No terminal report is safe without process-exit proof.
+		{"start_unconfirmed", func(f *startRunExitFixture) { f.tools("fixture-local-capability"); f.adapter.startErr = fault }, startRunExitWant{err: fault, routes: 1, claims: 1, registrations: 1, stops: 1, starts: 1, state: "ownership_lost", launch: launchAttempted, tools: "closed", chat: "closed", checkout: true}},
+		{"model_invalid_start", func(f *startRunExitFixture) { f.adapter.startErr = errModelInvalid }, startRunExitWant{err: errModelInvalid, routes: 1, claims: 1, registrations: 1, stops: 1, starts: 1, state: "ownership_lost", launch: launchAttempted, chat: "closed", checkout: true}},
 	}
 	for _, stage := range []int{1, 2, 3} {
 		tests = append(tests, struct {
@@ -432,6 +448,52 @@ func TestStartRunExits(t *testing.T) {
 			err := f.s.StartRun(f.ctx, f.run)
 			f.assert(err, tc.want)
 		})
+	}
+}
+
+// Risk: moving cleanup into one owner either loses settlement after request
+// cancellation or creates a second terminal report after a lost response. The
+// local harness must close once even while that exact report remains pending.
+func TestStartRunCleanupRetainsSingleSettlementOnDeliveryFailure(t *testing.T) {
+	f := newStartRunExitFixture(t)
+	f.tools("fixture-local-capability")
+	ctx, cancel := context.WithCancel(f.ctx)
+	defer cancel()
+	f.ctx = ctx
+	responseLost := errors.New("fixture settlement response lost")
+	f.managed()
+	f.api.reportErr = responseLost
+	f.api.onTier = cancel
+	f.api.onStop = func(ctx context.Context) {
+		if ctx.Err() != nil {
+			t.Fatal("cleanup inherited the cancelled request")
+		}
+	}
+	f.api.onReport = f.api.onStop
+	err := f.s.StartRun(f.ctx, f.run)
+	// The tool API has no managed rules endpoint. Use its exact failure as
+	// evidence that cancellation did not make this pass at an earlier step.
+	if err == nil || !strings.Contains(err.Error(), "managed rules API unavailable") || !errors.Is(err, responseLost) {
+		t.Fatalf("wrong cleanup outcome: %v", err)
+	}
+	f.assert(err, startRunExitWant{err: responseLost, routes: 1, claims: 1, reports: 1, registrations: 1, stops: 1,
+		state: "failed", launch: launchPrepared, tools: "closed", checkout: true})
+	entry := f.s.runs[f.run.ID]
+	entry.mu.Lock()
+	sequence, pending := entry.record.Sequence, append([]Telemetry(nil), entry.record.Pending...)
+	entry.mu.Unlock()
+	if sequence != 1 || len(pending) != 1 || !reflect.DeepEqual(pending[0], f.api.accepted[1]) {
+		t.Fatal("cleanup did not retain its exact terminal report")
+	}
+	f.api.reportErr = nil
+	if err := f.s.PollOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	entry.mu.Lock()
+	sequence, pendingCount := entry.record.Sequence, len(entry.record.Pending)
+	entry.mu.Unlock()
+	if sequence != 1 || pendingCount != 0 || len(f.api.accepted) != 1 || len(f.api.reportGenerations) != 2 || len(f.api.harnessStops) != 1 || f.adapter.starts != 0 {
+		t.Fatal("delivery retry repeated settlement, startup or harness cleanup")
 	}
 }
 
@@ -598,7 +660,7 @@ func TestStartRunFixFindingsExit(t *testing.T) {
 }
 
 // Risk: a continuation can lose its stopped-process/checkout proof while
-// registration is in flight. Preserve the current refusal and leaked owners.
+// registration is in flight. Close ephemeral resources and retain the fence.
 func TestStartRunContinuationExits(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -620,8 +682,7 @@ func TestStartRunContinuationExits(t *testing.T) {
 			f.api.onTier = func() { tc.mutate(f, prior) }
 			f.api.server = f.run
 			err := f.s.StartRun(f.ctx, f.run)
-			// AEON-1419 s2: single cleanup owner.
-			f.assert(err, startRunExitWant{message: tc.message, routes: 1, claims: 1, reports: 1, registrations: 1,
+			f.assert(err, startRunExitWant{message: tc.message, routes: 1, claims: 1, reports: 1, registrations: 1, stops: 1,
 				state: "failed", launch: launchPrepared, resources: 1, checkouts: 1, chat: "closed"})
 		})
 	}
@@ -821,8 +882,8 @@ func TestStartRunRoutineExits(t *testing.T) {
 	allocated := func() startRunExitWant { return startRunExitWant{resources: 1, checkouts: 1} }
 	claimed := func() startRunExitWant {
 		w := allocated()
-		w.routes, w.claims, w.reports, w.registrations = 1, 1, 1, 1
-		w.state, w.launch, w.chat, w.tools = "failed", launchPrepared, "closed", "open"
+		w.routes, w.claims, w.reports, w.registrations, w.stops = 1, 1, 1, 1, 1
+		w.state, w.launch, w.chat, w.tools = "failed", launchPrepared, "closed", "closed"
 		return w
 	}
 	tests := []struct {
@@ -876,8 +937,8 @@ func TestStartRunRoutineExits(t *testing.T) {
 			w.err, w.routes, w.state, w.launch = ErrScope, 1, "route_pending", launchRoutePending
 			return w
 		}()},
-		// AEON-1419 s2: single cleanup owner. All of these post-registration
-		// refusals settle exactly once but retain both the harness and tools.
+		// These post-registration refusals settle once and close the harness,
+		// tools and chat while retaining the disputed resource lease.
 		{"routine_checkout_revalidation", func(f *startRunExitFixture, _ RoutineRepository) {
 			f.tools("fixture-local-capability")
 			f.api.onTier = func() {

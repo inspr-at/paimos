@@ -24,6 +24,7 @@ const harnessStreamIdle = 45 * time.Second
 // Hints never submit controls or content. The worker's existing claim, lease,
 // ownership, expiry and receipt paths remain the only authority.
 func (r *Remote) WatchHarness(ctx context.Context, session HarnessSession, wake func()) error {
+	ctx = r.sessionContentContext(ctx, session.ID)
 	// Let the server recycle its bounded listener. Its 15-second pings also
 	// bound silent transport failures without repeatedly reopening healthy SSE.
 	ctx, cancel := context.WithTimeout(ctx, db.ListenerMaxLifetime+time.Minute)
@@ -40,6 +41,9 @@ func (r *Remote) WatchHarness(ctx context.Context, session HarnessSession, wake 
 		req.Header.Set("Authorization", "Bearer "+r.Client.Token)
 	}
 	req.Header.Set("Accept", "text/event-stream")
+	if proof, _ := ctx.Value(runCapabilityContextKey{}).(string); proof != "" {
+		req.Header.Set(db.RunCapabilityHeader, proof)
+	}
 	hc := *r.Client.HTTP
 	hc.Timeout = 0 // bounded above by the stream context, including connection
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

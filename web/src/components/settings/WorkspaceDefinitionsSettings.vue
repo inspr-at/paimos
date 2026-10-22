@@ -2,7 +2,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useSession } from '../../stores/session'
-import { useProfile } from '../../stores/profile'
 import { displayLanguage } from '../../lib/displayLanguage'
 import { statusName } from '../../lib/statusNames'
 import { can, onAccessRevalidate } from '../../lib/authz'
@@ -14,10 +13,10 @@ import AppIcon from '../AppIcon.vue'
 import SettingsCard from './SettingsCard.vue'
 import DefinitionEditor from './DefinitionEditor.vue'
 
-const session = useSession(), profile = useProfile(), scope = useIdentityScope(), reads = scope.lane()
+const session = useSession(), scope = useIdentityScope(), reads = scope.lane()
 const context = ref<WorkspaceDefinitionContext | null>(null), busy = ref(false), loading = ref(true), error = ref(''), stale = ref(false), open = ref(false), moreBusy = ref(false)
 const editor=ref<InstanceType<typeof DefinitionEditor>>()
-const language = computed(() => displayLanguage(profile.profile?.locale, 'definitions'))
+const language = computed(() => displayLanguage())
 const t = (en: string, de: string) => language.value === 'de' ? de : en
 const editable = computed(() => !!context.value?.can_manage && session.identity?.principal.kind === 'person' && can('settings.manage') && !stale.value)
 const checks = computed(() => context.value?.definition?.checks ?? {})

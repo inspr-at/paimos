@@ -440,6 +440,27 @@ func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
 	}
 }
 
+// Verify the security patches before projecting onto the immutable CI fixtures.
+func normalizeAEON1642Toolchains(t *testing.T, j map[string]any) {
+	t.Helper()
+	for _, value := range reuseSteps(j) {
+		s := treeMap(value)
+		for _, tool := range []struct{ action, key, current, historical string }{
+			{"actions/setup-go@", "go-version", "1.26.10", "1.26"},
+			{"actions/setup-node@", "node-version", "24.22.1", "24"},
+		} {
+			if !strings.HasPrefix(fmt.Sprint(s["uses"]), tool.action) {
+				continue
+			}
+			with := treeMap(s["with"])
+			if with[tool.key] != tool.current {
+				t.Fatalf("%s must pin %s", tool.key, tool.current)
+			}
+			with[tool.key] = tool.historical
+		}
+	}
+}
+
 // Restore the historical setup for its immutable hash check only after proving
 // the new setup and parallel unit job preserve every moved check byte for byte.
 func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any {
@@ -503,6 +524,7 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 	}
 	normalizeEffectiveLane(t, "web-setup", setup)
 	normalizeAEON1018Classification(t, "web-setup", setup)
+	normalizeAEON1642Toolchains(t, setup)
 	if !reflect.DeepEqual(setup, want) {
 		t.Fatal("Parallel setup changed beyond moving units and their prerequisites/proofs")
 	}
@@ -943,6 +965,9 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				j = normalizeParallelWebSetup(t, jobs)
 			}
 			j = cloneStep(t, j)
+			if id != "web-setup" { // The historical setup was already projected above.
+				normalizeAEON1642Toolchains(t, j)
+			}
 			if id == "release-check-run" {
 				// AEON-532 adds its exact completion/retry regression step. Prove
 				// that addition before comparing every remaining main job field.
