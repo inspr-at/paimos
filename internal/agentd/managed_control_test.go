@@ -79,7 +79,7 @@ func managedServiceFixture(t *testing.T) (*Supervisor, *fakeAPI, *owned, *manage
 	p := &managedFake{fakeProcess: process, identity: ownedprocess.Identity{ProcessID: strings.Repeat("b", 32), RootPID: process.PID(), GroupID: process.PID(), StartedAt: time.Now().UTC()}}
 	e := &owned{
 		record:  Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: a.run.ID, Generation: s.generation, State: "running", PID: p.PID(), Controls: map[string]replay{}},
-		harness: HarnessSession{ID: "session", ProjectID: "project", Model: a.profile.Model, ReasoningEffort: a.profile.Effort, Activity: "busy"},
+		harness: HarnessSession{ID: "session", ProjectID: "project"},
 		process: p, managedPolicy: true, replies: map[string]InboxReplyTarget{}, harnessWake: make(chan struct{}, 1),
 		budgetProcess: p, tokenBudget: defaultTokenBudget, turnBudget: defaultTurnBudget,
 	}
