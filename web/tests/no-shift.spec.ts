@@ -156,6 +156,7 @@ test('P02 desktop top actions stay anchored while content grows and scrolls', as
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockWork(page, fixtures())
   await page.goto('/p/PHAROS')
+  await expect(page.locator('.confirm')).toHaveCount(1)
   const open = (body: string) => page.evaluate(async body => {
     const { confirmAction } = await import('/src/lib/confirm.ts')
     void confirmAction({ title: 'Confirm change', body, confirmLabel: 'Accept', danger: true })
@@ -204,7 +205,16 @@ test('P02 phone choices and pinned actions retain geometry and focus across a me
     ] })
     for (const button of [decide, skip, controls.close]) {
       const bounds = (await button.boundingBox())!
-      expect(bounds.width).toBeGreaterThanOrEqual(44); expect(bounds.height).toBeGreaterThanOrEqual(44)
+      expect(bounds.width).toBeGreaterThan(0); expect(bounds.height).toBeGreaterThan(0)
+      const reach = await button.evaluate(el => {
+        const rect = el.getBoundingClientRect(), x = rect.x + rect.width / 2, y = rect.y + rect.height / 2
+        const own = (dx: number, dy: number) => { const hit = document.elementFromPoint(x + dx, y + dy); return hit === el || !!hit && el.contains(hit) }
+        return { x: [own(-22, 0), own(21.99, 0)], y: [own(0, -22), own(0, 21.99)] }
+      })
+      // Small visual buttons use the shared ::before hit extension. Assert
+      // the actual 44px reach, including collisions with neighbouring actions.
+      if (bounds.width < 44) expect(reach.x).toEqual([true, true])
+      if (bounds.height < 44) expect(reach.y).toEqual([true, true])
       expect(bounds.y + bounds.height).toBeLessThanOrEqual(844)
     }
   } finally { await context.close() }
@@ -219,6 +229,7 @@ test('P02 floating search and selectors keep positive geometry through loading, 
   await mockWork(page, data, { hold: request => request.path === '/api/nodes' && hold ? { until: held, computed: requested } : undefined })
   await page.goto('/p/PHAROS/PHAROS-12')
   const ticket = page.getByRole('complementary', { name: 'Ticket details' })
+  await expect(ticket.getByRole('heading', { name: 'Add an Oracle Cloud connector', exact: true })).toBeVisible()
   await ticket.focus(); await ticket.press('r')
   const dialog = page.getByRole('dialog', { name: 'Link PHAROS-12 to another ticket' })
   const search = dialog.getByRole('combobox')

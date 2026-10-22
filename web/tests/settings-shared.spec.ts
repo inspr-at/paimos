@@ -15,11 +15,13 @@ test('P02 a Settings dock becomes an isolated phone sheet with pinned series act
   await open(page, 1440, true)
   const row = page.locator('[data-row="1"]')
   const nav = page.getByRole('button', { name: 'Accounts and computers', exact: true })
+  await page.evaluate(() => document.fonts.ready)
   const before = { row: await row.boundingBox(), nav: await nav.boundingBox() }
   await row.click()
   await expect(page.locator('.settings-frame')).toHaveClass(/mode-dock/)
   await expect(pane(page).getByRole('heading')).toBeFocused()
-  expect(await row.boundingBox()).toEqual(before.row)
+  const after = (await row.boundingBox())!
+  for (const axis of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(after[axis] - before.row![axis]), `clicked row ${axis}`).toBeLessThanOrEqual(.5)
   await expect(page.locator('.dock-content')).toHaveJSProperty('inert', false)
   await expectStableControls({ controls: { close: page.getByRole('button', { name: 'Close details' }), next: page.getByRole('button', { name: 'Next computer' }), apply: page.getByRole('button', { name: 'Apply capacity' }), clickedRow: row },
     scrollAreas: { body: pane(page).locator('.pane-body') }, interactions: [{ name: 'long dock content', run: async () => {

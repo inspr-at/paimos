@@ -18,6 +18,7 @@ import { capacityWorld, NOW as CAPACITY_NOW } from '../capacity-fixtures'
 import { mockDailyPlan } from '../agents-daily-fixtures'
 import { mockStartAgent } from '../start-agent-fixtures'
 import type { VisualSetup, Theme } from './checkpoint'
+import { visualChrome } from './chrome-fixture'
 
 export const LONG = 'Projektübergreifende Entwicklungszusammenarbeit und langfristige Infrastrukturverantwortung mit vollständiger Qualitätsprüfung'
 export const NOW = Date.parse('2026-09-23T12:00:00Z')
@@ -34,6 +35,7 @@ async function work(page: Page, theme: Theme) {
   data.nodes.find(node => node.id === 'n-1')!.title = LONG
   data.nodes.find(node => node.id === 'n-epic')!.title = `Übergeordnetes Arbeitsziel · ${LONG}`
   await mockWork(page, data, { admin: true })
+  await visualChrome(page, data, NOW)
   return data
 }
 
@@ -45,6 +47,7 @@ export const projects: VisualSetup = async (page, _profile, theme) => {
   data.live.push(...[1, 2, 3].map(index => liveAgent({ project_id: 'p-pharos', session_id: `live-${index}`,
     principal_id: `33333333-3333-4333-8333-33333333333${index}`, name: `Worker ${index}`, ticket: null }, index)))
   await mockWork(page, data, { liveTruncated: true })
+  await visualChrome(page, data, NOW)
   await page.goto('/')
   await expect(page.locator('.live-chip').first()).toBeVisible()
   await expect(page.getByText('Studio infrastructure', { exact: true }).first()).toBeVisible()
@@ -63,12 +66,18 @@ export const agents: VisualSetup = async (page, _profile, theme) => {
   data.sessions[0]!.display_label = 'Release coordination'
   data.sessions[1]!.parent_harness_session_id = data.sessions[0]!.id
   data.sessions[2]!.parent_harness_session_id = data.sessions[1]!.id
+  data.sessions[2]!.project_id = 'p-pharos'
+  data.sessions[2]!.project = nodes['p-pharos']
+  data.sessions[6]!.parent_harness_session_id = data.sessions[0]!.id
   data.sessions[1]!.host = 'entwicklungsarbeitsplatz.infrastruktur.example.invalid'
   data.accounts[0]!.label = `Gemeinsam verwaltetes Entwicklungskonto · ${LONG}`
-  await mockAgents(page, data)
+  await mockAgents(page, data, { now: () => NOW })
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible()
   await expect(page.locator('.sessions [data-row]').first()).toBeVisible()
+  const lead = page.locator(`[data-row="s:${data.sessions[0]!.id}"]`)
+  await lead.locator('.history-toggle').click()
+  await expect(page.locator(`[data-row="s:${data.sessions[6]!.id}"]`)).toBeVisible()
 }
 
 export const sessionChat: VisualSetup = async (page, _profile, theme) => {
@@ -88,10 +97,16 @@ export const sessionChat: VisualSetup = async (page, _profile, theme) => {
 }
 
 export const decisionDesk: VisualSetup = async (page, _profile, theme) => {
-  const world = await mockDecisionDesk(page, { theme, long: true })
+  await work(page, theme)
+  const world = await mockDecisionDesk(page, { theme, long: true, phone: true })
+  await visualChrome(page, fixtures(), NOW, { agents: false })
+  world.projectionTime = NOW
   world.approval.expires_at = new Date(NOW + 3_600_000).toISOString()
-  await page.goto('/agents?needs=a:approval-1')
-  await expect(page.getByTestId('desk-decide')).toBeDisabled()
+  world.approval.proposed_at = new Date(NOW - 600_000).toISOString()
+  for (const question of world.questions) { question.created_at = new Date(NOW - 120_000).toISOString(); question.updated_at = question.created_at }
+  await page.goto('/decision-desk')
+  await page.getByTestId('desk-row-q:question-1').click()
+  await expect(page.getByTestId('stamp-doctrine')).toBeDisabled()
   await expect(page.getByTestId('desk-choices')).toBeVisible()
 }
 
@@ -118,8 +133,9 @@ export const knowledge: VisualSetup = async (page, profile, theme) => {
   if (profile === 'desktop') await expect(page.locator('.entry-page.dock')).toBeVisible()
 }
 
-export const models: VisualSetup = async (page, _profile, _theme) => {
-  await mockModels(page, { longLabels: true, down: true })
+export const models: VisualSetup = async (page, _profile, theme) => {
+  await work(page, theme)
+  await mockModels(page, { longLabels: true, fallback: true })
   await openModelsSettings(page)
   await page.getByRole('button', { name: 'For everyone' }).click()
   await page.locator('[data-pick="design"]').click()
@@ -158,11 +174,12 @@ export const quoteEditor: VisualSetup = async (page, _profile, theme) => {
   await expect(panel).toBeVisible()
 }
 
-export const publicQuote: VisualSetup = async page => {
+export const publicQuote: VisualSetup = async (page, _profile, theme) => {
+  await work(page, theme)
   await mockPublicQuote(page, { acceptable: true })
   await page.goto('/offers/sel-demo/tok-example')
   await expect(page.locator('#pq-title')).toBeVisible()
-  await expect(page.getByRole('button', { name: /Accept/ }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Prüfen und annehmen', exact: true })).toBeVisible()
 }
 
 export const agentRules: VisualSetup = async (page, _profile, theme) => {

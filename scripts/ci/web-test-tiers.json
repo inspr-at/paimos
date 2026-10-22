@@ -16550,6 +16550,8 @@
     ,
     {"kind":"node","file":"tests/avatar.test.ts","name":"zones and languages read well","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/brandMarks.test.ts","name":"P02 live product branding updates page and overlay titles while invalid brands preserve the confirmed value","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/brandMarks.test.ts","name":"known harnesses and providers use distinct vendored silhouettes","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/business-setup-owner.test.ts","name":"every setup link on the Business pages ends in Settings › Business","tier":"GATED-FULL"}
@@ -17045,6 +17047,10 @@
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"the header glimpse needs a wide viewport, motion, and eight tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"the shared context pages the Tickets query and drops links outside its membership","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/header-menus.test.ts","name":"P02 rendered account menus bind the current identity and preserve it when sign-out fails","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/header-menus.test.ts","name":"P02 rendered app menus react to current authority, person kind and workspace membership","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/header-menus.test.ts","name":"feedback says where it was written, then the words","tier":"GATED-FULL"}
     ,
@@ -19161,6 +19167,8 @@
     {"kind":"vitest","file":"tests/footer-release.unit.test.ts","name":"only shows a known positive new count (null)","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/footer-release.unit.test.ts","name":"uses the running release publication time, then tag time, then reservation","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"P02 footer actions route to the named exception and loading or hidden authority cannot claim one","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"the ping and who speaks > lets a sheet speak over its page and gives the centre back when it closes","tier":"NIGHTLY"}
     ,
@@ -24305,6 +24313,22 @@
     {"kind":"vitest","file":"tests/tier-evidence-live.unit.test.ts","name":"drops queued reads on record/run changes, hidden tabs and disposal","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/tier-evidence-live.unit.test.ts","name":"ignores other sessions and throttles matching telemetry with one trailing read","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 a pending touch disclosure is cancelled by changed record","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 a pending touch disclosure is cancelled by nine pixels","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 a pending touch disclosure is cancelled by pointer cancellation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 a pending touch disclosure is cancelled by removed record","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 a pending touch disclosure is cancelled by scroll","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 a pending touch disclosure is cancelled by second contact","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 an eight-pixel hold reveals at 500 ms and suppresses only its own compatibility click","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 focused disclosure follows a changed record and discards a disconnected anchor and late observer","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"a nested scroll retains the focused label and repositions its disclosure","tier":"NIGHTLY"}
     ,

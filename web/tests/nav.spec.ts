@@ -28,7 +28,8 @@ test('P02 keyboard places navigate outside fields and preserve text-field shortc
 })
 
 test('P02 account menu keyboard focus returns through a route and browser Back', async ({ page }) => {
-  await setup(page)
+  const data = await setup(page)
+  data.nodes.find(node => node.id === 'n-4')!.state = 'blocked'
   await page.goto('/')
   const account = page.getByRole('button', { name: /^Account for / })
   await account.focus(); await page.keyboard.press('Enter')
@@ -42,21 +43,31 @@ test('P02 account menu keyboard focus returns through a route and browser Back',
   await expect(account).toBeFocused()
   await page.keyboard.press('Enter'); await page.keyboard.press('Enter')
   await expect(page).toHaveURL('/settings/personal')
-  await expect(page.getByRole('heading', { name: 'Personal', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true, level: 1 })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Settings sections' }).getByRole('link', { name: /^Personal / })).toHaveAttribute('aria-current', 'page')
   await page.goBack()
   await expect(page).toHaveURL('/')
   await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible()
   await account.focus(); await page.keyboard.press('Enter'); await page.keyboard.press('Escape')
   await expect(account).toBeFocused()
+  await page.goto('/p/PHAROS/tickets')
+  const summary = page.locator('footer.app-footer .sum')
+  await expect(summary).toHaveAccessibleName(/1 blocked\. Show the blocked tickets\.$/)
+  await summary.click()
+  await expect(page).toHaveURL(/status=blocked/)
+  await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(1)
+  await expect(page.locator('#row-n-4')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
 })
 
 const places = (page: Page) => page.getByRole('navigation', { name: 'Places' })
 const crumbs = (page: Page) => page.getByRole('navigation', { name: 'Breadcrumb' })
 async function setup(page: Page, options: BusinessMockOptions = {}) {
-  await mockWork(page, fixtures())
+  const data = fixtures()
+  await mockWork(page, data)
   await mockBusiness(page, businessData(options), options)
   await mockSettings(page, settingsData())
+  return data
 }
 
 test('three places in order of use; the active one is highlighted and the breadcrumb continues from it', async ({ page }) => {

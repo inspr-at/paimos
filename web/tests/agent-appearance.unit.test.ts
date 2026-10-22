@@ -65,21 +65,27 @@ it('shares viewer state preferences across surfaces and preserves independent se
 
 it('reports a failed state save and lets the same choice be retried', async () => {
   let offline = false
-  vi.stubGlobal('fetch', vi.fn(async () => {
+  let reported!: () => void, saved!: () => void
+  const failureReported = new Promise<void>(resolve => { reported = resolve }), writeSaved = new Promise<void>(resolve => { saved = resolve })
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
     if (offline) throw new Error('offline')
+    if (init.method === 'PUT') saved()
     return response(null)
   }))
   const { useAgentAppearance } = await import('../src/lib/agentAppearance')
   const { onPreferenceFailure } = await import('../src/lib/preferences')
-  const failed = vi.fn(), stop = onPreferenceFailure(failed)
+  const { usePreference } = await import('../src/lib/preferences')
+  const failed = vi.fn(() => reported()), stop = onPreferenceFailure(failed)
   const settings = useAgentAppearance()
   await settings.ready
   offline = true
   settings.save({ inactiveOpacity: 40 })
-  await vi.waitFor(() => expect(failed).toHaveBeenCalledWith('agent-state'))
+  await failureReported
+  expect(failed).toHaveBeenCalledWith('agent-state')
   offline = false
   settings.save({})
-  await new Promise(resolve => setTimeout(resolve, 20))
+  await writeSaved
+  expect(await usePreference('agent-state').done()).toBe(true)
   expect(failed).toHaveBeenCalledTimes(1)
   expect(settings.choice.value.inactiveOpacity).toBe(40)
   stop()
