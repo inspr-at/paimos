@@ -6462,6 +6462,14 @@
     ,
     {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: the peek opens the ticket’s full page at its canonical address","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1637-session-tab-events.spec.ts","name":"AEON-1637: 1440 dark a tap leaves Events for Lead, Details and Chat without an error, from a link and from the default","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1637-session-tab-events.spec.ts","name":"AEON-1637: 1440 light a tap leaves Events for Lead, Details and Chat without an error, from a link and from the default","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1637-session-tab-events.spec.ts","name":"AEON-1637: 390 dark a tap leaves Events for Lead, Details and Chat without an error, from a link and from the default","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1637-session-tab-events.spec.ts","name":"AEON-1637: 390 light a tap leaves Events for Lead, Details and Chat without an error, from a link and from the default","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -23915,6 +23923,8 @@
     {"kind":"vitest","file":"tests/version-crossfade.unit.test.ts","name":"reveals seconds with shared opacity for a Pretty value of undefined","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/version-crossfade.unit.test.ts","name":"touch does not hover; keyboard focus survives pointer exit and leaves on blur; disposal removes listeners","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"AEON-1637: the default hold clock calls the timers on Window, so a touch never throws and a hold still opens","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a delayed default never writes one person's choice into the next person's preferences","tier":"ESSENTIAL"}
     ,
