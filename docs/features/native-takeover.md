@@ -295,3 +295,37 @@ retirement and reserved Stop slot needed to fix the shared-journal exhaustion.
 `scripts/ci/go-test-tiers.json` adds only the four new ESSENTIAL rows through
 the canonical writer. Production qualification and package G/P2 enablement
 boundaries remain as described above.
+
+The optional broad `agentd -race` run found six unrelated fixture races; the
+same six were reproduced by a separate remote run on unchanged reviewed head
+`7b13d50a4`. The first five race with `watchHarness` reading the test clock in
+`harness_notifications.go:107`; the last races on the fake queue call count:
+
+- `TestPauseHeartbeatUsesExistingInboxAndNeverStopsProcess`
+- `TestScheduledPauseWaitsAndEscalationIsDeliveredOnce`
+- `TestPauseWakeHintAnchorsBeforeHeartbeatRoundTrip`
+- `TestUncertainDeliveryDoesNotMaskHeartbeatFailure`
+- `TestInboxUnconfirmedDoesNotReinject`
+- `TestSupervisorQueueHintsUnavailableBackoff/401`
+
+Their code is unchanged by this slice. No assertion was skipped or weakened;
+the required normal affected suite and focused PTY race checks are separate
+from this additional broad race probe. The export regression asserts the
+existing relay protocol: a gap closes the subscription, then a fresh authorized
+snapshot and the exact next terminal frame prove recovery.
+
+FIX2 validation on code head `c09af095e`: the full required remote affected
+set passed with `-count=1`: `nativepty`, `nativeattach`, `agentd`,
+`nativesessions/...`, `reportercontract`, plus `nativereceipts`,
+`nativeintegration/...` and `nativecontract`. Focused remote `-race -count=1`
+passed every `TestNativeHost.*PTY` case and the receipt-retirement safety test.
+The earlier broader race run also passed every package except the six baseline
+fixture failures named above. Guarded `ci-static --merge-main` passed all 44
+checks with zero optional skips. No web source, unit or browser spec changed.
+
+The existing PR rehearsal failure was checked read-only: the amd64 build failed
+downloading Go modules from `proxy.golang.org` with network timeouts. Its dependent
+release rehearsal consequently failed. The non-required policy preview reported
+`no trusted gate/verdict`; the coordinator must post the fresh review verdict.
+Neither path was rerun or bypassed by this worker. No origin push, deployment,
+model CLI or product review gate was run.
