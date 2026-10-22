@@ -22,6 +22,7 @@ export async function visualChrome(page: Page, data: Fixtures, now: number, opti
     if (request.method() !== 'GET') return route.fallback()
     const json = (body: unknown) => route.fulfill({ json: body })
     if (path === '/api/models' || path === '/api/me/host-labels') return json([])
+    if (path === '/api/quote-profiles') return json([])
     if (path === '/api/models/outdated') return json({ versions: [], revision: 'a'.repeat(64), incomplete: false, next_cursor: '' })
     if (path === '/api/recurrences') return json({ items: [], next_cursor: null })
     if (path === '/api/queue') return json({ items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 0, work_hours: null, warning: false } })

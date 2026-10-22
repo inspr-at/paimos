@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, type Browser, type Page, type TestInfo } from '@playwright/test'
@@ -8,6 +10,7 @@ import { readBaselineBundle } from '../../../scripts/test-prune/visual-baselines
 import { domAudit } from '../ui-audit-rules'
 
 const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8'))
+const captureSHA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: fileURLToPath(new URL('../../../', import.meta.url)), encoding: 'utf8' }).trim()
 export type Profile = 'phone' | 'tablet' | 'desktop'
 export type Theme = 'light' | 'dark'
 export type VisualSetup = (page: Page, profile: Profile, theme: Theme) => Promise<void>
@@ -16,13 +19,15 @@ export interface Checkpoint {
   profile: Profile
   theme: Theme
   fixture: string
+  owner: string
   reference: { attachmentMember: string }
 }
 
 export function visualCases(id: string): Checkpoint[] {
   const state = manifest.states.find((state: { id: string }) => state.id === id)
   if (!state) throw new Error(`Unknown visual state: ${id}`)
-  return state.checkpoints.map((checkpoint: Checkpoint) => ({ ...checkpoint, fixture: state.fixture }))
+  return state.checkpoints.map((checkpoint: Checkpoint) => ({ ...checkpoint, owner: state.owner,
+    fixture: state.fixturesByProfile?.[checkpoint.profile] ?? state.fixture }))
 }
 
 export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoint, setup: VisualSetup) {
@@ -48,13 +53,15 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
       }, checkpoint.theme)
       // Always keep review evidence even when a quality check or the reference
       // authority fails. Capturing evidence is not a passing visual comparison.
-      await page.screenshot({ path: info.outputPath(`${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' })
+      const png = await page.screenshot({ path: info.outputPath(`${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' })
       const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
       const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
       const violations = axe.violations.map(row => ({ id: row.id, impact: row.impact, nodes: row.nodes.map(node => node.target) }))
-      writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify({ id: checkpoint.id, fixture: checkpoint.fixture,
+      writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify({ id: checkpoint.id, owner: checkpoint.owner, fixture: checkpoint.fixture,
+        captureSHA, pngSHA256: createHash('sha256').update(png).digest('hex'), baselineCompared: false,
         viewport, theme: checkpoint.theme, layout, axe: violations, console: errors, responses }, null, 2))
       expect(errors, 'unexpected console/page failure').toEqual([])
+      expect(responses, 'unexpected failed HTTP reads').toEqual([])
       expect(layout, 'unexpected clipping, overlap or overflow').toEqual([])
       expect(violations, 'WCAG A/AA violations').toEqual([])
       materializeReference(info, checkpoint)

@@ -92,7 +92,8 @@ export const sessionChat: VisualSetup = async (page, _profile, theme) => {
   await mockAgents(page, data, { now: () => NOW })
   await page.goto(`/agents/${worker.id}?tab=messages`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
-  await expect(panel.locator('.chat-composer')).toBeVisible()
+  await panel.getByRole('tab', { name: /^Chat/ }).click()
+  await expect(panel.getByRole('textbox', { name: 'Message to Release coordination', exact: true })).toBeVisible()
   await expect(panel.getByText('Übergabebericht', { exact: true })).toBeVisible()
 }
 
