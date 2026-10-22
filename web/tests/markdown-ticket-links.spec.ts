@@ -171,6 +171,12 @@ for (const [oldKey, canonicalKey, projectId, projectKey] of [
     const link = ws.getByRole('link', { name: `${oldKey}: ${moved.title}`, exact: true })
     await expect(link).toHaveText(oldKey)
     await expect(link).toHaveAttribute('href', `/p/${projectKey}/${canonicalKey}`)
+    const tabOpened = page.context().waitForEvent('page')
+    await link.click({ modifiers: ['ControlOrMeta'] })
+    const tab = await tabOpened
+    await tab.waitForURL(`**/p/${projectKey}/${canonicalKey}`)
+    await tab.close()
+    await expect(page).toHaveURL(sourceURL)
     await link.click()
     await expect(page).toHaveURL(`/p/${projectKey}/${canonicalKey}?q=Oracle&type=ticket`)
     await expect(ws).toHaveCount(1)

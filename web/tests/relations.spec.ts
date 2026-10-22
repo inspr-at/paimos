@@ -32,7 +32,19 @@ async function axe(page: Page) {
 
 test('r opens the picker; the relation and the ticket are chosen by keyboard; Undo takes the link back', async ({ page }) => {
   const errors = watchErrors(page)
-  const calls = await mockWork(page, fixtures())
+  const data = fixtures(), calls = await mockWork(page, data)
+  const attempts: unknown[] = []
+  const refusal = 'PHAROS-14 cannot block PHAROS-12: this link would make a loop.'
+  let releaseUndo!: () => void, undoStarted!: () => void
+  const heldUndo = new Promise<void>(resolve => { releaseUndo = resolve })
+  const started = new Promise<void>(resolve => { undoStarted = resolve })
+  await page.route('**/api/relations', async route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    attempts.push(route.request().postDataJSON())
+    if (attempts.length === 1) return route.fulfill({ status: 409, json: { code: 'conflict', message: refusal } })
+    if (attempts.length === 3) { undoStarted(); await heldUndo }
+    return route.fallback()
+  })
   await page.goto('/p/PHAROS/PHAROS-12')
   await expect(panel(page).getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
   // No links yet: the section says so and offers Link.
@@ -63,16 +75,38 @@ test('r opens the picker; the relation and the ticket are chosen by keyboard; Un
   await expect(options).toHaveCount(1)
   await expect(options.first()).toContainText('Visual acceptance of the version pill')
   await page.keyboard.press('Enter')
+  await expect(dialog.getByRole('alert')).toHaveText(refusal)
+  await expect(search).toBeFocused()
+  expect(data.relations.some(relation => relation.source_node_id === 'n-4' && relation.target_node_id === 'n-2')).toBe(false)
+  expect(attempts).toEqual([{ source_node_id: 'n-4', target_node_id: 'n-2', type: 'blocks' }])
+  await axe(page)
+  await page.keyboard.press('Enter')
   await expect(dialog).toHaveCount(0)
   // The other ticket blocks this one: it is the source.
   expect(linkWrites(calls, 'POST').at(-1)!.body).toEqual({ source_node_id: 'n-4', target_node_id: 'n-2', type: 'blocks' })
   await expect(relations(page).getByRole('button', { name: /^Blocked by PHAROS-14/ })).toBeVisible()
   await expect(relations(page).getByRole('button', { name: 'Link', exact: true })).toBeFocused()
   await expect(toast(page).filter({ hasText: 'PHAROS-14 now blocks PHAROS-12' })).toBeVisible()
-  await toast(page).filter({ hasText: 'PHAROS-14 now blocks PHAROS-12' }).getByRole('button', { name: 'Undo' }).click()
+  await relations(page).getByRole('button', { name: 'Remove link: Blocked by PHAROS-14' }).click()
+  const confirmation = page.getByRole('dialog', { name: 'Remove the link to PHAROS-14?' })
+  await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click()
+  expect(linkWrites(calls, 'DELETE')).toHaveLength(0)
+  await relations(page).getByRole('button', { name: 'Remove link: Blocked by PHAROS-14' }).click()
+  await confirmation.getByRole('button', { name: 'Remove link', exact: true }).click()
   await expect(relations(page).getByRole('button', { name: /^Blocked by PHAROS-14/ })).toHaveCount(0)
   expect(linkWrites(calls, 'DELETE').at(-1)!.path).toMatch(/^\/api\/relations\/r-new-/)
   await expect(toast(page).filter({ hasText: 'PHAROS-14 no longer blocks PHAROS-12' })).toBeVisible()
+  try {
+    await toast(page).filter({ hasText: 'PHAROS-14 no longer blocks PHAROS-12' }).getByRole('button', { name: 'Undo' }).click()
+    await started
+    await panel(page).getByRole('button', { name: 'Next ticket' }).click()
+    await expect(page).toHaveURL('/p/PHAROS/PHAROS-13')
+    await expect(panel(page).getByRole('heading', { name: 'Run the disposable Hetzner end-to-end check' })).toBeVisible()
+    releaseUndo()
+    await expect.poll(() => data.relations.some(relation => relation.source_node_id === 'n-4' && relation.target_node_id === 'n-2')).toBe(true)
+    await expect(relations(page).getByRole('button', { name: /^Blocked by PHAROS-14/ })).toHaveCount(0)
+    expect(attempts).toEqual(Array.from({ length: 3 }, () => ({ source_node_id: 'n-4', target_node_id: 'n-2', type: 'blocks' })))
+  } finally { releaseUndo() }
   expect(errors).toEqual([])
 })
 

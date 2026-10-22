@@ -15966,6 +15966,8 @@
     ,
     {"kind":"node","file":"tests/accounts-overview.test.ts","name":"shared quota names its computers in the singular and plural, in English and German","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/activity.test.ts","name":"P03: automatic history names Aeon while a person named System remains a person through filtering","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/activity.test.ts","name":"an automatic change keeps the job that wrote it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/activity.test.ts","name":"changes read in product words","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -17636,11 +17638,17 @@
     ,
     {"kind":"node","file":"tests/theme-values.test.ts","name":"saved presets and Custom previews each choose ink within their own mode","leaf":"saved presets and Custom previews each choose ink within their own mode","line":49,"tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"P03: agent work renders optional, capped, partial and withheld usage without invented zeroes","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"a numeric cost in the payload is unknown, not displayed","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"estimated cost stays an exact decimal string and never a float","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"two model rows stay exact when summed text is already decimal","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/ticket-benefits.test.ts","name":"P03: benefit visibility preserves language text and independent release flags","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/ticket-benefits.test.ts","name":"P03: historic completion and read-only benefit guidance render from the actual component","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/ticket-benefits.test.ts","name":"a backfilled snapshot says the notes were written after the release, and a historical headline does not","tier":"GATED-FULL"}
     ,
@@ -18902,6 +18910,12 @@
     ,
     {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"rejects direct and aliased locale detectors while allowing language selection and region formatting","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"P03: deferred e waits for both grants and the captured ticket, in either order","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"P03: deferred ticket shortcuts are spent by changed ownership, fields, dialogs and denial","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"P03: the latest e/c intent alone runs once, while denied readers gain no intent","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"adoption confirmation is bound to the acting person and key","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"keeps an explicit custom-role recurrence grant and names the creator ceiling","tier":"ESSENTIAL"}
@@ -19162,6 +19176,12 @@
     ,
     {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"Aithema extension disclosures > retains unknown namespaces and coexisting majors as plain text","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"P03: denied intake reads stay absent; unavailable history exposes Retry without invented evidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"P03: held intake pages and errors cannot populate a different ticket, project or revoked grant","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"P03: intake continuation retains evidence, deduplicates drafts and retries the same bounded cursor","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"intake history continuation > keeps older drafts accessible and preserves the node filter on the next page","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"intake history continuation > reports a continuation failure instead of returning an empty successful page","tier":"GATED-FULL"}
@@ -19245,6 +19265,10 @@
     {"kind":"vitest","file":"tests/ledger.unit.test.ts","name":"the row version decides first, whatever the position or start order says","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/ledger.unit.test.ts","name":"with equal versions, the list snapshot decides before the start order","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/live-agents-store.unit.test.ts","name":"P03: a forbidden live read clears prior workers and truncation, without inventing an empty successful read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/live-agents-store.unit.test.ts","name":"P03: every ticket consumer shares one poll and reports partial or withheld worker evidence honestly","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/live-agents-store.unit.test.ts","name":"a stop during a slow poll discards the old response and coalesces a catch-up read","tier":"GATED-FULL"}
     ,
@@ -20332,6 +20356,10 @@
     ,
     {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"waits for a deferred wrong-version recovery decision even after the old 400ms window","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"P03: delayed table resize deliveries settle on the live width and discard superseded frame callbacks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"P03: editor fit math preserves growth and only spends the scroller slack on delete, late font or resize","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > drops a mark whose update never restored once its flush is over","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > follows the next row on screen when the first one leaves, and stays still at the top or for a sub-pixel","tier":"ESSENTIAL"}
@@ -20345,6 +20373,8 @@
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"touchScroll > ends at scrollend once no finger is down, and ignores scrolls without a touch","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"touchScroll > runs from the touch until momentum is quiet, never while a finger is down","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/record-ownership.unit.test.ts","name":"P03: the same ticket retains its owned comment draft when expanded and returned","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/record-ownership.unit.test.ts","name":"S8-001: changing ticket clears description and comment drafts, including a late save","tier":"ESSENTIAL"}
     ,
@@ -24064,6 +24094,10 @@
     ,
     {"kind":"vitest","file":"tests/ticket-links.unit.test.ts","name":"unmount trims to 200 off-screen answers and access refresh without links forgets them","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/ticket-outcomes.unit.test.ts","name":"P03: a late outcome read or failure for A cannot replace B","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-outcomes.unit.test.ts","name":"P03: optional outcomes render recorded evidence and full long text, with honest empty/error states","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/ticket-outcomes.unit.test.ts","name":"describes each outcome without raw ids","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/ticket-peek-link.unit.test.ts","name":"a ctrl or cmd click opens one ticket tab and does not open the peek","tier":"ESSENTIAL"}
@@ -24077,6 +24111,8 @@
     {"kind":"vitest","file":"tests/ticket-peek-link.unit.test.ts","name":"a plain click opens the peek and leaves the tab closed","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/ticket-peek-link.unit.test.ts","name":"repeated ctrl or cmd key presses keep the browser tab after a press opened one","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-peek.unit.test.ts","name":"P03: peek routing preserves Agents, knowledge and graph context and returns focus to its opener","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/ticket-peek.unit.test.ts","name":"the route owns the panel even when a stale peek query survives navigation","tier":"GATED-FULL"}
     ,

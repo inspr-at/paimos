@@ -5,6 +5,7 @@ import { getLiveAgents } from '../src/lib/agentRows'
 import { useLiveAgents } from '../src/stores/liveAgents'
 import type { LiveAgent } from '../src/lib/liveAgents'
 import { ticketWorkers } from '../src/lib/liveAgents'
+import { APIError } from '../src/lib/api'
 
 vi.mock('../src/lib/agentRows', async importOriginal => ({ ...await importOriginal<typeof import('../src/lib/agentRows')>(), getLiveAgents: vi.fn() }))
 const at = Date.parse('2026-09-26T12:00:00Z')
@@ -249,4 +250,45 @@ it('silent stream reconnects at 45s despite successful polling; pings never refe
     await vi.advanceTimersByTimeAsync(0)
     expect(store.dataStale).toBe(false)
   } finally { stop() }
+})
+
+it('P03: every ticket consumer shares one poll and reports partial or withheld worker evidence honestly', async () => {
+  const { store, stop, workers } = await watching([])
+  const other = store.watch()
+  try {
+    const stream = Stream.current
+    expect(getLiveAgents).toHaveBeenCalledTimes(1)
+    vi.mocked(getLiveAgents).mockResolvedValueOnce({ items: [agent({ ticket }), agent({ session_id: undefined, harness: 'codex', name: undefined, ticket })], at: new Date(at).toISOString(), fresh_seconds: 120, truncated: true })
+    await store.refresh()
+    expect(store.truncated).toBe(true)
+    expect(workers()).toHaveLength(2)
+    expect(workers().map(worker => worker.session_id)).toEqual(['s1', undefined])
+    expect(ticketWorkers(store.forProject('p2'), 'p2').size).toBe(0)
+    expect(Stream.current).toBe(stream)
+    stop()
+    expect(stream?.close).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(getLiveAgents).toHaveBeenCalledTimes(3)
+    other()
+    expect(stream?.close).toHaveBeenCalledOnce()
+    const reads = vi.mocked(getLiveAgents).mock.calls.length
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(getLiveAgents).toHaveBeenCalledTimes(reads)
+  } finally { stop(); other() }
+})
+
+it('P03: a forbidden live read clears prior workers and truncation, without inventing an empty successful read', async () => {
+  for (const status of [401, 403, 404]) {
+    setActivePinia(createPinia())
+    vi.mocked(getLiveAgents).mockReset()
+    const { store, stop, workers } = await watching([agent({ ticket })])
+    try {
+      expect(workers()).toHaveLength(1)
+      vi.mocked(getLiveAgents).mockRejectedValueOnce(new APIError(status, 'denied'))
+      await store.refresh()
+      expect(store.state).toBe('unavailable')
+      expect(workers()).toEqual([])
+      expect(store.truncated).toBe(false)
+    } finally { stop() }
+  }
 })
