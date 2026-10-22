@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn } from 'node:child_process'
 import { appendFileSync, writeFileSync } from 'node:fs'
+import { boundFixture } from '../fixture-lifecycle.mjs'
 const [mode, ready, pidFile] = process.argv.slice(2)
+boundFixture()
 
 if (mode === 'browser' || mode === 'browser-fail' || mode === 'browser-hang') {
   const { chromium } = await import('../../../web/node_modules/playwright/index.mjs')
@@ -22,7 +24,7 @@ if (mode === 'browser' || mode === 'browser-fail' || mode === 'browser-hang') {
   }
 } else {
   if (process.env.AEON_PW_REUSE_PID) appendFileSync(process.env.AEON_PW_GROUP_LOG, `${JSON.stringify({ pid: Number(process.env.AEON_PW_REUSE_PID), started: 'Mon Jan 1 00:00:00 2001' })}\n`)
-  const orphan = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); process.on("SIGINT", () => {}); setInterval(() => {}, 1000)'], { stdio: 'ignore', detached: true })
+  const orphan = spawn(process.execPath, [new URL('./hang.mjs', import.meta.url).pathname], { stdio: 'ignore', detached: true })
   writeFileSync(pidFile, String(orphan.pid))
   // Keep unrelated child alive until this parent is terminated; normal exit
   // deliberately leaves a descendant for the supervisor to collect.
