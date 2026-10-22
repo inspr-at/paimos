@@ -268,11 +268,30 @@ test("AEON-1502 first pairing 1280x800 en and de: Pair or Deny with the harness 
     // Neither Cursor nor Codex can be verified: today's default is verification off.
     await expect(review.locator('[data-review-facts]')).toHaveText(copy.factsOff)
     await expect(review.locator('.actions .go')).toHaveText([copy.pairButton, copy.deny])
+    // AEON-1611: the taller readable computer list must not retain the guide's
+    // scroll offset or leave keyboard focus on the form that just disappeared.
+    await expect(review.locator('[data-review-title]')).toBeFocused()
     const fit = await fitsWithoutScrolling(page, review)
     expect(fit.scrolled).toBe(0)
     expect(fit.bottom).toBeLessThanOrEqual(fit.viewport)
     expect(await sentences(review)).toEqual([copy.factsOff, copy.role])
     expect(await overflowing(review)).toEqual([])
+    const boxes = review.locator('.checklist input[type=checkbox]')
+    for (const box of await boxes.all()) await expect(box).toBeInViewport({ ratio: 1 })
+    const checklistGuard = await controlStability(page, {
+      checklist: review.locator('.checklist'),
+      cursor: boxes.first(), codex: boxes.last(),
+      pair: review.getByRole('button', { name: copy.pairButton, exact: true }),
+      deny: review.getByRole('button', { name: copy.deny, exact: true }),
+      details: review.locator('details.more > summary'),
+    })
+    await checklistGuard.check(() => boxes.last().uncheck())
+    await expect(boxes.last()).not.toBeChecked()
+    await checklistGuard.check(() => boxes.last().check())
+    await expect(boxes.last()).toBeChecked()
+    checklistGuard.done()
+    // Deliver the repaint after scrolling with the installed browser clock.
+    await page.clock.runFor(32)
     await shot(page, testInfo, `first-pairing-${language}`)
     await detailsHold(page, review, copy.pairButton)
     record(`first pairing ${language}`, { viewport: '1280x800', fit, sentences: 2, detailsMovementPx: 0 })

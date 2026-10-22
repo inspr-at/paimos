@@ -32,11 +32,14 @@ function account(overrides: Partial<CatalogAccount> = {}): CatalogAccount {
   }
 }
 function catalog(accounts: CatalogAccount[] = [account()], extraHosts: AgentAccountCatalog['hosts'] = []): AgentAccountCatalog {
-  const ranked = accounts.filter(item => item.available && item.remaining_fraction != null)
+  const runnable = accounts.filter(item => item.available)
+  const ranked = runnable.filter(item => item.remaining_fraction != null)
     .sort((a, b) => (b.remaining_fraction ?? 0) - (a.remaining_fraction ?? 0) || (a.id < b.id ? -1 : 1))
+  // Match the server: the only runnable account is the default even before a reading.
+  const defaultAccountId = ranked[0]?.id ?? (runnable.length === 1 ? runnable[0].id : null)
   return {
     as_of: new Date(NOW).toISOString(), role: 'build',
-    hosts: [{ daemon_id: 'workstation', label: 'Work Mac', harnesses: [{ harness: 'codex', accounts, default_account_id: ranked[0]?.id ?? null }] }, ...extraHosts],
+    hosts: [{ daemon_id: 'workstation', label: 'Work Mac', harnesses: [{ harness: 'codex', accounts, default_account_id: defaultAccountId }] }, ...extraHosts],
   }
 }
 const context = (value: AgentAccountCatalog | null, role: 'build' | 'review-gate' = 'build') => ({ catalog: value, role: { role, source: 'ticket' as const }, authorFamily: '' as const })
@@ -304,13 +307,13 @@ describe('account catalog contract', () => {
     expect(known.filled.accountId).toBe(knownId)
     expect(known.view.notes.account).toContain('most allowance left')
     expect(known.view.notes.account).toContain('30%')
-    expect(known.view.accounts.find(item => item.value === freshId)?.label).toContain('allowance unknown')
+    expect(known.view.accounts.find(item => item.value === freshId)?.label).toContain('Quota reading unavailable')
     expect(known.view.accounts.find(item => item.value === freshId)?.label).not.toContain('100%')
     const mixed = account({
       remaining_fraction: null,
       windows: [measured, unmeasured],
     })
-    expect(presented(catalog([mixed])).view.notes.account).toContain('Allowance is unknown.')
+    expect(presented(catalog([mixed])).view.notes.account).toContain('Agents can start now. The quota shows once this account reports it.')
     expect(presented(catalog([mixed])).view.notes.account).not.toMatch(/100%|30%/)
     const inflated = structuredClone(nested)
     inflated.hosts[0].harnesses[0].default_account_id = null
@@ -318,10 +321,22 @@ describe('account catalog contract', () => {
     const unranked = presented(inflated)
     expect(unranked.filled.accountId).toBe('')
     expect(unranked.view.notes.account).not.toContain('most allowance left')
-    expect(unranked.view.accounts.find(item => item.value === freshId)?.label).toContain('allowance unknown')
+    expect(unranked.view.accounts.find(item => item.value === freshId)?.label).toContain('Quota reading unavailable')
     expect(unranked.view.accounts.find(item => item.value === freshId)?.label).not.toContain('100%')
     const onlyFresh = presented(catalog([account({ remaining_fraction: 1, windows: [unmeasured] })]))
-    expect(onlyFresh.view.notes.account).toContain('Allowance is unknown.')
+    expect(onlyFresh.view.notes.account).toContain('Agents can start now. The quota shows once this account reports it.')
+    expect(onlyFresh.view.accounts[0].label).toContain('No quota reading yet')
+    expect(onlyFresh.view.notes.account).not.toContain('first run')
+    const multiHost = catalog([account({ remaining_fraction: null, windows: [unmeasured] })], [{ daemon_id: 'other', label: 'Other host', harnesses: [] }])
+    const singleRunnable = presented(multiHost)
+    expect(singleRunnable.filled).toMatchObject({ hostId: 'workstation', harness: 'codex', accountId: accountA })
+    expect(singleRunnable.view.notes.host).toBe('Agents can start now. The quota shows once this account reports it.')
+    const unavailableHost = structuredClone(multiHost)
+    unavailableHost.hosts[0].harnesses[0].accounts[0].available = false
+    unavailableHost.hosts[0].harnesses[0].accounts[0].unavailable_reasons = ['probe']
+    const unavailableNote = presentCascade(context(unavailableHost), singleRunnable.filled, emptyTouch())
+    expect(unavailableNote.notes.host).toBe(singleRunnable.view.notes.host)
+    expect(unavailableNote.status.label).toBe('Sign-in probe is stale')
     expect(onlyFresh.view.notes.account).not.toContain('most allowance left')
     expect(onlyFresh.view.notes.account).not.toContain('100%')
     const unread = account({ id: accountA, label: 'Unread', remaining_fraction: null, windows: [{ ...window(5), provisional: true }] })

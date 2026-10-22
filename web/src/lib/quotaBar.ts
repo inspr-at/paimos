@@ -159,8 +159,8 @@ export function quotaSegments(bar: QuotaBar): QuotaSegments {
   }
 }
 /** The bar in words, for its image role and its tip. */
-export function quotaLabel(bar: QuotaBar, name: string, period = ''): string {
-  if (!bar.known) return `${name}: quota not reported${bar.by === 'rule' ? '; the limit set by you is used up' : ''}`
+export function quotaLabel(bar: QuotaBar, name: string, period = '', unreported = 'quota not reported'): string {
+  if (!bar.known) return `${name}: ${unreported}${bar.by === 'rule' ? '; the limit set by you is used up' : ''}`
   const parts = [`${pct(bar.used)} % used${period ? ` ${period}` : ''}`]
   if (bar.limit !== null) parts.push(`${bar.boost ? 'Boost today' : 'today’s limit'} ${pct(bar.limit)} %`)
   if (bar.keepAt !== null) parts.push(`kept for you ${pct(100 - bar.keepAt)} % while you work`)
@@ -179,9 +179,9 @@ const STOPPED: Record<QuotaStop, string> = {
 }
 export interface QuotaCaption { text: string; tone: '' | 'warn'; icon: '' | 'gauge' | 'pause' | 'alert' }
 /** The one caption under a list row's bar. A low warning says so first; warnings never stop agents. */
-export function quotaCaption(bar: QuotaBar, o: { period?: string; resetsAt?: string | null; now: number; timezone?: string; low?: boolean }): QuotaCaption {
+export function quotaCaption(bar: QuotaBar, o: { period?: string; resetsAt?: string | null; now: number; timezone?: string; low?: boolean; unreported?: string }): QuotaCaption {
   const stopped = bar.room === 0 && bar.by ? STOPPED[bar.by] : ''
-  if (!bar.known) return stopped ? { text: stopped, tone: 'warn', icon: 'pause' } : { text: 'Quota not reported', tone: '', icon: '' }
+  if (!bar.known) return stopped ? { text: stopped, tone: 'warn', icon: 'pause' } : { text: o.unreported ?? 'Quota not reported', tone: '', icon: '' }
   const left = `${pct(bar.left)} % left`, resets = o.resetsAt ? ` · resets ${when(o.resetsAt, o.now, o.timezone)}` : ''
   if (o.low) return { text: `Low · ${left}${stopped ? ` · ${stopped.charAt(0).toLowerCase()}${stopped.slice(1)}` : resets}`, tone: 'warn', icon: 'gauge' }
   // A used-up rule stops agents whatever the reading says; an old reading alone only claims no room.
@@ -209,9 +209,9 @@ export interface Said { text: string; strong?: boolean }
  * stops them first, or why they stopped. At the limit, new work follows the
  * harness's own choice (the model ladder, or wait until midnight).
  */
-export function quotaSentence(bar: QuotaBar, o: { vendor: string; atLimit?: 'ladder' | 'wait' }): Said[] {
+export function quotaSentence(bar: QuotaBar, o: { vendor: string; atLimit?: 'ladder' | 'wait'; unreported?: string }): Said[] {
   const ruleUsedUp: Said[] = [{ text: 'Agents have stopped using it.', strong: true }, { text: ' The limit set by you is used up for now.' }]
-  if (!bar.known) return bar.by === 'rule' ? ruleUsedUp : [{ text: 'This account doesn’t report its quota, so agents can’t pace it. The agent count on the dial still caps it.' }]
+  if (!bar.known) return bar.by === 'rule' ? ruleUsedUp : [{ text: o.unreported ?? 'This account doesn’t report its quota, so agents can’t pace it. The agent count on the dial still caps it.' }]
   if (bar.by === 'held') return [{ text: 'Agents leave it alone', strong: true }, { text: ' until the hold ends.' }]
   if (bar.by === 'off') return [{ text: 'Agents leave it alone', strong: true }, { text: ' while “Agents may use it” is off. Running work finishes.' }]
   if (bar.by === 'rule' && bar.room === 0) return ruleUsedUp
@@ -231,11 +231,11 @@ export function quotaSentence(bar: QuotaBar, o: { vendor: string; atLimit?: 'lad
  * Limits never moves the controls below the sentence (AEON-541). An account without a
  * reading only says so, or that a used-up rule stopped it, until Remove.
  */
-export function widestSentences(vendor: string, known = true): Said[][] {
+export function widestSentences(vendor: string, known = true, unreported?: string): Said[][] {
   const bars = known ? [
     quotaBar({ used: 10.5, limit: 99, keep: 22.5 }), quotaBar({ used: 10.5, limit: 77.5, boost: true }), quotaBar({ used: 10.5, limit: 100 }),
     quotaBar({ used: 50.5, limit: 50.5 }), quotaBar({ used: 50.5, limit: 60.5, ruleSpent: true }), quotaBar({ used: 50.5, limit: 60.5, paused: 'off' }),
     quotaBar({ used: 50.5, limit: 60.5, paused: 'held' }), quotaBar({ used: 50.5, limit: 60.5, stale: true }), quotaBar({ used: 50.5 }),
   ] : [quotaBar({ used: null }), quotaBar({ used: null, ruleSpent: true })]
-  return bars.map(bar => quotaSentence(bar, { vendor, atLimit: 'ladder' }))
+  return bars.map(bar => quotaSentence(bar, { vendor, atLimit: 'ladder', unreported }))
 }

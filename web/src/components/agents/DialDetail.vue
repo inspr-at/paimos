@@ -110,7 +110,7 @@ const paceHome = computed(() => `/settings/capacity#pace-${harness.value}`)
 
 <template>
   <div class="cd" :class="{ ghost }" :aria-hidden="ghost || undefined" :inert="ghost || undefined" :data-detail="ghost ? undefined : harness">
-    <h3 class="cd-h"><HarnessMark :harness="harness" :size="16" /><span>{{ view.kind === 'none' ? `${name} · no account yet` : detailHeadline(view) }}</span></h3>
+    <h3 class="cd-h"><HarnessMark :harness="harness" :size="16" /><span>{{ usage.kind === 'none' ? `${name} · no account yet` : view.kind === 'none' ? `${name} · quota` : detailHeadline(view) }}</span></h3>
 
     <QuotaUsage :view="usage" :state="usageState" :generated-at="generatedAt" :anchor-hour="anchorHour" :tz="tz" :failed="usageFailed" :since="usageSince" :ghost="ghost" @retry="emit('retry')" />
     <template v-if="view.kind === 'no_limit'">

@@ -61,6 +61,19 @@ export async function mockStartAgent(page: Page, options: { ticketTitle?: string
   const hosts = options.catalog === 'empty-grants' || options.offline || options.unavailable
     ? [{ daemon_id: 'workstation', label: 'Work Mac', harnesses: [{ harness: 'codex', accounts: [primary], default_account_id: available ? accountId : null }] }]
     : [{ daemon_id: 'workstation', label: 'Work Mac', harnesses: [{ harness: options.catalog?.startsWith('pi') ? 'pi' : 'codex', accounts: [primary, spare], default_account_id: accountId }] }]
+  if (options.catalog === 'two-hosts') {
+    // Keep the account-note candidates equal while the host note changes on a
+    // harness switch: one reading is known, the other harness has none yet.
+    spare.remaining_fraction = null
+    spare.windows[0].provisional = true
+    const unread = structuredClone(hosts[0].harnesses[0])
+    unread.harness = 'claude'
+    for (const account of unread.accounts) {
+      account.remaining_fraction = null
+      account.windows.forEach(window => { window.provisional = true })
+    }
+    hosts[0].harnesses.push(unread)
+  }
   if (options.catalog === 'two-hosts' || options.catalog === 'claude') {
     hosts.push({
       daemon_id: 'laptop', label: 'Laptop', harnesses: [{

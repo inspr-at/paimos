@@ -6,6 +6,7 @@
 // reserved, so loading, a refresh and every state keep the controls below in place (0 px).
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { vClipTip } from '../../directives/clipTip'
+import { missingQuota } from '../../lib/accountLimits'
 import { accountRows, chartModel, defaultRange, VERDICT_ICON, type OutlookGroup, type UsageView } from '../../lib/quotaOutlook'
 import type { IconName } from '../AppIcon.vue'
 import AppIcon from '../AppIcon.vue'
@@ -67,13 +68,14 @@ const offShown = computed(() => !!model.value && [...model.value.past.values()].
 const accountsWord = computed(() => `${rows.value.length} ${rows.value.length === 1 ? 'account' : 'accounts'}`)
 const publicRows = computed(() => rows.value.filter(r => r.state !== 'private'))
 const hasPrivate = computed(() => rows.value.some(r => r.state === 'private'))
+const missingRow = (id: string) => missingQuota(props.view.harness, props.view.known.find(a => a.account_id === id)?.reading_support, props.view.running).short
 </script>
 
 <template>
   <div class="ub" :data-load="shown">
     <!-- The answer first: one sentence (two lines kept), the pool in muted ink, the pace verdict. -->
     <div v-if="none" class="ub-sum short"><p class="ub-hd one">No accounts yet<span class="ub-of">·</span><RouterLink class="link-btn ln-ic" to="/settings/accounts#add-account" :tabindex="tab">Add an account<AppIcon name="arrow" :size="12" /></RouterLink></p></div>
-    <div v-else-if="quiet" class="ub-sum short"><p class="ub-hd one">Quota not reported<span class="ub-of">· {{ accountsWord }}</span></p></div>
+    <div v-else-if="quiet" class="ub-sum short"><p class="ub-hd one"><span v-clip-tip="ghost ? '' : view.head">{{ view.head }}</span><span class="ub-of">· {{ accountsWord }}</span></p></div>
     <div v-else-if="shown === 'loading'" class="ub-sum" aria-busy="true"><div class="ub-hd"><span class="sk2"><span class="skeleton" /><span class="skeleton" /></span><span class="sr-only">Reading usage…</span></div><p class="ub-l2"><span class="skeleton" /></p><div class="ub-v"><span class="skeleton" /></div></div>
     <div v-else-if="shown === 'error'" class="ub-sum"><div class="ub-hd"><p class="err" :role="ghost ? undefined : 'alert'"><AppIcon name="alert" :size="15" /><span>Usage couldn’t be read</span><span class="ub-of">·</span><button type="button" class="link-btn" :tabindex="tab" @click="emit('retry')">Try again</button></p></div><p class="ub-l2" /><div class="ub-v" /></div>
     <div v-else class="ub-sum">
@@ -102,7 +104,7 @@ const hasPrivate = computed(() => rows.value.some(r => r.state === 'private'))
       <template v-else>
         <div class="ub-plot" :aria-busy="shown === 'loading' || undefined">
           <template v-if="!ghost">
-            <p v-if="quiet" class="ub-empty"><span class="ub-rule" aria-hidden="true" />{{ view.name }} doesn’t report quota. Burn appears once it does.</p>
+            <p v-if="quiet" class="ub-empty"><span class="ub-rule" aria-hidden="true" />{{ view.tip }}</p>
             <template v-else-if="shown === 'loading'"><span class="skeleton sk-line" /><span class="skeleton sk-strip" /></template>
             <p v-else-if="shown === 'error'" class="ub-empty">No readings to draw.</p>
             <p v-else-if="kind === 'held'" class="ub-empty">Held accounts don’t run, so there is no pace to draw.</p>
@@ -132,7 +134,7 @@ const hasPrivate = computed(() => rows.value.some(r => r.state === 'private'))
           <span class="ub-an" :class="{ priv: r.state === 'private' }"><AppIcon v-if="r.state === 'private'" name="lock" :size="12" /><span v-if="!ghost" v-clip-tip class="ub-name">{{ r.name }}</span><span v-else class="ub-name">{{ r.name }}</span></span>
           <template v-if="pending && shown === 'loading'"><span class="ub-meta"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></span><span class="skeleton" /></template>
           <span v-else-if="pending" class="ub-nr"><AppIcon name="ring-dashed" :size="12" />not read</span>
-          <span v-else-if="r.state === 'not_reported'" class="ub-nr"><AppIcon name="ring-dashed" :size="12" />Quota not reported</span>
+          <span v-else-if="r.state === 'not_reported'" class="ub-nr"><AppIcon name="ring-dashed" :size="12" />{{ missingRow(r.id) }}</span>
           <template v-else>
             <span class="ub-meta">
               <span v-if="r.state === 'private'" class="ub-bat quiet">—</span>
@@ -166,6 +168,8 @@ p { margin: 0; }
 .ub-sum.short { grid-template-rows: 30px; }
 .ub-hd { align-self: stretch; overflow: hidden; color: var(--ink); font: 650 17.5px/24px var(--font); letter-spacing: -.005em; text-wrap: pretty; font-variant-numeric: tabular-nums; }
 .ub-hd.one { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.ub-hd.one > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ub-hd.one > .ub-of { flex: none; }
 .ub-hd .ub-of { color: var(--ink-3); font-size: 13px; font-weight: 500; }
 .ub-hd .ln-ic { font-size: 13.5px; }
 .ub-hd .sk2 { display: grid; gap: 10px; padding-top: 6px; }
@@ -284,6 +288,14 @@ p { margin: 0; }
   .ub-link { min-height: 44px; margin-top: 0; }
   .ub-link .link-btn { min-height: 44px; display: inline-flex; align-items: center; }
 }
-@media (pointer: coarse) { .ub-sb { width: 44px; height: 44px; } .ub-pop .ub-step { min-height: 44px; } }
+@media (pointer: coarse) {
+  .ub-sb { width: 44px; height: 44px; }
+  .ub-pop .ub-step { min-height: 44px; }
+  .err .link-btn, .ub-retry { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; }
+  /* The refresh target reaches into adjacent text rows, without moving the
+     range controls or clipping its hit area to the 20 px status line. */
+  .ub-l2 { overflow: visible; }
+  .ub-retry { position: relative; z-index: 1; }
+}
 @media (prefers-reduced-motion: reduce) { .ub-acc-t .ic { transition: none; } }
 </style>

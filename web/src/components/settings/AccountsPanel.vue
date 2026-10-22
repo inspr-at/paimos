@@ -55,9 +55,9 @@ function openSignin(s: SignInReference) {
   void router.push({ path: '/settings/computers', query: { computer: s.computer.computer_id!, signin: s.enrollment.account_id } })
 }
 const shown = computed(() => account.value ? quota.value(account.value) : null)
-const said = computed(() => account.value && shown.value ? quotaSentence(shown.value.bar, { vendor: account.value.vendor, atLimit: shown.value.atLimit }) : [])
+const said = computed(() => account.value && shown.value ? quotaSentence(shown.value.bar, { vendor: account.value.vendor, atLimit: shown.value.atLimit, unreported: shown.value.unreported.detail }) : [])
 // The sentence keeps the height of the longest one its Limits can reach: the controls below never move.
-const sizers = computed(() => account.value && shown.value ? widestSentences(account.value.vendor, shown.value.bar.known) : [])
+const sizers = computed(() => account.value && shown.value ? widestSentences(account.value.vendor, shown.value.bar.known, shown.value.unreported.detail) : [])
 // The legend names Keep for you whenever the person keeps something, so a hold ending or a Sprint never re-wraps it.
 const keeps = computed(() => capacity.value.schedule.reserve !== 'off')
 const readWindow = computed(() => shown.value?.window ?? account.value?.windows[0] ?? null)

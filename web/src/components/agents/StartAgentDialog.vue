@@ -497,7 +497,10 @@ defineExpose({ open, openOnce })
               <option value="">{{ loading ? 'Loading accounts…' : 'Choose a host' }}</option>
               <option v-for="host in view.hosts" :key="host.value" :value="host.value">{{ host.label }}</option>
             </select>
-            <p v-if="notes.host" :id="`${uid}-host-note`" class="note">{{ notes.host }}</p>
+            <div class="host-notes">
+              <p v-if="notes.host" :id="`${uid}-host-note`" class="note">{{ notes.host }}</p>
+              <p v-for="(text, i) in view.hostNotes" :key="i" class="note sizer" :data-text="text" aria-hidden="true" />
+            </div>
           </div>
           <div class="select-field">
             <label :for="`${uid}-harness`">Harness</label>
@@ -514,7 +517,10 @@ defineExpose({ open, openOnce })
               <option value="">Choose an account</option>
               <option v-for="account in view.accounts" :key="account.value" :value="account.value">{{ accountLabel(account.label) }}</option>
             </select>
-            <p v-if="notes.account" :id="`${uid}-account-note`" class="note">{{ notes.account }}</p>
+            <div class="account-notes">
+              <p v-if="notes.account" :id="`${uid}-account-note`" class="note">{{ notes.account }}</p>
+              <p v-for="(text, i) in view.accountNotes" :key="i" class="note sizer" :data-text="text" aria-hidden="true" />
+            </div>
             <label v-if="choice.accountId && !oneOff" class="remember"><input v-model="remember" type="checkbox"> Remember for this ticket</label>
           </div>
           <div class="pair" :class="{ 'pi-bound': piModelBound }">
@@ -650,6 +656,10 @@ label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; c
 .ticket-results > .note { padding: 12px; }
 .more { margin: 8px 12px; }
 .note { font-size: 12px; line-height: 1.5; color: var(--ink-2); margin-top: 6px; }
+.host-notes, .account-notes { display: grid; }
+.host-notes .note, .account-notes .note { grid-area: 1 / 1; }
+.host-notes .sizer, .account-notes .sizer { visibility: hidden; pointer-events: none; }
+.host-notes .sizer::before, .account-notes .sizer::before { content: attr(data-text); }
 .effort-note { min-block-size: 3em; }
 .remember { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 13px; font-weight: 500; color: var(--ink-2); }
 .remember input { margin: 0; }

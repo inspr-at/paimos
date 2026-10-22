@@ -9,6 +9,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router'
 import { api } from './api'
 import { accountName } from './accountCascade'
+import { missingQuota } from './accountLimits'
 import { approveAccountCapacity, type AgentAccount } from './agents'
 import { confirmAction } from './confirm'
 import { can, myPermissions } from './authz'
@@ -138,15 +139,18 @@ export function useAccountsSettings(part: AccountsPart) {
     const ids = new Set(a.records.map(r => r.id))
     const daily = plan.value?.daily_state?.[a.harness]?.accounts.find(d => ids.has(d.account_id)) ?? null
     const window = longWindow(a), record = a.records.find(r => r.id === daily?.account_id) ?? a.records[0]
+    const unreported = daily?.details_redacted
+      ? { short: 'Quota details are private', detail: 'Quota details are hidden by this account’s usage sharing settings.' }
+      : missingQuota(a.harness, record?.reading_support)
     const settings = plan.value?.daily?.[a.harness]
     const boost = !!settings?.boost_today && Date.parse(settings.boost_today.until) > agents.now
     const bar = quotaBar(quotaInput({ daily, window, boost, rule: record ? capacity.byAccount.get(record.id)?.limit : null, override: poolOf(a)?.override ?? '', off: !a.records.some(allowed), now: agents.now, clock: planClock.value, dayEnds: plan.value?.daily_until }))
     const period = periodWords(window)
     const low = a.windows.some(w => quotaWindowWarns(w, thresholds.value, agents.now))
     const problem = problemSignins.value.find(p => p.account.id === a.id && isProblemSignin(p.signin))
-    let caption = quotaCaption(bar, { period, resetsAt: daily?.resets_at ?? window?.reading.resets_at, now: agents.now, timezone: capacity.timezone, low })
+    let caption = quotaCaption(bar, { period, resetsAt: daily?.resets_at ?? window?.reading.resets_at, now: agents.now, timezone: capacity.timezone, low, unreported: unreported.short })
     if (problem) caption = { text: `${caption.text.split(' · ')[0]} · needs verifying on ${problem.signin.computer.computer_name}`, tone: 'warn', icon: 'alert' }
-    return { bar, caption, label: quotaLabel(bar, `${a.vendor} · ${a.identity}`, period), atLimit: settings?.at_limit, window, daily, low, period }
+    return { bar, caption, label: quotaLabel(bar, `${a.vendor} · ${a.identity}`, period, unreported.detail), atLimit: settings?.at_limit, window, daily, low, period, unreported }
   }
   const quotas = computed(() => new Map(accounts.value.map(a => [a.id, quotaOf(a)])))
   const quota = (a: OverviewAccount) => quotas.value.get(a.id) ?? quotaOf(a)

@@ -6698,6 +6698,18 @@
     ,
     {"kind":"browser","file":"tests/agent-names.spec.ts","name":"the saved word names the lead on the project band","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 390px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"Agents links to Connect your machine","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"Homebrew offers two commands and removal after draining","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -7127,6 +7139,10 @@
     {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1497 390: the detail answers first, the chart follows the projection, and nothing moves","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1497: loading keeps the reserved heights, a failed read says so with Try again, stale readings say their age","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1511: enrolled accounts without readings stay visible, with a reason and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"touch quota retries › AEON-1511: quota retry targets stay usable on touch screens without moving controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1024 dark wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
