@@ -11,6 +11,59 @@ import { statusFill } from '../src/lib/statusMotion'
 // 2× pixels, so the screenshots and mid-animation frames saved for the visual check show the icons' detail.
 test.use({ reducedMotion: 'no-preference', deviceScaleFactor: 2 })
 
+// AEON-1683 / P11: the browser owns animation dispatch, physical stability and
+// the live reduced-motion preference. status-motion.unit.test.ts owns the
+// status/timing/spelling vectors; runner speed is not a correctness assertion.
+test('AEON-1683: live and static status icons respect native focus and reduced motion without moving controls', async ({ page }) => {
+  const errors = watchErrors(page)
+  await instrument(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, workData('light'))
+  await page.goto('/p/PHAROS')
+  await showProjectHead(page)
+  const progress = statusButton(page, 'PHAROS-11'), qa = statusButton(page, 'PHAROS-13')
+  await expect(progress.locator('span.st-ip')).toBeVisible()
+  await expect(qa.locator('svg.st-qa .ring')).toBeVisible()
+  await expect.poll(async () => (await slides(page)).filter(slide => slide.state === 'running').length).toBeGreaterThan(0)
+  const guard = await controlStability(page, { progress, qa, new: statusButton(page, 'PHAROS-14') })
+  let count = await oneOffs(page)
+  await guard.check(() => qa.hover({ position: { x: 4, y: 4 } }))
+  expectOneOff(await oneOffsSince(page, count), 'qa')
+  await guard.check(() => qa.locator('.status-icon').hover())
+  expect(await oneOffs(page)).toBe(count + 1)
+  await guard.check(() => qa.click())
+  const items = page.getByRole('menu', { name: 'Status of PHAROS-13' }).getByRole('menuitemradio')
+  await expect(items.nth(5)).toBeFocused()
+  await guard.check(() => page.keyboard.press('ArrowDown'))
+  await expect(items.nth(6)).toBeFocused()
+  await guard.check(() => page.keyboard.press('Escape'))
+  await expect(qa).toBeFocused()
+
+  // Change the actual browser preference while the live icon is mounted.
+  await guard.check(() => page.emulateMedia({ reducedMotion: 'reduce' }))
+  const still = () => page.evaluate(() => ({
+    animations: document.getAnimations().filter(animation => animation instanceof CSSAnimation
+      ? /slide/.test(animation.animationName)
+      : !!(animation.effect as KeyframeEffect | null)?.target?.closest?.('.status-icon')).length,
+    names: [...document.querySelectorAll('.st-ip > i')].map(layer => getComputedStyle(layer, '::before').animationName),
+  }))
+  await expect.poll(async () => (await still()).animations).toBe(0)
+  const names = (await still()).names
+  expect(names.length).toBeGreaterThan(0)
+  expect(names.every(name => name === 'none')).toBe(true)
+  count = await oneOffs(page)
+  await guard.check(() => statusButton(page, 'PHAROS-14').hover())
+  await guard.check(() => qa.click())
+  await guard.check(() => page.keyboard.press('ArrowDown'))
+  await expect(items.nth(6)).toBeFocused()
+  expect(await oneOffs(page)).toBe(count)
+  expect((await still()).animations).toBe(0)
+  await guard.check(() => page.keyboard.press('Escape'))
+  await expect(qa.locator('svg.st-qa .ring')).toBeVisible()
+  guard.done()
+  expect(errors).toEqual([])
+})
+
 type OneOffCall = { part: string; status: string; delay: number; duration: number; easing: string; fill: string; props: string[] }
 
 // §7.2, written out here so the spec checks the design's numbers rather than the code's table.
