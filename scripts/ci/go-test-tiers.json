@@ -6910,6 +6910,10 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalPauseUsesLatestStoppedSession","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalPeopleCreateLinkUnlinkDelete","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalPeopleRenameUnlinkDeleteRights","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalPercentComputedUnlessHandSet","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalProjectWriterUpdatesOnlyVisibleOutcomes","tier":"ESSENTIAL"}
@@ -6941,6 +6945,8 @@
     {"kind":"go","package":"internal/goals","name":"TestGoalStorageVisibility","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalTooLargeDetailKeepsOnlyVisibleCounts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalWorkDeltaAndImplicitRef","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestPersonCeilingGoals","tier":"ESSENTIAL"}
     ,
