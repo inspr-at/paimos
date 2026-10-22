@@ -1759,7 +1759,7 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 			req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
 				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: item.ID,
 				Operation: "inbox", Text: messageText}
-			if item.SenderPrincipalID == s.principalID && !entry.managedPolicy {
+			if !item.Priority && item.SenderPrincipalID == s.principalID && !entry.managedPolicy {
 				var in inboxControl
 				if json.Unmarshal([]byte(item.Body), &in) == nil && in.RunID != "" && in.Operation != "inbox" {
 					req.RunID, req.Generation, req.Operation, req.Text = in.RunID, in.Generation, in.Operation, in.Text
