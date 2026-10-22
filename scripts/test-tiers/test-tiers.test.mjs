@@ -1309,7 +1309,7 @@ test('AEON-1453 sixteen full web shards stay over the budget',()=>{
   assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
 })
 
-test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 800s and eighteen over the 900s guard',()=>{
+test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 860s and eighteen over the 900s guard',()=>{
   // Risk: #871 adds nine chat cases and pushes twenty shards past 860s.
   // Prove that neither twenty nor twenty-one can reach 800s even with
   // perfect packing. The full gate must retain every case and measured
@@ -1325,18 +1325,29 @@ test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 800s and eight
   assert.ok(harnessRows.every(row=>row.tier==='ESSENTIAL'),harness)
   assert.equal(gate.find(row=>row.file===matrix&&row.name===matrixCase)?.tier,'ESSENTIAL')
   assert.ok(policy.groups.some(group=>group.specs?.some(spec=>spec.file===harness)),`${harness} has a shard weight`)
-  const full=webShardPlan(gate,policy,{mode:'full'})
-  assert.equal(fullWebShardCount,22)
-  assert.equal(full.timeoutSeconds,1200)
-  assert.equal(full.budgetSeconds,900)
-  assert.equal(full.overheadSeconds,120)
-  assert.equal(full.headroom,0.25)
-  assert.deepEqual(full.shards,fullWebShards)
-  assertWebShardBudget(full)
-  assert.ok(full.projectedMaxSeconds<=860,`main incl. AEON-1502 busiest shard ${full.projectedMaxSeconds.toFixed(3)}s`)
-  assert.ok(full.projectedMaxSeconds<=800,`full gate needs headroom: busiest shard ${full.projectedMaxSeconds.toFixed(3)}s`)
-  for(const bin of full.projections) assert.ok(bin.seconds<=full.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
-  assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
+  const assertFullGate=(rows,shardPolicy)=>{
+    const full=webShardPlan(rows,shardPolicy,{mode:'full'})
+    assert.equal(fullWebShardCount,22)
+    assert.equal(full.timeoutSeconds,1200)
+    assert.equal(full.budgetSeconds,900)
+    assert.equal(full.overheadSeconds,120)
+    assert.equal(full.headroom,0.25)
+    assert.deepEqual(full.shards,fullWebShards)
+    assertWebShardBudget(full)
+    assert.ok(full.projectedMaxSeconds<=860,`busiest shard ${full.projectedMaxSeconds.toFixed(3)}s`)
+    for(const bin of full.projections) assert.ok(bin.seconds<=full.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
+    assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),rows.length)
+    return full
+  }
+  const full=assertFullGate(gate,policy)
+  // Risk: treating the 800s rebalance goal as a hard budget rejects normal
+  // catalogue growth. Exercise the same invariants above 800s, below 860s,
+  // with deterministic timings independent of the live inventory.
+  const growthGate=fullWebShards.map(shard=>({kind:'browser',file:`tests/growth-${shard}.spec.ts`,name:'case'}))
+  const growthPolicy={groups:[{specs:growthGate.map(row=>({file:row.file,tierTiming:{seconds:710,selectedTests:1}}))}]}
+  assert.equal(assertFullGate(growthGate,growthPolicy).projectedMaxSeconds,830)
+  const overTargetPolicy={groups:[{specs:growthGate.map(row=>({file:row.file,tierTiming:{seconds:741,selectedTests:1}}))}]}
+  assert.throws(()=>assertFullGate(growthGate,overTargetPolicy),{name:'AssertionError',message:'busiest shard 861.000s'})
   const weights=tierWeights(policy,gate)
   const workSeconds=[...new Set(gate.map(row=>row.file))].reduce((sum,file)=>sum+weights[file],0)
   for(const count of [20,21]) {
