@@ -1113,10 +1113,10 @@
     {"id":"retained-go:internal/themes:TestAppearanceMigrationKeepsCanonicalAppearanceWhileLinkedAndAliasesAfterUnlink","kind":"retained","owner":"internal/themes","risk":"Preserve the existing backend/API/migration regression; browser pruning cannot replace it.","package":"P01","verificationNote":"Existing test, no prune change.","verification":{"status":"planned","nativeKeys":[],"evidence":null}},
     {"id":"retained-go:internal/themes:TestAppearanceMigrationPreservesInheritedExplicitChoices","kind":"retained","owner":"internal/themes","risk":"Preserve the existing backend/API/migration regression; browser pruning cannot replace it.","package":"P01","verificationNote":"Existing test, no prune change.","verification":{"status":"planned","nativeKeys":[],"evidence":null}},
     {"id":"retained-go:internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink","kind":"retained","owner":"internal/themes","risk":"Preserve the existing backend/API/migration regression; browser pruning cannot replace it.","package":"P01","verificationNote":"Existing test, no prune change.","verification":{"status":"planned","nativeKeys":[],"evidence":null}},
-    {"id":"runtime:p05-estimates","kind":"runtime","owner":"web/tests/work-prune-runtime.unit.test.ts","risk":"Estimate validation, conflict draft preservation, explicit clearing, parent plan editing, read-only refusal and held answers after record changes.","package":"P05","existsAtSnapshot":false,"verification":{"status":"planned","nativeKeys":["vitest:tests/work-prune-runtime.unit.test.ts:P05 estimate actions > a late conflict for ticket A cannot close or mark ticket B’s estimate","vitest:tests/work-prune-runtime.unit.test.ts:P05 estimate actions > a late error for ticket A cannot close or mark ticket B’s estimate","vitest:tests/work-prune-runtime.unit.test.ts:P05 estimate actions > a late ok for ticket A cannot close or mark ticket B’s estimate","vitest:tests/work-prune-runtime.unit.test.ts:P05 estimate actions > invalid values never write; a conflict preserves the draft; clearing writes null after explicit retry","vitest:tests/work-prune-runtime.unit.test.ts:P05 estimate actions > read-only estimates cannot write and parent editing starts from the plan, not the leaf total"],"evidence":null,"positiveEvidence":"One permitted local targeted run: 22/22 passed in 0.685 seconds, including this group. Remote verification and negative controls remain required before cuts."}},
-    {"id":"runtime:p05-consent","kind":"runtime","owner":"web/tests/work-prune-runtime.unit.test.ts","risk":"Resume then explicit consent with the returned revision and captured principal; held responses cannot cross person, tenant, record, project or permission changes; failed consent reports resumed honestly.","package":"P05","existsAtSnapshot":false,"verification":{"status":"planned","nativeKeys":["vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > a failed consent stays resumed, never reports consented or kept paused, and does not retry itself","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > a held resume cannot carry consent across a permission change","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > a held resume cannot carry consent across a person change","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > a held resume cannot carry consent across a project change","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > a held resume cannot carry consent across a record change","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > a held resume cannot carry consent across a tenant change","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > another owner or an unavailable agent cannot begin either consent write","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > resumes the reviewed record before consenting to the returned revision as the captured agent"],"evidence":null,"positiveEvidence":"One permitted local targeted run: 22/22 passed in 0.685 seconds, including this group. Remote verification and negative controls remain required before cuts."}},
-    {"id":"runtime:p05-logbook","kind":"runtime","owner":"web/tests/work-prune-runtime.unit.test.ts","risk":"Held older pages remain bound to routine, filter and person; failed pagination preserves rows and cursor; a linked older run remains open and is deduplicated.","package":"P05","existsAtSnapshot":false,"verification":{"status":"planned","nativeKeys":["vitest:tests/work-prune-runtime.unit.test.ts:P05 logbook callbacks > a deep-linked run is pinned once, then deduplicated when Show older reaches it","vitest:tests/work-prune-runtime.unit.test.ts:P05 logbook callbacks > an older page cannot land after the filter changes","vitest:tests/work-prune-runtime.unit.test.ts:P05 logbook callbacks > an older page cannot land after the person changes","vitest:tests/work-prune-runtime.unit.test.ts:P05 logbook callbacks > an older page cannot land after the routine changes","vitest:tests/work-prune-runtime.unit.test.ts:P05 logbook callbacks > failed pagination retains the shown rows and cursor so Retry reads that exact page"],"evidence":null,"positiveEvidence":"One permitted local targeted run: 22/22 passed in 0.685 seconds, including this group. Remote verification and negative controls remain required before cuts."}},
-    {"id":"runtime:p05-autopilot","kind":"runtime","owner":"web/tests/work-prune-runtime.unit.test.ts","risk":"Validate bounded day inputs; preserve server caps and failed-write drafts; expired responses cannot save or offer Undo; Undo is revision- and person-bound.","package":"P05","existsAtSnapshot":false,"verification":{"status":"planned","nativeKeys":["vitest:tests/work-prune-runtime.unit.test.ts:P05 autopilot settings actions > Undo refuses both a newer settings revision and a different person","vitest:tests/work-prune-runtime.unit.test.ts:P05 autopilot settings actions > a rejected settings write preserves the saved limits and never offers Undo","vitest:tests/work-prune-runtime.unit.test.ts:P05 autopilot settings actions > a response after session expiry cannot replace settings or offer Undo","vitest:tests/work-prune-runtime.unit.test.ts:P05 autopilot settings actions > validates all day bounds before writing and preserves the server cap after explicit upgrade"],"evidence":null,"positiveEvidence":"One permitted local targeted run: 22/22 passed in 0.685 seconds, including this group. Remote verification and negative controls remain required before cuts."}}
+    {"id":"runtime:p05-estimates","kind":"runtime","owner":"web/tests/work-prune-runtime.unit.test.ts","risk":"Estimate validation, conflict draft preservation, explicit clearing, parent plan editing, read-only refusal and held answers after record changes.","package":"P05","existsAtSnapshot":false,"verification":{"status":"verified","nativeKeys":["vitest:tests/work-prune-runtime.unit.test.ts:P05 estimate actions > a late conflict for ticket A cannot close or mark ticket B’s estimate","vitest:tests/work-prune-runtime.unit.test.ts:P05 estimate actions > a late error for ticket A cannot close or mark ticket B’s estimate","vitest:tests/work-prune-runtime.unit.test.ts:P05 estimate actions > a late ok for ticket A cannot close or mark ticket B’s estimate","vitest:tests/work-prune-runtime.unit.test.ts:P05 estimate actions > invalid values never write; a conflict preserves the draft; clearing writes null after explicit retry","vitest:tests/work-prune-runtime.unit.test.ts:P05 estimate actions > read-only estimates cannot write and parent editing starts from the plan, not the leaf total"],"evidence":"AEON-1677 remote-spec.sh scratch proof 90b4932ef: 22/22 new runtime cases passed in 0.680 s; estimate-record failed exactly one intended AssertionError. Proof SHA-256 94fd595f1242550bf4f237fd3116b17f33a913c293618242bf50295fd5e7e99f. This verifies this runtime risk only; browser/visual destinations remain required before cuts."}},
+    {"id":"runtime:p05-consent","kind":"runtime","owner":"web/tests/work-prune-runtime.unit.test.ts","risk":"Resume then explicit consent with the returned revision and captured principal; held responses cannot cross person, tenant, record, project or permission changes; failed consent reports resumed honestly.","package":"P05","existsAtSnapshot":false,"verification":{"status":"verified","nativeKeys":["vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > a failed consent stays resumed, never reports consented or kept paused, and does not retry itself","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > a held resume cannot carry consent across a permission change","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > a held resume cannot carry consent across a person change","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > a held resume cannot carry consent across a project change","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > a held resume cannot carry consent across a record change","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > a held resume cannot carry consent across a tenant change","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > another owner or an unavailable agent cannot begin either consent write","vitest:tests/work-prune-runtime.unit.test.ts:P05 routine consent actions > resumes the reviewed record before consenting to the returned revision as the captured agent"],"evidence":"AEON-1677 remote-spec.sh scratch proof 90b4932ef: 22/22 new runtime cases passed in 0.680 s; consent-revision failed exactly one intended AssertionError. Proof SHA-256 94fd595f1242550bf4f237fd3116b17f33a913c293618242bf50295fd5e7e99f. This verifies this runtime risk only; browser/visual destinations remain required before cuts."}},
+    {"id":"runtime:p05-logbook","kind":"runtime","owner":"web/tests/work-prune-runtime.unit.test.ts","risk":"Held older pages remain bound to routine, filter and person; failed pagination preserves rows and cursor; a linked older run remains open and is deduplicated.","package":"P05","existsAtSnapshot":false,"verification":{"status":"verified","nativeKeys":["vitest:tests/work-prune-runtime.unit.test.ts:P05 logbook callbacks > a deep-linked run is pinned once, then deduplicated when Show older reaches it","vitest:tests/work-prune-runtime.unit.test.ts:P05 logbook callbacks > an older page cannot land after the filter changes","vitest:tests/work-prune-runtime.unit.test.ts:P05 logbook callbacks > an older page cannot land after the person changes","vitest:tests/work-prune-runtime.unit.test.ts:P05 logbook callbacks > an older page cannot land after the routine changes","vitest:tests/work-prune-runtime.unit.test.ts:P05 logbook callbacks > failed pagination retains the shown rows and cursor so Retry reads that exact page"],"evidence":"AEON-1677 remote-spec.sh scratch proof 90b4932ef: 22/22 new runtime cases passed in 0.680 s; logbook-retention failed exactly one intended AssertionError. Proof SHA-256 94fd595f1242550bf4f237fd3116b17f33a913c293618242bf50295fd5e7e99f. This verifies this runtime risk only; browser/visual destinations remain required before cuts."}},
+    {"id":"runtime:p05-autopilot","kind":"runtime","owner":"web/tests/work-prune-runtime.unit.test.ts","risk":"Validate bounded day inputs; preserve server caps and failed-write drafts; expired responses cannot save or offer Undo; Undo is revision- and person-bound.","package":"P05","existsAtSnapshot":false,"verification":{"status":"verified","nativeKeys":["vitest:tests/work-prune-runtime.unit.test.ts:P05 autopilot settings actions > Undo refuses both a newer settings revision and a different person","vitest:tests/work-prune-runtime.unit.test.ts:P05 autopilot settings actions > a rejected settings write preserves the saved limits and never offers Undo","vitest:tests/work-prune-runtime.unit.test.ts:P05 autopilot settings actions > a response after session expiry cannot replace settings or offer Undo","vitest:tests/work-prune-runtime.unit.test.ts:P05 autopilot settings actions > validates all day bounds before writing and preserves the server cap after explicit upgrade"],"evidence":"AEON-1677 remote-spec.sh scratch proof 90b4932ef: 22/22 new runtime cases passed in 0.680 s; expired-write failed exactly one intended AssertionError. Proof SHA-256 94fd595f1242550bf4f237fd3116b17f33a913c293618242bf50295fd5e7e99f. This verifies this runtime risk only; browser/visual destinations remain required before cuts."}}
   ],
   "risks": [
     {"id":"drift:browser:tests/a11y.spec.ts:axe: agents approve in dark","source":{"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: agents approve in dark"},"risk":"axe: agents approve in dark","resolution":"exact-or-describe-suffix","currentKeys":["browser:tests/a11y.spec.ts:axe: agents approve in dark"],"destinations":["visual:projects","visual:tickets","visual:goals","visual:agents","visual:session-chat","visual:decision-desk","visual:account-use-matrix","visual:models","visual:access","visual:knowledge","visual:delivery-numbers","visual:hours","visual:quote-editor","visual:public-quote","visual:start-agent","visual:agent-rules","visual:capacity","visual:ticket-workspace"]},
@@ -1770,7 +1770,7 @@
   "packageEvidence": {
     "P05": {
       "ticket": "AEON-1677",
-      "status": "replacement-preparation",
+      "status": "blocked-before-cuts",
       "browserBefore": 457,
       "browserAfter": 457,
       "specOwners": 35,
@@ -1779,19 +1779,69 @@
       "runtimeOwner": "web/tests/work-prune-runtime.unit.test.ts",
       "sourceSlice": "S9 web-core-tests (existing web/tests/** ownership)",
       "positiveRun": {
-        "command": "npx --no-install vitest run tests/work-prune-runtime.unit.test.ts --maxWorkers=1",
-        "passed": 22,
-        "seconds": 0.685,
-        "scope": "Single small local file after remote-spec.sh refused capacity; not the full affected set."
+        "sourceCommit": "7ae25ce97",
+        "transportCommit": "90b4932ef",
+        "entryPoint": "LEAD remote-spec.sh, REMOTE_ONLY=1, one worker, scratch harness (absent from final branch)",
+        "newRuntime": {
+          "passed": 22,
+          "seconds": 0.68
+        },
+        "affectedVitest": {
+          "passed": 149,
+          "seconds": 8.507
+        },
+        "affectedNode": {
+          "passed": 54,
+          "seconds": 0.854
+        },
+        "proofSha256": "94fd595f1242550bf4f237fd3116b17f33a913c293618242bf50295fd5e7e99f"
       },
-      "negativeControls": "Pending remote capacity; destinations remain planned and no browser cases are removed.",
+      "negativeControls": [
+        {
+          "mutation": "consent-revision",
+          "exit": 1,
+          "failedNativeTest": "P05 routine consent actions resumes the reviewed record before consenting to the returned revision as the captured agent",
+          "reason": "AssertionError: expected \"vi.fn()\" to be called once with arguments: [ 'routine-a', …(2) ]"
+        },
+        {
+          "mutation": "estimate-record",
+          "exit": 1,
+          "failedNativeTest": "P05 estimate actions a late ok for ticket A cannot close or mark ticket B’s estimate",
+          "reason": "AssertionError: expected false to be true // Object.is equality"
+        },
+        {
+          "mutation": "logbook-retention",
+          "exit": 1,
+          "failedNativeTest": "P05 logbook callbacks failed pagination retains the shown rows and cursor so Retry reads that exact page",
+          "reason": "AssertionError: expected [ 'older-run' ] to deeply equal [ 'newest', 'older-run' ]"
+        },
+        {
+          "mutation": "expired-write",
+          "exit": 1,
+          "failedNativeTest": "P05 autopilot settings actions a response after session expiry cannot replace settings or offer Undo",
+          "reason": "AssertionError: expected { enabled: false, revision: 8, …(3) } to deeply equal { enabled: true, revision: 7, …(3) }"
+        }
+      ],
       "runnerTimeChange": null,
-      "runnerTimeNote": "No before/after browser execution completed; no measured browser saving is claimed.",
+      "runnerTimeNote": "No browser cases have been removed. Browser before/after saving is unmeasured; the added 22-case runtime owner took 0.680 s on mbp2606.",
       "blockedPrerequisites": [
         "P01 visual approval.status is pending; immutable baseline source is pending-review.",
-        "remote-spec.sh: remote busy: 2/2 remote runs (CI pool 0/4).",
         "ci-static-remote.sh: remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job."
-      ]
+      ],
+      "risksKeptOnPurpose": "All 457 original P05 cases remain, including identity/authority/Undo, native controls, child-derived status and visual coverage. No deletion/demotion is authorized by this evidence while the P01 visual prerequisite is pending. No full transfer to 22 retained browser cases is claimed.",
+      "browserBaseline": {
+        "sourceCommit": "7ae25ce97",
+        "entryPoint": "LEAD remote-spec.sh, REMOTE_ONLY=1, one worker",
+        "specs": [
+          "tests/estimates.spec.ts",
+          "tests/routines-editor.spec.ts",
+          "tests/routines-tab.spec.ts",
+          "tests/status-autopilot.spec.ts"
+        ],
+        "passed": 42,
+        "wallSeconds": 48.4,
+        "note": "Original browser cases stay unchanged; this is a baseline observation, not a measured prune saving."
+      }
     }
   }
 }
