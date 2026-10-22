@@ -164,13 +164,14 @@ func (a *pairingVerificationAdapter) Start(_ context.Context, r agentd.StartRequ
 
 func seedVerificationPin(t *testing.T, f *fixture) {
 	t.Helper()
+	// Use the indexed always-on kernel name, as a real doctrine pin does.
 	content := []byte("Company rules.\n")
 	commit := strings.Repeat("a", 40)
 	var source string
-	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,commit_sha,paths) VALUES($1,'fixture/company','public',$2,ARRAY['docs/KERNEL.md']) RETURNING id::text`, f.tenantID, commit).Scan(&source); err != nil {
+	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,commit_sha,paths) VALUES($1,'fixture/company','public',$2,ARRAY['docs/AGENTS-KERNEL.md']) RETURNING id::text`, f.tenantID, commit).Scan(&source); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO doctrine_cache(tenant_id,source_id,commit_sha,path,blob_sha,content) VALUES($1,$2,$3,'docs/KERNEL.md',$4,$5)`, f.tenantID, source, commit, doctrine.BlobSHA(content), content); err != nil {
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO doctrine_cache(tenant_id,source_id,commit_sha,path,blob_sha,content) VALUES($1,$2,$3,'docs/AGENTS-KERNEL.md',$4,$5)`, f.tenantID, source, commit, doctrine.BlobSHA(content), content); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE doctrine_sources SET indexed_at=clock_timestamp() WHERE id=$1`, source); err != nil {
