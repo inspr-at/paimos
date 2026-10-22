@@ -69,10 +69,17 @@ func hydrateJobWaitsTx(ctx context.Context, tx pgx.Tx, repository string, run in
 		return errRead
 	}
 	ids := make([]int64, 0, len(facts.Waits))
-	for key := range facts.Waits {
+	for key, wait := range facts.Waits {
+		if wait != nil {
+			continue
+		}
 		if id, err := strconv.ParseInt(key, 10, 64); err == nil && id > 0 {
 			ids = append(ids, id)
 		}
+	}
+	if len(ids) == 0 {
+		facts.WorstWaitMS = worstJobWait(facts.Waits)
+		return nil
 	}
 	rows, err := tx.Query(ctx, `SELECT job_id::text,created_at,started_at FROM delivery_metric_jobs WHERE repository=$1 AND run_id=$2 AND attempt=$3 AND job_id=ANY($4::bigint[]) LIMIT 500`, repository, run, attempt, ids)
 	if err != nil {

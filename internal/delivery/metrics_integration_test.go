@@ -423,9 +423,15 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 	if step.State != "running" || step.Calls > backfillCallBudget || step.Phase != "runs" || step.Day == nil {
 		t.Fatalf("first step: %+v", step)
 	}
+	if step.RetryAt != nil {
+		f.at = *step.RetryAt
+	}
 	f.call(t, f.person, "POST", backfillPath, map[string]any{}, 200, &step)
 	if step.Phase != "runs" || step.Day == nil || step.Calls > backfillCallBudget {
 		t.Fatalf("second step still in runs: %+v", step)
+	}
+	if step.RetryAt != nil {
+		f.at = *step.RetryAt
 	}
 	anchor := step
 	// The next step fails on the pulls page: nothing is written and the
@@ -471,6 +477,9 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 	// A restart reads the same history and converges on the same rows.
 	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{"days": 30, "restart": true}, 200, &step)
 	for i := 0; step.State != "done" && i < 12; i++ {
+		if step.RetryAt != nil {
+			f.at = *step.RetryAt
+		}
 		f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
 	}
 	if r, p, _ := metricCounts(t, f); r != runs || p != pulls {

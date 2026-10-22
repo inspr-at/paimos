@@ -302,7 +302,7 @@ func computeMetricsFor(in metricInput, now time.Time, windows []int) []Metric {
 		if requiredStatus(run, required) == "unknown" {
 			requiredGaps = append(requiredGaps, run.Created)
 		}
-		if !run.JobsRead || run.WorstWaitMS == nil {
+		if !run.JobsRead || len(run.JobWaits) > 0 && run.WorstWaitMS == nil {
 			waitGaps = append(waitGaps, run.Created)
 		}
 	}

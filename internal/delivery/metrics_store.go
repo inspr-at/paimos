@@ -453,6 +453,14 @@ func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now ti
 				return in, err
 			}
 			r.Required, r.JobsComplete = conclusions, complete
+			if complete {
+				var stored storedJobFacts
+				if err := json.Unmarshal(required, &stored); err != nil {
+					rows.Close()
+					return in, err
+				}
+				r.JobWaits = stored.Waits
+			}
 		}
 		in.Runs = append(in.Runs, r)
 	}
