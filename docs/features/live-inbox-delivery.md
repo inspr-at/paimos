@@ -27,8 +27,8 @@ P3a fsyncs the possible-write marker before provider I/O. Confirmed replay in
 the same live journal returns its existing receipt without another native
 write. Restored write evidence requires reconciliation and never reports a
 successful live retry. An accepted input with no possible write can still be
-authorized for its first write. Uncertainty holds the input and
-prevents automatic reinjection; correlated late evidence can resolve the hold.
+authorized for its first write. Uncertainty holds the input and prevents
+automatic reinjection; correlated late evidence can resolve the hold.
 The server projects native write acknowledgement separately from correlated
 turn evidence. Ordinary inbox hooks cannot concurrently consume an open
 managed/native delivery lease.
@@ -76,14 +76,29 @@ branch was restored before further work; no negative-control commit remains
 on it. The broader affected race run also passed the other native-session,
 integration, harness and API-contract packages, including reportercontract.
 
-Full validation remains open. The full agentd race run reproduced the exact
-fixture failures assigned to AEON-1685: the three pause heartbeat/wake tests,
+Full validation remains open. The affected race run on `161d8871d8` passed the
+native session, harness, inbox, questions and reportercontract packages. The
+full agentd package reproduced the exact fixture failures assigned to AEON-1685:
+the three pause heartbeat/wake tests,
 `TestUncertainDeliveryDoesNotMaskHeartbeatFailure`,
 `TestInboxUnconfirmedDoesNotReinject`, and
 `TestSupervisorQueueHintsUnavailableBackoff/401`. Those fixtures are unchanged
 here apart from the minimal priority-case extension in harness notifications.
-AEON-1685 was still open when the latest main was merged. The static wrapper
-returned exit 3 twice because the remote static lane was paused at night;
+AEON-1685 was still open when the latest main was merged. In fix round 2, the
+static wrapper again returned exit 3 twice because its lane was paused at night;
 the wrapper directed validation to the PR's hosted CI static job.
 Handoff therefore stays at 95 percent, pending that shared race fix and hosted
 static checks. No origin push, deployment or model review gate was run.
+
+Fix round 2 keeps the original recovery assertions unchanged. The full receipt,
+recovery and native integration packages passed remotely with `-race -count=1`
+on `1c3e077743`. The existing essential crash regression now checks restored
+acknowledgement, turn-start and turn-completion evidence, while retaining live
+replay and the first authorized write of a previously unwritten input. Against
+`114109554`, the unreferenced stash snapshot `cdd8abbdfec` contains only the
+regression extension: all three restored-evidence cases and the original
+after-ack recovery case fail with a missing `input_outcome_unconfirmed` error.
+The snapshot is outside the delivery branch's history. Public documentation
+uses neutral runner descriptions; no allowlist or checker was changed.
+The final targeted agentd priority-input/native-receipt checks and harness
+boundary-input check also passed remotely with `-race -count=1` on `1c3e077743`.
