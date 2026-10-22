@@ -166,7 +166,9 @@
       "columns": {
         "install_method": "metadata",
         "ledger_enrolled_at": "metadata",
-        "ledger_generation": "metadata"
+        "ledger_generation": "metadata",
+        "content_daemon_generation": "metadata",
+        "content_capability_epoch": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
@@ -178,7 +180,15 @@
       "columns": {
         "routine_launch_id": "metadata",
         "trace": "personal",
-        "acting_person_id": "personal"
+        "acting_person_id": "personal",
+        "content_capability_digest": "secret",
+        "content_capability_person_id": "personal",
+        "content_capability_computer_id": "metadata",
+        "content_capability_account_id": "personal",
+        "content_capability_daemon_id": "metadata",
+        "content_capability_generation": "metadata",
+        "content_capability_expires_at": "metadata",
+        "content_capability_epoch": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"

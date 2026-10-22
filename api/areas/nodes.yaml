@@ -240,6 +240,8 @@ paths:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     get:
       operationId: getNode
+      description: "A paired computer reads its bound work-order node only with the server-issued run capability. Bare transport cannot read task bodies."
+      parameters: [{$ref: '#/components/parameters/RunCapability'}]
       security: *auth
       responses:
         '200':

@@ -23,8 +23,10 @@ test('presentation follows the viewer language and falls back to English per fie
   assert.equal(localizedPresentation(release()), null)
   const en = localizedPresentation(release({ presentation }))!
   assert.deepEqual([en.theme, en.headline, en.intro, en.themeLang], ['Releases with a name', 'Every release says what it is about.', 'A theme and an intro.', 'en'])
-  const de = localizedPresentation(release({ presentation }), 'de-AT')!
+  const de = localizedPresentation(release({ presentation }), 'de')!
   assert.deepEqual([de.theme, de.themeLang, de.headline, de.headlineLang, de.intro, de.introLang], ['Releases mit Namen', 'de', 'Every release says what it is about.', 'en', 'Ein Thema und eine Einführung.', 'de'])
+  const regional = localizedPresentation(release({ presentation }), 'de-AT')!
+  assert.deepEqual([regional.theme, regional.themeLang, regional.intro, regional.introLang], ['Releases with a name', 'en', 'A theme and an intro.', 'en'])
   assert.equal(localizedPresentation(release({ presentation: { ...presentation, headline_en: '  ' } })), null)
 })
 

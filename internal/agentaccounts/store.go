@@ -469,6 +469,18 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if err := agentpairing.AccountFence(ctx, tx, accountID, false); err != nil {
 		return Account{}, err
 	}
+	// Tenant/tree/pairing are held. Fence the computer generation before
+	// account rows; a sibling account restart invalidates every run proof.
+	if !in.MeasurementOnly {
+		if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers c SET content_daemon_generation=$4,
+ content_capability_epoch=coalesce(content_capability_epoch,0)+1
+ WHERE c.tenant_id=$1 AND c.principal_id=$2 AND c.daemon_id=$3
+ AND c.content_daemon_generation IS DISTINCT FROM $4
+ AND EXISTS(SELECT 1 FROM agent_accounts a WHERE a.tenant_id=c.tenant_id AND a.id=$5
+ AND a.registered_by_principal_id=$2 AND a.daemon_id=$3)`, p.TenantID, p.ID, daemonID, generation, accountID); err != nil {
+			return Account{}, err
+		}
+	}
 	before, err := lockAccount(ctx, tx, accountID)
 	if err != nil {
 		return Account{}, err

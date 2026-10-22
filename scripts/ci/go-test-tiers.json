@@ -1976,6 +1976,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPostClaimPreparationFailureSettlesWithoutLaunch","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestPrepareRunContentUsesOnlyItsServerCapability","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestProbeDiagnosticReachesLifecycleJSONAndClearsOnRecovery","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestProbeFailureMatrixKeepsSiblingDispatchAndRecovers","tier":"ESSENTIAL"}
@@ -2101,6 +2103,10 @@
     {"kind":"go","package":"internal/agentd","name":"TestRoutineToolsRefuseUnqualifiedNativeStartup","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineWorkspacesSeparateAndRetainWriters","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunChildLaunchDropsTransportCredentials","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunChildrenScrubTransportEnvironment","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRunCommitsEarlierReproductions","tier":"GATED-FULL"}
     ,
@@ -2799,6 +2805,8 @@
     {"kind":"go","package":"internal/agentpairing","name":"TestRemoveRefusesUnsettledRuns","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestRemoveRevokedComputerArchivesItAndItsAccounts","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestRunCapabilitySeparatesTransportAndBindsContent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestSharedFenceCallerInventory","tier":"GATED-FULL"}
     ,
@@ -3829,6 +3837,8 @@
     {"kind":"go","package":"internal/auth","name":"TestAuthenticationActivityRenewalKeepsLiveValidity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestAuthenticationCanaryUsesAuthAdmissionWithoutRenewal","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestBareTransportPersonControlKeepsPairingCeiling","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestBootstrapAdminRequiresASCIIMailboxMatch","tier":"GATED-FULL"}
     ,
@@ -7225,6 +7235,10 @@
     {"kind":"go","package":"internal/harness","name":"TestOrdinaryEndpointPreservesNarrowedCallerAndOwner","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestOwnedStopCapabilityKeepsUnmanagedControlFence","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestPairedAttachedHookNotificationsCeiling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestPairedAttachedHookTransportCeiling","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestPauseAllAcrossProjectsAndLongPausedHistory","tier":"GATED-FULL"}
     ,

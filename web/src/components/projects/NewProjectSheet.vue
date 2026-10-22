@@ -76,7 +76,7 @@ function loadDraft() {
   if (!held) { phase.value = 'gone'; return }
   phase.value = 'loading'
   void scope.run(({ after, signal }) => after(getImportDraft(held, signal), result => {
-    lang.value = result.language
+    // The sheet stays in the app language. The draft's language does not switch it (AEON-1609).
     // The person's own create already committed: open the project it made.
     if (result.status === 'created' && result.project) { finishStart(result.project, result.tickets ?? 0, false); return }
     draft.value = result

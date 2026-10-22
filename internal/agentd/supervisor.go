@@ -1051,6 +1051,11 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	run, grant, entry := admitted.run, admitted.grant, admitted.entry
+	if binder, ok := s.api.(interface {
+		RunContext(context.Context, string) context.Context
+	}); ok {
+		ctx = binder.RunContext(ctx, run.ID)
+	}
 	profile, adapter, accountIDs := admitted.profile, admitted.adapter, admitted.accountIDs
 	routineBudget := admitted.routineBudget
 	verification, review, managedPolicy := admitted.verification, admitted.review, admitted.managedPolicy
@@ -1342,6 +1347,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	var runTools *RunTools
 	if toolAPI, ok := s.api.(RunToolAPI); ok && !verification && !review {
+		if scoped, ok := s.api.(interface{ RunToolsFor(string) RunToolAPI }); ok {
+			toolAPI = scoped.RunToolsFor(run.ID)
+		}
 		if signer, ok := s.api.(interface {
 			runCredential(string, string, string, string) string
 		}); ok {

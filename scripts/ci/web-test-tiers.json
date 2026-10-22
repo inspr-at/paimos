@@ -1202,6 +1202,12 @@
     ,
     "browser:tests/recurrences.spec.ts:renaming legacy monthly and event definitions leaves their trigger unchanged"
     ,
+    "browser:tests/release-groups.spec.ts:a German profile stays in English; an explicit DE choice uses the German pill and falls back when German is empty"
+    ,
+    "browser:tests/release-historic.spec.ts:a German profile reads the backfilled pills and benefits in English"
+    ,
+    "browser:tests/release-switches.spec.ts:the language is remembered per person and defaults to the app language"
+    ,
     "browser:tests/role-picker-layout.spec.ts:a description distinguishes duplicate role names when it is present in the payload"
     ,
     "browser:tests/role-picker-layout.spec.ts:a rejected role change and another choice keep actions still at 1440"
@@ -1623,6 +1629,8 @@
     "browser:tests/theme-settings.spec.ts:Theme settings 390 light: preview, derived colours, marker and overlay stay still"
     ,
     "browser:tests/theme-settings.spec.ts:derived contrast preserves chosen colours and staged edits apply only after Save"
+    ,
+    "browser:tests/ticket-benefits.spec.ts:a German profile stays in English; an explicit DE choice shows German and falls back when German is empty"
     ,
     "browser:tests/ui-audit-dark-1024.spec.ts:offline route and state audit dark 1024"
     ,
@@ -8598,8 +8606,6 @@
     ,
     {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 Desk opens waiting definitions and resolves only after the last admin decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 German definitions copy covers every P3 string and singular notices","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 default decisions preserve every row notice copy and focus in all viewports","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 failed stale and identity-bound decisions never claim success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -8607,6 +8613,8 @@
     {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 workspace defaults differences empty inherited and viewer match the approved states","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1528 definitions remeasure resize locale and longer decisions without shifting unchanged content","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1609 a de-AT browser and German profile keep Definitions in English","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 Add and row menus stay anchored at every width with the approved copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -10316,13 +10324,13 @@
     ,
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"new-tab response enforces sandbox without the iframe; residual self-navigation is explicit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -12972,7 +12980,7 @@
     ,
     {"kind":"browser","file":"tests/release-groups.spec.ts","name":"Enter and Space expand the commit disclosure and leave the release where it is","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-groups.spec.ts","name":"a German locale uses the German pill and benefit, and an empty German field falls back to English","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-groups.spec.ts","name":"a German profile stays in English; an explicit DE choice uses the German pill and falls back when German is empty","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-groups.spec.ts","name":"a search that matches only a commit subject opens that disclosure","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13048,7 +13056,7 @@
     ,
     {"kind":"browser","file":"tests/release-historic-tenant.spec.ts","name":"historic notes in a non-PPM tenant: filters and views at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-historic.spec.ts","name":"a German profile reads the backfilled pills and benefits in German","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-historic.spec.ts","name":"a German profile reads the backfilled pills and benefits in English","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-historic.spec.ts","name":"a told ticket without commits keeps its block, without a disclosure","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13108,7 +13116,7 @@
     ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"the ticket release field follows native membership after reload, reopen and undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-presentation.spec.ts","name":"a German profile reads the German presentation and pills, with English where German is empty","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/release-presentation.spec.ts","name":"a German profile reads the presentation and pills in English","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/release-presentation.spec.ts","name":"a presented release leads with its header, then the ticket blocks at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -13150,7 +13158,7 @@
     ,
     {"kind":"browser","file":"tests/release-switches.spec.ts","name":"switches fit 390 light in both views, and Details passes axe","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-switches.spec.ts","name":"the language is remembered per person and defaults to the profile","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-switches.spec.ts","name":"the language is remembered per person and defaults to the app language","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-switches.spec.ts","name":"the list and Compare badge a name shown in the other language","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14886,7 +14894,7 @@
     ,
     {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"empty capped scope still warns that deeper sessions may exist","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"a German language setting shows the German pill and sentence, and an empty German field falls back to English","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"a German profile stays in English; an explicit DE choice shows German and falls back when German is empty","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"backfilled notes say they were written after the release at 1600px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -16622,6 +16630,8 @@
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a hit-bitmap pixel belongs to a node only when it is opaque and holds its index colour","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a stale wide glimpse box does not paint once the visual viewport has left 1280","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a ticket adapter needs no knowledge schema and engines cannot mutate the source","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"elliptic anchors stay distinct for small, prime and composite graph sizes","tier":"GATED-FULL"}
@@ -17208,7 +17218,7 @@
     ,
     {"kind":"node","file":"tests/releases.test.ts","name":"headlines read without the ticket keys their chips show, in sentence case","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/releases.test.ts","name":"language and view: the address, then the remembered choice, then the profile; Highlights by default","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/releases.test.ts","name":"language and view: the address, then the remembered choice, then the app language; Highlights by default","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/releases.test.ts","name":"names in the rail and in Compare say when they fell back to the other language","tier":"GATED-FULL"}
     ,
@@ -18714,11 +18724,11 @@
     ,
     {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"the Filters sheet filters and links to the Display menu instead of holding display settings","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"follows the START handoff language, else the browser, through the shared helper","tier":"ESSENTIAL"}
-    ,
     {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"has no app locale switches outside the shared helper","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"keeps the incomplete app in English and preserves the independent release-note choice","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"keeps every surface in the one app language and preserves an explicit release-note choice","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"keeps the START sheet in the app language regardless of the handoff or the browser","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"rejects direct and aliased locale detectors while allowing language selection and region formatting","tier":"ESSENTIAL"}
     ,

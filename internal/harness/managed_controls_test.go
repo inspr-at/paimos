@@ -70,6 +70,16 @@ func TestRunPersonRevocationKeepsOnlyOwnedSafetyControls(t *testing.T) {
 			f.key = "aeon_" + prefix + "_" + keyParts[2]
 			dbtest.BindRole(t, f.db, f.person.TenantID, admin, "admin")
 			f.agent.KeyID, f.agent.KeyCreatorID = f.agent.AuthKeyID, admin
+			// Exercise the real paired metadata transport, with no run content
+			// capability. Pairing provenance is distinct from the revoked actor.
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				request, computer := uid(), uid()
+				if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,'135791357',repeat('c',64),repeat('c',64),repeat('c',64),'{"platform":"darwin","arch":"arm64"}',repeat('c',64),'redeemed',$3)`, f.person.TenantID, request, admin); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) VALUES($1,$2,$3,$4,$5,'fixture',repeat('c',64))`, f.person.TenantID, computer, request, f.agent.ID, f.agent.AuthKeyID)
+				return err
+			})
 			am, err := auth.New(auth.Config{Env: "dev", PublicURL: "https://safety.test", SessionKey: []byte(strings.Repeat("f", 32))}, f.db.App)
 			if err != nil {
 				t.Fatal(err)

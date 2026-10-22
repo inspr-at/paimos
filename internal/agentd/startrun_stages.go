@@ -64,6 +64,9 @@ func (s *Supervisor) admitRun(ctx context.Context, run Run) (*runAdmission, erro
 		return nil, ErrScope
 	}
 	grant, err := routineGrant(run)
+	if run.RunCapabilityRequired && len(run.Trace) == 0 {
+		grant, err = nil, nil
+	} // Content is acquired by Prepare below.
 	if err != nil {
 		return nil, err
 	}
@@ -221,10 +224,36 @@ func (s *Supervisor) admitRun(ctx context.Context, run Run) (*runAdmission, erro
 
 // prepareRun preserves the admission's authority and the original allocation order.
 func (s *Supervisor) prepareRun(ctx context.Context, admitted *runAdmission) (preparedRun, error) {
+	var node Node
+	var order WorkOrder
+	var err error
+	if preparer, ok := s.api.(interface {
+		PrepareRunContent(context.Context, Run, string, string) (Run, Node, WorkOrder, error)
+	}); ok {
+		var full Run
+		full, node, order, err = preparer.PrepareRunContent(ctx, admitted.run, s.daemonID, s.generation)
+		if err != nil {
+			return preparedRun{}, err
+		}
+		// Admission's routine and provider bindings are content. Re-evaluate
+		// them here from the authorized snapshot before workspace allocation.
+		fresh, e := s.admitRun(ctx, full)
+		if e != nil {
+			return preparedRun{}, e
+		}
+		if fresh == nil {
+			return preparedRun{}, ErrScope
+		}
+		*admitted = *fresh
+	} else {
+		node, err = s.api.Node(ctx, admitted.run.WorkOrderID)
+		if err == nil {
+			order, err = s.api.WorkOrder(ctx, admitted.run.WorkOrderID)
+		}
+	}
 	run, grant, entry := admitted.run, admitted.grant, admitted.entry
 	verification, review := admitted.verification, admitted.review
 	approvedRepository := admitted.approvedRepository
-	node, err := s.api.Node(ctx, run.WorkOrderID)
 	if err != nil {
 		return preparedRun{}, err
 	}
@@ -233,10 +262,6 @@ func (s *Supervisor) prepareRun(ctx context.Context, admitted *runAdmission) (pr
 	}
 	if node.Key == "" {
 		return preparedRun{}, errors.New("work order key unavailable")
-	}
-	order, err := s.api.WorkOrder(ctx, run.WorkOrderID)
-	if err != nil {
-		return preparedRun{}, err
 	}
 	if order.NodeID != run.WorkOrderID || (order.Status != "ready" && order.Status != "running") {
 		return preparedRun{}, errors.New("work order is not dispatchable")

@@ -79,7 +79,7 @@ const props = defineProps<{
   canDrag?: boolean
   // The person's saved columns, order and widths for this project (null: automatic).
   extraColumns?: ColumnDef[]
-  // Hosts can use the approved EN/DE copy for the new group controls.
+  // Hosts may still pass a locale. Group labels follow the one app language (AEON-1609).
   locale?: string
   prefs?: ListPrefs | null
   costAllowed?: boolean
@@ -155,7 +155,7 @@ const emit = defineEmits<{
 }>()
 
 const instance = getCurrentInstance()
-const german = computed(() => displayLanguage(props.locale) === 'de')
+const german = computed(() => displayLanguage() === 'de')
 const groupName = (group: RowGroup) => group.project?.key ?? group.epic?.key ?? group.label
 const moreLabel = (group: RowGroup) => german.value ? `50 weitere zeigen in ${groupName(group)}` : `Show 50 more in ${groupName(group)}`
 const shownLabel = (group: RowGroup) => german.value ? `${group.loaded ?? group.rows.length} von ${group.total} gezeigt` : `${group.loaded ?? group.rows.length} of ${group.total} shown`

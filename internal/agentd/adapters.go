@@ -58,7 +58,7 @@ func localHome(homes map[string]string, key string) (string, error) {
 func withEnv(name, value string) []string {
 	prefix := name + "="
 	env := make([]string, 0)
-	for _, entry := range os.Environ() {
+	for _, entry := range harnesslaunch.WithoutTransportCredentials(os.Environ()) {
 		if !strings.HasPrefix(entry, prefix) {
 			env = append(env, entry)
 		}

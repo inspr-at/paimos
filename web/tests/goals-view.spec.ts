@@ -133,6 +133,9 @@ async function mockGoals(page: Page, w: World, options: { failList?: boolean } =
     const id = new URL(route.request().url()).pathname.split('/').pop()!, g = w.goals.find(x => x.id === id)
     return g ? route.fulfill({ json: { id, key: g.key, kind_id: 'k-goal', title: g.title, body: '', fields: {}, state: 'open', parent_id: null, position: 1, created_at: iso(g.created), updated_at: iso(NOW) } }) : route.fulfill({ status: 404, json: { error: 'not found' } })
   })
+  // AEON-1495: an unanswered instances read is unknown coverage, which must not
+  // look like an empty desk. This Goals world is one known instance and no siblings.
+  await page.route(/\/api\/decision-desk\/instances$/, route => route.fulfill({ json: { here: 'ppm', siblings: [] } }))
   await page.route(/\/api\/decision-desk\/projection/, route => route.fulfill({ json: {
     items: w.desk.open ? [
       { id: 'q-gate', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'Which identity should agent reviews run as for the gatekeeper go-live?', created_at: iso(NOW - 3 * HOUR), held: true, href: '', source: '', ticket_key: 'AEON-1394', asked_by: { id: 'p-lead', name: 'AEON-LEAD' } },
