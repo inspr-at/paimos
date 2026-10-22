@@ -38,7 +38,14 @@ type pauseTestAPI struct {
 }
 
 func (a *pauseTestAPI) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, phase string) (*HarnessPause, error) {
-	return a.pause, a.fakeAPI.HeartbeatHarness(ctx, s, phase)
+	a.mu.Lock()
+	var pause *HarnessPause
+	if a.pause != nil {
+		copy := *a.pause
+		pause = &copy
+	}
+	a.mu.Unlock()
+	return pause, a.fakeAPI.HeartbeatHarness(ctx, s, phase)
 }
 
 func TestPauseHeartbeatUsesExistingInboxAndNeverStopsProcess(t *testing.T) {
@@ -68,8 +75,10 @@ func TestPauseHeartbeatUsesExistingInboxAndNeverStopsProcess(t *testing.T) {
 func TestScheduledPauseWaitsAndEscalationIsDeliveredOnce(t *testing.T) {
 	start := time.Now().Add(time.Minute)
 	pause := &HarnessPause{ControlID: "12345678-1234-1234-9234-123456789012", State: "requested", Level: "pause", StartsAt: &start, DeadlineAt: time.Now().Add(10 * time.Minute), Note: "Keep the failing test"}
-	s, _, e, p := managedFixtureWithAPI(t, func(api *fakeAPI) API {
-		return &pauseTestAPI{fakeAPI: api, pause: pause}
+	api := &pauseTestAPI{pause: pause}
+	s, _, e, p := managedFixtureWithAPI(t, func(base *fakeAPI) API {
+		api.fakeAPI = base
+		return api
 	})
 	e.mu.Lock()
 	e.inboxCapable = true
@@ -82,13 +91,17 @@ func TestScheduledPauseWaitsAndEscalationIsDeliveredOnce(t *testing.T) {
 		t.Fatal("scheduled request delivered early")
 	}
 	p.mu2.Unlock()
+	api.mu.Lock()
 	pause.Deliver = true
+	api.mu.Unlock()
 	for range 2 {
 		if err := s.heartbeatHarness(t.Context(), e); err != nil {
 			t.Fatal(err)
 		}
 	}
+	api.mu.Lock()
 	pause.Level = "pause_quickly"
+	api.mu.Unlock()
 	for range 2 {
 		if err := s.heartbeatHarness(t.Context(), e); err != nil {
 			t.Fatal(err)
@@ -167,7 +180,9 @@ func TestPauseWakeHintAnchorsBeforeHeartbeatRoundTrip(t *testing.T) {
 	if wake.Before(start.Add(250*time.Millisecond)) || wake.After(time.Now().Add(250*time.Millisecond)) {
 		t.Fatal("wake hint was lost")
 	}
+	api.mu.Lock()
 	api.pause = nil
+	api.mu.Unlock()
 	if err := s.heartbeatHarness(t.Context(), e); err != nil {
 		t.Fatal(err)
 	}
