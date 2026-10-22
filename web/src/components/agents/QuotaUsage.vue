@@ -288,6 +288,14 @@ p { margin: 0; }
   .ub-link { min-height: 44px; margin-top: 0; }
   .ub-link .link-btn { min-height: 44px; display: inline-flex; align-items: center; }
 }
-@media (pointer: coarse) { .ub-sb { width: 44px; height: 44px; } .ub-pop .ub-step { min-height: 44px; } }
+@media (pointer: coarse) {
+  .ub-sb { width: 44px; height: 44px; }
+  .ub-pop .ub-step { min-height: 44px; }
+  .ub-hd .link-btn, .ub-retry { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; }
+  /* The refresh target reaches into adjacent text rows, without moving the
+     range controls or clipping its hit area to the 20 px status line. */
+  .ub-l2 { overflow: visible; }
+  .ub-retry { position: relative; z-index: 1; }
+}
 @media (prefers-reduced-motion: reduce) { .ub-acc-t .ic { transition: none; } }
 </style>

@@ -6,8 +6,8 @@
   },
   "spec": {
     "file": "tests/agents-dial-usage.spec.ts",
-    "listedTests": 6,
-    "weightSeconds": 45,
-    "weightSource": "AEON-1497 estimate, six dial cases with captures at 1440, 1024 and 390"
+    "listedTests": 9,
+    "weightSeconds": 60,
+    "weightSource": "AEON-1511 estimate, nine dial cases including touch retries and captures at 1440, 1024 and 390"
   }
 }

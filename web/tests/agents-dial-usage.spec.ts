@@ -117,6 +117,81 @@ test('AEON-1511: enrolled accounts without readings stay visible, with a reason 
   await body(page).screenshot({ path: info.outputPath('aeon-1511-enrolled-no-readings.png'), animations: 'disabled' })
 })
 
+test.describe('touch quota retries', () => {
+  test.use({ viewport: { width: 390, height: 1100 }, hasTouch: true, isMobile: true })
+  test('AEON-1511: quota retry targets stay usable on touch screens without moving controls', async ({ page }, info) => {
+    test.setTimeout(120_000)
+    const { state } = await setup(page, { outlook: 'error' })
+    await page.goto('/agents')
+    await showCapacityRow(page)
+    await control(page).locator('.fs-tog').tap()
+    await expect(page.getByRole('dialog', { name: 'Capacity' })).toHaveCount(0)
+    const claude = detail(page, 'claude')
+    const retry = claude.getByRole('button', { name: 'Try again', exact: true })
+    const usableRetry = async () => {
+      await expect(retry).toBeVisible()
+      await retry.scrollIntoViewIfNeeded()
+      const target = await retry.evaluate(el => {
+        const r = el.getBoundingClientRect()
+        return {
+          width: r.width, height: r.height,
+          // Check the actual hit area, including clipping or overlapping controls.
+          reaches: [r.top + 1, r.bottom - 1].map(y => el.contains(document.elementFromPoint(r.x + r.width / 2, y))),
+        }
+      })
+      expect(target.width).toBeGreaterThanOrEqual(44)
+      expect(target.height).toBeGreaterThanOrEqual(44)
+      expect(target.reaches).toEqual([true, true])
+    }
+    await expect(claude.getByRole('alert')).toContainText('Usage couldn’t be read')
+    await usableRetry()
+    await expectStableControls({
+      controls: {
+        selected: row(page, 'claude').locator('.f-sel'), limits: row(page, 'claude').locator('.limit'),
+        range: claude.locator('.ub-dots'), pace: claude.getByRole('button', { name: 'Pace', exact: true }),
+        boost: claude.getByRole('button', { name: 'Boost today', exact: true }),
+      },
+      scrollAreas: { dial: body(page) },
+      interactions: [
+        { name: 'retry a failed first read', run: async () => {
+          state.outlook = scenarios.fast
+          const reads = state.reads
+          await retry.tap()
+          await expect.poll(() => state.reads).toBeGreaterThan(reads)
+          await expect(claude.locator('.ub-hd')).toHaveText(HEAD)
+        } },
+        { name: 'a failed refresh keeps the reading and a usable retry', run: async () => {
+          state.outlook = 'error'
+          const reads = state.reads
+          await goOnline(page)
+          await expect.poll(() => state.reads).toBeGreaterThan(reads)
+          await expect(claude.locator('.ub-hd')).toHaveText(HEAD)
+          await expect(claude.locator('.ub-retry')).toBeVisible()
+          await usableRetry()
+        } },
+        { name: 'retry the retained reading', run: async () => {
+          state.outlook = scenarios.fast
+          const reads = state.reads
+          await retry.tap()
+          await expect.poll(() => state.reads).toBeGreaterThan(reads)
+          await expect(retry).toHaveCount(0)
+          await expect(claude.locator('.ub-hd')).toHaveText(HEAD)
+        } },
+      ],
+    })
+    // Capture the real refresh error at each evidence width and theme.
+    state.outlook = 'error'
+    await goOnline(page)
+    await expect(claude.locator('.ub-retry')).toBeVisible()
+    for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: 1100 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+      await usableRetry()
+      await claude.screenshot({ path: info.outputPath(`${width}-${theme}-quota-refresh-retry.png`), animations: 'disabled' })
+    }
+  })
+})
+
 for (const width of [1440, 1024, 390]) {
   const phone = width < 720
   test(`AEON-1497 ${width}: the detail answers first, the chart follows the projection, and nothing moves`, async ({ page }, info) => {

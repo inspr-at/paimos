@@ -7068,6 +7068,8 @@
     ,
     {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1511: enrolled accounts without readings stay visible, with a reason and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"touch quota retries › AEON-1511: quota retry targets stay usable on touch screens without moving controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1024 dark wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1024 light wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

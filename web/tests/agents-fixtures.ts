@@ -5,6 +5,7 @@
 // come from the caller, so captures can sit on real projects and tickets.
 import type { Page, Route } from '@playwright/test'
 import { defaultSchedule, type CapacityWorld } from './capacity-fixtures'
+import type { QuotaOutlook } from '../src/lib/quotaOutlook'
 
 export interface AgentWorld {
   me: string
@@ -274,6 +275,16 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       if (options.failDecision) return route.fulfill({ status: 409, json: { error: 'The request expired while you were deciding' } })
       if (decision[2] === 'decision') Object.assign(found, { decision: (body as { decision: string }).decision, decided_by_principal_id: 'me' })
       return route.fulfill({ json: found })
+    }
+    // Accounts may be enrolled before the first quota reading. Unrelated specs
+    // need a successful empty outlook, rather than an unmocked-route error.
+    if (path === '/api/agent-accounts/quota-outlook' && method === 'GET') {
+      if (options.accountsForbidden) return route.fulfill({ status: 403, json: { error: 'account.read permission required' } })
+      const now = options.now?.() ?? Date.now()
+      return route.fulfill({ json: {
+        generated_at: new Date(now).toISOString(), anchor_hour: new Date(Math.floor(now / 3_600_000) * 3_600_000).toISOString(),
+        history_hours: 168, horizon_hours: 168, truncated: false, groups: [],
+      } satisfies QuotaOutlook })
     }
     if (path.startsWith('/api/agent-accounts/capacity') || pairing) {
       if (options.capacityForbidden || options.accountsForbidden) return route.fulfill({ status: 403, json: { error: 'account.read permission required' } })
