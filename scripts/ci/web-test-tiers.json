@@ -11964,6 +11964,8 @@
     ,
     {"kind":"browser","file":"tests/outline.spec.ts","name":"the List | Outline switch keeps the view in the URL and the same toolbar","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/p10-runtime-proof.spec.ts","name":"AEON-1682 worker runtime and negative-control proof","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/palette.spec.ts","name":"/ opens the palette only where the page has no list search","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/palette.spec.ts","name":"Cmd or Ctrl+Enter opens the result in a new tab and keeps the palette","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -18368,6 +18370,10 @@
     ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: changing the rate-cache owner retires pending reads and stops queued requests","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1682: effective rates use the selected day, unit and currency and reject failed rates","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1682: rate form validates before writing, retains a refused draft and refreshes confirmed rates","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > accepts exactly 2,000 rows but rejects a continuation rather than returning a partial list","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > includes the oldest supported open period with the explicit approval bound","tier":"GATED-FULL"}
@@ -20254,6 +20260,12 @@
     ,
     {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the subscriptions > each battery says what is left, when it refills and its own forecast; only the account that empties the pool warns","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/quote-editor.unit.test.ts","name":"AEON-1682: persisted editor vectors > keeps six numbered levels, marks, measurements, IDs, order and exact money through history","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/quote-editor.unit.test.ts","name":"AEON-1682: persisted editor vectors > numbers restart, explicit start and continuation across prose with section binding","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/quote-editor.unit.test.ts","name":"AEON-1682: persisted editor vectors > sends CAS and mutation identity, normalizes legacy measurements without changing money or the source","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/quote-editor.unit.test.ts","name":"QuoteEditor snapshots > hydrates nested reactive document data and preserves independent undo history","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/quote-editor.unit.test.ts","name":"QuoteEditor snapshots > persists section settings and restores them through undo and redo","tier":"ESSENTIAL"}
@@ -20311,6 +20323,8 @@
     {"kind":"vitest","file":"tests/quote-list.unit.test.ts","name":"the customer page speaks the document’s language > has every string in both catalogs","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/quote-list.unit.test.ts","name":"the customer page speaks the document’s language > reads the language from the document, German when in doubt, a declared one first","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/quote-profile-normalize.unit.test.ts","name":"AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/quote-profile-normalize.unit.test.ts","name":"normalizeProfile > keeps the profile helpers from throwing on a null-list snapshot","tier":"GATED-FULL"}
     ,

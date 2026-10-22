@@ -262,3 +262,63 @@ it('AEON-1417: a cursor at every directory cap returns typed partial rows and th
     }
   }
 })
+
+it('AEON-1682: effective rates use the selected day, unit and currency and reject failed rates', () => {
+  const { store } = costStore([unitNode(0)])
+  store.addCostUnit(unitNode(0))
+  const before = { ...hourlyRate('cu-0'), id: 'before', effective_from: '2025-01-01', effective_until: '2026-10-01' }
+  const after = { ...hourlyRate('cu-0'), id: 'after', effective_from: '2026-10-01', bill_amount: '99.5' }
+  const dollars = { ...after, id: 'dollars', currency: 'USD', bill_amount: '120' }
+  const daily = { ...after, id: 'daily', unit: 'day' as const, bill_amount: '720' }
+  store.setRates('cu-0', [daily, dollars, after, before])
+  expect(store.rateOn('cu-0', 'hour', 'EUR', '2026-09-30')).toEqual(before)
+  expect(store.rateOn('cu-0', 'hour', 'EUR', '2026-10-01')).toEqual(after)
+  expect(store.rateOn('cu-0', 'hour', 'USD', '2026-10-01')).toEqual(dollars)
+  expect(store.rateOn('cu-0', 'day', 'EUR', '2026-10-01')).toEqual(daily)
+  expect(store.rateOn('cu-0', 'hour', 'GBP', '2026-10-01')).toBeNull()
+  expect(store.rateOn('cu-0', 'hour', 'EUR', '2024-12-31')).toBeNull()
+  expect(store.usable('hour', 'EUR', '2024-12-31')).toEqual([])
+  store.costUnits[0]!.ratesError = 'refused'
+  expect(store.rateOn('cu-0', 'hour', 'EUR', '2026-10-01')).toBeNull()
+  expect(store.usable('hour', 'EUR', '2026-10-01').map(unit => unit.node.id)).toEqual(['cu-0'])
+  store.costUnits[0]!.node.state = 'archived'
+  expect(store.usable('hour', 'EUR', '2026-10-01')).toEqual([])
+})
+
+it('AEON-1682: rate form validates before writing, retains a refused draft and refreshes confirmed rates', async () => {
+  const { APIError } = await import('../src/lib/api')
+  const { store } = costStore([unitNode(0)])
+  store.addCostUnit(unitNode(0))
+  const createRate = vi.fn(), listRates = vi.fn(), toast = vi.fn()
+  const view = setupSource('views/business/CostUnitsView.vue', {}, {
+    '../../lib/api': { APIError }, '../../lib/business': { createRate, listRates },
+    '../../lib/toast': { toast }, '../../lib/work': {},
+    '../../components/business/money': money, '../../stores/business': { useBusiness: () => store },
+  })
+  try {
+    const state = view.state, unit = store.costUnit('cu-0')!
+    Object.assign(state.form, { unit: 'hour', currency: 'eur', bill: 'abc', internal: '64,25', from: '1.10.2026', until: '' })
+    state.adding.value = unit.node.id
+    await state.save(unit)
+    expect(createRate).not.toHaveBeenCalled()
+    expect(state.error.value).toBe('Bill rate is an amount with at most four decimals.')
+    state.form.bill = '99.5'
+    createRate.mockRejectedValueOnce(new APIError(409, 'a rate already starts on that date'))
+    await state.save(unit)
+    expect(state.error.value).toBe('A rate already starts on that date. Rates for one unit and currency cannot overlap.')
+    expect(state.form.bill).toBe('99.5')
+    expect(state.adding.value).toBe('cu-0')
+    expect(listRates).not.toHaveBeenCalled()
+    expect(toast).not.toHaveBeenCalled()
+    const confirmed = { ...hourlyRate('cu-0'), bill_amount: '99.5', effective_from: '2026-10-01' }
+    listRates.mockResolvedValueOnce([confirmed])
+    await state.save(unit)
+    expect(createRate.mock.calls).toEqual(Array(2).fill(['cu-0', {
+      unit: 'hour', currency: 'EUR', bill_amount: 99.5, internal_amount: 64.25,
+      effective_from: '2026-10-01', effective_until: null,
+    }]))
+    expect(store.costUnit('cu-0')!.rates).toEqual([confirmed])
+    expect(state.adding.value).toBe('')
+    expect(toast).toHaveBeenCalledWith('Rate added to Unit 0.')
+  } finally { view.stop() }
+})
