@@ -465,9 +465,10 @@ test('a Lands day reads as a day in the row, its label and its history; a goal w
     await openGoals(page, w)
     await (await newGoalEntry(page, phone)).click()
     await page.locator('#goal-title').fill('Managed provisioning works end to end')
+    await page.locator('#goal-where').selectOption('p-pharos')
     await page.locator('dialog input.native[type="date"]').evaluate((input: HTMLInputElement) => { input.value = '2026-10-30'; input.dispatchEvent(new Event('change', { bubbles: true })) })
     await page.locator('#goal-go').click()
-    const goal = goalRow(page, 'g-new1'), row = goal.locator('.goal-row'), lands = goal.locator('.goal-eta')
+    const goal = goalRow(page, 'g-new1'), row = goal.locator('.goal-row'), lands = row.locator('.goal-eta')
     await expect(goal).toHaveAttribute('data-open', '1')
 
     // A day stays a day, like the agent's "Fri 23 Oct" beside it.
@@ -476,7 +477,7 @@ test('a Lands day reads as a day in the row, its label and its history; a goal w
     await expect(goalRow(page, 'g-agent').locator('.goal-eta .t')).toHaveText('Fri 23 Oct')
 
     // No work yet: an empty track, no percent, "No work linked yet" where "N of M done" goes.
-    const progress = goal.locator('.goal-progress')
+    const progress = row.locator('.goal-progress')
     await expect(progress.locator('.of')).toHaveText('No work linked yet')
     await expect(progress.locator('.pct')).toHaveText('')
     await expect(progress).not.toContainText('%')
