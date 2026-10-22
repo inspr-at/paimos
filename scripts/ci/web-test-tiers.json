@@ -17564,6 +17564,8 @@
     ,
     {"kind":"node","file":"tests/tenant-brand.test.ts","name":"the header draws the dark logo in dark mode, else the light one on a plate","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/test-prune-ledger.test.ts","name":"test-prune ledger rejects removed risks without lineage and keeps P01 execution frozen","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Go subtest diagnostics retain ancestry and package-only failures keep their output","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Go tier runner consumes one failing jsonl execution and preserves the original exit code","tier":"NIGHTLY"}
