@@ -300,6 +300,25 @@ func TestWorkspaceEmbeddingsUseSameEndpointAndKey(t *testing.T) {
 		if p, err := s.Embeddings(request, f.admin.TenantID); !errors.Is(err, denied) || p != nil {
 			t.Fatal("cached request bypassed current authority", err)
 		}
+		rollback := errors.New("fixture configuration rollback")
+		err = db.InTransaction(t.Context(), pool, func(ctx context.Context) error {
+			if err := db.InTenant(ctx, pool, f.admin.TenantID, func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `UPDATE workspace_model_provider SET settings=jsonb_set(settings,'{enabled}','false'),revision=revision+1`)
+				return err
+			}); err != nil {
+				return err
+			}
+			if p, err := s.Embeddings(ctx, f.admin.TenantID); err != nil || p != nil {
+				t.Fatal("transaction did not read its own configuration", err)
+			}
+			return rollback
+		})
+		if !errors.Is(err, rollback) {
+			t.Fatal("configuration transaction failed for another reason", err)
+		}
+		if p, err := s.Embeddings(t.Context(), f.admin.TenantID); err != nil || p == nil || p.Model() != initial.Model() {
+			t.Fatal("uncommitted configuration escaped into the worker cache", err)
+		}
 		// A second replica misses the local invalidation, so its independently
 		// injected clock must force revision refresh at the exact TTL boundary.
 		replica := New(pool, bytes.Repeat([]byte{9}, 32))
