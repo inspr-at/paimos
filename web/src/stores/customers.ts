@@ -21,16 +21,16 @@ export const useCustomers = defineStore('customers', () => {
 
   function load(force = false): Promise<void> {
     if (request) return request
-    if (items.value && !force) return Promise.resolve()
+    if (items.value && !error.value && !force) return Promise.resolve()
     loading.value = true
     const run = generation
     request = (async () => {
       try {
         const [list, contacts] = await Promise.all([listCustomers(), contactDirectory().catch(() => null)])
         if (run !== generation) return
-        items.value = list
-        if (contacts) directory.value = contacts
-        error.value = ''
+        items.value = list.items
+        if (contacts) directory.value = contacts.items
+        error.value = list.partial || !contacts || contacts.partial ? 'Some customers or contacts could not be loaded.' : ''
       } catch (e) {
         if (run !== generation) return
         error.value = e instanceof Error ? e.message : 'Customers could not be loaded.'

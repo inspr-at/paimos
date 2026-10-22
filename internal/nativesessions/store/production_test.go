@@ -205,6 +205,7 @@ type productionComposition struct {
 	root                             string
 	denials                          chan error
 	finalDone, turnDone, turnStarted chan struct{}
+	exitDone                         chan struct{}
 }
 
 func (c *productionComposition) personCall(t *testing.T, path string, body, out any) {
@@ -306,6 +307,7 @@ func composeProduction(t *testing.T, options ...compositionOptions) *productionC
 	chatModule.Mount(mux)
 	approvals.New(f.d.App).Mount(mux)
 	finalDone, turnDone, turnStarted := make(chan struct{}, 2), make(chan struct{}, 2), make(chan struct{}, 4)
+	exitDone := make(chan struct{}, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw := []byte(nil)
 		if r.Body != nil {
@@ -332,6 +334,9 @@ func composeProduction(t *testing.T, options ...compositionOptions) *productionC
 			}
 			if v.State == "turn_completed" {
 				turnDone <- struct{}{}
+			}
+			if v.Operation == "start" && v.State == "exit_confirmed" {
+				exitDone <- struct{}{}
 			}
 		}
 	}))
@@ -366,7 +371,7 @@ func composeProduction(t *testing.T, options ...compositionOptions) *productionC
 		_, err := tx.Exec(t.Context(), `UPDATE agent_pairing_computers SET ledger_generation=$2 WHERE id=$1`, f.intent.ComputerID, api.ledger)
 		return err
 	})
-	return &productionComposition{f: f, mux: mux, config: config, provider: provider, profiles: profiles, root: root, denials: denials, finalDone: finalDone, turnDone: turnDone, turnStarted: turnStarted}
+	return &productionComposition{f: f, mux: mux, config: config, provider: provider, profiles: profiles, root: root, denials: denials, finalDone: finalDone, turnDone: turnDone, turnStarted: turnStarted, exitDone: exitDone}
 }
 
 // Risk: the installed production start/command/receipt/final paths borrow the

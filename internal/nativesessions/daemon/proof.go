@@ -7,6 +7,7 @@ package daemon
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -21,6 +22,15 @@ const MaxProofBytes = 16384
 type identity nativecontract.NativeIdentity
 type evidence nativecontract.NativeEvidence
 type exit nativecontract.ExitEvidence
+
+// TerminalEvidence is observed lifecycle metadata, never terminal history.
+// It contains no output, input, reasoning, tool bodies or credentials.
+type TerminalEvidence struct {
+	RuntimeEpoch string `json:"runtime_epoch"`
+	OutputBytes  uint64 `json:"output_bytes"`
+	Frames       uint64 `json:"frames"`
+	OutputSHA256 string `json:"output_sha256"`
+}
 
 // Proof is private to the authenticated paired connection. Identities and
 // observations are rechecked against SQL; possession never grants control.
@@ -39,6 +49,7 @@ type Proof struct {
 	Evidence      evidence                   `json:"evidence"`
 	Exit          *exit                      `json:"exit,omitempty"`
 	LocalStart    *nativecontract.LocalStart `json:"local_start,omitempty"`
+	Terminal      *TerminalEvidence          `json:"terminal,omitempty"`
 }
 
 func (p *Proof) SetRuntime(i nativecontract.NativeIdentity, e nativecontract.NativeEvidence, x *nativecontract.ExitEvidence) {
@@ -82,6 +93,12 @@ func Decode(r *http.Request) (Proof, error) {
 	d.DisallowUnknownFields()
 	if d.Decode(&p) != nil || d.Decode(&struct{}{}) != io.EOF || len(p.WorkerLease) < 16 || len(p.WorkerLease) > 256 || len(p.SessionRef) > 256 || len(p.DaemonID) < 1 || len(p.DaemonID) > 128 || len(p.Generation) < 1 || len(p.Generation) > 128 || len(p.Ledger) != 36 || len(p.Capability) != 64 {
 		return Proof{}, refused()
+	}
+	if p.Terminal != nil {
+		digest, err := hex.DecodeString(p.Terminal.OutputSHA256)
+		if err != nil || len(digest) != 32 || p.Terminal.RuntimeEpoch != p.Identity.RuntimeEpoch || p.Terminal.RuntimeEpoch == "" || p.Terminal.OutputBytes > 9007199254740991 || p.Terminal.Frames > 9007199254740991 {
+			return Proof{}, refused()
+		}
 	}
 	return p, nil
 }

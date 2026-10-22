@@ -73,7 +73,7 @@ export function arrive(page: ArrivalPage, holdMs = ARRIVAL_HOLD_MS): () => void 
   return stop
 }
 
-const PERSON = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
+export const ARRIVAL_INPUT = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
 
 function scrollBox(target: HTMLElement): HTMLElement {
   const root = (document.scrollingElement ?? document.documentElement) as HTMLElement
@@ -108,8 +108,8 @@ export function arrivalPage(target: HTMLElement, behavior: ScrollBehavior): Arri
       return () => { observer?.disconnect(); window.removeEventListener('scroll', changed, { capture: true }) }
     },
     person(took) {
-      for (const type of PERSON) window.addEventListener(type, took, { capture: true, passive: true })
-      return () => { for (const type of PERSON) window.removeEventListener(type, took, { capture: true }) }
+      for (const type of ARRIVAL_INPUT) window.addEventListener(type, took, { capture: true, passive: true })
+      return () => { for (const type of ARRIVAL_INPUT) window.removeEventListener(type, took, { capture: true }) }
     },
     later(run, ms) {
       const timer = setTimeout(run, ms)

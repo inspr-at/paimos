@@ -12,7 +12,7 @@ import { checkMigrations, contractMarker, destructive, loadMigrationExceptions, 
 
 const marker = '-- aeon:contract-phase AEON-415 expanded-in=v260930115354.0.0 expansion-migration=0001_tenants.sql\n';
 
-const migrationExceptionFiles = () => readdirSync(new URL('./migration-policy-exceptions/', import.meta.url)).sort().map(name => name.replace(/\.json$/, '.sql'));
+const migrationExceptionFiles = () => readdirSync(new URL('./migration-policy-exceptions/', import.meta.url)).filter(name => !name.startsWith('.')).sort().map(name => name.replace(/\.json$/, '.sql'));
 
 test('AEON-698 historical migration reads preserve exact bytes with two Git launches', () => {
   const directory = mkdtempSync(join(tmpdir(), 'aeon-698-migration-batch-'));
@@ -515,6 +515,7 @@ test('AEON-985 exception files assemble deterministically and fail closed on dup
     return directory;
   };
   const directory = fixture([['1002_second.json', manifest([second])], ['1001_first.json', manifest([entry])]]);
+  writeFileSync(join(directory, '.DS_Store'), 'non-source metadata');
   const assembled = loadMigrationExceptions(directory);
   assert.deepEqual(assembled, manifest([entry, second]), 'discovery order must not alter the legacy manifest or its fields');
   const files = new Map([[entry.file, sql], [second.file, sql]]);
@@ -545,6 +546,7 @@ test('AEON-985 exception files assemble deterministically and fail closed on dup
 
 const caseDirectory = new URL('./check-migrations-cases/', import.meta.url);
 for (const entry of readdirSync(caseDirectory, {withFileTypes: true}).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+  if (entry.isFile() && entry.name.startsWith('.')) continue; // Match exception discovery's non-source metadata policy.
   if (!entry.isFile() || !/^\d{4}_[a-z0-9_]+\.mjs$/.test(entry.name)) throw new Error(`${entry.name}: expected migration case NNNN_name.mjs`);
   const migration = new URL(`../internal/db/migrations/${entry.name.replace(/\.mjs$/, '.sql')}`, import.meta.url);
   readFileSync(migration); // An orphan check must fail even if its body forgets to read SQL.

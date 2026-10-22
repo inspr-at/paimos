@@ -6,6 +6,8 @@ import { sessionListReads } from './agents-fixtures'
 import { mockStartAgent } from './start-agent-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { me } from './work-fixtures'
+import { absoluteTime } from '../src/lib/work'
+import type { QueueWireEntry } from '../src/lib/workQueue'
 
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Start agent', exact: true })
 const newAgent = (page: Page) => page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })
@@ -161,6 +163,77 @@ test('an empty model grant is not filled from the tenant catalog', async ({ page
   await expect(dialog(page).getByRole('button', { name: 'Queue run', exact: true })).toBeDisabled()
 })
 
+// AEON-1510: a catalog explanation must not move the selectors/actions, and
+// selecting another granted level must queue that exact profile on that account.
+test('AEON-1510: Sonnet explains a single catalog level and keeps every granted level selectable', async ({ page }, info) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const mock = await mockStartAgent(page)
+  const harness = mock.catalog.hosts[0].harnesses[0]
+  harness.harness = 'claude'
+  harness.accounts.splice(1)
+  const account = harness.accounts[0]
+  account.label = 'agent.one'
+  account.models = [{ model: 'sonnet', family: 'anthropic', efforts: [{ effort: 'high', model_profile_id: mock.profile.id, version: '1' }] }]
+  Object.assign(mock.profile, { harness: 'claude', family: 'anthropic', model: 'sonnet' })
+  await open(page, true)
+  await ready(page, true)
+  const thinking = dialog(page).getByLabel('Thinking', { exact: true })
+  const model = dialog(page).getByLabel('Model', { exact: true })
+  const note = dialog(page).locator('[id$="-effort-note"]')
+  const queue = dialog(page).getByRole('button', { name: 'Queue run', exact: true })
+  const singleLevelNote = 'This account offers only High thinking for this model.'
+  await expect(thinking.locator('option')).toHaveText(['Choose a thinking level', 'High'])
+  await expect(note).toHaveText(singleLevelNote)
+  await expect(thinking).toHaveAccessibleDescription(singleLevelNote)
+  await page.screenshot({ path: info.outputPath('sonnet-single-level-390-light.png'), fullPage: true })
+  const lowProfile = 'b1000000-0000-4000-8000-000000000003'
+  await expectStableControls({
+    controls: {
+      model, thinking, selectors: model.locator('../..'),
+      queue, cancel: dialog(page).getByRole('button', { name: 'Cancel', exact: true }),
+      frame: dialog(page),
+    },
+    scrollAreas: { dialog: dialog(page) },
+    interactions: [
+      { name: 'clear the only thinking level', run: async () => {
+        await thinking.selectOption('')
+        await expect(queue).toBeDisabled()
+        await expect(note).toHaveText(singleLevelNote)
+      } },
+      { name: 'choose the granted level again', run: async () => {
+        await thinking.selectOption(mock.profile.id)
+        await expect(queue).toBeEnabled()
+      } },
+      { name: 'read an expanded Sonnet grant', run: async () => {
+        account.models[0].efforts.push(
+          { effort: 'medium', model_profile_id: mock.spareProfileId, version: '1' },
+          { effort: 'low', model_profile_id: lowProfile, version: '1' },
+        )
+        await dialog(page).getByRole('button', { name: 'Close start agent', exact: true }).click()
+        await open(page, true)
+        await ready(page, true)
+        await expect(thinking.locator('option')).toHaveText(['Choose a thinking level', 'Low', 'Medium', 'High'])
+        await expect(note).not.toHaveText(singleLevelNote)
+      } },
+      ...[
+        { level: 'Medium', id: mock.spareProfileId },
+        { level: 'High', id: mock.profile.id },
+        { level: 'Low', id: lowProfile },
+      ].map(({ level, id }) => ({ name: `select ${level}`, run: async () => {
+        await thinking.selectOption(id)
+        await expect(thinking).toHaveValue(id)
+        await expect(queue).toBeEnabled()
+      } })),
+    ],
+  })
+  await queue.click()
+  await expect(dialog(page).getByRole('heading', { name: 'Queued', exact: true })).toBeVisible()
+  expect(mock.calls.find(call => call.method === 'POST' && call.path.endsWith('/runs'))?.body).toEqual({
+    agent_principal_id: mock.agentId, model_profile_id: lowProfile, requested_account_id: account.id,
+  })
+  await expect(dialog(page).locator('.requested').first()).toContainText('Low')
+})
+
 test('a catalog miss stays empty until retry', async ({ page }) => {
   await mockStartAgent(page, { catalog: 'retry' })
   await open(page)
@@ -257,6 +330,64 @@ test('changing host replaces the granted model', async ({ page }) => {
   await expect(dialog(page).getByLabel('Thinking', { exact: true }).locator('option:checked')).toHaveText('Medium')
 })
 
+test('same-name hosts distinguish offline pairings and queue only the chosen account', async ({ page }, info) => {
+  const mock = await mockStartAgent(page, { catalog: 'same-name-hosts' })
+  await open(page, true)
+  const frame = dialog(page)
+  const host = frame.getByLabel('Host', { exact: true })
+  const account = frame.getByLabel('Account', { exact: true })
+  const oldProbe = mock.catalog.hosts.find(item => item.daemon_id === 'workstation-old')!.harnesses[0].accounts[0]
+  const offlineLabel = `Work Mac · Offline · last seen ${absoluteTime(oldProbe.last_probe_at)}`
+  await expect(host.locator('option')).toHaveText(['Choose a host', 'Work Mac · Online', offlineLabel])
+  await expect(host).toHaveValue('workstation')
+  await expect(account).toHaveValue(mock.account.id)
+  await host.selectOption('workstation-old')
+  await expect(account).not.toHaveValue(mock.account.id)
+  const oldAccount = await account.inputValue()
+  expect(oldAccount).not.toBe(mock.account.id)
+  await expect(account.locator('option').filter({ hasText: 'Workspace account' })).toHaveCount(1)
+  const checkHostControls = () => expectStableControls({
+    controls: {
+      host, hostGroup: frame.locator('.pair').first(), account,
+      harness: frame.getByLabel('Harness', { exact: true }), model: frame.getByLabel('Model', { exact: true }),
+      thinking: frame.getByLabel('Thinking', { exact: true }),
+      queue: frame.getByRole('button', { name: 'Queue run', exact: true }), cancel: frame.getByRole('button', { name: 'Cancel', exact: true }),
+    },
+    scrollAreas: { frame },
+    interactions: ['workstation', 'workstation-old', 'workstation'].map(id => ({ name: `choose ${id}`, run: async () => {
+      await host.selectOption(id)
+      await expect(account).toHaveValue(id === 'workstation' ? mock.account.id : oldAccount)
+    } })),
+  })
+  // Evidence is local to this run, with no visual equality assertions.
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    await host.selectOption('workstation-old')
+    await frame.screenshot({ path: info.outputPath(`same-name-hosts-${width}-${theme}.png`) })
+    await checkHostControls()
+  }
+  // When both same-name daemons report online, retain distinct ordinals and
+  // exercise the same controls with the longer/shorter host labels.
+  oldProbe.last_probe_at = new Date(Date.parse(mock.catalog.as_of) - 2000).toISOString()
+  await frame.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await open(page, true)
+  await expect(host.locator('option')).toHaveText(['Choose a host', 'Work Mac · Online · pairing 1', 'Work Mac · Online · pairing 2'])
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    await host.selectOption('workstation-old')
+    await frame.screenshot({ path: info.outputPath(`same-name-online-hosts-${width}-${theme}.png`) })
+    await checkHostControls()
+  }
+  await frame.getByRole('button', { name: 'Queue run', exact: true }).click()
+  await expect(frame.getByRole('heading', { name: 'Queued', exact: true })).toBeVisible()
+  await expect(frame.locator('.requested')).toContainText('Work Mac · Online · pairing 1')
+  const launches = mock.calls.filter(call => call.method === 'POST' && call.path.endsWith('/runs'))
+  expect(launches).toHaveLength(1)
+  expect(launches[0].body?.requested_account_id).toBe(mock.account.id)
+})
+
 test('failed prerequisites keep launch disabled and read-only people have no action', async ({ page }) => {
   await mockStartAgent(page, { forbidden: true })
   await open(page)
@@ -286,8 +417,94 @@ for (const theme of ['light', 'dark']) {
     expect(result.violations).toEqual([])
     expect(await dialog(page).evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
     await page.keyboard.press('Escape')
+    await expect(dialog(page)).toBeVisible()
+    await expect(dialog(page).getByLabel('Harness', { exact: true })).not.toBeFocused()
+    await page.keyboard.press('Escape')
     await expect(dialog(page)).not.toBeVisible()
     await expect(newAgent(page)).toBeFocused()
+  })
+}
+
+for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+  test(`AEON-1508: lead queue replaces manual setup and keeps controls still at ${width} ${theme}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    const mock = await mockStartAgent(page, { theme, ticketTitle: 'Agentensteuerung für gemeinsame Entwicklungsprojekte und zuverlässige Übergaben an den Projektverantwortlichen' })
+    await page.route('**/api/projects/p-pharos/lead', route => route.fulfill({ json: {
+      project_id: 'p-pharos', revision: 4, generation: 1, session_id: null, state: 'paused', reason: 'admission_not_configured', process_active: false, automatic_launch_enabled: false,
+    } }))
+    const queuePosts: unknown[] = []
+    const queueItems: QueueWireEntry[] = []
+    let refuse = true
+    await page.route('**/api/queue**', async route => {
+      if (route.request().method() === 'GET') return route.fulfill({ json: { items: queueItems, manual_order: false, capacity: { queued_hours: queueItems.length * 2, parallel_runs: 0, work_hours: null, warning: false } } })
+      queuePosts.push(route.request().postDataJSON())
+      if (refuse) return route.fulfill({ status: 503, json: { error: 'The lead queue is unavailable. Try again.' } })
+      const entry: QueueWireEntry = {
+        node_id: 'n-1', project_id: 'p-pharos', key: 'PHAROS-11', title: 'Agentensteuerung', state: 'open', priority: 'high', estimate_hours: 2,
+        queued: { run_id: 'lead-demand', position: 1, by: { ...me, kind: 'person' }, at: new Date().toISOString(), target_agent_id: null, expected_agent_id: null, model_profile_id: null, expected_start_at: null, waiting: true, wait_reason: 'Automatic launch is not enabled' },
+      }
+      queueItems.push(entry)
+      return route.fulfill({ json: entry })
+    })
+    await open(page)
+    const sheet = dialog(page), actions = sheet.locator('footer'), primary = actions.locator('button[type="submit"]'), secondary = actions.locator('button[type="button"]').first()
+    const catalogsBefore = mock.calls.filter(call => call.path === '/api/agent-accounts/catalog').length
+    await sheet.getByRole('searchbox').fill('PHAROS-11')
+    await expectStableControls({
+      controls: { close: sheet.getByRole('button', { name: 'Close start agent' }), cancel: actions.getByRole('button', { name: 'Cancel', exact: true }) },
+      scrollAreas: { body: sheet.locator('.launch-body') },
+      interactions: [{ name: 'choose configured work', run: async () => {
+        await sheet.getByRole('button', { name: /^PHAROS-11 Agentensteuerung/ }).click()
+        await expect(sheet.getByText('This project starts work through its lead.', { exact: true })).toBeVisible()
+        await expect(primary).toHaveAccessibleName('Queue for lead')
+      } }],
+    })
+    await expect(sheet.getByLabel('Host', { exact: true })).toHaveCount(0)
+    await expect(sheet.getByLabel('Harness', { exact: true })).toHaveCount(0)
+    await expect(sheet.getByText('Automatic launch is not enabled for this workspace yet. Queued work stays queued.', { exact: true })).toBeVisible()
+    await expect(primary).toBeEnabled()
+    expect(mock.calls.filter(call => call.path === '/api/agent-accounts/catalog')).toHaveLength(catalogsBefore)
+    await sheet.screenshot({ path: info.outputPath(`AEON-1508-lead-hint-${width}-${theme}.png`) })
+    await expectStableControls({
+      controls: { actions, primary, secondary, change: sheet.getByRole('button', { name: 'Change ticket', exact: true }), ...(width === 390 ? { frame: sheet } : {}) },
+      scrollAreas: { body: sheet.locator('.launch-body') },
+      interactions: [
+        { name: 'failed queue request', run: async () => {
+          await primary.click()
+          await expect(sheet.getByRole('alert')).toHaveText('The lead queue is unavailable. Try again.')
+          await expect(primary).toBeEnabled()
+          await expect(secondary).toHaveAccessibleName('Cancel')
+        } },
+        { name: 'successful retry', run: async () => {
+          refuse = false
+          const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
+          await primary.focus()
+          const before = { primary: await primary.boundingBox(), secondary: await secondary.boundingBox() }
+          expect(before.primary).not.toBeNull()
+          expect(before.secondary).not.toBeNull()
+          await page.keyboard.press(mac ? 'Meta+Enter' : 'Control+Enter')
+          await expect(sheet.getByText('Queued for the lead. Nothing has started yet.', { exact: true })).toBeVisible()
+          await expect(primary).toHaveAccessibleName('Queued')
+          await expect(primary).toBeDisabled()
+          await expect(secondary).toHaveAccessibleName('Close')
+          await expect(secondary.locator('kbd')).toHaveText('Esc')
+          await expect(secondary).toBeEnabled()
+          await expect(primary.locator(':scope > svg > path')).toHaveAttribute('d', 'm3.4 8.4 3 3 6.2-6.8')
+          expect(await primary.boundingBox(), 'queued primary stays in exactly the same slot').toEqual(before.primary)
+          expect(await secondary.boundingBox(), 'Close stays in exactly the same slot as Cancel').toEqual(before.secondary)
+        } },
+      ],
+    })
+    expect(queuePosts).toEqual([{ node_id: 'n-1' }, { node_id: 'n-1' }])
+    expect(queueItems).toHaveLength(1)
+    expect(queueItems[0]?.queued.target_agent_id).toBeNull()
+    expect(mock.calls.filter(call => call.method !== 'GET' && (call.path.startsWith('/api/work-orders') || call.path === '/api/agent-accounts/pins'))).toEqual([])
+    await sheet.screenshot({ path: info.outputPath(`AEON-1508-queued-${width}-${theme}.png`) })
+    await secondary.click()
+    await expect(sheet).not.toBeVisible()
+    expect(queuePosts).toEqual([{ node_id: 'n-1' }, { node_id: 'n-1' }])
+    expect(queueItems).toHaveLength(1)
   })
 }
 

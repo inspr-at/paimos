@@ -14,6 +14,9 @@ import (
 const outboundCloser = "it does not claim to simulate every optional integration or arbitrary elapsed time."
 
 func TestReadmeCarriesNoFeatureProse(t *testing.T) {
+	if got := firstLine(strings.Repeat("界", 120) + "é\nsecond line"); got != strings.Repeat("界", 120) {
+		t.Fatalf("failure diagnostic split Unicode characters: %q", got)
+	}
 	root := moduleRoot(t)
 	readme := readText(t, filepath.Join(root, "README.md"))
 	_, after, found := strings.Cut(readme, outboundCloser)
@@ -55,8 +58,9 @@ func assertFeature(t *testing.T, root, rel string, markers []string) {
 
 func firstLine(text string) string {
 	line, _, _ := strings.Cut(text, "\n")
-	if len(line) > 120 {
-		return line[:120]
+	runes := []rune(line)
+	if len(runes) > 120 {
+		return string(runes[:120])
 	}
 	return line
 }

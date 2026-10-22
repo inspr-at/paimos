@@ -124,7 +124,7 @@ func finishWrite(ctx context.Context, tx pgx.Tx, p tenant.Principal, key, method
 	_, err = tx.Exec(ctx, `INSERT INTO goal_update_receipts(tenant_id,actor_principal_id,idempotency_key,method,target_node_id,request_sha256,response,event_id) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`, p.TenantID, p.ID, key, method, n.ID, hash[:], raw, out.ReadThrough)
 	return out, err
 }
-func createTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, key string, in createInput) (WriteResult, error) {
+func createTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, key string, in createInput, now time.Time) (WriteResult, error) {
 	var out WriteResult
 	if err := lockWrite(ctx, tx, p); err != nil {
 		return out, err
@@ -164,16 +164,27 @@ func createTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, key string, in
 		}
 		return replay(r, http.MethodPost, n.ID, hash)
 	}
+	// The Lands clock is checked for a fresh create only; a receipt replays.
+	if err := validateETA(in.ETA, "eta", now, true); err != nil {
+		return out, err
+	}
 	kinds, changes, err := ensureKinds(ctx, tx, p.TenantID)
 	if err != nil {
 		return out, err
 	}
-	n, err := insertNode(ctx, tx, p, kinds[GoalKind], in.Title, project, map[string]any{}, "0")
+	draft := storedNode{Fields: map[string]any{}}
+	if in.ETA != nil {
+		setETA(&draft, Field[ETAInput]{Set: true, Value: in.ETA}, p, now)
+	}
+	n, err := insertNode(ctx, tx, p, kinds[GoalKind], in.Title, project, draft.Fields, "0")
 	if err != nil {
 		return out, err
 	}
 	pending := kindEvents(changes)
 	pending = append(pending, events.Change{NodeID: &n.ID, Type: "goal.created", After: map[string]any{"id": n.ID, "key": n.Key, "title": n.Title}})
+	if in.ETA != nil {
+		pending = append(pending, events.Change{NodeID: &n.ID, Type: "goal.eta_changed", Before: etaSnapshot(storedNode{}), After: etaSnapshot(n)})
+	}
 	return finishWrite(ctx, tx, p, key, http.MethodPost, n, hash, pending)
 }
 func insertNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind kindSnapshot, title, parent string, fields map[string]any, position string) (storedNode, error) {
