@@ -7,6 +7,7 @@ import { mkdirSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockReleases, releaseHistory, type History } from './releases-fixtures'
+import { controlStability } from './control-stability'
 
 // AEON-309: the CalVer3 renderer names a version by its canonical value and UTC
 // time; an interactive one adds its copy action.
@@ -304,14 +305,13 @@ test('the update toast ends at the release name and counts its public notes by k
   await expect(counts.locator('.sr-only')).toHaveText('2 new features, 1 fix')
   await expect(toast.getByRole('button', { name: 'What’s new' })).toBeVisible()
   await expect(toast.getByRole('button', { name: 'Reload' })).toBeVisible()
-  // No gap: the name is as wide as its text, and the counts follow at the toast's own spacing.
+  // The hidden stamp adds no width; the count row starts 20px after the name.
   const fit = await toast.evaluate(el => {
     const box = (s: string) => el.querySelector(s)!.getBoundingClientRect()
     return { cell: box('.release-name').width, name: box('.rn-name').width, gap: box('.toast-counts').left - box('.rn-name').right }
   })
   expect(Math.abs(fit.cell - fit.name)).toBeLessThanOrEqual(0.5)
-  expect(fit.gap).toBeGreaterThan(0)
-  expect(fit.gap).toBeLessThanOrEqual(16)
+  expect(Math.abs(fit.gap - 20)).toBeLessThanOrEqual(0.5)
   // Revealing the calendar version on hover moves nothing.
   const controls = () => toast.evaluate(el => [...el.querySelectorAll('.toast-counts, .toast-count, .toast-action, .toast-close, .release-name')].map(node => {
     const r = node.getBoundingClientRect()
@@ -340,7 +340,11 @@ test.describe('update toast counts', () => {
         const geo = await toast.evaluate(el => {
           const edges = (r: DOMRect) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom })
           const box = (s: string) => edges(el.querySelector(s)!.getBoundingClientRect())
-          return { toast: edges(el.getBoundingClientRect()), sentence: box(':scope > span'), counts: box('.toast-counts'), action: box('.toast-action'), scroll: document.documentElement.scrollWidth - document.documentElement.clientWidth }
+          return {
+            toast: edges(el.getBoundingClientRect()), sentence: box(':scope > span'), name: box('.rn-name'), counts: box('.toast-counts'),
+            countItems: [...el.querySelectorAll('.toast-count')].map(node => edges(node.getBoundingClientRect())),
+            action: box('.toast-action'), scroll: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          }
         })
         expect(geo.scroll).toBeLessThanOrEqual(1)
         expect(geo.toast.left).toBeGreaterThanOrEqual(0)
@@ -352,10 +356,26 @@ test.describe('update toast counts', () => {
           expect(geo.counts.right).toBeLessThanOrEqual(geo.toast.right)
         } else {
           // Wider screens: one line, the counts between the sentence and the actions.
-          expect(geo.counts.left).toBeGreaterThan(geo.sentence.right)
+          expect(Math.abs(geo.countItems[0].left - geo.name.right - 20)).toBeLessThanOrEqual(0.5)
+          geo.countItems.slice(1).forEach((item, i) => expect(Math.abs(item.left - geo.countItems[i].right - 12)).toBeLessThanOrEqual(0.5))
           expect(geo.action.left).toBeGreaterThan(geo.counts.right)
           expect(Math.abs((geo.counts.top + geo.counts.bottom) / 2 - (geo.sentence.top + geo.sentence.bottom) / 2)).toBeLessThanOrEqual(2)
         }
+        const guard = await controlStability(page, {
+          releaseName: toast.locator('.release-name'), counts: toast.locator('.toast-counts'),
+          newCount: toast.locator('.toast-count[data-kind="features"]'), fixCount: toast.locator('.toast-count[data-kind="fixes"]'),
+          whatsNew: toast.getByRole('button', { name: 'What’s new' }), reload: toast.getByRole('button', { name: 'Reload' }),
+          dismiss: toast.getByRole('button', { name: 'Dismiss' }),
+        })
+        await guard.check(async () => {
+          await toast.locator('.release-name').hover()
+          await expect(toast.locator('.rn-stamp')).toHaveCSS('opacity', '1')
+        })
+        await guard.check(async () => {
+          await page.mouse.move(2, 2)
+          await expect(toast.locator('.rn-stamp')).toHaveCSS('opacity', '0')
+        })
+        guard.done()
         await page.screenshot({ path: testInfo.outputPath(`update-toast-${width}-${theme}.png`), animations: 'disabled' })
         await toast.screenshot({ path: testInfo.outputPath(`update-toast-${width}-${theme}-toast.png`), animations: 'disabled' })
       })

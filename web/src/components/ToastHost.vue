@@ -57,8 +57,9 @@ onBeforeUnmount(() => dialogs?.disconnect())
    It shows over the name without widening it, so the sentence ends at the name (AEON-1655). */
 .toast :deep(.release-name) { position: relative; }
 .toast :deep(.rn-stamp) { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 1; background: var(--tip-bg); border-color: color-mix(in srgb, var(--surface-highlight) 28%, transparent); box-shadow: none; color: var(--tip-ink); }
-/* What the release brings, by kind: quieter than the sentence, the numbers in the toast's ink. */
-.toast-counts { display: inline-flex; flex: none; align-items: center; gap: 12px; margin-left: 2px; color: var(--tip-muted); font-size: 12.5px; white-space: nowrap; }
+/* What the release brings, by kind: quieter than the sentence, the numbers in the toast's ink.
+   The toast's 10px gap plus this 10px margin separates the counts from the name by 20px. */
+.toast-counts { display: inline-flex; flex: none; align-items: center; gap: 12px; margin-left: 10px; color: var(--tip-muted); font-size: 12.5px; white-space: nowrap; }
 .toast-count { display: inline-flex; align-items: center; gap: 4px; }
 .toast-count svg { flex: none; margin-right: 1px; }
 .toast-count strong { color: var(--tip-ink); font-weight: 650; font-variant-numeric: tabular-nums; }
