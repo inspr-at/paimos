@@ -11592,6 +11592,8 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestImmutabilityGuardsFailClosed","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestInterruptedFixturesLeaveNoProcesses","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestLoadedImageResolverFailsClosed","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestMergeGroupPRReuseAggregatesRequireConfirmedProof","tier":"GATED-FULL"}
