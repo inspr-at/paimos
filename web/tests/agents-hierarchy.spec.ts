@@ -124,7 +124,9 @@ test('AEON-1360 cross-project children nest with their own work and survive thei
     if (width === 390) {
       await stable.check(async () => {
         await expect(parent.locator('.l2t')).toHaveAttribute('data-clip-tip', '')
-        await parent.locator('.agent-link').focus()
+        await fold.focus()
+        await page.keyboard.press('Tab')
+        await expect(parent.locator('.agent-link')).toBeFocused()
         await expect(page.getByRole('tooltip')).toContainText('includes 1 from AEON')
       })
       await page.getByRole('tooltip').screenshot({ path: info.outputPath(`aeon-1649-${width}-${theme}-full-label.png`), animations: 'disabled' })
