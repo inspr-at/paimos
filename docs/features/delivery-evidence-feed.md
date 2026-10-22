@@ -113,3 +113,15 @@ Deployment, production backfill and external coordinator hook rollout remain
 coordinator/OPS operations. This worker runs neither gates nor live backfills.
 The AEON-1658 seven-day repair instructions remain in
 [Delivery history jobs](delivery-history-jobs.md).
+
+## Verification
+
+ESSENTIAL behavior tests cover native review history and first-head deduplication,
+atomic fact/rollout/preflight replay, corrected audit severity, tenant/repository
+isolation, explicit merge resolution with captured head and repository, and a
+changed completion replay. They also exercise canonical queue history, incomplete
+pagination, narrow installation grants, authenticated historical harness review,
+and rejection of a reported metric as approval. The producer receipt cases in
+`web/tests/review-tooling.test.ts` also run in the remote Go tooling check.
+Existing delivery, crossreview, reporter contract, DSAR and shared-fence tests
+remain part of the affected verification set.
