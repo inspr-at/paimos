@@ -327,6 +327,10 @@ watch(openId, id => { if (id) store.cursor = id })
         <p v-if="items && (isNarrowed || filter.archived)" class="count" role="status">{{ rows.length }} of {{ filter.archived ? all.length : live.length }}</p>
       </div>
 
+      <div v-if="store.error && items" class="load-status">
+        <p role="status">{{ store.error }}</p>
+        <button type="button" class="btn sm" :disabled="store.loading" @click="store.load(true)">Try again</button>
+      </div>
       <details v-if="items && creatorNotices.length" class="acceptance-notices">
         <summary><AppIcon name="chevron-right" :size="12" class="disclosure-chev" />Recently accepted offers you created <span>{{ creatorNotices.length }}</span></summary>
         <ol>
