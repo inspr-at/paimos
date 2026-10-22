@@ -40,6 +40,7 @@ const dialog = ref<HTMLDialogElement>()
 const searchInput = ref<HTMLInputElement>()
 const taskInput = ref<HTMLInputElement>()
 const settingsOpen = ref(false)
+const lastSettingsWarning = ref('')
 const hostSelect = ref<HTMLSelectElement>()
 const tickets = ref<WorkNode[]>([])
 const ticket = ref<WorkNode | null>(null)
@@ -107,7 +108,13 @@ const contextReady = computed(() => oneOff.value && newTicket.value ? can('nodes
 const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && contextReady.value && !readOnlyReason.value && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
 const settingsSummary = computed(() => loading.value ? copy.loading : copy.runsOn(Object.values(view.value.requested).join(' · ')))
 const settingsWarning = computed(() => loading.value ? '' : [catalogGap.value ? catalogMessage.value : '', readOnlyReason.value, catalog.value && view.value.status.tone === 'warn' ? `${view.value.status.label} ${view.value.status.detail}` : ''].filter(Boolean).join(' '))
-watch(settingsWarning, warning => { if (oneOff.value && visible.value && warning) settingsOpen.value = true })
+watch(settingsWarning, warning => {
+  if (oneOff.value && visible.value && warning) { lastSettingsWarning.value = warning; settingsOpen.value = true }
+})
+function toggleSettings() {
+  settingsOpen.value = !settingsOpen.value
+  if (!settingsOpen.value && !settingsWarning.value) lastSettingsWarning.value = ''
+}
 
 function resetTask() {
   generation++; instruction.value = ''; mayChangeFiles.value = false; error.value = ''
@@ -199,7 +206,7 @@ async function open(initial?: WorkNode, mode: 'expert' | 'once' = 'expert') {
   if (busy.value) return
   opener = document.activeElement as HTMLElement
   generation++; visible.value = true
-  oneOff.value = mode === 'once'; newTicket.value = !initial; projectId.value = ''; resetTask(); task.value = ''; settingsOpen.value = false
+  oneOff.value = mode === 'once'; newTicket.value = !initial; projectId.value = ''; resetTask(); task.value = ''; settingsOpen.value = false; lastSettingsWarning.value = ''
   ticket.value = initial?.is_leaf === true ? initial : null; query.value = ''; tickets.value = []; nextCursor.value = null
   authorFamily.value = authorFamilyFor(ticket.value)
   catalog.value = null; catalogGap.value = null; catalogMessage.value = ''
@@ -319,7 +326,7 @@ defineExpose({ open, openOnce })
 </script>
 
 <template>
-  <dialog ref="dialog" class="launch-dialog" :aria-labelledby="`${uid}-title`" @cancel.prevent="escape">
+  <dialog ref="dialog" class="launch-dialog" :class="{ 'run-once': oneOff }" :aria-labelledby="`${uid}-title`" @cancel.prevent="escape">
     <form class="launch-card" @submit.prevent="submit()" @keydown="formKey">
       <header class="launch-head">
         <h2 :id="`${uid}-title`">{{ oneOff ? copy.once : 'Start agent' }}</h2>
@@ -381,8 +388,8 @@ defineExpose({ open, openOnce })
           </div>
           <p v-if="oneOff" class="note restriction-note" role="status">{{ mayChangeFiles ? copy.writable : copy.readOnly }}</p>
           <div v-if="oneOff" class="run-settings-summary" :class="{ warn: settingsWarning }">
-            <div class="run-summary-line"><p>{{ settingsSummary }}</p><button type="button" class="btn ghost settings-toggle" :aria-expanded="settingsOpen" :aria-controls="`${uid}-settings`" @click="settingsOpen = !settingsOpen">{{ settingsOpen ? copy.hide : copy.change }}</button></div>
-            <p class="note settings-status" role="status">{{ settingsWarning || (!loading && catalog ? view.status.label : '') }}</p>
+            <div class="run-summary-line"><p>{{ settingsSummary }}</p><button type="button" class="btn ghost settings-toggle" :aria-expanded="settingsOpen" :aria-controls="`${uid}-settings`" @click="toggleSettings">{{ settingsOpen ? copy.hide : copy.change }}</button></div>
+            <p v-if="settingsWarning || lastSettingsWarning" class="note settings-status" :class="{ resolved: !settingsWarning }" :role="settingsWarning ? 'status' : undefined" :aria-hidden="!settingsWarning || undefined">{{ settingsWarning || lastSettingsWarning }}</p>
             <button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button>
           </div>
           <div v-show="!oneOff || settingsOpen" :id="`${uid}-settings`" class="run-settings-fields" :aria-label="oneOff ? copy.settings : undefined">
@@ -505,10 +512,11 @@ defineExpose({ open, openOnce })
 .one-off .restriction-note { min-block-size: 3em; }
 .run-settings-fields { display: grid; gap: 16px; min-width: 0; }
 .run-settings-summary { padding-block: 12px; border-block: 1px solid var(--line); }
-.run-summary-line { display: flex; align-items: start; gap: 12px; }
+.run-summary-line { display: flex; align-items: center; gap: 12px; }
 .run-summary-line p { flex: 1; min-width: 0; margin: 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .settings-toggle { flex-shrink: 0; min-height: 44px; }
 .settings-status { min-block-size: 3em; margin: 4px 0 0; }
+.settings-status.resolved { visibility: hidden; }
 .run-settings-summary.warn .settings-status { color: var(--ink-2); }
 .queue-label { display: grid; }
 .queue-label > span { grid-area: 1 / 1; }
@@ -568,6 +576,7 @@ footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
 .field.pinned-model { font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; }
 @media (max-width: 600px) {
   .launch-dialog { inset: 0; transform: none; max-height: 100dvh; height: 100dvh; width: 100%; border-radius: 0; }
+  .launch-dialog.run-once { max-width: none; }
   .launch-card { padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); height: 100%; max-height: 100dvh; }
   .launch-body { flex: 1; }
   .launch-card > footer { order: 3; margin: 14px 0 0; padding: 14px 0 0; border-bottom: 0; border-top: 1px solid var(--line); }
