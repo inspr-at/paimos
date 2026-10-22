@@ -280,7 +280,7 @@ changed. The coordinator retains cross-family review, merge and release gates.
 ### P1 second fix round
 
 The three blocking host regressions were reproduced against reviewed head
-`7b13d50a4` using a detached test-only snapshot `a7b0ab3d1` on the approved agm2
+`7b13d50a4` using a detached test-only snapshot `a7b0ab3d1` on the approved remote
 runner. Typing hit `buffer_full` at resize 257; first input and expired-holder
 input were incorrectly marked uncertain; HTTP 503/408/429 stopped the output
 reader before its second publish. The test-only commit is outside the delivery
