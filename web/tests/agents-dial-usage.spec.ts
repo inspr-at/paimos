@@ -119,7 +119,7 @@ test('AEON-1511: enrolled accounts without readings stay visible, with a reason 
       const cursor = detail(page, 'cursor')
       await expect(cursor.getByRole('heading')).toHaveText('Cursor · quota')
       await expect(cursor.locator('.ub-nr')).toHaveText('Quota not available')
-      await expect(cursor.locator('.ub-empty')).toContainText('doesn\'t report its quota')
+      await expect(cursor.locator('.ub-empty')).toContainText('doesn’t report its quota')
     } }, { name: 'return to the enrolled Claude account', run: async () => {
       await row(page, 'claude').locator('.nm').click()
       await expect(claude.locator('.ub-nr')).toHaveText('Reads after the first run')
