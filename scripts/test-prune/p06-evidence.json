@@ -3,7 +3,7 @@
   "ticket": "AEON-1678",
   "package": "P06",
   "status": "blocked-by-cut-prerequisites",
-  "recordedAt": "2026-10-22T23:26:17.494755+00:00",
+  "recordedAt": "2026-10-22T23:28:29.236219+00:00",
   "baseCommit": "20eea5be1fb22f5579619d8de6cc2577384cb749",
   "selectedAccount": {
     "instance": "ppm",
@@ -39,7 +39,8 @@
     "cases": 9,
     "observedRunnerSeconds": 0.585,
     "sourceHelper": "web/tests/record-source.ts",
-    "sourceHelperChange": "Optional in-memory source argument; existing callers still compile the current production source by default."
+    "sourceHelperChange": "Optional in-memory source argument; existing callers still compile the current production source by default.",
+    "host": "One targeted local file with one worker after the authorized remote browser lane refused capacity; no browser was launched locally."
   },
   "negativeControls": [
     {
@@ -84,6 +85,16 @@
       "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh <worktree> \"tests/agent-rules-ticks.spec.ts tests/agent-rules-budget-clients.spec.ts tests/provenance.spec.ts tests/lead-remove.spec.ts tests/lead-start.spec.ts tests/model-prefs.spec.ts\"",
       "exitCode": 3,
       "output": "remote busy: 2/2 remote runs (CI pool 0/4); remote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI"
+    },
+    {
+      "command": "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh",
+      "exitCode": 3,
+      "output": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job"
+    },
+    {
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh <worktree> \"tests/agent-rules-ticks.spec.ts tests/agent-rules-budget-clients.spec.ts tests/provenance.spec.ts tests/lead-remove.spec.ts tests/lead-start.spec.ts tests/model-prefs.spec.ts\"",
+      "exitCode": 3,
+      "output": "remote busy (host guard); wait or rely on PR CI"
     }
   ],
   "browserRunnerTimeChangeSeconds": null,
@@ -104,6 +115,32 @@
     {
       "path": "docs/features/test-prune-ledger.md",
       "reason": "Document the additive P06 proof and the unresolved visual-reference prerequisite in the existing ledger documentation."
+    }
+  ],
+  "lastMergedMain": "2c9707daf5cee89594a355333529c72751abf369",
+  "checks": [
+    {
+      "command": "node scripts/test-prune/check.mjs",
+      "result": "passed after merging newest origin/main",
+      "protectedRisks": 647,
+      "cuts": false,
+      "visualApproval": "pending"
+    },
+    {
+      "command": "node scripts/test-tiers/cli.mjs classify --kind web --tier ESSENTIAL --only tests/agents-prune.unit.test.ts",
+      "result": "9 exact native cases registered through the canonical writer"
+    },
+    {
+      "command": "node scripts/test-tiers/cli.mjs manifests --write",
+      "result": "passed"
+    },
+    {
+      "command": "node scripts/test-tiers/cli.mjs manifests --check",
+      "result": "passed after merging newest origin/main"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
     }
   ]
 }
