@@ -128,7 +128,9 @@ func (f *nativeHostServer) claim(proof daemon.Proof, in nativecontract.Claim) (a
 				s.view.Mode = f.startMode
 			}
 			s.view.Generation = 1
+			s.view.Harness = local.Intent.Harness
 			s.view.Capabilities.Steer, s.view.Capabilities.Quota = "unsupported", "unsupported"
+			s.view.Capabilities.QualificationDigest = strings.Repeat("e", 64)
 			f.sessions[local.Intent.RequestID] = s
 		} else if f.revoked[local.Intent.RequestID] {
 			return nil, http.StatusForbidden, nativecontract.ReasonPermissionRevoked

@@ -123,10 +123,12 @@ func (l *ExecLauncher) OpenPTY(ctx context.Context, spec nativecontract.PTYLaunc
 		return nil, refuse(nativecontract.ReasonNativeFailure)
 	}
 	now := time.Now()
-	digest := sha256.Sum256([]byte(uuid.NewString()))
+	processID := uuid.NewString()
+	digest := sha256.Sum256([]byte(processID))
 	r := &execPTY{master: master, masterFD: masterFD, binding: cloneBinding(spec.Binding), life: ownedprocess.Track(cmd), cmd: cmd,
-		identity: nativecontract.NativeIdentity{Provider: plan.Provider, RuntimeEpoch: spec.Binding.RuntimeEpoch, NativeSessionRef: spec.ResumeRef, PID: cmd.Process.Pid, StartedAt: now, ProcessIdentityDigest: hex.EncodeToString(digest[:])},
-		cols:     spec.Cols, rows: spec.Rows, frames: make(chan nativecontract.TerminalFrame, 8), done: make(chan struct{}), readerDone: make(chan struct{}), readStop: make(chan struct{}), readyDone: make(chan struct{}), readiness: plan.Ready}
+		ownership: ownedprocess.Identity{DaemonID: spec.Binding.DaemonID, Generation: spec.Binding.DaemonGeneration, ProcessID: processID, RootPID: cmd.Process.Pid, GroupID: cmd.Process.Pid, StartedAt: now},
+		identity:  nativecontract.NativeIdentity{Provider: plan.Provider, RuntimeEpoch: spec.Binding.RuntimeEpoch, NativeSessionRef: spec.ResumeRef, PID: cmd.Process.Pid, StartedAt: now, ProcessIdentityDigest: hex.EncodeToString(digest[:])},
+		cols:      spec.Cols, rows: spec.Rows, frames: make(chan nativecontract.TerminalFrame, 8), done: make(chan struct{}), readerDone: make(chan struct{}), readStop: make(chan struct{}), readyDone: make(chan struct{}), readiness: plan.Ready}
 	if plan.Ready == nil {
 		r.readyErr = refuse(nativecontract.ReasonQualificationMissing)
 		close(r.readyDone)
@@ -220,6 +222,7 @@ type execPTY struct {
 	masterFD                   int
 	binding                    nativecontract.Binding
 	identity                   nativecontract.NativeIdentity
+	ownership                  ownedprocess.Identity
 	life                       *ownedprocess.Lifetime
 	cmd                        *exec.Cmd
 	cols, rows                 int
@@ -243,6 +246,13 @@ func (r *execPTY) Identity() nativecontract.NativeIdentity {
 }
 func (r *execPTY) Frames() <-chan nativecontract.TerminalFrame { return r.frames }
 
+func (r *execPTY) Ownership() (ownedprocess.Identity, error) {
+	if err := r.life.Verify(); err != nil {
+		return ownedprocess.Identity{}, refuse(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	return r.ownership, nil
+}
+
 func (r *execPTY) Ready(ctx context.Context) (nativecontract.NativeIdentity, error) {
 	select {
 	case <-ctx.Done():
@@ -250,6 +260,9 @@ func (r *execPTY) Ready(ctx context.Context) (nativecontract.NativeIdentity, err
 	case <-r.readyDone:
 		r.mu.Lock()
 		defer r.mu.Unlock()
+		if r.closed {
+			return r.identity, refuse(nativecontract.ReasonOwnershipUnconfirmed)
+		}
 		return r.identity, r.readyErr
 	}
 }

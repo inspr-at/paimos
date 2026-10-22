@@ -52,6 +52,23 @@ func requireStart(ctx context.Context, tx pgx.Tx, p tenant.Principal, project st
 	return nil
 }
 
+func (s *Store) initialMode(ctx context.Context, tx pgx.Tx, actor nativecontract.Actor, intent nativecontract.StartIntent, policy nativecontract.Policy) (string, error) {
+	if s.startMode == nil {
+		return "structured", nil
+	}
+	mode, err := s.startMode(ctx, tx, actor, intent, policy)
+	if err != nil {
+		return "", err
+	}
+	if mode != "structured" && mode != "terminal" {
+		return "", fail(503, nativecontract.ReasonQualificationMissing)
+	}
+	if mode == "terminal" && (actor.PrincipalKind != "person" || len(actor.KeyCeiling) != 0 || intent.Role != "coordinator" || intent.Harness != "claude" && intent.Harness != "codex") {
+		return "", fail(403, nativecontract.ReasonWrongPrincipal)
+	}
+	return mode, nil
+}
+
 func (s *Store) authorize(ctx context.Context, tx pgx.Tx, actor nativecontract.Actor, project string, intent nativecontract.StartIntent) (Authorization, error) {
 	a, err := s.authority.AuthorizeTx(ctx, tx, actor, project, intent)
 	if err != nil {

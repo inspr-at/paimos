@@ -196,6 +196,17 @@ func (s *Store) reportStarted(ctx context.Context, d nativecontract.DaemonActor,
 		}
 		if changed {
 			view.State = "running"
+			if view.Mode == "terminal" {
+				private, ok := ctx.Value(proofKey{}).(daemon.Proof)
+				mode, err := s.initialMode(ctx, tx, session.Actor, session.Intent, session.Policy)
+				if err != nil {
+					return err
+				}
+				if !ok || private.Terminal == nil || mode != "terminal" || i.Provider != session.Intent.Harness {
+					return fail(403, nativecontract.ReasonQualificationMissing)
+				}
+				view.State = "taken"
+			}
 			view.Revision++
 			raw, _ := json.Marshal(view)
 			if _, err := tx.Exec(ctx, `UPDATE native_session_bindings SET view=$2 WHERE id=$1`, b.OwnedSessionID, raw); err != nil {

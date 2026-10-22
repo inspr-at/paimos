@@ -24,6 +24,7 @@ import (
 	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
 	"github.com/inspr-at/paimos/internal/nativesessions/stream"
 	"github.com/inspr-at/paimos/internal/nativestream"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
 // NativePTYAuthority is the qualified local person command port. Prepare must
@@ -522,6 +523,19 @@ func (e *nativeOwned) openSuccessor(ctx context.Context, spec nativecontract.Lau
 	}
 	if err = s.ledger.Running(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, group, identity.PID, identity.StartedAt); err != nil {
 		return out, err
+	}
+	ownershipSource := any(transport)
+	if terminal, ok := transport.(*nativeTerminalTransport); ok {
+		ownershipSource = terminal.PTYRuntime
+	}
+	if owner, ok := ownershipSource.(interface {
+		Ownership() (ownedprocess.Identity, error)
+	}); ok {
+		owned, err := owner.Ownership()
+		if err != nil {
+			return out, err
+		}
+		e.ownership = &owned
 	}
 	d, err := delivery.New(delivery.DeliveryOptions{Binding: *fresh, Journal: e.journal, Transport: e.transport, Authority: e, Reports: e, Finals: e, Now: s.capacityNow, Retention: e.retention, Release: e.release, Refused: func(err error) bool { _ = e.fault(err); return e.faulted() != nil }})
 	if err != nil {

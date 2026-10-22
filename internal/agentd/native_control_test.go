@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -51,6 +52,9 @@ func (a *nativePTYAuthorityFixture) Prepare(_ context.Context, actor nativecontr
 	return a.caller, id, nil
 }
 func (a *nativePTYAuthorityFixture) WithWrite(ctx context.Context, caller nativepty.Caller, binding nativecontract.Binding, kind string, fn func(nativepty.Access) error) error {
+	if a.before != nil {
+		a.before()
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.deny != nil {
@@ -58,9 +62,6 @@ func (a *nativePTYAuthorityFixture) WithWrite(ctx context.Context, caller native
 	}
 	if !binding.Equal(a.binding) || caller.Capability != a.caller.Capability {
 		return nativeRefusal(nativecontract.ReasonGrantMissing)
-	}
-	if a.before != nil {
-		a.before()
 	}
 	return fn(a.access)
 }
@@ -81,6 +82,7 @@ type nativePTYRuntimeFixture struct {
 	once                       sync.Once
 	writes, resizes, closes    int
 	writeErr, errorExit        error
+	readyErr                   error
 	x                          nativecontract.ExitEvidence
 	now                        time.Time
 }
@@ -96,7 +98,7 @@ func (p *nativePTYRuntimeFixture) Ready(ctx context.Context) (nativecontract.Nat
 		case <-p.readyRelease:
 		}
 	}
-	return p.identity, nil
+	return p.identity, p.readyErr
 }
 func (p *nativePTYRuntimeFixture) Write(_ context.Context, in nativecontract.PTYInput) (nativecontract.NativeEvidence, error) {
 	p.mu.Lock()
@@ -232,12 +234,16 @@ func requireNativeReason(t *testing.T, err error, want nativecontract.Reason) {
 func TestNativeHostInitialPTYWaitsForProviderReadiness(t *testing.T) {
 	f, l, a := nativePTYHost(t)
 	l.pty.readyEntered, l.pty.readyRelease = make(chan struct{}), make(chan struct{})
+	releaseReady := sync.OnceFunc(func() { close(l.pty.readyRelease) })
+	defer releaseReady()
 	local := f.local(0)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
 	done := make(chan error, 1)
-	go func() { _, err := f.h.Start(t.Context(), local); done <- err }()
+	go func() { _, err := f.h.Start(ctx, local); done <- err }()
 	select {
 	case <-l.pty.readyEntered:
-	case <-t.Context().Done():
+	case <-ctx.Done():
 		t.Fatal("readiness barrier")
 	}
 	f.server.mu.Lock()
@@ -246,7 +252,7 @@ func TestNativeHostInitialPTYWaitsForProviderReadiness(t *testing.T) {
 	if state != "starting" || f.groups(t) != 1 || l.opens != 1 {
 		t.Fatal("fork was treated as readiness", state)
 	}
-	close(l.pty.readyRelease)
+	releaseReady()
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
@@ -255,6 +261,27 @@ func TestNativeHostInitialPTYWaitsForProviderReadiness(t *testing.T) {
 	f.server.mu.Unlock()
 	if f.launcher.opens != 0 || local.NativeResumeRef != nil {
 		t.Fatal("initial TUI used the structured launcher or invented resume")
+	}
+}
+
+func TestNativeHostPTYReadinessFailureRetainsHandleUntilExitReport(t *testing.T) {
+	f, l, _ := nativePTYHost(t)
+	l.pty.readyErr = nativeRefusal(nativecontract.ReasonQualificationMissing)
+	_, err := f.h.Start(t.Context(), f.local(0))
+	requireNativeReason(t, err, nativecontract.ReasonQualificationMissing)
+	if l.opens != 1 || f.groups(t) != 1 {
+		t.Fatal("readiness failure lost possible owner")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if _, err := l.pty.Wait(ctx); err != nil {
+		t.Fatal("owner lifetime cleanup", err)
+	}
+	if err := f.h.Poll(ctx); err != nil {
+		t.Fatal("exit reconciliation", err)
+	}
+	if f.groups(t) != 0 {
+		t.Fatal("confirmed and reported exit retained local occupancy")
 	}
 }
 
@@ -359,26 +386,54 @@ func TestNativeHostPTYUncertainInputRequiresRecovery(t *testing.T) {
 	}
 }
 
-// Risk: output stops draining without watch/export, natural EOF leaks the
-// owner, or lifecycle persistence stores raw terminal bytes as history.
-func TestNativeHostPTYOutputEOFAndLifecycleMetadata(t *testing.T) {
+// Risk: a grant revoked after server preparation but before the final native
+// fence still permits a write. The barrier establishes that exact ordering.
+func TestNativeHostPTYRevalidatesAfterPreparationBeforeIO(t *testing.T) {
 	f, l, a := nativePTYHost(t)
-	projector, err := nativestream.NewProjector(nativestream.ExportPolicy{Text: func(_ context.Context, _ nativecontract.Binding, s string) (string, error) { return s, nil }, Terminal: func(context.Context, nativecontract.Binding, []byte) error { return nil }})
+	startNativePTY(t, f, a)
+	ctx := nativePTYContext(a)
+	if _, err := f.h.Resize(ctx, nativePTYResize(a)); err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	releaseFence := sync.OnceFunc(func() { close(release) })
+	defer releaseFence()
+	a.before = func() { close(entered); <-release }
+	done := make(chan error, 1)
+	go func() { _, err := f.h.PTYInput(ctx, nativePTYInput(a)); done <- err }()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("final write fence barrier")
+	}
+	a.mu.Lock()
+	a.deny = nativeRefusal(nativecontract.ReasonPermissionRevoked)
+	a.mu.Unlock()
+	releaseFence()
+	requireNativeReason(t, <-done, nativecontract.ReasonPermissionRevoked)
+	if writes, _, _ := l.pty.counts(); writes != 0 {
+		t.Fatal("revoked grant reached stdin")
+	}
+}
+
+func enableNativePTYRelay(t *testing.T, f *nativeHostFixture) {
+	t.Helper()
+	p, err := nativestream.NewProjector(nativestream.ExportPolicy{Text: func(_ context.Context, _ nativecontract.Binding, s string) (string, error) { return s, nil }, Terminal: func(context.Context, nativecontract.Binding, []byte) error { return nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.h.config.Live, err = stream.NewRelay(projector, nil)
+	f.h.config.Live, err = stream.NewRelay(p, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.h.caps.TerminalView = true
-	b := startNativePTY(t, f, a)
-	view := nativecontract.SessionView{}
+}
+func subscribeNativePTY(t *testing.T, f *nativeHostFixture, b nativecontract.Binding) nativecontract.Subscription {
+	t.Helper()
 	f.server.mu.Lock()
-	view = f.server.byOwned(b.OwnedSessionID).view
+	view := f.server.byOwned(b.OwnedSessionID).view
 	f.server.mu.Unlock()
 	view.Capabilities.TerminalView = true
-	view.Capabilities.Steer, view.Capabilities.Quota = "unsupported", "unsupported"
 	fence := func(_ context.Context, fn func(nativecontract.ValidationContext) error) error {
 		return fn(nativecontract.ValidationContext{Binding: &b, Generation: view.Generation, PrincipalKind: "person", Capabilities: &view.Capabilities, View: "terminal", Mode: "terminal", State: "taken"})
 	}
@@ -386,16 +441,77 @@ func TestNativeHostPTYOutputEOFAndLifecycleMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sub.Close()
-	<-sub.Events()
-	l.pty.frames <- nativecontract.TerminalFrame{TerminalEpoch: b.RuntimeEpoch, Sequence: "1", DataBase64: base64.StdEncoding.EncodeToString([]byte("private-terminal")), Cols: 120, Rows: 36}
+	t.Cleanup(func() { _ = sub.Close() })
+	return sub
+}
+func readNativePTYEvent(t *testing.T, sub nativecontract.Subscription) nativecontract.StreamEvent {
+	t.Helper()
 	select {
-	case ev := <-sub.Events():
-		if ev.Kind != "terminal" {
-			t.Fatal(ev.Kind)
+	case event, ok := <-sub.Events():
+		if !ok {
+			t.Fatal("terminal stream ended before witness")
 		}
-	case <-t.Context().Done():
-		t.Fatal("terminal read barrier")
+		return event
+	case <-time.After(10 * time.Second):
+		t.Fatal("terminal stream witness barrier")
+		return nativecontract.StreamEvent{}
+	}
+}
+
+// Risk: gaps are hidden or a slow viewer blocks the owner and grows memory.
+func TestNativeHostPTYSourceGapsAndSlowViewerStayBounded(t *testing.T) {
+	for _, kind := range []string{"source gap", "slow viewer"} {
+		t.Run(kind, func(t *testing.T) {
+			f, l, a := nativePTYHost(t)
+			enableNativePTYRelay(t, f)
+			b := startNativePTY(t, f, a)
+			slow := subscribeNativePTY(t, f, b)
+			witness := subscribeNativePTY(t, f, b)
+			readNativePTYEvent(t, witness)
+			if kind == "source gap" {
+				l.pty.frames <- nativecontract.TerminalFrame{TerminalEpoch: b.RuntimeEpoch, Sequence: "3", DataBase64: base64.StdEncoding.EncodeToString([]byte("gap witness")), Cols: 120, Rows: 36}
+				event := readNativePTYEvent(t, witness)
+				var gap nativecontract.Gap
+				if event.Kind != "gap" || json.Unmarshal(event.Payload, &gap) != nil || gap.Reason != "frame_omitted" || gap.DroppedFrames != "2" {
+					t.Fatal("missing explicit source gap", event)
+				}
+				return
+			}
+			for i := 1; i <= nativecontract.LiveReplayFrames+2; i++ {
+				l.pty.frames <- nativecontract.TerminalFrame{TerminalEpoch: b.RuntimeEpoch, Sequence: strconv.Itoa(i), DataBase64: base64.StdEncoding.EncodeToString([]byte("bounded output")), Cols: 120, Rows: 36}
+				if event := readNativePTYEvent(t, witness); event.Kind != "terminal" {
+					t.Fatal("fast witness lost output", event.Kind)
+				}
+			}
+			frames, bytes, _, err := f.h.config.Live.Stats(b)
+			if err != nil || frames > nativecontract.LiveReplayFrames || bytes > nativecontract.LiveReplayBytes {
+				t.Fatal("unbounded relay", frames, bytes, err)
+			}
+			if event := readNativePTYEvent(t, slow); event.Kind != "snapshot" {
+				t.Fatal("slow viewer snapshot", event.Kind)
+			}
+			event := readNativePTYEvent(t, slow)
+			var gap nativecontract.Gap
+			if event.Kind != "gap" || json.Unmarshal(event.Payload, &gap) != nil || gap.Reason != "buffer_evicted" || gap.DroppedFrames == "0" {
+				t.Fatal("slow viewer loss was hidden", event)
+			}
+		})
+	}
+}
+
+// Risk: output stops draining without watch/export, natural EOF leaks the
+// owner, or lifecycle persistence stores raw terminal bytes as history.
+func TestNativeHostPTYOutputEOFAndLifecycleMetadata(t *testing.T) {
+	f, l, a := nativePTYHost(t)
+	enableNativePTYRelay(t, f)
+	b := startNativePTY(t, f, a)
+	sub := subscribeNativePTY(t, f, b)
+	if event := readNativePTYEvent(t, sub); event.Kind != "snapshot" {
+		t.Fatal("initial snapshot", event.Kind)
+	}
+	l.pty.frames <- nativecontract.TerminalFrame{TerminalEpoch: b.RuntimeEpoch, Sequence: "1", DataBase64: base64.StdEncoding.EncodeToString([]byte("private-terminal")), Cols: 120, Rows: 36}
+	if event := readNativePTYEvent(t, sub); event.Kind != "terminal" {
+		t.Fatal("terminal output", event.Kind)
 	}
 	f.h.mu.Lock()
 	var e *nativeOwned
@@ -406,7 +522,7 @@ func TestNativeHostPTYOutputEOFAndLifecycleMetadata(t *testing.T) {
 	l.pty.finish()
 	select {
 	case <-e.released:
-	case <-t.Context().Done():
+	case <-time.After(10 * time.Second):
 		t.Fatal("exit release barrier")
 	}
 	if f.groups(t) != 0 {

@@ -817,6 +817,9 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	if currentView.CurrentBinding == nil || !currentView.CurrentBinding.Equal(b) || currentView.OwnerPersonID != h.owner {
 		return out, nativeRefusal(nativecontract.ReasonWrongPrincipal)
 	}
+	if currentView.Harness != local.Intent.Harness {
+		return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
+	}
 	e.owner = nativecontract.CommandActor{TenantID: s.tenantID, PrincipalID: currentView.OwnerPersonID, OwnerPersonID: currentView.OwnerPersonID, GrantID: g.Policy.GrantID, GrantRevision: g.Policy.GrantRevision}
 	profile, err := h.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: s.tenantID, OwnerPersonID: e.owner.OwnerPersonID, AccountID: local.Intent.AccountID, AccountKey: local.AccountKey, WorkspaceID: local.Intent.WorkspaceID, Harness: local.Intent.Harness, Policy: g.Policy, BindingRevision: b.BindingRevision})
 	if err != nil {
@@ -899,7 +902,11 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	if i.RuntimeEpoch != b.RuntimeEpoch || i.PID < 1 || i.StartedAt.IsZero() || !nativereceipts.ValidDigest(i.ProcessIdentityDigest) {
 		return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
 	}
-	if owner, ok := process.(interface {
+	ownershipSource := any(process)
+	if terminal, ok := process.(*nativeTerminalTransport); ok {
+		ownershipSource = terminal.PTYRuntime
+	}
+	if owner, ok := ownershipSource.(interface {
 		Ownership() (ownedprocess.Identity, error)
 	}); ok {
 		identity, err := owner.Ownership()
@@ -909,6 +916,9 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 		e.ownership = &identity
 	}
 	if err = s.ledger.Running(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, e.group, i.PID, i.StartedAt); err != nil {
+		return out, err
+	}
+	if err = e.save("running"); err != nil {
 		return out, err
 	}
 	t := &nativeObservedTransport{NativeTransport: process, owner: e}
