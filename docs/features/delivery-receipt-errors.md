@@ -11,6 +11,14 @@ Previously unfinished `github_http` receipts continue from their stored
 checkpoints and receive a specific class on their next failed read. Existing
 terminal receipts are not reopened.
 
+A webhook can arrive before its projection prerequisites, such as the queued PR
+head recorded by another delivery. A missing row retries the complete projection
+up to three times, with 250 ms and 500 ms waits within the original two-minute
+projection deadline. Each attempt releases the observation lock before waiting,
+so another webhook or reconciliation can supply the missing fact. A persistent
+miss returns HTTP 502 and leaves the verified receipt unfinished for the existing
+bounded background retries; it does not checkpoint a successful projection.
+
 An ordinary 401 or 403 pauses automatic GitHub reads. The pause epoch is the
 time of the first pause for that tenant, repository, installation and class, and
 it is cleared when a probe shows reads work again. The existing Delivery notice

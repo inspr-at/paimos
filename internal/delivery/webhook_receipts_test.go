@@ -39,6 +39,172 @@ type projectionLockFailure struct {
 	resume chan struct{}
 }
 
+type startupProjectionUnlockKey struct{}
+
+// Stop after the missing-history transaction has rolled back and its observation
+// lock has actually been released. A competing webhook can then commit the fact
+// before the original delivery retries, without relying on elapsed wall time.
+type startupProjectionBarrier struct {
+	lookups  atomic.Int32
+	paused   atomic.Bool
+	released chan struct{}
+	resume   chan struct{}
+}
+
+func (b *startupProjectionBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.HasPrefix(data.SQL, "SELECT o FROM delivery_github_events e CROSS JOIN LATERAL") {
+		b.lookups.Add(1)
+	}
+	if data.SQL == `SELECT pg_advisory_unlock(hashtextextended($1,0))` && len(data.Args) == 1 {
+		key, _ := data.Args[0].(string)
+		if strings.HasPrefix(key, "aeon-delivery-observation:") {
+			return context.WithValue(ctx, startupProjectionUnlockKey{}, true)
+		}
+	}
+	return ctx
+}
+
+func (b *startupProjectionBarrier) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if data.Err != nil || ctx.Value(startupProjectionUnlockKey{}) != true || !b.paused.CompareAndSwap(true, false) {
+		return
+	}
+	close(b.released)
+	select {
+	case <-b.resume:
+	case <-ctx.Done():
+	}
+}
+
+func TestDeliveryWebhookStartupProjectionRace(t *testing.T) {
+	// Risk: a check arriving three seconds after startup precedes its queued-head
+	// history, or a persistent missing dependency is falsely acknowledged as done.
+	for _, recoverDuringRequest := range []bool{true, false} {
+		t.Run(fmt.Sprintf("history_ready_during_request_%t", recoverDuringRequest), func(t *testing.T) {
+			f := newFixture(t)
+			f.call(t, f.person, http.MethodPut, "/api/projects/"+f.project+"/delivery-settings", map[string]any{"required_workflow": "CI", "required_checks": []string{"web"}}, http.StatusOK, nil)
+			started := f.at
+			f.at = started.Add(3 * time.Second)
+			p := f.pull()
+			p.Queued, p.QueueHead = true, strings.Repeat("c", 40)
+			f.gh.pulls[p.Number] = p
+			f.m.github = &quarantineGitHub{fakeGitHub: f.gh, workflow: "CI"}
+			completed := f.at
+			suite := queueSuite{ID: 1650, Head: p.QueueHead, Branch: "gh-readonly-queue/main/pr-7-" + p.Head}
+			suite.App.Slug = "github-actions"
+			check := queueRun{ID: 1650, Name: "web", Head: p.QueueHead, Status: "completed", Conclusion: "failure", Completed: &completed, Suite: suite}
+			check.App.Slug = "github-actions"
+			raw := receiptBody(t, f, map[string]any{"action": "completed", "check_run": check})
+
+			barrier := &startupProjectionBarrier{released: make(chan struct{}), resume: make(chan struct{})}
+			barrier.paused.Store(true)
+			cfg := f.d.App.Config()
+			cfg.ConnConfig.Tracer = barrier
+			pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(pool.Close)
+			f.m.pool = pool
+			var logs bytes.Buffer
+			f.m.webhookFailures.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			t.Cleanup(cancel)
+			var resumeOnce sync.Once
+			resume := func() { resumeOnce.Do(func() { close(barrier.resume) }) }
+			t.Cleanup(resume)
+			codes := make(chan int, 1)
+			go func() {
+				r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/github/webhook", bytes.NewReader(raw))
+				r.Header.Set("X-GitHub-Event", "check_run")
+				r.Header.Set("X-GitHub-Delivery", "startup-check")
+				r.Header.Set("X-Hub-Signature-256", signed(raw, f.m.secret))
+				w := httptest.NewRecorder()
+				f.mux.ServeHTTP(w, r)
+				codes <- w.Code
+			}()
+			select {
+			case <-barrier.released:
+			case <-ctx.Done():
+				t.Fatal("missing-history projection did not release its observation lock")
+			}
+			if got := barrier.lookups.Load(); got != 1 {
+				t.Fatalf("first projection performed %d history lookups; want 1", got)
+			}
+			f.tx(t, func(tx pgx.Tx) error {
+				var payload []byte
+				var received time.Time
+				var ledger, failures int
+				if err := tx.QueryRow(ctx, `SELECT payload,received_at,(SELECT count(*) FROM delivery_github_events),(SELECT count(*) FROM delivery_queue_failures) FROM delivery_webhook_receipts WHERE delivery_id='startup-check'`).Scan(&payload, &received, &ledger, &failures); err != nil {
+					return err
+				}
+				if !bytes.Equal(payload, raw) || !received.Equal(started.Add(3*time.Second)) || ledger != 0 || failures != 0 {
+					t.Fatalf("startup receipt or rollback: received %s ledger %d failures %d payload retained %v", received, ledger, failures, bytes.Equal(payload, raw))
+				}
+				return nil
+			})
+			if recoverDuringRequest {
+				// This signed predecessor must finish while the first attempt is
+				// paused; retaining its observation lock would deadlock here.
+				f.webhook(t, "pull_request", "enqueued", "startup-enqueued", http.StatusNoContent)
+			}
+			resume()
+			wantStatus, wantLookups := http.StatusNoContent, int32(2)
+			if !recoverDuringRequest {
+				wantStatus, wantLookups = http.StatusBadGateway, 3
+			}
+			select {
+			case code := <-codes:
+				if code != wantStatus {
+					t.Fatalf("startup projection HTTP %d, want %d; logs %s", code, wantStatus, logs.String())
+				}
+			case <-ctx.Done():
+				t.Fatal("startup projection did not finish")
+			}
+			if got := barrier.lookups.Load(); got != wantLookups {
+				t.Fatalf("startup projection performed %d history lookups; want %d", got, wantLookups)
+			}
+			attempts, next, finished, points, step, class := receiptState(t, f, "startup-check")
+			if !recoverDuringRequest {
+				if attempts != 1 || finished != nil || len(points) != 0 || step == nil || *step != "projection" || class == nil || *class != "record_missing" || !next.After(f.at) {
+					t.Fatalf("missing history lost its retry: attempts %d finished %v points %v step %v class %v next %s", attempts, finished != nil, points, step, class, next)
+				}
+				assertWebhookFailureLine(t, &logs, "check_run", "completed", "projection", "record_missing", http.StatusBadGateway, map[string]any{"delivery_id": "startup-check"})
+				f.webhook(t, "pull_request", "enqueued", "startup-enqueued", http.StatusNoContent)
+				f.at = next
+				if err := f.m.retryWebhooks(ctx); err != nil {
+					t.Fatal(err)
+				}
+			} else if logs.Len() != 0 {
+				t.Fatalf("recovered startup race logged a failure: %s", logs.String())
+			}
+			attempts, _, finished, points, step, class = receiptState(t, f, "startup-check")
+			wantAttempts := int64(1)
+			if !recoverDuringRequest {
+				wantAttempts = 2
+			}
+			if attempts != wantAttempts || finished == nil || len(points) != len(webhookSteps) || points["projection"] != webhookRecorded || step != nil || class != nil {
+				t.Fatalf("startup receipt did not finish: attempts %d finished %v points %v step %v class %v", attempts, finished != nil, points, step, class)
+			}
+			if w := receiptSend(f, "check_run", "startup-check", raw); w.Code != http.StatusNoContent {
+				t.Fatalf("startup redelivery HTTP %d", w.Code)
+			}
+			f.tx(t, func(tx pgx.Tx) error {
+				var ledger, failures int
+				if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM delivery_github_events WHERE delivery_id='startup-check'),(SELECT count(*) FROM delivery_queue_failures WHERE check_run_id=$1)`, check.ID).Scan(&ledger, &failures); err != nil {
+					return err
+				}
+				if ledger != 1 || failures != 1 {
+					t.Fatalf("startup recovery/redelivery duplicated effects: ledger %d failures %d", ledger, failures)
+				}
+				return nil
+			})
+			if item := f.item(t, p.Number); item.Head != p.Head || item.State != QueueFailed || !item.Observation.QueueFailure {
+				t.Fatalf("startup queue failure was lost or attached to the wrong head: %+v", item)
+			}
+		})
+	}
+}
+
 // Pause the first projection after it claims the observation session. Let the
 // other deliveries save their receipts before a competing writer takes the
 // tenant fence. TraceQueryEnd observes an actual PostgreSQL lock timeout.
