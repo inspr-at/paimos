@@ -51,7 +51,10 @@ metadata operation and does not require content authority. Pairing and API-key p
 separate rollout concerns.
 
 The exact owned stop/yield/confirm-exit/control-completion safety routes retain
-their private worker-lease checks without a content capability. The server also
+their private worker-lease checks without a content capability. Person session
+controls (interrupt and stop) are not content or launch: a bare paired
+credential meets the computer pairing ceiling on those routes, and an upgrade
+reason does not replace that refusal. A content credential cannot select them. The server also
 rechecks the exact lease and S1-03 ownership: an assigned run, a generation
 started by the paired principal, or its current native session binding. A lease
 on a person-created direct registration does not establish daemon ownership. Bare paired

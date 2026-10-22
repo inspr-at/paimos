@@ -50,10 +50,23 @@ func transportMetadataRoute(r *http.Request) bool {
 	return false
 }
 
+// Person session controls are not content reads or launch claims. A bare
+// computer credential must meet the pairing ceiling on these routes. An
+// upgrade demand would hide "outside this computer's runtime authority" and
+// invite a content credential onto a control the computer does not hold.
+func transportControlCeilingRoute(r *http.Request) bool {
+	switch r.Pattern {
+	case "POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/interrupt",
+		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/stop":
+		return true
+	}
+	return false
+}
+
 func (m *Module) runContentBoundary(r *http.Request, p tenant.Principal) (*http.Request, tenant.Principal, error) {
 	values := r.Header.Values(db.RunCapabilityHeader)
 	if len(values) == 0 {
-		if p.TransportComputerID != "" && !transportMetadataRoute(r) {
+		if p.TransportComputerID != "" && !transportMetadataRoute(r) && !transportControlCeilingRoute(r) {
 			return r, p, &agentpairing.Error{Status: 403, Code: "run_capability_upgrade_required", Message: "Upgrade agentd: run_content_v1 capability required for content and launch"}
 		}
 		return r, p, nil
@@ -130,6 +143,9 @@ func runCapabilityTarget(r *http.Request, p tenant.Principal) bool {
 			return false
 		}
 	case "projects":
+		if transportControlCeilingRoute(r) {
+			return false
+		}
 		if len(parts) < 4 || parts[3] != "harness-sessions" {
 			return false
 		}
