@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/servicetier"
 )
 
@@ -29,6 +30,45 @@ func (a *runOnceAdapter) Start(_ context.Context, r StartRequest, _ func(Adapter
 	a.request = r
 	sum := sha256.Sum256([]byte(r.Rules))
 	return &deliveryStartProcess{fakeProcess: a.proc, hash: hex.EncodeToString(sum[:])}, nil
+}
+
+// Risk: a trusted host hides a bridge fixture that uses an ambient Node path
+// refused on CI. The real adapter must retain its path checks and still
+// enforce the read-only ceiling with this test's private interpreter copy.
+func TestRunOnceReadOnlyBridgeWithUntrustedAmbientNode(t *testing.T) {
+	installedNode, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(prefix, 0777); err != nil {
+		t.Fatal(err)
+	}
+	ambientNode := filepath.Join(prefix, "node")
+	copyNativeFixtureNode(t, installedNode, ambientNode)
+	_, sdk := claudeAdapterDependencies(t, fakeVendorPath(t, "claude"))
+	_, err = agentsetup.ResolveClaudeRuntime(agentsetup.ClaudeDependencies{NodePath: ambientNode, SDKPath: sdk}, "")
+	if !errors.Is(err, agentsetup.ErrUnsafePath) || !strings.Contains(err.Error(), "world-writable") {
+		t.Fatal("untrusted ambient Node refused for wrong reason", err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, executable, "-test.v", "-test.run=^TestRunOnceReadOnlyCeilingAndInstruction$/^bridge$")
+	command.Env = append(os.Environ(), "PATH="+prefix+string(os.PathListSeparator)+os.Getenv("PATH"))
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("untrusted ambient Node broke the read-only bridge fixture: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "--- PASS: TestRunOnceReadOnlyCeilingAndInstruction/bridge (") {
+		t.Fatal("CI host regression did not execute the read-only bridge behavior", string(output))
+	}
 }
 
 // Risk: a generic no-mutation flag is ignored, the original work-order text
@@ -72,7 +112,7 @@ func TestRunOnceReadOnlyCeilingAndInstruction(t *testing.T) {
 		}
 	}
 	t.Run("bridge", func(t *testing.T) {
-		node, err := exec.LookPath("node")
+		installedNode, err := exec.LookPath("node")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -81,7 +121,8 @@ func TestRunOnceReadOnlyCeilingAndInstruction(t *testing.T) {
 			t.Fatal(err)
 		}
 		vendor := fakeVendorPath(t, "claude")
-		_, sdkPath := claudeAdapterDependencies(t, vendor)
+		node, sdkPath := claudeAdapterDependencies(t, vendor)
+		copyNativeFixtureNode(t, installedNode, node)
 		const sdk = `export function query({prompt,options:o}) {
           if (o.tools.length || o.allowedTools.length || o.plugins.length || o.settingSources.length || Object.keys(o.mcpServers).length || !o.strictMcpConfig || o.maxTurns!==1 || o.additionalDirectories.length) throw new Error('unsafe options');
           return {streamInput:async()=>{},close:()=>{},async *[Symbol.asyncIterator]() {

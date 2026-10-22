@@ -2126,6 +2126,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRunIdleSleepAssertionLifecycle","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunOnceReadOnlyBridgeWithUntrustedAmbientNode","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRunOnceReadOnlyCeilingAndInstruction","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSIGTERMEndsIdleManagedCodex","tier":"GATED-FULL"}
