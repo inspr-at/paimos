@@ -5,10 +5,14 @@ package events
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +21,8 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Risk: hostile selectors/cursors must be bounded before database or listener
@@ -72,10 +78,8 @@ func TestSubscriptionInputAndAdmissionBounds(t *testing.T) {
 	}
 }
 
-// Risk: idle connections must revalidate authority and send cursor-free
-// heartbeat frames without creating events. Injected wake barriers replace
-// wall-clock waits; timeouts below only guard against hangs.
-func TestSubscriptionHeartbeatPreservesCursorAndRevocation(t *testing.T) {
+func subscriptionPlanReader(t *testing.T) (*dbtest.DB, tenant.Principal) {
+	t.Helper()
 	d, a, _ := fixture(t)
 	var owner string
 	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Owner') RETURNING id::text`, a.TenantID).Scan(&owner); err != nil {
@@ -99,10 +103,18 @@ func TestSubscriptionHeartbeatPreservesCursorAndRevocation(t *testing.T) {
 	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'fixture','fixture',repeat('0',64),$3,$4) RETURNING id::text`, a.TenantID, a.ID, a.Scopes, owner).Scan(&a.KeyID); err != nil {
 		t.Fatal(err)
 	}
+	return d, a
+}
+
+// Risk: idle connections must revalidate authority and send cursor-free
+// heartbeat frames without creating events. Injected wake barriers replace
+// wall-clock waits; timeouts below only guard against hangs.
+func TestSubscriptionHeartbeatPreservesCursorAndRevocation(t *testing.T) {
+	d, a := subscriptionPlanReader(t)
 	ticks := make(chan struct{})
 	waiting := make(chan struct{}, 2)
 	m := New(d.App).(*module)
-	m.subscriptionWait = func(ctx context.Context, _ db.NotificationListener, _ time.Time) error {
+	m.subscriptionWait = func(ctx context.Context, _ db.NotificationListener, _ int64, _ time.Time) error {
 		waiting <- struct{}{}
 		select {
 		case <-ticks:
@@ -166,6 +178,252 @@ func TestSubscriptionHeartbeatPreservesCursorAndRevocation(t *testing.T) {
 	<-finished
 	if m.subscriptions.total != 0 || len(m.subscriptions.keys) != 0 {
 		t.Fatal("revoked stream retained resources")
+	}
+}
+
+type subscriptionNotice struct {
+	notification *pgconn.Notification
+	err          error
+}
+
+type subscriptionNoticeSource struct {
+	steps   chan subscriptionNotice
+	waiting chan struct{}
+}
+
+func (s *subscriptionNoticeSource) WaitForNotification(ctx context.Context) (*pgconn.Notification, error) {
+	select {
+	case s.waiting <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case step := <-s.steps:
+		return step.notification, step.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+func (*subscriptionNoticeSource) Close(context.Context) error { return nil }
+
+type subscriptionReadTrace struct {
+	pages, boundaries atomic.Int64
+	pauseAt           atomic.Int64
+	paused, release   chan struct{}
+}
+
+func (tr *subscriptionReadTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "SELECT e.id,e.type,e.at") {
+		tr.pages.Add(1)
+	}
+	if strings.Contains(data.SQL, "SELECT last_id FROM event_counters WHERE tenant_id=$1") {
+		if tr.boundaries.Add(1) == tr.pauseAt.Load() {
+			close(tr.paused)
+			select {
+			case <-tr.release:
+			case <-ctx.Done():
+			}
+		}
+	}
+	return ctx
+}
+func (*subscriptionReadTrace) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+// Risk: idle/duplicate hints cause data reads, missed hints lose a durable
+// cursor, or a replay backlog bypasses current key authority. Query barriers
+// establish the revocation interleaving; injected waits establish heartbeat due.
+func TestSubscriptionIdleReadsCoalesceAndCatchUpWithCurrentAuthority(t *testing.T) {
+	for _, revokeBacklog := range []bool{false, true} {
+		t.Run(fmt.Sprintf("revoke_backlog=%t", revokeBacklog), func(t *testing.T) {
+			d, agent := subscriptionPlanReader(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
+			trace := &subscriptionReadTrace{paused: make(chan struct{}), release: make(chan struct{})}
+			defer func() {
+				select {
+				case <-trace.release:
+				default:
+					close(trace.release)
+				}
+			}()
+			cfg := d.App.Config()
+			cfg.ConnConfig.Tracer = trace
+			if _, err := db.ConfigurePool(cfg); err != nil {
+				t.Fatal(err)
+			}
+			pool, err := pgxpool.NewWithConfig(ctx, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pool.Close()
+			defer db.CloseNotificationConnections(pool)
+			source := &subscriptionNoticeSource{steps: make(chan subscriptionNotice), waiting: make(chan struct{})}
+			m := New(pool).(*module)
+			m.subscriptionWait = func(ctx context.Context, _ db.NotificationListener, after int64, deadline time.Time) error {
+				return waitSubscription(ctx, source, after, deadline)
+			}
+			mux := http.NewServeMux()
+			m.Mount(mux)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mux.ServeHTTP(w, r.WithContext(tenant.WithPrincipal(r.Context(), agent)))
+			}))
+			defer srv.Close()
+			req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/events/subscribe?topics=plan", nil)
+			resp, err := srv.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != 200 {
+				t.Fatalf("subscription status %d", resp.StatusCode)
+			}
+			scanner := bufio.NewScanner(resp.Body)
+			frame := func() (name, data string, id int64) {
+				t.Helper()
+				id = -1
+				for scanner.Scan() {
+					line := scanner.Text()
+					if line == "" {
+						return
+					}
+					switch {
+					case strings.HasPrefix(line, "id: "):
+						var err error
+						id, err = strconv.ParseInt(strings.TrimPrefix(line, "id: "), 10, 64)
+						if err != nil {
+							t.Fatal(err)
+						}
+					case strings.HasPrefix(line, "event: "):
+						name = strings.TrimPrefix(line, "event: ")
+					case strings.HasPrefix(line, "data: "):
+						data = strings.TrimPrefix(line, "data: ")
+					}
+				}
+				t.Fatalf("incomplete frame: %v", scanner.Err())
+				return
+			}
+			wait := func() {
+				t.Helper()
+				select {
+				case <-source.waiting:
+				case <-ctx.Done():
+					t.Fatal("subscription did not reach wait barrier")
+				}
+			}
+			step := func(s subscriptionNotice) {
+				t.Helper()
+				select {
+				case source.steps <- s:
+				case <-ctx.Done():
+					t.Fatal("subscription did not consume scripted wake")
+				}
+			}
+			name, _, base := frame()
+			if name != "stream.ready" || base != logPosition(t, d, agent) {
+				t.Fatal("subscription did not establish its durable cursor")
+			}
+			wait()
+			boundaries := trace.boundaries.Load()
+			for i := range 64 {
+				payload := fmt.Sprintf(`{"tenant_id":%q,"id":%d}`, agent.TenantID, base)
+				if i%3 == 0 {
+					payload = fmt.Sprintf(`{"tenant_id":%q,"heartbeat_session_id":"ignored"}`, agent.TenantID)
+				} else if i%3 == 1 {
+					payload = `{"tenant_id":"other","id":9223372036854775807}`
+				}
+				step(subscriptionNotice{notification: &pgconn.Notification{Payload: payload}})
+				wait()
+			}
+			if trace.pages.Load() != 0 || trace.boundaries.Load() != boundaries {
+				t.Fatalf("irrelevant burst caused SQL: pages=%d boundaries=%d", trace.pages.Load(), trace.boundaries.Load()-boundaries)
+			}
+			// A forged future wake must not become a durable cursor. It reads
+			// the real boundary, finds no change, and skips the filtered page.
+			step(subscriptionNotice{notification: &pgconn.Notification{Payload: fmt.Sprintf(`{"tenant_id":%q,"id":9223372036854775807}`, agent.TenantID)}})
+			wait()
+			step(subscriptionNotice{err: context.DeadlineExceeded})
+			if name, _, id := frame(); name != "stream.ping" || id != -1 {
+				t.Fatal("idle heartbeat changed cursor")
+			}
+			wait()
+			if trace.pages.Load() != 0 {
+				t.Fatal("unchanged cursor read a filtered page")
+			}
+			var last int64
+			if err := db.InTenant(dbtest.Seed(ctx), d.App, agent.TenantID, func(tx pgx.Tx) error {
+				for range subscriptionBatch + 1 {
+					e, err := Append(ctx, tx, tenant.Principal{ID: agent.KeyCreatorID, TenantID: agent.TenantID, Kind: tenant.Person}, Change{
+						Type: "agents_plan.changed", After: map[string]any{"principal_id": agent.KeyCreatorID},
+					})
+					if err != nil {
+						return err
+					}
+					last = e.ID
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if revokeBacklog {
+				trace.pauseAt.Store(trace.boundaries.Load() + 2)
+			}
+			// The source deliberately receives no event notification. The next
+			// heartbeat must recover both pages from the original real cursor.
+			step(subscriptionNotice{err: context.DeadlineExceeded})
+			if name, _, id := frame(); name != "stream.ping" || id != -1 {
+				t.Fatal("reconciliation heartbeat changed cursor")
+			}
+			wantItems := subscriptionBatch + 1
+			if revokeBacklog {
+				wantItems = subscriptionBatch
+			}
+			seen, cursors, through := 0, 0, base
+			for seen < wantItems || through < base+int64(wantItems) {
+				name, data, id := frame()
+				switch name {
+				case "agents_plan.changed":
+					var hint subscriptionHint
+					if err := json.Unmarshal([]byte(data), &hint); err != nil || hint.ID != base+int64(seen)+1 || hint.ID != id || hint.Topic != "plan" {
+						t.Fatalf("lost or invalid plan hint %s: %v", data, err)
+					}
+					seen++
+				case "stream.cursor":
+					cursors++
+					through = id
+					if id != base+int64(seen) {
+						t.Fatal("cursor skipped undelivered hints")
+					}
+				default:
+					t.Fatalf("unexpected frame %s", name)
+				}
+			}
+			if revokeBacklog {
+				select {
+				case <-trace.paused:
+				case <-ctx.Done():
+					t.Fatal("second replay page never reached revocation barrier")
+				}
+			} else {
+				wait()
+				if through != last || cursors != 2 {
+					t.Fatalf("catch-up cursor=%d want=%d pages=%d", through, last, cursors)
+				}
+			}
+			if _, err := d.Admin.Exec(ctx, `UPDATE agent_keys SET revoked_at=now() WHERE id=$1`, agent.KeyID); err != nil {
+				t.Fatal(err)
+			}
+			if revokeBacklog {
+				close(trace.release)
+			} else {
+				step(subscriptionNotice{err: context.DeadlineExceeded})
+			}
+			if scanner.Scan() || scanner.Err() != nil {
+				t.Fatalf("revoked stream delivered data or failed to close: %s %v", scanner.Text(), scanner.Err())
+			}
+			if trace.pages.Load() > 4 || revokeBacklog && trace.pages.Load() != 2 {
+				t.Fatalf("unexpected replay reads after revocation: %d", trace.pages.Load())
+			}
+		})
 	}
 }
 

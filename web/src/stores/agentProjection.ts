@@ -13,6 +13,7 @@ import { onProjectionWake } from '../lib/agents'
 import { addWake, asksBySession, emptyWake, queueByProject, subtree, type Wake } from '../lib/agentProjection'
 import { readQuestions, MAX_QUESTION_PAGES, type Question } from '../lib/decisionDeskApi'
 import { usePoller } from '../lib/usePolledData'
+import { RECONCILE_MS } from '../lib/sharedRequests'
 import { queueRequest, type QueueWireSnapshot } from '../lib/workQueue'
 import { useAgents } from './agents'
 import { useProjectLeads } from './projectLeads'
@@ -29,7 +30,7 @@ export const QUEUE_ITEM_LIMIT = 2000
 /** Sessions read for a project's tree where the Agents list is not loaded. */
 export const TREE_LIMIT = 200
 export const WAKE_BATCH_MS = 400
-export const PROJECTION_POLL_MS = 30_000
+export const PROJECTION_POLL_MS = RECONCILE_MS
 
 const failure = (e: unknown, fallback: string): Pick<Source, 'state' | 'error'> => e instanceof APIError && e.status === 403
   ? { state: 'forbidden', error: 'You may not see this.' }
@@ -166,7 +167,7 @@ export const useAgentProjection = defineStore('agentProjection', () => {
   function flush() {
     timer = undefined
     const w = pending; pending = emptyWake()
-    if (!owner.value || !watchers.size) return
+    if (!owner.value || !watchers.size || typeof document !== 'undefined' && document.visibilityState === 'hidden' || typeof navigator !== 'undefined' && navigator.onLine === false) return
     if (w.all) { void refresh(true); if (agents.loaded) void agents.loadAll(); return }
     const known = new Set(projects.projects.map(p => p.id))
     if (w.anyLead && everyProject()) void leads.loadMany(activeProjects())

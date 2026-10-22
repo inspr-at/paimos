@@ -358,8 +358,6 @@
     ,
     "scripts/releaseworkflow:TestRehearsedBuilderPins"
     ,
-    "scripts/releaseworkflow:TestRootAptTimeoutReapsBeforeRetry"
-    ,
     "scripts/test-tiers/go-package:TestPackageInventoryMatchesUncachedCollector"
   ]
   ,
@@ -6816,6 +6814,8 @@
     ,
     {"kind":"go","package":"internal/events","name":"TestSubscriptionHeartbeatPreservesCursorAndRevocation","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/events","name":"TestSubscriptionIdleReadsCoalesceAndCatchUpWithCurrentAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/events","name":"TestSubscriptionInputAndAdmissionBounds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestSubscriptionTopicProjectAndReferenceCeilings","tier":"ESSENTIAL"}
@@ -7059,6 +7059,10 @@
     {"kind":"go","package":"internal/harness","name":"TestHarnessGenerationAndOwnedControls","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHarnessInboxLeaseAndExactAck","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestHarnessNotificationBurstReadsOneDurableRange","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestHarnessNotificationCursorCoalescingAndAuthorityDeadline","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHarnessNotificationsCommitWakeLeaseAndRevocation","tier":"ESSENTIAL"}
     ,
@@ -11662,7 +11666,7 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReuseAlwaysPrimesMatchingMainCacheKeys","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"scripts/releaseworkflow","name":"TestRootAptTimeoutReapsBeforeRetry","tier":"NIGHTLY"}
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestRootAptTimeoutReapsBeforeRetry","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestRuntimeClosurePreparedColdAndNeverCached","tier":"ESSENTIAL"}
     ,

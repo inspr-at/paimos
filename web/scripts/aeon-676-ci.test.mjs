@@ -2,6 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { withoutOptionalAptDownload } from '../../scripts/check-apt-bounds.mjs'
 
 const requiredSpecs = ['clip-tip', 'aeon-632b-clip', 'aeon-632b-clip-settings', 'key-trim', 'model-prefs']
   .map(name => `tests/${name}.spec.ts`)
@@ -37,7 +38,7 @@ test('AEON-676 regressions retain hosted launch policy and full nightly coverage
   assert.doesNotMatch(shard, /ci-flake-guard\.mjs/)
   assert.match(shard, /if \[ "\$CI_LANE" = spec-only \]/)
   assert.match(shard, /npm --prefix web run ci:web:shard -- "\$\{\{ matrix.shard \}\}\/1"/)
-  assert.doesNotMatch(shard, /continue-on-error:\s*true/)
+  assert.doesNotMatch(withoutOptionalAptDownload(shard), /continue-on-error:\s*true/)
   const scripts = JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).scripts
   assert.equal(scripts['ci:web:shard'], 'node scripts/ci-web-shard.mjs')
   assert.ok(scripts['test:unit'].startsWith('npm run ci:web:shard:test &&'))

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { DeployTarget } from './deployTarget'
 import { agentEventIdentity, type AgentEventIdentity } from './tierEvidenceLive.ts'
-import { watchStreamHealth } from './streamHealth.ts'
+import { subscribeBrowserEvents } from './sharedRequests.ts'
 import { eventNode, PROJECTION_EVENTS } from './agentProjection.ts'
 import { api, APIError } from './api.ts'
 import { stamp, tick } from './position.ts'
@@ -181,31 +181,24 @@ export const DELIVERY_EVENTS = ['delivery.stall_alerted', 'inbox.message_fetched
 const projectionWakes = new Set<(event?: string, node?: string | null) => void>()
 export function onProjectionWake(listener: (event?: string, node?: string | null) => void) { projectionWakes.add(listener); return () => { projectionWakes.delete(listener) } }
 const wakeProjection = (event?: string, node?: string | null) => projectionWakes.forEach(listener => listener(event, node))
+let agentSubscribers = 0
+let stopProjectionEvents: (() => void) | undefined
 export function subscribeAgents(changed: (event?: string, identity?: AgentEventIdentity) => void, connection: (live: boolean) => void = () => {}, delivery: () => void = () => {}, telemetry = false, recover: () => void = changed): () => void {
   if (typeof EventSource === 'undefined') return () => {}
-  let stream: EventSource
+  if (++agentSubscribers === 1) stopProjectionEvents = subscribeBrowserEvents(PROJECTION_EVENTS, (name, data) => wakeProjection(name, eventNode(data)))
   let stopped = false
-  const health = watchStreamHealth(() => {
-    stream.close()
-    connection(false)
-    recover(); delivery(); wakeProjection()
-    connect()
-  })
-  function connect() {
-    const source = stream = new EventSource('/api/events/stream?after=latest')
-    const current = (run: (event: Event) => void) => (event: Event) => { if (!stopped && stream === source) { health.heard(); run(event) } }
-    source.onopen = current(() => { connection(true); changed(); delivery(); wakeProjection() })
-    source.onerror = () => { if (!stopped && stream === source) connection(false) }
-    source.addEventListener('stream.ping', current(() => {}))
-    source.addEventListener('stream.ready', current(() => {}))
-    for (const name of [...HARNESS_EVENTS.map(kind => `harness.${kind}`), ...OTHER_EVENTS]) source.addEventListener(name, current(event => { const identity = agentEventIdentity((event as MessageEvent).data); if (identity) changed(name, identity); else changed(name) }))
-    // Heartbeats prove liveness without invalidating the 20-second live feed poll.
-    source.addEventListener('harness.heartbeat', current(() => { if (telemetry) changed() }))
-    for (const name of DELIVERY_EVENTS) source.addEventListener(name, current(delivery))
-    for (const name of PROJECTION_EVENTS) source.addEventListener(name, current(event => wakeProjection(name, eventNode((event as MessageEvent).data))))
+  const changes = new Set([...HARNESS_EVENTS.map(kind => `harness.${kind}`), ...OTHER_EVENTS])
+  const stop = subscribeBrowserEvents([...changes, ...DELIVERY_EVENTS, 'harness.heartbeat'], (name, data) => {
+    if (!name) { changed(); delivery(); return }
+    if (changes.has(name)) { const identity = agentEventIdentity(data); if (identity) changed(name, identity); else changed(name) }
+    if (name === 'harness.heartbeat' && telemetry) changed()
+    if (DELIVERY_EVENTS.includes(name)) delivery()
+  }, connection, () => { recover(); delivery() })
+  return () => {
+    if (stopped) return
+    stopped = true; stop()
+    if (--agentSubscribers === 0) { stopProjectionEvents?.(); stopProjectionEvents = undefined }
   }
-  connect()
-  return () => { stopped = true; health.stop(); stream.close() }
 }
 
 export const approveAccountCapacity = (id: string) => request<void>(`/agent-accounts/${enc(id)}/capacity/approve`, 'POST', {})
