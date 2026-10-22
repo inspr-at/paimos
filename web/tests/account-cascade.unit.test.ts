@@ -4,6 +4,7 @@ import {
   allowanceWindowLabel, authorFamilyFor, chooseStep, displayText, emptyChoice, emptyTouch, fetchAccountCatalog, fillDefaults, isAccountCatalog, presentCascade, publicModelId, sessionReport, workRoleFor,
   type AgentAccountCatalog, type CatalogAccount, type CascadeChoice, type CascadeTouch,
 } from '../src/lib/accountCascade'
+import { absoluteTime } from '../src/lib/work'
 
 const NOW = Date.parse('2026-09-27T12:00:00Z')
 const profileA = 'b1000000-0000-4000-8000-000000000001'
@@ -112,8 +113,8 @@ describe('account catalog contract', () => {
     }])
     const { filled, view } = presented(value)
     expect(view.hosts).toEqual([
-      { value: 'workstation-new', label: 'Work Mac · Online · pairing 2' },
-      { value: 'workstation', label: 'Work Mac · Offline · pairing 1' },
+      { value: 'workstation-new', label: 'Work Mac · Online' },
+      { value: 'workstation', label: `Work Mac · Offline · last seen ${absoluteTime(new Date(NOW - 180_000).toISOString())}` },
     ])
     expect(filled.hostId).toBe('workstation-new')
     expect(filled.accountId).toBe(accountB)
@@ -124,6 +125,13 @@ describe('account catalog contract', () => {
     expect(manual.filled.hostId).toBe('workstation')
     expect(manual.filled.accountId).toBe(accountA)
     expect(manual.view.accounts.map(item => item.value)).toEqual([accountA])
+    // The last-seen label uses the newest probe across every harness/account,
+    // including a failed probe, rather than the first enrollment in the list.
+    value.hosts[0].harnesses.push({ harness: 'claude', default_account_id: null, accounts: [account({
+      id: 'ac000000-0000-4000-8000-000000000003', last_probe_at: new Date(NOW - 120_000).toISOString(), last_probe_ok: false,
+      available: false, unavailable_reasons: ['probe'],
+    })] })
+    expect(presented(value).view.hosts[1].label).toBe(`Work Mac · Offline · last seen ${absoluteTime(new Date(NOW - 120_000).toISOString())}`)
     // A second live pairing remains distinguishable and manually selectable.
     value.hosts[0].harnesses[0].accounts[0].last_probe_at = new Date(NOW - 1000).toISOString()
     expect(presented(value).view.hosts.map(item => item.label)).toEqual(['Work Mac · Online · pairing 2', 'Work Mac · Online · pairing 1'])

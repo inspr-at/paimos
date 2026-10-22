@@ -7,6 +7,7 @@
 import { api } from './api.ts'
 import { capacityWaitText, isCapacityWait, type CapacityWait } from './capacityWait.ts'
 import { duration, harnessLabel } from './agentState.ts'
+import { absoluteTime } from './work.ts'
 
 export const WORK_ROLES = ['scout', 'mechanical', 'build', 'build-hard', 'review-gate'] as const
 export type WorkRole = typeof WORK_ROLES[number]
@@ -358,20 +359,25 @@ function hostConnection(host: CatalogHost, asOf: string) {
 function hostOptions(catalog: AgentAccountCatalog | null): CascadeOption[] {
   if (!catalog) return []
   const hosts = catalog.hosts.map(host => ({ host, name: hostLabel(host), connection: hostConnection(host, catalog.as_of) }))
-  const pairings = new Map<string, string[]>()
-  for (const { host, name } of hosts) {
-    const ids = pairings.get(name) ?? []
-    ids.push(host.daemon_id)
-    pairings.set(name, ids)
+  const pairings = new Map<string, { count: number; onlineIds: string[] }>()
+  for (const { host, name, connection } of hosts) {
+    const group = pairings.get(name) ?? { count: 0, onlineIds: [] }
+    group.count++
+    if (connection.state === 'online') group.onlineIds.push(host.daemon_id)
+    pairings.set(name, group)
   }
-  for (const ids of pairings.values()) ids.sort()
+  for (const { onlineIds } of pairings.values()) onlineIds.sort()
   return hosts.sort((a, b) => a.connection.rank - b.connection.rank || b.connection.checkedAt - a.connection.checkedAt || a.host.daemon_id.localeCompare(b.host.daemon_id))
     .map(({ host, name, connection }) => {
-      const ids = pairings.get(name)!
+      const { count, onlineIds } = pairings.get(name)!
       // A name is not an identity: retain every enrollment, including two live
-      // machines with the same name. Ordinals avoid exposing opaque daemon IDs.
-      const suffix = ids.length > 1 ? ` · pairing ${ids.indexOf(host.daemon_id) + 1}` : ''
-      return { value: host.daemon_id, label: `${name}${ids.length > 1 || connection.state !== 'online' ? ` · ${connection.label}` : ''}${suffix}` }
+      // machines with the same name. Only live duplicates need an ordinal;
+      // stale pairings are identified by their latest valid probe instead.
+      const suffix = connection.state === 'online' && onlineIds.length > 1 ? ` · pairing ${onlineIds.indexOf(host.daemon_id) + 1}` : ''
+      const status = count > 1 && connection.state === 'offline'
+        ? `${connection.label} · last seen ${absoluteTime(new Date(connection.checkedAt).toISOString())}`
+        : connection.label
+      return { value: host.daemon_id, label: `${name}${count > 1 || connection.state !== 'online' ? ` · ${status}` : ''}${suffix}` }
     })
 }
 function modelLabel(model: CatalogModel, models: CatalogModel[]) {
