@@ -104,7 +104,7 @@ func TestDeliveryEvidenceFeedsNativeAndReportedMeasurements(t *testing.T) {
 			t.Fatal("evidence replay lost its receipt or duplicated events")
 		}
 	}
-	rollout := map[string]any{"schema": "aeon.rollout.v1", "direction": "forward", "release": "140", "version": "v140", "outcome": "live",
+	rollout := map[string]any{"schema": "aeon.rollout.v1", "repository": f.m.config.Repository, "direction": "forward", "release": "140", "version": "v140", "outcome": "live",
 		"cut_at": f.at.Add(-60 * time.Minute), "live_at": f.at.Add(-10 * time.Minute), "healthy_at": f.at.Add(-9 * time.Minute)}
 	for i := 0; i < 2; i++ {
 		f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/flow/rollout", rollout, 200, nil)
@@ -121,6 +121,11 @@ func TestDeliveryEvidenceFeedsNativeAndReportedMeasurements(t *testing.T) {
 	wantWindow(t, metricByKey(t, out.Metrics, "review_audits"), 7, "partial", 1, f64(1), nil, nil)
 	if metricByKey(t, out.Metrics, "preflight_red_rate").Status != "no_data" {
 		t.Fatal("harness evidence fabricated GitHub preflight observations")
+	}
+	rollout["repository"] = "example/changed-source"
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/flow/rollout", rollout, 409, nil)
+	if evidenceCount(t, f) != 5 {
+		t.Fatal("stale rollout binding changed evidence")
 	}
 	// A correction updates one projection row and emits one new observation.
 	report.Facts = report.Facts[3:]
@@ -206,8 +211,9 @@ func TestDeliveryMergeCompletionEmitsExplicitResolution(t *testing.T) {
 		round = *claim.Round
 		progress := path + "/" + round.ID + "/progress"
 		f.call(t, f.person, "POST", progress, map[string]any{"revision": round.Revision, "state": "running"}, 200, &round)
-		f.call(t, f.person, "POST", progress, map[string]any{"revision": round.Revision, "state": "done", "merge_outcome": outcome}, 200, &round)
-		f.call(t, f.person, "POST", progress, map[string]any{"revision": round.Revision, "state": "done", "merge_outcome": outcome}, 200, &round)
+		f.call(t, f.person, "POST", progress, map[string]any{"revision": round.Revision, "state": "done", "merge_outcome": outcome, "repository": f.m.config.Repository, "head_sha": strings.Repeat("e", 40)}, 409, nil)
+		f.call(t, f.person, "POST", progress, map[string]any{"revision": round.Revision, "state": "done", "merge_outcome": outcome, "repository": f.m.config.Repository, "head_sha": p.Head}, 200, &round)
+		f.call(t, f.person, "POST", progress, map[string]any{"revision": round.Revision, "state": "done", "merge_outcome": outcome, "repository": f.m.config.Repository, "head_sha": p.Head}, 200, &round)
 		if evidenceCount(t, f) != i+1 {
 			t.Fatal("progress replay duplicated measurement")
 		}

@@ -160,6 +160,7 @@ components:
       required: [schema, release]
       properties:
         schema: {type: string, enum: [aeon.rollout.v1]}
+        repository: {type: string, maxLength: 200, description: 'Optional captured metric repository; a changed or missing linked source returns 409 without writing the report.'}
         direction: {type: string, enum: [forward]}
         outcome: {type: string, enum: [in_progress, live, success, failed]}
         release: {type: string, pattern: '^[A-Za-z0-9._-]{1,32}$'}

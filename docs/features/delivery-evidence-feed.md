@@ -18,14 +18,15 @@ approval changes. Measurement facts never authorize a review, merge or release.
 - **Merge rounds:** trusted merge tooling can submit `merge_round` facts with
   outcome `scripted` or `model` through the existing facts route. The existing
   shadow queue's progress route also accepts optional `merge_outcome` when a
-  claimant completes a merge round. It requires a current project/repository/
+  claimant completes a merge round. It requires the captured repository/head and a current project/repository/
   ticket/PR link and commits the measurement with progress. Omitting it invents
   no classification. The queue's execution flag stays closed.
 - **Release to live:** a forward `aeon.rollout.v1` report with successful/live
   outcome, `cut_at` and `live_at` emits a release fact when the project has a
   linked metric repository. `healthy_at`, when present, remains separate.
   Publication, healthy time alone and in-progress/failed reports do not invent
-  live confirmation. Identity is `rollout/<release label>`, not version. The
+  live confirmation. Identity is `rollout/<release label>`, not version. The optional top-level
+  `repository` rejects a changed or missing source with 409. The
   existing `release_queue_to_live` key measures the recorded start → live: OPS
   cut time or a manually reported queue-entry time. The server label and
   definition name that distinction.

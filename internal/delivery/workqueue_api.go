@@ -13,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -212,6 +213,8 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Revision     int64           `json:"revision"`
 		MergeOutcome string          `json:"merge_outcome"`
+		Repository   string          `json:"repository"`
+		Head         string          `json:"head_sha"`
 		State        string          `json:"state"`
 		Hold         json.RawMessage `json:"hold_reason"`
 	}
@@ -228,8 +231,12 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 		respondError(w, fail(400, "invalid round transition"))
 		return
 	}
-	if in.MergeOutcome != "" && (!progress || in.State != "done" || in.MergeOutcome != "scripted" && in.MergeOutcome != "model") {
-		respondError(w, fail(400, "merge_outcome requires completed merge progress"))
+	if in.MergeOutcome != "" && (!progress || in.State != "done" || in.MergeOutcome != "scripted" && in.MergeOutcome != "model" || !reviewgate.ValidRepository(in.Repository) || !reviewgate.ValidSHA(in.Head)) {
+		respondError(w, fail(400, "merge_outcome requires completed merge progress and captured repository/head"))
+		return
+	}
+	if in.MergeOutcome == "" && (in.Repository != "" || in.Head != "") {
+		respondError(w, fail(400, "repository/head belong to merge_outcome"))
 		return
 	}
 	var hold *string
@@ -316,8 +323,8 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return nil, 200, err
 			}
-			if source == nil {
-				return nil, 200, fail(409, "link a repository before reporting merge resolution")
+			if source == nil || source.Repository != in.Repository {
+				return nil, 200, fail(409, "project repository changed; discard the merge result")
 			}
 			var head string
 			err = tx.QueryRow(r.Context(), `SELECT head_sha FROM delivery_items WHERE project_id=$1 AND ticket_node_id=$2 AND repository=$3 AND pull_request=$4`, project, out.Ticket, source.Repository, out.PR).Scan(&head)
@@ -326,6 +333,9 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 			}
 			if err != nil {
 				return nil, 200, err
+			}
+			if head != in.Head {
+				return nil, 200, fail(409, "pull request head changed; discard the merge result")
 			}
 			if err := lockMergeEventParentsTx(r.Context(), tx, p, &project); err != nil {
 				return nil, 200, err

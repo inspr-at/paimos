@@ -64,8 +64,8 @@ func readMergeQueueProof(number int64, sha string, page func(*string, any) error
 						} `json:"mergeCommit"`
 						Timeline struct {
 							Nodes []queueHistoryEvent `json:"nodes"`
-							Info  struct {
-								More bool    `json:"hasNextPage"`
+							Info  *struct {
+								More *bool   `json:"hasNextPage"`
 								End  *string `json:"endCursor"`
 							} `json:"pageInfo"`
 						} `json:"timelineItems"`
@@ -78,7 +78,7 @@ func readMergeQueueProof(number int64, sha string, page func(*string, any) error
 		}
 		p := response.Data.Repository.Pull
 		if len(response.Errors) != 0 || p == nil || p.Number != number || !p.Merged || p.Commit.OID != sha || p.At.IsZero() ||
-			p.Timeline.Nodes == nil || len(p.Timeline.Nodes) > 100 || !mergedAt.IsZero() && !mergedAt.Equal(p.At) {
+			p.Timeline.Info == nil || p.Timeline.Info.More == nil || p.Timeline.Nodes == nil || len(p.Timeline.Nodes) > 100 || !mergedAt.IsZero() && !mergedAt.Equal(p.At) {
 			return false, errGitHub
 		}
 		mergedAt = p.At
@@ -102,7 +102,7 @@ func readMergeQueueProof(number int64, sha string, page func(*string, any) error
 				return false, errGitHub
 			}
 		}
-		if !p.Timeline.Info.More {
+		if !*p.Timeline.Info.More {
 			return merged, nil
 		}
 		end := p.Timeline.Info.End

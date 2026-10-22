@@ -22,7 +22,7 @@ func TestMergeQueueHistoryRequiresCanonicalCompleteTimeline(t *testing.T) {
 	// administrator's merge is incorrectly treated as canonical queue proof.
 	sha := strings.Repeat("c", 40)
 	at := time.Date(2026, 10, 22, 17, 19, 0, 0, time.UTC)
-	for _, scenario := range []string{"merged", "manual", "wrong-sha", "wrong-pr", "error", "missing-add", "out-of-order", "partial", "repeated-cursor", "page-cap"} {
+	for _, scenario := range []string{"merged", "manual", "wrong-sha", "wrong-pr", "error", "missing-add", "out-of-order", "missing-page-info", "missing-next-page", "partial", "repeated-cursor", "page-cap"} {
 		t.Run(scenario, func(t *testing.T) {
 			reads := 0
 			queued, err := readMergeQueueProof(874, sha, func(cursor *string, out any) error {
@@ -61,9 +61,16 @@ func TestMergeQueueHistoryRequiresCanonicalCompleteTimeline(t *testing.T) {
 						end += strings.Repeat("a", reads)
 					}
 				}
+				var pageInfo any = map[string]any{"hasNextPage": more, "endCursor": end}
+				if scenario == "missing-page-info" {
+					pageInfo = nil
+				}
+				if scenario == "missing-next-page" {
+					pageInfo = map[string]any{"endCursor": end}
+				}
 				raw, _ := json.Marshal(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{
 					"number": pr, "merged": true, "mergedAt": at, "mergeCommit": map[string]string{"oid": canonical},
-					"timelineItems": map[string]any{"nodes": nodes, "pageInfo": map[string]any{"hasNextPage": more, "endCursor": end}},
+					"timelineItems": map[string]any{"nodes": nodes, "pageInfo": pageInfo},
 				}}}})
 				return json.Unmarshal(raw, out)
 			})

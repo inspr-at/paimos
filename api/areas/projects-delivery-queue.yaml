@@ -160,4 +160,6 @@ components:
       properties:
         revision: {type: integer, format: int64, minimum: 1}
         state: {type: string, enum: [running, done]}
-        merge_outcome: {type: string, enum: [scripted, model], description: 'Optional measured resolution, only when completing a merge round linked to the current project repository and PR. Emits delivery evidence in the same transaction; never grants merge authority.'}
+        merge_outcome: {type: string, enum: [scripted, model], description: 'Optional measured resolution, only when completing a merge round linked to the captured repository, PR and head_sha. Requires repository and head_sha in this request. Emits delivery evidence in the same transaction; never grants merge authority.'}
+        repository: {type: string, maxLength: 200, description: 'Captured repository, required with merge_outcome; a changed source returns 409.'}
+        head_sha: {type: string, pattern: '^[0-9a-f]{40}$', description: 'Captured completed head, required with merge_outcome; a changed head returns 409.'}
