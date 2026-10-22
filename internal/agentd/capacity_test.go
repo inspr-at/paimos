@@ -18,6 +18,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
@@ -309,7 +310,7 @@ func TestClaudeBridgeCapacityProjectionAndEndTime(t *testing.T) {
 	if err := os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.CommandContext(t.Context(), node, path, sdkPath, "/bin/true", root)
+	cmd := exec.CommandContext(t.Context(), node, path, sdkPath, fixturebin.Require(t, "true"), root)
 	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"fixture","model":"test-model","effort":"high"}` + "\n")
 	output, _ := cmd.Output()
 	if strings.Contains(string(output), "DO_NOT_FORWARD") {
@@ -543,7 +544,8 @@ func TestCodexSeparateHomesBindQuotaAndIdentityToEachProfile(t *testing.T) {
 		}
 	}
 	reset := time.Now().Add(time.Hour).Unix()
-	path := fakeScript(t, fmt.Sprintf(`identity=$(/bin/cat "$CODEX_HOME/active-login") || exit 10
+	cat := fixturebin.Quote(fixturebin.Require(t, "cat"))
+	path := fakeScript(t, fmt.Sprintf(`identity=$(%s "$CODEX_HOME/active-login") || exit 10
 used=11
 [ "$identity" != second@example.test ] || used=22
 if [ "$1" = login ]; then echo 'Logged in using ChatGPT'; exit 0; fi
@@ -554,7 +556,7 @@ case "$line" in
 *'"id":2'*) printf '{"id":2,"result":{"account":{"type":"chatgpt","email":"%%s"}}}\n' "$identity";;
 *'"id":3'*) printf '{"id":3,"result":{"rateLimits":{"primary":{"usedPercent":%%s,"windowDurationMins":300,"resetsAt":%d}}}}\n' "$used";;
 esac
-done`, reset))
+done`, cat, reset))
 	a := NewCodexAdapter(path, map[string]string{"first": first, "second": second})
 	a.SetExpectedEmails(map[string]string{"first": "first@example.test", "second": "second@example.test"})
 	qualifyCodexFixture(t, a)

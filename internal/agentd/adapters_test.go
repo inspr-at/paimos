@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/rules"
@@ -758,7 +759,7 @@ func TestClaudeBridgeMapsSDKResultUsage(t *testing.T) {
 	if err := os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", root)
+	cmd := exec.Command(node, bridgePath, sdkPath, fixturebin.Require(t, "true"), root)
 	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"hello","model":"test-model","effort":"high"}` + "\n")
 	output, _ := cmd.Output() // The fake Query closes without a normal stop receipt.
 	var turn, usage, models bool
@@ -846,7 +847,7 @@ func TestClaudeBridgeDeniesNativeEdits(t *testing.T) {
 	if err := os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", workspace)
+	cmd := exec.Command(node, bridgePath, sdkPath, fixturebin.Require(t, "true"), workspace)
 	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"hello"}` + "\n")
 	output, _ := cmd.Output() // The fake Query closes without a normal stop receipt.
 	if !strings.Contains(string(output), `"kind":"session_started"`) ||

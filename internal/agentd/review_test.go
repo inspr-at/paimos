@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
@@ -530,7 +531,7 @@ func TestClaudeReviewBridgeHasNoToolsAndCapturesFinalAnswer(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, "/bin/true", root)
+	cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, fixturebin.Require(t, "true"), root)
 	cmd.Stdin = strings.NewReader(`{"op":"start","purpose":"managed","read_only_review":true,"prompt":"Review supplied diff","model":"review-model","effort":"xhigh","tools":null,"capabilities":["status","stop"]}` + "\n")
 	output, err := cmd.Output()
 	if err != nil || !strings.Contains(string(output), `"kind":"review_result","answer":"VERDICT: ok"`) || strings.Contains(string(output), `"control_failed"`) {
