@@ -111,8 +111,7 @@ test('root shell installation retries fit the four-minute workflow step', async 
   // to 210 seconds. Exhaust both allowances, including each root kill grace.
   assert.deepEqual(deadlines, [[1, 60, 20], [1, 110, 20]], 'root cleanup must finish within the tighter shared budget')
   assert.equal(Number(readFileSync(join(exhausted.state, 'clock'), 'utf8')), 1210)
-  // Main captures attempt diagnostics through tee with the other apt output.
-  assert.match(exhausted.stdout, /apt retry budget exhausted/)
+  assert.match(exhausted.stderr, /apt retry budget exhausted/)
   assert.match(exhausted.calls[0], /install /)
   assert.match(exhausted.calls[1], /update /)
 })

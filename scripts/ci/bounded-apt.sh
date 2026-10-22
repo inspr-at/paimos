@@ -30,10 +30,7 @@ run_timeout() {
     effective_deadline=$decision_deadline
   fi
   remaining=$((effective_deadline - $(date +%s)))
-  if [[ $remaining -le 0 ]]; then
-    [[ $mode != apt ]] || echo 'apt retry budget exhausted' >&2
-    return 124
-  fi
+  [[ $remaining -gt 0 ]] || return 124
   [[ $seconds -le $remaining ]] || seconds=$remaining
   start_timeout "$user" "$seconds" "$@"
 }
@@ -300,6 +297,9 @@ PY
 
 finish() {
   local status=$?
+  if [[ $mode == apt && $status -ne 0 && $(date +%s) -ge $((deadline - 20)) ]]; then
+    echo 'apt retry budget exhausted' >&2
+  fi
   if [[ $mode == bundle && $status -ne 0 && -d $bundle ]]; then
     echo "bounded-apt: failed bundle tree (at most 200 entries, depth 4): $bundle" >&2
     # Ten seconds were reserved outside the fetch deadline for diagnostics,
