@@ -5,13 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/inspr-at/paimos/internal/harness"
 	"path"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/jackc/pgx/v5"
@@ -48,7 +48,7 @@ func newDeliveryFixture(t *testing.T) deliveryFixture {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,content_daemon_generation) VALUES($1,$2,$3,$4,$5,'delivery-daemon',repeat('c',64),$6)`, f.person.TenantID, computer, request, f.agent.ID, f.agent.KeyID, generation); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,last_daemon_generation) VALUES($1,$2,'delivery-account','claude','delivery-daemon',$3,'Delivery fixture',$4)`, f.person.TenantID, account, f.agent.ID, generation); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,last_daemon_generation,last_probe_at,last_probe_ok) VALUES($1,$2,'delivery-account','claude','delivery-daemon',$3,'Delivery fixture',$4,clock_timestamp(),true)`, f.person.TenantID, account, f.agent.ID, generation); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=$2,daemon_id='delivery-daemon',daemon_generation=$3 WHERE id=$1`, run, account, generation)
@@ -174,6 +174,29 @@ func TestRulesDeliveryRejectsReboundEvidence(t *testing.T) {
 	ack = deliveryAck(manifest)
 	ack.ManifestID = uid()
 	f.rejected(t, ack, 403, "manifest binding rejected")
+	// The destination is a second fully authorized run/session on this same
+	// computer. Rebinding all caller fields still cannot transplant the id.
+	order, run := stateRun(t, f.harnessFixture, f.project, "running", "DELIVERY-11")
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := agentruns.SetActingPersonTx(t.Context(), tx, f.person.TenantID, run, f.person.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET account_id=(SELECT account_id FROM agent_runs WHERE id=$2),daemon_id='delivery-daemon',daemon_generation=$3 WHERE id=$1`, run, manifest.RunID, manifest.Generation)
+		return err
+	})
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	nextLease := "delivery-next-worker-lease-" + uid()
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "delivery-next-ref-" + uid(), "worker_lease": nextLease, "management_mode": "managed", "role": "worker", "run_id": run, "work_order_id": order, "ticket_node_id": order, "work_shape": "ship"}, "")
+	expect(t, w, 201)
+	next := f.agent
+	next.RunID, next.RunWorkOrderID = run, order
+	ack = deliveryAck(manifest)
+	ack.RunID = run
+	w = f.call(next, "POST", base+"/"+decode(t, w)["id"].(string)+"/rules-delivery-evidence", ack, nextLease)
+	expect(t, w, 403)
+	if !strings.Contains(w.Body.String(), "manifest binding rejected") {
+		t.Fatal(w.Body.String())
+	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET daemon_generation='replacement-generation' WHERE id=$1`, manifest.RunID)
 		return err

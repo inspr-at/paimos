@@ -368,8 +368,9 @@ func TestClaudeNotRunningBecomesNothingRunning(t *testing.T) {
 
 type managedRulesFixture struct {
 	*fakeAPI
-	bundle   rules.Merged
-	receipts int
+	bundle       rules.Merged
+	receipts     int
+	acknowledged []rules.RulesDeliveryAck
 }
 
 func (a *managedRulesFixture) ManagedContext(context.Context, HarnessSession) (rules.Merged, error) {
@@ -464,6 +465,9 @@ func TestClaudeBridgeEphemeralRulesBudgetAndNativeClose(t *testing.T) {
 			out, err := cmd.Output()
 			if err != nil {
 				t.Fatalf("bridge: %v (%s)", err, out)
+			}
+			if strings.Contains(string(out), `"kind":"session_started"`) && !strings.Contains(string(out), `"rules_sha256":"`+rulesDeliveryHash("Ephemeral safety fixture")+`"`) {
+				t.Fatal("bridge did not acknowledge its received rules bytes")
 			}
 			if strings.Contains(string(out), "Ephemeral safety fixture") {
 				t.Fatal("leaked rules")

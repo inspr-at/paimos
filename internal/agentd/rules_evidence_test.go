@@ -20,14 +20,14 @@ func (a *managedRulesFixture) PrepareRulesDelivery(_ context.Context, session Ha
 	body, err := assembleRulesPack(a.bundle, in.Repository)
 	return rules.RulesDeliveryManifest{ID: "manifest", RunID: in.RunID, SessionID: session.ID, Generation: in.Generation, BodySHA256: rulesDeliveryHash(body), ByteSize: len(body), RepositoryCommit: in.Repository.Commit, ExpiresAt: time.Now().Add(time.Minute)}, err
 }
-func (a *managedRulesFixture) AcknowledgeRulesDelivery(context.Context, HarnessSession, rules.RulesDeliveryAck) error {
+func (a *managedRulesFixture) AcknowledgeRulesDelivery(_ context.Context, _ HarnessSession, in rules.RulesDeliveryAck) error {
+	a.acknowledged = append(a.acknowledged, in)
 	return nil
 }
 
 type evidenceAPI struct {
 	*managedRulesFixture
-	acknowledged []rules.RulesDeliveryAck
-	fail         error
+	fail error
 }
 
 func (a *evidenceAPI) AcknowledgeRulesDelivery(_ context.Context, _ HarnessSession, in rules.RulesDeliveryAck) error {
@@ -130,7 +130,6 @@ func (a *deliveryStartAdapter) Start(_ context.Context, request StartRequest, _ 
 func TestRulesDeliveryStartRunAcknowledgesAfterHarnessStart(t *testing.T) {
 	s, base, process := testPinnedSupervisor(t)
 	api := &evidenceAPI{managedRulesFixture: base.managedRulesFixture}
-	s.api = api
 	base.profile.Harness = Claude
 	s.accounts[0].Harness = Claude
 	adapter := &deliveryStartAdapter{api: api, proc: &deliveryStartProcess{fakeProcess: process}, t: t}
