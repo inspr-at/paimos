@@ -7965,8 +7965,8 @@
     "261022082852.0.0": {
       "release_channel": "stable",
       "release_sequence": 138,
-      "snapshot_sha256": "82597c71dcd0716682c5a8448a7da80dbc4ba61b697cdad31f47930667d12ddb",
-      "captured_at": "2026-10-22T08:31:00Z",
+      "snapshot_sha256": "0a4ebfb86e37a52c3cf83df67ea345ba4d33ccfc5eeba6a6095c9fcee76072c8",
+      "captured_at": "2026-10-22T08:45:01Z",
       "release_revision": 1,
       "items": [
         {
@@ -7995,10 +7995,10 @@
         },
         {
           "key": "AEON-1291",
-          "pill_en": "Owned agent sessions",
-          "pill_de": "Eigene Agentensitzungen",
-          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
-          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
+          "pill_en": "Owned-session groundwork",
+          "pill_de": "Grundlage eigener Sitzungen",
+          "benefit_en": "Adds owned-session UI and control groundwork; native terminal viewing and interactive handover remain incomplete.",
+          "benefit_de": "Bringt Oberfläche und Steuerung als Grundlage für eigene Sitzungen; native Terminalansicht und interaktive Übergabe sind noch unvollständig.",
           "group": "features"
         },
         {
@@ -8069,8 +8069,8 @@
           "key": "AEON-1495",
           "pill_en": "One inbox, both instances",
           "pill_de": "Ein Eingang, beide Instanzen",
-          "benefit_en": "The owner sees every question waiting for them on both PAIMOS instances in one place, read-only, with a link into each Desk.",
-          "benefit_de": "Der Owner sieht alle offenen Fragen beider PAIMOS-Instanzen an einem Ort, nur lesend, mit Link in den jeweiligen Desk.",
+          "benefit_en": "When sibling instances are configured and readable, the owner sees counts and selected waiting questions together, with links into each Desk.",
+          "benefit_de": "Sind Schwesterinstanzen eingerichtet und lesbar, sieht der Owner Anzahl und ausgewählte offene Fragen gemeinsam, mit Links in den jeweiligen Desk.",
           "group": "features"
         },
         {
@@ -8099,18 +8099,18 @@
         },
         {
           "key": "AEON-1504",
-          "pill_en": "Touch ID really works",
-          "pill_de": "Touch ID funktioniert wirklich",
-          "benefit_en": "Pairing a Mac now really enables Touch ID confirmation, and if it can't, the reason is shown instead of an endless re-pair loop.",
-          "benefit_de": "Das Koppeln eines Mac aktiviert nun wirklich die Touch-ID-Bestätigung; geht das nicht, wird der Grund angezeigt statt einer endlosen Neu-Kopplung.",
+          "pill_en": "Clearer Touch ID diagnostics",
+          "pill_de": "Klarere Touch-ID-Diagnose",
+          "benefit_en": "Pairing reports missing Touch ID entitlements and uses Aeon approval instead of suggesting an ineffective re-pair.",
+          "benefit_de": "Das Koppeln meldet fehlende Touch-ID-Berechtigungen und nutzt die Aeon-Freigabe, statt eine wirkungslose Neu-Kopplung vorzuschlagen.",
           "group": "fixes"
         },
         {
           "key": "AEON-1514",
-          "pill_en": "Quota while idle",
-          "pill_de": "Kontingent auch im Leerlauf",
-          "benefit_en": "Every Claude and Codex account shows its real quota even when no agent is running.",
-          "benefit_de": "Jedes Claude- und Codex-Konto zeigt sein echtes Kontingent, auch wenn gerade kein Agent läuft.",
+          "pill_en": "Idle quota checks",
+          "pill_de": "Prüfung für Leerlauf-Kontingent",
+          "benefit_en": "Adds qualification checks for idle quota reads; production idle capture remains unavailable.",
+          "benefit_de": "Fügt Qualifikationsprüfungen für das Lesen des Kontingents im Leerlauf hinzu; im Produktivbetrieb ist diese Erfassung noch nicht verfügbar.",
           "group": "features"
         },
         {
@@ -8157,16 +8157,16 @@
           "key": "AEON-1589",
           "pill_en": "Safety floor built in",
           "pill_de": "Sicherheitsboden eingebaut",
-          "benefit_en": "Agent runs receive the pinned rule files plus a short safety floor; a run whose pinned rules are missing or too large stops before productive work.",
-          "benefit_de": "Agentenläufe erhalten die festgelegten Regeldateien und einen kurzen Sicherheitsboden; fehlen die Regeln oder sind sie zu groß, stoppt der Lauf vor produktiver Arbeit.",
+          "benefit_en": "Managed Claude runs receive pinned rule files and a short safety floor; missing or oversized pinned rules stop those runs before productive work.",
+          "benefit_de": "Verwaltete Claude-Läufe erhalten die festgelegten Regeldateien und einen kurzen Sicherheitsboden; fehlen die Regeln oder sind sie zu groß, stoppen diese Läufe vor produktiver Arbeit.",
           "group": "features"
         },
         {
           "key": "AEON-1590",
           "pill_en": "Proof of rules sent",
           "pill_de": "Nachweis gesendeter Regeln",
-          "benefit_en": "PAIMOS records which rule bytes agentd handed to which run and rejects tampered, foreign or expired receipts.",
-          "benefit_de": "PAIMOS hält fest, welche Regelbytes agentd an welchen Lauf übergeben hat, und weist manipulierte, fremde oder abgelaufene Belege zurück.",
+          "benefit_en": "For managed Claude runs, PAIMOS records bridge-acknowledged rule hashes and rejects tampered, foreign or expired delivery evidence.",
+          "benefit_de": "Für verwaltete Claude-Läufe hält PAIMOS die von der Brücke bestätigten Regel-Hashes fest und weist manipulierte, fremde oder abgelaufene Belege zurück.",
           "group": "features"
         },
         {
@@ -8187,10 +8187,10 @@
         },
         {
           "key": "AEON-1593",
-          "pill_en": "Consented native sessions",
-          "pill_de": "Native Sitzungen mit Zustimmung",
-          "benefit_en": "A person-approved native agent session can start, run and finish end to end, with the person's current consent checked at each step.",
-          "benefit_de": "Eine von einer Person freigegebene native Agentensitzung kann vollständig starten, laufen und enden; die aktuelle Zustimmung wird bei jedem Schritt geprüft.",
+          "pill_en": "Native session groundwork",
+          "pill_de": "Grundlage nativer Sitzungen",
+          "benefit_en": "Adds consent and lifecycle integration for native Claude sessions behind disabled-by-default server and daemon options.",
+          "benefit_de": "Bringt Zustimmung und Lebenszyklus für native Claude-Sitzungen, hinter standardmäßig deaktivierten Server- und Daemon-Optionen.",
           "group": "features"
         },
         {
@@ -8213,8 +8213,8 @@
           "key": "AEON-1608",
           "pill_en": "Deliveries recorded again",
           "pill_de": "Auslieferungen wieder erfasst",
-          "benefit_en": "Tickets in a verified release are marked Delivered again, so progress shows what is actually live.",
-          "benefit_de": "Tickets in einem geprüften Release werden wieder als ausgeliefert markiert, sodass der Fortschritt zeigt, was tatsächlich live ist.",
+          "benefit_en": "Authorized agents can record verified deployments again, advancing eligible Done tickets to Delivered while preserving required human checks.",
+          "benefit_de": "Berechtigte Agenten können geprüfte Deployments wieder erfassen; geeignete erledigte Tickets werden als ausgeliefert markiert, erforderliche menschliche Prüfungen bleiben erhalten.",
           "group": "fixes"
         },
         {
@@ -8227,10 +8227,10 @@
         },
         {
           "key": "AEON-1610",
-          "pill_en": "Ready for other languages",
-          "pill_de": "Bereit für weitere Sprachen",
-          "benefit_en": "The whole app can switch language in one step once a translation is complete, never screen by screen.",
-          "benefit_de": "Die ganze App kann die Sprache in einem Schritt wechseln, sobald eine Übersetzung vollständig ist, nie Ansicht für Ansicht.",
+          "pill_en": "One language policy",
+          "pill_de": "Eine Sprachregel",
+          "benefit_en": "App controls share one English language policy; complete-app translation switching remains future work.",
+          "benefit_de": "Die Bedienelemente der App folgen einer gemeinsamen englischen Sprachregel; der Sprachwechsel für die ganze App folgt später.",
           "group": "features"
         },
         {
@@ -8269,16 +8269,16 @@
           "key": "AEON-1617",
           "pill_en": "Tidier alerts offer",
           "pill_de": "Ruhigeres Alarm-Angebot",
-          "benefit_en": "The browser-alerts offer on the Desk reads as one line with its action next to it.",
-          "benefit_de": "Das Angebot für Browser-Benachrichtigungen im Desk liest sich als eine Zeile mit der Aktion direkt daneben.",
+          "benefit_en": "On wide screens, the Desk's browser-alert offer and its action sit together on one line; narrow screens wrap them.",
+          "benefit_de": "Auf breiten Bildschirmen stehen das Angebot für Browser-Benachrichtigungen im Desk und seine Aktion in einer Zeile; auf schmalen Bildschirmen umbrechen sie.",
           "group": "features"
         },
         {
           "key": "AEON-1619",
-          "pill_en": "PR checks on time",
-          "pill_de": "Prüfungen rechtzeitig fertig",
-          "benefit_en": "Pull requests stop failing on a timeout after every test passed.",
-          "benefit_de": "Pull Requests scheitern nicht mehr an einer Zeitgrenze, obwohl alle Tests bestanden sind.",
+          "pill_en": "Better balanced PR checks",
+          "pill_de": "Besser verteilte PR-Prüfungen",
+          "benefit_en": "Browser checks are rebalanced across 20 shards to reduce timeout failures.",
+          "benefit_de": "Die Browser-Prüfungen sind neu auf 20 Teile verteilt, damit seltener eine Zeitgrenze überschritten wird.",
           "group": "fixes"
         },
         {
@@ -8291,10 +8291,10 @@
         },
         {
           "key": "AEON-1626",
-          "pill_en": "Take over sessions locally",
-          "pill_de": "Sitzungen lokal übernehmen",
-          "benefit_en": "A person can attach to and take over their own agent session from their own computer, proven as that person, while agents and API keys can never take over.",
-          "benefit_de": "Eine Person kann sich vom eigenen Computer aus mit der eigenen Agentensitzung verbinden und sie übernehmen, als diese Person nachgewiesen; Agenten und API-Schlüssel können nie übernehmen.",
+          "pill_en": "Local takeover groundwork",
+          "pill_de": "Grundlage lokaler Übernahme",
+          "benefit_en": "Adds person-session authentication for local attach and takeover commands; interactive terminal integration remains incomplete.",
+          "benefit_de": "Bringt die Anmeldung als Person für lokales Verbinden und Übernehmen per Befehl; die interaktive Terminal-Einbindung ist noch unvollständig.",
           "group": "features"
         },
         {
