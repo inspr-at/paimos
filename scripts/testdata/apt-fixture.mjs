@@ -17,12 +17,30 @@ function stubBin(state) {
 export AEON_AS_ROOT=1
 exec "$@"
 `)
+  // The budget fixture advances one clock by each requested deadline and its
+  // cleanup grace. No elapsed-time assertion or real timeout is needed.
+  write('date', `#!/usr/bin/env bash
+cat "\${AEON_STUB_STATE:?}/clock"
+`)
   write('timeout', `#!/usr/bin/env bash
 state=\${AEON_STUB_STATE:?}
+kill_after=0
 while [[ "\${1:-}" == --* ]]; do
-  if [[ "\$1" == "--kill-after" ]]; then shift 2; else shift; fi
+  case "\$1" in
+    --kill-after) kill_after=\$2; shift 2 ;;
+    --kill-after=*) kill_after=\${1#*=}; shift ;;
+    *) shift ;;
+  esac
 done
+kill_after=\${kill_after%s}
+seconds=\$1
 shift
+if [[ "\$(cat "\$state/mode")" == apt-budget ]]; then
+  printf '%s %s %s\\n' "\${AEON_AS_ROOT:-0}" "\$seconds" "\$kill_after" >> "\$state/timeouts"
+  printf '%s\\n' "\$*" >> "\$state/calls"
+  echo \$((\$(cat "\$state/clock") + seconds + kill_after)) > "\$state/clock"
+  exit 124
+fi
 # A previous attempt's hang marker must not make this attempt look hung
 # before it can take the lock or report that the lock is still held.
 rm -f "\$state/hung"
@@ -91,6 +109,7 @@ export function aptFixture({ mode, shells = false }) {
   const state = mkdtempSync(join(tmpdir(), 'aeon-apt-'))
   writeFileSync(join(state, 'mode'), mode)
   writeFileSync(join(state, 'calls'), '')
+  writeFileSync(join(state, 'clock'), '1000\n')
   const bin = stubBin(state)
   if (shells) {
     for (const name of ['fish', 'zsh']) writeFileSync(join(bin, name), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 })

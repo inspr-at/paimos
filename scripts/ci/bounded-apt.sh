@@ -18,9 +18,25 @@ run_root_timeout() {
   sudo -- env "PATH=$PATH" timeout --kill-after=20s "$seconds" "$@"
 }
 
+run_apt_timeout() {
+  # All attempts share the four-minute workflow step. Reserve root timeout's
+  # kill grace and leave another 20 seconds for the runner to collect the exit.
+  local seconds=$((apt_deadline - $(date +%s) - 20))
+  if [[ $seconds -le 0 ]]; then
+    echo "apt retry budget exhausted" >&2
+    return 124
+  fi
+  [[ $seconds -le 150 ]] || seconds=150
+  run_root_timeout "$seconds" apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 "$@"
+}
+
 attempt_apt() {
-  run_root_timeout 150 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq \
-    && run_root_timeout 150 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq "$@"
+  # Hosted runners already have package indexes. Refresh only after a failed
+  # install; updating every healthy runner needlessly spends the step budget.
+  if [[ $apt_refresh -eq 1 ]]; then
+    run_apt_timeout update -qq || return $?
+  fi
+  run_apt_timeout install -y -qq "$@"
 }
 
 attempt_playwright() {
@@ -63,8 +79,11 @@ case "$mode" in
       command -v "$tool" >/dev/null 2>&1 || missing=1
     done
     [[ $missing -eq 0 ]] && exit 0
+    apt_deadline=$(($(date +%s) + 220))
+    apt_refresh=0
     for _ in 1 2 3; do
       if attempt_apt "$@"; then ok=1; break; fi
+      apt_refresh=1
     done
     ;;
   playwright)

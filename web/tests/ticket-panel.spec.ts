@@ -115,10 +115,19 @@ test('description edits with preview, Cmd/Ctrl+Enter saves, Esc asks before disc
 })
 
 test('s, p and a open status, priority and assignee from the panel', async ({ page }) => {
-  const calls = await mockWork(page, fixtures())
+  let releaseGrants!: () => void
+  const grants = new Promise<void>(resolve => { releaseGrants = resolve })
+  const calls = await mockWork(page, fixtures(), {
+    hold: request => request.path === '/api/me/permissions' && request.query.get('project_id') === 'p-pharos' ? { until: grants } : undefined,
+  })
   await page.goto('/p/PHAROS/PHAROS-14')
   const ws = panel(page)
   await expect(ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+  // The ticket can render before its project grants arrive. A keyboard press
+  // has no Playwright actionability wait, unlike clicking the status button.
+  await expect(ws.getByRole('button', { name: /Status: New/ })).toBeDisabled()
+  releaseGrants()
+  await expect(ws.getByRole('button', { name: /Status: New/ })).toBeEnabled()
   await page.keyboard.press('s')
   await page.getByRole('menu', { name: 'Status of PHAROS-14' }).getByRole('menuitemradio', { name: 'Backlog' }).click()
   await expect(ws.getByRole('button', { name: /Status: Backlog/ })).toBeVisible()

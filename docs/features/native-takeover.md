@@ -376,3 +376,29 @@ skips, including the full no-browser safety suite and both positive regressions.
 The existing live-root ESRCH assertion is unchanged. No UI spec is affected;
 no browser was launched by the worker. No origin push, deployment, model CLI
 or review gate was run.
+
+### P1 fourth fix round
+
+Hosted shell installation could spend 150 seconds on each update and install,
+then repeat both three times inside a four-minute workflow step. Shell installs
+now try the runner's cached indexes first and refresh after failure. All retries
+share a 220-second budget, including each root timeout's kill grace, leaving
+20 seconds before the unchanged workflow deadline. Deterministic clock fixtures
+cover the healthy cached-index path and exhausted root cleanup budget. Both
+regressions are exercised through the existing
+`TestRootAptTimeoutReapsBeforeRetry` entry in the Go tier inventory.
+
+The ticket-panel shortcut spec previously sent `s` when the title appeared,
+before the project permission response necessarily enabled status changes.
+It now holds that response behind an explicit barrier, proves the initial
+disabled state, releases the response, and waits for the enabled status control
+before sending the shortcut. The original status, priority, assignee and write
+precondition assertions remain in place. This is test synchronization only;
+the product's permission checks and keyboard policy still apply.
+
+Outside the write set: `scripts/ci/bounded-apt.sh`,
+`scripts/check-apt-bounds.test.mjs` and `scripts/testdata/apt-fixture.mjs`
+contain the shell installation fix and regressions required by this CI brief;
+`web/tests/ticket-panel.spec.ts` adds the permission barrier and readiness
+assertions for its reported CI failure. Existing source files and registered
+test entries own these checks; no new source file or tier entry is needed.

@@ -68,3 +68,25 @@ test('three failed attempts fail the step and installed shells skip apt', async 
   const recovered = await run(`bash "${script}" apt zsh fish`, { mode: 'hung' })
   assert.equal(recovered.status, 0, recovered.stderr)
 })
+
+test('shell installation uses cached indexes before refreshing apt', async () => {
+  // Risk: an unnecessary update consumes the shell-install budget. Stub package
+  // names also keep this independent of the real runner's installed shells.
+  const cached = await run(`bash "${script}" apt aeon-fixture-fish aeon-fixture-zsh`, { mode: 'ok' })
+  assert.equal(cached.status, 0, cached.stderr)
+  assert.equal(cached.calls.length, 1, cached.calls.join('\n'))
+  assert.match(cached.calls[0], /install .*aeon-fixture-fish aeon-fixture-zsh/)
+})
+
+test('root shell installation retries fit the four-minute workflow step', async () => {
+  // Risk: independent update/install deadlines and retries outlive the workflow
+  // deadline, which interrupts apt before the helper can reap its root group.
+  const exhausted = await run(`bash "${script}" apt aeon-fixture-fish aeon-fixture-zsh`, { mode: 'apt-budget' })
+  assert.notEqual(exhausted.status, 0, exhausted.stdout)
+  const deadlines = readFileSync(join(exhausted.state, 'timeouts'), 'utf8').trim().split('\n').map(line => line.split(' ').map(Number))
+  assert.deepEqual(deadlines, [[1, 150, 20], [1, 30, 20]], 'root cleanup must finish before the shared 220-second budget')
+  assert.equal(Number(readFileSync(join(exhausted.state, 'clock'), 'utf8')), 1220)
+  assert.match(exhausted.stderr, /apt retry budget exhausted/)
+  assert.match(exhausted.calls[0], /install /)
+  assert.match(exhausted.calls[1], /update /)
+})
