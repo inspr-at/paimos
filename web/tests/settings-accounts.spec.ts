@@ -203,7 +203,7 @@ test('accounts are a list by vendor with how each is read, and no allowance form
   await show(page, ACCOUNTS.main)
   await expect(card(page).locator('.group-head')).toHaveText(['Codex1 account'])
   await expect(row(page, ACCOUNTS.main).locator('.chip.host')).toHaveText('build-7')
-  await expect(row(page, ACCOUNTS.main)).toContainText('Reads every 5 min')
+  await expect(row(page, ACCOUNTS.main)).toContainText('Reads during runs')
   await expect(row(page, ACCOUNTS.main).locator('.state')).toHaveCount(0)
   await expect(use(page, ACCOUNTS.main)).toHaveAccessibleName('Agents may use it · Main')
   await expect(use(page, ACCOUNTS.main)).toHaveAttribute('aria-checked', 'true')

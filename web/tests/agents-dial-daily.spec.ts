@@ -29,7 +29,7 @@ async function setup(page: Page, options: SetupOptions = {}) {
   const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   const capacity = capacityWorld()
   options.capacityEdit?.(capacity)
-  data.accounts = (capacity.accounts as unknown as typeof data.accounts).filter(a => ['codex', 'claude', 'cursor'].includes(a.harness)).map(a => ({ ...a, registered_by_principal_id: me.id }))
+  data.accounts = (capacity.accounts as unknown as typeof data.accounts).filter(a => ['codex', 'claude', 'cursor'].includes(a.harness) && !options.without?.includes(a.harness)).map(a => ({ ...a, registered_by_principal_id: me.id }))
   const calls = await mockAgents(page, data, { capacity })
   await page.route('**/api/me/permissions*', route => {
     const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
@@ -289,9 +289,9 @@ test('AEON-1036: the detail reads the usage first, then today, the pace state an
   // Billed by use: nothing to pace, and the words never call it "No limit" (the agent-count control already does).
   await row(page, 'cursor').locator('.nm').click()
   const cursor = detail(page, 'cursor')
-  await expect(cursor.locator('.ub-hd')).toHaveText('Quota not reported· 2 accounts')
+  await expect(cursor.locator('.ub-hd')).toHaveText('Quota not available· 2 accounts')
   await expect(cursor).toContainText('the 12 at once and the account still cap it')
-  await expect(row(page, 'cursor').locator('.sub')).toHaveText('Quota not reported · 2 accounts')
+  await expect(row(page, 'cursor').locator('.sub')).toHaveText('Quota not available · 2 accounts')
   await expect(row(page, 'cursor').locator('.cap-stl')).toHaveCount(0)
 })
 
@@ -307,7 +307,7 @@ test('AEON-1036: each row shows its running count, its usage line and only a pac
   await page.setViewportSize({ width: 1440, height: 1000 })
   await setup(page, { example: 'limit' })
   await page.goto('/agents')
-  for (const [key, running, usage, pace] of [['codex', '6 running', 'enough until refill', null], ['claude', '2 running', 'lasts until Mon 20:20 · refill 22:59', 'At today’s limit · Codex next'], ['cursor', '3 running', 'Quota not reported · 2 accounts', null]] as const) {
+  for (const [key, running, usage, pace] of [['codex', '6 running', 'enough until refill', null], ['claude', '2 running', 'lasts until Mon 20:20 · refill 22:59', 'At today’s limit · Codex next'], ['cursor', '3 running', 'Quota not available · 2 accounts', null]] as const) {
     await expect(row(page, key).locator('.nm-run')).toHaveText(running)
     await expect(row(page, key).locator('.sub')).toHaveText(usage)
     if (pace) await expect(row(page, key).locator('.cap-stl')).toHaveText(pace)

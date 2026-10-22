@@ -55,7 +55,7 @@ async function setup(page: Page, options: Options = {}) {
     await gated
     return state.outlook === 'error' ? route.fulfill({ status: 500, json: { error: 'unavailable' } }) : route.fulfill({ json: state.outlook })
   })
-  return { state, gate: { release: open } as Gate }
+  return { state, gate: { release: open } as Gate, data, plan }
 }
 const body = (page: Page) => page.locator('.dial-card')
 const control = (page: Page) => page.locator('.cdial')
@@ -74,6 +74,166 @@ function withPrivate(outlook: QuotaOutlook): QuotaOutlook {
   Object.assign(copy.groups[0]!.accounts[1]!, { state: 'private', pooled: false, used_percent: null, limit_percent: null, resets_at: null, read_at: null, reading_age_seconds: null, forecast: null })
   return copy
 }
+
+// R10/R2: an enrolled account without daily/quota rows is still an account;
+// failed inventory reads and someone else's enrollment must not stand in for it.
+test('AEON-1511: enrolled accounts without readings stay visible, with a reason and stable controls', async ({ page }, info) => {
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  const { data, plan } = await setup(page, { outlook: { ...scenarios.fast, groups: [] } })
+  plan.daily_state = {}
+  plan.running.claude = 0
+  plan.running_total -= 2
+  const own = data.accounts.find(a => a.harness === 'claude')!
+  let failed = true
+  let releaseRecovery!: () => void, recoveryRead!: () => void
+  const recovery = new Promise<void>(resolve => { releaseRecovery = resolve })
+  const recoveryStarted = new Promise<void>(resolve => { recoveryRead = resolve })
+  await page.route('**/api/agent-accounts', async route => {
+    if (failed) return route.fulfill({ status: 503, json: { error: 'unavailable' } })
+    recoveryRead()
+    // A background refresh must not remove Try again between locating and clicking it.
+    await recovery
+    return route.fulfill({ json: [...data.accounts, { ...own, id: 'ac000000-0000-4000-8000-000000000099', owner_person_id: 'another-person', label: 'Another person’s account' }] })
+  })
+  await page.goto('/agents')
+  const claude = detail(page, 'claude')
+  await expect(claude.getByRole('alert')).toContainText('Usage couldn’t be read')
+  await expect(claude).not.toContainText('no account yet')
+  await expect(row(page, 'claude').locator('.sub')).toHaveText('Usage not read')
+  failed = false
+  await Promise.all([recoveryStarted, claude.getByRole('button', { name: 'Try again' }).click()])
+  releaseRecovery()
+  await expect(claude.getByRole('heading')).toHaveText('Claude · quota')
+  await expect(claude.locator('.ub-acc')).toHaveCount(1)
+  await expect(claude.locator('.ub-name')).toHaveText(own.label)
+  await expect(claude.locator('.ub-nr')).toHaveText('Reads after the first run')
+  await expect(claude.locator('.ub-empty')).toHaveText('Claude reports its quota during a run, so readings start with the first run on each account.')
+  await expect(claude).not.toContainText('Another person’s account')
+  await expect(row(page, 'claude').locator('.f-sel')).not.toHaveAttribute('data-tip', /no account to read/)
+  await expectStableControls({
+    controls: { claude: row(page, 'claude').locator('.f-sel'), cursor: row(page, 'cursor').locator('.f-sel'), limits: row(page, 'claude').locator('.limit') },
+    scrollAreas: { dial: body(page) },
+    interactions: [{ name: 'select Cursor without quota', run: async () => {
+      await row(page, 'cursor').locator('.nm').click()
+      const cursor = detail(page, 'cursor')
+      await expect(cursor.getByRole('heading')).toHaveText('Cursor · quota')
+      await expect(cursor.locator('.ub-nr')).toHaveText('Quota not available')
+      await expect(cursor.locator('.ub-empty')).toContainText('doesn’t report its quota')
+    } }, { name: 'return to the enrolled Claude account', run: async () => {
+      await row(page, 'claude').locator('.nm').click()
+      await expect(claude.locator('.ub-nr')).toHaveText('Reads after the first run')
+    } }, { name: 'runs start before the quota reading arrives', run: async () => {
+      plan.running.claude = 2
+      plan.running_total += 2
+      await goOnline(page)
+      await expect(row(page, 'claude').locator('.nm-run')).toHaveText('2 running')
+      await expect(claude.locator('.ub-hd')).toHaveText('Waiting for a quota reading· 1 account')
+      await expect(claude.locator('.ub-nr')).toHaveText('Waiting for a quota reading')
+      await expect(claude.locator('.ub-empty')).toHaveText('Runs are going, but no quota reading has arrived yet.')
+      await expect(row(page, 'claude').locator('.sub')).toHaveText('Waiting for a quota reading · 1 account')
+    } }],
+  })
+  await body(page).screenshot({ path: info.outputPath('aeon-1511-enrolled-no-readings.png'), animations: 'disabled' })
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1100 })
+    await page.emulateMedia({ colorScheme: theme })
+    await page.goto('/agents')
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    await showCapacityRow(page)
+    if (width < 720) await control(page).locator('.fs-tog').click()
+    if (width < 720) await claude.locator('.ub-acc-t').click()
+    await expect(claude.locator('.ub-nr')).toHaveText('Waiting for a quota reading')
+    await body(page).screenshot({ path: info.outputPath(`aeon-1511-${width}-${theme}-waiting.png`), animations: 'disabled' })
+    await expectStableControls({
+      controls: { claude: row(page, 'claude').locator('.f-sel'), cursor: row(page, 'cursor').locator('.f-sel'), limits: row(page, 'claude').locator('.limit') },
+      scrollAreas: { dial: body(page) },
+      interactions: [{ name: 'show Cursor quota explanation', run: async () => {
+        await row(page, 'cursor').locator('.nm').click()
+        await expect(detail(page, 'cursor').locator('.ub-empty')).toHaveText("Cursor doesn’t report its quota, so agents can’t pace it. The agent count on the dial still caps it.")
+        await body(page).screenshot({ path: info.outputPath(`aeon-1511-${width}-${theme}-cursor.png`), animations: 'disabled' })
+      } }, { name: 'return to a quota reading that is waiting', run: async () => {
+        await row(page, 'claude').locator('.nm').click()
+        await expect(claude.locator('.ub-hd')).toHaveText('Waiting for a quota reading· 1 account')
+      } }],
+    })
+  }
+})
+
+test.describe('touch quota retries', () => {
+  test.use({ viewport: { width: 390, height: 1100 }, hasTouch: true, isMobile: true })
+  test('AEON-1511: quota retry targets stay usable on touch screens without moving controls', async ({ page }, info) => {
+    test.setTimeout(120_000)
+    const { state } = await setup(page, { outlook: 'error' })
+    await page.goto('/agents')
+    await showCapacityRow(page)
+    await control(page).locator('.fs-tog').tap()
+    await expect(page.getByRole('dialog', { name: 'Capacity' })).toHaveCount(0)
+    const claude = detail(page, 'claude')
+    const retry = claude.getByRole('button', { name: 'Try again', exact: true })
+    const usableRetry = async () => {
+      await expect(retry).toBeVisible()
+      await retry.scrollIntoViewIfNeeded()
+      const target = await retry.evaluate(el => {
+        const r = el.getBoundingClientRect()
+        return {
+          width: r.width, height: r.height,
+          // Check the actual hit area, including clipping or overlapping controls.
+          reaches: [r.top + 1, r.bottom - 1].map(y => el.contains(document.elementFromPoint(r.x + r.width / 2, y))),
+        }
+      })
+      expect(target.width).toBeGreaterThanOrEqual(44)
+      expect(target.height).toBeGreaterThanOrEqual(44)
+      expect(target.reaches).toEqual([true, true])
+    }
+    await expect(claude.getByRole('alert')).toContainText('Usage couldn’t be read')
+    await usableRetry()
+    await expectStableControls({
+      controls: {
+        selected: row(page, 'claude').locator('.f-sel'), limits: row(page, 'claude').locator('.limit'),
+        range: claude.locator('.ub-dots'), pace: claude.getByRole('button', { name: 'Pace', exact: true }),
+        boost: claude.getByRole('button', { name: 'Boost today', exact: true }),
+      },
+      scrollAreas: { dial: body(page) },
+      interactions: [
+        { name: 'retry a failed first read', run: async () => {
+          state.outlook = scenarios.fast
+          const reads = state.reads
+          await retry.tap()
+          await expect.poll(() => state.reads).toBeGreaterThan(reads)
+          await expect(claude.locator('.ub-hd')).toHaveText(HEAD)
+        } },
+        { name: 'a failed refresh keeps the reading and a usable retry', run: async () => {
+          state.outlook = 'error'
+          const reads = state.reads
+          await goOnline(page)
+          await expect.poll(() => state.reads).toBeGreaterThan(reads)
+          await expect(claude.locator('.ub-hd')).toHaveText(HEAD)
+          await expect(claude.locator('.ub-retry')).toBeVisible()
+          await usableRetry()
+        } },
+        { name: 'retry the retained reading', run: async () => {
+          state.outlook = scenarios.fast
+          const reads = state.reads
+          await retry.tap()
+          await expect.poll(() => state.reads).toBeGreaterThan(reads)
+          await expect(retry).toHaveCount(0)
+          await expect(claude.locator('.ub-hd')).toHaveText(HEAD)
+        } },
+      ],
+    })
+    // Capture the real refresh error at each evidence width and theme.
+    state.outlook = 'error'
+    await goOnline(page)
+    await expect(claude.locator('.ub-retry')).toBeVisible()
+    for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: 1100 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+      await usableRetry()
+      await claude.screenshot({ path: info.outputPath(`${width}-${theme}-quota-refresh-retry.png`), animations: 'disabled' })
+    }
+  })
+})
 
 for (const width of [1440, 1024, 390]) {
   const phone = width < 720
@@ -98,7 +258,7 @@ for (const width of [1440, 1024, 390]) {
     await expect(row(page, 'claude').locator('.sub')).toHaveText(SHORT)
     await expect(row(page, 'claude').locator('.sub .vw')).toHaveAccessibleName('Too fast')
     await expect(row(page, 'codex').locator('.sub')).toHaveText('enough until refill')
-    await expect(row(page, 'cursor').locator('.sub')).toHaveText('Quota not reported · 2 accounts')
+    await expect(row(page, 'cursor').locator('.sub')).toHaveText('Quota not available · 2 accounts')
     // The headline, the pool in muted ink, the verdict with the safe pace.
     await expect(claude.locator('.ub-hd')).toHaveText(HEAD)
     await expect(claude.locator('.ub-l2')).toHaveText('77 % of the pool used · 3 accounts · sampled 13:10')
@@ -243,11 +403,11 @@ for (const width of [1440, 1024, 390]) {
     // Cursor reports no quota: a quiet chart sentence and dashed rings, never a curve.
     await row(page, 'cursor').locator('.nm').click()
     const cursor = detail(page, 'cursor')
-    await expect(cursor.locator('.ub-hd')).toHaveText('Quota not reported· 2 accounts')
-    await expect(cursor.locator('.ub-empty')).toHaveText('Cursor doesn’t report quota. Burn appears once it does.')
+    await expect(cursor.locator('.ub-hd')).toHaveText('Quota not available· 2 accounts')
+    await expect(cursor.locator('.ub-empty')).toHaveText('Cursor doesn’t report its quota, so agents can’t pace it. The agent count on the dial still caps it.')
     await expect(cursor.locator('.ub-plot svg')).toHaveCount(0)
     if (phone) await cursor.locator('.ub-acc-t').click()
-    await expect(cursor.locator('.ub-nr')).toHaveText(['Quota not reported', 'Quota not reported'])
+    await expect(cursor.locator('.ub-nr')).toHaveText(['Quota not available', 'Quota not available'])
     await body(page).screenshot({ path: info.outputPath(`${width}-light-cursor.png`), animations: 'disabled' })
     if (phone) {
       // Every new target a finger uses reaches 44 px.

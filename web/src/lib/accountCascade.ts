@@ -7,6 +7,7 @@
 import { api } from './api.ts'
 import { capacityWaitText, isCapacityWait, type CapacityWait } from './capacityWait.ts'
 import { duration, harnessLabel } from './agentState.ts'
+import { missingQuota } from './accountLimits.ts'
 import { absoluteTime } from './work.ts'
 
 export const WORK_ROLES = ['scout', 'mechanical', 'build', 'build-hard', 'review-gate'] as const
@@ -69,6 +70,10 @@ export interface CascadeStatus { label: string; detail: string; tone: 'neutral' 
 export interface CascadePresentation {
   hosts: CascadeOption[]; harnesses: CascadeOption[]; accounts: CascadeOption[]
   models: CascadeOption[]; efforts: CascadeOption[]; notes: CascadeNotes
+  /** Reserve the host explanation across harness/account choices on every host. */
+  hostNotes: string[]
+  /** Reserve the account explanation's tallest candidate so later selectors stay put. */
+  accountNotes: string[]
   roleNote: string; profileId: string; agentId: string; status: CascadeStatus; requested: RequestedRun
 }
 export interface CascadeContext {
@@ -307,14 +312,17 @@ function tightestWindow(account: CatalogAccount) {
   }
   return best?.window ?? null
 }
-function allowanceSentence(account: CatalogAccount) {
-  if (!allowanceKnown(account) || account.remaining_fraction == null) return 'Allowance is unknown.'
+// The launch catalog does not advertise how this account reports quota.
+const NO_QUOTA_READING = { short: 'No quota reading yet', detail: 'Agents can start now. The quota shows once this account reports it.' }
+const catalogMissingQuota = (harness: string) => harness === 'claude' || harness === 'codex' ? NO_QUOTA_READING : missingQuota(harness)
+function allowanceSentence(account: CatalogAccount, harness: string) {
+  if (!allowanceKnown(account) || account.remaining_fraction == null) return catalogMissingQuota(harness).detail
   const pct = Math.round(Math.min(1, Math.max(0, account.remaining_fraction)) * 100)
   const window = tightestWindow(account)
   return window ? `${pct}% of the ${allowanceWindowLabel(window)} window is left.` : `${pct}% is left.`
 }
-function allowancePhrase(account: CatalogAccount) {
-  if (!allowanceKnown(account) || account.remaining_fraction == null) return 'allowance unknown'
+function allowancePhrase(account: CatalogAccount, harness: string) {
+  if (!allowanceKnown(account) || account.remaining_fraction == null) return catalogMissingQuota(harness).short
   const pct = `${Math.round(Math.min(1, Math.max(0, account.remaining_fraction)) * 100)}%`
   const window = tightestWindow(account)
   return window ? `${pct} of ${allowanceWindowLabel(window)} left` : `${pct} left`
@@ -392,7 +400,7 @@ function accountWaitText(account: CatalogAccount, harness: string, subject = 'Ag
 }
 function accountOptionLabel(account: CatalogAccount, harness: string) {
   const plan = accountPlan(account)
-  const extra = account.wait ? accountWaitText(account, harness) : account.available ? allowancePhrase(account) : account.unavailable_reasons.map(reason => reasonText(account, reason).replace(/\.$/, '')).join('; ')
+  const extra = account.wait ? accountWaitText(account, harness) : account.available ? allowancePhrase(account, harness) : account.unavailable_reasons.map(reason => reasonText(account, reason).replace(/\.$/, '')).join('; ')
   return [accountName(account), plan, extra].filter(Boolean).join(' · ')
 }
 
@@ -431,6 +439,10 @@ export function presentCascade(input: CascadeContext, choice: CascadeChoice, tou
       model: modelNote(choice, touch, account, models, input.role.role),
       effort: effortNote(choice, model, efforts, selectedEffort, account),
     },
+    hostNotes: hosts.length > 1 ? [...new Set((catalog?.hosts ?? []).flatMap(item => item.harnesses.flatMap(h => h.accounts.map(a => hostAccountNote(a, h.harness)))))] : [],
+    accountNotes: [accountNote(choice, touch, accounts, undefined, defaultId), ...accounts.flatMap(item => [
+      accountNote(choice, { ...touch, account: false }, accounts, item, defaultId), accountNote(choice, { ...touch, account: true }, accounts, item, defaultId),
+    ])],
     roleNote,
     profileId: selectedEffort?.model_profile_id ?? '',
     agentId: account?.registered_by_principal_id ?? '',
@@ -451,10 +463,13 @@ function hostNote(catalog: AgentAccountCatalog | null, hosts: CascadeOption[], c
   if (hosts.length === 1) return 'Only one host has an enrolled account.'
   if (!touch.host && choice.hostId) {
     const account = accountOf(harnessOf(hostOf(catalog, choice.hostId), choice.harness), choice.accountId)
-    if (account && allowanceKnown(account)) return 'Chosen because it has the account with the most allowance left.'
-    return 'Allowance is unknown, so this host is not ranked by remaining allowance.'
+    return hostAccountNote(account, choice.harness)
   }
   return ''
+}
+function hostAccountNote(account: CatalogAccount | undefined, harness: string) {
+  if (account && allowanceKnown(account)) return 'Chosen because it has the account with the most allowance left.'
+  return catalogMissingQuota(harness).detail
 }
 function harnessNote(choice: CascadeChoice, host: CatalogHost | undefined) {
   if (!choice.hostId || !host) return ''
@@ -468,7 +483,7 @@ function accountNote(choice: CascadeChoice, touch: CascadeTouch, accounts: Catal
   if (!account) return 'Choose an account. An unavailable account stays listed with the reason it cannot be the default.'
   if (account.wait) return accountWaitText(account, choice.harness)
   if (!account.available) return account.unavailable_reasons.map(reason => reasonText(account, reason)).join(' ')
-  const allowance = allowanceSentence(account)
+  const allowance = allowanceSentence(account, choice.harness)
   if (accounts.length === 1) return `Only one account is enrolled here. ${allowance}`
   if (!touch.account && account.id === defaultId && allowanceKnown(account)) return `Selected because it has the most allowance left. ${allowance}`
   return `Only this account will be used. ${allowance}`
