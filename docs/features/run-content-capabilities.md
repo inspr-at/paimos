@@ -112,8 +112,8 @@ order, auth lock inventory and negative controls also pass remotely.
 The final pairing suite reports only
 `TestPathProofCommandsRunInShells: shell_test.go:25: zsh is not installed` on
 the secondary Linux runner. The primary Mac test lane is RED. The required
-static runner was attempted three times and returned exit 3 each time:
-`remote static check paused at night (night protocol: mbp2606 is shared with
-the CI pool); rely on the PR's hosted CI static job`. Full pairing validation
-on a runner with its required shells and `node scripts/ci-static.mjs
+static runner was attempted three times and returned exit 3 each time because
+the night protocol paused checks on the runner shared with the CI pool. Its
+response directed validation to the PR's hosted CI static job. Full pairing
+validation on a runner with its required shells and `node scripts/ci-static.mjs
 --merge-main` remain pending. No test or assertion was skipped or loosened.
