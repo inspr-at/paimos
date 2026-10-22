@@ -390,7 +390,7 @@ export function presentCascade(input: CascadeContext, choice: CascadeChoice, tou
       model: modelNote(choice, touch, account, models, input.role.role),
       effort: effortNote(choice, model, efforts, selectedEffort, account),
     },
-    hostNotes: hosts.length > 1 ? (catalog?.hosts ?? []).flatMap(item => item.harnesses.flatMap(h => h.accounts.map(a => hostAccountNote(a, h.harness)))) : [],
+    hostNotes: hosts.length > 1 ? [...new Set((catalog?.hosts ?? []).flatMap(item => item.harnesses.flatMap(h => h.accounts.map(a => hostAccountNote(a, h.harness)))))] : [],
     accountNotes: [accountNote(choice, touch, accounts, undefined, defaultId), ...accounts.flatMap(item => [
       accountNote(choice, { ...touch, account: false }, accounts, item, defaultId), accountNote(choice, { ...touch, account: true }, accounts, item, defaultId),
     ])],

@@ -282,6 +282,7 @@ test('changing host replaces the granted model', async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme })
     await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    await page.evaluate(async () => { await document.fonts.ready })
     const height = await hostNotes.evaluate(element => element.getBoundingClientRect().height)
     expect(height).toBeGreaterThan(0)
     await expectStableControls({
@@ -295,7 +296,10 @@ test('changing host replaces the granted model', async ({ page }, info) => {
       } })),
     })
   }
-  await dialog(page).getByLabel('Host', { exact: true }).selectOption({ label: 'Laptop' })
+  const heightBeforeHostChange = await hostNotes.evaluate(element => element.getBoundingClientRect().height)
+  await host.selectOption({ label: 'Laptop' })
+  await expect(hostNotes.locator('p:not(.sizer)')).toHaveCount(0)
+  expect(await hostNotes.evaluate(element => element.getBoundingClientRect().height) - heightBeforeHostChange).toBe(0)
   await expect(dialog(page).getByLabel('Harness', { exact: true }).locator('option:checked')).toHaveText('Claude Code')
   await expect(dialog(page).getByLabel('Model', { exact: true }).locator('option:checked')).toHaveText('other-model')
   await expect(dialog(page).getByRole('option', { name: 'workspace-build' })).toHaveCount(0)
