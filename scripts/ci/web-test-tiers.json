@@ -18184,6 +18184,24 @@
     ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > serializes rapid clicks and coalesces edits behind a held write","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 metadata: delayed provenance cannot replace the session now open","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 metadata: forbidden/missing provenance clears the old data and stale failures cannot hide a newer record","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: a held budget save sends once, reports refusal and retains the unsaved values","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: a partial layer tick keeps the committed draft, restores the failed set and stops before later sets","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: client delivery uses each client ceiling and invalid totals/layer caps never write","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: company ticks and duplication require a person with write and publish grants","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: duplicate sets have independent identities and never change the original or publish","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: editing keeps ticks and duplicates local until an explicit draft save; publication requires a separate confirmation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: held set/rule tick failures roll back their optimistic state and reject overlapping ticks","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/agents-revision.unit.test.ts","name":"a capacity override answered after a daemon claimed the run does not put the run back to queued","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-revision.unit.test.ts","name":"a current-list answer held across a restore does not bring back the row History read restored","tier":"GATED-FULL"}

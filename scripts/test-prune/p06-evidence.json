@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "ticket": "AEON-1678",
+  "package": "P06",
+  "status": "blocked-by-cut-prerequisites",
+  "recordedAt": "2026-10-22T23:26:17.494755+00:00",
+  "baseCommit": "20eea5be1fb22f5579619d8de6cc2577384cb749",
+  "selectedAccount": {
+    "instance": "ppm",
+    "principal": "workstation-agents",
+    "tenant": "INSPR",
+    "workerMarkerVerified": true,
+    "coordinatorOwnsStatusAndReleaseGates": true
+  },
+  "browserCases": {
+    "auditBefore": 756,
+    "baselineBefore": 757,
+    "currentAfter": 765,
+    "plannedCeiling": 29,
+    "removed": 0,
+    "demoted": 0
+  },
+  "runtime": {
+    "owner": "web/tests/agents-prune.unit.test.ts",
+    "tier": "ESSENTIAL",
+    "nativeKeys": [
+      "vitest:tests/agents-prune.unit.test.ts:P06 metadata: delayed provenance cannot replace the session now open",
+      "vitest:tests/agents-prune.unit.test.ts:P06 metadata: forbidden/missing provenance clears the old data and stale failures cannot hide a newer record",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: a held budget save sends once, reports refusal and retains the unsaved values",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: a partial layer tick keeps the committed draft, restores the failed set and stops before later sets",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: client delivery uses each client ceiling and invalid totals/layer caps never write",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: company ticks and duplication require a person with write and publish grants",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: duplicate sets have independent identities and never change the original or publish",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: editing keeps ticks and duplicates local until an explicit draft save; publication requires a separate confirmation",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: held set/rule tick failures roll back their optimistic state and reject overlapping ticks"
+    ],
+    "command": "cd web && npx --no-install vitest run tests/agents-prune.unit.test.ts --maxWorkers=1",
+    "result": "passed",
+    "cases": 9,
+    "observedRunnerSeconds": 0.585,
+    "sourceHelper": "web/tests/record-source.ts",
+    "sourceHelperChange": "Optional in-memory source argument; existing callers still compile the current production source by default."
+  },
+  "negativeControls": [
+    {
+      "change": "Continue after a failed layer draft instead of stopping.",
+      "requiredFailure": "partial layer stops before the third set"
+    },
+    {
+      "change": "Omit restoring the previous draft after a rejected set/rule tick.",
+      "requiredFailure": "failed tick restores the saved rules"
+    },
+    {
+      "change": "Publish automatically on opening the review.",
+      "requiredFailure": "review alone never publishes"
+    },
+    {
+      "change": "Use the workspace budget without the individual client ceiling.",
+      "requiredFailure": "each client keeps its delivery ceiling"
+    },
+    {
+      "change": "Allow another budget write while the first response is held.",
+      "requiredFailure": "a pending budget has one write"
+    },
+    {
+      "change": "Accept a delayed provenance response after the selected session changes.",
+      "requiredFailure": "late provenance belongs to its captured session"
+    }
+  ],
+  "negativeControlMethod": "Each counterexample compiles a one-guard mutant in memory and runs the same behavioral oracle. The test requires AssertionError and the exact risk-specific message, so compilation/dependency failures cannot count as proof. Production files are never mutated.",
+  "supplementedSources": [
+    "tests/agent-rules-ticks.spec.ts",
+    "tests/agent-rules-budget-clients.spec.ts",
+    "tests/agent-rules.spec.ts",
+    "tests/provenance.spec.ts"
+  ],
+  "remaining": [
+    "P02 owns the actual visual comparisons and Tick-reviewed immutable reference artifacts. visual-manifest.json still has pending approval and no pinned references. validateVisual(..., {cuts:true}) refuses: Unpinned visual reference: V-projects-390-light.",
+    "The 29 retained browser journeys and remaining runtime destinations still need package-wide implementation/equivalence proof before removing their originals. This report does not claim the nine runtime additions complete P06.",
+    "The before/after browser runner-time delta is unmeasured because the authorized remote browser lane refused capacity. No browser saving is claimed."
+  ],
+  "remoteAttempts": [
+    {
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh <worktree> \"tests/agent-rules-ticks.spec.ts tests/agent-rules-budget-clients.spec.ts tests/provenance.spec.ts tests/lead-remove.spec.ts tests/lead-start.spec.ts tests/model-prefs.spec.ts\"",
+      "exitCode": 3,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4); remote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI"
+    }
+  ],
+  "browserRunnerTimeChangeSeconds": null,
+  "preserved": "All 757 original P06 browser cases, protected risk rows, historical evidence, launch records, tier/shard policy, selection flags and release controls are unchanged. No review gate, other model CLI, origin push or deployment was run.",
+  "sourceOwnership": {
+    "web/tests/agents-prune.unit.test.ts": "existing web/tests/** S9 rule",
+    "scripts/test-prune/p06-evidence.json": "existing scripts/** S7 rule"
+  },
+  "outsideWriteSet": [
+    {
+      "path": "web/tests/record-source.ts",
+      "reason": "Add an optional in-memory source argument to execute missing-guard negative controls through the existing production-SFC helper."
+    },
+    {
+      "path": "web/tests/agents-prune.unit.test.ts",
+      "reason": "Add supplemental production-handler integration cases for the planned rule/budget/provenance conversions; no original test is removed."
+    },
+    {
+      "path": "docs/features/test-prune-ledger.md",
+      "reason": "Document the additive P06 proof and the unresolved visual-reference prerequisite in the existing ledger documentation."
+    }
+  ]
+}
