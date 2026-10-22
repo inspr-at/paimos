@@ -324,7 +324,7 @@ function changeTicket() {
   remember.value = false
   remembered.value = ''
   void checkDispatch()
-  void loadCatalog()
+  if (!oneOff.value) void loadCatalog()
   void search()
   void nextTick(() => searchInput.value?.focus())
 }
