@@ -647,6 +647,10 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 		if sortsByPlanningValue(q) {
 			money = map[string]planMicros{}
 		}
+		var sortAggregates map[string]eta.Aggregate
+		if listReusesSortAggregates(q) {
+			sortAggregates = map[string]eta.Aggregate{}
+		}
 		for rows.Next() {
 			var item listItem
 			var fields, position string
@@ -672,8 +676,16 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			if money != nil {
 				dest = append(dest, &listSpent, &listEst, &paidSpent, &paidEst)
 			}
-			dest = append(dest, &rowNumber, &anchorValid)
-			err = rows.Scan(dest...)
+			tail := []any{&rowNumber, &anchorValid}
+			if sortAggregates != nil {
+				var aggregate eta.Aggregate
+				aggregate, err = eta.ScanAggregate(rows, dest, tail)
+				if err == nil {
+					sortAggregates[item.ID] = aggregate
+				}
+			} else {
+				err = rows.Scan(append(dest, tail...)...)
+			}
 			if err != nil {
 				rows.Close()
 				return err
@@ -760,9 +772,13 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			var estimates map[string]*estimateView
 			var views map[string]eta.View
 			if !q.OmitRollups {
-				estimates, views, err = loadWorkTotals(ctx, tx, ids)
-				if err != nil {
-					return err
+				if sortAggregates != nil {
+					estimates, views = workTotals(sortAggregates)
+				} else {
+					estimates, views, err = loadWorkTotals(ctx, tx, ids)
+					if err != nil {
+						return err
+					}
 				}
 			}
 			queued, err := workqueue.Load(ctx, tx, ids)
@@ -1459,6 +1475,14 @@ func sortsBy(q listQuery, name string) bool {
 	}
 	return false
 }
+
+// Full sort aggregates already contain every page fact. The gated estimate-only
+// path intentionally has no ETA/completion facts, so it still hydrates the page.
+func listReusesSortAggregates(q listQuery) bool {
+	return !q.OmitRollups && (sortsBy(q, "eta_ready") || sortsBy(q, "progress") ||
+		sortsBy(q, "estimate") && !q.boundedAggregates)
+}
+
 func listSQL(q listQuery, anchor any) (string, []any) {
 	prefix, args := listFilterSQL(q, true)
 	args = append(args, anchor, q.Limit+1)
@@ -1526,6 +1550,17 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 			aggregateCTE = listEstimateSortSQL()
 		}
 	}
+	aggregateCols, aggregateJoin := "", ""
+	if listReusesSortAggregates(q) {
+		// Join by the selected root, never by a descendant in its scope. The
+		// materialized sort facts and root author share this statement's RLS
+		// snapshot; no later page read can replace them with newer evidence.
+		aggregateCols = "," + eta.AggregateColumns("page_work", "estimate_author")
+		aggregateJoin = ` LEFT JOIN work_values page_work ON page_work.id=n.id
+    LEFT JOIN principals estimate_author ON estimate_author.tenant_id=n.tenant_id AND estimate_author.id=CASE
+        WHEN n.fields->>'estimate_by' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        THEN (n.fields->>'estimate_by')::uuid END`
+	}
 	sql := prefix + aggregateCTE + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
     cursor_guard AS (SELECT (` + anchorArg + `::uuid IS NULL OR EXISTS(SELECT 1 FROM ordered WHERE id=` + anchorArg + `::uuid)) AS valid),
     selected AS (SELECT * FROM ordered WHERE (SELECT valid FROM cursor_guard) AND rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
@@ -1541,7 +1576,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
            par.id::text,par.key,par.title,pk.slug,
            coalesce(cc.child_count,0),
            project.id::text,project.key,project.title,
-           epic.id::text,epic.key,epic.title,` + leadColumns + moneyCols + `,s.rn
+           epic.id::text,epic.key,epic.title,` + leadColumns + moneyCols + aggregateCols + `,s.rn
     FROM selected s JOIN nodes n ON n.id=s.id JOIN node_kinds k ON k.id=n.kind_id
     LEFT JOIN child_counts cc ON cc.parent_id=n.id
     ` + assigneeJoin + pageWorker + `
@@ -1562,7 +1597,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
                 JOIN nodes a ON a.id=up.parent_id AND a.deleted_at IS NULL
             WHERE up.depth<32
         ) SELECT u.id,u.key,u.title FROM up u JOIN node_kinds ek ON ek.id=u.kind_id WHERE ek.slug IN ('epic','work') ORDER BY u.depth LIMIT 1
-    ) epic ON true` + moneyJoin + `
+    ) epic ON true` + moneyJoin + aggregateJoin + `
     ) SELECT page_rows.*,cursor_guard.valid FROM cursor_guard LEFT JOIN page_rows ON true ORDER BY page_rows.rn`
 	return sql, args
 }

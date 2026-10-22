@@ -92,7 +92,7 @@ const eligibilityDay = computed<string>(previous => newStart.value ? utcDay.valu
 const inForce = (r: { unit: string; currency: string; effective_from: string; effective_until: string | null }) =>
   r.unit === 'hour' && (!seed || r.currency === seed.currency) && r.effective_from <= eligibilityDay.value && (!r.effective_until || r.effective_until > eligibilityDay.value)
 // Hourly cost units with a rate on that day (in the entry's currency when correcting).
-const hourly = computed(() => business.costUnits.filter(unit => unit.node.id === seed?.cost_unit_node_id || (!['cancelled', 'archived', 'done'].includes(unit.node.state) && unit.rates.some(inForce))))
+const hourly = computed(() => business.costUnits.filter(unit => unit.node.id === seed?.cost_unit_node_id || (!['cancelled', 'archived', 'done'].includes(unit.node.state) && (!!unit.ratesPending || !!unit.ratesError || unit.rates.some(inForce)))))
 watch(hourly, units => { if (!seed && !units.some(unit => unit.node.id === costUnitId.value)) costUnitId.value = units.length === 1 ? units[0].node.id : '' }, { immediate: true })
 watch(costUnitId, value => { if (value && !seed) lastCostUnit = value })
 const rate = computed<{ bill_amount: string; currency: string } | null>(() => {
@@ -107,6 +107,9 @@ const rate = computed<{ bill_amount: string; currency: string } | null>(() => {
 })
 const problem = computed(() => {
   if (!ticket.value) return 'Choose a ticket.'
+  if (!rate.value && business.costUnit(costUnitId.value)?.ratesError) return 'Rates for this cost unit could not be loaded.'
+  if (!rate.value && ((!business.costUnitsLoaded && business.costUnitsLoading) || business.costUnit(costUnitId.value)?.ratesPending)) return 'Loading rates…'
+  if (!costUnitId.value && business.costUnitsError) return business.costUnitsError
   if (!costUnitId.value) return hourly.value.length ? 'Choose a cost unit.' : 'No cost unit has an hourly rate on this day. Add one under Rates.'
   if (!rate.value) return seed ? `This cost unit has no hourly rate in ${seed.currency} on that day.` : 'This cost unit has no hourly rate on this day.'
   if (!duration.value.trim()) return 'Enter how long, like 1h30 or 90m.'
@@ -205,7 +208,7 @@ defineExpose({ reset, focus: focusFirst, openPicker: () => { picker.value = pick
       <span class="sr-only">Cost unit</span>
       <select v-model="costUnitId" class="pick select" :class="{ unset: !costUnitId }" aria-label="Cost unit">
         <option value="" disabled>Cost unit</option>
-        <option v-for="unit in hourly" :key="unit.node.id" :value="unit.node.id">{{ unit.node.title }}</option>
+        <option v-for="unit in hourly" :key="unit.node.id" :value="unit.node.id" :disabled="!!unit.ratesError">{{ unit.node.title }}{{ unit.ratesError ? ' — rates unavailable' : '' }}</option>
       </select>
       <AppIcon name="chevron" :size="12" class="select-chev" />
     </label>
@@ -226,6 +229,10 @@ defineExpose({ reset, focus: focusFirst, openPicker: () => { picker.value = pick
         <span class="edit-keys"><kbd class="keycap">Enter</kbd> saves · <kbd class="keycap">Esc</kbd> cancels</span>
         <button type="button" class="btn sm ghost danger remove-btn" @click="emit('remove')"><AppIcon name="trash" :size="13" />Delete entry</button>
       </template>
+    </div>
+    <div v-if="business.costUnitsError" class="load-status rate-load-status">
+      <p role="status">Some rates could not be loaded.</p>
+      <button type="button" class="btn sm" :disabled="business.costUnitsLoading" @click="business.loadCostUnits()">Retry rates</button>
     </div>
     <PickerMenu v-if="picker" :anchor="picker" title="Ticket" :options="ticketOptions" :search="searchTickets" :current="ticket?.id" placeholder="Search tickets by key or title…" :width="380" empty="No ticket matches." @choose="chooseTicket" @close="closePicker" />
   </form>
@@ -255,6 +262,7 @@ defineExpose({ reset, focus: focusFirst, openPicker: () => { picker.value = pick
 .log-status.warn { color: var(--warn-ink); }
 .edit-keys { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
 .remove-btn { gap: 6px; }
+.rate-load-status { grid-column: 1 / -1; }
 /* Correcting an entry: the same line plus Cancel beside Save. */
 .editing { grid-template-columns: minmax(170px, 1.4fr) minmax(120px, .8fr) auto 64px 72px minmax(90px, 1fr) auto auto; }
 .cancel-btn { height: 34px; }

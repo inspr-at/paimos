@@ -103,6 +103,7 @@ test('offline publication includes daily unknowns, samples and coverage; invalid
   assert.equal(requiredStatus({ required: { go: 'missing' } }), 'red')
   assert.equal(requiredStatus({ required: { go: 'skipped' } }), 'green')
   assert.match(timelineQuery('inspr-at/paimos', 352), /^query /)
+  assert.doesNotMatch(timelineQuery('inspr-at/paimos', 352), /\bactor\b/, 'unused actor data is not collected')
   assert.throws(() => timelineQuery('inspr-at/paimos', '1) { mutation'), /invalid/)
 })
 

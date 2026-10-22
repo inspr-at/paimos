@@ -196,6 +196,17 @@ func (s *Store) reportStarted(ctx context.Context, d nativecontract.DaemonActor,
 		}
 		if changed {
 			view.State = "running"
+			if view.Mode == "terminal" {
+				private, ok := ctx.Value(proofKey{}).(daemon.Proof)
+				mode, err := s.initialMode(ctx, tx, session.Actor, session.Intent, session.Policy)
+				if err != nil {
+					return err
+				}
+				if !ok || private.Terminal == nil || mode != "terminal" || i.Provider != session.Intent.Harness {
+					return fail(403, nativecontract.ReasonQualificationMissing)
+				}
+				view.State = "taken"
+			}
 			view.Revision++
 			raw, _ := json.Marshal(view)
 			if _, err := tx.Exec(ctx, `UPDATE native_session_bindings SET view=$2 WHERE id=$1`, b.OwnedSessionID, raw); err != nil {
@@ -215,6 +226,59 @@ func (s *Store) reportStarted(ctx context.Context, d nativecontract.DaemonActor,
 	if err == nil {
 		s.runtimes[b.OwnedSessionID] = digest
 		err = s.production.relay.Register(*out.Session)
+	}
+	return out, err
+}
+
+// Natural EOF, cancellation and the runtime deadline do not manufacture a
+// person stop command. The owning terminal reports observed exit against its
+// original start operation through the existing private receipt route. Current
+// paired ownership and RequireTx are rechecked under the access-change lock.
+func (s *Store) reportOwnedTerminalExit(ctx context.Context, d nativecontract.DaemonActor, in nativecontract.Receipt) (out nativecontract.OperationResult, err error) {
+	private, ok := ctx.Value(proofKey{}).(daemon.Proof)
+	if !ok || private.Terminal == nil || in.Binding == nil || in.SourceSequence != "1" || in.InputID != nil || in.TurnRef != nil || in.Reason != nil || private.Terminal.RuntimeEpoch != in.Binding.RuntimeEpoch {
+		return out, fail(403, nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	b := *in.Binding
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err = s.stopTx(ctx, d, b, true, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
+		x := proof.Exit
+		if x == nil || !x.RootExited || !x.GroupAbsent || x.ObservedAt.IsZero() || x.ObservedAt.After(s.now()) || proof.Identity.RuntimeEpoch != b.RuntimeEpoch || !nativereceipts.ValidDigest(x.ProcessIdentityDigest) || x.ProcessIdentityDigest != proof.Identity.ProcessIdentityDigest {
+			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
+		if prior := s.runtimes[b.OwnedSessionID]; prior != "" && prior != x.ProcessIdentityDigest {
+			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
+		var operation, request string
+		if err := tx.QueryRow(ctx, `SELECT id::text,request_id::text FROM native_session_intents WHERE owned_session_id=$1`, b.OwnedSessionID).Scan(&operation, &request); err != nil {
+			return err
+		}
+		if operation != in.OperationID || request != in.RequestID || session.View.CurrentBinding == nil || !session.View.CurrentBinding.Equal(b) {
+			return fail(409, nativecontract.ReasonIdentityMismatch)
+		}
+		view := session.View
+		out = nativecontract.OperationResult{Receipt: in, Session: &view}
+		if view.State == "stopped" {
+			return nil
+		}
+		if _, err := tx.Exec(ctx, `UPDATE native_session_roots SET released_at=coalesce(released_at,$3),hold_state='released' WHERE owned_session_id=$1 AND runtime_epoch=$2`, b.OwnedSessionID, b.RuntimeEpoch, x.ObservedAt); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE harness_sessions SET phase='stopped',stopped_at=coalesce(stopped_at,$2),stop_reason=coalesce(stop_reason,'completed') WHERE id=$1`, b.HarnessSessionID, x.ObservedAt); err != nil {
+			return err
+		}
+		view.State = "stopped"
+		view.Revision++
+		raw, _ := json.Marshal(view)
+		if _, err := tx.Exec(ctx, `UPDATE native_session_bindings SET view=$2 WHERE id=$1`, b.OwnedSessionID, raw); err != nil {
+			return err
+		}
+		p, _ := tenant.PrincipalFrom(ctx)
+		return appendEvent(ctx, tx, p, "native_session.stopped", b.ProjectID, in.OperationID, in.RequestID, view)
+	})
+	if err == nil {
+		s.production.relay.Remove(b)
 	}
 	return out, err
 }

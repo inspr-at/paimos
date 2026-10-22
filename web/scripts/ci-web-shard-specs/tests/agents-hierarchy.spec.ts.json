@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/agents-hierarchy.spec.ts",
-    "listedTests": 6,
+    "listedTests": 7,
     "tierTiming": {
       "caseSeconds": {
         "max": 12.445,

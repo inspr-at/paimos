@@ -75,6 +75,7 @@ func main() {
 		// api/openapi.yaml is derived from current sources; a stale local bundle
 		// must never be used to approve response pins.
 		generate := exec.Command("node", "api/generate.mjs", "--stdout")
+		generate.Stderr = os.Stderr
 		openAPI, err := generate.Output()
 		if err != nil {
 			die("generate OpenAPI: %v", err)

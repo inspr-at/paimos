@@ -17,6 +17,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativeintegration/delivery"
 	"github.com/inspr-at/paimos/internal/nativestream"
 )
 
@@ -56,7 +57,7 @@ func (a *nativeSocketAuthority) Authenticate(r *http.Request) (nativecontract.Ac
 		return nativecontract.Actor{}, nativeRefusal(nativecontract.ReasonWrongPrincipal)
 	}
 	query := r.URL.Query()
-	request := nativestream.LocalRequest{Method: "stream", OwnedSessionID: r.PathValue("ownedSessionId"), ViewerID: r.Header.Get(nativecontract.ViewerHeader), Query: query, View: query.Get("view")}
+	request := nativestream.LocalRequest{Method: "stream", OwnedSessionID: r.PathValue("ownedSessionId"), ViewerID: r.Header.Get(nativecontract.ViewerHeader), ControlCapability: r.Header.Get(nativecontract.ControlHeader), Query: query, View: query.Get("view")}
 	if request.View == "" {
 		request.View = "structured"
 	}
@@ -116,7 +117,7 @@ func serveNativeStart(s *Supervisor, authorize func(*http.Request) bool) http.Ha
 			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonWrongPrincipal))
 			return
 		}
-		if local.Intent.Role != "coordinator" || local.Intent.Profile != "native" || local.Intent.Harness != Claude {
+		if local.Intent.Role != "coordinator" || local.Intent.Profile != "native" || (local.Intent.Harness != Claude && local.Intent.Harness != Codex) {
 			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonUnsupported))
 			return
 		}
@@ -448,6 +449,21 @@ func verifyNativePin(pin nativecontract.BinaryPin) error {
 type nativeObservedTransport struct {
 	nativecontract.NativeTransport
 	owner *nativeOwned
+}
+
+// Retain the handle and its exact-binding stop path even when the launcher
+// also returned an error. Readiness failure never strands a possible writer
+// behind the predecessor's Delivery or grants permission to launch another.
+func (e *nativeOwned) retainTransport(transport nativecontract.NativeTransport) error {
+	t := &nativeObservedTransport{NativeTransport: transport, owner: e}
+	e.mu.Lock()
+	e.transport = t
+	e.mu.Unlock()
+	d, err := delivery.New(delivery.DeliveryOptions{Binding: *e.grant.ExpectedBinding, Journal: e.journal, Transport: t, Authority: e, Reports: e, Finals: e, Now: e.host.s.capacityNow, Retention: e.retention, Release: e.release, Refused: func(err error) bool { _ = e.fault(err); return e.faulted() != nil }})
+	if err == nil {
+		e.delivery = d
+	}
+	return err
 }
 
 func (t *nativeObservedTransport) Send(ctx context.Context, in nativecontract.Input) (nativecontract.NativeEvidence, error) {

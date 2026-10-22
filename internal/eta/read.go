@@ -6,6 +6,7 @@ package eta
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -76,6 +77,24 @@ type Aggregate struct {
 	EstimateByName *string
 }
 
+// AggregateColumns projects a complete aggregate and its root's estimate author.
+// Both aliases are trusted SQL source text, never request input.
+func AggregateColumns(alias, author string) string {
+	return strings.ReplaceAll(estimateColumns, "e.", alias+".") +
+		"," + alias + ".hours::float8," + alias + ".planned_hours::float8," + alias + ".is_parent," + author + ".id::text," + author + ".name"
+}
+
+// ScanAggregate reads AggregateColumns, with optional destinations for columns
+// before and after that projection in a wider row. It shares detail/page ETA
+// normalization, including nullable reporters, partial coverage and staleness.
+func ScanAggregate(rows pgx.Rows, before, after []any) (Aggregate, error) {
+	var a Aggregate
+	extra := []any{&a.Hours, &a.PlannedHours, &a.IsParent, &a.EstimateByID, &a.EstimateByName}
+	var err error
+	a.View, err = scanView(rows, before, append(extra, after...))
+	return a, err
+}
+
 // AggregateReadTimeout also covers detail reads, which have no list middleware.
 const AggregateReadTimeout = 5 * time.Second
 
@@ -86,7 +105,7 @@ func LoadAggregates(ctx context.Context, tx pgx.Tx, ids []string) (map[string]Ag
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT e.id::text, `+estimateColumns+`,e.hours::float8,e.planned_hours::float8,e.is_parent,author.id::text,author.name
+	rows, err := tx.Query(ctx, `SELECT e.id::text, `+AggregateColumns("e", "author")+`
  FROM (`+AggregateSQL("$1::uuid[]")+`) e
  JOIN nodes n ON n.id=e.id AND n.tenant_id=current_setting('aeon.tenant_id')::uuid
  LEFT JOIN principals author ON author.tenant_id=n.tenant_id AND author.id=CASE
@@ -98,8 +117,7 @@ func LoadAggregates(ctx context.Context, tx pgx.Tx, ids []string) (map[string]Ag
 	defer rows.Close()
 	for rows.Next() {
 		var id string
-		var a Aggregate
-		a.View, err = scanView(rows, &id, &a.Hours, &a.PlannedHours, &a.IsParent, &a.EstimateByID, &a.EstimateByName)
+		a, err := ScanAggregate(rows, []any{&id}, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -136,15 +154,15 @@ func One(ctx context.Context, tx pgx.Tx, id string) (View, error) {
 		return View{}, rows.Err()
 	}
 	var got string
-	return scanView(rows, &got)
+	return scanView(rows, []any{&got}, nil)
 }
 
-func scanView(rows pgx.Rows, id *string, extra ...any) (View, error) {
+func scanView(rows pgx.Rows, before, extra []any) (View, error) {
 	var view View
 	var progress *int
 	var readyBy, liveBy, finishedBy *string
-	dest := []any{id, &view.ReadyAt, &view.LiveAt, &progress, &view.ReadyReportedAt, &view.LiveReportedAt, &readyBy, &liveBy, &view.ReadyStale, &view.LiveStale, &view.HasWorkingSession,
-		&view.Finished, &view.FinishedAt, &finishedBy, &view.LeafCount, &view.EstimatedLeaves, &view.ProgressBasis, &view.OpenLeaves, &view.ReadyLeaves, &view.LiveLeaves}
+	dest := append(before, &view.ReadyAt, &view.LiveAt, &progress, &view.ReadyReportedAt, &view.LiveReportedAt, &readyBy, &liveBy, &view.ReadyStale, &view.LiveStale, &view.HasWorkingSession,
+		&view.Finished, &view.FinishedAt, &finishedBy, &view.LeafCount, &view.EstimatedLeaves, &view.ProgressBasis, &view.OpenLeaves, &view.ReadyLeaves, &view.LiveLeaves)
 	err := rows.Scan(append(dest, extra...)...)
 	if err != nil {
 		return View{}, err

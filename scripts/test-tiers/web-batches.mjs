@@ -65,16 +65,20 @@ export function browserBatches(rows, policy) {
 // not invent an overhead measurement; the runner's separate result checks
 // still determine whether execution was valid.
 export function browserCaseSeconds(report) {
-  let milliseconds = 0, complete = true
+  let milliseconds = 0, attempts = 0, complete = true
   const visit = suites => {
     for (const suite of suites ?? []) {
-      for (const spec of suite.specs ?? []) for (const test of spec.tests ?? []) for (const result of test.results ?? []) {
-        if (!Number.isFinite(result.duration) || result.duration < 0) complete = false
-        else milliseconds += result.duration
+      for (const spec of suite.specs ?? []) for (const test of spec.tests ?? []) {
+        if (!test.results?.length) complete = false
+        for (const result of test.results ?? []) {
+          attempts++
+          if (!Number.isFinite(result?.duration) || result.duration < 0) complete = false
+          else milliseconds += result.duration
+        }
       }
       visit(suite.suites)
     }
   }
   visit(report.suites)
-  return complete ? milliseconds / 1000 : null
+  return complete && attempts > 0 ? milliseconds / 1000 : null
 }

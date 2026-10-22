@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -66,6 +67,37 @@ type headerTransport struct{ token string }
 func (t headerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	r.Header.Set("Authorization", "Bearer "+t.token)
 	return http.DefaultTransport.RoundTrip(r)
+}
+
+// Risk: startup can fail before Serve registers its listener with http.Server.
+// Close must release that listener even when the serving goroutine has not run.
+func TestManagedToolsCloseBeforeServeClosesListener(t *testing.T) {
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	// This deadline only guards a leaked listener from hanging the assertion.
+	if err := listener.SetDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	host := &managedToolServer{listener: listener, server: &http.Server{}}
+	if err := host.Close(); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := listener.Accept()
+	if connection != nil {
+		_ = connection.Close()
+	}
+	if !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("listener after Close: %v, want net.ErrClosed", err)
+	}
+	if err := host.server.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("delayed Serve after Close: %v, want http.ErrServerClosed", err)
+	}
+	if err := host.Close(); err != nil {
+		t.Fatalf("repeated Close: %v", err)
+	}
 }
 
 func TestManagedToolsRunBinding(t *testing.T) {

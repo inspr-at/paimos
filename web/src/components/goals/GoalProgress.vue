@@ -9,6 +9,9 @@
 // and that line wins); with the chart open the range switch leads it.
 // AEON-1395: an epic (chart false) has no recorded series: the bar is a plain bar in
 // the same footprint and the signal row stays reserved and empty.
+// AEON-1618 Tick round 1: a goal with no work yet has nothing to count or chart. Its
+// bar is an empty plain track, the % slot stays reserved and blank, and "No work
+// linked yet" stands where "N of M done" goes, so the row keeps its height.
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import GoalTip from './GoalTip.vue'
@@ -34,7 +37,9 @@ const young = computed(() => createdAt.value !== null && createdAt.value > windo
 // A goal born inside the window with fewer than three values has no line to draw yet.
 const few = computed(() => young.value && (rate.value?.values ?? 0) < 3)
 
-const charted = computed(() => props.chart !== false)
+// No items and no hand-set percent: there is no progress to show yet.
+const empty = computed(() => props.goal.kind !== 'epic' && !!progress.value && progress.value.total === 0 && !percent.value.byHand)
+const charted = computed(() => props.chart !== false && !empty.value)
 const stalled = computed(() => !done.value && !!props.goal.stall?.stalled)
 const signal = computed(() => {
   if (done.value || !charted.value) return null
@@ -98,12 +103,12 @@ const placeholder = computed(() => {
 </script>
 
 <template>
-  <div class="goal-progress" :class="{ 'is-open': open }">
+  <div class="goal-progress" :class="{ 'is-open': open && !empty, empty }">
     <template v-if="goal.expansion !== 'full' || !progress">
       <span class="of wide">Too many items to sum up</span>
     </template>
     <template v-else>
-      <template v-if="open">
+      <template v-if="open && charted">
         <div v-if="ready && !few && points.length" :id="`chart-${goal.id}`" ref="chart" class="chart" :class="{ on: index !== null }" tabindex="0" role="group" :aria-label="chartLabel"
           @keydown="chartKey" @focus="chartFocus" @blur="leave" @pointermove="move" @pointerdown="pointerType($event); down($event)" @pointerup="up" @pointercancel="up" @pointerleave="out" @click="click"
         >
@@ -125,13 +130,16 @@ const placeholder = computed(() => {
       </template>
       <template v-else>
         <span v-if="!charted" class="bar-btn plain">
-          <span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="pct" :aria-label="`${goal.title} progress, ${pct} percent of its leaf hours done`"><i :style="{ width: `${pct}%` }" /></span>
+          <span v-if="empty" class="bar" role="img" :aria-label="`${goal.title}: no work linked yet`" />
+          <span v-else class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="pct" :aria-label="`${goal.title} progress, ${pct} percent of its leaf hours done`"><i :style="{ width: `${pct}%` }" /></span>
         </span>
         <button v-else ref="bar" type="button" class="bar-btn" data-tip="Progress over time" :aria-expanded="false" :aria-controls="`chart-${goal.id}`" :aria-label="label" @click="openChart">
           <span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="pct" :aria-label="`${goal.title} progress`"><i :style="{ width: `${pct}%` }" /></span>
         </button>
-        <span class="pct" :data-tip="percent.tip"><AppIcon v-if="percent.byHand" name="edit" :size="11" />{{ pct }}%</span>
-        <span class="of">{{ progress.done }} of {{ progress.total }} done</span>
+        <span v-if="empty" class="pct" aria-hidden="true" />
+        <span v-else class="pct" :data-tip="percent.tip"><AppIcon v-if="percent.byHand" name="edit" :size="11" />{{ pct }}%</span>
+        <span v-if="empty" class="of none">No work linked yet</span>
+        <span v-else class="of">{{ progress.done }} of {{ progress.total }} done</span>
       </template>
       <div class="sigrow">
         <div v-if="open && !few" class="range" role="group" aria-label="Range" @keydown="rangeKey">
@@ -195,6 +203,9 @@ button.pct { position: relative; padding: 0; border: 0; border-radius: 6px; back
   .bar-btn .bar { top: 8px; }
   .bar-btn::before, button.pct::before { inset: -11px -3px; }
   .of { display: none; }
+  /* Phones have no "N of M done"; an empty goal says it under its track instead of a signal. */
+  .empty .of.none { display: block; grid-row: 2; }
+  .empty .sigrow { display: none; }
   .sigrow { grid-row: 2; justify-self: stretch; width: auto; max-width: 100%; gap: 8px; }
   .chart, .nohist { grid-row: 1; }
   .nohist { line-height: 22px; }

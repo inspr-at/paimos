@@ -114,6 +114,13 @@ func loadWorkTotals(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*e
 	if err != nil {
 		return nil, nil, err
 	}
+	estimates, views := workTotals(aggregates)
+	return estimates, views, nil
+}
+
+// workTotals gives sorted projections and page-only reads identical response
+// semantics without repeating a scope traversal for already computed facts.
+func workTotals(aggregates map[string]eta.Aggregate) (map[string]*estimateView, map[string]eta.View) {
 	estimates := map[string]*estimateView{}
 	views := map[string]eta.View{}
 	for id, a := range aggregates {
@@ -128,7 +135,7 @@ func loadWorkTotals(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*e
 			views[id] = a.View
 		}
 	}
-	return estimates, views, nil
+	return estimates, views
 }
 func loadEstimates(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*estimateView, error) {
 	estimates, _, err := loadWorkTotals(ctx, tx, ids)

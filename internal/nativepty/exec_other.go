@@ -12,6 +12,8 @@ type CommandPlan struct {
 	Args, Environment []string
 	Provider          string
 	Require           func(context.Context, nativecontract.PTYLaunchSpec) error
+	ConversationRef   string
+	Ready             func(nativecontract.TerminalFrame) (string, error)
 }
 type CommandBuilder interface {
 	Prepare(context.Context, nativecontract.PTYLaunchSpec) (CommandPlan, error)

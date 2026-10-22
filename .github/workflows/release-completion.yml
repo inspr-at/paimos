@@ -271,8 +271,6 @@ jobs:
 
   pin:
     needs: [prepare]
-    outputs:
-      pin_evidence: ${{ steps.pin.outputs.pin_evidence }}
     runs-on: ubuntu-24.04
     environment: release-pinning
     permissions:
