@@ -16,7 +16,6 @@ import { approvalItem, commitDesk, decisionPermission, emptySources, loadDesk, l
 import { phoneCapability } from '../lib/deskPhoneApproval'
 import { settledElsewhere } from '../lib/stepup'
 import { can, onAccessRevalidate } from '../lib/authz'
-import { useProfile } from '../stores/profile'
 import { definitionDeskWords } from '../lib/definitions'
 import { displayLanguage } from '../lib/displayLanguage'
 import { deskOfferDismissed, deskOfferEligible, deskPushBrowser, deviceSubscriptionHash, dismissDeskOffer, phoneSettings, setDeskSubscription, type PhoneSettings } from '../lib/phoneApprovals'
@@ -32,8 +31,8 @@ import { doctrineInbox, inboxChanged } from '../lib/doctrineInbox'
 import deskLight from '../assets/desk/desk-empty-light.webp'
 import deskDark from '../assets/desk/desk-empty-dark.webp'
 
-const session = useSession(), profile = useProfile()
-const noticeDe = computed(() => displayLanguage(profile.profile?.locale) === 'de')
+const session = useSession()
+const noticeDe = computed(() => displayLanguage() === 'de')
 const noticeText = (en: string, de: string) => noticeDe.value ? de : en
 const noticeWords = computed(() => ({
   offer: noticeText('Get a browser notification when a decision waits', 'Browser-Benachrichtigung erhalten, wenn eine Entscheidung wartet'),
@@ -87,7 +86,7 @@ onMounted(() => {
   if (noticeDeciding.value) noticeTimer = setTimeout(() => { noticeReads.cancel(); decideNotice() }, NOTICE_WAIT_MS)
   void loadNotice()
 })
-const definitionLanguage = computed(() => displayLanguage(profile.profile?.locale, 'definitions'))
+const definitionLanguage = computed(() => displayLanguage())
 const titleOf = (item: DeskItem) => item.definitionChange ? definitionDeskWords(item.definitionChange.project_key,item.definitionChange.pending_count,definitionLanguage.value) : item.title
 const agents = useAgents()
 const desk = useDecisionDesk(), route = useRoute(), router = useRouter()

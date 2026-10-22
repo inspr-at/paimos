@@ -264,6 +264,7 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	for name, value := range headers {
 		req.Header.Set(name, value)
 	}
+	applyRunContentCapability(ctx, req.Header)
 	hc := c.HTTP
 	if hc == nil {
 		hc = http.DefaultClient
@@ -350,7 +351,11 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 			// Worker callers log these errors, so remove both proof forms
 			// before decoding messages or retaining structured refusals.
 			var proofs []string
-			for _, proof := range workerlease.Proofs(req.Header) {
+			reflectedProofs := workerlease.Proofs(req.Header)
+			if res.Request != nil {
+				reflectedProofs = append(reflectedProofs, workerlease.Proofs(res.Request.Header)...)
+			}
+			for _, proof := range reflectedProofs {
 				if proof == "" {
 					continue
 				}

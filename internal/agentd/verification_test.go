@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 )
 
 func verificationRequest(t *testing.T) StartRequest {
@@ -118,6 +120,7 @@ func testUnsupportedVerificationBlocksBeforeAnyVendorProcess(t *testing.T, harne
 }
 
 func TestClaudeVerificationSDKEnforcesNoTools(t *testing.T) {
+	truePath := fixturebin.Require(t, "true")
 	for _, capability := range []string{"absent", "interrupt_receipt_v1"} {
 		t.Run(capability, func(t *testing.T) {
 			node, err := exec.LookPath("node")
@@ -153,7 +156,7 @@ func TestClaudeVerificationSDKEnforcesNoTools(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, "/bin/true", root)
+			cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, truePath, root)
 			cmd.Stdin = strings.NewReader(`{"op":"start","purpose":"pairing_verification","prompt":"AEON_VERIFIED","model":"test-model","effort":"high","tools":null}` + "\n")
 			output, err := cmd.Output()
 			if err != nil || !strings.Contains(string(output), `"turn_completed"`) || !strings.Contains(string(output), `"model_evidence_status":"vendor_reported"`) || strings.Count(string(output), `"turn_started"`) != 1 || strings.Contains(string(output), `"control_failed"`) {
