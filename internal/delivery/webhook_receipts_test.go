@@ -49,6 +49,7 @@ type startupProjectionBarrier struct {
 	paused   atomic.Bool
 	released chan struct{}
 	resume   chan struct{}
+	done     <-chan struct{}
 }
 
 func (b *startupProjectionBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
@@ -71,7 +72,7 @@ func (b *startupProjectionBarrier) TraceQueryEnd(ctx context.Context, _ *pgx.Con
 	close(b.released)
 	select {
 	case <-b.resume:
-	case <-ctx.Done():
+	case <-b.done:
 	}
 }
 
@@ -95,7 +96,7 @@ func TestDeliveryWebhookStartupProjectionRace(t *testing.T) {
 			check.App.Slug = "github-actions"
 			raw := receiptBody(t, f, map[string]any{"action": "completed", "check_run": check})
 
-			barrier := &startupProjectionBarrier{released: make(chan struct{}), resume: make(chan struct{})}
+			barrier := &startupProjectionBarrier{released: make(chan struct{}), resume: make(chan struct{}), done: t.Context().Done()}
 			barrier.paused.Store(true)
 			cfg := f.d.App.Config()
 			cfg.ConnConfig.Tracer = barrier
