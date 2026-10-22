@@ -102,7 +102,8 @@ onMounted(async () => { await nextTick(); focusAt(0) })
 .row-menu-item:focus-visible .row-menu-keys { color: var(--ink-2); }
 /* Touch screens have no keys to press, and neither has the phone's bottom sheet (AEON-1618). */
 @media (pointer: coarse) { .row-menu-keys { display: none; } }
-:global(.floating.bottom) .row-menu-keys { display: none; }
+/* The whole selector sits inside :global(): Vue drops anything after it, which hid every bottom sheet. */
+:global(.floating.bottom .row-menu-keys) { display: none; }
 @media (hover: hover) { .row-menu-item:hover .row-menu-keys { color: var(--ink-2); } }
 .row-menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
 .row-menu-spin { animation: row-menu-spin .8s linear infinite; }

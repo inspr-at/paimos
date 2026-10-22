@@ -261,6 +261,8 @@ for (const [width, height] of [[1440, 900], [390, 844]] as const) {
       await expect(page.getByRole('menu').locator('.row-menu-sep')).toHaveCount(3)
       await expect(page.getByRole('menuitem', { name: 'Delete goal' })).toHaveClass(/danger/)
       const panel = page.locator('.floating').filter({ has: page.getByRole('menu') })
+      // The sheet itself shows; only its key hints hide (a rule hid every bottom sheet, CI on f9edc509).
+      await expect(panel).toBeVisible()
       const box = (await panel.boundingBox())!
       expect(box.x).toBeGreaterThanOrEqual(0)
       expect(box.y).toBeGreaterThanOrEqual(0)

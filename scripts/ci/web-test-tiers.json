@@ -20550,6 +20550,10 @@
     ,
     {"kind":"vitest","file":"tests/run-kinds.unit.test.ts","name":"renders the registered host by default, an owner override, and an ellipsis-ready long label","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/scoped-global-selectors.unit.test.ts","name":"Vue keeps only the inside of :global(), so the guard flags anything beside it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/scoped-global-selectors.unit.test.ts","name":"no scoped style in web/src keeps a selector part outside its :global()","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a failed read is retried before a write; failures are reported, not hidden","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a new viewer starts from their own state; the old viewer’s queued write is dropped","tier":"GATED-FULL"}
