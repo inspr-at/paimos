@@ -1,17 +1,15 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, toRef, watch } from 'vue'
+import { computed, toRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { can } from '../../lib/authz'
 import { canLaunchLead, canPause, canResume, leadLaunchReason, unmanagedLeadCopy, LEAD_WORDS } from '../../lib/lead'
 import { useLeadCardFold, useLeadPanelCollapse } from '../../lib/leadCardFold'
 import { openLeadPanel, openLeadPause, openStartLead } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
-import { usePoller } from '../../lib/usePolledData'
 import { useLeadSummary } from '../../lib/useLeadSummary'
 import { useProjectLeads } from '../../stores/projectLeads'
 import { useSession } from '../../stores/session'
-import { useWorkQueue } from '../../stores/workQueue'
 import { projectSettingsPath } from '../../lib/projectSettings'
 import AppIcon from '../AppIcon.vue'
 import LeadBot from './LeadBot.vue'
@@ -23,7 +21,7 @@ import LeadMenu from './LeadMenu.vue'
 // runs, what it does and what comes next; one primary action per state.
 const props = defineProps<{ projectId: string; projectKey: string; routeKey: string }>()
 const w = LEAD_WORDS
-const leads = useProjectLeads(), queue = useWorkQueue(), session = useSession(), router = useRouter()
+const leads = useProjectLeads(), session = useSession(), router = useRouter()
 const summary = useLeadSummary(toRef(props, 'projectId'), toRef(props, 'projectKey'))
 const { lead, band, leadSession, workers, workersKnown, workersPartial, stations, questions, questionsPartial } = summary
 const person = computed(() => session.identity?.principal.kind === 'person')
@@ -44,10 +42,6 @@ const shown = computed(() => !!lead.value && (band.value.state === 'none' ? fold
 const foldTip = computed(() => `${folded.value ? 'Unfold' : 'Fold'} the ${w.l} card`)
 const collapseLabel = computed(() => `${collapsed.value ? 'Expand' : 'Collapse'} ${w.l} panel`)
 const launchBlocked = computed(() => ['start', 'resume'].includes(band.value.action) && !canLaunchLead(lead.value))
-const poller = usePoller(() => leads.load(props.projectId), 15_000)
-watch(() => [props.projectId, session.identity?.principal.id], () => { void leads.load(props.projectId); void queue.load(props.projectId) }, { immediate: true })
-onMounted(() => poller.start())
-onBeforeUnmount(() => poller.stop())
 
 const time = (iso?: string | null) => iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''
 // Workers by their real parent (AEON-1210 G2): no count while that tree can't be read, “3+” while only part of it was.

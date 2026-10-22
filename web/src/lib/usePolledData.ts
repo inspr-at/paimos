@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { computed, shallowRef, type ComputedRef, type Ref, type ShallowRef } from 'vue'
-import { APIError, StaleRequestError } from './api'
-import { positionOf, type ReadOrder } from './position'
+import { APIError, StaleRequestError } from './api.ts'
+import { positionOf, type ReadOrder } from './position.ts'
 
 export type PollState = 'idle' | 'ready' | 'forbidden' | 'error'
 export interface RefreshStatus { state: PollState; failures: number; updatedAt: number | null; error: string }

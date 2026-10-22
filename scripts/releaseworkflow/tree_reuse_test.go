@@ -427,6 +427,10 @@ func mergeGroupInventory(t *testing.T, w map[string]any) []string {
 	var names []string
 	for id, value := range treeMap(w["jobs"]) {
 		j := treeMap(value)
+		if id == "apt-bundle" {
+			checkOfflineAptWorkflow(t)
+			continue // Optional fetch acceleration, never execution evidence.
+		}
 		if id == "tree-reuse" || id == "cache-prime" {
 			if !strings.Contains(fmt.Sprint(j["if"]), "github.event_name == 'push'") {
 				t.Fatalf("%s must remain push-only", id)
@@ -922,6 +926,35 @@ func normalizeAEON933InstallBounds(t *testing.T, id string, job map[string]any) 
 	}
 }
 
+// AEON-1652 adds an optional package artifact, preserving the original install
+// and failure fallback. Prove its wiring before projecting historical jobs.
+func normalizeOfflineAptBundle(t *testing.T, id string, job map[string]any) {
+	t.Helper()
+	if id != "go-test" && id != "web-unit" && id != "web-shard" {
+		return
+	}
+	checkOfflineAptWorkflow(t)
+	var steps, needs []any
+	removed := 0
+	for _, value := range reuseSteps(job) {
+		switch treeMap(value)["name"] {
+		case "Identify optional apt bundle for this runner image", "Download optional apt bundle":
+			removed++
+		default:
+			steps = append(steps, value)
+		}
+	}
+	if removed != 2 || !containsNeed(job["needs"], "apt-bundle") {
+		t.Fatalf("%s lost its optional apt bundle prerequisites", id)
+	}
+	for _, need := range anySlice(job["needs"]) {
+		if need != "apt-bundle" {
+			needs = append(needs, need)
+		}
+	}
+	job["steps"], job["needs"] = steps, needs
+}
+
 // AEON-1605: mocked browser shards opt out of the backend wait, and e2e
 // requires it through the bounded readiness waiter. Prove both exact additions
 // before projecting onto the accepted-CI pin.
@@ -987,7 +1020,7 @@ func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
 	normalizeParallelWebSetup(t, jobs)
 	unit, browser := treeMap(jobs["web-unit"]), treeMap(jobs["web-shard"])
 	for _, j := range []map[string]any{unit, browser} {
-		if !reflect.DeepEqual(j["needs"], []any{"ci-plan", "web-setup", "tree-reuse"}) {
+		if !reflect.DeepEqual(j["needs"], []any{"ci-plan", "web-setup", "tree-reuse", "apt-bundle"}) {
 			t.Fatal("Unit and browser shards must start together from setup, without depending on each other")
 		}
 		if treeMap(reuseStep(t, j, "Download shared web runtime")["with"])["name"] != "web-runtime" || reuseStep(t, j, "Restore web runtime")["run"] != `tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"` {
@@ -1062,6 +1095,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				j = normalizeParallelWebSetup(t, jobs)
 			}
 			j = cloneStep(t, j)
+			normalizeOfflineAptBundle(t, id, j)
 			normalizeAEON1660Caches(t, id, j)
 			if id != "web-setup" { // The historical setup was already projected above.
 				normalizeAEON1642Toolchains(t, j)

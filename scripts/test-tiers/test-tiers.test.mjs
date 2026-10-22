@@ -31,6 +31,7 @@ import './tiers-merge-driver.test.mjs'
 import '../merge-drivers/merge-drivers.test.mjs'
 import '../nightly-ticket.test.mjs'
 import { requiredJobs } from '../ci-tree-reuse.mjs'
+import { withoutOptionalAptDownload } from '../check-apt-bounds.mjs'
 
 const fullWebShardJSON = `[${fullWebShards.join(',')}]`
 
@@ -1265,7 +1266,7 @@ test('AEON-1451 the full web layout and the essential gate stay inside the shard
   assert.match(shardJob,/timeout-minutes: 20\n/)
   assert.match(shardJob,/PW_RETRIES: '0'/)
   assert.equal(shardJob.includes(`github.event_name == 'pull_request' && needs.ci-plan.outputs.web_shards || '${spaced}'`),true)
-  assert.doesNotMatch(shardJob,/continue-on-error|max-attempts/)
+  assert.doesNotMatch(withoutOptionalAptDownload(shardJob),/continue-on-error|max-attempts/)
   assert.deepEqual(requiredJobs.filter(name=>name.startsWith('web-shard (')),fullWebShards.map(shard=>`web-shard (${shard})`))
 })
 

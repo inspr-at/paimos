@@ -49,7 +49,7 @@ export class QuotePresence {
     this.stream.addEventListener('presence',(event)=>{ if(this.disposed) return; this.snapshot=JSON.parse((event as MessageEvent).data) as PresenceSnapshot;this.onSnapshot(this.snapshot) })
     this.stream.addEventListener('quote_change',(event)=>{ if(this.disposed) return;this.onNotice(JSON.parse((event as MessageEvent).data) as QuoteNotice) })
     this.stream.addEventListener('access_revoked',()=>this.stop())
-    this.heartbeatTimer=window.setInterval(()=>{void this.update()},15000)
+    this.heartbeatTimer=window.setInterval(()=>{if(!document.hidden && navigator.onLine!==false) void this.update()},15000)
     document.addEventListener('visibilitychange',this.visibility)
     window.addEventListener('focus',this.focus)
   }
@@ -80,7 +80,7 @@ export class QuotePresence {
   async refresh():Promise<void> { if(this.disposed) return; try { const s=await json<PresenceSnapshot>(await api(path(this.quoteId)));if(!this.disposed){this.snapshot=s;this.onSnapshot(s)} } catch(e) { if(e instanceof APIError && (e.status===401 || e.status===403)) this.stop() } }
   private finishUpdate():void {
     this.updating=false
-    if(this.disposed || !this.pendingUpdate) return
+    if(this.disposed || document.hidden || !this.pendingUpdate) return
     // A timer may fire while a PATCH or rejoin is held. Coalesce those requests,
     // then flush the latest desired state after the throttle and retry fence.
     window.clearTimeout(this.pendingTimer)
