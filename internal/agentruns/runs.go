@@ -842,6 +842,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		actor := tenant.Principal{ID: *v.ActingPersonID, TenantID: p.TenantID, Kind: tenant.Person}
 		for _, permission := range []string{"work_orders.write", "run.create"} {
 			if err := authz.RequireTx(ctx, tx, actor, permission, authz.Scope{ProjectID: project}); err != nil {
+				if errors.Is(err, authz.ErrForbidden) {
+					return nil, &workqueue.PersonAdmissionError{Code: "permission_revoked"}
+				}
 				return nil, err
 			}
 		}

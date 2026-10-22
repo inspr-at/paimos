@@ -115,10 +115,13 @@ func TestRunOnceBindsContextOptionsAndCurrentAuthority(t *testing.T) {
 	r.Header.Set(agentverification.RunOncePolicyHeader, agentverification.RunOncePolicy)
 	w := httptest.NewRecorder()
 	f.mux.ServeHTTP(w, r)
-	if w.Code != 403 || !strings.Contains(w.Body.String(), "run.create") {
+	if w.Code != 403 || !strings.Contains(w.Body.String(), `"code":"permission_revoked"`) {
 		t.Fatalf("wrong final-claim refusal: %d %s", w.Code, w.Body.String())
 	}
 	if f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='queued'`, readOnly.ID) != 1 {
 		t.Fatal("revoked claim mutated the run")
+	}
+	if f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.admission_refused' AND after->>'reason'='permission_revoked'`) != 1 {
+		t.Fatal("revoked one-off claim lost its refusal audit")
 	}
 }

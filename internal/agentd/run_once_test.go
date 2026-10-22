@@ -93,7 +93,7 @@ func TestRunOnceReadOnlyCeilingAndInstruction(t *testing.T) {
             const hook=await o.hooks.PreToolUse[0].hooks[0]({tool_name:'Bash',tool_input:{command:'write'}});
             if(hook.hookSpecificOutput.permissionDecision!=='deny') throw new Error('hook allowed');
             const first=await prompt[Symbol.asyncIterator]().next();
-            if(first.value.message.content!=='Inspect exactly this supplied task.') throw new Error('wrong task');
+            if(first.value.message.content.length!==1 || first.value.message.content[0].text!=='Inspect exactly this supplied task.') throw new Error('wrong task');
             yield {type:'system',subtype:'init',session_id:'once-session',model:'once-model',capabilities:[]};
             yield {type:'result',subtype:'success',is_error:false,result:'Inspection complete.',modelUsage:{model:{inputTokens:2,outputTokens:1}},total_cost_usd:0.000001};
           }};
