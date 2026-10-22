@@ -17,6 +17,17 @@ function stubBin(state) {
 export AEON_AS_ROOT=1
 exec "$@"
 `)
+  // sudo is simulated throughout this fixture. Track the ownership handoff
+  // explicitly; restrictive modes below are real and need a real chmod.
+  write('chown', `#!/usr/bin/env bash
+state=\${AEON_STUB_STATE:?}
+[[ \${AEON_AS_ROOT:-} == 1 && \$# -eq 4 && \$1 == -hR && \$2 == -- && \$3 =~ ^[0-9]+:[0-9]+$ && -d \$4 ]] || exit 1
+printf '%s\\n' "\$3" "\$4" > "\$state/ownership-handoff"
+if [[ -f \$state/root-owned-bundle ]]; then
+  [[ \$(cat "\$state/root-owned-bundle") == "\$4" ]] || exit 1
+  mv "\$state/root-owned-bundle" "\$state/runner-owned-bundle"
+fi
+`)
   if (existsSync(join(state, 'clock'))) write('date', `#!/usr/bin/env bash
 cat "\${AEON_STUB_STATE:?}/clock"
 `)
@@ -34,6 +45,10 @@ limit=\$1
 shift
 printf '%s|%s|%s\\n' "\${AEON_AS_ROOT:-0}" "\$limit" "\$*" >> "\$state/timeouts"
 printf '%s\\n' "\$grace" >> "\$state/kill-graces"
+if [[ \$1 == python3 && \${2:-} == - && \${3:-} == write && -f \$state/root-owned-bundle ]]; then
+  echo 'fixture: bundle still owned by root at manifest write' >&2
+  exit 1
+fi
 advance_clock() {
   [[ -f "\$state/clock" ]] || return 0
   local index elapsed
@@ -164,6 +179,22 @@ if [[ "\$mode" == bundle-* ]]; then
   fi
   for name in fish zsh libtest fonts-test; do echo "\$name" > "\$archives/\${name}_1_amd64.deb"; done
   echo 'partial download' > "\$archives/partial/unneeded"
+  if [[ -f \$state/root-only ]]; then
+    python3 - "\$state" "\$lists" "\$archives" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+state, lists, archives = map(Path, sys.argv[1:])
+(lists / 'auxfiles').mkdir()
+(lists / 'auxfiles' / 'metadata').write_text('root-only index metadata')
+restricted = [lists / 'partial', archives / 'partial', lists / 'auxfiles', lists / 'noble_Packages', archives / 'fish_1_amd64.deb']
+for path in restricted:
+    path.chmod(0o700 if path.is_dir() else 0o600)
+(state / 'root-only-modes').write_text(json.dumps({str(p.relative_to(lists.parent)): p.stat().st_mode & 0o777 for p in restricted}))
+(state / 'root-owned-bundle').write_text(str(lists.parent))
+PY
+  fi
   exit 0
 fi
 browser=0
@@ -222,12 +253,13 @@ exec "\$AEON_FIXTURE_NODE" "\$AEON_FIXTURE_APT_HOLD" "\$PPID"
   return bin
 }
 
-export function aptFixture({ mode, shells = false, format = 'sources', elapsed, mirrorList = false, timeoutStatus = 124, dpkgActivity = 'Unpacking libtest (1.0) ...', bundleDir, imageOS = 'ubuntu24', imageVersion = '20261021.1', runnerArch = 'X64' }) {
+export function aptFixture({ mode, shells = false, format = 'sources', elapsed, mirrorList = false, timeoutStatus = 124, dpkgActivity = 'Unpacking libtest (1.0) ...', bundleDir, rootOnly = false, imageOS = 'ubuntu24', imageVersion = '20261021.1', runnerArch = 'X64' }) {
   const state = mkdtempSync(join(tmpdir(), 'aeon-apt-'))
   writeFileSync(join(state, 'mode'), mode)
   writeFileSync(join(state, 'calls'), '')
   writeFileSync(join(state, 'timeout-status'), String(timeoutStatus))
   writeFileSync(join(state, 'dpkg-activity'), dpkgActivity + '\n')
+  if (rootOnly) writeFileSync(join(state, 'root-only'), '')
   const sourceRoot = join(state, 'apt')
   mkdirSync(join(sourceRoot, 'sources.list.d'), { recursive: true })
   const sources = format === 'list' ? {

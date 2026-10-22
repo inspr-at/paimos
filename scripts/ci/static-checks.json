@@ -23,7 +23,7 @@
     "apt-bundle": {
       "kind": "not-static",
       "reason": "AEON-1652: one bounded hosted apt fetch and run artifact preparation; offline and fallback behaviour is covered by apt-step-bounds.",
-      "runs_sha256": "9ae81b558879673d09042757c1c60f16553fbed56257a8cd89d15a815c670fea"
+      "runs_sha256": "a9d0754eea8be36dab1492e598c587f0b4bf2b35eba1116bcea6a7100b4dbd15"
     },
     "go-test": {
       "kind": "not-static",

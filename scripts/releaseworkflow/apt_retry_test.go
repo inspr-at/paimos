@@ -67,6 +67,16 @@ func checkOfflineAptWorkflow(t *testing.T) {
 			t.Fatal("apt bundle must not depend on the evicting actions cache")
 		}
 	}
+	warning := reuseStep(t, bundle, "Warn when optional apt bundle is unavailable")
+	if warning["if"] != "failure()" || warning["timeout-minutes"] != 1 || !strings.Contains(fmt.Sprint(warning["run"]), "::warning title=Optional apt bundle unavailable::") || !strings.Contains(fmt.Sprint(warning["run"]), "GITHUB_STEP_SUMMARY") {
+		t.Fatal("optional bundle failures must retain a visible warning and network fallback summary")
+	}
+	for _, id := range []string{"go", "web", "release-check", "e2e", "tier-measurements"} {
+		j := treeMap(jobs[id])
+		if !strings.Contains(fmt.Sprint(j["if"]), "always()") || containsNeed(j["needs"], "apt-bundle") || strings.Contains(fmt.Sprint(j), "needs.apt-bundle.result") {
+			t.Fatalf("%s must aggregate required execution independently of optional apt-bundle failure", id)
+		}
+	}
 	for id, installName := range map[string]string{
 		"go-test":   "Install shells when this shard runs pairing path-proof tests",
 		"web-unit":  "Install shells used by command round-trip unit tests",

@@ -448,10 +448,13 @@ if [[ $mode == bundle ]]; then
   for number in 1 2 3 4; do
     attempt_deadline=$(($(date +%s) + first_attempt_seconds))
     if capture_attempt; then
-      # Apt owns partial directories as _apt:root (0700) and its lock files
-      # as root. They are not bundle inputs and an unprivileged artifact
-      # upload cannot traverse them. Apt has exited before this cleanup.
+      # Apt can leave root-only files (0600) and _apt-owned directories
+      # (0700). Hand this private tree back to the runner before either the
+      # unprivileged manifest or upload traverses it. Apt has exited here.
       attempt_deadline=$deadline
+      run_root_timeout 30 chown -hR -- "$(id -u):$(id -g)" "$bundle"
+      run_root_timeout 30 chmod -R -- u=rwX,go=rX "$bundle"
+      # Working files are not bundle inputs, even after the ownership handoff.
       run_root_timeout 30 rm -rf -- "$bundle/archives/partial" "$bundle/archives/lock" "$bundle/lists/partial" "$bundle/lists/lock"
       mkdir -p "$bundle/etc/sources.list.d"
       [[ ! -f $selected_sources/sources.list ]] || cp "$selected_sources/sources.list" "$bundle/etc/sources.list"

@@ -4,7 +4,7 @@
 // commit because its workflow commands are the historical ones below.
 import { afterEach, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, cpSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, cpSync, mkdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { aptFixture } from './testdata/apt-fixture.mjs'
@@ -302,14 +302,36 @@ test('browser download errors do not trigger an apt mirror retry', async () => {
 // AEON-1652 fix5 risk: fetching in every shard multiplies mirror outages;
 // partial artifacts must fall back before dpkg, never after a failed write.
 test('one complete image bundle installs offline and invalid bundles retain network fallback', async () => {
-  const producer = await run(state => `bash "${script}" bundle "${join(state, 'bundle')}"`, { mode: 'bundle-fetch-retry', mirrorList: 'hosted', elapsed: [0, 0, 260, 0, 260, 0, 0, 0] })
+  const producer = await run(state => `bash "${script}" bundle "${join(state, 'bundle')}"`, { mode: 'bundle-fetch-retry', rootOnly: true, mirrorList: 'hosted', elapsed: [0, 0, 260, 0, 260, 0, 0, 0] })
   assert.equal(producer.status, 0, `${producer.error}\n${producer.stdout}\n${producer.stderr}`)
   const bundleDir = join(producer.state, 'bundle')
   const manifest = JSON.parse(readFileSync(join(bundleDir, 'manifest.json'), 'utf8'))
   assert.deepEqual(manifest.packages, ['fish', 'fonts-test', 'libtest', 'zsh'], 'retain installed libraries from the dry-run argument list')
   assert.deepEqual(manifest.image, ['ubuntu24', '20261021.1', 'X64'])
   assert.equal(producer.calls.filter(call => call.includes('--download-only')).length, 3, 'allow several bounded fetch attempts across mirrors')
-  assert.deepEqual(producer.timeouts.filter(timeout => timeout.root === '1').map(timeout => timeout.seconds), [150, 240, 150, 240, 150, 240, 30], 'fetch attempts and artifact cleanup stay inside the shared 18-minute budget')
+  assert.deepEqual(producer.timeouts.filter(timeout => timeout.root === '1').map(timeout => timeout.seconds), [150, 240, 150, 240, 150, 240, 30, 30, 30], 'fetch attempts, ownership handoff and cleanup stay inside the shared 18-minute budget')
+  // AEON-1652 fix7: apt's root-only output must reach an unprivileged
+  // manifest and artifact upload without weakening checksum validation.
+  assert.deepEqual(JSON.parse(readFileSync(join(producer.state, 'root-only-modes'), 'utf8')), {
+    'lists/partial': 0o700, 'archives/partial': 0o700, 'lists/auxfiles': 0o700,
+    'lists/noble_Packages': 0o600, 'archives/fish_1_amd64.deb': 0o600,
+  })
+  assert.equal(readFileSync(join(producer.state, 'ownership-handoff'), 'utf8'), `${process.getuid()}:${process.getgid()}\n${bundleDir}\n`)
+  assert.equal(existsSync(join(producer.state, 'root-owned-bundle')), false)
+  for (const [file, mode] of [['lists/auxfiles', 0o755], ['lists/noble_Packages', 0o644], ['archives/fish_1_amd64.deb', 0o644]]) {
+    assert.equal(statSync(join(bundleDir, file)).mode & 0o777, mode, `${file} must be readable by the runner and artifact uploader`)
+  }
+  const manifestTimeout = producer.timeouts.find(timeout => timeout.command === `python3 - write ${bundleDir}`)
+  assert.equal(manifestTimeout?.root, '0', 'manifest writing must remain unprivileged')
+  // Negative control uses a private copy, never a throwaway branch commit.
+  const missingHandoff = await run(state => {
+    const copy = join(state, 'without-handoff.sh')
+    writeFileSync(copy, readFileSync(script, 'utf8').replace(/^      run_root_timeout 30 chown .*\n/m, ''))
+    return `bash "${copy}" bundle "${join(state, 'bundle')}"`
+  }, { mode: 'bundle-ok', rootOnly: true })
+  assert.equal(missingHandoff.status, 1, missingHandoff.stdout)
+  assert.match(missingHandoff.stderr, /bundle still owned by root at manifest write/)
+  assert.equal(existsSync(join(missingHandoff.state, 'bundle/manifest.json')), false)
   for (const file of ['archives/partial', 'archives/lock', 'lists/partial', 'lists/lock']) assert.equal(existsSync(join(bundleDir, file)), false, 'exclude private apt working files from the artifact')
   assert.match(producer.attempts.filter(attempt => attempt.command.includes('--download-only'))[1].sources['ubuntu.sources'], /http:\/\/archive\.ubuntu\.com/)
   assert.ok(producer.attempts.filter(attempt => attempt.command.includes('--download-only')).every(attempt => attempt.root === '1' && attempt.command.includes('--reinstall')))
