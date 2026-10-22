@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput, registryImpact, webShardPlan, fullGateTests, driftCases, browserScopeNoneAllowlist, fullWebShards, fullWebShardCount, nightlyWebShardPlan, assertWebShardBudget } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
-import { aggregate, jobMinutes, readReports } from './measure.mjs'
+import { aggregate, jobMinutes, readReports, pollJobInventory } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
 import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, effectiveLane, sourceTree, promotionsBetween, registryChangesBetween, sizeWebDecision } from './diff.mjs'
 import { runnerDecision, runnerSelection, browserRunnerIdentity, run, main as tierRunnerMain } from './cli.mjs'
@@ -2185,6 +2185,69 @@ test('job accounting includes setup in minutes and reports missing artifacts rat
   assert.equal(measurement.measured.goRunnerMinutes,2)
   assert.equal(measurement.coverage,'incomplete')
   assert.deepEqual(measurement.missingEvidence,['go-test-1'])
+})
+
+// Risk: Actions status propagation lag can falsely mark passed shards as
+// interrupted. This fixed go-static regression is outside the tier inventories.
+test('AEON-1349 measurements re-poll stale jobs within a deadline and preserve incomplete evidence',async()=>{
+  const env={GITHUB_REPOSITORY:'example/aeon',GITHUB_RUN_ID:'1349'}
+  const finished={status:'completed',conclusion:'success',started_at:'2026-10-14T14:26:50Z',completed_at:'2026-10-14T14:28:50Z'}
+  const row={kind:'browser',file:'tests/fixture.spec.ts',name:'passed case',tier:'ESSENTIAL'}
+  const evidence=reportCases([row],[{key:key(row),status:'passed',started:true}],1,'web-shard-12')
+  for(const fixture of [
+    {states:['queued','in_progress','completed'],waited:10_000,coverage:'reported'},
+    {states:['completed','completed'],upstreamLag:true,waited:5_000,coverage:'reported'},
+    {states:['completed'],waited:0,coverage:'reported'},
+    {states:['completed'],collector:'tier-measurements / pr-tree-v1:fixture',waited:0,coverage:'reported'},
+    {states:['completed'],collector:'nightly-tier-measurements',waited:0,coverage:'reported'},
+    {states:['in_progress'],waited:60_000,coverage:'incomplete',reason:'Actions job in_progress'},
+    {states:['completed'],cancelled:true,waited:0,coverage:'incomplete',reason:'Actions job cancelled'},
+    {states:['completed'],missing:true,waited:0,coverage:'incomplete'},
+  ]) {
+    let clock=0,poll=-1
+    const calls=[],waits=[]
+    const collector=fixture.collector??'tier-measurements'
+    const jobs=await pollJobInventory(env,{
+      now:()=>clock,
+      wait:async ms=>{waits.push(ms);clock+=ms},
+      execute:(bin,args,{timeout})=>{
+        assert.equal(bin,'gh')
+        assert.equal(args[0],'api')
+        const page=Number(new URL(args[1],'https://api.github.com/').searchParams.get('page'))
+        assert.equal(args[1],`repos/example/aeon/actions/runs/1349/jobs?filter=latest&per_page=100&page=${page}`)
+        assert.equal(timeout,60_000-clock,'API calls share the polling deadline')
+        if(page===1)poll++
+        calls.push([poll,page])
+        const status=fixture.states[Math.min(poll,fixture.states.length-1)]
+        const shard={...finished,name:`${collector.startsWith('nightly-')?'nightly-':''}web-shard (12)`,status,
+          conclusion:status==='completed'?'success':null}
+        if(fixture.cancelled)Object.assign(shard,{conclusion:'cancelled',runner_id:null,steps:[],started_at:null,completed_at:null})
+        const inventory=[{name:collector,status:'in_progress'},
+          ...Array.from({length:99},(_,i)=>({...finished,name:`upstream-${i}`,
+            ...(i===0&&fixture.upstreamLag&&poll===0?{status:'in_progress',conclusion:null}:{})})),shard]
+        return JSON.stringify({total_count:inventory.length,jobs:inventory.slice((page-1)*100,page*100)})
+      },
+    })
+    assert.equal(clock,fixture.waited)
+    assert.equal(waits.reduce((sum,ms)=>sum+ms,0),fixture.waited)
+    assert.ok(waits.every(ms=>ms>0&&ms<=5_000))
+    assert.equal(calls.length,2*(fixture.waited===60_000?12:fixture.states.length))
+    assert.deepEqual(calls.map(([,page])=>page),Array.from({length:calls.length},(_,i)=>i%2+1),'every poll refreshes both pages')
+    assert.equal(jobs.length,101,'re-polls replace rather than append the inventory')
+    const measured=aggregate(fixture.missing?[]:[evidence],jobs)
+    assert.equal(measured.coverage,fixture.coverage)
+    assert.deepEqual(measured.missingEvidence,fixture.missing?['web-shard-12']:[])
+    assert.deepEqual(measured.incompleteEvidence,fixture.reason?[{job:'web-shard-12',status:'interrupted',reason:fixture.reason}]:[])
+    assert.equal(measured.classes.ESSENTIAL?.passed,fixture.missing?undefined:1)
+    assert.equal(measured.measured.webRunnerMinutes,fixture.cancelled||fixture.waited===60_000?0:2)
+  }
+  for(const runner_id of [undefined,null,0]) for(const timestamps of [{},{started_at:null,completed_at:null}]) {
+    const cancelled={name:'web-shard (12)',status:'completed',conclusion:'cancelled',runner_id,steps:[],...timestamps}
+    assert.equal(jobMinutes(cancelled),null,'queued cancellation never acquired a runner')
+    assert.equal(aggregate([], [cancelled]).coverage,'incomplete','runnerless cancellation still lacks test evidence')
+    assert.throws(()=>jobMinutes({...cancelled,runner_id:1}),/Invalid job timestamps: web-shard \(12\)/)
+    assert.throws(()=>jobMinutes({...cancelled,steps:[{name:'Checkout'}]}),/Invalid job timestamps: web-shard \(12\)/)
+  }
 })
 
 test('skipped jobs have no runner duration and cannot hide missing test evidence',()=>{

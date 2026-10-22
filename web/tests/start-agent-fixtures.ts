@@ -14,7 +14,7 @@ const accountId = 'ac000000-0000-4000-8000-000000000001'
 const spareAccountId = 'ac000000-0000-4000-8000-000000000002'
 const laptopAccountId = 'ac000000-0000-4000-8000-000000000003'
 
-export async function mockStartAgent(page: Page, options: { ticketTitle?: string; expertStart?: boolean; lostOnceResponse?: boolean; wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'claude' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
+export async function mockStartAgent(page: Page, options: { ticketTitle?: string; expertStart?: boolean; lostOnceResponse?: boolean; wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'same-name-hosts' | 'claude' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
   const work = fixtures()
   if (options.ticketTitle) work.nodes.find(node => node.id === 'n-1')!.title = options.ticketTitle
   const workParents = new Set(work.nodes.filter(node => ['work', 'epic', 'ticket', 'task'].includes(node.kind_slug)).map(node => node.parent_id))
@@ -73,6 +73,15 @@ export async function mockStartAgent(page: Page, options: { ticketTitle?: string
     })
   }
   if (options.catalog === 'claude') hosts.shift()
+  if (options.catalog === 'same-name-hosts') {
+    hosts[0].harnesses[0].accounts = [primary]
+    // Keep identical grants/labels but a separate account on the old daemon.
+    // Stale high headroom must not override the current host's connection.
+    hosts.unshift({ daemon_id: 'workstation-old', label: 'Work Mac', harnesses: [{
+      harness: 'codex', default_account_id: laptopAccountId,
+      accounts: [{ ...primary, id: laptopAccountId, last_probe_at: new Date(now - 180_000).toISOString(), remaining_fraction: 0.95 }],
+    }] })
+  }
   const catalog = { as_of: new Date(now).toISOString(), role: 'build', hosts: hosts.map(host => ({ ...host, harnesses: host.harnesses.map(h => ({ ...h, read_only_run: { supported: h.harness === 'claude', policy: h.harness === 'claude' ? 'no_tools' : 'unavailable', reason: h.harness === 'claude' ? '' : 'Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.' } })) })) }
   const account: AgentAccount = {
     id: accountId, account_key: 'should-not-render-key', harness: 'codex', daemon_id: 'workstation', label: 'Workspace account', plan: 'Pro', host_label: 'Work Mac',
@@ -202,5 +211,5 @@ export async function mockStartAgent(page: Page, options: { ticketTitle?: string
       project: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' }, ticket: { id: 'n-1', key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning' }, agent: { id: agentId, name: 'Studio builder' },
     })
   }
-  return { state, calls, claim, account, profile, agentId, spareProfileId, spareAccountId, pins, createdLeaves }
+  return { state, calls, claim, account, profile, agentId, spareProfileId, spareAccountId, pins, createdLeaves, catalog }
 }

@@ -5,7 +5,7 @@ import type { SessionControl } from '../../lib/agents'
 import { reparentSession, undoRemoval } from '../../lib/agentRows'
 import { movableWorker, moveTarget } from './sessionMove'
 import { useAgents } from '../../stores/agents'
-import { GROUPS, controlBlocked, sessionForest, sessionWorking, stopReasonLabel, type SessionBranch, type SessionGroup } from '../../lib/agentState'
+import { GROUPS, controlBlocked, sessionForest, sessionParent, sessionWorking, stopReasonLabel, type SessionBranch, type SessionGroup } from '../../lib/agentState'
 import { relativeTime } from '../../lib/work'
 import type { Availability, SessionView } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
@@ -169,7 +169,7 @@ const keyFocus = ref(false)
 const menuOpen = ref(false)
 const structure: Structure<SessionView> = {
   id: view => view.session.id,
-  key: view => `${view.status.group}|${view.session.project_id ?? ''}|${view.session.parent_harness_session_id ?? ''}|${group.value === 'harness' ? view.session.harness : group.value === 'computer' ? view.session.host : ''}`,
+  key: view => `${view.status.group}|${view.session.project_id ?? ''}|${sessionParent(view.session) ?? ''}|${group.value === 'harness' ? view.session.harness : group.value === 'computer' ? view.session.host : ''}`,
   match: view => liveMatch.value?.(view) ?? true,
   order: views => placementOrder(views),
 }
@@ -1123,7 +1123,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         <div
           v-for="row in sectionRows.get(section.id)" :key="row.view.session.id" class="row agent-state-surface" :data-state="row.view.status.state" role="row"
           :aria-level="row.depth + 1" :aria-posinset="row.posinset" :aria-setsize="row.setsize" :aria-expanded="row.foldable ? row.open : undefined" :aria-selected="selected === row.view.session.id"
-          :data-row="`s:${row.view.session.id}`" :data-parent="row.view.session.parent_harness_session_id || undefined" :data-depth="row.depth" :style="{ '--depth': row.depth, ...appearance(row.view.status.state) }" tabindex="-1" @focusin="emit('focusRow', `s:${row.view.session.id}`)"
+          :data-row="`s:${row.view.session.id}`" :data-parent="sessionParent(row.view.session) || undefined" :data-depth="row.depth" :style="{ '--depth': row.depth, ...appearance(row.view.status.state) }" tabindex="-1" @focusin="emit('focusRow', `s:${row.view.session.id}`)"
           :draggable="permittedWorker(row.view) && !moving"
           :data-drop-target="dragged && targetFor(dragged, row.view) ? 'true' : undefined"
           @dragstart="startDrag($event, row.view)" @dragend="endDrag" @dragover="dragOver($event, row.view)" @dragleave="dropOver = ''" @drop="drop($event, row.view)"

@@ -1,5 +1,8 @@
 # Decision Desk
 
+See [Decision Desk projection](decision-desk-projection.md) for canonical ordering,
+exact counts and notification admission.
+
 The Decision Desk UI (AEON-567) lives at `/decision-desk`. Open and answered
 questions are paged separately; refresh retains up to ten loaded pages per state
 (1,000 questions), with remaining results stated explicitly. Each memo freezes its
@@ -60,7 +63,8 @@ existing node read permissions; UUID addressing needs only the question scopes.
 The MCP `ask` tool accepts `{project, ticket?, input}` with the same typed HTTP
 input and mandatory request ID; `ask_status` accepts `{question_id}`.
 
-The additive API is documented in `api/openapi.yaml`: project question create/list,
+The additive API is authored in `api/areas/*.yaml` and `api/openapi.base.yaml`
+and bundled into `api/openapi.yaml`: project question create/list,
 question get/status/person decision and a permission-filtered `/decision-desk`
 question projection. Answered lists accept `state=answered&order=desc` (AEON-611):
 newest current answer first, with question ID as the tie-breaker. Follow the

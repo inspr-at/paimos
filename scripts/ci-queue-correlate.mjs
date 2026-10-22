@@ -40,7 +40,7 @@ export function timelineQuery(repository, pr, cursor = null) {
     number timelineItems(first:100,after:${JSON.stringify(cursor)},itemTypes:[ADDED_TO_MERGE_QUEUE_EVENT,REMOVED_FROM_MERGE_QUEUE_EVENT]) {
       pageInfo { hasNextPage endCursor } nodes { __typename
         ... on AddedToMergeQueueEvent { id createdAt }
-        ... on RemovedFromMergeQueueEvent { id createdAt reason beforeCommit { oid } actor { __typename } }
+        ... on RemovedFromMergeQueueEvent { id createdAt reason beforeCommit { oid } }
       }
     }
   } } }`

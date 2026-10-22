@@ -6,7 +6,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { checkMigrations, destructive, loadMigrationExceptions } from '../check-migrations.mjs';
 
-for (const [file, ticket] of [['1230_work_leaf_aggregates.sql', 'AEON-651']]) test(`${ticket} inherited contract evidence pins source provenance and retains rollout gates`, () => {
+const file = '1230_work_leaf_aggregates.sql', ticket = 'AEON-651';
+test(`${ticket} inherited contract evidence pins source provenance and retains rollout gates`, () => {
   const manifest = loadMigrationExceptions();
   const entry = manifest.exceptions.find(entry => entry.file === file);
   assert.ok(entry, `${file}: missing exact-byte contract evidence`);

@@ -100,6 +100,7 @@ const requiredSharedImports = [
   'internal/agentactivity/privacy.json',
   'internal/authz/permission_data.mjs',
   'internal/nodes/status_definitions.json',
+  'internal/nodes/work_icons.json',
 ];
 
 test('production external web compilation resolves every shared import in the full checkout', () => {
@@ -113,12 +114,8 @@ test('AEON-983 permission data is one shared module import', () => {
     'internal/authz/project_self_permissions.json',
     'internal/authz/builtin_agent_exclusions.json',
   ];
-  assert.deepEqual(requiredSharedImports, [
-    'internal/agentactivity/privacy.json',
-    'internal/authz/permission_data.mjs',
-    'internal/nodes/status_definitions.json',
-  ]);
   const targets = externalImports();
+  assert.deepEqual([...targets].sort(), requiredSharedImports, 'the production import scan selects exactly the listed shared inputs');
   assert.ok(targets.has('internal/authz/permission_data.mjs'), 'missing shared import internal/authz/permission_data.mjs');
   for (const input of legacy) {
     assert.equal(requiredSharedImports.includes(input), false, input);

@@ -123,6 +123,9 @@ const byId = (a: HarnessSession, b: HarnessSession) => a.id < b.id ? -1 : a.id >
 export const byStart = (a: HarnessSession, b: HarnessSession) => Date.parse(a.created_at) - Date.parse(b.created_at) || byId(a, b)
 export const byStopped = (a: HarnessSession, b: HarnessSession) => Date.parse(b.stopped_at ?? b.created_at) - Date.parse(a.stopped_at ?? a.created_at) || byId(a, b)
 
+/** Verified display lineage never grants execution or parent controls. */
+export const sessionParent = (s: { parent_harness_session_id?: string | null; cross_project_parent_harness_session_id?: string | null }) => s.cross_project_parent_harness_session_id ?? s.parent_harness_session_id
+
 export interface SessionBranch<T> {
   view: T; children: SessionBranch<T>[]; group: SessionGroup; liveCount: number; workingCount: number; count: number
 }
@@ -143,14 +146,14 @@ export function sessionForest<T extends { session: HarnessSession; status: Sessi
   const roots: SessionBranch<T>[] = []
   for (const branch of branches.values()) {
     const s = branch.view.session
-    let parent = s.parent_harness_session_id ? branches.get(s.parent_harness_session_id) : undefined
-    if (parent?.view.session.project_id !== s.project_id) parent = undefined
+    let parent = branches.get(sessionParent(s) ?? '')
+    if (parent?.view.session.project_id !== s.project_id && !s.cross_project_parent_harness_session_id) parent = undefined
     const seen = new Set([s.id])
     for (let ancestor = parent; ancestor;) {
       const id = ancestor.view.session.id
       if (seen.has(id)) { parent = undefined; break }
       seen.add(id)
-      ancestor = branches.get(ancestor.view.session.parent_harness_session_id ?? '')
+      ancestor = branches.get(sessionParent(ancestor.view.session) ?? '')
     }
     if (parent) parent.children.push(branch)
     else roots.push(branch)
