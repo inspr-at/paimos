@@ -214,6 +214,11 @@ func TestDeliveryMergeCompletionEmitsExplicitResolution(t *testing.T) {
 		f.call(t, f.person, "POST", progress, map[string]any{"revision": round.Revision, "state": "done", "merge_outcome": outcome, "repository": f.m.config.Repository, "head_sha": strings.Repeat("e", 40)}, 409, nil)
 		f.call(t, f.person, "POST", progress, map[string]any{"revision": round.Revision, "state": "done", "merge_outcome": outcome, "repository": f.m.config.Repository, "head_sha": p.Head}, 200, &round)
 		f.call(t, f.person, "POST", progress, map[string]any{"revision": round.Revision, "state": "done", "merge_outcome": outcome, "repository": f.m.config.Repository, "head_sha": p.Head}, 200, &round)
+		other := "model"
+		if outcome == "model" {
+			other = "scripted"
+		}
+		f.call(t, f.person, "POST", progress, map[string]any{"revision": round.Revision, "state": "done", "merge_outcome": other, "repository": f.m.config.Repository, "head_sha": p.Head}, 409, nil)
 		if evidenceCount(t, f) != i+1 {
 			t.Fatal("progress replay duplicated measurement")
 		}

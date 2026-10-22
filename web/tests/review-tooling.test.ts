@@ -206,8 +206,9 @@ test('offline audit CLI prepares API-compatible facts and rejects tampered selec
   const submitFlags = ['--submit', '--project', binding.project, '--instance', 'ppm', '--aeon', binding.aeon]
   const submitted = auditMain(['facts', '--plan', planPath, '--results', resultPath, '--output', join(root, 'submitted.json'), ...submitFlags], { now, publish })
   assert.equal(submitted.status, 'evidence_recorded'); assert.equal(submitted.stored, 5); assert.equal(published, 1)
-  for (const failure of [{ status: 1, stderr: 'private diagnostic' }, { status: 0, stdout: '{}' }, { status: 0, stdout: '{"stored":4}' }]) {
-    assert.throws(() => publishFacts({ ...binding, facts: payload.facts }, { execute: () => failure }), /delivery_evidence_(?:publish_failed|receipt_partial)/)
+  for (const [failure, reason] of [[{ status: 1, stderr: 'private diagnostic' }, /delivery_evidence_publish_failed/],
+    [{ status: 0, stdout: '{}' }, /delivery_evidence_receipt_partial/], [{ status: 0, stdout: '{"stored":4}' }, /delivery_evidence_receipt_partial/]]) {
+    assert.throws(() => publishFacts({ ...binding, facts: payload.facts }, { execute: () => failure }), reason)
   }
   assert.throws(() => auditMain(['facts', '--plan', planPath, '--results', resultPath, '--output', join(root, 'failed.json'), ...submitFlags],
     { now, publish: () => { throw new Error('delivery_evidence_publish_failed') } }), /publish_failed/)

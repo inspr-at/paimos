@@ -269,6 +269,19 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 				return nil, 200, authz.ErrForbidden
 			}
 			if before.State == in.State {
+				if in.MergeOutcome != "" {
+					var same bool
+					if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM delivery_metric_marks m
+ JOIN delivery_metric_sources s ON s.repository=m.repository AND s.project_id=$1
+ JOIN delivery_items d ON d.project_id=s.project_id AND d.repository=s.repository AND d.pull_request=m.pull_request
+ WHERE m.repository=$2 AND m.kind='merge_round' AND m.mark_key=$3 AND m.head_sha=$4 AND m.outcome=$5
+ AND d.ticket_node_id=$6 AND d.head_sha=$4)`, project, in.Repository, "round/"+before.ID, in.Head, in.MergeOutcome, before.Ticket).Scan(&same); err != nil {
+						return nil, 200, err
+					}
+					if !same {
+						return nil, 200, fail(409, "completed merge evidence differs; reload the round and source")
+					}
+				}
 				return before, 200, nil
 			}
 			if !(before.State == "claimed" && in.State == "running" || before.State == "running" && in.State == "done") {
