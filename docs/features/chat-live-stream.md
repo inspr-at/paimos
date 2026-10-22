@@ -98,7 +98,11 @@ stream sequence, so a retried final persists once.
 outbox and worker projection (AEON-1082). Omitted timing and `simple` mean
 **After this turn**. `steer` means **Send now** for a qualified native adapter,
 or **At next step** only for an adapter that owns that boundary. It never
-falls back to stopping and restarting a session. Queued simple input does not
+falls back to stopping and restarting a session. Steering also requires the
+person's current `harness.control` permission on the thread's project, checked
+under the tenant access fence in the same transaction that accepts the input.
+Without that permission, the composer offers **After this turn**; ordinary
+chat input still requires `chat.send`. Queued simple input does not
 block a later eligible native steer. All writes use the same bounded,
 journaled input control: the journal retains IDs, digests and outcomes, never
 message bodies, and an uncertain write is never automatically injected again.

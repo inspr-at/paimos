@@ -307,9 +307,22 @@ func (m *Module) sessionThread(r *http.Request, tx pgx.Tx, p tenant.Principal, _
 	}
 	out, err := loadThread(r.Context(), tx, id)
 	if err == nil && r.Header.Get("Aeon-Chat-Timing") == "1" {
-		out.InputTiming, err = inputTimingTx(r.Context(), tx, session)
+		out.InputTiming, err = viewerInputTimingTx(r.Context(), tx, p, project, session)
 	}
 	return out, err
+}
+
+// The viewer's offer includes current control authority. The worker still
+// negotiates its adapter separately; it consumes only inputs authorized by
+// sendOutbox, without borrowing the person's control permission.
+func viewerInputTimingTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, session string) (string, error) {
+	if err := require(ctx, tx, p, "harness.control", project); err != nil {
+		if errors.Is(err, authz.ErrForbidden) {
+			return "queue", nil
+		}
+		return "", err
+	}
+	return inputTimingTx(ctx, tx, session)
 }
 
 // The explicit upgraded-relay capability qualifies the transport. A family

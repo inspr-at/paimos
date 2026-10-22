@@ -82,6 +82,12 @@ func (m *Module) sendOutbox(r *http.Request, tx pgx.Tx, p tenant.Principal, in o
 		return nil, workorders.Fail(409, "chat binding changed")
 	}
 	if in.Level == "steer" {
+		// Steering can interrupt a managed turn. Chat ownership and chat.send
+		// do not grant control authority; recheck it under the access fence in
+		// this same transaction before accepting any native input.
+		if err = require(r.Context(), tx, p, "harness.control", project); err != nil {
+			return nil, err
+		}
 		timing, err := inputTimingTx(r.Context(), tx, session)
 		if err != nil {
 			return nil, err

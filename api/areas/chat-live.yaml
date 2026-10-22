@@ -392,7 +392,7 @@ components:
         delivery_level:
           type: "string"
           enum: ["simple", "steer"]
-          description: "Optional negotiated input timing. Omitted or simple waits until the active turn ends. Steer uses only the exact session's advertised native or next-step adapter; unavailable timing is refused, never converted to stop/restart. Part of the idempotent payload."
+          description: "Optional negotiated input timing. Omitted or simple waits until the active turn ends. Steer additionally requires harness.control on the thread's project and uses only the exact session's advertised native or next-step adapter; unavailable timing is refused, never converted to stop/restart. Part of the idempotent payload."
         expected_session_id:
           type: "string"
           format: "uuid"
