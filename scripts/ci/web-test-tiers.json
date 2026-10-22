@@ -7810,6 +7810,14 @@
     ,
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"the bulk bar and its menus have no axe violations in light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: 200 cost units keep rate request concurrency at six","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: continuation on the last allowed page reports partial for every business directory","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: partial customer quote contact and project lists show retry beside retained results","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: rejected rates remain in the hours picker and retry keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"a partly set up overview shows status only, and its one link to Settings › Business stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"a role that manages plugins but not settings switches the parts in Settings › Business","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11568,6 +11576,12 @@
     ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"three places in order of use; the active one is highlighted and the breadcrumb continues from it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"AEON-1639: attention search and singular turn-off copy keep controls still in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"AEON-1639: fallback truncation explains the ten-page scan with fewer than 500 groups","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"AEON-1639: preview loading has an honest reserved status slot before any write","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"Apply, Dismiss and Undo retain rows and control boxes on desktop and phone, in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a delayed action cannot resolve a different filtered record or offer stale Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -12517,6 +12531,8 @@
     {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1233: General edits, lifecycle and legacy links stay on the acted-on project and revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1233: approved P1 reference states and check.mjs audit against the build","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1639: project settings resolve literal hash IDs only inside their own root","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/project-sort.spec.ts","name":"Alt and the arrow keys move a card, announced; the card menu moves it too; the list moves with Alt up and down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14504,6 +14520,8 @@
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1510: Sonnet explains a single catalog level and keeps every granted level selectable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"New menu restores its trigger without moving header controls at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"New menu restores its trigger without moving header controls at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14549,6 +14567,8 @@
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"reports Account is draining and still pins that account","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"reports Sign-in probe is stale and still pins that account","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"same-name hosts distinguish offline pairings and queue only the chosen account","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"screenshot 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -15191,6 +15211,8 @@
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"known fixture responses and decorative labelled versions are filtered precisely","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"layout shift audit arms after navigation and resets startup movement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"layout shift audit filters delayed entries by start time without rounding away small shifts","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"overlap rule ignores a card action and modal background but keeps peer collisions","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -17756,9 +17778,13 @@
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > defaults to the greatest remaining fraction and the routed profile, with a UUID tie","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > distinguishes stale, missing and failed host probes without mistaking account capacity for offline","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > does not invent a model when the role has no route or the grant is empty","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > fails closed when the catalog is missing, forbidden, or the wrong shape","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > keeps same-name pairings distinct and prefers the online daemon over stale allowance","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > labels the requested snapshot and reports a different or unknown session separately","tier":"GATED-FULL"}
     ,
@@ -18232,6 +18258,8 @@
     ,
     {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: upload cleanup revokes each preview once and rejects late completions","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"AEON-1639: turn-off copy uses a singular flag or plural flags in each catalog","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a finished fallback group scan shows the scanned project, count and facets","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a resolved fallback group scan cannot restore groups, counts or facets after a filter change","tier":"ESSENTIAL"}
@@ -18287,6 +18315,14 @@
     {"kind":"vitest","file":"tests/authz.unit.test.ts","name":"can() > review r2: a 401 latches until a later 200, and never refetches by itself","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/authz.unit.test.ts","name":"can() > unions project and workspace permissions only for that project","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: 200 units use at most six rate reads and a rejected unit remains visible until retry succeeds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: a cursor at every directory cap returns typed partial rows and the final complete page stays complete","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: a late rate response or failure cannot replace a newer confirmed rate update","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: changing the rate-cache owner retires pending reads and stops queued requests","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > accepts exactly 2,000 rows but rejects a continuation rather than returning a partial list","tier":"GATED-FULL"}
     ,
@@ -20075,6 +20111,8 @@
     {"kind":"vitest","file":"tests/profile-permissions.unit.test.ts","name":"profile permissions describe the caller’s personal profile","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1226: saved repository failures take precedence over history and stale events","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1639: repository status icons render only their selected artwork","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1038: launch-off or unreadable policy refuses Start without a POST","tier":"GATED-FULL"}
     ,

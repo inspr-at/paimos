@@ -87,6 +87,7 @@ const props = defineProps<{
   selectable?: boolean
   // A host may keep resolved/read-only rows visible without making them selectable.
   rowSelectable?: (row: ListItem) => boolean
+  groupSelectionLabel?: (group: RowGroup) => string
   label?: string
   retryLabel?: string
   emptyText?: string
@@ -1170,7 +1171,7 @@ defineExpose({
                   <AppIcon name="chevron" :size="14" />
                 </button>
                 <label v-if="selectable" class="group-check-target">
-                  <input type="checkbox" class="group-check" :checked="groupChecked(entry.group)" :indeterminate="groupMixed(entry.group)" :disabled="selectionDisabled || !selectableRows(entry.group).length" :aria-label="german ? `Alle Vorschläge in ${groupName(entry.group)} auswählen` : `Select every loaded ticket in ${groupName(entry.group)}`" @change="selectGroup($event, entry.group)" />
+                  <input type="checkbox" class="group-check" :checked="groupChecked(entry.group)" :indeterminate="groupMixed(entry.group)" :disabled="selectionDisabled || !selectableRows(entry.group).length" :aria-label="groupSelectionLabel?.(entry.group) ?? (german ? `Alle Vorschläge in ${groupName(entry.group)} auswählen` : `Select every loaded ticket in ${groupName(entry.group)}`)" @change="selectGroup($event, entry.group)" />
                 </label>
                 <div class="group-caption">
                 <template v-if="entry.group.project">

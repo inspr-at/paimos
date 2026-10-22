@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/project-settings.spec.ts",
-    "listedTests": 4,
+    "listedTests": 5,
     "tierTiming": {
       "caseSeconds": {
         "max": 89.014,
