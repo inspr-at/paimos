@@ -24,6 +24,8 @@ import (
 // retain their inbox. A durable lease is the P3a operation ID, once per message
 // and generation; a restart never reconstructs a possibly written input.
 func (s *Store) admitInbox(ctx context.Context, d nativecontract.DaemonActor) error {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	private, ok := ctx.Value(proofKey{}).(daemon.Proof)
 	identity, _, _ := private.Runtime()
 	if !ok || identity.RuntimeEpoch == "" {

@@ -28,7 +28,7 @@ func exerciseRelatedDeliveryTruth(t *testing.T) {
 		return id
 	}
 	same := session(f.project, f.ticket, false)
-	parentSession := session(f.project, parent, false)
+	parentSession := session(f.project, parent, true)
 	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, f.ticket, parent); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func exerciseRelatedDeliveryTruth(t *testing.T) {
 	if e.Delivery == nil || e.Delivery.State != "inbox" || e.Delivery.SessionID != f.session || e.Delivery.DeliveredAt != nil || e.Delivery.SeenAt != nil {
 		t.Fatalf("offline fallback claimed input: %+v", e.Delivery)
 	}
-	for _, id := range []string{same, parentSession, lead} {
+	for _, id := range []string{same, lead} {
 		if n := f.count(t, `SELECT count(*) FROM inbox_messages WHERE recipient_session_id=$1 AND idempotency_key=$2`, id, "desk-fyi/"+q.Answer.ID+"/"+id); n != 1 {
 			t.Fatalf("related notice count=%d", n)
 		}
@@ -76,7 +76,7 @@ func exerciseRelatedDeliveryTruth(t *testing.T) {
 			t.Fatal("FYI leaked answer/context or requested work")
 		}
 	}
-	for _, id := range []string{unrelated, ended, hidden} {
+	for _, id := range []string{unrelated, ended, hidden, parentSession} {
 		if n := f.count(t, `SELECT count(*) FROM inbox_messages WHERE recipient_session_id=$1`, id); n != 0 {
 			t.Fatal("FYI escaped related active project scope")
 		}
