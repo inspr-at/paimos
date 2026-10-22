@@ -11,6 +11,14 @@ Previously unfinished `github_http` receipts continue from their stored
 checkpoints and receive a specific class on their next failed read. Existing
 terminal receipts are not reopened.
 
+A webhook can arrive before its projection prerequisites, such as the queued PR
+head recorded by another delivery. A missing row retries the complete projection
+up to three times, with 250 ms and 500 ms waits within the original two-minute
+projection deadline. Each attempt releases the observation lock before waiting,
+so another webhook or reconciliation can supply the missing fact. A persistent
+miss returns HTTP 502 and leaves the verified receipt unfinished for the existing
+bounded background retries; it does not checkpoint a successful projection.
+
 An ordinary 401 or 403 pauses automatic GitHub reads. The pause epoch is the
 time of the first pause for that tenant, repository, installation and class, and
 it is cleared when a probe shows reads work again. The existing Delivery notice
@@ -41,3 +49,10 @@ persisted. Best-effort token revocation cannot replace the failed read's hint.
 404, server and network failures retain bounded retries. At exhaustion, the
 receipt keeps the upstream class and the failed step's `gave_up` checkpoint;
 it does not report successful completion or restart reads on redelivery.
+
+`TestDeliveryWebhookStartupProjectionRace` uses an injected clock and a database
+barrier to reproduce a signed queue check three seconds after startup, before its
+queued-head history exists. It covers recovery during the request, a persistent
+miss, background replay and duplicate delivery. The remote-only
+`scripts/test-webhook-start-race-negative.py` overlay disables the immediate
+retry and verifies that the same ordering reproduces HTTP 502.

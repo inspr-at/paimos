@@ -6574,6 +6574,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookSequenceRebuildIsolationAndHolds","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookStartupProjectionRace","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookTerminalNoOps","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookUnlinkedMetricSource","tier":"ESSENTIAL"}
