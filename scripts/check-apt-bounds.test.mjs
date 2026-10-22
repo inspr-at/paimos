@@ -310,8 +310,7 @@ test('both apt mirrors share the overall deadline', async () => {
   const result = await run(`bash "${script}" apt aeon-apt-fixture-missing-tool`, { mode: 'fetch-fail', elapsed: [80, 130] })
   assert.equal(result.status, 124, `${result.error}\n${result.stdout}\n${result.stderr}`)
   assert.deepEqual(result.timeouts.map(({ root, seconds }) => ({ root, seconds })), [{ root: '1', seconds: 60 }, { root: '1', seconds: 110 }])
-  assert.equal(result.calls.length, 2, 'the exhausted budget must prevent apt install')
-  assert.ok(result.calls.every(call => call.includes('update -qq')))
+  assert.deepEqual(result.calls, ['install -y -qq aeon-apt-fixture-missing-tool', 'update -qq'], 'the exhausted budget must prevent a second install after fallback refresh')
   assert.doesNotMatch(result.stdout, /dependencies installed/)
 })
 
@@ -601,7 +600,7 @@ test('bundle diagnostics identify unsafe or unreadable install inputs before dpk
     assert.equal(rejected.status, 0, rejected.stderr)
     assert.ok(rejected.stderr.includes(`${expectedPath}: ${reason}`), rejected.stderr)
     assert.match(rejected.stderr, /st_mode=\S+, owner=\S+/)
-    assert.deepEqual(rejected.calls, ['update -qq', 'install -y -qq libtest'])
+    assert.deepEqual(rejected.calls, ['install -y -qq libtest'], 'unsafe offline inputs fall back to the cached-index network path')
     assert.equal(existsSync(join(rejected.state, 'offline-dpkg-started')), false)
     if (fault === 'unreadable') chmodSync(file, 0o644)
   }
