@@ -99,18 +99,20 @@ func (p compositionProfiles) Resolve(_ context.Context, q nativecontract.Profile
 }
 
 type compositionProvider struct {
-	mu        sync.Mutex
-	identity  nativecontract.NativeIdentity
-	binding   nativecontract.Binding
-	events    chan nativecontract.ProviderEvent
-	input     nativecontract.Input
-	closed    bool
-	sequence  uint64
-	confirmed bool
-	closes    int
-	now       time.Time
-	age       time.Duration
-	opens     int
+	written     chan nativecontract.Input
+	unconfirmed bool
+	mu          sync.Mutex
+	identity    nativecontract.NativeIdentity
+	binding     nativecontract.Binding
+	events      chan nativecontract.ProviderEvent
+	input       nativecontract.Input
+	closed      bool
+	sequence    uint64
+	confirmed   bool
+	closes      int
+	now         time.Time
+	age         time.Duration
+	opens       int
 }
 
 func (p *compositionProvider) Open(_ context.Context, s nativecontract.LaunchSpec) (nativecontract.NativeTransport, error) {
@@ -136,6 +138,12 @@ func (p *compositionProvider) Send(_ context.Context, in nativecontract.Input) (
 	defer p.mu.Unlock()
 	p.input = in
 	p.sequence++
+	if p.written != nil {
+		p.written <- in
+	}
+	if p.unconfirmed {
+		return nativecontract.NativeEvidence{}, errors.New("fixture provider acknowledgement lost")
+	}
 	return nativecontract.NativeEvidence{Stage: "write_acknowledged", InputID: in.InputID, RequestID: in.RequestID, SourceSequence: p.sequence, ObservedAt: p.now}, nil
 }
 func (p *compositionProvider) Interrupt(_ context.Context, in nativecontract.Interrupt) (nativecontract.NativeEvidence, error) {

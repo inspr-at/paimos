@@ -19,6 +19,7 @@ import (
 // every boundary; only the provider fixture is synthetic.
 func exerciseLiveInbox(t *testing.T) {
 	hints, subscribed, acknowledged := make(chan struct{}, 8), make(chan struct{}, 1), make(chan struct{}, 4)
+	uncertain := make(chan struct{}, 2)
 	c := composeProduction(t, compositionOptions{disableRetention: true,
 		notifications: func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -44,9 +45,13 @@ func exerciseLiveInbox(t *testing.T) {
 			if r.State == "write_acknowledged" {
 				acknowledged <- struct{}{}
 			}
+			if r.State == "uncertain" {
+				uncertain <- struct{}{}
+			}
 		},
 	})
 	f := c.f
+	c.provider.written = make(chan nativecontract.Input, 4)
 	f.begin(t)
 	out, err := c.config.Host.Start(t.Context(), nativecontract.LocalStart{Intent: f.intent, Cwd: c.root, AccountKey: "real-own-account"})
 	if err != nil {
@@ -140,6 +145,56 @@ func exerciseLiveInbox(t *testing.T) {
 	var body string
 	if err := f.d.Admin.QueryRow(t.Context(), `SELECT body FROM inbox_messages WHERE id=$1`, desk.ID).Scan(&body); err != nil || body != desk.Body {
 		t.Fatal("inbox lost its durable record", err)
+	}
+	// Lost native acknowledgement leaves an unresolved P3a hold. Neither a
+	// duplicate hint nor a polling retry may inject it again; late correlated
+	// turn evidence can still advance the same durable inbox delivery.
+	turn = guuid.NewString()
+	c.provider.turn("turn_started", turn, 5)
+	wait(c.turnStarted)
+	c.provider.turn("turn_completed", turn, 6)
+	wait(c.turnDone)
+	for len(c.provider.written) > 0 {
+		<-c.provider.written
+	}
+	c.provider.mu.Lock()
+	c.provider.unconfirmed = true
+	c.provider.mu.Unlock()
+	var late inbox.Message
+	f.seed(t, func(tx pgx.Tx) error {
+		late, err = inbox.AcceptMessageTx(t.Context(), tx, f.person, inbox.Acceptance{RecipientPrincipalID: f.agent.ID, RecipientSessionID: &b.HarnessSessionID, Body: "uncertain delivery", IdempotencyKey: guuid.NewString()})
+		return err
+	})
+	hints <- struct{}{}
+	select {
+	case wrote := <-c.provider.written:
+		if wrote.InputID != late.ID {
+			t.Fatal("wrong uncertain input")
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("uncertain input never reached its write boundary")
+	}
+	if err := c.config.Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	wait(uncertain)
+	check(late.ID, false, false)
+	if err := c.config.Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	c.provider.mu.Lock()
+	sequence = c.provider.sequence
+	c.provider.mu.Unlock()
+	if sequence != 7 {
+		t.Fatal("uncertain native input was replayed")
+	}
+	turn = guuid.NewString()
+	c.provider.turn("turn_started", turn, 8)
+	wait(c.turnStarted)
+	check(late.ID, true, true)
+	var delivered, seen bool
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT body_released_at IS NOT NULL,shown_at IS NOT NULL FROM harness_deliveries WHERE message_id=$1`, late.ID).Scan(&delivered, &seen); err != nil || !delivered || !seen {
+		t.Fatal("late native evidence did not resolve delivery truth", err)
 	}
 	// Independent observed absence settles this fake owned process, without a
 	// message causing stop, resume, adoption or another launch.
