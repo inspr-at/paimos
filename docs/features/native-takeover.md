@@ -431,3 +431,42 @@ or host guard. The complete static set, including its web unit infrastructure,
 tier/shard and audit checks, therefore needs the coordinator's CI handover.
 This round retains 95% status until that evidence exists. No origin push,
 deployment, review gate or model CLI was run.
+
+
+### P1 merge-main round
+
+The normal merge incorporates main `83a13846c` without changing the reviewed
+PTY implementation. The four conflicts are confined to apt installation
+fixtures and the browser supervisor test imports. Cached-index-first shell
+installation is retained alongside main's temporary mirror fallback, offline
+bundles, security configuration, fetch-only retry rules and root cleanup.
+Main's 210-second shared budget tightens the earlier 220-second limit and
+includes the final kill grace. Deterministic assertions exhaust both allowances
+and verify the exact install/refresh order; unsafe bundle tests still prove
+that rejected inputs never reach offline dpkg. Both browser supervisor imports
+and their ownership regressions remain present.
+
+All 74 main-only files match the merged main byte-for-byte, every branch-only
+file matches reviewed head `9ce8ffb9f`, and the merged Go tier inventory retains
+every test row from both parents. No migration is introduced or renumbered.
+The full required native package set, including receipts, integration and
+reporter contract checks, passed remotely with `-count=1` on `d03d36bce`.
+Focused local apt checks passed 4/4, root verification and uncertain group
+ownership checks passed 4/4 without a browser, and migration policy tests
+passed 43/43. The complete 17-case apt regression then passed remotely through
+`TestRootAptTimeoutReapsBeforeRetry` on `d03d36bce`. The existing interrupted
+fixture/lifecycle regression also passed remotely on that head. Full static
+validation on `d03d36bce` passed 43 checks with zero optional skips, including
+apt bounds, migrations, OpenAPI, audit/tier/shard checks, lint/typecheck and the
+full no-browser supervisor safety suite. Its `releaseworkflow-tests` check
+exceeded the existing 120-second harness limit. The focused apt and interrupted
+fixture regressions passed separately; the full package timeout remains
+unproven and is not classified as a known environment exception.
+
+The final guarded static retry was refused at the two-run capacity cap.
+Fresh `ticket-panel.spec.ts` validation was also refused by host-level and
+capacity guards. No browser or full static suite ran locally. This merge round
+therefore remains at 95% pending coordinator CI evidence for the full static
+release-workflow check and the browser spec. No test was skipped or removed,
+no timeout was extended, and no product behavior outside conflict reconciliation
+was changed. No origin push, deployment, review gate or model CLI was run.
