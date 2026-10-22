@@ -867,6 +867,13 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "goals.write", true
 		case (r.Method == http.MethodPatch || r.Method == http.MethodPut) && len(parts) == 2 && id != "":
 			return "goals.write", true
+		// AEON-1618 added these writes after the AEON-1613 ceiling. They use
+		// the same goals.write grant. POST on an existing goal, and DELETE of
+		// the epics and status-note paths, stay outside the allowlist.
+		case (r.Method == http.MethodPost || r.Method == http.MethodDelete) && len(parts) == 3 && id != "" && parts[2] == "work":
+			return "goals.write", true
+		case r.Method == http.MethodDelete && len(parts) == 2 && id != "" && id != "epics" && id != "status-note":
+			return "goals.write", true
 		}
 	case "outcomes":
 		if len(parts) == 2 && parts[1] == "measurement" && read {
@@ -905,7 +912,7 @@ func harnessScope(parts []string, read bool) string {
 	}
 	if len(parts) > 0 {
 		switch parts[len(parts)-1] {
-		case "model-reports", "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "confirm-exit", "rules-receipts", "managed-context":
+		case "model-reports", "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "confirm-exit", "rules-receipts", "managed-context", "rules-delivery-manifest", "rules-delivery-evidence":
 			return "harness.worker"
 		}
 	}

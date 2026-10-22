@@ -170,7 +170,9 @@ func TestClaudeIdleCapabilityExactBinary(t *testing.T) {
 	path := filepath.Join(home, "fixture-claude")
 	node := filepath.Join(home, "fixture-node")
 	raw := []byte("#!/bin/sh\nexit 88\n")
-	_ = os.WriteFile(path, raw, 0700)
+	if err := os.WriteFile(path, raw, 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(node, raw, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +194,12 @@ func TestClaudeIdleCapabilityExactBinary(t *testing.T) {
 	if len(a.CaptureCapacity(t.Context(), "a")) != 1 || calls != 1 {
 		t.Fatal("verified fixture did not capture")
 	}
-	_ = os.WriteFile(path, []byte("#!/bin/sh\nexit 89\n"), 0700)
+	// Allow the filesystem clock to advance before the in-place rewrite.
+	// A same-size change in the same timestamp tick keeps the capacity stamp.
+	time.Sleep(2 * time.Millisecond)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 89\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	if a.CanCaptureCapacity("a") || len(a.CaptureCapacity(t.Context(), "a")) != 0 || calls != 1 {
 		t.Fatal("changed binary launched")
 	}

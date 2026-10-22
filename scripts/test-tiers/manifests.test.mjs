@@ -76,10 +76,11 @@ test('AEON-735 native collection failures retain bounded stdout and stderr diagn
 test('AEON-735 native Go collection reports an earlier failed package before later successful output', t => {
   const directory = fixtureDirectory(t, 'aeon735-go-collection-')
   const failed = 'github.com/inspr-at/paimos/internal/failed'
+  const failedBuild = `${failed} [${failed}.test]`
   const passed = 'github.com/inspr-at/paimos/internal/passed'
   const output = [
-    { Action: 'build-output', ImportPath: failed, Output: 'native compiler diagnostic\n' },
-    { Action: 'build-fail', ImportPath: failed },
+    { Action: 'build-output', ImportPath: failedBuild, Output: 'native compiler diagnostic\n' },
+    { Action: 'build-fail', ImportPath: failedBuild },
     { Action: 'output', Package: failed, Output: 'native package diagnostic\n' },
     { Action: 'fail', Package: failed },
     { Action: 'output', Package: passed, Output: 'later successful output'.repeat(300) },
@@ -92,7 +93,8 @@ test('AEON-735 native Go collection reports an earlier failed package before lat
       assert.match(error.message, /go test -json failed \(1\)/)
       if (suffix) assert.ok(error.message.endsWith(suffix))
       else {
-        assert.match(error.message, /internal\/failed: native compiler diagnostic\nnative package diagnostic/)
+        assert.ok(error.message.includes('internal/failed [github.com/inspr-at/paimos/internal/failed.test]: native compiler diagnostic'))
+        assert.match(error.message, /internal\/failed: native package diagnostic/)
         assert.ok(!error.message.includes('later successful output'))
       }
       assert.ok(error.message.length < 2500)

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/rules"
 )
 
@@ -42,6 +43,7 @@ func TestClaudeBridgeRulesByteCeiling(t *testing.T) {
 	if err = os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
 		t.Fatal(err)
 	}
+	truePath := fixturebin.Require(t, "true")
 	for _, size := range []int{12000, 12001, rules.MaxBudgetBytes, rules.MaxBytes, rules.MaxBytes + 1} {
 		for _, escaped := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%d/escaped-%t", size, escaped), func(t *testing.T) {
@@ -53,7 +55,7 @@ func TestClaudeBridgeRulesByteCeiling(t *testing.T) {
 				raw, _ := json.Marshal(map[string]any{"op": "start", "prompt": "fixture", "rules": body, "purpose": "pairing_verification", "capabilities": []string{}})
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
-				cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, "/bin/true", root, "fixture", fmt.Sprint(size))
+				cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, truePath, root, "fixture", fmt.Sprint(size))
 				cmd.Stdin = strings.NewReader(string(raw) + "\n")
 				out, err := cmd.CombinedOutput()
 				if (err == nil) != (size <= rules.MaxBytes) {

@@ -14,9 +14,9 @@ type Handler = (...args: never[]) => unknown
 const mocks = vi.hoisted(() => ({
   queue: (() => ({ items: [] })) as Handler, questions: (() => ({ items: [], has_more: false })) as Handler, sessions: (() => ({ items: [], next_cursor: null })) as Handler,
   calls: [] as string[], wake: null as null | ((event?: string, node?: string | null) => void),
-  leads: { views: {} as Record<string, { caughtUp: boolean; decisions: unknown[] }>, loadMany: vi.fn(async () => {}), loadLead: vi.fn(async () => {}), load: vi.fn(async () => {}) },
+  leads: { watch: () => () => {}, views: {} as Record<string, { caughtUp: boolean; decisions: unknown[] }>, loadMany: vi.fn(async () => {}), loadLead: vi.fn(async () => {}), load: vi.fn(async () => {}) },
   agents: { loaded: false, views: [] as unknown[], sessionsState: 'ready', sessionsError: '', sessionsStale: false, sessionsUpdatedAt: 1, admitSessions: (rows: unknown[]) => rows, loadAll: vi.fn(async () => {}) },
-  work: { snapshots: {} as Record<string, unknown>, load: vi.fn(async (_project: string, _force?: boolean) => {}) },
+  work: { watch: () => () => {}, snapshots: {} as Record<string, unknown>, load: vi.fn(async (_project: string, _force?: boolean) => {}) },
   liveStatus: null as unknown as { state: string; dataStale: boolean; truncated: boolean; items: unknown[] },
   identity: null as unknown as { identity: { tenant: { id: string }; principal: { id: string } } | null },
   projects: null as unknown as { projects: { id: string; archived: boolean }[] },

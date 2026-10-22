@@ -2,7 +2,7 @@
 // AEON owns this bridge process and one documented Agent SDK Query handle.
 // Lifecycle events are content-free. Chat projections and native_message send
 // arguments are bounded, transient frames to the owner; never journal them.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { createInterface } from "node:readline";
@@ -736,7 +736,7 @@ try {
         // Agent SDK system/init is emitted only after Query has accepted its
         // first streamed user input. This evidence annotates that owned
         // session; it cannot truthfully validate the first input in advance.
-        emit({ kind: "session_started", harness_session_id: message.session_id,
+        emit({ kind: "session_started", rules_sha256: createHash("sha256").update(start.rules ?? "", "utf8").digest("hex"), harness_session_id: message.session_id,
           effective_model: effectiveModel, model_evidence_status: modelEvidenceStatus });
       } else if (message.session_id !== sessionID || initModel !== effectiveModel ||
           initModelEvidenceStatus !== modelEvidenceStatus) {

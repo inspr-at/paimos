@@ -330,6 +330,10 @@ func mergeGroupInventory(t *testing.T, w map[string]any) []string {
 	var names []string
 	for id, value := range treeMap(w["jobs"]) {
 		j := treeMap(value)
+		if id == "apt-bundle" {
+			checkOfflineAptWorkflow(t)
+			continue // Optional fetch acceleration, never execution evidence.
+		}
 		if id == "tree-reuse" || id == "cache-prime" {
 			if !strings.Contains(fmt.Sprint(j["if"]), "github.event_name == 'push'") {
 				t.Fatalf("%s must remain push-only", id)
@@ -440,6 +444,27 @@ func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
 	}
 }
 
+// Verify the security patches before projecting onto the immutable CI fixtures.
+func normalizeAEON1642Toolchains(t *testing.T, j map[string]any) {
+	t.Helper()
+	for _, value := range reuseSteps(j) {
+		s := treeMap(value)
+		for _, tool := range []struct{ action, key, current, historical string }{
+			{"actions/setup-go@", "go-version", "1.26.10", "1.26"},
+			{"actions/setup-node@", "node-version", "24.22.1", "24"},
+		} {
+			if !strings.HasPrefix(fmt.Sprint(s["uses"]), tool.action) {
+				continue
+			}
+			with := treeMap(s["with"])
+			if with[tool.key] != tool.current {
+				t.Fatalf("%s must pin %s", tool.key, tool.current)
+			}
+			with[tool.key] = tool.historical
+		}
+	}
+}
+
 // Restore the historical setup for its immutable hash check only after proving
 // the new setup and parallel unit job preserve every moved check byte for byte.
 func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any {
@@ -503,6 +528,7 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 	}
 	normalizeEffectiveLane(t, "web-setup", setup)
 	normalizeAEON1018Classification(t, "web-setup", setup)
+	normalizeAEON1642Toolchains(t, setup)
 	if !reflect.DeepEqual(setup, want) {
 		t.Fatal("Parallel setup changed beyond moving units and their prerequisites/proofs")
 	}
@@ -803,6 +829,35 @@ func normalizeAEON933InstallBounds(t *testing.T, id string, job map[string]any) 
 	}
 }
 
+// AEON-1652 adds an optional package artifact, preserving the original install
+// and failure fallback. Prove its wiring before projecting historical jobs.
+func normalizeOfflineAptBundle(t *testing.T, id string, job map[string]any) {
+	t.Helper()
+	if id != "go-test" && id != "web-unit" && id != "web-shard" {
+		return
+	}
+	checkOfflineAptWorkflow(t)
+	var steps, needs []any
+	removed := 0
+	for _, value := range reuseSteps(job) {
+		switch treeMap(value)["name"] {
+		case "Identify optional apt bundle for this runner image", "Download optional apt bundle":
+			removed++
+		default:
+			steps = append(steps, value)
+		}
+	}
+	if removed != 2 || !containsNeed(job["needs"], "apt-bundle") {
+		t.Fatalf("%s lost its optional apt bundle prerequisites", id)
+	}
+	for _, need := range anySlice(job["needs"]) {
+		if need != "apt-bundle" {
+			needs = append(needs, need)
+		}
+	}
+	job["steps"], job["needs"] = steps, needs
+}
+
 // AEON-1605: mocked browser shards opt out of the backend wait, and e2e
 // requires it through the bounded readiness waiter. Prove both exact additions
 // before projecting onto the accepted-CI pin.
@@ -868,7 +923,7 @@ func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
 	normalizeParallelWebSetup(t, jobs)
 	unit, browser := treeMap(jobs["web-unit"]), treeMap(jobs["web-shard"])
 	for _, j := range []map[string]any{unit, browser} {
-		if !reflect.DeepEqual(j["needs"], []any{"ci-plan", "web-setup", "tree-reuse"}) {
+		if !reflect.DeepEqual(j["needs"], []any{"ci-plan", "web-setup", "tree-reuse", "apt-bundle"}) {
 			t.Fatal("Unit and browser shards must start together from setup, without depending on each other")
 		}
 		if treeMap(reuseStep(t, j, "Download shared web runtime")["with"])["name"] != "web-runtime" || reuseStep(t, j, "Restore web runtime")["run"] != `tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"` {
@@ -943,6 +998,10 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				j = normalizeParallelWebSetup(t, jobs)
 			}
 			j = cloneStep(t, j)
+			normalizeOfflineAptBundle(t, id, j)
+			if id != "web-setup" { // The historical setup was already projected above.
+				normalizeAEON1642Toolchains(t, j)
+			}
 			if id == "release-check-run" {
 				// AEON-532 adds its exact completion/retry regression step. Prove
 				// that addition before comparing every remaining main job field.

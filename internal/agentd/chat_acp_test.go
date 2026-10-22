@@ -246,7 +246,7 @@ func TestACPChatQueuedDeliveryExactlyOnceAndControlsPass(t *testing.T) {
 			if err := s.serviceHarness(t.Context(), e); err != nil {
 				t.Fatal(err)
 			}
-			if len(p.texts) != 3 || p.texts[1] != "next turn" || !strings.Contains(p.texts[2], "send after this turn") || a.harnessDeliveryCompletions != 1 || len(e.pending) != 0 {
+			if len(p.texts) != 3 || p.texts[1] != labelledMessage("", "next turn") || !strings.Contains(p.texts[2], "send after this turn") || a.harnessDeliveryCompletions != 1 || len(e.pending) != 0 {
 				t.Fatal("queued input was lost or delivered twice")
 			}
 			if a.harnessCompletions[1] != "queued-steer:applied:queued_next_turn" {
@@ -330,7 +330,7 @@ func TestACPQueuedControlSettlesWhileBusy(t *testing.T) {
 					t.Fatal("lost completion must report uncertainty", err)
 				}
 				prior, recorded := e.record.Controls["lost-steer"]
-				if len(p.texts) != 1 || p.texts[0] != "one input" || len(e.pending) != 1 ||
+				if len(p.texts) != 1 || p.texts[0] != labelledMessage("", "one input") || len(e.pending) != 1 ||
 					len(a.harnessCompletions) != 0 || !recorded || prior.Rejected != rejected || e.harness.Activity != "busy" {
 					t.Fatal("fixture did not retain the exact attempted write and busy turn")
 				}
@@ -347,7 +347,7 @@ func TestACPQueuedControlSettlesWhileBusy(t *testing.T) {
 				}
 				want := []string{outcome, "interrupt:applied:agentd_applied"}
 				if !reflect.DeepEqual(a.harnessCompletions, want) || len(e.pending) != 0 ||
-					len(e.record.Controls) != 0 || !reflect.DeepEqual(p.texts, []string{"one input", ""}) || e.harness.Activity != "busy" {
+					len(e.record.Controls) != 0 || !reflect.DeepEqual(p.texts, []string{labelledMessage("", "one input"), ""}) || e.harness.Activity != "busy" {
 					t.Fatalf("busy completion changed or reinjected input: completions=%v writes=%v pending=%d", a.harnessCompletions, p.texts, len(e.pending))
 				}
 			})

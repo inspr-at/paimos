@@ -4,6 +4,8 @@ package agentpairing_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 )
 
 // Only the vendor is synthetic. Queue projection, account probing, routing,
@@ -37,6 +40,11 @@ func TestPairingSupervisorHTTPVerificationRoutesUnboundQueue(t *testing.T) {
 			}
 			if queued[0].ID != *e.VerificationRunID || queued[0].AccountID != "" || queued[0].RequestedAccountID != e.AccountID {
 				t.Fatal("fixture must exercise the genuine unbound queued verification")
+			}
+			// Claude verification still requires the tenant pin and floor. The probe
+			// text itself stays the immutable verification task.
+			if family == agentd.Claude {
+				seedVerificationPin(t, f)
 			}
 			workspace := physicalSetupTemp(t)
 			stateRoot := filepath.Join(physicalSetupTemp(t), "state")
@@ -68,6 +76,19 @@ func TestPairingSupervisorHTTPVerificationRoutesUnboundQueue(t *testing.T) {
 			}
 			if adapter.starts != 1 || adapter.probes != 1 {
 				t.Fatalf("starts/probes=%d/%d, want 1/1", adapter.starts, adapter.probes)
+			}
+			if family == agentd.Claude && (adapter.request.Prompt != agentd.VerificationTask || !strings.Contains(adapter.request.Rules, "never relax them") || !strings.Contains(adapter.request.Rules, "Company rules.")) {
+				t.Fatal("claude verification changed the probe or dropped the pinned floor")
+			}
+			if family == agentd.Claude {
+				var evidenceHash, evidenceRun string
+				if err := f.db.Admin.QueryRow(t.Context(), `SELECT manifest->>'body_sha256',run_id::text FROM harness_rules_deliveries WHERE run_id=$1 AND acknowledgement IS NOT NULL`, queued[0].ID).Scan(&evidenceHash, &evidenceRun); err != nil {
+					t.Fatal(err)
+				}
+				expectedHash := sha256.Sum256([]byte(adapter.request.Rules))
+				if evidenceHash != hex.EncodeToString(expectedHash[:]) || evidenceRun != queued[0].ID {
+					t.Fatal("real HTTP delivery evidence lost the run or transmitted bytes")
+				}
 			}
 			var window string
 			if err := f.db.Admin.QueryRow(t.Context(), `SELECT id::text FROM account_allowance_windows WHERE account_id=$1 AND pairing_verification`, e.AccountID).Scan(&window); err != nil {
@@ -122,6 +143,7 @@ type pairingVerificationAdapter struct {
 	queued                          agentd.Run
 	process                         *pairingVerificationProcess
 	observe                         func(agentd.AdapterEvent)
+	request                         agentd.StartRequest
 	starts, probes                  int
 }
 
@@ -159,13 +181,37 @@ func (a *pairingVerificationAdapter) Start(_ context.Context, r agentd.StartRequ
 		return nil, errors.New("synthetic adapter rejected repository workspace")
 	}
 	a.starts++
+	a.request = r
+	a.process.rulesHash = sha256.Sum256([]byte(r.Rules))
 	a.observe = observe
 	return a.process, nil
 }
 
+func seedVerificationPin(t *testing.T, f *fixture) {
+	t.Helper()
+	// Use the indexed always-on kernel name, as a real doctrine pin does.
+	content := []byte("Company rules.\n")
+	commit := strings.Repeat("a", 40)
+	var source string
+	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,commit_sha,paths) VALUES($1,'fixture/company','public',$2,ARRAY['docs/AGENTS-KERNEL.md']) RETURNING id::text`, f.tenantID, commit).Scan(&source); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO doctrine_cache(tenant_id,source_id,commit_sha,path,blob_sha,content) VALUES($1,$2,$3,'docs/AGENTS-KERNEL.md',$4,$5)`, f.tenantID, source, commit, doctrine.BlobSHA(content), content); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE doctrine_sources SET indexed_at=clock_timestamp() WHERE id=$1`, source); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type pairingVerificationProcess struct {
-	done chan struct{}
-	once sync.Once
+	rulesHash [32]byte
+	done      chan struct{}
+	once      sync.Once
+}
+
+func (p *pairingVerificationProcess) RulesDeliveryHash() string {
+	return hex.EncodeToString(p.rulesHash[:])
 }
 
 func (*pairingVerificationProcess) PID() int      { return 0 } // No operating system process exists.

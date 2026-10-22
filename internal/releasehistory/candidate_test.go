@@ -247,6 +247,22 @@ func TestCandidateCommittedCorrectionBinding(t *testing.T) {
 }
 
 func TestCandidateRejectsInvalidInputs(t *testing.T) {
+	// A withdrawn coordinate must fail before the existing-tag fast path, too.
+	t.Run("withdrawn release", func(t *testing.T) {
+		at := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+		head := versionFile{Product: "PAIMOS AEON", VersionScheme: SchemeCalVer2, Version: candidateVersion,
+			ReleaseChannel: "stable", ReleaseSequence: 3, ReservedAt: at.Format(time.RFC3339),
+			WithdrawnReleases: []Withdrawal{{Version: candidateVersion}}}
+		for _, releases := range [][]Release{nil, {{Version: candidateVersion, State: StateWithdrawn}}} {
+			_, err := withCandidate(History{Releases: releases}, head, Options{Candidate: candidateVersion}, func(...string) (string, error) {
+				t.Fatal("withdrawn candidate reached Git reads")
+				return "", nil
+			})
+			if err == nil || !strings.Contains(err.Error(), "candidate is listed as a withdrawn release") {
+				t.Fatalf("withdrawn candidate accepted or rejected for the wrong reason: %v", err)
+			}
+		}
+	})
 	for _, test := range []struct {
 		name    string
 		change  func(*versionFile)

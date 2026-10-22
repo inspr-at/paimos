@@ -54,10 +54,10 @@ paths:
     delete:
       operationId: deleteTimeEntry
       summary: Delete an entry from an open period
-      description: Entry owner (person) or admin person only. Writes time_entry.deleted with the full before snapshot and increments the period revision. Undo can restore it only while the period remains open.
+      description: 'Entry owner (person) or admin person only. Writes time_entry.deleted with the full before snapshot and increments the period revision. Returns that exact event receipt for Undo; never search for a later deletion when the receipt is unavailable. Undo can restore it only while the period remains open.'
       security: [{session: []}]
       responses:
-        '204': {description: Entry deleted}
+        '204': {description: 'Entry deleted', headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}

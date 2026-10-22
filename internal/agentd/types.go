@@ -121,6 +121,7 @@ type HarnessSession struct {
 }
 
 type HarnessControl struct {
+	AuthorPrincipalID  string `json:"author_principal_id,omitempty"`
 	ExpectedGeneration string `json:"expected_generation"`
 	RequestPayload     *struct {
 		StopNow bool `json:"stop_now"`

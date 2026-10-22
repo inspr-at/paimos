@@ -70,7 +70,9 @@ test('self-check CLI binds real commits and refuses dirty, untracked or moved sn
   // Risk: a receipt for an earlier SHA authorizes modified work.
   const root = temporary(t)
   const git = (...args) => {
-    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
+    // Isolate personal signing/configuration; repository hooks still run normally.
+    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8',
+      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } })
     assert.equal(result.status, 0, result.stderr); return result.stdout.trim()
   }
   git('init', '-q'); git('config', 'user.name', 'Review fixture'); git('config', 'user.email', 'fixture@example.invalid')

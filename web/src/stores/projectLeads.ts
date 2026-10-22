@@ -7,6 +7,8 @@ import { APIError, getNode } from '../lib/api'
 import { getSession } from '../lib/agentRows'
 import { adoptLead, cancelLeadAdoption, canLaunchLead, canRemoveLead, emptyFold, foldDecisions, leadLaunchReason, leadActionAvailable, leadActionReason, pauseLead, readLead, readLeadDecisions, readLeadSettings, removeLead, startLead, type DecisionFold, type LeadDecision, type LeadSettings, type ProjectLead } from '../lib/lead'
 import { useAgents } from './agents'
+import { DECISION_EVENTS, LEAD_EVENTS, eventNode } from '../lib/agentProjection'
+import { createSharedRequests } from '../lib/sharedRequests'
 
 // AEON-741: read projections of each project's lead. The server decides state;
 // writes carry the revision and generation shown on screen and refuse when the
@@ -36,6 +38,12 @@ export const useProjectLeads = defineStore('projectLeads', () => {
   // Per project: bumped by every write, so a read that began earlier is dropped.
   const writes = new Map<string, number>()
   const reads = new Map<string, number>()
+  const watching = createSharedRequests(id => load(id), {
+    events: [...LEAD_EVENTS, ...DECISION_EVENTS],
+    relevant: (id, _type, data) => { const node = eventNode(data); return !node || node === id },
+    invalidate: id => { writes.set(id, (writes.get(id) ?? 0) + 1); pending.delete(id) },
+  })
+  onScopeDispose(watching.stop)
   const clear = () => {
     epoch++; writes.clear(); reads.clear()
     for (const id of Object.keys(views)) delete views[id]
@@ -44,7 +52,7 @@ export const useProjectLeads = defineStore('projectLeads', () => {
     pending.clear(); truncated.value = false
   }
   onScopeDispose(onReset(clear))
-  onScopeDispose(onAccessRevalidate({ reset: clear, refresh: () => { for (const id of Object.keys(views)) void load(id) } }))
+  onScopeDispose(onAccessRevalidate({ reset: clear, refresh: () => { for (const id of Object.keys(views)) { writes.set(id, (writes.get(id) ?? 0) + 1); pending.delete(id); void load(id) } } }))
   const view = (id: string) => views[id] ??= blank()
 
   /** Lead state only: the Agents page reads one per project, bounded. */
@@ -63,6 +71,7 @@ export const useProjectLeads = defineStore('projectLeads', () => {
       Object.assign(view(id), { lead, error: '', forbidden: false, loadedAt: Date.now() })
     } catch (e) {
       if (stale()) return
+      if (e instanceof APIError && [401, 403, 404].includes(e.status)) views[id] = blank()
       Object.assign(view(id), { error: message(e, 'The lead could not be read.'), forbidden: e instanceof APIError && e.status === 403, loadedAt: Date.now() })
     }
   }
@@ -78,44 +87,45 @@ export const useProjectLeads = defineStore('projectLeads', () => {
   function load(id: string): Promise<void> {
     if (!id) return Promise.resolve()
     if (pending.has(id)) return pending.get(id)!
-    const started = epoch
+    const started = epoch, wrote = writes.get(id) ?? 0
+    const currentRead = () => started === epoch && wrote === (writes.get(id) ?? 0)
     const request = (async () => {
       await loadLead(id, started)
-      if (started !== epoch) return
+      if (!currentRead()) return
       const current = view(id), lead = current.lead
       if (!lead || current.error) return
       // Settings change rarely; the Start lead sheet always reads them fresh.
       const tasks: Promise<unknown>[] = current.settings ? [] : [
-        readLeadSettings(id).then(settings => { if (started === epoch) view(id).settings = settings }).catch(() => { if (started === epoch) view(id).settings = null }),
+        readLeadSettings(id).then(settings => { if (currentRead()) view(id).settings = settings }).catch(() => { if (currentRead()) view(id).settings = null }),
       ]
       if (lead && lead.state !== 'none') {
-        tasks.push(loadDecisions(id, started))
-        if (lead.session_id && current.principal?.session !== lead.session_id) tasks.push(loadPrincipal(id, lead.session_id, started))
+        tasks.push(loadDecisions(id, currentRead))
+        if (lead.session_id && current.principal?.session !== lead.session_id) tasks.push(loadPrincipal(id, lead.session_id, currentRead))
       } else Object.assign(current, { decisions: [], fold: emptyFold(), after: 0, caughtUp: true })
       await Promise.all(tasks)
     })().finally(() => { if (pending.get(id) === request) pending.delete(id) })
     pending.set(id, request)
     return request
   }
-  async function loadDecisions(id: string, started: number) {
+  async function loadDecisions(id: string, currentRead: () => boolean) {
     const from = view(id).after
     try {
       const page = await readLeadDecisions(id, from)
       // Another read already moved the cursor: folding again would count twice.
-      if (started !== epoch || view(id).after !== from) return
+      if (!currentRead() || view(id).after !== from) return
       const next = view(id)
       const fresh = page.items.filter(item => item.event_id > from)
       foldDecisions(next.fold, fresh)
       const merged = [...next.decisions, ...fresh]
       Object.assign(next, { decisions: merged.slice(-RETAIN), after: page.after, caughtUp: page.caughtUp, decisionsError: '' })
-      void resolveKeys(merged.slice(-60).flatMap(d => d.request.ticket_node_id ? [d.request.ticket_node_id] : []), started)
-    } catch (e) { if (started === epoch) view(id).decisionsError = message(e, 'The lead’s decisions could not be read.') }
+      void resolveKeys(merged.slice(-60).flatMap(d => d.request.ticket_node_id ? [d.request.ticket_node_id] : []))
+    } catch (e) { if (currentRead()) view(id).decisionsError = message(e, 'The lead’s decisions could not be read.') }
   }
-  async function loadPrincipal(id: string, session: string, started: number) {
+  async function loadPrincipal(id: string, session: string, currentRead: () => boolean) {
     try {
       const read = await getSession(id, session)
       // A reset or another lead meanwhile: the read belongs to nobody on screen now.
-      if (started !== epoch || view(id).lead?.session_id !== session) return
+      if (!currentRead() || view(id).lead?.session_id !== session) return
       // The session read passes the session ledger like every other copy (AEON-449).
       const [row] = useAgents().admitSessions([read])
       if (row) view(id).principal = { session, id: row.agent_principal_id, management: row.management_mode }
@@ -177,5 +187,5 @@ export const useProjectLeads = defineStore('projectLeads', () => {
     if (!current || current.reason !== 'adoption_pending') return
     return write(id, lead => cancelLeadAdoption(id, lead.revision))
   }
-  return { views, keys, busy, truncated, view, load, loadLead, loadMany, start, adopt, pause, remove, cancelAdoption, keyOf, resolveKeys }
+  return { views, keys, busy, truncated, view, load, watch: watching.watch, loadLead, loadMany, start, adopt, pause, remove, cancelAdoption, keyOf, resolveKeys }
 })

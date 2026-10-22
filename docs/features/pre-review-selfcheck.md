@@ -60,6 +60,10 @@ strictly before the window, retaining only merged PRs within `[start,end)`.
 Each 25-PR page read is capped at 1 MiB and 15 seconds; the 20-page (500-PR) cap,
 duplicate or unordered results, an invalid merge/head binding or any read failure fail the
 plan. A partial collection never becomes an empty or complete population.
+A manual dispatch late in the week can scan almost two weeks of closed PRs,
+including updates after the audited week. That can reach the 500-PR scan cap
+even when the target week has fewer than 500 merged PRs. A capped run fails;
+the coordinator must establish complete coverage before using an offline inventory.
 An offline `--inventory PATH` accepts `{schema:1,repository,window,complete:true,
 pulls:[{number,head_sha,merge_sha,merged_at}]}`; the caller must establish its
 completeness before using it.
@@ -150,12 +154,3 @@ time and audit findings together, retaining unknown/partial coverage and
 watching escaped defects. The initial weekly artifact awaits coordinator
 dispatch and completed audits after merge; deployment and that follow-up are
 outside a builder's handoff.
-
-Builder validation for the implementation commit: 7 behavior tests, 282 tier
-policy tests, 32 shard policy tests and 33 ownership tests passed; the remote
-Go workflow guard passed. The locked remote `ci-static --merge-main` completed
-with exit 0, 42 checks passed and zero optional skips. A read-only collection
-for 2026-09-28–2026-10-05 found 245 merged PRs and selected five; their audits
-remain pending coordinator dispatch. The generated plan and current-commit
-builder evidence are retained under ignored `tmp/review/` for attachment at
-handoff. No review verdict, metric write, origin push or deployment was made.

@@ -7748,6 +7748,8 @@
     ,
     {"kind":"browser","file":"tests/attachments.spec.ts","name":"![caption](attachment:<id>) in Markdown shows the image inline and opens the viewer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/attachments.spec.ts","name":"AEON-1416: pending attachment Undo stays in place and failed Undo shows plain copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/attachments.spec.ts","name":"Alt+arrows reorder with the attachment precondition","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/attachments.spec.ts","name":"a failed upload says why and can be retried or removed","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -9452,6 +9454,38 @@
     ,
     {"kind":"browser","file":"tests/from-classic.spec.ts","name":"sign-in returns to the classic resolver before opening its destination","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1024 dark: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1024 light: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 dark: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 dark: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 light: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 light: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 dark: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 dark: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 light: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 light: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"Link keeps its size and place while picking from 0 to 10 and back, on a desktop and a phone","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"Link stays put across search results and a refusal, on a desktop and a phone","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"Undo of a stale picker removes only the ids that call added","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"a Lands day reads as a day in the row, its label and its history; a goal without work says so at the same height","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"a created goal is shown through search, the Done filter and a one-goal page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"a person who may not create goals sees no New goal, and no goal offers Link work, Edit or Delete","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-epics.spec.ts","name":" › E6 390 dark: phones keep the epic rows and their essentials, 44 px Group targets, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-epics.spec.ts","name":" › E6 390 light: phones keep the epic rows and their essentials, 44 px Group targets, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -10266,6 +10300,10 @@
     ,
     {"kind":"browser","file":"tests/hide-states.spec.ts","name":"shared view membership › default and Reset Graph Hide honour kind categories at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/hours-edit.spec.ts","name":"AEON-1416: pending Hours Undo stays in its day and failed Undo shows plain copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hours-edit.spec.ts","name":"AEON-1416: the first Hours Undo cannot reverse a later deletion cycle","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/hours-edit.spec.ts","name":"Delete removes an entry with a six-second undo that reverses it on the server","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/hours-edit.spec.ts","name":"a conflict shows the newer entry and keeps the draft","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10331,6 +10369,10 @@
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"missing/unsafe preview keeps download and refuses app-origin iframe","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"new-tab response enforces sandbox without the iframe; residual self-navigation is explicit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/idle-requests.spec.ts","name":"AEON-1117 raw ticket readers and quote heartbeats stop while hidden and resume with current screen identity","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/idle-requests.spec.ts","name":"AEON-1117 shares mounted reads and event transport, fences stale answers and recovers missed events and access","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -14292,6 +14334,8 @@
     ,
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"tall up-opening popovers stay separated from their trigger through keyboard viewport changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"AEON-1366: a late Colours deep link scrolls, rings and holds without moving navigation","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"Agents links admins to the agent keys","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"Business shows the parts and the stored quote settings; a deep link rings its card","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -14445,6 +14489,18 @@
     {"kind":"browser","file":"tests/stability.spec.ts","name":"at 390px › the quote list, its notice and its columns land together","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/stability.spec.ts","name":"the approval queue never says nothing waits before it knows","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"New menu restores its trigger without moving header controls at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -16121,6 +16177,10 @@
     {"kind":"node","file":"tests/agents-cleanup.test.ts","name":"a paused account says why and how to resume","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agents-cleanup.test.ts","name":"a revoked or never-confirmed computer can be removed by a person who manages accounts","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/api.test.ts","name":"AEON-1117 a stream opening immediately replaces an invalidated initial read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/api.test.ts","name":"AEON-1117 native Node consumers share the browser event transport","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/api.test.ts","name":"API requests use same-origin credentials, no cache and a timeout signal","tier":"ESSENTIAL"}
     ,
@@ -18150,6 +18210,24 @@
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: Hours Undo is immediate, keeps its view and uses plain failures or silent DELETE 404","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: Hours ignores superseded Undo and locks optimistic rows until confirmation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: a superseded attachment Undo never paints or sends the old receipt","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: attachment Undo keeps its own receipt across two deletion cycles","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: attachment Undo restores immediately through reloads and rolls back failures","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: confirmed attachment Undo rejects an older list and trusts a subsequent read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: deletion receipts keep exact IDs and refuse missing or ambiguous receipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: pending attachment Undo blocks Delete, caption and reorder until confirmation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: upload cleanup revokes each preview once and rejects late completions","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a finished fallback group scan shows the scanned project, count and facets","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a resolved fallback group scan cannot restore groups, counts or facets after a filter change","tier":"ESSENTIAL"}
@@ -18831,6 +18909,24 @@
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets filtered to none","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets with blocked","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"Hide for me keeps a just-created goal away > a created goal past the first page stays hidden through pending and later reads; Undo brings it back","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a created goal is revealed through filters and the first page > clears search and the state filter, and keeps a goal the first page omits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a late goal write does not toast for the next person > drops a late unlink, rename and delete","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a late goal write does not toast for the next person > drops a link, its Undo, the picker and the menu when the person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a late goal write does not toast for the next person > offers no Undo when the link changes nothing, and undoes only the returned delta","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a picker confirmation and an Undo stay with their person > a recent ticket found after the person changed, or after the picker closed, links nothing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a picker confirmation and an Undo stay with their person > a submission from a picker that closed links nothing for the next person","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a picker confirmation and an Undo stay with their person > an Undo in flight when the person changes neither toasts its failure nor reads","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a picker confirmation and an Undo stay with their person > picks stop at the most one link may name, so \"Link {n}\" never outgrows its reserved label","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/goals-epics-fix2.unit.test.ts","name":"a group switch keeps the frame > keeps the status note and header while the rows are replaced, then shows an empty list","tier":"ESSENTIAL"}
     ,
@@ -20518,6 +20614,10 @@
     ,
     {"kind":"vitest","file":"tests/run-kinds.unit.test.ts","name":"renders the registered host by default, an owner override, and an ellipsis-ready long label","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/scoped-global-selectors.unit.test.ts","name":"Vue keeps only the inside of :global(), so the guard flags anything beside it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/scoped-global-selectors.unit.test.ts","name":"no scoped style in web/src keeps a selector part outside its :global()","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a failed read is retried before a write; failures are reported, not hidden","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a new viewer starts from their own state; the old viewer’s queued write is dropped","tier":"GATED-FULL"}
@@ -20734,6 +20834,8 @@
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a section opened in the same frame also keeps its draft on expiry","tags":[],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a target rendered after the old deadline arrives once and releases its observer and timers","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"access retains the same child, draft and one-time link on expiry, with writes inert","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"an incoming owner clears frozen Access before fresh permissions arrive","tags":[],"tier":"GATED-FULL"}
@@ -20743,6 +20845,8 @@
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"legacy #estimates highlights its consolidated field until the arrival expires","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"legacy #silent-sessions highlights its consolidated field until the arrival expires","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"pending arrivals yield to input, route changes, unmount and the five-second bound","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"personal retains the same child, draft and one-time link on expiry, with writes inert","tags":[],"tier":"GATED-FULL"}
     ,
@@ -20837,6 +20941,16 @@
     {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"shortcut help preserves approved transition labels with SVG arrows and accessible words","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/signout-stale-lists.unit.test.ts","name":"AEON-1424: a reset drops an in-flight customers or quotes list and the next load sends a new request","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > AEON-1508: a delayed lead read cannot replace the next ticket or a reopened dialog","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > AEON-1508: configured work offers the lead queue before any catalog, pin or manual launch","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > AEON-1508: node-only entry points resolve their project with one bounded leaf read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > AEON-1508: queue failures stay visible and an access reset discards an in-flight result","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > AEON-1508: unreadable project settings keep manual launch disabled until a successful retry","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > queries canonical leaves on every page and excludes parents and unknown shapes from mixed results","tier":"ESSENTIAL"}
     ,
