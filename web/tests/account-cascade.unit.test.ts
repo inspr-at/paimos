@@ -30,11 +30,14 @@ function account(overrides: Partial<CatalogAccount> = {}): CatalogAccount {
   }
 }
 function catalog(accounts: CatalogAccount[] = [account()], extraHosts: AgentAccountCatalog['hosts'] = []): AgentAccountCatalog {
-  const ranked = accounts.filter(item => item.available && item.remaining_fraction != null)
+  const runnable = accounts.filter(item => item.available)
+  const ranked = runnable.filter(item => item.remaining_fraction != null)
     .sort((a, b) => (b.remaining_fraction ?? 0) - (a.remaining_fraction ?? 0) || (a.id < b.id ? -1 : 1))
+  // Match the server: the only runnable account is the default even before a reading.
+  const defaultAccountId = ranked[0]?.id ?? (runnable.length === 1 ? runnable[0].id : null)
   return {
     as_of: new Date(NOW).toISOString(), role: 'build',
-    hosts: [{ daemon_id: 'workstation', label: 'Work Mac', harnesses: [{ harness: 'codex', accounts, default_account_id: ranked[0]?.id ?? null }] }, ...extraHosts],
+    hosts: [{ daemon_id: 'workstation', label: 'Work Mac', harnesses: [{ harness: 'codex', accounts, default_account_id: defaultAccountId }] }, ...extraHosts],
   }
 }
 const context = (value: AgentAccountCatalog | null, role: 'build' | 'review-gate' = 'build') => ({ catalog: value, role: { role, source: 'ticket' as const }, authorFamily: '' as const })
@@ -249,7 +252,9 @@ describe('account catalog contract', () => {
     expect(onlyFresh.view.accounts[0].label).toContain('No quota reading yet')
     expect(onlyFresh.view.notes.account).not.toContain('first run')
     const multiHost = catalog([account({ remaining_fraction: null, windows: [unmeasured] })], [{ daemon_id: 'other', label: 'Other host', harnesses: [] }])
-    expect(presented(multiHost).view.notes.host).toBe('Agents can start now. The quota shows once this account reports it.')
+    const singleRunnable = presented(multiHost)
+    expect(singleRunnable.filled).toMatchObject({ hostId: 'workstation', harness: 'codex', accountId: accountA })
+    expect(singleRunnable.view.notes.host).toBe('Agents can start now. The quota shows once this account reports it.')
     expect(onlyFresh.view.notes.account).not.toContain('most allowance left')
     expect(onlyFresh.view.notes.account).not.toContain('100%')
     const unread = account({ id: accountA, label: 'Unread', remaining_fraction: null, windows: [{ ...window(5), provisional: true }] })

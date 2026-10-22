@@ -86,16 +86,24 @@ test('AEON-1511: enrolled accounts without readings stay visible, with a reason 
   plan.running_total -= 2
   const own = data.accounts.find(a => a.harness === 'claude')!
   let failed = true
-  await page.route('**/api/agent-accounts', route => route.fulfill(failed
-    ? { status: 503, json: { error: 'unavailable' } }
-    : { json: [...data.accounts, { ...own, id: 'ac000000-0000-4000-8000-000000000099', owner_person_id: 'another-person', label: 'Another person’s account' }] }))
+  let releaseRecovery!: () => void, recoveryRead!: () => void
+  const recovery = new Promise<void>(resolve => { releaseRecovery = resolve })
+  const recoveryStarted = new Promise<void>(resolve => { recoveryRead = resolve })
+  await page.route('**/api/agent-accounts', async route => {
+    if (failed) return route.fulfill({ status: 503, json: { error: 'unavailable' } })
+    recoveryRead()
+    // A background refresh must not remove Try again between locating and clicking it.
+    await recovery
+    return route.fulfill({ json: [...data.accounts, { ...own, id: 'ac000000-0000-4000-8000-000000000099', owner_person_id: 'another-person', label: 'Another person’s account' }] })
+  })
   await page.goto('/agents')
   const claude = detail(page, 'claude')
   await expect(claude.getByRole('alert')).toContainText('Usage couldn’t be read')
   await expect(claude).not.toContainText('no account yet')
   await expect(row(page, 'claude').locator('.sub')).toHaveText('Usage not read')
   failed = false
-  await claude.getByRole('button', { name: 'Try again' }).click()
+  await Promise.all([recoveryStarted, claude.getByRole('button', { name: 'Try again' }).click()])
+  releaseRecovery()
   await expect(claude.getByRole('heading')).toHaveText('Claude · quota')
   await expect(claude.locator('.ub-acc')).toHaveCount(1)
   await expect(claude.locator('.ub-name')).toHaveText(own.label)
