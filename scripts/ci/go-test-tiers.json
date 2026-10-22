@@ -7010,6 +7010,10 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestCoordinatorProgressCountsMissingAndFinishedWorkers","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestCrossProjectChildrenKeepWorkAndPrivacy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestCrossProjectRegistrationRechecksRevokedAccess","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestCurrentActivityPolicyFreshnessHistoryAndIsolation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestCurrentActivityProjectIsolation","tier":"GATED-FULL"}
