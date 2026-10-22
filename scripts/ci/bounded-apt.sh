@@ -47,8 +47,12 @@ start_timeout() {
 }
 
 attempt_apt() {
-  run_root_timeout 150 apt-get update -qq \
-    && run_root_timeout 150 apt-get install -y -qq "$@"
+  # Keep the reviewed cached-index fast path. Main's shared deadline and
+  # fetch-only fallback still bound both mirrors and root cleanup.
+  if [[ $retry -eq 1 ]]; then
+    run_root_timeout 150 apt-get update -qq || return "$?"
+  fi
+  run_root_timeout 150 apt-get install -y -qq "$@"
 }
 
 parse_playwright() {
@@ -293,6 +297,9 @@ PY
 
 finish() {
   local status=$?
+  if [[ $mode == apt && $status -ne 0 && $(date +%s) -ge $((deadline - 20)) ]]; then
+    echo 'apt retry budget exhausted' >&2
+  fi
   if [[ $mode == bundle && $status -ne 0 && -d $bundle ]]; then
     echo "bounded-apt: failed bundle tree (at most 200 entries, depth 4): $bundle" >&2
     # Ten seconds were reserved outside the fetch deadline for diagnostics,

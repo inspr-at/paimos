@@ -124,7 +124,9 @@ func (s *Store) Accept(ctx context.Context, in Intent) (nativecontract.Receipt, 
 	if !s.now().Before(in.ExpiresAt) {
 		return nativecontract.Receipt{}, Fail(nativecontract.ReasonGrantExpired)
 	}
-	if len(s.entries) == MaxReceipts {
+	// Terminal typing must never consume the last slot needed by owner Stop,
+	// including when report delivery is unavailable and cannot be retired.
+	if len(s.entries) == MaxReceipts || (in.Receipt.Operation == "pty_input" || in.Receipt.Operation == "resize") && len(s.entries) >= MaxReceipts-1 {
 		return nativecontract.Receipt{}, Fail(nativecontract.ReasonBufferFull)
 	}
 	pending := 0
@@ -145,6 +147,52 @@ func (s *Store) Accept(ctx context.Context, in Intent) (nativecontract.Receipt, 
 	}
 	s.entries = next
 	return cloneReceipt(in.Receipt), nil
+}
+
+// RetirePTYReports keeps a small tail of settled terminal metadata. Unreported
+// or uncertain effects and every non-PTY command remain durable. The owner must
+// serialize this with report flushing (which retains entry indices over I/O).
+// Retired receipts remain authoritative on the server; native input sequencing
+// and current access fencing continue to forbid replay of their effects.
+func (s *Store) RetirePTYReports(ctx context.Context, b nativecontract.Binding) ([]nativecontract.Receipt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.closed || s.poisoned {
+		return nil, Fail(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	eligible := func(in Intent) bool {
+		return in.Receipt.Binding.Equal(b) && in.ReportOffset == len(in.Reports) &&
+			(in.Receipt.Operation == "pty_input" && in.Receipt.State == "write_acknowledged" ||
+				in.Receipt.Operation == "resize" && in.Receipt.State == "applied" ||
+				(in.Receipt.Operation == "pty_input" || in.Receipt.Operation == "resize") && (in.Receipt.State == "rejected" || in.Receipt.State == "expired"))
+	}
+	count := 0
+	for _, in := range s.entries {
+		if eligible(in) {
+			count++
+		}
+	}
+	if count <= PTYReceiptHistory {
+		return nil, nil
+	}
+	next := make([]Intent, 0, len(s.entries))
+	retired := make([]nativecontract.Receipt, 0, count-PTYReceiptHistory)
+	for _, in := range s.entries {
+		if eligible(in) && count > PTYReceiptHistory {
+			retired = append(retired, cloneReceipt(in.Receipt))
+			count--
+			continue
+		}
+		next = append(next, in)
+	}
+	if err := s.save("receipts.json", next, journalFileBytes); err != nil {
+		return nil, err
+	}
+	s.entries = next
+	return retired, nil
 }
 
 func (s *Store) index(binding nativecontract.Binding, operationID string) (int, error) {

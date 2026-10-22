@@ -56,9 +56,12 @@ type Observation struct {
 }
 
 type Options struct {
-	Authority           Authority
-	Observer            Observer
-	Now                 func() time.Time
+	Authority Authority
+	Observer  Observer
+	Now       func() time.Time
+	// StartMode is a construction-only, independently approved profile matrix.
+	// Nil preserves structured starts. No request may install this policy.
+	StartMode           func(context.Context, pgx.Tx, nativecontract.Actor, nativecontract.StartIntent, nativecontract.Policy) (string, error)
 	TerminalViewerHosts []string // nil defaults to 100.64.0.0/10 and *.ts.net
 	TerminalViewerPorts []int    // nil defaults to 443 and 8082; omitted URL port means 443
 }
@@ -76,6 +79,7 @@ type Store struct {
 	now         func() time.Time
 	validator   *nativecontract.Validator
 	viewerHosts ViewerHosts
+	startMode   func(context.Context, pgx.Tx, nativecontract.Actor, nativecontract.StartIntent, nativecontract.Policy) (string, error)
 }
 
 func New(pool *pgxpool.Pool, opts Options) (*Store, error) {
@@ -93,7 +97,7 @@ func New(pool *pgxpool.Pool, opts Options) (*Store, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Store{pool: pool, authority: opts.Authority, observer: opts.Observer, now: opts.Now, validator: v, viewerHosts: hosts}, nil
+	return &Store{pool: pool, authority: opts.Authority, observer: opts.Observer, now: opts.Now, validator: v, viewerHosts: hosts, startMode: opts.StartMode}, nil
 }
 
 // Failure is safe for the native Error envelope: only the closed C0 reason.

@@ -170,6 +170,94 @@ type testReporter struct {
 	lose   bool
 }
 
+// Risk: retiring typing metadata loses an unreported/uncertain effect, or an
+// outage fills all slots and prevents Stop. Only server-acknowledged PTY effects
+// may age out, and even a journal full of unreported typing reserves Stop.
+func TestPTYReceiptRetirementPreservesPendingAndStopCapacity(t *testing.T) {
+	now := time.Now().UTC()
+	clock := func() time.Time { return now }
+	accept := func(t *testing.T, s *Store, b nativecontract.Binding, kind string) nativecontract.Receipt {
+		t.Helper()
+		in := Intent{Receipt: nativecontract.Receipt{RequestID: uuid.NewString(), OperationID: uuid.NewString(), Binding: &b, Operation: kind, State: "accepted", SourceSequence: "0", UpdatedAt: now}, ActorID: uuid.NewString(), PayloadSHA256: strings.Repeat("a", 64), ProcessIdentityDigest: strings.Repeat("b", 64), ExpiresAt: now.Add(time.Hour)}
+		r, err := s.Accept(t.Context(), in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	t.Run("retains required evidence across reopen", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "receipts")
+		s := openStore(t, path, clock)
+		b := testBinding()
+		settle := func(binding nativecontract.Binding, kind string, flush bool) nativecontract.Receipt {
+			r := accept(t, s, binding, kind)
+			if _, err := s.BeginWrite(t.Context(), binding, r.OperationID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Observe(t.Context(), binding, r.OperationID, nativecontract.NativeEvidence{Stage: "applied", RequestID: r.RequestID, SourceSequence: 1, ObservedAt: now}); err != nil {
+				t.Fatal(err)
+			}
+			if flush {
+				if _, err := s.FlushOperationReports(t.Context(), binding, r.OperationID, 16, &testReporter{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return r
+		}
+		for range 40 {
+			settle(b, "resize", true)
+		}
+		unreported := settle(b, "resize", false)
+		nonPTY := settle(b, "interrupt", true)
+		other := settle(testBinding(), "resize", true)
+		uncertain := accept(t, s, b, "pty_input")
+		if _, err := s.BeginWrite(t.Context(), b, uncertain.OperationID); err != nil {
+			t.Fatal(err)
+		}
+		reason := nativecontract.ReasonInputOutcomeUnconfirmed
+		if _, err := s.SetIntentState(t.Context(), b, uncertain.OperationID, "uncertain", &reason); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.FlushOperationReports(t.Context(), b, uncertain.OperationID, 16, &testReporter{}); err != nil {
+			t.Fatal(err)
+		}
+		retired, err := s.RetirePTYReports(t.Context(), b)
+		if err != nil || len(retired) != 8 {
+			t.Fatal("retirement tail", len(retired), err)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		s = openStore(t, path, clock)
+		for _, want := range []struct {
+			receipt nativecontract.Receipt
+			state   string
+		}{{unreported, "applied"}, {nonPTY, "applied"}, {other, "applied"}, {uncertain, "uncertain"}} {
+			if got, err := s.Get(*want.receipt.Binding, want.receipt.OperationID); err != nil || got.State != want.state {
+				t.Fatal("retirement lost required evidence", got, err)
+			}
+		}
+		for _, retired := range retired {
+			_, err := s.Get(b, retired.OperationID)
+			checkReason(t, err, nativecontract.ReasonInvalidInput)
+		}
+	})
+	t.Run("unreported typing reserves stop", func(t *testing.T) {
+		s := openStore(t, filepath.Join(t.TempDir(), "receipts"), clock)
+		b := testBinding()
+		for range MaxReceipts - 1 {
+			accept(t, s, b, "pty_input")
+		}
+		if retired, err := s.RetirePTYReports(t.Context(), b); err != nil || len(retired) != 0 {
+			t.Fatal("unreported typing was retired", len(retired), err)
+		}
+		in := Intent{Receipt: nativecontract.Receipt{RequestID: uuid.NewString(), OperationID: uuid.NewString(), Binding: &b, Operation: "resize", State: "accepted", SourceSequence: "0", UpdatedAt: now}, ActorID: uuid.NewString(), PayloadSHA256: strings.Repeat("a", 64), ExpiresAt: now.Add(time.Hour)}
+		_, err := s.Accept(t.Context(), in)
+		checkReason(t, err, nativecontract.ReasonBufferFull)
+		accept(t, s, b, "stop")
+	})
+}
+
 func (f *testReporter) Report(_ context.Context, r nativecontract.Receipt) (nativecontract.Receipt, error) {
 	f.states = append(f.states, r.State)
 	if f.lose {

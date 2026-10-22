@@ -16,12 +16,13 @@ import (
 )
 
 const (
-	MaxReceipts      = 512
-	MaxPendingInputs = 32
-	MaxFinals        = 64
-	MaxFinalBytes    = 4 << 20
-	MaxTextBytes     = 65536
-	MaxRetention     = 24 * time.Hour
+	MaxReceipts       = 512
+	MaxPendingInputs  = 32
+	PTYReceiptHistory = 32 // recently settled metadata; server retains authoritative receipts
+	MaxFinals         = 64
+	MaxFinalBytes     = 4 << 20
+	MaxTextBytes      = 65536
+	MaxRetention      = 24 * time.Hour
 )
 
 // Error never contains content, native protocol bodies or authority tokens.

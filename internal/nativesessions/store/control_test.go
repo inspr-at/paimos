@@ -3,7 +3,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativesessions/consent"
+	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
 	"github.com/inspr-at/paimos/internal/nativesessions/interaction"
 	"github.com/inspr-at/paimos/internal/nativesessions/stream"
 	"github.com/inspr-at/paimos/internal/nativestream"
@@ -56,7 +59,69 @@ func (p *controlPTYFixture) OpenPTY(_ context.Context, s nativecontract.PTYLaunc
 	defer p.mu.Unlock()
 	p.opens++
 	p.identity = nativecontract.NativeIdentity{Provider: "claude", NativeSessionRef: s.ResumeRef, RuntimeEpoch: s.Binding.RuntimeEpoch, PID: 23456, StartedAt: p.now.Add(-8500 * time.Millisecond), ProcessIdentityDigest: strings.Repeat("e", 64)}
+	if p.identity.NativeSessionRef == "" {
+		p.identity.NativeSessionRef = "observed-initial-fixture-conversation"
+	}
 	return p, nil
+}
+
+// Risk: an initial TUI bypasses person-bound start/profile authority, or natural
+// EOF releases occupancy before the final transaction confirms root/group exit.
+func TestOwnedInitialPTYUsesPersonStartAndPersistsOnlyExitMetadata(t *testing.T) {
+	pty := &controlPTYFixture{frames: make(chan nativecontract.TerminalFrame, 4), confirmed: true}
+	c := composeProduction(t, compositionOptions{disableRetention: true, configure: func(f *startFixture, a *consent.Authority, config *agentd.NativeSessionConfig) {
+		if config != nil {
+			pty.now = f.now
+			config.Terminal = pty
+			config.Qualification = qualifiedControlFixture{}
+		}
+	}})
+	f := c.f
+	f.s.startMode = func(_ context.Context, _ pgx.Tx, actor nativecontract.Actor, intent nativecontract.StartIntent, policy nativecontract.Policy) (string, error) {
+		if actor.PrincipalID != f.person.ID || intent.AccountID != f.intent.AccountID || intent.ModelProfileID != f.intent.ModelProfileID || policy.GrantID != f.intent.PolicyID {
+			return "", nativeRefuse(nativecontract.ReasonQualificationMissing)
+		}
+		return "terminal", nil
+	}
+	f.begin(t)
+	started, err := c.config.Host.Start(t.Context(), nativecontract.LocalStart{Intent: f.intent, Cwd: c.root, AccountKey: "real-own-account"})
+	if err != nil || started.Session == nil || started.Session.State != "taken" || started.Session.Mode != "terminal" || c.provider.opens != 0 || pty.opens != 1 {
+		t.Fatal("initial person-bound PTY", started, err)
+	}
+	b := *started.Session.CurrentBinding
+	pty.mu.Lock()
+	pty.closed = true
+	pty.mu.Unlock()
+	close(pty.frames)
+	select {
+	case <-c.exitDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("owned exit report barrier")
+	}
+	if err := c.config.Close(t.Context()); err != nil {
+		t.Fatal("owned exit settlement", err)
+	}
+	var released, stopped bool
+	var state string
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT r.released_at IS NOT NULL,h.stopped_at IS NOT NULL,b.view->>'state' FROM native_session_roots r JOIN native_session_bindings b ON b.id=r.owned_session_id JOIN harness_sessions h ON h.id=b.current_harness_session_id WHERE b.id=$1`, b.OwnedSessionID).Scan(&released, &stopped, &state); err != nil || !released || !stopped || state != "stopped" {
+		t.Fatal("terminal root/harness settlement", released, stopped, state, err)
+	}
+	var raw, public []byte
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT metadata->'terminal',after FROM events WHERE tenant_id=$1 AND type='native_session.stopped' AND after->>'owned_session_id'=$2`, f.person.TenantID, b.OwnedSessionID).Scan(&raw, &public); err != nil {
+		t.Fatal("persisted exit metadata", err)
+	}
+	var evidence daemon.TerminalEvidence
+	hash := sha256.Sum256(nil)
+	if err := json.Unmarshal(raw, &evidence); err != nil || evidence.RuntimeEpoch != b.RuntimeEpoch || evidence.OutputBytes != 0 || evidence.OutputSHA256 != hex.EncodeToString(hash[:]) {
+		t.Fatal("exit metadata", string(raw), err)
+	}
+	v, err := nativecontract.NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.ValidateJSON("NativeAuditEvent", public); err != nil {
+		t.Fatal("strict public lifecycle snapshot changed", err)
+	}
 }
 func (p *controlPTYFixture) Identity() nativecontract.NativeIdentity {
 	p.mu.Lock()
@@ -64,6 +129,9 @@ func (p *controlPTYFixture) Identity() nativecontract.NativeIdentity {
 	return p.identity
 }
 func (p *controlPTYFixture) Frames() <-chan nativecontract.TerminalFrame { return p.frames }
+func (p *controlPTYFixture) Ready(context.Context) (nativecontract.NativeIdentity, error) {
+	return p.Identity(), nil
+}
 func (p *controlPTYFixture) Write(context.Context, nativecontract.PTYInput) (nativecontract.NativeEvidence, error) {
 	p.mu.Lock()
 	p.writes++
@@ -256,6 +324,21 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 	}
 	if accepted.Receipt.OperationID == returned.Receipt.OperationID {
 		t.Fatal("different transitions reused operation")
+	}
+	// D4 permits aggregate lifecycle evidence, never persisted screen content.
+	// The final PTY summary is recorded in the authorized successor admission
+	// transaction against the exact exited predecessor epoch.
+	var metadata []byte
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT metadata->'predecessor_terminal' FROM events WHERE tenant_id=$1 AND metadata->'predecessor_terminal'->>'runtime_epoch'=$2`, f.person.TenantID, takenBinding.RuntimeEpoch).Scan(&metadata); err != nil {
+		t.Fatal("terminal lifecycle evidence", err)
+	}
+	var evidence daemon.TerminalEvidence
+	hash := sha256.Sum256([]byte("live owned terminal"))
+	if err := json.Unmarshal(metadata, &evidence); err != nil || evidence.OutputBytes != uint64(len("live owned terminal")) || evidence.Frames != 1 || evidence.OutputSHA256 != hex.EncodeToString(hash[:]) {
+		t.Fatal("terminal counts/hash", string(metadata), err)
+	}
+	if strings.Contains(string(metadata), "live owned terminal") || strings.Contains(string(metadata), base64.StdEncoding.EncodeToString([]byte("live owned terminal"))) {
+		t.Fatal("terminal content persisted")
 	}
 	// An explicit provider-exit observation drives P5 manual recovery. The
 	// retained handle, existing ledger and journal are checked; no saved PID
