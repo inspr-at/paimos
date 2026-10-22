@@ -4,7 +4,7 @@
 // commit because its workflow commands are the historical ones below.
 import { afterEach, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { aptFixture } from './testdata/apt-fixture.mjs'
@@ -27,6 +27,7 @@ afterEach(() => {
 async function run(command, options) {
   const { state, env, sources, sourceRoot } = aptFixture(options)
   states.push(state)
+  if (typeof command === 'function') command = command(state)
   let stdout = '', stderr = '', error = ''
   const child = fixtures.spawn('bash', ['-eo', 'pipefail', '-c', command], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] })
   child.stdout.on('data', data => { stdout += data })
@@ -291,4 +292,67 @@ test('browser download errors do not trigger an apt mirror retry', async () => {
   assert.deepEqual(result.calls, ['playwright install chromium'])
   assert.equal(result.attempts[0].root, '0')
   assert.doesNotMatch(result.stdout, /retrying fetch|dependencies installed/)
+})
+
+// AEON-1652 fix5 risk: fetching in every shard multiplies mirror outages;
+// partial artifacts must fall back before dpkg, never after a failed write.
+test('one complete image bundle installs offline and invalid bundles retain network fallback', async () => {
+  const producer = await run(state => `bash "${script}" bundle "${join(state, 'bundle')}"`, { mode: 'bundle-fetch-retry', mirrorList: 'hosted' })
+  assert.equal(producer.status, 0, `${producer.error}\n${producer.stdout}\n${producer.stderr}`)
+  const bundleDir = join(producer.state, 'bundle')
+  const manifest = JSON.parse(readFileSync(join(bundleDir, 'manifest.json'), 'utf8'))
+  assert.deepEqual(manifest.packages, ['fish', 'fonts-test', 'libtest', 'zsh'], 'retain installed libraries from the dry-run argument list')
+  assert.deepEqual(manifest.image, ['ubuntu24', '20261021.1', 'X64'])
+  assert.equal(producer.calls.filter(call => call.includes('--download-only')).length, 3, 'allow several bounded fetch attempts across mirrors')
+  assert.match(producer.attempts.filter(attempt => attempt.command.includes('--download-only'))[1].sources['ubuntu.sources'], /http:\/\/archive\.ubuntu\.com/)
+  assert.ok(producer.attempts.filter(attempt => attempt.command.includes('--download-only')).every(attempt => attempt.root === '1' && attempt.command.includes('--reinstall')))
+  for (const [file, original] of Object.entries(producer.sources)) assert.equal(readFileSync(join(producer.sourceRoot, file), 'utf8'), original)
+
+  for (const command of ['apt fish zsh', 'playwright install-deps chromium', 'playwright install --with-deps --only-shell chromium']) {
+    // The network adapter would fail. Success therefore requires the bundle.
+    const offline = await run(`bash "${script}" ${command}`, { mode: 'always-fail', bundleDir })
+    assert.equal(offline.status, 0, `${offline.error}\n${offline.stdout}\n${offline.stderr}`)
+    assert.match(offline.stdout, /dependencies installed offline/)
+    const dependencies = offline.calls.filter(call => !call.includes('playwright install --only-shell'))
+    assert.equal(dependencies.length, 2, 'archive-only preflight followed by one bounded install')
+    assert.ok(dependencies.every(call => call.includes('--no-download') && !call.includes('update') && !call.includes('npx')))
+    assert.ok(dependencies[0].includes('--download-only'))
+    assert.ok(!dependencies[1].includes('--download-only'))
+    assert.ok(offline.attempts.filter(attempt => attempt.command.includes('--no-download')).every(attempt => attempt.root === '1' && attempt.config.includes(`${bundleDir}/lists`) && attempt.config.includes(`${bundleDir}/archives`)))
+    assert.ok(offline.timeouts.filter(timeout => timeout.root === '1').every(timeout => timeout.seconds <= 150))
+  }
+
+  for (const options of [{ imageVersion: 'different-image' }, { imageOS: 'ubuntu26' }, { imageVersion: '' }, { mode: 'offline-missing' }]) {
+    const fallback = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'ok', bundleDir, ...options })
+    assert.equal(fallback.status, 0, `${fallback.stdout}\n${fallback.stderr}`)
+    assert.match(fallback.calls.at(-1), /playwright install-deps chromium$/)
+    assert.doesNotMatch(fallback.stdout, /dependencies installed offline/)
+    if (options.mode === 'offline-missing') assert.ok(fallback.calls[0].includes('--no-download'), 'exercise resolution preflight, not identity rejection')
+  }
+
+  const dpkg = await run(`bash "${script}" apt fish zsh`, { mode: 'offline-install-fail', bundleDir })
+  assert.equal(dpkg.status, 100, dpkg.stdout)
+  assert.match(dpkg.stdout, /dpkg: error/)
+  assert.equal(dpkg.calls.length, 2)
+  assert.ok(dpkg.calls.every(call => call.includes('--no-download')), 'no network fallback after an offline mutation fails')
+  assert.doesNotMatch(dpkg.stdout, /dependencies installed|retrying fetch/)
+
+  for (const filename of ['archives/fish_1_amd64.deb', 'lists/noble_Packages']) {
+    const file = join(bundleDir, filename), original = readFileSync(file)
+    rmSync(file)
+    const incomplete = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'ok', bundleDir })
+    assert.equal(incomplete.status, 0, incomplete.stderr)
+    assert.deepEqual(incomplete.calls, ['playwright install-deps chromium'], 'reject missing bundle files before package mutation')
+    assert.doesNotMatch(incomplete.stdout, /dependencies installed offline/)
+    writeFileSync(file, original)
+  }
+  writeFileSync(join(bundleDir, 'archives/fish_1_amd64.deb'), 'corrupt')
+  const corrupt = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'ok', bundleDir })
+  assert.equal(corrupt.status, 0, corrupt.stderr)
+  assert.deepEqual(corrupt.calls, ['playwright install-deps chromium'])
+
+  const exhausted = await run(state => `bash "${script}" bundle "${join(state, 'bundle')}"`, { mode: 'bundle-fetch-fail' })
+  assert.equal(exhausted.status, 100, exhausted.stdout)
+  assert.equal(exhausted.calls.filter(call => call.includes('--download-only')).length, 4)
+  assert.equal(existsSync(join(exhausted.state, 'bundle/manifest.json')), false, 'never publish a completion marker for partial downloads')
 })

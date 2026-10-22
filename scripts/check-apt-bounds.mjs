@@ -74,6 +74,8 @@ export function auditWorkflowText(name, text) {
         const args = call.slice(playwrightCall.length)
         const allowed = ['install-deps chromium', 'install --with-deps chromium', 'install --with-deps --only-shell chromium']
         if (!allowed.includes(args)) failures.push(`${where}: unsupported Playwright dependency install: ${args}`)
+      } else if (call === `${script} bundle "$RUNNER_TEMP/apt-bundle"`) {
+        if (limit !== 22) failures.push(`${where}: bundle step needs timeout-minutes: 22`)
       } else failures.push(`${where}: unsupported bounded apt invocation`)
     }
   }

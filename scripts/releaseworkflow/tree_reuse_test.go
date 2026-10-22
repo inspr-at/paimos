@@ -825,6 +825,35 @@ func normalizeAEON933InstallBounds(t *testing.T, id string, job map[string]any) 
 	}
 }
 
+// AEON-1652 adds an optional package artifact, preserving the original install
+// and failure fallback. Prove its wiring before projecting historical jobs.
+func normalizeOfflineAptBundle(t *testing.T, id string, job map[string]any) {
+	t.Helper()
+	if id != "go-test" && id != "web-unit" && id != "web-shard" {
+		return
+	}
+	checkOfflineAptWorkflow(t)
+	var steps, needs []any
+	removed := 0
+	for _, value := range reuseSteps(job) {
+		switch treeMap(value)["name"] {
+		case "Identify optional apt bundle for this runner image", "Download optional apt bundle":
+			removed++
+		default:
+			steps = append(steps, value)
+		}
+	}
+	if removed != 2 || !containsNeed(job["needs"], "apt-bundle") {
+		t.Fatalf("%s lost its optional apt bundle prerequisites", id)
+	}
+	for _, need := range anySlice(job["needs"]) {
+		if need != "apt-bundle" {
+			needs = append(needs, need)
+		}
+	}
+	job["steps"], job["needs"] = steps, needs
+}
+
 // AEON-1605: mocked browser shards opt out of the backend wait, and e2e
 // requires it through the bounded readiness waiter. Prove both exact additions
 // before projecting onto the accepted-CI pin.
@@ -965,6 +994,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				j = normalizeParallelWebSetup(t, jobs)
 			}
 			j = cloneStep(t, j)
+			normalizeOfflineAptBundle(t, id, j)
 			if id != "web-setup" { // The historical setup was already projected above.
 				normalizeAEON1642Toolchains(t, j)
 			}

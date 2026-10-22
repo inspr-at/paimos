@@ -100,6 +100,43 @@ if [[ -f "\$main" ]]; then cp "\$main" "\$snapshot/sources.list"; fi
 for file in "\$parts/"*.list "\$parts/"*.sources; do
   [[ ! -f "\$file" ]] || cp "\$file" "\$snapshot/\$(basename "\$file")"
 done
+if [[ "\$*" == *'install-deps --dry-run chromium' ]]; then
+  # Playwright 1.63 passes ALL packages to apt's simulation but prints only
+  # missing ones. Both fixture libraries appear installed to the dry run.
+  apt-get install -s --no-install-recommends libtest fonts-test || exit \$?
+  echo 'All system dependencies are installed.'
+  exit 0
+fi
+if [[ "\$*" == *--no-download* ]]; then
+  if [[ "\${AEON_AS_ROOT:-}" != 1 ]]; then echo offline-not-root >&2; exit 1; fi
+  if [[ "\$mode" == offline-missing && "\$*" == *--download-only* ]]; then
+    echo 'E: Unable to fetch some archives, --no-download is set' >&2
+    exit 100
+  fi
+  if [[ "\$mode" == offline-install-fail && "\$*" != *--download-only* ]]; then
+    echo 'Unpacking libtest (1.0) ...' >&2
+    echo 'dpkg: error processing archive libtest.deb' >&2
+    exit 100
+  fi
+  exit 0
+fi
+if [[ "\$mode" == bundle-* ]]; then
+  lists=\$(sed -n '/^Dir::State::lists "/{s/^Dir::State::lists "//;s/";$//;p;}' "\$config")
+  archives=\$(sed -n '/^Dir::Cache::archives "/{s/^Dir::Cache::archives "//;s/";$//;p;}' "\$config")
+  [[ -n "\$lists" && -n "\$archives" ]] || { echo shared-apt-cache >&2; exit 1; }
+  if [[ "\$*" == 'update -qq' ]]; then
+    echo 'fixture package indexes' > "\$lists/noble_Packages"
+    exit 0
+  fi
+  [[ "\$*" == *--download-only* ]] || { echo unexpected-package-mutation >&2; exit 1; }
+  printf '%s\\n' "\$*" >> "\$state/downloads"
+  if [[ "\$mode" == bundle-fetch-fail || "\$mode" == bundle-fetch-retry && \$(wc -l < "\$state/downloads") -le 2 ]]; then
+    echo 'E: Failed to fetch http://azure.archive.ubuntu.com/ubuntu/pool/libtest.deb Connection timed out' >&2
+    exit 100
+  fi
+  for name in fish zsh libtest fonts-test; do echo "\$name" > "\$archives/\${name}_1_amd64.deb"; done
+  exit 0
+fi
 browser=0
 case "\$0 \$*" in
   *install-deps*|*apt-get*) ;;
@@ -156,7 +193,7 @@ exec "\$AEON_FIXTURE_NODE" "\$AEON_FIXTURE_APT_HOLD" "\$PPID"
   return bin
 }
 
-export function aptFixture({ mode, shells = false, format = 'sources', elapsed, mirrorList = false, timeoutStatus = 124, dpkgActivity = 'Unpacking libtest (1.0) ...' }) {
+export function aptFixture({ mode, shells = false, format = 'sources', elapsed, mirrorList = false, timeoutStatus = 124, dpkgActivity = 'Unpacking libtest (1.0) ...', bundleDir, imageOS = 'ubuntu24', imageVersion = '20261021.1' }) {
   const state = mkdtempSync(join(tmpdir(), 'aeon-apt-'))
   writeFileSync(join(state, 'mode'), mode)
   writeFileSync(join(state, 'calls'), '')
@@ -227,6 +264,7 @@ Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
     PATH: `${bin}:/usr/bin:/bin:${process.env.PATH}`, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
     AEON_STUB_STATE: state, AEON_AS_ROOT: '', GITHUB_WORKSPACE: fileURLToPath(new URL('../..', import.meta.url)),
     AEON_APT_SOURCES_DIR: sourceRoot,
+    AEON_APT_BUNDLE_DIR: bundleDir ?? join(state, 'absent-bundle'), ImageOS: imageOS, ImageVersion: imageVersion, RUNNER_ARCH: 'X64',
     AEON_FIXTURE_NODE: process.execPath, AEON_FIXTURE_APT_HOLD: fileURLToPath(new URL('./apt-hold.mjs', import.meta.url)),
   } }
 }

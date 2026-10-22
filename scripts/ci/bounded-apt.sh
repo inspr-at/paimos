@@ -5,11 +5,11 @@
 # that sudo or Playwright starts, so the lock survives and the next attempt
 # fails with exit 100 (PR 377, web-shard 3 and 11). Browser downloads stay
 # unprivileged so they land in the runner's cache, not root's.
-# AEON-1652: retry fetch errors once via temporary Ubuntu mirror overrides.
+# AEON-1652: share one image-specific package bundle; retain mirror fallback.
 set -euo pipefail
 
 usage() {
-  echo "usage: bounded-apt.sh apt <command...> | playwright install-deps <browser...> | playwright install --with-deps [--only-shell] <browser...>" >&2
+  echo "usage: bounded-apt.sh bundle <directory> | apt <command...> | playwright install-deps <browser...> | playwright install --with-deps [--only-shell] <browser...>" >&2
   exit 2
 }
 
@@ -72,6 +72,141 @@ attempt_playwright() {
     run_root_timeout 150 apt-get update -qq || return "$?"
   fi
   run_root_timeout 240 npx playwright install-deps "${targets[@]}"
+}
+
+resolve_bundle_packages() {
+  # Since Playwright 1.60, dry-run prints only MISSING packages. Capture the
+  # complete argument list of its simulated apt install, including libraries
+  # already on the image. This adapter cannot update or install anything.
+  mkdir "$temporary/dry-run"
+  cat > "$temporary/dry-run/apt-get" <<'PY'
+#!/usr/bin/env python3
+import os
+from pathlib import Path
+import re
+import sys
+
+args = sys.argv[1:]
+if args[:3] != ['install', '-s', '--no-install-recommends']:
+    sys.exit('bounded-apt: unexpected Playwright dry-run command')
+packages = args[3:]
+if not 1 <= len(packages) <= 256 or not all(re.fullmatch(r'[a-z0-9][a-z0-9+.-]*(?<!-)', p) for p in packages):
+    sys.exit('bounded-apt: invalid Playwright package list')
+Path(os.environ['AEON_APT_PACKAGE_LIST']).write_text('\n'.join(sorted(set(packages + ['fish', 'zsh']))) + '\n')
+PY
+  chmod +x "$temporary/dry-run/apt-get"
+  run_timeout user 90 env "PATH=$temporary/dry-run:$PATH" \
+    "AEON_APT_PACKAGE_LIST=$bundle/packages.txt" \
+    npx --no-install playwright install-deps --dry-run chromium
+  [[ -s $bundle/packages.txt ]] || return 1
+  while IFS= read -r package; do packages+=("$package"); done < "$bundle/packages.txt"
+}
+
+attempt_bundle() {
+  run_root_timeout 150 apt-get update -qq \
+    && run_root_timeout 360 apt-get install --download-only --reinstall -y -qq --no-install-recommends "${packages[@]}"
+}
+
+bundle_config() {
+  # Package indexes and archives never use the image's mutable shared cache.
+  cat >> "$apt_final_config" <<EOF
+Dir::State::lists "$bundle/lists";
+Dir::Cache::archives "$bundle/archives";
+Dir::Cache::pkgcache "";
+Dir::Cache::srcpkgcache "";
+EOF
+}
+
+bundle_manifest() {
+  run_timeout user 45 python3 - "$1" "$bundle" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import sys
+
+mode, directory = sys.argv[1:]
+root = Path(directory)
+manifest = root / 'manifest.json'
+image = [os.environ.get('ImageOS'), os.environ.get('ImageVersion'), os.environ.get('RUNNER_ARCH', platform.machine())]
+try:
+    if not all(image):
+        raise ValueError('runner image identity unavailable')
+    if mode == 'write':
+        packages = (root / 'packages.txt').read_text().splitlines()
+        files = [p for folder in ('archives', 'lists', 'etc') for p in (root / folder).rglob('*')
+                 if p.is_file() and p.name != 'lock' and 'partial' not in p.parts]
+        files.append(root / 'packages.txt')
+        data = {'version': 1, 'image': image, 'packages': packages, 'files': {str(p.relative_to(root)): '' for p in files}}
+    else:
+        if manifest.stat().st_size > 1024 * 1024:
+            raise ValueError('oversize manifest')
+        data = json.loads(manifest.read_text())
+        if data['version'] != 1 or data['image'] != image:
+            raise ValueError('runner image differs')
+        packages = data['packages']
+    if not 2 <= len(packages) <= 258 or not {'fish', 'zsh'} <= set(packages) or not all(
+            re.fullmatch(r'[a-z0-9][a-z0-9+.-]*(?<!-)', p) for p in packages):
+        raise ValueError('invalid package set')
+    files = data['files']
+    if not 3 <= len(files) <= 10000 or not any(p.startswith('archives/') and p.endswith('.deb') for p in files) or not any(p.startswith('lists/') for p in files):
+        raise ValueError('empty package bundle')
+    total = 0
+    for name, expected in files.items():
+        path = root / name
+        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()) or not path.is_file():
+            raise ValueError('missing or invalid bundle file')
+        total += path.stat().st_size
+        if total > 2 * 1024**3:
+            raise ValueError('oversize bundle')
+        digest = hashlib.sha256()
+        with path.open('rb') as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                digest.update(chunk)
+        if mode == 'write':
+            files[name] = digest.hexdigest()
+        elif digest.hexdigest() != expected:
+            raise ValueError('bundle checksum mismatch')
+    if (root / 'packages.txt').read_text().splitlines() != packages:
+        raise ValueError('package set differs')
+    if mode == 'write':
+        manifest.write_text(json.dumps(data) + '\n')
+    else:
+        print('\n'.join(packages))
+except (OSError, ValueError, KeyError, TypeError) as error:
+    sys.exit(f'bounded-apt: bundle unavailable: {error}')
+PY
+}
+
+try_offline() {
+  bundle=${AEON_APT_BUNDLE_DIR:-${RUNNER_TEMP:-/nonexistent}/apt-bundle}
+  [[ -f $bundle/manifest.json ]] || return 1
+  if [[ $mode == playwright && ( ${#targets[@]} -ne 1 || ${targets[0]} != chromium ) ]]; then return 1; fi
+  # Finish validation and an archive-only preflight BEFORE dpkg can mutate.
+  bundle_manifest check > "$temporary/offline-packages" || return 1
+  local package
+  packages=()
+  while IFS= read -r package; do packages+=("$package"); done < "$temporary/offline-packages"
+  if [[ $mode == apt ]]; then
+    for package in "$@"; do grep -Fxq -- "$package" "$temporary/offline-packages" || return 1; done
+  fi
+  write_config "$bundle/etc"
+  bundle_config
+  if ! run_root_timeout 30 apt-get install --download-only --no-download -y -qq --no-install-recommends "${packages[@]}"; then
+    echo 'bounded-apt: incomplete offline resolution; using network fallback'
+    write_config "$source_root"
+    return 1
+  fi
+  echo "bounded-apt: installing offline bundle for ${ImageOS} / ${ImageVersion}"
+  # A failure after this point is final: never retry after package mutation.
+  if run_root_timeout 150 apt-get install --no-download -y -qq --no-install-recommends "${packages[@]}"; then
+    echo 'bounded-apt: dependencies installed offline'
+    exit 0
+  else
+    exit "$?"
+  fi
 }
 
 write_config() {
@@ -203,6 +338,13 @@ shift
 targets=()
 browser=()
 case "$mode" in
+  bundle)
+    [[ $# -eq 1 && ! -e $1 && -n ${ImageOS:-} && -n ${ImageVersion:-} ]] || usage
+    bundle=$1
+    budget=1080
+    first_attempt_seconds=240
+    attempt=(attempt_bundle)
+    ;;
   apt)
     [[ $# -gt 0 ]] || usage
     missing=0
@@ -239,10 +381,19 @@ apt_final_config=$temporary/apt-final.conf
 log=$temporary/attempt.log
 source_root=${AEON_APT_SOURCES_DIR:-/etc/apt}
 write_config "$source_root"
+packages=()
+if [[ $mode == bundle ]]; then
+  mkdir -p "$bundle/archives/partial" "$bundle/lists/partial"
+  resolve_bundle_packages
+  bundle_config
+else
+  :
+fi
 
 # Same user as the runner: browser downloads land in their cache and happen
 # only once, even when the subsequent dependency fetch needs another mirror.
 if [[ ${#browser[@]} -gt 0 ]]; then run_timeout user 240 "${browser[@]}"; fi
+if [[ $mode != bundle ]]; then try_offline "$@" || true; fi
 source_files=()
 for file in "$source_root/sources.list" "$source_root/sources.list.d/"*.list "$source_root/sources.list.d/"*.sources; do
   [[ ! -f $file ]] || source_files+=("$file")
@@ -252,6 +403,35 @@ if [[ ${#source_files[@]} -gt 0 ]]; then
   mirrors=$(grep -hEo 'https?://(([[:alnum:]-]+\.)?archive|security)\.ubuntu\.com|mirror\+file:[^[:space:]]+' "${source_files[@]}" | sed -E 's#https?://##' | sort -u | paste -sd, -) || true
 fi
 echo "bounded-apt: using ${mirrors:-configured apt sources}"
+if [[ $mode == bundle ]]; then
+  # Four fetch-only attempts share 18 minutes including all kill graces.
+  # Keep successfully fetched archives between attempts; never run dpkg here.
+  alternate=0
+  selected_sources=$source_root
+  for number in 1 2 3 4; do
+    attempt_deadline=$(($(date +%s) + first_attempt_seconds))
+    if capture_attempt; then
+      mkdir -p "$bundle/etc/sources.list.d"
+      [[ ! -f $selected_sources/sources.list ]] || cp "$selected_sources/sources.list" "$bundle/etc/sources.list"
+      for file in "$selected_sources/sources.list.d/"*.list "$selected_sources/sources.list.d/"*.sources; do
+        [[ ! -f $file ]] || cp "$file" "$bundle/etc/sources.list.d/"
+      done
+      bundle_manifest write
+      echo "bounded-apt: package bundle ready for $ImageOS / $ImageVersion"
+      exit 0
+    else
+      status=$?
+    fi
+    fetch_failure || exit "$status"
+    [[ $number -lt 4 ]] || exit "$status"
+    if [[ $number -eq 1 ]] && fallback_sources; then alternate=1; fi
+    selected_sources=$source_root
+    if [[ $alternate -eq 1 && $((number % 2)) -eq 1 ]]; then selected_sources=$temporary/apt; fi
+    write_config "$selected_sources"
+    bundle_config
+    echo "bounded-apt: retrying bundle fetch (attempt $((number + 1))/4) via $selected_sources"
+  done
+fi
 # Reserve time for a different mirror even if the first fetch never returns.
 # This cap covers apt update + install, plus at most 20 seconds to reap it.
 attempt_deadline=$(($(date +%s) + first_attempt_seconds))

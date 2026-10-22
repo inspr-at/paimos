@@ -313,9 +313,45 @@ jobs:
     with:
       required-idle-runners: 4
 
+  # AEON-1652: one fetch per run, then offline installs in the hosted shards.
+  # Optional acceleration: an absent bundle or a runner image rollout retains
+  # the bounded network path. Do not store packages in the evicting cache.
+  apt-bundle:
+    needs: [ci-plan, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && needs.ci-plan.outputs.lane != 'docs-only' && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24.22.1"
+      - name: Identify apt bundle for this runner image
+        id: apt-image
+        run: echo "artifact=apt-bundle-${ImageOS}-${ImageVersion}-${RUNNER_ARCH}" >> "$GITHUB_OUTPUT"
+      - name: Download Chromium and shell system packages once
+        timeout-minutes: 22
+        run: |
+          set -euo pipefail
+          pw_version="$(node -p "require('./web/package-lock.json').packages['node_modules/@playwright/test'].version")"
+          timeout --kill-after=20s 150 npm install --prefix "$RUNNER_TEMP/apt-playwright" --ignore-scripts --no-package-lock --no-save "playwright@${pw_version}"
+          cd "$RUNNER_TEMP/apt-playwright"
+          bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" bundle "$RUNNER_TEMP/apt-bundle"
+      - name: Share apt bundle for this run
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.apt-image.outputs.artifact }}
+          path: ${{ runner.temp }}/apt-bundle
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+
   go-test:
     if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full' && (github.event_name != 'pull_request' || needs.ci-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.runner-route.result == 'success'
-    needs: [runner-route, ci-plan, tree-reuse]
+    needs: [runner-route, ci-plan, tree-reuse, apt-bundle]
     strategy:
       fail-fast: false
       matrix:
@@ -376,6 +412,21 @@ jobs:
           restore-keys: |
             go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-${{ github.head_ref || github.ref_name }}-
             go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-main-
+      - name: Identify optional apt bundle for this runner image
+        id: apt-image
+        if: runner.os == 'Linux'
+        run: |
+          if [ -n "${ImageOS:-}" ] && [ -n "${ImageVersion:-}" ]; then
+            echo "artifact=apt-bundle-${ImageOS}-${ImageVersion}-${RUNNER_ARCH}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download optional apt bundle
+        if: runner.os == 'Linux' && steps.apt-image.outputs.artifact != ''
+        timeout-minutes: 2
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ steps.apt-image.outputs.artifact }}
+          path: ${{ runner.temp }}/apt-bundle
       - name: Install shells when this shard runs pairing path-proof tests
         timeout-minutes: 4
         env:
@@ -780,7 +831,7 @@ jobs:
   # Units start with the UI shards; setup only prepares their shared runtime.
   web-unit:
     if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.web-setup.result == 'success'
-    needs: [ci-plan, web-setup, tree-reuse]
+    needs: [ci-plan, web-setup, tree-reuse, apt-bundle]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -802,6 +853,20 @@ jobs:
           path: ${{ runner.temp }}/web-runtime
       - name: Restore web runtime
         run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
+      - name: Identify optional apt bundle for this runner image
+        id: apt-image
+        run: |
+          if [ -n "${ImageOS:-}" ] && [ -n "${ImageVersion:-}" ]; then
+            echo "artifact=apt-bundle-${ImageOS}-${ImageVersion}-${RUNNER_ARCH}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download optional apt bundle
+        if: steps.apt-image.outputs.artifact != ''
+        timeout-minutes: 2
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ steps.apt-image.outputs.artifact }}
+          path: ${{ runner.temp }}/apt-bundle
       - name: Install shells used by command round-trip unit tests
         timeout-minutes: 4
         run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt fish zsh
@@ -841,7 +906,7 @@ jobs:
 
   web-shard:
     if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only' && (github.event_name != 'pull_request' || needs.ci-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.web-setup.result == 'success'
-    needs: [ci-plan, web-setup, tree-reuse]
+    needs: [ci-plan, web-setup, tree-reuse, apt-bundle]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -872,7 +937,21 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ needs.web-setup.outputs.browser-cache-key }}
           fail-on-cache-miss: true
-      # OS libraries are per runner; browser downloads and npm ci are shared.
+      - name: Identify optional apt bundle for this runner image
+        id: apt-image
+        run: |
+          if [ -n "${ImageOS:-}" ] && [ -n "${ImageVersion:-}" ]; then
+            echo "artifact=apt-bundle-${ImageOS}-${ImageVersion}-${RUNNER_ARCH}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download optional apt bundle
+        if: steps.apt-image.outputs.artifact != ''
+        timeout-minutes: 2
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ steps.apt-image.outputs.artifact }}
+          path: ${{ runner.temp }}/apt-bundle
+      # OS libraries install offline from this run's matching image bundle.
       - name: Install Chromium system dependencies
         timeout-minutes: 13
         working-directory: web
