@@ -4,6 +4,17 @@ The Agents page (`/agents`) is built from the approved design AEON-1196 in
 packages (epic AEON-1208). This file describes what has shipped; each package
 adds its part.
 
+## Thinking levels in manual starts (AEON-1510)
+
+The manual Start agent dialog offers every thinking level returned for the
+chosen model by the account catalog. Each choice keeps its exact model profile
+and account when a run is queued. Levels are not inferred from the model name.
+If the catalog returns only one level, such as High for Sonnet, the note below
+Thinking explains that this is the only level offered by this account's catalog.
+This does not claim the model or harness itself supports only that level.
+The note keeps its space when a level is cleared or changed, so the controls
+stay in place. Account grants and model profiles are unchanged.
+
 ## Head, capacity row and the Sessions card head (AEON-1209, P1)
 
 **Head.** One line: `Agents`, the state counts (working, waiting, problems;
