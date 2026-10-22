@@ -5,7 +5,9 @@ package host
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -210,9 +212,16 @@ func measureIdleMinute(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.plugin.Scopes = []string{"harness.worker"}
+	digest := sha256.Sum256([]byte("idle-synthetic-secret-only"))
+	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id)
+		VALUES($1,$2,'idle fixture','idlemeasurement',$3,ARRAY['harness.worker'],$4) RETURNING id::text`,
+		f.p.TenantID, f.plugin.ID, hex.EncodeToString(digest[:]), f.p.ID).Scan(&f.plugin.AuthKeyID); err != nil {
+		t.Fatal(err)
+	}
 	beat := func() {
 		r := httptest.NewRequest("POST", base+"/"+session.ID+"/heartbeat", strings.NewReader(`{"phase":"working","activity":"idle","activity_sequence":1}`))
 		r.Header.Set("X-Aeon-Worker-Lease", lease)
+		r.Header.Set("Authorization", "Bearer aeon_idlemeasurement_idle-synthetic-secret-only")
 		r = r.WithContext(tenant.WithPrincipal(r.Context(), f.plugin))
 		w := httptest.NewRecorder()
 		f.mux.ServeHTTP(w, r)
