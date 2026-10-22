@@ -159,13 +159,20 @@ the first row behind ⋯. Without that right the button is absent.
   the end of that day. Create goal closes the sheet. Search and the state filter
   clear so the new goal is on screen, and a goal past the first page is fetched
   and shown, before it opens with **Link work** focused. The toast says "Goal created".
+  Hide for me on that goal lets it go: no later read brings it back, and its Undo
+  shows it again in the same search and filters.
 - **Link work** sits at the bottom of an opened goal and in its ⋯. It opens the
   ticket picker in its multi-select mode: search tickets and epics (a project goal
   searches its project), mark several, "Link {n}" (⌘↵ or Ctrl+↵). A ticket already
   on the goal stays marked; choosing it says so and does not change Link {n}.
+  One link names at most 20 items (a goal holds at most 20); a 21st pick says so.
+  Link {n} keeps the width of "Link 20", so picking never moves or resizes it.
   On a desktop the button stays above the results and a refusal. On a phone the
   results scroll and the button stays pinned. The toast says "{n} linked" and Undo
   removes only the ids this call added; a link that changes nothing has no Undo.
+  A link, its lookups and every Undo belong to the person who started them: a
+  sign-in change, or closing the picker before a recent ticket is found, drops
+  them without a word for the next person.
   Linked items show as the goal's own items; progress,
   Moving · Queued · Done and Lands roll up as for every item.
 - **Unlink from goal** is in a linked item's ⋯, with Undo. **Edit goal** reopens

@@ -9,6 +9,7 @@ import { choiceById, RELATION_CHOICES, type RelationChoice } from '../../lib/rel
 import { searchWork, workKindMap, WORK_KINDS } from '../../lib/ticketSearch'
 import type { RelatedNode, RelatedTicket } from '../../lib/useTicket'
 import { highlight } from '../../lib/work'
+import { useIdentityScope } from '../../lib/useIdentityScope'
 import { useProjects } from '../../stores/projects'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
@@ -25,7 +26,9 @@ import { settingsSubmitKey } from '../../lib/settingsOverlays'
 // Link work, without a relation: Enter or a click marks a row, ⌘↵ (Ctrl+↵) or the
 // "Link {n}" button links them all. projectKey limits the rows to one project.
 // within: the project node the search stays in (a project goal); onlyProject its route key, for recents.
-export interface PickMode { label: string; linked: readonly string[]; onlyProject: string | null; within: string | null; submit: (picked: RelatedTicket[]) => Promise<string | null> }
+// most: how many one link may name; "Link {n}" reserves the width of "Link {most}", so picking never moves it.
+// The lookups and the link run for the person who confirmed: a person change or closing the picker drops them.
+export interface PickMode { label: string; linked: readonly string[]; onlyProject: string | null; within: string | null; most: number; submit: (picked: RelatedTicket[]) => Promise<string | null> }
 const props = defineProps<{
   anchor: HTMLElement | null; subject: string; selfId: string; projectKey: string
   related: RelatedNode[]; link?: (choice: RelationChoice, other: RelatedTicket) => Promise<string | null>
@@ -33,6 +36,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const projects = useProjects()
+const scope = useIdentityScope()
 
 // The relation last used in this session comes first again.
 const choice = ref<RelationChoice>(choiceById(lastChoice))
@@ -113,24 +117,27 @@ async function resolve(result: TicketResult): Promise<RelatedTicket | null> {
 // Pick mode marks and unmarks; nothing is linked until the person confirms.
 function toggle(result: TicketResult) {
   if (linkedKeys.value.has(result.key)) { refusal.value = `${result.key} is already linked to this goal.`; return }
+  const most = props.picking?.most ?? Infinity
+  if (!pickedKeys.value.has(result.key) && picked.value.length >= most) { refusal.value = `Link at most ${most} at once; link an epic to bring in its tickets.`; return }
   refusal.value = ''
   picked.value = pickedKeys.value.has(result.key) ? picked.value.filter(entry => entry.key !== result.key) : [...picked.value, result]
 }
+const widestPick = computed(() => `Link ${props.picking?.most ?? 0}`)
 async function confirmPicked() {
-  if (!props.picking || busy.value || !picked.value.length) return
+  const picking = props.picking
+  if (!picking || busy.value || !picked.value.length) return
+  const chosen = [...picked.value]
   busy.value = true; refusal.value = ''
   try {
-    const chosen: RelatedTicket[] = []
-    for (const result of picked.value) {
-      const other = await resolve(result)
-      if (!other) { refusal.value = `${result.key} is no longer available.`; return }
-      chosen.push(other)
-    }
-    const problem = await props.picking.submit(chosen)
-    if (problem) { refusal.value = problem; await nextTick(); input.value?.focus(); return }
-    emit('close', true)
-  } catch (e) {
-    refusal.value = e instanceof Error ? e.message : 'The work could not be linked'
+    await scope.run(({ after }) => after(Promise.all(chosen.map(resolve)), found => {
+      const missing = chosen.find((_, index) => !found[index])
+      if (missing) { refusal.value = `${missing.key} is no longer available.`; return }
+      return after(picking.submit(found as RelatedTicket[]), problem => {
+        if (!problem) { emit('close', true); return }
+        refusal.value = problem
+        return after(nextTick(), () => { input.value?.focus() })
+      })
+    }), { failed: e => { refusal.value = e instanceof Error ? e.message : 'The work could not be linked' } })
   } finally {
     busy.value = false
   }
@@ -213,7 +220,7 @@ let lastChoice = 'relates'
       </label>
       <div v-if="multi" class="confirm-row">
         <button type="button" class="btn primary link-picked" :disabled="!picked.length || busy" :aria-busy="busy" @click="confirmPicked">
-          Link {{ picked.length }}<KeyCap k="mod" /><KeyCap k="enter" />
+          <span class="btn-label"><span>Link {{ picked.length }}</span><span aria-hidden="true">{{ widestPick }}</span></span><KeyCap k="mod" /><KeyCap k="enter" />
         </button>
       </div>
       <div class="picker-body" :class="{ contents: !multi }">
@@ -304,7 +311,8 @@ let lastChoice = 'relates'
 .pick-box { flex-shrink: 0; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--teal-ink); }
 .option[aria-selected="true"] .pick-box { box-shadow: inset 0 0 0 1px var(--chip-teal-line); background: var(--seg-on); }
 .confirm-row { display: flex; justify-content: flex-end; padding: 2px 2px 0; }
-.link-picked { gap: 6px; }
+/* Digits of one width: "Link 1" to "Link 20" all fit the reserved "Link 20". */
+.link-picked { gap: 6px; font-variant-numeric: tabular-nums; }
 .note { padding: 8px 10px; font-size: 12.5px; color: var(--ink-3); }
 .note.error { color: var(--danger); }
 .foot { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 6px 2px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }

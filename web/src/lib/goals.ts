@@ -132,6 +132,8 @@ export const updateGoal = (id: string, change: { title?: string; lands?: string 
     ...(change.title !== undefined ? { title: change.title } : {}),
     ...(change.lands !== undefined ? { eta: landsAt(change.lands) ? { at: landsAt(change.lands) } : null } : {}),
   }, writeKey())
+// A goal holds at most this many linked items, and one call names at most this many (node_ids maxItems).
+export const MAX_LINKED = 20
 export const linkGoalWork = (id: string, nodeIds: string[]) => write<GoalWorkResult>(`/goals/${encodeURIComponent(id)}/work`, 'POST', { node_ids: nodeIds })
 export const unlinkGoalWork = (id: string, nodeIds: string[]) => write<GoalWorkResult>(`/goals/${encodeURIComponent(id)}/work`, 'DELETE', { node_ids: nodeIds })
 export const deleteGoal = (id: string) => write<GoalWorkResult>(`/goals/${encodeURIComponent(id)}`, 'DELETE')

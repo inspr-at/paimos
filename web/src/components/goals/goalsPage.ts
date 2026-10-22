@@ -304,7 +304,9 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     }
     return index
   }
-  async function setHidden(goal: Goal, hidden: boolean, at = -1) {
+  // A goal just created and kept on screen (pinned) stops being kept once it is hidden, so no
+  // read brings it back; Undo keeps it again while the query is the one it was hidden in.
+  async function setHidden(goal: Goal, hidden: boolean, at = -1, repin = '') {
     const who = owner.value, id = goal.id
     if (!who || !canHide.value || hiding.has(id)) return
     hiding.add(id)
@@ -317,9 +319,12 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     // An answer for another person never reaches this screen.
     if (who !== owner.value) return
     if (hidden) {
+      const kept = pinned === id ? JSON.stringify(query()) : ''
+      if (kept) pinned = null
       const index = placeHidden(id, true)
-      toast(hideCopy.toast, { key: `goal-hidden:${id}`, action: { label: hideCopy.undo, run: () => { if (who === owner.value) void setHidden(goal, false, index) } } })
+      toast(hideCopy.toast, { key: `goal-hidden:${id}`, action: { label: hideCopy.undo, run: () => { if (who === owner.value) void setHidden(goal, false, index, kept) } } })
     } else {
+      if (repin && repin === JSON.stringify(query())) pinned = id
       const shown = list.value
       placeHidden(id, false)
       // Undo puts the goal back where it was, before the fresh read confirms the order.

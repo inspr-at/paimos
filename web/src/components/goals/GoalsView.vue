@@ -42,7 +42,7 @@ import { onAction } from '../../lib/shortcuts'
 import { toast } from '../../lib/toast'
 import { plural } from '../../lib/work'
 import { undoEvent } from '../../lib/api'
-import { deleteGoal, hideCopy, linkGoalWork, STATE_FILTERS, unlinkGoalWork, updateGoal, type Goal, type GoalOutcome, type GoalSort } from '../../lib/goals'
+import { deleteGoal, hideCopy, linkGoalWork, MAX_LINKED, STATE_FILTERS, unlinkGoalWork, updateGoal, type Goal, type GoalOutcome, type GoalSort } from '../../lib/goals'
 import type { LiveAgent } from '../../lib/liveAgents'
 import type { RowAction } from '../../lib/rowActions'
 import type { RelatedTicket } from '../../lib/useTicket'
@@ -166,19 +166,24 @@ async function menuAction(action: string) {
 // ---------- People's writes (AEON-1618) ----------
 // Each write is bound to the goal and the person it acted for. A late answer
 // after a sign-in change never toasts, and its Undo never runs for the next person.
-// The toast epoch drops an Undo that was already shown when the person changes.
+// The toast epoch drops an Undo that was already shown when the person changes;
+// an Undo still in flight then is dropped too, its answer and its failure alike.
 const projects = useProjects()
 const failure = (cause: unknown, fallback: string) => toast(cause instanceof Error ? cause.message : fallback, { tone: 'error' })
+function undo(write: () => Promise<unknown>, fallback: string) {
+  void scope.run(({ after }) => after(write(), () => { void props.page.read() }), { failed: cause => failure(cause, fallback) })
+}
 const picker = ref<{ goal: Goal; anchor: HTMLElement } | null>(null)
 watch(scope.owner, () => { menu.value = null; picker.value = null }, { flush: 'sync' })
 function openPicker(goal: Goal, anchor: HTMLElement) { picker.value = { goal, anchor } }
 function closePicker(restore: boolean) { const at = picker.value; picker.value = null; if (restore && at?.anchor.isConnected) at.anchor.focus() }
 const pickMode = computed<PickMode | null>(() => {
-  const goal = picker.value?.goal
+  const at = picker.value, goal = at?.goal
   if (!goal) return null
   const linked = (goal.items ?? []).filter(item => item.linked).flatMap(item => item.keys)
   const home = goal.project_id ? projects.byId(goal.project_id)?.routeKey ?? goal.projects.find(badge => badge.id === goal.project_id)?.key ?? null : null
-  return { label: 'Link work', linked, onlyProject: home, within: goal.project_id, submit: picked => link(goal, picked) }
+  // Only the picker still open links: one that closed (a person change closes it) links nothing.
+  return { label: 'Link work', linked, onlyProject: home, within: goal.project_id, most: MAX_LINKED, submit: picked => picker.value === at ? link(goal, picked) : Promise.resolve(null) }
 })
 const changedIds = (ids: string[] | undefined) => ids ?? []
 async function link(goal: Goal, picked: RelatedTicket[]): Promise<string | null> {
@@ -191,7 +196,7 @@ async function link(goal: Goal, picked: RelatedTicket[]): Promise<string | null>
         toast('Already linked')
         return null
       }
-      toast(`${added.length} linked`, { action: { label: 'Undo', run: () => { void unlinkGoalWork(id, added).then(() => props.page.read(), cause => failure(cause, 'The link could not be undone.')) } } })
+      toast(`${added.length} linked`, { action: { label: 'Undo', run: () => undo(() => unlinkGoalWork(id, added), 'The link could not be undone.') } })
       return null
     }))
     return outcome ?? null
@@ -206,7 +211,7 @@ async function unlink(goal: Goal, item: GoalOutcome) {
       const removed = changedIds(result.delta)
       void props.page.read()
       if (!result.changed || removed.length === 0) return
-      toast(`${item.keys[0] ?? item.label} unlinked`, { action: { label: 'Undo', run: () => { void linkGoalWork(id, removed).then(() => props.page.read(), cause => failure(cause, 'The link could not be restored.')) } } })
+      toast(`${item.keys[0] ?? item.label} unlinked`, { action: { label: 'Undo', run: () => undo(() => linkGoalWork(id, removed), 'The link could not be restored.') } })
     }))
   } catch (cause) { failure(cause, 'The work could not be unlinked.') }
 }
@@ -224,7 +229,7 @@ async function remove(goal: Goal) {
   try {
     await scope.run(({ after }) => after(deleteGoal(id), result => {
       const event = result.event_id
-      toast('Goal deleted', event ? { action: { label: 'Undo', run: () => { void undoEvent(event).then(() => props.page.read(), cause => failure(cause, 'The goal could not be restored.')) } } } : {})
+      toast('Goal deleted', event ? { action: { label: 'Undo', run: () => undo(() => undoEvent(event), 'The goal could not be restored.') } } : {})
       return after(props.page.read(), () => after(nextTick(), () => { if (focused && next) toggleOf(next.id)?.focus() }))
     }))
   } catch (cause) { failure(cause, 'The goal could not be deleted.') }
@@ -240,7 +245,7 @@ async function rename(goal: Goal, title: string) {
   try {
     await scope.run(({ after }) => after(updateGoal(id, { title }), () => after(props.page.read(), () => {
       if (props.page.renaming.value === id) props.page.renaming.value = null
-      toast('Goal renamed', { action: { label: 'Undo', run: () => { void updateGoal(id, { title: before }).then(() => props.page.read(), cause => failure(cause, 'The name could not be restored.')) } } })
+      toast('Goal renamed', { action: { label: 'Undo', run: () => undo(() => updateGoal(id, { title: before }), 'The name could not be restored.') } })
       return after(nextTick(), () => { if (props.page.renaming.value === null) toggleOf(id)?.focus() })
     })))
   } catch (cause) {

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1618 fix round 2. These fail on 47789e21: a late link, unlink, rename or
 // delete still toasts after the person changes, and a created goal stays hidden
-// by the search, the state filter or the first page.
+// by the search, the state filter or the first page. Fix round 5 (these fail on
+// 705722db): a recent ticket's lookup that ends after the person changed or the
+// picker closed still links, an Undo in flight still toasts its failure for the
+// next person, and Hide for me does not keep a just-created goal away.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref, type EffectScope } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -19,11 +22,11 @@ const mocks = vi.hoisted(() => {
   vi.stubGlobal('navigator', { platform: 'MacIntel', userAgent: 'test', onLine: true })
   const el = () => ({ innerHTML: '', textContent: '', content: {}, style: {}, children: [], setAttribute() {}, appendChild() {}, remove() {}, focus() {}, classList: { contains: () => false } })
   vi.stubGlobal('document', { activeElement: null, fonts: { ready: Promise.resolve() }, documentElement: { lang: 'en' }, head: { append() {} }, body: el(), addEventListener() {}, removeEventListener() {}, querySelector: () => null, querySelectorAll: () => [], createElement: el, createElementNS: el, createTextNode: el, createComment: el })
-  return { listGoals: vi.fn(), readGoal: vi.fn(), goalSeries: vi.fn(), goalCreatedAt: vi.fn() }
+  return { listGoals: vi.fn(), readGoal: vi.fn(), goalSeries: vi.fn(), goalCreatedAt: vi.fn(), hideGoal: vi.fn(), unhideGoal: vi.fn() }
 })
 vi.mock('../src/lib/goals', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/lib/goals')>()
-  return { ...actual, listGoals: mocks.listGoals, readGoal: mocks.readGoal, goalSeries: mocks.goalSeries, goalCreatedAt: mocks.goalCreatedAt }
+  return { ...actual, listGoals: mocks.listGoals, readGoal: mocks.readGoal, goalSeries: mocks.goalSeries, goalCreatedAt: mocks.goalCreatedAt, hideGoal: mocks.hideGoal, unhideGoal: mocks.unhideGoal }
 })
 vi.mock('../src/lib/api', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/lib/api')>()
@@ -43,6 +46,9 @@ import * as identityScope from '../src/lib/useIdentityScope'
 import * as toastLib from '../src/lib/toast'
 import * as goalsLib from '../src/lib/goals'
 import * as apiLib from '../src/lib/api'
+import * as paletteLib from '../src/lib/palette'
+import * as relationsLib from '../src/lib/relations'
+import * as workLib from '../src/lib/work'
 
 const person = (id: string): Identity => ({ principal: { id, name: id, kind: 'person' }, tenant: { id: 'tenant', name: 'Workspace' } })
 function goal(id: string, extra: Partial<Goal> = {}): Goal {
@@ -60,9 +66,9 @@ function listed(items: Goal[], extra: Partial<GoalList> = {}): GoalList {
   }
 }
 function deferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>(res => { resolve = res })
-  return { promise, resolve }
+  let resolve!: (value: T) => void, reject!: (cause: unknown) => void
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
 }
 async function flush() {
   for (let i = 0; i < 8; i++) { await Promise.resolve(); await nextTick() }
@@ -76,6 +82,8 @@ beforeEach(() => {
   mocks.readGoal.mockReset().mockImplementation(async (id: string) => goal(id, { title: 'Created' }))
   mocks.goalSeries.mockReset().mockResolvedValue({ range: '24h', expansion: 'full', points: [], read_through: 1, generation: 1 })
   mocks.goalCreatedAt.mockReset().mockResolvedValue(1_000)
+  mocks.hideGoal.mockReset().mockResolvedValue(undefined)
+  mocks.unhideGoal.mockReset().mockResolvedValue(undefined)
 })
 afterEach(() => { for (const scope of scopes.splice(0)) scope.stop(); resetToasts() })
 
@@ -113,7 +121,21 @@ type View = {
   menuAction: (action: string) => Promise<void>
   rename: (goal: Goal, title: string) => Promise<void>
 }
-function setupView(): View {
+// Compiles a component's <script setup> and runs its setup in an effect scope, with
+// its imports taken from `modules`; the setup's bindings come back.
+function setupComponent<T>(file: string, modules: Record<string, unknown>, props: object, emit: (...args: unknown[]) => void = () => {}): { bindings: T; scope: EffectScope } {
+  const { descriptor } = parse(readFileSync(new URL(file, import.meta.url), 'utf8'))
+  const { content } = compileScript(descriptor, { id: file })
+  const exports: { default?: { setup: (props: object, context: object) => T } } = {}
+  new Function('require', 'exports', ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)((name: string) => {
+    if (!(name in modules)) throw new Error(`missing module ${name}`)
+    return modules[name]
+  }, exports)
+  const scope = effectScope()
+  scopes.push(scope)
+  return { bindings: scope.run(() => exports.default!.setup(props, { emit, expose: () => {} }))!, scope }
+}
+function setupView(): View & { page: { read: ReturnType<typeof vi.fn> } } {
   const modules: Record<string, unknown> = {
     vue: Vue,
     'vue-router': { useRoute: () => ({ query: {} }) },
@@ -129,13 +151,6 @@ function setupView(): View {
     '../../lib/goals': { ...goalsLib, linkGoalWork: writes.linkGoalWork, unlinkGoalWork: writes.unlinkGoalWork, deleteGoal: writes.deleteGoal, updateGoal: writes.updateGoal },
     '../../lib/useIdentityScope': identityScope,
   }
-  const { descriptor } = parse(readFileSync(new URL('../src/components/goals/GoalsView.vue', import.meta.url), 'utf8'))
-  const { content } = compileScript(descriptor, { id: 'GoalsView.vue' })
-  const exports: { default?: { setup: (props: object, context: object) => View } } = {}
-  new Function('require', 'exports', ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)((name: string) => {
-    if (!(name in modules)) throw new Error(`missing module ${name}`)
-    return modules[name]
-  }, exports)
   const page = {
     group: ref('goals'), replacing: ref(false), goals: ref<Goal[]>([goal('g1')]), loaded: ref(true), filter: ref('all'),
     want() {}, charts: new Set<string>(), sort: ref('eta'), dir: ref('asc'), allOpen: ref(false), range: ref('24h'),
@@ -144,9 +159,8 @@ function setupView(): View {
     live: ref('off'), etaLastSetAt: ref(null), updatedAt: ref(null), list: ref(null), loadingMore: ref(false), loadMore() {},
     error: ref(''), reading: ref(false), setSort() {}, reveal: vi.fn(async () => true),
   }
-  const scope = effectScope()
-  scopes.push(scope)
-  return scope.run(() => exports.default!.setup({ page, term: '', now: 0, hiddenGroups: false }, { emit: () => {}, expose: () => {} }))!
+  const { bindings } = setupComponent<View>('../src/components/goals/GoalsView.vue', modules, { page, term: '', now: 0, hiddenGroups: false })
+  return Object.assign(bindings, { page })
 }
 const anchor = { isConnected: true, focus() {}, classList: { contains: () => false } } as unknown as HTMLElement
 
@@ -224,5 +238,159 @@ describe('a late goal write does not toast for the next person', () => {
     expect(toasts).toEqual([])
     expect(writes.undoEvent).not.toHaveBeenCalled()
     expect(writes.linkGoalWork).not.toHaveBeenCalled()
+  })
+})
+
+type PickResult = { type: 'ticket'; id: string; key: string; title: string; state: string }
+type Picker = { picked: { value: PickResult[] }; refusal: { value: string }; busy: { value: boolean }; widestPick: { value: string }; toggle: (result: PickResult) => void; confirmPicked: () => Promise<void> }
+function setupPicker(picking: object, listNodes: (...args: unknown[]) => unknown) {
+  const modules: Record<string, unknown> = {
+    vue: Vue,
+    '../../directives/clipTip': { vClipTip: {} },
+    '../../lib/api': { listNodes },
+    '../../lib/palette': paletteLib,
+    '../../lib/recents': { recents: [] },
+    '../../lib/relations': relationsLib,
+    '../../lib/ticketSearch': { searchWork: vi.fn(), workKindMap: vi.fn(async () => new Map()), WORK_KINDS: ['ticket', 'epic'] },
+    '../../lib/work': workLib,
+    '../../lib/useIdentityScope': identityScope,
+    '../../stores/projects': { useProjects: () => ({ byRouteKey: () => null }) },
+    '../AppIcon.vue': {}, './FloatingPanel.vue': {}, '../ReadName.vue': {}, './StatusIcon.vue': {}, '../KeyCap.vue': {},
+    '../../lib/settingsOverlays': { settingsSubmitKey: () => false },
+  }
+  const emitted: unknown[][] = []
+  const { bindings, scope } = setupComponent<Picker>('../src/components/work/RelationPicker.vue', modules, { anchor, subject: 'Goal', selfId: 'g1', projectKey: 'PHAROS', related: [], picking }, (...args) => emitted.push(args))
+  return { picker: bindings, scope, emitted }
+}
+const recent = (key: string): PickResult => ({ type: 'ticket', id: `recent-${key}`, key, title: key, state: 'queued' })
+
+describe('a picker confirmation and an Undo stay with their person', () => {
+  beforeEach(() => { for (const fn of Object.values(writes)) fn.mockReset() })
+
+  it('a recent ticket found after the person changed, or after the picker closed, links nothing', async () => {
+    const session = useSession()
+    session.identity = person('person-a')
+    const submit = vi.fn(async () => null)
+    for (const leave of ['person', 'close'] as const) {
+      session.identity = person('person-a')
+      const lookup = deferred<{ items: { id: string; key: string; title: string; state: string }[] }>()
+      const { picker, scope, emitted } = setupPicker({ label: 'Link work', linked: [], onlyProject: null, within: null, most: 20, submit }, () => lookup.promise)
+      picker.picked.value = [recent('PHAROS-11')]
+      const confirming = picker.confirmPicked()
+      expect(picker.busy.value).toBe(true)
+      if (leave === 'person') session.identity = person('person-b')
+      else scope.stop()
+      lookup.resolve({ items: [{ id: 'n-1', key: 'PHAROS-11', title: 'One', state: 'queued' }] })
+      await confirming
+      await flush()
+      expect(submit, leave).not.toHaveBeenCalled()
+      expect(emitted, leave).toEqual([])
+    }
+    // The same lookup for the person still there links what they picked.
+    session.identity = person('person-a')
+    const { picker, emitted } = setupPicker({ label: 'Link work', linked: [], onlyProject: null, within: null, most: 20, submit }, async () => ({ items: [{ id: 'n-1', key: 'PHAROS-11', title: 'One', state: 'queued' }] }))
+    picker.picked.value = [recent('PHAROS-11')]
+    await picker.confirmPicked()
+    expect(submit).toHaveBeenCalledWith([{ id: 'n-1', key: 'PHAROS-11', title: 'One', state: 'queued' }])
+    expect(emitted).toEqual([['close', true]])
+  })
+
+  it('picks stop at the most one link may name, so "Link {n}" never outgrows its reserved label', () => {
+    const session = useSession()
+    session.identity = person('person-a')
+    const { picker } = setupPicker({ label: 'Link work', linked: [], onlyProject: null, within: null, most: 2, submit: vi.fn() }, vi.fn())
+    for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-13']) picker.toggle(recent(key))
+    expect(picker.picked.value.map(result => result.key)).toEqual(['PHAROS-11', 'PHAROS-12'])
+    expect(picker.refusal.value).toBe('Link at most 2 at once; link an epic to bring in its tickets.')
+    // Unpicking still works at the limit, and frees a place.
+    picker.toggle(recent('PHAROS-12'))
+    picker.toggle(recent('PHAROS-13'))
+    expect(picker.picked.value.map(result => result.key)).toEqual(['PHAROS-11', 'PHAROS-13'])
+    expect(picker.refusal.value).toBe('')
+    expect(picker.widestPick.value).toBe('Link 2')
+  })
+
+  it('a submission from a picker that closed links nothing for the next person', async () => {
+    const session = useSession()
+    session.identity = person('person-a')
+    writes.linkGoalWork.mockResolvedValue({ changed: true, delta: ['n-1'], node_ids: ['n-1'] })
+    const view = setupView()
+    view.openPicker(goal('g1'), anchor)
+    const mode = view.pickMode.value!
+    session.identity = person('person-b')
+    expect(view.picker.value).toBeNull()
+    expect(await mode.submit([{ id: 'n-1', key: 'PHAROS-11', title: 'One', state: 'queued' }])).toBeNull()
+    await flush()
+    expect(writes.linkGoalWork).not.toHaveBeenCalled()
+    expect(toasts).toEqual([])
+  })
+
+  it('an Undo in flight when the person changes neither toasts its failure nor reads', async () => {
+    const session = useSession()
+    session.identity = person('person-a')
+    writes.linkGoalWork.mockResolvedValue({ changed: true, delta: ['n-1'], node_ids: ['n-1'] })
+    writes.updateGoal.mockResolvedValue({ changed: true })
+    writes.deleteGoal.mockResolvedValue({ changed: true, event_id: 9 })
+    const view = setupView()
+    view.openPicker(goal('g1'), anchor)
+    await view.pickMode.value!.submit([{ id: 'n-1', key: 'PHAROS-11', title: 'One', state: 'queued' }])
+    await view.rename(goal('g1', { title: 'Before' }), 'After')
+    view.openMenu(goal('g1'), anchor)
+    await view.menuAction('delete')
+    await flush()
+    expect(toasts.map(item => item.message)).toEqual(['1 linked', 'Goal renamed', 'Goal deleted'])
+    const unlink = deferred<unknown>(), rename = deferred<unknown>(), restore = deferred<unknown>()
+    writes.unlinkGoalWork.mockReturnValue(unlink.promise)
+    writes.updateGoal.mockReturnValue(rename.promise)
+    writes.undoEvent.mockReturnValue(restore.promise)
+    for (const shown of [...toasts]) shown.actions[0]!.run()
+    expect(writes.unlinkGoalWork).toHaveBeenCalledWith('g1', ['n-1'])
+    expect(writes.updateGoal).toHaveBeenLastCalledWith('g1', { title: 'Before' })
+    expect(writes.undoEvent).toHaveBeenCalledWith(9)
+    view.page.read.mockClear()
+    session.identity = person('person-b')
+    unlink.reject(new Error('The link could not be undone for person-a.'))
+    rename.reject(new Error('The name could not be restored for person-a.'))
+    restore.resolve({ id: 10 })
+    await flush()
+    expect(toasts).toEqual([])
+    expect(view.page.read).not.toHaveBeenCalled()
+  })
+})
+
+describe('Hide for me keeps a just-created goal away', () => {
+  it('a created goal past the first page stays hidden through pending and later reads; Undo brings it back', async () => {
+    const session = useSession()
+    session.identity = person('person-a')
+    // The server's first page never lists the new goal (it sorts past page one).
+    mocks.listGoals.mockImplementation(async () => listed([goal('other')], { next_cursor: 'page-2' }))
+    const scope = effectScope()
+    scopes.push(scope)
+    const page = scope.run(() => useGoalsPage({ term: ref(''), active: () => true }))!
+    await flush()
+    expect(await page.reveal('created')).toBe(true)
+    expect(page.goals.value.map(item => item.id)).toEqual(['created', 'other'])
+    // A read already fetching the pinned goal when the hide lands.
+    const pinnedRead = deferred<Goal>()
+    mocks.readGoal.mockImplementationOnce(() => pinnedRead.promise)
+    const pending = page.read()
+    await flush()
+    expect(mocks.readGoal).toHaveBeenLastCalledWith('created', expect.anything())
+    await page.hide(page.goals.value[0]!)
+    await flush()
+    expect(page.goals.value.map(item => item.id)).toEqual(['other'])
+    pinnedRead.resolve(goal('created', { title: 'Created' }))
+    await pending
+    await page.read()
+    await flush()
+    expect(page.goals.value.map(item => item.id)).toEqual(['other'])
+    // Undo shows it again and keeps it on screen through the next reads.
+    const undo = toasts.find(item => item.message === goalsLib.hideCopy.toast)!
+    undo.actions[0]!.run()
+    await flush()
+    expect(mocks.unhideGoal).toHaveBeenCalledWith('created')
+    await page.read()
+    await flush()
+    expect(page.goals.value.map(item => item.id)).toEqual(['created', 'other'])
   })
 })

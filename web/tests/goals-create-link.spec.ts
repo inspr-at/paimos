@@ -349,11 +349,10 @@ test('Link stays put across search results and a refusal, on a desktop and a pho
     await page.keyboard.press('Enter')
     const picker = page.locator('.picker.multi')
     await expect(picker).toBeVisible()
-    // The label stays "Link 1" for the whole measurement. A later click would
-    // unpick the row, and "Link 0" to "Link 1" would move a right-aligned button.
     await picker.locator('input').fill('PHAROS-1')
     await picker.locator('.option', { hasText: 'PHAROS-11' }).click()
-    const link = picker.getByRole('button', { name: 'Link 1' })
+    const link = picker.locator('.link-picked')
+    await expect(link).toHaveAccessibleName(/^Link 1\b/)
     const guard = await controlStability(page, { link })
     await guard.check(async () => {
       await picker.locator('input').fill('PHAROS-12')
@@ -375,7 +374,7 @@ test('Link stays put across search results and a refusal, on a desktop and a pho
     // Pick mode keeps the row enabled so a click can say it is already linked.
     // aria-disabled would leave this click waiting until the test times out.
     await expect(linked).not.toHaveAttribute('aria-disabled', 'true')
-    const held = await controlStability(page, { link: again.getByRole('button', { name: 'Link 0' }) })
+    const held = await controlStability(page, { link: again.locator('.link-picked') })
     await held.check(async () => {
       await linked.click()
       await expect(again.locator('.refusal')).toContainText('PHAROS-11 is already linked to this goal.')
@@ -383,6 +382,47 @@ test('Link stays put across search results and a refusal, on a desktop and a pho
     expect(w.writes.filter(write => write.path.endsWith('/work'))).toHaveLength(1)
     held.done()
     await page.keyboard.press('Escape')
+  }
+})
+
+// "Link {n}" is right-aligned and reserves its widest label: picking from 0 to 10
+// (9 → 10 adds a digit) and back never changes its size or place.
+test('Link keeps its size and place while picking from 0 to 10 and back, on a desktop and a phone', async ({ page }) => {
+  test.setTimeout(90_000)
+  for (const [width, height] of [[1440, 900], [390, 844]] as const) {
+    await page.setViewportSize({ width, height })
+    const w = world()
+    for (const n of [17, 18, 19, 20, 21, 22]) {
+      w.data.nodes.push({ id: `n-x${n}`, key: `PHAROS-${n}`, kind_slug: 'ticket', title: `Probe region number ${n - 16}`, state: 'backlog', project: 'p-pharos', parent_id: 'p-pharos', body: '', fields: {}, created_at: iso(NOW - 400 * HOUR), updated_at: iso(NOW - n * HOUR) })
+    }
+    await openGoals(page, w)
+    await createGoal(page, width <= 760)
+    await goalRow(page, 'g-new1').locator('.link-work').click()
+    const picker = page.locator('.picker.multi')
+    const link = picker.locator('.link-picked')
+    await expect(link).toHaveAccessibleName(/^Link 0\b/)
+    const guard = await controlStability(page, { link })
+    const pick = async (key: string, count: number) => guard.check(async () => {
+      await picker.locator('.option', { hasText: key }).click()
+      await expect(link).toHaveAccessibleName(new RegExp(`^Link ${count}\\b`))
+    })
+    await picker.locator('input').fill('PHAROS-1')
+    await expect(picker.locator('.option', { hasText: 'PHAROS-17' })).toBeVisible()
+    let count = 0
+    for (const n of [11, 12, 13, 14, 15, 16, 17]) await pick(`PHAROS-${n}`, ++count)
+    await guard.check(async () => {
+      await picker.locator('input').fill('PHAROS-2')
+      await expect(picker.locator('.option', { hasText: 'PHAROS-22' })).toBeVisible()
+    })
+    for (const n of [20, 21, 22]) await pick(`PHAROS-${n}`, ++count)
+    expect(count).toBe(10)
+    // 10 → 9 → 8: unpicking moves nothing either.
+    await pick('PHAROS-22', 9)
+    await pick('PHAROS-21', 8)
+    guard.done()
+    await page.keyboard.press('Escape')
+    await expect(picker).toHaveCount(0)
+    expect(w.writes.filter(write => write.path.endsWith('/work'))).toHaveLength(0)
   }
 })
 

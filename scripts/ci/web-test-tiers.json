@@ -9456,6 +9456,8 @@
     ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 light: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"Link keeps its size and place while picking from 0 to 10 and back, on a desktop and a phone","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"Link stays put across search results and a refusal, on a desktop and a phone","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"Undo of a stale picker removes only the ids that call added","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -18842,6 +18844,8 @@
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets with blocked","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"Hide for me keeps a just-created goal away > a created goal past the first page stays hidden through pending and later reads; Undo brings it back","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a created goal is revealed through filters and the first page > clears search and the state filter, and keeps a goal the first page omits","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a late goal write does not toast for the next person > drops a late unlink, rename and delete","tier":"ESSENTIAL"}
@@ -18849,6 +18853,14 @@
     {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a late goal write does not toast for the next person > drops a link, its Undo, the picker and the menu when the person changes","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a late goal write does not toast for the next person > offers no Undo when the link changes nothing, and undoes only the returned delta","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a picker confirmation and an Undo stay with their person > a recent ticket found after the person changed, or after the picker closed, links nothing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a picker confirmation and an Undo stay with their person > a submission from a picker that closed links nothing for the next person","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a picker confirmation and an Undo stay with their person > an Undo in flight when the person changes neither toasts its failure nor reads","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a picker confirmation and an Undo stay with their person > picks stop at the most one link may name, so \"Link {n}\" never outgrows its reserved label","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/goals-epics-fix2.unit.test.ts","name":"a group switch keeps the frame > keeps the status note and header while the rows are replaced, then shows an empty list","tier":"ESSENTIAL"}
     ,
