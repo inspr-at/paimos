@@ -33,7 +33,7 @@ func createEvidenceReview(t *testing.T, f *fixture, p Pull, start time.Time) (re
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Evidence reviewer') RETURNING id::text`, reviewer.TenantID).Scan(&reviewer.ID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'fixture',$2::text,decode(repeat('00',32),'hex'),$3,$4) RETURNING id::text`, reviewer.TenantID, reviewer.ID, reviewer.Scopes, f.person.ID).Scan(&reviewer.KeyID); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'fixture',$5,decode(repeat('00',32),'hex'),$3,$4) RETURNING id::text`, reviewer.TenantID, reviewer.ID, reviewer.Scopes, f.person.ID, reviewer.ID).Scan(&reviewer.KeyID); err != nil {
 			return err
 		}
 		reviewer.AuthKeyID = reviewer.KeyID

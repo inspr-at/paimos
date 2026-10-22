@@ -127,5 +127,7 @@ changed completion replay. They also exercise canonical queue history, incomplet
 pagination, narrow installation grants, authenticated historical harness review,
 and rejection of a reported metric as approval. The producer receipt cases in
 `web/tests/review-tooling.test.ts` also run in the remote Go tooling check.
+`TestMergeAuditHarnessUsesLatestSubmittedReview` covers a newer pending run,
+verdicts submitted out of creation order, and submissions after the merge.
 Existing delivery, crossreview, reporter contract, DSAR and shared-fence tests
 remain part of the affected verification set.
