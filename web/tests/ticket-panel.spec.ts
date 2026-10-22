@@ -119,6 +119,8 @@ test('s, p and a open status, priority and assignee from the panel', async ({ pa
   await page.goto('/p/PHAROS/PHAROS-14')
   const ws = panel(page)
   await expect(ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+  // The title can render before project permissions enable the property shortcuts.
+  await expect(ws.getByRole('button', { name: /^Status:/ })).toBeEnabled()
   await page.keyboard.press('s')
   await page.getByRole('menu', { name: 'Status of PHAROS-14' }).getByRole('menuitemradio', { name: 'Backlog' }).click()
   await expect(ws.getByRole('button', { name: /Status: Backlog/ })).toBeVisible()
