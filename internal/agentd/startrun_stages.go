@@ -371,3 +371,160 @@ func (s *Supervisor) prepareRun(ctx context.Context, admitted *runAdmission) (pr
 		duration: duration, prompt: prompt, branch: branch,
 	}, nil
 }
+
+// claimedRun keeps the validated route and exact reservation set together with
+// the authorized content snapshot. It grants no proof that a process exists.
+type claimedRun struct {
+	admitted       *runAdmission
+	prepared       preparedRun
+	run            Run
+	entry          *owned
+	route          Route
+	reservationIDs []string
+}
+
+// claimRun preserves route journaling before the claim. A lost claim response
+// is reconciled by the startup owner, never treated as proof of rejection.
+func (s *Supervisor) claimRun(ctx context.Context, admitted *runAdmission, prepared preparedRun, cleanup *startRunCleanup) (claimedRun, error) {
+	run, entry := admitted.run, admitted.entry
+	profile, adapter, accountIDs := admitted.profile, admitted.adapter, admitted.accountIDs
+	routineBudget := admitted.routineBudget
+	runWorkspace, pickup, routineWorkspace := prepared.workspace, prepared.pickup, prepared.routineWorkspace
+	var err error
+	var route Route
+	if entry != nil {
+		entry.mu.Lock()
+		if !entry.record.RouteReleased {
+			if entry.record.ClaimRoute != nil {
+				route = *entry.record.ClaimRoute
+			}
+		}
+		entry.mu.Unlock()
+	}
+	var attempt *Record
+	if s.ledger != nil {
+		if entry != nil {
+			entry.mu.Lock()
+			saved := entry.record
+			entry.mu.Unlock()
+			if saved.LedgerGroup != "" && !saved.RouteReleased {
+				attempt = &saved
+			}
+		}
+		if attempt == nil {
+			if route.AccountID != "" {
+				accountIDs = []string{route.AccountID}
+			}
+			gid, e := agentsetup.LedgerID()
+			if e != nil {
+				return claimedRun{}, e
+			}
+			subset, e := s.ledger.Acquire(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, gid, s.ledgerCandidates(accountIDs, s.ledgerBinding.Generation))
+			if e != nil {
+				return claimedRun{}, e
+			}
+			if s.ledgerBarrier != nil {
+				s.ledgerBarrier("group")
+			}
+			rec := Record{RoutineWorkspace: routineWorkspace, WorkerPickup: pickup, LaunchState: launchRoutePending, RouteCandidates: subset, LedgerGroup: gid, LedgerGeneration: s.ledgerBinding.Generation, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: runWorkspace, State: "route_pending", Controls: map[string]replay{}}
+			if e = s.journal.Put(rec); e != nil {
+				return claimedRun{}, e
+			}
+			if entry == nil {
+				entry = &owned{record: rec, replies: map[string]InboxReplyTarget{}}
+				s.mu.Lock()
+				s.runs[run.ID] = entry
+				s.mu.Unlock()
+			} else {
+				s.setLedgerRecord(rec)
+			}
+			attempt = &rec
+			if s.ledgerBarrier != nil {
+				s.ledgerBarrier("intent")
+			}
+		}
+		accountIDs = candidateIDs(attempt.RouteCandidates)
+	}
+	if route.AccountID == "" {
+		route, err = s.routeWorkspace(ctx, run.ID, accountIDs, routineWorkspace)
+		if err != nil {
+			return claimedRun{}, err
+		}
+	}
+	if attempt != nil {
+		if err = s.confirmLedgerRoute(attempt, route); err != nil {
+			return claimedRun{}, err
+		}
+	}
+	if route.DaemonID != s.daemonID || route.AccountKey == "" || len(route.Reservations) == 0 || run.AccountID != "" && route.AccountID != run.AccountID || run.RequestedAccountID != "" && route.AccountID != run.RequestedAccountID {
+		return claimedRun{}, errors.New("account route is not bound to daemon")
+	}
+	localBinding := false
+	for _, account := range s.accounts {
+		if account.ID == route.AccountID && account.Key == route.AccountKey && account.Harness == profile.Harness {
+			localBinding = true
+			break
+		}
+	}
+	if !localBinding {
+		return claimedRun{}, errors.New("account route has no matching local enrollment")
+	}
+	ids := make([]string, 0, len(route.Reservations))
+	for _, reservation := range route.Reservations {
+		if reservation.ID == "" {
+			return claimedRun{}, errors.New("empty account reservation")
+		}
+		ids = append(ids, reservation.ID)
+	}
+	if !s.accountAvailable(route.AccountID) {
+		return claimedRun{}, ErrDraining
+	}
+	// Only the validated server route can fill the execution account. Preserve
+	// all approval terms and require the same strict binding as adapter.Start.
+	run.AccountID = route.AccountID
+	if err := validExecutionMode(run, adapter); err != nil {
+		return claimedRun{}, err
+	}
+	if routineBudget != nil && (route.AccountID != routineBudget.binding.Grant.AccountID || route.BillingMode != routineBudget.binding.Grant.BillingMode) {
+		return claimedRun{}, ErrRoutineBudgetBinding
+	}
+	if entry == nil {
+		rec := Record{RoutineWorkspace: routineWorkspace, WorkerPickup: pickup, LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: runWorkspace, State: "claim_pending", Controls: map[string]replay{}}
+		if err := s.journal.Put(rec); err != nil {
+			return claimedRun{}, err
+		}
+		entry = &owned{record: rec, replies: map[string]InboxReplyTarget{}}
+		s.mu.Lock()
+		s.runs[run.ID] = entry
+		s.mu.Unlock()
+	} else {
+		entry.mu.Lock()
+		next := entry.record
+		next.RoutineWorkspace = routineWorkspace
+		next.ClaimRoute, next.AccountID, next.RouteReleased = &route, route.AccountID, false
+		next.LaunchState, next.State = launchPrepared, "claim_pending"
+		if s.ledger != nil {
+			next.Generation = s.generation
+		}
+		if err := s.journal.Put(next); err != nil {
+			entry.mu.Unlock()
+			return claimedRun{}, err
+		}
+		entry.record = next
+		entry.mu.Unlock()
+	}
+	claimed := claimedRun{admitted: admitted, prepared: prepared, run: run, entry: entry, route: route, reservationIDs: ids}
+	cleanup.claimed, cleanup.phase = &claimed, startRunClaimUnconfirmed
+	if err := s.claimBoundRun(ctx, claimed); err != nil {
+		return claimedRun{}, err
+	}
+	cleanup.phase = startRunClaimed
+	return claimed, nil
+}
+
+func (s *Supervisor) claimBoundRun(ctx context.Context, claimed claimedRun) error {
+	if w := claimed.prepared.routineWorkspace; w != nil {
+		return s.claimRoutine(ctx, claimed.run, claimed.reservationIDs, claimed.prepared.pickup, w)
+	}
+	return s.claimWorker(ctx, claimed.run, claimed.reservationIDs, claimed.prepared.pickup)
+}
