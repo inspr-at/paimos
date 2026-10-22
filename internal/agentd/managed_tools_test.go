@@ -69,6 +69,27 @@ func (t headerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r)
 }
 
+func assertManagedToolsClosed(t *testing.T, host *managedToolServer) {
+	t.Helper()
+	listener, ok := host.listener.(*net.TCPListener)
+	if !ok {
+		t.Fatalf("tools listener: got %T, want *net.TCPListener", host.listener)
+	}
+	// Probe the owned listener, since its former port can already belong to
+	// another server. An expired deadline prevents an open listener hanging;
+	// only net.ErrClosed proves closure, never a timeout or another error.
+	if err := listener.SetDeadline(time.Now()); err != nil && !errors.Is(err, net.ErrClosed) {
+		t.Fatal(err)
+	}
+	connection, err := listener.Accept()
+	if connection != nil {
+		_ = connection.Close()
+	}
+	if !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("tools listener after cleanup: %v, want net.ErrClosed", err)
+	}
+}
+
 // Risk: startup can fail before Serve registers its listener with http.Server.
 // Close must release that listener even when the serving goroutine has not run.
 func TestManagedToolsCloseBeforeServeClosesListener(t *testing.T) {
@@ -77,21 +98,26 @@ func TestManagedToolsCloseBeforeServeClosesListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
-	// This deadline only guards a leaked listener from hanging the assertion.
-	if err := listener.SetDeadline(time.Now().Add(time.Second)); err != nil {
+	host := &managedToolServer{listener: listener, server: &http.Server{}}
+	// Negative control: the old Close implementation only closed http.Server.
+	// With Serve not yet called, that leaves the owned listener open.
+	if err := host.server.Close(); err != nil {
 		t.Fatal(err)
 	}
-	host := &managedToolServer{listener: listener, server: &http.Server{}}
-	if err := host.Close(); err != nil {
+	if err := listener.SetDeadline(time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	connection, err := listener.Accept()
 	if connection != nil {
 		_ = connection.Close()
 	}
-	if !errors.Is(err, net.ErrClosed) {
-		t.Fatalf("listener after Close: %v, want net.ErrClosed", err)
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("unregistered listener after http.Server.Close: %v, want deadline on open listener", err)
 	}
+	if err := host.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertManagedToolsClosed(t, host)
 	if err := host.server.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
 		t.Fatalf("delayed Serve after Close: %v, want http.ErrServerClosed", err)
 	}
