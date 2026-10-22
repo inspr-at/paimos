@@ -294,7 +294,10 @@ test('the update toast ends at the release name and counts its public notes by k
   await page.setViewportSize({ width: 1440, height: 900 })
   const { history, newest, older } = countedHistory()
   const toast = await showUpdateToast(page, history, older)
-  await expect(toast.locator('> span').first()).toHaveText(`PAIMOS AEON was updated to ${newest.codename}`)
+  // The sentence ends at the name; the stamp beside it is hidden until hover or focus.
+  const sentence = toast.locator('> span').first()
+  await expect(sentence.locator('.rn-name')).toHaveText(newest.codename)
+  expect(await sentence.evaluate(el => { const copy = el.cloneNode(true) as HTMLElement; copy.querySelector('.rn-stamp')?.remove(); return copy.textContent })).toBe(`PAIMOS AEON was updated to ${newest.codename}`)
   const counts = toast.locator('.toast-counts')
   await expect(counts.locator('.toast-count')).toHaveText(['2 new', '1 fix'])
   await expect(counts.locator('.toast-count svg')).toHaveCount(2)
