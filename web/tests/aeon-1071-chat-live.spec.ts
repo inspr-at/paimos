@@ -104,6 +104,12 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
     await expectInterrupt(page, false)
     await composer.fill('Bitte die vollständige Freigabeprüfung im Bericht berücksichtigen.')
     await composer.blur()
+    // Installing the clock still lets wall time advance it. Flush the initial
+    // history watermark before streaming, so slow browser actions cannot race
+    // its trailing timer against the interrupt and change the write order.
+    const readMarkerPath = `/api/projects/${worker.project_id}/harness-sessions/${worker.id}/read-marker`
+    await page.clock.runFor(2_100)
+    await expect.poll(() => calls.filter(call => call.method !== 'GET').map(call => call.path)).toEqual([readMarkerPath])
     const slot = panel.locator('.compose-row .choice')
     const guard = await controlStability(page, { composer, send, stop, ...(width > 720 ? { slot } : {}) })
 
@@ -172,10 +178,10 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
     })
     expect(data.messages.some(message => message.body.startsWith('Final:'))).toBe(false)
     guard.done()
-    // Nothing interim was sent anywhere: the only writes are the interrupt and
-    // the read marker the confirmation wait let flush, and none carries live text.
+    // Nothing interim was sent anywhere: the only writes are the initial read
+    // marker and the interrupt, and neither carries live text.
     const writes = calls.filter(call => call.method !== 'GET')
-    expect(writes.map(call => call.path)).toEqual([expect.stringMatching(/\/controls\/interrupt$/), `/api/projects/${worker.project_id}/harness-sessions/${worker.id}/read-marker`])
+    expect(writes.map(call => call.path)).toEqual([readMarkerPath, expect.stringMatching(/\/controls\/interrupt$/)])
     for (const write of writes) expect(JSON.stringify(write.body ?? null)).not.toMatch(/Paragraph|release checklist|SessionChat\.vue/)
   })
 }
