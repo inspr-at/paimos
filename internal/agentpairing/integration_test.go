@@ -118,17 +118,20 @@ func nixGuideFixture() *config.PairingNixGuide {
 }
 
 type fixture struct {
-	messages   []*attachedmsg.Service
-	pairing    *agentpairing.Module
-	t          *testing.T
-	db         *dbtest.DB
-	h          http.Handler
-	tenantID   string
-	tenantSlug string
-	person     string
-	cookie     *http.Cookie
-	profiles   map[string]string
-	sessionKey []byte
+	rawTransport  bool // explicit legacy/negative tests opt out of modern Prepare
+	contentMu     sync.Mutex
+	contentProofs map[string]string
+	messages      []*attachedmsg.Service
+	pairing       *agentpairing.Module
+	t             *testing.T
+	db            *dbtest.DB
+	h             http.Handler
+	tenantID      string
+	tenantSlug    string
+	person        string
+	cookie        *http.Cookie
+	profiles      map[string]string
+	sessionKey    []byte
 }
 type proposal struct {
 	id, device, runtime, lifecycle string
@@ -254,6 +257,11 @@ func (f *fixture) request(method, path string, body any, person bool, key string
 	if key != "" {
 		r.Header.Set("Authorization", "Bearer "+key)
 	}
+	if !person && key != "" && !f.rawTransport {
+		if proof := f.requestContentProof(method, path, b, key); proof != "" {
+			r.Header.Set(db.RunCapabilityHeader, proof)
+		}
+	}
 	return r
 }
 func (f *fixture) call(method, path string, body any, person bool, key string, status int) *httptest.ResponseRecorder {
@@ -321,6 +329,9 @@ func (f *fixture) redeem(p *proposal) agentpairing.View {
 func (f *fixture) probe(v agentpairing.View, e agentpairing.Enrollment, key string, status int) {
 	f.t.Helper()
 	f.call("POST", "/api/agent-accounts/"+e.AccountID+"/probe", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "available": true}, false, key, status)
+	if status == 200 && e.VerificationRunID != nil && !f.rawTransport {
+		f.prepareContentProof(*e.VerificationRunID, key)
+	}
 }
 func (f *fixture) reserve(v agentpairing.View, e agentpairing.Enrollment, key string, status int) []string {
 	f.t.Helper()

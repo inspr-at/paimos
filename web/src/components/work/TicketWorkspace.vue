@@ -63,7 +63,6 @@ import QueueDetails from './QueueDetails.vue'
 import QueueView from './QueueView.vue'
 import AssigneeMenu from './AssigneeMenu.vue'
 import { useWorkQueue } from '../../stores/workQueue'
-import { usePoller } from '../../lib/usePolledData'
 import { useSession } from '../../stores/session'
 import RecurrenceEditor from '../recurrences/RecurrenceEditor.vue'
 import RecurrenceProvenance from '../recurrences/RecurrenceProvenance.vue'
@@ -191,10 +190,7 @@ const queue = useWorkQueue()
 const queueAction = ref<InstanceType<typeof QueueAction>>()
 const queueAnchor = ref<HTMLElement | null>(null)
 const queueEntry = computed(() => item.value && queueable(item.value) ? queue.entry(props.project.id, item.value.id) : null)
-const queuePoller = usePoller(() => queue.load(props.project.id), 20_000)
-watch(() => props.project.id, id => { void queue.load(id) }, { immediate: true })
-onMounted(() => queuePoller.start())
-onBeforeUnmount(() => queuePoller.stop())
+watch(() => props.project.id, (id, _before, cleanup) => { cleanup(queue.watch(id)) }, { immediate: true, flush: 'sync' })
 const canQueue = computed(() => props.item?.is_leaf !== false && !ticket.readOnly.value && !ticket.gone.value && can('run.create', props.project.id))
 // AEON-741: a parent queues its open leaves; Start now on… is an expert control.
 const parentQueue = ref<InstanceType<typeof ParentQueueAction>>()
@@ -778,7 +774,7 @@ defineExpose({
           </p>
           <AttachmentStrip
             v-if="!contextColumn && (attachments.count.value || attachable)" class="ws-attachments" layout="strip" :items="attachments.items.value" :uploads="attachments.uploads.value"
-            :can-write="attachable" :loading="attachments.loading.value" :error="attachments.error.value"
+            :can-write="attachable" :loading="attachments.loading.value" :error="attachments.error.value" :pending="attachments.pending"
             @open="openAttachment" @add="files => attachments.add(files)" @remove="attachments.remove" @reorder="attachments.reorder" @caption="attachments.setCaption"
             @retry="attachments.retry" @cancel="attachments.cancel" @reload="attachments.load"
           />
@@ -821,7 +817,7 @@ defineExpose({
         <aside v-if="contextColumn" class="ws-context" aria-label="Attachments, relations and activity">
           <AttachmentStrip
             v-if="attachments.count.value || attachable" layout="gallery" :items="attachments.items.value" :uploads="attachments.uploads.value"
-            :can-write="attachable" :loading="attachments.loading.value" :error="attachments.error.value"
+            :can-write="attachable" :loading="attachments.loading.value" :error="attachments.error.value" :pending="attachments.pending"
             @open="openAttachment" @add="files => attachments.add(files)" @remove="attachments.remove" @reorder="attachments.reorder" @caption="attachments.setCaption"
             @retry="attachments.retry" @cancel="attachments.cancel" @reload="attachments.load"
           />
@@ -857,7 +853,7 @@ defineExpose({
     <div v-if="dropping" class="drop-overlay" aria-hidden="true">
       <div class="drop-card"><AppIcon name="upload" :size="22" /><strong>Drop to attach to {{ item?.key ?? ticketKey }}</strong><span>Images show as thumbnails; other files as cards.</span></div>
     </div>
-    <AttachmentLightbox ref="lightbox" :items="attachments.items.value" :ticket-key="item?.key ?? ticketKey" :can-write="attachable" :set-caption="attachments.setCaption" :names="names" />
+    <AttachmentLightbox ref="lightbox" :items="attachments.items.value" :ticket-key="item?.key ?? ticketKey" :can-write="attachable" :set-caption="attachments.setCaption" :names="names" :pending="attachments.pending" />
 
     <OptionMenu v-if="menu?.kind === 'priority' && item" :anchor="menu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="item.priority ?? ''" @choose="choosePriority" @close="closeMenu" />
     <AssigneeMenu v-if="menu?.kind === 'assignee' && item" :row="item" :project-id="project.id" :anchor="menu.anchor" :people="assigneeOptions" :can-assign="editable" @choose="chooseAssignee" @changed="emit('assigned')" @close="closeMenu" />

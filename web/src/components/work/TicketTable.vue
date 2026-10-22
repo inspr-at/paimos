@@ -79,7 +79,7 @@ const props = defineProps<{
   canDrag?: boolean
   // The person's saved columns, order and widths for this project (null: automatic).
   extraColumns?: ColumnDef[]
-  // Hosts can use the approved EN/DE copy for the new group controls.
+  // Hosts may still pass a locale. Group labels follow the one app language (AEON-1609).
   locale?: string
   prefs?: ListPrefs | null
   costAllowed?: boolean
@@ -87,6 +87,7 @@ const props = defineProps<{
   selectable?: boolean
   // A host may keep resolved/read-only rows visible without making them selectable.
   rowSelectable?: (row: ListItem) => boolean
+  groupSelectionLabel?: (group: RowGroup) => string
   label?: string
   retryLabel?: string
   emptyText?: string
@@ -155,7 +156,7 @@ const emit = defineEmits<{
 }>()
 
 const instance = getCurrentInstance()
-const german = computed(() => displayLanguage(props.locale) === 'de')
+const german = computed(() => displayLanguage() === 'de')
 const groupName = (group: RowGroup) => group.project?.key ?? group.epic?.key ?? group.label
 const moreLabel = (group: RowGroup) => german.value ? `50 weitere zeigen in ${groupName(group)}` : `Show 50 more in ${groupName(group)}`
 const shownLabel = (group: RowGroup) => german.value ? `${group.loaded ?? group.rows.length} von ${group.total} gezeigt` : `${group.loaded ?? group.rows.length} of ${group.total} shown`
@@ -1170,7 +1171,7 @@ defineExpose({
                   <AppIcon name="chevron" :size="14" />
                 </button>
                 <label v-if="selectable" class="group-check-target">
-                  <input type="checkbox" class="group-check" :checked="groupChecked(entry.group)" :indeterminate="groupMixed(entry.group)" :disabled="selectionDisabled || !selectableRows(entry.group).length" :aria-label="german ? `Alle Vorschläge in ${groupName(entry.group)} auswählen` : `Select every loaded ticket in ${groupName(entry.group)}`" @change="selectGroup($event, entry.group)" />
+                  <input type="checkbox" class="group-check" :checked="groupChecked(entry.group)" :indeterminate="groupMixed(entry.group)" :disabled="selectionDisabled || !selectableRows(entry.group).length" :aria-label="groupSelectionLabel?.(entry.group) ?? (german ? `Alle Vorschläge in ${groupName(entry.group)} auswählen` : `Select every loaded ticket in ${groupName(entry.group)}`)" @change="selectGroup($event, entry.group)" />
                 </label>
                 <div class="group-caption">
                 <template v-if="entry.group.project">

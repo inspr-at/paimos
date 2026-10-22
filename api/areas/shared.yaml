@@ -46,6 +46,8 @@ components:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
+        run_capability_required: {type: boolean, description: "Paired daemon must prepare a server-issued run capability before content reads or claim"}
+        upgrade_reason: {type: string, enum: [run_capability_upgrade_required], description: "Upgrade agentd to support run_content_v1"}
         acting_person_id: {type: [string, 'null'], format: uuid, description: 'Explicit immutable acting person after binding by the run writer; null until bound. Model-preference and requester stamps do not select this person.'}
         routine_budget: {allOf: [{$ref: '#/components/schemas/RoutineProviderBudget'}], description: 'Optional server-issued remaining actor grant. It grants no launch authority. Missing qualification or provider-call enforcement refuses budget-bearing routine work before any vendor process.'}
         routine_launch_id: {type: string, format: uuid, description: 'Optional immutable S11 launch intent. Its qualified binding lives in trace.routine_launch; optional lineage binds coordinator review/fix actors to the prior run, exact repository/base/head and review-policy digest. Missing or unsupported binding refuses automatic execution. Existing manual runs omit this property.'}
@@ -892,7 +894,7 @@ components:
         ticket_node_id: {type: [string, 'null'], format: uuid}
         parallel_reason: {$ref: '#/components/schemas/BuildParallelReason'}
         work_order_id: {type: [string, 'null'], format: uuid}
-        parent_harness_session_id: {type: [string, 'null'], format: uuid, description: 'Parent generation in this project. Children register distinct session references and worker leases under the same authenticated agent, including when parent and child use the same harness.'}
+        parent_harness_session_id: {type: [string, 'null'], format: uuid, description: 'Live parent generation on the selected instance. Across projects, both projects must be visible and both generations must have the same verified canonical person and tenant. Cross-project links are attribution only and are returned separately as cross_project_parent_harness_session_id; project, ticket and execution authority stay with the child. Unknown persons are refused. Same-project registration retains its existing rules.'}
         display_label:
           type: [string, 'null']
           maxLength: 128
@@ -964,6 +966,7 @@ components:
         ticket_node_id: {type: [string, 'null'], format: uuid}
         work_order_id: {type: [string, 'null'], format: uuid}
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
+        cross_project_parent_harness_session_id: {type: string, format: uuid, readOnly: true, description: 'Verified cross-project lineage for display only. Omitted when absent or when the parent is inaccessible. Never grants parent control, reparent, run or work authority. The legacy same-project parent field remains unchanged.'}
         owner_principal_id: {type: [string, 'null'], format: uuid, readOnly: true, description: 'Canonical person who owns this generation; null or omitted when no owner is recorded. Wind-down selects only the caller-owned running sessions, even for administrators.'}
         started_by_principal_id: {type: string, format: uuid, readOnly: true, description: 'Principal who registered this generation. Omitted on legacy generations.'}
         parallel_reason: {$ref: '#/components/schemas/BuildParallelReason', readOnly: true}

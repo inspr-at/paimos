@@ -1,5 +1,7 @@
 # Decision Desk projection
 
+See [Decision Desk](decision-desk.md) for the UI, questions and answer lifecycle.
+
 `GET /api/decision-desk/projection` supplies the Decision Desk's canonical
 order and exact counts. Held approvals sort by expiry, then other held work by
 age, then ordinary open items by age, with source ID ties. Questions with several

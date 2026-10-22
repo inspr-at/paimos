@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 
 	"github.com/inspr-at/paimos/internal/capacity"
@@ -94,9 +95,10 @@ func launchWireChecked(path string, args []string, workspace string, environment
 	}
 	cmd := exec.Command(path, args...)
 	cmd.Dir = workspace
-	if environment != nil {
-		cmd.Env = environment
+	if environment == nil {
+		environment = os.Environ()
 	}
+	cmd.Env = harnesslaunch.WithoutTransportCredentials(environment)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

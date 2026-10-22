@@ -10,9 +10,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 )
 
 func TestHarnessVersionProbeIsBoundedAndOptional(t *testing.T) {
+	sleepExec := fixturebin.ShellExec(t, "sleep", "5")
+	catWord := fixturebin.Quote(fixturebin.Require(t, "cat"))
 	dir := t.TempDir()
 	t.Setenv("PATH", dir)
 	path := filepath.Join(dir, "codex")
@@ -23,7 +27,7 @@ func TestHarnessVersionProbeIsBoundedAndOptional(t *testing.T) {
 		{"diagnostic text", ""}, {"codex-cli 1.2.3\nextra line", ""}, {strings.Repeat("x", 5000), ""},
 	} {
 		body := "#!/bin/sh\n[ \"$1\" = --version ] || exit 1\ncat <<'VERSION'\n" + tc.output + "\nVERSION\n"
-		body = strings.Replace(body, "cat <<", "/bin/cat <<", 1)
+		body = strings.Replace(body, "cat <<", catWord+" <<", 1)
 		if err := os.WriteFile(path, []byte(body), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -46,7 +50,7 @@ func TestHarnessVersionProbeIsBoundedAndOptional(t *testing.T) {
 			t.Fatalf("supplied version length=%d got=%q want=%q", len(tc.supplied), got, tc.want)
 		}
 	}
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexec /bin/sleep 5\n"), 0700); err != nil {
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+sleepExec+"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)

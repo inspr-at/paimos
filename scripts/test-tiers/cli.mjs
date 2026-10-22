@@ -229,7 +229,7 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
       const caseSeconds=execution.status!=='completed'||browserLaunches.some(launch=>launch.caseSeconds===null)?null:
         browserLaunches.reduce((sum,launch)=>sum+launch.caseSeconds,0)
       report.webShardTiming={collectSeconds,planSeconds,runSeconds,caseSeconds,
-        nonCaseSeconds:collectSeconds===null||planSeconds===null||caseSeconds===null?null:Math.max(0,collectSeconds+planSeconds+runSeconds-caseSeconds),
+        nonCaseSeconds:collectSeconds===null||planSeconds===null||caseSeconds===null||collectSeconds+planSeconds+runSeconds<caseSeconds?null:collectSeconds+planSeconds+runSeconds-caseSeconds,
         launches:browserLaunches,note:'Monotonic wall seconds; non-case time is collection + planning + execution minus summed native case durations (including explicit retries).'}
       report.browserCases=selection.tests.filter(row=>row.kind==='browser').map(row=>({key:key(row),file:row.file,config:row.config,project:row.project,
         status:terminal.get(key(row))?.status??'notRun',
@@ -396,7 +396,7 @@ async function runCases(kind,selection,{unit=false,job='local',env=process.env}=
             caseSeconds=terminal.interrupted?null:browserCaseSeconds(report)
           } catch(error) { console.error(JSON.stringify(error.message));reportError=true }
           browserLaunches.push({groups:group.groups,retry,listSeconds,runSeconds,caseSeconds,
-            nonCaseSeconds:caseSeconds===null?null:Math.max(0,runSeconds-caseSeconds)})
+            nonCaseSeconds:caseSeconds===null||runSeconds<caseSeconds?null:runSeconds-caseSeconds})
           const failures=outcomes.filter(outcome=>outcome.status==='failed').map(outcome=>{
             const row=rows.find(row=>key(row)===outcome.key)
             return {kind:'browser',owner:row.file,name:row.name,output:'See supervised Playwright output and JSON evidence.'}

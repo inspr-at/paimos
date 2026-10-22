@@ -2,6 +2,20 @@
 import { expect, test } from 'vitest'
 import { repositoryState, workflowFile } from '../src/lib/projectDeliverySettings'
 import type { MetricSource } from '../src/lib/deliveryNumbers'
+import { flatten, mountView } from './webcore-view-harness'
+
+test('AEON-1639: repository status icons render only their selected artwork', () => {
+  // Risk: a second conditional chain paints fallback artwork over the icon.
+  for (const [name, tags] of [['repo', ['path', 'path']], ['circle', ['circle']], ['signal-off', ['path']]] as const) {
+    const view = mountView('../src/components/AppIcon.vue', {}, { name })
+    try {
+      const shapes = flatten(view.root).filter(node => ['path', 'circle', 'rect'].includes(node.tag))
+      expect(shapes.map(node => node.tag), name).toEqual(tags)
+      if (name === 'circle') expect(shapes[0]!.props.r).toBe('6')
+      else expect(shapes[0]!.props.d, name).toContain(name === 'repo' ? 'M2.8 12.3' : 'M8 12.6')
+    } finally { view.app.unmount() }
+  }
+})
 
 test('AEON-1226: saved repository failures take precedence over history and stale events', () => {
   // Risk: a linked repository with no readable history is presented as live or zero.

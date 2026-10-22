@@ -39,7 +39,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <circle v-else-if="name === 'ring-dashed'" cx="8" cy="8" r="5.6" stroke-width="1.6" stroke-dasharray="2.3 2.1" />
     <path v-else-if="name === 'skip'" d="M3.6 3.6 9 8l-5.4 4.4zM12.2 3.6v8.8" />
     <path v-else-if="name === 'signal-off'" d="M8 12.6h.01M5.6 10.2a3.4 3.4 0 0 1 4.8 0M3.2 7.8a6.8 6.8 0 0 1 5.6-2.1M12.8 7.8a6.8 6.8 0 0 0-1.4-1.1M2 2l12 12" />
-    <path v-if="name === 'flag'" d="M3.5 14V2.6M3.5 3h8.2l-1.8 3 1.8 3H3.5" />
+    <path v-else-if="name === 'flag'" d="M3.5 14V2.6M3.5 3h8.2l-1.8 3 1.8 3H3.5" />
     <rect v-else-if="name === 'square'" x="2.2" y="2.2" width="11.6" height="11.6" rx="2" />
     <path v-else-if="name === 'queue'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h7.8M2.4 12h7.8" />
     <path v-else-if="name === 'queue-add'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M11.6 8.8v5.4M8.9 11.5h5.4" />

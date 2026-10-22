@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
@@ -327,7 +328,7 @@ export function query() {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, "/bin/true", root)
+	cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, fixturebin.Require(t, "true"), root)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -617,6 +618,7 @@ func TestClaudeBridgeRequiresAdvertisedInterruptSupport(t *testing.T) {
 	if err != nil {
 		t.Skip("Node unavailable")
 	}
+	truePath := fixturebin.Require(t, "true")
 	for _, capability := range []string{"steer", "interrupt"} {
 		for _, missing := range []string{"receipt", "method"} {
 			t.Run(capability+"/"+missing, func(t *testing.T) {
@@ -652,7 +654,7 @@ func TestClaudeBridgeRequiresAdvertisedInterruptSupport(t *testing.T) {
 				}
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 				defer cancel()
-				cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, "/bin/true", root)
+				cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, truePath, root)
 				cmd.Stdin = strings.NewReader(fmt.Sprintf("{\"op\":\"start\",\"prompt\":\"work\",\"capabilities\":[%q]}\n", capability))
 				output, err := cmd.Output()
 				if err == nil || strings.Contains(string(output), `"kind":"session_started"`) || strings.Contains(string(output), `"kind":"turn_started"`) || !strings.Contains(string(output), wantReason) {

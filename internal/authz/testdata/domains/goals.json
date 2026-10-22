@@ -1,6 +1,8 @@
 {
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "routes": {
+    "DELETE /api/goals/{goalId}": "nodes.write",
+    "DELETE /api/goals/{goalId}/work": "nodes.write",
     "GET /api/goals": "nodes.read",
     "GET /api/goals/epics": "nodes.read",
     "GET /api/goals/{goalId}": "nodes.read",
@@ -10,6 +12,7 @@
     "PATCH /api/goals/status-note": "nodes.write",
     "PATCH /api/goals/{goalId}": "nodes.write",
     "POST /api/goals": "nodes.write",
+    "POST /api/goals/{goalId}/work": "nodes.write",
     "PUT /api/me/goals/{goalId}/hidden": "nodes.read",
     "DELETE /api/me/goals/{goalId}/hidden": "nodes.read"
   },
@@ -23,8 +26,11 @@
     "DELETE /api/me/goals/{goalId}/hidden": true
   },
   "project_decided": {
+    "DELETE /api/goals/{goalId}": true,
+    "DELETE /api/goals/{goalId}/work": true,
     "PATCH /api/goals/{goalId}": true,
-    "POST /api/goals": true
+    "POST /api/goals": true,
+    "POST /api/goals/{goalId}/work": true
   },
   "builtin_roles": {
     "admin": [

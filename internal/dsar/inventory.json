@@ -166,7 +166,9 @@
       "columns": {
         "install_method": "metadata",
         "ledger_enrolled_at": "metadata",
-        "ledger_generation": "metadata"
+        "ledger_generation": "metadata",
+        "content_daemon_generation": "metadata",
+        "content_capability_epoch": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
@@ -178,7 +180,15 @@
       "columns": {
         "routine_launch_id": "metadata",
         "trace": "personal",
-        "acting_person_id": "personal"
+        "acting_person_id": "personal",
+        "content_capability_digest": "secret",
+        "content_capability_person_id": "personal",
+        "content_capability_computer_id": "metadata",
+        "content_capability_account_id": "personal",
+        "content_capability_daemon_id": "metadata",
+        "content_capability_generation": "metadata",
+        "content_capability_expires_at": "metadata",
+        "content_capability_epoch": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
@@ -944,6 +954,42 @@
         "tenant_column": "tenant_id"
       },
       "table": "goal_update_receipts"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "acknowledged_at": "personal",
+        "acknowledgement": "personal",
+        "computer_id": "personal",
+        "daemon_generation": "metadata",
+        "expires_at": "metadata",
+        "id": "metadata",
+        "issued_at": "metadata",
+        "manifest": "personal",
+        "recorded_at": "personal",
+        "request_digest": "secret",
+        "run_id": "metadata",
+        "session_id": "personal",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "harness_rules_deliveries"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "child_session_id": "personal",
+        "owner_person_id": "personal",
+        "parent_session_id": "personal",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "harness_session_lineage"
     },
     {
       "classification": "personal",

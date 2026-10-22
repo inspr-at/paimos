@@ -194,7 +194,7 @@ without its SQL migration, a mismatched exception filename, a duplicate record,
 malformed input or missing directory fails closed. The generic classifier,
 release-evidence and immutability tests remain in the entry point.
 
-AEON-985's conversion can be rechecked against its legacy commit:
+AEON-985's historical conversion oracle uses an explicit legacy commit:
 
 ```sh
 node scripts/check-migrations-proof.mjs --base-ref 79348b98ca1e10e861784fcfd8e3360e1585f8df
@@ -209,13 +209,6 @@ expected to change these sets. The directory regression tests and existing
 migration guard remain the ongoing checks. Reverting AEON-985 restores the
 ledger and tests together; there is no database migration or dependent runtime
 schema change.
-
-Conversion validation at `e6a8d1c19`: the dump proof passed for all 27 exception
-records and 37 original cases; all 38 migration tests passed. The full
-`internal/db` suite passed on build-6, and the locked remote
-`ci-static --merge-main` run passed all 40 checks with zero skips. The local
-static/planner regressions (294 tests) and ownership audit (33 tests) also
-passed. No origin push, deployment or worker-run review gate was performed.
 
 The sole initial exception, AEON-397's `1054_confirmed_quota_pools.sql`, replaces
 the reservation guard immediately. Existing accounts start unconfirmed, so

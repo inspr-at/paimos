@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentd"
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -211,7 +212,7 @@ func TestOpenNoFollowReadsRegularFileAndRejectsSymlinkParent(t *testing.T) {
 }
 
 func TestRunHeartbeatLiveOwnerKeepsBeating(t *testing.T) {
-	cmd := exec.Command("/bin/sleep", "3600")
+	cmd := exec.Command(fixturebin.Require(t, "sleep"), "3600")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +291,7 @@ func TestRunHeartbeatLiveOwnerAgainstDatabase(t *testing.T) {
 		t.Fatalf("dead owner created %d sessions", got-count)
 	}
 
-	cmd := exec.Command("/bin/sleep", "3600")
+	cmd := exec.Command(fixturebin.Require(t, "sleep"), "3600")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

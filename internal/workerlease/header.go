@@ -17,6 +17,8 @@ const Scheme = "Aeon-Worker"
 
 const LegacyHeader = "X-Aeon-Worker-Lease"
 
+const RunCapabilityHeader = "X-Aeon-Run-Capability"
+
 // SafetyRoute is the closed metadata-only worker transport allowlist. It is
 // not an authorization decision: handlers still require the live key, exact
 // session agent/lease and process-generation fences, and must redact content
@@ -61,7 +63,7 @@ func Carries(h http.Header) bool {
 	if h == nil {
 		return false
 	}
-	if h.Get(LegacyHeader) != "" || workerScheme(h.Get("Authorization")) {
+	if h.Get(LegacyHeader) != "" || h.Get(RunCapabilityHeader) != "" || workerScheme(h.Get("Authorization")) {
 		return true
 	}
 	return false
@@ -73,6 +75,9 @@ func Proofs(h http.Header) []string {
 		return nil
 	}
 	var out []string
+	if capability := h.Get(RunCapabilityHeader); capability != "" && len(capability) <= 256 {
+		out = append(out, capability)
+	}
 	if lease := leaseFragment(h.Get("Authorization")); lease != "" {
 		out = append(out, lease)
 	}

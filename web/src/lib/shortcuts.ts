@@ -61,6 +61,11 @@ export const SHORTCUT_ENTRIES = [
   { id: 'goals.toggle_all', keys: ['e'], scope: 'goals view', label: 'Expand all / Collapse all' },
   { id: 'goals.next', keys: ['j', 'ArrowDown'], scope: 'goals view', label: 'Next / previous goal or item' },
   { id: 'goals.prev', keys: ['k', 'ArrowUp'], scope: 'goals view', label: 'Next / previous goal or item' },
+  // AEON-1618 (Tick spec v1.1): on a focused goal row, for people who may edit the goal.
+  // Mac keyboards name Backspace "delete", so it deletes too (with Undo).
+  { id: 'goals.rename', keys: ['F2'], scope: 'goals view', label: 'Rename the focused goal' },
+  { id: 'goals.link', keys: ['l'], scope: 'goals view', label: 'Link work to the focused goal' },
+  { id: 'goals.delete', keys: ['Delete', 'Backspace'], scope: 'goals view', label: 'Delete the focused goal (with Undo)' },
 ] as const satisfies readonly ShortcutEntry[]
 export type ShortcutAction = typeof SHORTCUT_ENTRIES[number]['id']
 type Handler = (event: KeyboardEvent) => void | false

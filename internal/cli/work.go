@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/workqueue"
 )
@@ -434,6 +435,7 @@ type issuePatch struct {
 	Title          string
 	Type           string
 	Status         string
+	ExpectedStates []string
 	Priority       string
 	Parent         string
 	Assignee       string
@@ -447,6 +449,29 @@ type issuePatch struct {
 	RouteRole      string
 	Area           string
 	Complexity     string
+}
+
+func issueExpectedStates(values []string, status string) ([]string, error) {
+	if values == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(status) == "" {
+		return nil, usagef("--if-status requires --status")
+	}
+	var states []string
+	for _, value := range values {
+		if len(value) > 32*(128*4+1) {
+			return nil, usagef("--if-status accepts 1 to 32 nonblank statuses of at most 128 characters")
+		}
+		for _, state := range strings.Split(value, ",") {
+			state = strings.TrimSpace(state)
+			if state == "" || utf8.RuneCountInString(state) > 128 || len(states) == 32 {
+				return nil, usagef("--if-status accepts 1 to 32 nonblank statuses of at most 128 characters")
+			}
+			states = append(states, state)
+		}
+	}
+	return states, nil
 }
 
 // checkIssueKind refuses a different kind before any write. The same kind is
@@ -580,6 +605,9 @@ func (rt *runtime) updateIssueResult(in issuePatch) (issueUpdateResult, error) {
 	}
 	if status := strings.TrimSpace(in.Status); status != "" {
 		patch["state"] = status
+	}
+	if in.ExpectedStates != nil {
+		patch["expected_states"] = in.ExpectedStates
 	}
 	if changedFields {
 		patch["fields"] = fields

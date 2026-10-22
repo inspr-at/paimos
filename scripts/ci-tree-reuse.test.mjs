@@ -67,6 +67,15 @@ test('found: an exact-SHA successful merge-group full suite reuses with source n
   assert(f.calls.includes(listPath));
   assert(f.calls.includes('actions/runs/123/attempts/1/jobs?per_page=100'));
   assert(!f.calls.some(p => /git\/|compare\/|pulls\/|statuses\//.test(p)));
+  // AEON-1652: only the optional package fetch may fail or be absent; all
+  // required execution obligations remain checked above and below.
+  for (const conclusion of ['success', 'failure', 'skipped', 'cancelled']) {
+    const bundled = fixture();
+    bundled.jobs.jobs.push({ name: 'apt-bundle', status: 'completed', conclusion, run_attempt: 1 });
+    bundled.jobs.total_count++;
+    if (conclusion === 'cancelled') await assert.rejects(verifyRun(repository, 123, bundled.api, sha), /incomplete suite/);
+    else assert.deepEqual(await verifyRun(repository, 123, bundled.api, sha), { run: 123, attempt: 1, sha });
+  }
 });
 
 test('the full suite reuses without the retired comparison job and still requires every surviving job', async () => {

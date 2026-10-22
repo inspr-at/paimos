@@ -108,7 +108,8 @@
         "internal/db/migrations/1359_delivery_admission_publisher.sql"
       ],
       "exclude": [
-        "internal/db/migrations/1333_models_v2_migration.sql"
+        "internal/db/migrations/1333_models_v2_migration.sql",
+        "internal/db/migrations/1408_rules_delivery_evidence.sql"
       ]
     },
     {
@@ -240,7 +241,8 @@
         "internal/crossreview/routine_pr_app.go",
         "internal/crossreview/github_history_test.go",
         "internal/delivery/metrics_checks.go",
-        "internal/delivery/metrics_checks_test.go"
+        "internal/delivery/metrics_checks_test.go",
+        "internal/db/migrations/1408_rules_delivery_evidence.sql"
       ]
     },
     {
@@ -265,9 +267,6 @@
         "internal/hookbinding/**",
         "internal/cli/hook_binding.go",
         "internal/cli/hook_binding_unix_test.go",
-        "internal/cli/principal_inbox.go",
-        "internal/cli/principal_inbox_test.go",
-        "internal/inbox/messaging_only_test.go",
         "internal/cli/rules_export.go",
         "internal/cli/rules_export_test.go"
       ]
@@ -433,8 +432,6 @@
         "web/src/views/**",
         "web/src/components/**",
         "web/src/components/lead/LeadMenu.vue",
-        "web/src/components/work/AttentionGroupMenu.vue",
-        "web/src/components/work/AttentionBulkPreview.vue",
         "web/src/components/agents/ChatCodeBlock.vue",
         "web/src/components/lead/LeadAdoption.vue",
         "web/src/components/agents/AgentChores.vue",

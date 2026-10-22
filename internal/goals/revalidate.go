@@ -90,6 +90,11 @@ func (m *module) RevalidateTenant(ctx context.Context, tenantID, after string, n
 				return err
 			}
 			for _, item := range g.Items {
+				// A linked item's id is its work item's; its passed state shows only
+				// through the goal (AEON-1618).
+				if item.Linked {
+					continue
+				}
 				prior := false
 				err := tx.QueryRow(ctx, `SELECT after='true'::jsonb FROM events WHERE node_id=$1 AND type='goal.passed_changed' ORDER BY id DESC LIMIT 1`, item.ID).Scan(&prior)
 				if err != nil && !errors.Is(err, pgx.ErrNoRows) {

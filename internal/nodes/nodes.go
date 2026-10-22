@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -474,7 +476,7 @@ func validateNodePatch(raw map[string]json.RawMessage) error {
 	}
 	for key := range raw {
 		switch key {
-		case "title", "body", "fields", "estimate_hours", "state", "override_reason", "human_check", "kind_id", "type", "kind":
+		case "title", "body", "fields", "estimate_hours", "state", "expected_states", "override_reason", "human_check", "kind_id", "type", "kind":
 		case "key":
 			return badRequest("key is immutable")
 		case "parent_id":
@@ -483,7 +485,32 @@ func validateNodePatch(raw map[string]json.RawMessage) error {
 			return badRequest("unknown field")
 		}
 	}
+	if _, err := patchExpectedStates(raw); err != nil {
+		return err
+	}
 	return nil
+}
+
+func patchExpectedStates(raw map[string]json.RawMessage) ([]string, error) {
+	v, present := raw["expected_states"]
+	if !present {
+		return nil, nil
+	}
+	state, err := parsePatchString(raw["state"])
+	if err != nil || !nonBlank(state) {
+		return nil, badRequest("expected_states requires state")
+	}
+	var states []string
+	// Bound the encoded list as well as its decoded values before allocation.
+	if len(v) > 32*(128*12+16) || json.Unmarshal(v, &states) != nil || len(states) == 0 || len(states) > 32 {
+		return nil, badRequest("expected_states must contain 1 to 32 nonblank states of at most 128 characters")
+	}
+	for _, state := range states {
+		if !nonBlank(state) || utf8.RuneCountInString(state) > 128 {
+			return nil, badRequest("expected_states must contain 1 to 32 nonblank states of at most 128 characters")
+		}
+	}
+	return states, nil
 }
 
 func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, raw map[string]json.RawMessage, expected *time.Time) (nodeJSON, error) {
@@ -524,6 +551,22 @@ func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		if _, statusWrite := raw["state"]; statusWrite {
 			if err := requireLeafStatusWrite(ctx, tx, id); err != nil {
 				return err
+			}
+		}
+		if states, err := patchExpectedStates(raw); err != nil {
+			return err
+		} else if states != nil {
+			// Authorize the current target under the access-change fence before
+			// returning its state, including mismatches and same-state patches.
+			target, err := workqueue.EntryTicketTx(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if err := authz.RequireTx(ctx, tx, p, "nodes.write", entryScope(target.ProjectID)); err != nil {
+				return err
+			}
+			if !slices.Contains(states, current.State) {
+				return &httpError{status: http.StatusConflict, msg: "status precondition failed: current state is " + current.State, code: "status_mismatch", currentState: &current.State}
 			}
 		}
 		// Compare after SELECT FOR UPDATE, so competing patches cannot both

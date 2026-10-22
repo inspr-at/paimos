@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue'
+import { computed, onScopeDispose, reactive, ref, watch, type Ref } from 'vue'
 import { APIError } from './api'
-import { byPosition, deleteAttachment, findRemovalEvent, listAttachments, patchAttachment, positionBetween, positionOf, undoEvent, uploadAttachment, type Attachment } from './attachments'
-import { dismiss, toast } from './toast'
+import { byPosition, deleteAttachment, listAttachments, patchAttachment, positionBetween, positionOf, undoEvent, uploadAttachment, type Attachment } from './attachments'
+import { captureToastOwner, dismiss, toast } from './toast'
 
 // One ticket's attachments. Uploads show at once with their progress (images with
 // a local preview); a delete reaches the server at once and its toast offers Undo
@@ -17,41 +17,62 @@ export function useAttachments(nodeId: Ref<string | null>) {
   const loading = ref(false)
   const error = ref('')
   // Deletes still on their way, so an early Undo waits for them.
-  const deleting = new Map<string, Promise<boolean>>()
+  const deleting = new Map<string, Promise<{ eventId: string | null } | null>>()
+  const restoring = new Map<string, { item: Attachment; here: () => boolean; confirmedAt: number | null }>()
+  const pending = reactive(new Set<string>())
+  const removals = new Map<string, number>()
   let generation = 0
+  let recordEpoch = 0
+  let active = true
+  function captureRecord() {
+    const node = nodeId.value, epoch = recordEpoch, owner = captureToastOwner()
+    return () => active && epoch === recordEpoch && nodeId.value === node && owner()
+  }
 
   async function load() {
     const id = nodeId.value
     const current = ++generation
-    if (!id) { items.value = []; return }
+    const here = captureRecord()
+    if (!id) { items.value = []; loading.value = false; error.value = ''; return }
     loading.value = true; error.value = ''
     try {
       const list = await listAttachments(id)
-      if (current === generation) items.value = list.filter(item => !deleting.has(item.id))
+      if (current === generation && here()) {
+        // Only a read started after confirmation may replace a restored row.
+        for (const [id, undo] of restoring) {
+          if (undo.confirmedAt !== null && current > undo.confirmedAt) restoring.delete(id)
+        }
+        const pending = [...restoring.values()].filter(undo => undo.here()).map(undo => undo.item)
+        const ids = new Set(pending.map(item => item.id))
+        items.value = [...list.filter(item => !deleting.has(item.id) && !ids.has(item.id)), ...pending].sort(byPosition)
+      }
     } catch (e) {
-      if (current !== generation) return
+      if (current !== generation || !here()) return
       // A server without the attachments surface simply shows none.
       if (e instanceof APIError && (e.status === 404 || e.status === 405)) items.value = []
       else error.value = e instanceof Error ? e.message : 'Attachments could not be loaded'
-    } finally { if (current === generation) loading.value = false }
+    } finally { if (current === generation && here()) loading.value = false }
   }
-  watch(nodeId, () => { uploads.value = []; void load() }, { immediate: true })
+  watch(nodeId, () => { recordEpoch++; clearUploads(); items.value = []; void load() }, { immediate: true, flush: 'sync' })
 
   // Resolves with the new attachment's id, or null when the upload failed.
   function upload(file: File): Promise<Attachment | null> {
     const id = nodeId.value
-    if (!id) return Promise.resolve(null)
+    if (!id || !active) return Promise.resolve(null)
+    const here = captureRecord()
     const entry: Upload = {
       key: `u${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: file.name || 'Screenshot.png', size: file.size, type: file.type, progress: 0,
       preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : null, error: '', file, controller: new AbortController(),
     }
     uploads.value = [...uploads.value, entry]
-    const update = (patch: Partial<Upload>) => { uploads.value = uploads.value.map(u => u.key === entry.key ? { ...u, ...patch } : u) }
+    const pending = () => here() && uploads.value.some(u => u.key === entry.key)
+    const update = (patch: Partial<Upload>) => { if (pending()) uploads.value = uploads.value.map(u => u.key === entry.key ? { ...u, ...patch } : u) }
     return uploadAttachment(id, file, { onProgress: progress => update({ progress }), signal: entry.controller.signal })
       .then(created => {
-        if (nodeId.value === id) items.value = [...items.value.filter(item => item.id !== created.id), created].sort(byPosition)
+        const accepted = pending()
+        if (accepted) items.value = [...items.value.filter(item => item.id !== created.id), created].sort(byPosition)
         finish(entry.key)
-        return created
+        return accepted ? created : null
       })
       .catch(e => {
         if (e instanceof DOMException && e.name === 'AbortError') { finish(entry.key); return null }
@@ -64,6 +85,9 @@ export function useAttachments(nodeId: Ref<string | null>) {
     if (entry?.preview) URL.revokeObjectURL(entry.preview)
     uploads.value = uploads.value.filter(u => u.key !== key)
   }
+  // All exits take the same path. Removing the entry before a late completion
+  // means its URL is revoked once and its result cannot refill another record.
+  function clearUploads() { for (const entry of [...uploads.value]) cancel(entry.key) }
   function retry(key: string) {
     const entry = uploads.value.find(u => u.key === key)
     if (!entry) return
@@ -74,6 +98,7 @@ export function useAttachments(nodeId: Ref<string | null>) {
   async function add(files: File[]) { return Promise.all(files.map(upload)) }
 
   async function setCaption(item: Attachment, caption: string) {
+    if (pending.has(item.id)) return false
     if (caption === item.caption) return true
     const before = item.caption
     items.value = items.value.map(x => x.id === item.id ? { ...x, caption } : x)
@@ -90,6 +115,7 @@ export function useAttachments(nodeId: Ref<string | null>) {
   }
   // Move `id` to index `to` among the current items.
   async function reorder(id: string, to: number) {
+    if (pending.has(id)) return
     const from = items.value.findIndex(x => x.id === id)
     if (from === -1 || from === to) return
     const list = items.value.filter(x => x.id !== id)
@@ -109,36 +135,74 @@ export function useAttachments(nodeId: Ref<string | null>) {
   }
 
   function remove(item: Attachment) {
+    if (pending.has(item.id) || deleting.has(item.id)) return
     const node = nodeId.value
+    const removal = (removals.get(item.id) ?? 0) + 1
+    removals.set(item.id, removal)
+    const current = () => removals.get(item.id) === removal
+    const record = captureRecord(), toastOwner = captureToastOwner()
+    const here = () => current() && record(), owner = () => current() && toastOwner()
+    const restoration = { item, here, confirmedAt: null as number | null }
+    restoring.delete(item.id)
+    function rollback() {
+      if (restoring.get(item.id) !== restoration) return
+      restoring.delete(item.id)
+      if (here()) items.value = items.value.filter(x => x.id !== item.id)
+    }
     items.value = items.value.filter(x => x.id !== item.id)
-    const done = deleteAttachment(item.id).then(() => true, e => {
-      if (e instanceof APIError && e.status === 404) return true
+    let toastId = 0
+    const done = deleteAttachment(item.id).then(eventId => ({ eventId }), e => {
+      dismiss(toastId)
+      rollback()
+      if (!owner()) return null
+      if (e instanceof APIError && e.status === 404) return null
       toast(`${item.name} could not be deleted.`, { tone: 'error' })
-      if (nodeId.value === node) void load()
-      return false
-    }).finally(() => deleting.delete(item.id))
-    deleting.set(item.id, done)
-    const toastId = toast(`Deleted ${item.name}`, { timeout: UNDO_MS, action: { label: 'Undo', run: () => void undo(item, node, done, toastId) } })
-  }
-  // Undo puts the attachment back at once and undoes the removal on the server.
-  async function undo(item: Attachment, node: string | null, done: Promise<boolean>, toastId?: number) {
-    if (toastId !== undefined) dismiss(toastId)
-    const here = () => nodeId.value === node
-    if (here()) items.value = [...items.value.filter(x => x.id !== item.id), item].sort(byPosition)
-    try {
-      if (!(await done)) return
-      const event = node ? await findRemovalEvent(node, item.id) : null
-      if (event === null) throw new Error('no removal to undo')
-      const restored = await undoEvent(event)
-      if (here() && restored) items.value = items.value.map(x => x.id === item.id ? { ...x, ...restored } : x)
-    } catch {
-      toast(`${item.name} could not be restored.`, { tone: 'error' })
       if (here()) void load()
+      return null
+    }).finally(() => { if (deleting.get(item.id) === done) deleting.delete(item.id) })
+    deleting.set(item.id, done)
+    let undoStarted = false
+    toastId = toast(`Deleted ${item.name}`, { timeout: UNDO_MS, action: { label: 'Undo', run: () => {
+      if (undoStarted) return
+      undoStarted = true
+      void undo()
+    } } })
+    async function undo() {
+      dismiss(toastId)
+      if (!owner()) return
+      pending.add(item.id)
+      if (here()) {
+        restoring.set(item.id, restoration)
+        items.value = [...items.value.filter(x => x.id !== item.id), item].sort(byPosition)
+      }
+      try {
+        const deletion = await done
+        if (!deletion || !owner()) return
+        if (!deletion.eventId) throw new Error('The exact deletion receipt is unavailable. Reload to check the attachment.')
+        const restored = await undoEvent(deletion.eventId)
+        if (!owner()) return
+        if (!restored || restored.id !== item.id || restored.node_id !== node) throw new Error('The restored attachment could not be confirmed.')
+        if (here()) {
+          restoration.item = restored
+          restoration.confirmedAt = ++generation
+          loading.value = false
+          items.value = [...items.value.filter(x => x.id !== item.id), restored].sort(byPosition)
+        }
+      } catch (e) {
+        if (!owner()) return
+        console.error('Attachment Undo failed', e)
+        rollback()
+        toast(`${item.name} could not be restored.`, { tone: 'error' })
+        if (here()) void load()
+      } finally {
+        if (current()) pending.delete(item.id)
+        if (restoring.get(item.id) === restoration && restoration.confirmedAt === null) restoring.delete(item.id)
+      }
     }
   }
-  onBeforeUnmount(() => { for (const u of uploads.value) if (u.preview) URL.revokeObjectURL(u.preview) })
+  onScopeDispose(() => { active = false; recordEpoch++; generation++; clearUploads() })
 
   const count = computed(() => items.value.length + uploads.value.length)
   const images = computed(() => items.value.filter(item => item.content_type.startsWith('image/')))
-  return { items, uploads, loading, error, count, images, load, add, upload, retry, cancel, setCaption, reorder, remove }
+  return { items, uploads, loading, error, count, images, pending, load, add, upload, retry, cancel, setCaption, reorder, remove }
 }

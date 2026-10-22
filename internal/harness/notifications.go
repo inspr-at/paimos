@@ -39,7 +39,7 @@ func (m *Module) notifications(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 	// Authorize before joining the shared LISTEN connection, then authorize
 	// again after subscribing. The initial wake closes the replay/listen gap.
-	if _, err := m.notificationHint(r, p, 0); err != nil {
+	if _, _, err := m.notificationHint(r, p, nil); err != nil {
 		workorders.WriteError(w, err)
 		return
 	}
@@ -49,7 +49,8 @@ func (m *Module) notifications(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
-	if _, err := m.notificationHint(r, p, 0); err != nil {
+	after, _, err := m.notificationHint(r, p, nil)
+	if err != nil {
 		workorders.WriteError(w, err)
 		return
 	}
@@ -70,32 +71,66 @@ func (m *Module) notifications(w http.ResponseWriter, r *http.Request) {
 	if err := send("harness.wake"); err != nil {
 		return
 	}
-	nextBeat := time.Now().Add(15 * time.Second)
-	for r.Context().Err() == nil {
+	stream := harnessNotificationStream{
+		tenantID: p.TenantID,
+		after:    after,
+		now:      time.Now,
+		check: func(after int64) (int64, bool, error) {
+			return m.notificationHint(r, p, &after)
+		},
+		send: send,
+	}
+	stream.run(r.Context(), conn)
+}
+
+// The position comes only from an authorized durable read. Queued notifications
+// through it are redundant, even if their payloads are repeated or forged.
+// The injected clock lets tests establish a due heartbeat during a backlog.
+type harnessNotificationStream struct {
+	tenantID string
+	after    int64
+	now      func() time.Time
+	check    func(int64) (int64, bool, error)
+	send     func(string) error
+}
+
+func (s *harnessNotificationStream) refresh(force bool) error {
+	through, relevant, err := s.check(s.after)
+	if err != nil {
+		return err
+	}
+	s.after = through
+	if relevant || force {
+		return s.send("harness.wake")
+	}
+	return nil
+}
+
+func (s *harnessNotificationStream) run(ctx context.Context, conn db.NotificationListener) {
+	nextBeat := s.now().Add(15 * time.Second)
+	for ctx.Err() == nil {
 		// A busy tenant cannot postpone authority checks or the keepalive.
-		if !time.Now().Before(nextBeat) {
-			if _, err := m.notificationHint(r, p, 0); err != nil {
+		if !s.now().Before(nextBeat) {
+			// Reconcile from durable state even if its notification was missed.
+			if err := s.refresh(false); err != nil {
 				return
 			}
-			if err := send("stream.ping"); err != nil {
+			if err := s.send("stream.ping"); err != nil {
 				return
 			}
-			nextBeat = time.Now().Add(15 * time.Second)
+			nextBeat = s.now().Add(15 * time.Second)
 		}
-		waitCtx, cancel := context.WithDeadline(r.Context(), nextBeat)
+		waitCtx, cancel := context.WithDeadline(ctx, nextBeat)
 		notice, err := conn.WaitForNotification(waitCtx)
 		cancel()
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) && r.Context().Err() == nil {
+			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 				continue
 			}
 			return
 		}
 		if db.IsResync(notice) {
-			if _, err := m.notificationHint(r, p, 0); err != nil {
-				return
-			}
-			if send("harness.wake") != nil {
+			if err := s.refresh(true); err != nil {
 				return
 			}
 			continue
@@ -104,27 +139,28 @@ func (m *Module) notifications(w http.ResponseWriter, r *http.Request) {
 			TenantID string `json:"tenant_id"`
 			ID       int64  `json:"id"`
 		}
-		if json.Unmarshal([]byte(notice.Payload), &hint) != nil || hint.TenantID != p.TenantID || hint.ID <= 0 {
+		if json.Unmarshal([]byte(notice.Payload), &hint) != nil || hint.TenantID != s.tenantID || hint.ID <= s.after {
 			continue
 		}
-		relevant, err := m.notificationHint(r, p, hint.ID)
-		if err != nil {
+		if err := s.refresh(false); err != nil {
 			return
-		}
-		if relevant {
-			if err := send("harness.wake"); err != nil {
-				return
-			}
 		}
 	}
 }
 
-func (m *Module) notificationHint(r *http.Request, p tenant.Principal, eventID int64) (bool, error) {
+func (m *Module) notificationHint(r *http.Request, p tenant.Principal, after *int64) (int64, bool, error) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
+	through := int64(0)
 	relevant := false
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		// Bound the batch BEFORE checking authority. A revocation can commit
+		// after those checks; its newer events must wait for a fresh check,
+		// rather than enter this batch through a later statement snapshot.
+		if err := tx.QueryRow(ctx, `SELECT coalesce((SELECT last_id FROM event_counters WHERE tenant_id=$1),0)`, p.TenantID).Scan(&through); err != nil {
+			return err
+		}
 		// Revalidate the exact bearer, not just the principal cached at connection.
 		if _, err := workorders.CurrentKeyPrincipal(r, tx, p, "harness.worker"); err != nil {
 			return err
@@ -145,22 +181,24 @@ func (m *Module) notificationHint(r *http.Request, p tenant.Principal, eventID i
 		if err := proof(s, r, p); err != nil {
 			return err
 		}
-		if s.Management != "managed" {
-			return workorders.Fail(409, "managed worker required")
+		if s.Management != "managed" && !has(s, "attached_reconnect_v1") {
+			return workorders.Fail(409, "managed worker or paired attached hook required")
 		}
-		if eventID == 0 {
+		if after == nil || *after == through {
 			return nil
 		}
+		// The payload only wakes this read: it cannot advance the position,
+		// select a session, or stand in for the current bearer/proof checks.
 		// Principal inbox events can be hidden from project event readers. Read
 		// only this worker's recipient rows, just as drain does, by the committed
 		// sent-event ID; never broaden its event-history or inbox permissions.
 		return tx.QueryRow(ctx, `SELECT
-   EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=$1 AND e.id=$2
+   EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=$1 AND e.id>$2 AND e.id<=$3
     AND e.type IN ('harness.control_requested','harness.pause_requested','harness.pause_interrupt_requested','harness.pause_stop_requested','harness.pause_level_changed','harness.resume_requested','harness.tier_requested')
-    AND e.node_id=$3::uuid AND (e.after->>'session_id'=$4 OR e.after->>'id'=$4 OR e.after->'session'->>'id'=$4))
-   OR EXISTS(SELECT 1 FROM inbox_messages m WHERE m.tenant_id=$1 AND m.sent_event_id=$2
-    AND m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.recipient_principal_id=$5::uuid
-    AND (m.recipient_session_id IS NULL OR m.recipient_session_id=$4::uuid))`, p.TenantID, eventID, s.ProjectID, s.ID, s.AgentPrincipalID).Scan(&relevant)
+    AND e.node_id=$4::uuid AND (e.after->>'session_id'=$5 OR e.after->>'id'=$5 OR e.after->'session'->>'id'=$5))
+   OR EXISTS(SELECT 1 FROM inbox_messages m WHERE m.tenant_id=$1 AND m.sent_event_id>$2 AND m.sent_event_id<=$3
+    AND m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.recipient_principal_id=$6::uuid
+    AND ((m.recipient_session_id IS NULL AND $7) OR m.recipient_session_id=$5::uuid))`, p.TenantID, *after, through, s.ProjectID, s.ID, s.AgentPrincipalID, s.Management == "managed").Scan(&relevant)
 	})
-	return relevant, err
+	return through, relevant, err
 }

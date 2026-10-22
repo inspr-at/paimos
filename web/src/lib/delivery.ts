@@ -19,7 +19,10 @@ async function request<T>(path: string, method: string, signal?: AbortSignal, re
 }
 export const readDelivery = (nodeId: string, signal?: AbortSignal, after?: string) => request<DeliveryPage>(`/nodes/${encodeURIComponent(nodeId)}/delivery?limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}`, 'GET', signal)
 export const liftDeliveryHold = (item: DeliveryItem, signal?: AbortSignal) => request<DeliveryItem>(`/delivery/${encodeURIComponent(item.id)}/hold`, 'DELETE', signal, item.updated_at)
-export const deliveryLanguage = (locale?: string | null): DeliveryLanguage => displayLanguage(locale)
+export function deliveryLanguage(locale?: string | null): DeliveryLanguage {
+  void locale
+  return displayLanguage()
+}
 export function stepIndex(state: DeliveryState, heldFrom?: DeliveryState | null): number {
   if (state === 'held') return heldFrom && heldFrom !== 'held' ? stepIndex(heldFrom) : -1
   return state === 'queue_failed' ? 4 : deliverySteps.indexOf(state as typeof deliverySteps[number])

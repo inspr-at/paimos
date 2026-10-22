@@ -60,16 +60,25 @@ func testRoutineUnresolvedRunPersonAuditsAt(t *testing.T, clock time.Duration) {
 	if !routine.CreatedAt.Equal(now) {
 		t.Fatalf("routine clock = %s, want %s", routine.CreatedAt, now)
 	}
+	// The scheduler must reach admission even before today's 09:00 occurrence.
+	// Derive both the schedule and its overdue cursor from the database clock.
+	due, err := recurrences.Preview(routine.Trigger, now.UTC().AddDate(0, 0, -3), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !due[0].Before(now.UTC().Truncate(24 * time.Hour)) {
+		t.Fatalf("fixture has no occurrence before today's UTC midnight: %s", due[0])
+	}
 	var failure map[string]any
 	f.call(t, f.person, "POST", "/api/recurrences/"+routine.ID+"/run-now", map[string]string{"idempotency_key": "unresolved"}, 409, &failure)
 	if failure["code"] != "run_person_unresolved" {
 		t.Fatalf("manual refused for wrong reason: %v", failure)
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE recurrences SET next_at=$2 WHERE id=$1`, routine.ID, now.AddDate(0, 0, -2))
+		_, err := tx.Exec(t.Context(), `UPDATE recurrences SET next_at=$2 WHERE id=$1`, routine.ID, due[0])
 		return err
 	})
-	err := m.RunTenant(t.Context(), f.person.TenantID)
+	err = m.RunTenant(t.Context(), f.person.TenantID)
 	var refusal *workqueue.PersonAdmissionError
 	if !errors.As(err, &refusal) || refusal.Code != "run_person_unresolved" {
 		t.Fatalf("scheduler refused for wrong reason: %v", err)

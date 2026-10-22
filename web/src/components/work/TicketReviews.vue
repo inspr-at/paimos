@@ -4,8 +4,14 @@ import AppIcon from '../AppIcon.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { can, onAccessRevalidate } from '../../lib/authz'
 import { familyName, listReviews, requestReview, reviewLabel, reviewSkips, reviewUsage, type ReviewFamily, type ReviewRequest, type TicketReview } from '../../lib/reviews'
+import { createSharedRequests } from '../../lib/sharedRequests'
+import { eventNode } from '../../lib/agentProjection'
+import { scopeOwner } from '../../lib/identityScope'
+import { useSession } from '../../stores/session'
+import { APIError } from '../../lib/api'
 
 const props = defineProps<{ nodeId: string; projectId: string }>()
+const session = useSession()
 const reviews = ref<TicketReview[]>([])
 const error = ref('')
 const sending = ref(false)
@@ -23,6 +29,8 @@ const valid = computed(() => /^[\w.-]+\/[\w.-]+$/.test(repository.value) && /^(?
   && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(head.value) && base.value !== head.value && (authorFamily.value || authorRun.value)
   && (!pullRequest.value || /^[1-9][0-9]*$/.test(pullRequest.value)))
 let generation = 0
+let readVersion = 0
+let needsRead = true
 let disposed = false
 let abort: AbortController | undefined
 let submitAbort: AbortController | undefined
@@ -31,32 +39,42 @@ let submittedBody: ReviewRequest | undefined
 async function load() {
   if (!read.value || disposed || sending.value) return
   const id = props.nodeId
-  const turn = ++generation
+  const turn = ++readVersion
+  needsRead = false
   abort?.abort()
   const currentAbort = new AbortController()
   abort = currentAbort
   try {
     const next = await listReviews(id, currentAbort.signal)
-    if (turn === generation && id === props.nodeId && !disposed) { reviews.value = next; error.value = '' }
+    if (turn === readVersion && id === props.nodeId && !disposed) { reviews.value = next; error.value = '' }
   } catch (cause) {
-    if (turn === generation && !disposed && !currentAbort.signal.aborted) error.value = cause instanceof Error ? cause.message : 'Reviews could not be loaded.'
+    if (turn === readVersion && !disposed && !currentAbort.signal.aborted) { needsRead = true; if (cause instanceof APIError && [401, 403, 404].includes(cause.status)) reviews.value = []; error.value = cause instanceof Error ? cause.message : 'Reviews could not be loaded.' }
   }
 }
 function reset() {
-  generation++; abort?.abort(); submitAbort?.abort(); reviews.value = []; error.value = ''; sending.value = false
+  generation++; readVersion++; abort?.abort(); submitAbort?.abort(); reviews.value = []; error.value = ''; sending.value = false
   formOpen.value = false; repository.value = ''; base.value = ''; head.value = ''; authorFamily.value = ''; authorRun.value = ''; pullRequest.value = ''
   requestId.value = crypto.randomUUID(); submittedBody = undefined
 }
-watch(() => [props.nodeId, read.value], () => { reset(); void load() }, { immediate: true })
-const poll = setInterval(() => { if (reviews.value.some(r => ['queued', 'starting', 'running', 'waiting'].includes(r.status))) void load() }, 15_000)
+const polling = createSharedRequests(() => {
+  if (needsRead || reviews.value.some(r => ['queued', 'starting', 'running', 'waiting'].includes(r.status))) return load()
+}, {
+  events: ['work_order.created', 'work_order.updated', 'review.result_recorded'],
+  // Work-order events name the order rather than its ticket. The result event
+  // names the ticket; both are hints and are answered through the ticket API.
+  relevant: (_key, type, data) => type !== 'review.result_recorded' || !eventNode(data) || eventNode(data) === props.nodeId,
+  period: 15_000, enabled: () => read.value,
+  invalidate: () => { readVersion++; abort?.abort(); needsRead = true },
+})
+watch(() => [props.nodeId, props.projectId, scopeOwner(session.identity), read.value], (_value, _before, cleanup) => { reset(); needsRead = true; cleanup(polling.watch(`${props.projectId}/${props.nodeId}`)) }, { immediate: true, flush: 'sync' })
 const stopAccess = onAccessRevalidate({ reset, refresh: () => { void load() } })
-onBeforeUnmount(() => { disposed = true; generation++; abort?.abort(); submitAbort?.abort(); clearInterval(poll); stopAccess() })
+onBeforeUnmount(() => { disposed = true; generation++; polling.stop(); abort?.abort(); submitAbort?.abort(); stopAccess() })
 
 async function submit() {
   if (!valid.value || !write.value || sending.value) return
   const id = props.nodeId
   const turn = ++generation
-  abort?.abort()
+  readVersion++; abort?.abort()
   sending.value = true; error.value = ''
   submitAbort = new AbortController()
   const body: ReviewRequest = { request_id: requestId.value, repository: repository.value.trim(), base_sha: base.value, head_sha: head.value,

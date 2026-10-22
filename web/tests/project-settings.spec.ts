@@ -66,6 +66,44 @@ async function navigate(page: Page, path: string) {
   await page.evaluate(path => (document.querySelector('#app') as unknown as { __vue_app__: { config: { globalProperties: { $router: { push(path: string): Promise<void> } } } } }).__vue_app__.config.globalProperties.$router.push(path), path)
 }
 
+test('AEON-1639: project settings resolve literal hash IDs only inside their own root', async ({ page }, testInfo) => {
+  // Risk: selector syntax in an untrusted bookmark throws or focuses another view.
+  const world = await setup(page)
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto('/p/PHAROS/settings')
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    const name = page.getByLabel('Name', { exact: true }), description = page.getByLabel('Description', { exact: true })
+    await expect(name).toBeEnabled()
+    const sections = width <= 1000 ? page.getByRole('button', { name: /^Section:/ }) : page.getByRole('navigation', { name: 'Project settings sections' })
+    const guard = await controlStability(page, { name, description, sections })
+    for (const id of ['quoted"id', 'brackets[]', 'selector"], input, [id="f-desc']) {
+      await name.evaluate((el, id) => { el.id = id; el.setAttribute('aria-label', 'Name') }, id)
+      await description.focus()
+      await guard.check(async () => {
+        await navigate(page, `/p/PHAROS/settings#${encodeURIComponent(id)}`)
+        await expect(name).toBeFocused()
+      })
+    }
+    await page.evaluate(() => {
+      const outside = document.createElement('input')
+      outside.id = 'outside-settings'; outside.setAttribute('aria-label', 'Outside settings')
+      outside.style.cssText = 'position:fixed;top:0;left:0'
+      document.body.append(outside)
+    })
+    await description.focus()
+    await guard.check(async () => {
+      await navigate(page, '/p/PHAROS/settings#outside-settings')
+      await expect(description).toBeFocused()
+      await expect(page.getByLabel('Outside settings')).not.toBeFocused()
+    })
+    guard.done()
+    await page.getByLabel('Outside settings').evaluate(el => el.remove())
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1639/settings-hash-${width}-${theme}.png`), fullPage: true })
+  }
+  expect(world.errors).toEqual([])
+})
+
 test('AEON-1233 FIX2: unavailable project deletion cannot write or report removal', async ({ page }) => {
   // Risk: false completion of a destructive action leaves the project readable.
   const world = await setup(page), before = structuredClone(world.nodes.get('p-pharos')!)

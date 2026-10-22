@@ -17,7 +17,7 @@ import (
 // Use the canonical person and live role bindings, never legacy roles or a
 // client-supplied owner. A key creator is recorded at registration time.
 func ownsMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) (bool, error) {
-	if p.Kind != tenant.Person {
+	if p.Kind != tenant.Person || s.lineageParentID != nil {
 		return false, nil
 	}
 	if err := authz.RequireTx(ctx, tx, p, "harness.write", authz.Scope{ProjectID: s.ProjectID}); err != nil {
