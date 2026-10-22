@@ -11,7 +11,9 @@ import { groupsWorld, mockProjectGroups } from '../project-groups-fixtures'
 // not make a reference depict an accidental outage; unknown paths still fail.
 export async function visualChrome(page: Page, data: Fixtures, now: number, options: { agents?: boolean } = {}) {
   await mockSettings(page, settingsData())
-  await mockBusiness(page, businessData({ enabled: ['business_costs', 'business_crm', 'business_quotes', 'business_hours'] }))
+  await mockBusiness(page, businessData({ enabled: ['business_costs', 'business_crm', 'business_quotes', 'business_hours'] }), {
+    grant: ['account.read', 'account.manage', 'account.use.manage', 'questions.read', 'questions.decide', 'approvals.read', 'approvals.revoke'],
+  })
   await mockReleases(page, releaseHistory(now))
   await mockProjectGroups(page, data, groupsWorld())
   if (options.agents !== false) await mockAgents(page, agentData({ me: me.id, now, empty: true,

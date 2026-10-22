@@ -187,6 +187,8 @@ export const agentRules: VisualSetup = async (page, _profile, theme) => {
   await work(page, theme)
   await mockSettings(page, settingsData())
   await mockRulesScale(page, { state: 'empty' })
+  await page.route('**/api/rules/doctrine/inbox/summary', route => route.fulfill({ json: { pending: 0 } }))
+  await page.route('**/api/rules/doctrine', route => route.fulfill({ json: { revision: 0, sources: [] } }))
   await page.goto('/settings/agent-rules')
   await page.getByRole('button', { name: 'Import rules' }).click()
   await page.locator('#draft-import-file').setInputFiles(scaleImportFile())
@@ -228,8 +230,11 @@ export const ticketWorkspace: VisualSetup = async (page, _profile, theme) => {
   await page.goto('/p/PHAROS/PHAROS-11')
   const ticket = page.getByRole('complementary', { name: 'Ticket details' })
   await expect(ticket.locator('.attachments')).toBeVisible()
-  await ticket.getByRole('checkbox').first().focus()
-  await expect(ticket.getByRole('checkbox').first()).toBeFocused()
+  const check = ticket.getByRole('checkbox').first()
+  await expect(check, 'Tick fixture prerequisite: focusable checklist in the ticket workspace').toBeEnabled()
+  await check.focus()
+  await expect(check).toBeFocused()
+  await expect(ticket.locator('.ws-composer')).toBeVisible()
 }
 
 // A real revision-checked cell save exposes Undo while other cells remain mixed.
