@@ -1847,6 +1847,15 @@
         "transportCommit": "7e3daea1f",
         "command": "node --experimental-strip-types --test tests/test-prune-ledger.test.ts",
         "result": "passed remotely through LEAD remote-spec.sh; protected lineage, missing-mapping counterexamples, P01 snapshot and visual approval checks remain enforced."
+      },
+      "handoff": {
+        "mergedMain": "2c9707daf5cee89594a355333529c72751abf369",
+        "static": {
+          "entryPoint": "LEAD ci-static-remote.sh",
+          "exit": 3,
+          "reason": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job"
+        },
+        "remainingWork": "P05 is incomplete: the 22 retained browser journeys, remaining runtime transfer gaps, original-case destination remapping, browser cuts and before/after runner measurement still need completion after the P01 cut prerequisites are fulfilled. Existing browser tests and protected historical obligations are unchanged."
       }
     }
   }
