@@ -312,7 +312,11 @@ can fire; unavailable/deleted source nodes are withheld.
 The definition owner needs read permission in every source project (and
 `knowledge.read` for knowledge). The scheduler rechecks the owner's current
 permissions and event-reference visibility under the tenant/tree fence before
-writing a ticket. Invisible source events advance the cursor without copying
+writing a ticket. Agent owners and external senders need an explicit live
+`recurrences.manage` role grant for background event processing. Full-access
+keys can create definitions or submit events using writable-project authority,
+but that derived permission does not carry into the keyless scheduler.
+Invisible source events advance the cursor without copying
 content; revoked authority reports a failed attempt and retains its cursor for
 retry. New trigger kinds consume source events in order, within the existing
 50-claim tenant pass. A source event has one durable occurrence key, including

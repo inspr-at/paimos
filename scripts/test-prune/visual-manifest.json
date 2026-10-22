@@ -1,0 +1,1084 @@
+{
+  "version": 1,
+  "ticket": "AEON-1673",
+  "source": "AEON-1668 section 8 and Tick addendum (2026-10-22)",
+  "approval": {
+    "reviewer": "Tick",
+    "status": "pending",
+    "approvedAt": null,
+    "evidence": null
+  },
+  "baselineAuthority": {
+    "status": "pending-review",
+    "source": {
+      "kind": "existing-ppm-ticket-attachment",
+      "ticket": "AEON-1670",
+      "instance": "PPM / INSPR",
+      "attachmentId": null,
+      "sha256": null
+    },
+    "retention": {
+      "policy": "Keep the approved reference attachment for the lifetime of this visual set; do not rely on expiring CI captures. Removal or loss requires a newly reviewed reference.",
+      "availability": "P02 must verify download through the existing authorized PPM attachment path, then CI materializes the pinned bytes and verifies SHA-256 before comparison. No new credentials.",
+      "verifiedAt": null
+    },
+    "onMissing": "fail",
+    "onExpired": "fail",
+    "onDigestMismatch": "fail",
+    "automaticRewrite": false,
+    "currentRunMayBeReference": false
+  },
+  "profiles": {
+    "phone": {
+      "width": 390,
+      "height": 844
+    },
+    "tablet": {
+      "width": 1024,
+      "height": 768
+    },
+    "desktop": {
+      "width": 1440,
+      "height": 900
+    }
+  },
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "requirements": {
+    "actualImageComparison": true,
+    "axe": true,
+    "rejectClipping": true,
+    "rejectOverlap": true,
+    "rejectConsoleFailures": true,
+    "waitForFonts": true,
+    "explicitApplicationReadiness": true,
+    "frozenFixtureClockAndData": true,
+    "reducedMotion": true,
+    "maskAssessedContent": false,
+    "fullPageTour": false,
+    "controlStabilityTolerancePx": 0.5,
+    "separateInteractionProof": true,
+    "captures": "testInfo.outputPath()",
+    "captureStorage": "Existing CI artifacts; PNGs are never committed."
+  },
+  "states": [
+    {
+      "id": "projects",
+      "label": "Projects",
+      "owner": "tests/visual/projects.spec.ts",
+      "fixture": "Long project names; live worker faces; one useful empty/error cue",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-projects-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-projects-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-projects-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-projects-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "tickets",
+      "label": "Tickets / grouped list",
+      "owner": "tests/visual/tickets.spec.ts",
+      "fixture": "Long keys and parent names; visible filters; scoped figures",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-tickets-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-tickets-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-tickets-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-tickets-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "goals",
+      "label": "Goals",
+      "owner": "tests/visual/goals.spec.ts",
+      "fixture": "Long title and key; desktop Expert and phone Simple with profile-specific fixtures",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-goals-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-goals-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-goals-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-goals-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ],
+      "fixturesByProfile": {
+        "phone": "Simple; 56 px rows; candy bar frozen by reduced motion",
+        "desktop": "Expert; one goal expanded; pace badges; a late Lands with \"at this pace\"; numbered steps with stage tracks; waits marker"
+      }
+    },
+    {
+      "id": "agents",
+      "label": "Agents",
+      "owner": "tests/visual/agents.spec.ts",
+      "fixture": "Deep live/stopped tree, Needs you and long host/account labels",
+      "profiles": [
+        "phone",
+        "tablet",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-agents-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-agents-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-agents-1024-light",
+          "profile": "tablet",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-agents-1024-dark",
+          "profile": "tablet",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-agents-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-agents-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "session-chat",
+      "label": "Session Chat",
+      "owner": "tests/visual/session-chat.spec.ts",
+      "fixture": "Long post/code/link, receipt and composer in the open panel",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-session-chat-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-session-chat-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-session-chat-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-session-chat-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "decision-desk",
+      "label": "Decision Desk memo",
+      "owner": "tests/visual/decision-desk.spec.ts",
+      "fixture": "Long request/context, explicit choices, disabled reason and fixed actions",
+      "profiles": [
+        "phone",
+        "tablet",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-decision-desk-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-decision-desk-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-decision-desk-1024-light",
+          "profile": "tablet",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-decision-desk-1024-dark",
+          "profile": "tablet",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-decision-desk-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-decision-desk-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "account-use-matrix",
+      "label": "Settings · Account use matrix",
+      "owner": "tests/visual/account-use-matrix.spec.ts",
+      "fixture": "Long account/context names, partial selection and visible Undo",
+      "profiles": [
+        "phone",
+        "tablet",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-account-use-matrix-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-account-use-matrix-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-account-use-matrix-1024-light",
+          "profile": "tablet",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-account-use-matrix-1024-dark",
+          "profile": "tablet",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-account-use-matrix-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-account-use-matrix-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "models",
+      "label": "Models",
+      "owner": "tests/visual/models.spec.ts",
+      "fixture": "A locked selection with registry/situation disclosure and long names",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-models-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-models-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-models-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-models-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "access",
+      "label": "Access · role/scopes picker",
+      "owner": "tests/visual/access.spec.ts",
+      "fixture": "Long role descriptions, bounded choices and authority explanation",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-access-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-access-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-access-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-access-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "knowledge",
+      "label": "Knowledge",
+      "owner": "tests/visual/knowledge.spec.ts",
+      "fixture": "Docked long entry with headings/table; phone full-page equivalent",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-knowledge-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-knowledge-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-knowledge-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-knowledge-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "delivery-numbers",
+      "label": "Delivery · Numbers",
+      "owner": "tests/visual/delivery-numbers.spec.ts",
+      "fixture": "Representative counts/chart plus honest partial-data label",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-delivery-numbers-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-delivery-numbers-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-delivery-numbers-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-delivery-numbers-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "hours",
+      "label": "Business · Hours",
+      "owner": "tests/visual/hours.spec.ts",
+      "fixture": "Week/period entries, correction control and approval state",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-hours-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-hours-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-hours-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-hours-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "quote-editor",
+      "label": "Quote editor / inspector",
+      "owner": "tests/visual/quote-editor.spec.ts",
+      "fixture": "Long marked prose, native editor and selected inspector controls",
+      "profiles": [
+        "phone",
+        "tablet",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-quote-editor-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-quote-editor-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-quote-editor-1024-light",
+          "profile": "tablet",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-quote-editor-1024-dark",
+          "profile": "tablet",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-quote-editor-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-quote-editor-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "public-quote",
+      "label": "Public quote",
+      "owner": "tests/visual/public-quote.spec.ts",
+      "fixture": "Representative issued document and explicit acceptance controls",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-public-quote-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-public-quote-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-public-quote-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-public-quote-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "start-agent",
+      "label": "Start agent / Run once",
+      "owner": "tests/visual/start-agent.spec.ts",
+      "fixture": "Run once mode; task filled; \"Create a ticket in a project\"; read-only; folded \"Runs on …\" row with a capacity warning",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-start-agent-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-start-agent-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-start-agent-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-start-agent-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "agent-rules",
+      "label": "Agent rules / import review",
+      "owner": "tests/visual/agent-rules.spec.ts",
+      "fixture": "Long explanation/diff with explicit draft/publish distinction",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-agent-rules-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-agent-rules-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-agent-rules-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-agent-rules-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "capacity",
+      "label": "Capacity & load",
+      "owner": "tests/visual/capacity.spec.ts",
+      "fixture": "Quota/pace rows with stale or partial evidence and an open editor",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-capacity-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-capacity-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-capacity-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-capacity-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "ticket-workspace",
+      "label": "Ticket workspace",
+      "owner": "tests/visual/ticket-workspace.spec.ts",
+      "fixture": "Long title and key; properties panel; attachment strip with one preview; checklist with the focus ring; chat dock open",
+      "profiles": [
+        "phone",
+        "desktop"
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "checkpoints": [
+        {
+          "id": "V-ticket-workspace-390-light",
+          "profile": "phone",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-ticket-workspace-390-dark",
+          "profile": "phone",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-ticket-workspace-1440-light",
+          "profile": "desktop",
+          "theme": "light",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        },
+        {
+          "id": "V-ticket-workspace-1440-dark",
+          "profile": "desktop",
+          "theme": "dark",
+          "reference": {
+            "attachmentMember": null,
+            "sha256": null
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -336,8 +336,8 @@ func readGrants(ctx context.Context, tx pgx.Tx, p tenant.Principal) (grants, err
 		perms := []string{}
 		if builtin {
 			perms = builtinPermissions(key)
-			// Recurrence automation is an explicit agent grant, even for an
-			// agent bound to Owner/Admin. A custom role and key scope are required.
+			// Scoped keys need explicit grants for excluded permissions.
+			// Full-access recurrence grants are derived from live writes below.
 			if p.Kind == tenant.Agent {
 				filtered := make([]string, 0, len(perms))
 				for _, permission := range perms {
@@ -372,7 +372,25 @@ func readGrants(ctx context.Context, tx pgx.Tx, p tenant.Principal) (grants, err
 			}
 		}
 	}
-	return g, rows.Err()
+	if err := rows.Err(); err != nil {
+		return g, err
+	}
+	// Full-access keys may schedule work wherever their role permits writing.
+	// Keyless background identities still need explicit recurrence grants.
+	// Derive this before creator/person intersections so every ceiling still
+	// applies, and keep workspace and project grants separate for list queries.
+	if p.Kind == tenant.Agent && p.FullAccess && p.KeyID != "" {
+		if contains(g.workspace, "nodes.write") {
+			g.workspace = append(g.workspace, "recurrences.manage")
+		}
+		for _, grant := range g.projects {
+			if contains(grant.Permissions, "nodes.write") {
+				grant.Permissions = append(grant.Permissions, "recurrences.manage")
+				g.anyProject = append(g.anyProject, "recurrences.manage")
+			}
+		}
+	}
+	return g, nil
 }
 
 // allows is permitEffective for one project (or the workspace, ""), on grants read once.
