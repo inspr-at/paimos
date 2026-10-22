@@ -151,7 +151,7 @@ type fakeRelayAPI struct {
 }
 
 func newFakeRelayAPI() *fakeRelayAPI {
-	return &fakeRelayAPI{binding: ChatRelayBinding{"conversation", "1"}, calls: make(chan string, 1024)}
+	return &fakeRelayAPI{binding: ChatRelayBinding{ConversationID: "conversation", BindingEpoch: "1"}, calls: make(chan string, 1024)}
 }
 
 func (f *fakeRelayAPI) note(call string) {
@@ -1031,7 +1031,7 @@ func TestChatRelayRebindingResetsInputCursor(t *testing.T) {
 		t.Fatalf("cursor %q", paged)
 	}
 	api.mu.Lock()
-	api.binding = ChatRelayBinding{"conversation", "2"}
+	api.binding = ChatRelayBinding{ConversationID: "conversation", BindingEpoch: "2"}
 	api.first, api.next, api.conflict = []ChatInput{chatInput("m2", "sent")}, nil, true
 	api.mu.Unlock()
 	ticks <- time.Time{}

@@ -388,6 +388,14 @@ components:
         reply_to:
           type: "string"
           format: "uuid"
+        delivery_level:
+          type: "string"
+          enum: ["simple", "steer"]
+          description: "Optional negotiated input timing. Omitted or simple waits until the active turn ends. Steer uses only the exact session's advertised native or next-step adapter; unavailable timing is refused, never converted to stop/restart. Part of the idempotent payload."
+        expected_session_id:
+          type: "string"
+          format: "uuid"
+          description: "Optional exact session selected on screen. A changed binding is refused. Send only after timing negotiation with this server."
     ChatWorkerFinal:
       type: "object"
       additionalProperties: false
@@ -453,3 +461,6 @@ components:
           type: "integer"
           minimum: 0
           maximum: 50
+        include_timing:
+          type: "boolean"
+          description: "Opt in to delivery_level in worker message projections. Send only when the current binding advertises input_timing; omitted for older strict servers and daemons."

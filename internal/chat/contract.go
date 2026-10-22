@@ -46,6 +46,7 @@ type Thread struct {
 	Revision     string    `json:"revision"`
 	BindingEpoch string    `json:"binding_epoch"`
 	Readiness    Readiness `json:"readiness"`
+	InputTiming  string    `json:"input_timing,omitempty"`
 }
 
 type WorkerBindingRequest struct {
@@ -64,4 +65,5 @@ type CurrentBinding struct {
 	Contract       string `json:"contract"`
 	ConversationID string `json:"conversation_id"`
 	BindingEpoch   string `json:"binding_epoch"`
+	InputTiming    string `json:"input_timing,omitempty"`
 }

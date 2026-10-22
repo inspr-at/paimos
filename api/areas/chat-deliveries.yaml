@@ -226,6 +226,7 @@ components:
         contract: {type: string, const: chat-live-v1}
         conversation_id: {type: string, format: uuid}
         binding_epoch: {$ref: '#/components/schemas/ChatPosition'}
+        input_timing: {type: string, enum: [native, next-step, queue], description: "Timing negotiation for a daemon advertising chat_timing_v1. Absent for older daemons; no new request field may be sent to a server that omits this marker."}
     ChatWorkerBindingRequest:
       type: object
       additionalProperties: false

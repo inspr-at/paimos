@@ -43,7 +43,7 @@ func TestManagedChatSessionUsesLeaseBoundCurrentBinding(t *testing.T) {
 	f.bind(t, f.alice, thread, first, "0")
 	w := f.current(first, firstLease)
 	got := decode[CurrentBinding](t, w)
-	if got != (CurrentBinding{"chat-live-v1", thread.ID, "1"}) {
+	if got != (CurrentBinding{Contract: "chat-live-v1", ConversationID: thread.ID, BindingEpoch: "1"}) {
 		t.Fatalf("current binding %+v", got)
 	}
 	for _, hidden := range []string{"private-", "lease", "session", "role", "person", "body"} {

@@ -3,7 +3,7 @@
 import { displayLanguage } from '../../lib/displayLanguage'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { APIError } from '../../lib/api'
-import { cancelSessionMessage, chatThreadForSession, chatThreadMessages, markChatSeen, messageStatuses, sendChatMessage, type MessageStatus, type ProjectMessage } from '../../lib/agents'
+import { cancelSessionMessage, chatThreadForSession, chatThreadMessages, markChatSeen, messageStatuses, sendChatMessage, type ChatInputTiming, type MessageStatus, type ProjectMessage } from '../../lib/agents'
 import { readSessionMarker, writeSessionMarker } from '../../lib/agentRows'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
@@ -60,6 +60,7 @@ const statuses = ref<Record<string, MessageStatus>>({})
 // in the project message list.
 const chatMessages = ref<ProjectMessage[]>([])
 let chatThread = ''
+const chatTiming = ref<ChatInputTiming | null>(null)
 // The bound thread's saved history has been read once. Before that a turn has
 // no baseline: an older saved reply arriving late must not end it.
 let chatBaseline = false
@@ -100,13 +101,12 @@ const ended = computed(() => s.value.phase === 'stopped' || !!s.value.stopped_at
 const steerAdvertised = computed(() => s.value.advertised_capabilities.includes('steer'))
 const steerOffered = computed(() => !!offeredSteer(capability.value, steerAdvertised.value, 'managed'))
 // The next send's transport decides what the slot offers. A reply to a
-// chat-native message goes to the chat outbox, consumed only between turns:
-// the slot then says so instead of offering a send mode nothing would honour.
+// chat-native message uses the exact bound session's negotiated relay timing.
 const transport = computed<SendTransport>(() => !editing.value && replyTo.value?.chat_thread ? 'chat' : 'managed')
-const steerMode = computed(() => offeredSteer(capability.value, steerAdvertised.value, transport.value))
+const steerMode = computed(() => offeredSteer(capability.value, steerAdvertised.value, transport.value, chatTiming.value))
 const canSteer = computed(() => working.value && !!steerMode.value)
 const alternative = computed(() => steerMode.value === 'next' ? words.value.next : words.value.now)
-const primaryLabel = computed(() => editing.value ? words.value.save : working.value && capability.value !== 'between' ? words.value.after : words.value.send)
+const primaryLabel = computed(() => editing.value ? words.value.save : working.value && (transport.value === 'chat' || capability.value !== 'between') ? words.value.after : words.value.send)
 const unmanaged = computed(() => s.value.management_mode === 'unmanaged')
 // The slot left of the primary action (AEON-1438): Send now, its transport note
 // or Stop and send. It is reserved for the whole session and shows only while a
@@ -723,7 +723,7 @@ const liveFrames = liveQueue(applyLiveFrames, { schedule: run => requestAnimatio
 function resetLive() {
   liveFrames.clear()
   if (stopTimer !== undefined) { clearTimeout(stopTimer); stopTimer = undefined }
-  liveDropped = undefined; liveTurn.value = null
+  liveDropped = undefined; liveTurn.value = null; chatTiming.value = null
 }
 // Saved replies come from the bound chat thread's newest page. A failed read
 // leaves the live block in place; the next hint or session read retries.
@@ -788,9 +788,10 @@ function startLive() {
       resetLive()
       if (loaded) { void refresh().then(refreshReceipts); refreshChat() }
     },
-    thread: id => {
+    thread: (id, timing) => {
       if (generation !== liveGeneration) return
       if (id !== chatThread) { leaveChatThread(id); chatBaseline = false }
+      chatTiming.value = timing ?? null
       refreshChat()
     },
     attached: () => {},
@@ -819,6 +820,7 @@ const composeBlock = computed(() => {
 const hookReceipt = computed(() => hookReceipts(boundHookIds.value, statuses.value))
 const showHookNotice = computed(() => unmanaged.value && hookNoticeVisible(awaitsInboxHook(s.value), hookReceipt.value))
 async function deliver(local: ProjectMessage) {
+  if (local.recipient_session_id !== s.value.id || local.sender_principal_id !== me.value) return
   const session = s.value, viewer = me.value, generation = readGeneration
   const stillHere = () => generation === readGeneration && session.id === s.value.id && viewer === me.value
   local.send_failed = false
@@ -827,7 +829,7 @@ async function deliver(local: ProjectMessage) {
       // A reply to a chat-native message stays in its chat thread; the project
       // message route would refuse the parent. The client ID keeps a retry idempotent.
       const thread = local.chat_thread
-      const result = await sendChatMessage(thread, { client_message_id: local.client_id ?? local.id, body: local.body, ...(local.reply_to ? { reply_to: local.reply_to } : {}) })
+      const result = await sendChatMessage(thread, { client_message_id: local.client_id ?? local.id, body: local.body, ...(local.reply_to ? { reply_to: local.reply_to } : {}), ...(local.chat_timing ? { delivery_level: local.delivery_level, expected_session_id: local.recipient_session_id! } : {}) })
       if (!stillHere()) return
       const sent = chatSent(result.message, viewer, session.agent_principal_id, session.id, thread, local.created_at ?? new Date().toISOString())
       if (thread === chatThread) chatMessages.value = [...chatMessages.value.filter(message => message.id !== sent.id), sent].sort((a, b) => a.sent_event_id - b.sent_event_id)
@@ -859,8 +861,8 @@ async function send(level: 'simple' | 'steer' = 'simple', source?: ProjectMessag
     id: clientId, client_id: clientId, optimistic: true, queue_pending: chat ? false : source?.queue_pending ?? (working.value || atPrompt.value), resend_of: chat ? undefined : source?.id, body, sender_principal_id: me.value,
     recipient_principal_id: s.value.agent_principal_id, recipient_session_id: s.value.id, to: recipient.value,
     sent_event_id: Number.MAX_SAFE_INTEGER, is_action_request: false, expects_reply: false,
-    delivery_level: chat ? 'simple' : level, reply_to: source ? source.reply_to : replyTo.value?.id, status: 'accepted', reply_obligation: 'none', created_at: new Date().toISOString(),
-    ...(chat ? { chat_thread: chat } : {}),
+    delivery_level: chat && !offeredSteer(capability.value, steerAdvertised.value, 'chat', chatTiming.value) ? 'simple' : level, reply_to: source ? source.reply_to : replyTo.value?.id, status: 'accepted', reply_obligation: 'none', created_at: new Date().toISOString(),
+    ...(chat ? { chat_thread: chat, ...(chatTiming.value ? { chat_timing: chatTiming.value } : {}) } : {}),
   }
   if (local.queue_pending) queuedIds.value = new Set([...queuedIds.value, local.id])
   localSends.value = [...localSends.value, local]

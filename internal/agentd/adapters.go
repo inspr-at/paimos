@@ -131,8 +131,10 @@ type codexShutdown struct {
 }
 
 type codexProcess struct {
-	chatPending      []pendingCodexChat // normalized, bounded and memory-only before turn acknowledgement
-	chatCandidate    pendingCodexChat   // the last completed agent message before acknowledgement
+	chatPending      []pendingCodexChat         // normalized, bounded and memory-only before turn acknowledgement
+	chatCandidate    pendingCodexChat           // the last completed agent message before acknowledgement
+	chatInputs       map[string]*codexChatInput // only IDs/digests and exact turn evidence
+	chatBoundary     chan struct{}
 	serviceTier      string
 	capacityParser   capacity.Parser
 	capacityModel    string
@@ -164,21 +166,72 @@ func (p *codexProcess) Wait() error {
 	return p.waitForTurn(func(ctx context.Context) error { p.readCapacity(ctx, "end"); return p.wireProcess.Stop(ctx) }, 3*time.Second)
 }
 func (p *codexProcess) Control(ctx context.Context, op, text string) error {
-	p.controlMu.Lock()
+	return p.controlChat(ctx, op, text, "")
+}
+
+func (p *codexProcess) ControlChat(ctx context.Context, op, text, inputID string) error {
+	return p.controlChat(ctx, op, text, inputID)
+}
+
+func (p *codexProcess) controlChat(ctx context.Context, op, text, inputID string) (resultErr error) {
+	var idle, ended bool
+	var thread, turn string
+	for {
+		p.controlMu.Lock()
+		p.eventMu.Lock()
+		idle = p.terminalSeen && p.acknowledged && p.terminal != nil && p.terminal.Clean && !p.invalid
+		ended = p.finishing || p.sealed || p.abandoned.Load() || p.invalid || (p.terminalSeen && (!p.persistent || !idle))
+		thread, turn = p.threadID, p.turnID
+		if inputID != "" && op == "inbox" && !idle && !ended {
+			if p.chatBoundary == nil {
+				p.chatBoundary = make(chan struct{})
+			}
+			boundary := p.chatBoundary
+			p.eventMu.Unlock()
+			p.controlMu.Unlock() // stop/interrupt retain access while ordinary input waits
+			select {
+			case <-boundary:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-p.readDone:
+				return ErrNotOwned
+			}
+		}
+		p.eventMu.Unlock()
+		break
+	}
 	defer p.controlMu.Unlock()
-	p.eventMu.Lock()
-	idle := p.terminalSeen && p.acknowledged && p.terminal != nil && p.terminal.Clean && !p.invalid
-	ended := p.finishing || p.sealed || p.abandoned.Load() || p.invalid || (p.terminalSeen && (!p.persistent || !idle))
-	thread, turn := p.threadID, p.turnID
-	p.eventMu.Unlock()
 	if ended {
 		return ErrNotOwned
 	}
 	if op == "tier" {
 		return p.changeTier(ctx, text)
 	}
+	if inputID != "" {
+		p.eventMu.Lock()
+		if len(p.chatInputs) >= chatRelayReceiptLimit {
+			p.eventMu.Unlock()
+			return ErrUnsupported
+		}
+		if p.chatInputs == nil {
+			p.chatInputs = map[string]*codexChatInput{}
+		}
+		p.chatInputs[inputID] = &codexChatInput{digest: sha256Hex([]byte(text))}
+		if !idle {
+			p.chatInputs[inputID].turn = turn
+		}
+		p.eventMu.Unlock()
+		defer func() {
+			if resultErr != nil {
+				p.eventMu.Lock()
+				delete(p.chatInputs, inputID)
+				p.eventMu.Unlock()
+			}
+		}()
+	}
 	inbox := op == "inbox"
-	if inbox {
+	if inbox || inputID != "" && op == "steer" && idle {
 		if p.persistent && idle {
 			return p.wakeTurn(ctx, text)
 		}
@@ -884,6 +937,14 @@ func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
 }
 
 func (p *claudeProcess) controlCorrelated(ctx context.Context, op, text, correlation string) error {
+	return p.controlInput(ctx, op, text, correlation, false)
+}
+
+func (p *claudeProcess) ControlChat(ctx context.Context, op, text, inputID string) error {
+	return p.controlInput(ctx, op, text, inputID, true)
+}
+
+func (p *claudeProcess) controlInput(ctx context.Context, op, text, correlation string, chat bool) error {
 	ctx, cancel := operationContext(ctx)
 	defer cancel()
 	if op != "steer" && op != "inbox" && op != "interrupt" && op != "stop" && op != "model" && op != "effort" && op != "tier" {
@@ -908,9 +969,12 @@ func (p *claudeProcess) controlCorrelated(ctx context.Context, op, text, correla
 		p.controlMu.Unlock()
 	}()
 	frame := map[string]any{"op": op, "correlation_id": correlation}
+	if chat {
+		frame["chat_input"] = true
+	}
 	if op == "inbox" {
-		frame["managed_policy"] = p.managedPolicy
-		frame["steer_enabled"] = p.steerEnabled
+		frame["managed_policy"] = p.managedPolicy || chat
+		frame["steer_enabled"] = p.steerEnabled && !chat
 	}
 	if isSetting(op) {
 		frame["value"] = text
@@ -1080,9 +1144,7 @@ func (a *ClaudeAdapter) startBridge(ctx context.Context, r StartRequest, observe
 		if json.Unmarshal(raw, &frame) != nil {
 			return
 		}
-		if native == nil {
-			p.observeChat(Claude, raw)
-		} else {
+		{
 			updates, known := normalizeChat(Claude, raw, "", "")
 			if !known {
 				p.chatDropped.Add(1)

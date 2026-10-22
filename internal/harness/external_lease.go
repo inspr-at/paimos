@@ -27,6 +27,10 @@ type ExternalRegistration struct {
 // harness supplies the normalized S1 chat stream. It grants no other control.
 const ChatCapability = "chat"
 
+// ChatTimingCapability qualifies the upgraded relay's exact-input timing path.
+// Generic steer/chat flags on an older daemon do not make this promise.
+const ChatTimingCapability = "chat_timing_v1"
+
 const registrationColumns = `SELECT id::text,project_id::text,agent_principal_id::text,owner_principal_id::text,role,harness,ref_digest,vendor_ref_digest FROM harness_sessions
  WHERE id=$1::uuid AND harness IN ('claude','codex','pi','cursor','grok') AND owner_principal_id IS NOT NULL
  AND stopped_at IS NULL AND archived_at IS NULL AND phase NOT IN ('stopping','stopped')

@@ -305,7 +305,25 @@ func (m *Module) sessionThread(r *http.Request, tx pgx.Tx, p tenant.Principal, _
 	if err = require(r.Context(), tx, p, "chat.read", project); err != nil {
 		return nil, err
 	}
-	return loadThread(r.Context(), tx, id)
+	out, err := loadThread(r.Context(), tx, id)
+	if err == nil && r.URL.Query().Get("include_timing") == "true" {
+		out.InputTiming, err = inputTimingTx(r.Context(), tx, session)
+	}
+	return out, err
+}
+
+// The explicit upgraded-relay capability qualifies the transport. A family
+// name or an older daemon's generic steer flag alone cannot offer chat steer.
+func inputTimingTx(ctx context.Context, tx pgx.Tx, session string) (string, error) {
+	var native bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE id=$1
+ AND stopped_at IS NULL AND archived_at IS NULL AND phase NOT IN ('stopping','stopped')
+ AND coalesce(heartbeat_at,created_at)>clock_timestamp()-interval '2 minutes'
+ AND harness IN ('claude','codex') AND capabilities @> ARRAY['chat','steer','chat_timing_v1']::text[])`, session).Scan(&native)
+	if native {
+		return "native", err
+	}
+	return "queue", err
 }
 
 func position(value string) (int64, error) {
@@ -462,7 +480,14 @@ func (m *Module) currentWorker(r *http.Request, tx pgx.Tx, p tenant.Principal, i
 	if _, err = AuthorizeWorkerTx(r.Context(), tx, r, p, WorkerBindingRequest{out.ConversationID, s.ID, out.BindingEpoch}); err != nil {
 		return nil, err
 	}
-	return out, nil
+	var timing bool
+	if err = tx.QueryRow(r.Context(), `SELECT capabilities @> ARRAY['chat_timing_v1']::text[] FROM harness_sessions WHERE id=$1`, s.ID).Scan(&timing); err != nil {
+		return nil, err
+	}
+	if timing {
+		out.InputTiming, err = inputTimingTx(r.Context(), tx, s.ID)
+	}
+	return out, err
 }
 
 // AuthorizeWorkerTx is the common boundary for subsequent history/claim

@@ -20,6 +20,7 @@ import (
 // stream with exact per-input turns (see relayChatHarness), and only while the
 // server accepts the relay (see chatRelayGate).
 const chatCapability = "chat"
+const chatTimingCapability = "chat_timing_v1"
 
 const (
 	chatRelayLiveLimit     = 64 // pending live frames; the oldest is dropped and counted
@@ -52,13 +53,15 @@ var (
 type ChatRelayBinding struct {
 	ConversationID string `json:"conversation_id"`
 	BindingEpoch   string `json:"binding_epoch"`
+	InputTiming    string `json:"input_timing,omitempty"`
 }
 
 // ChatInput is one final person input pinned to this session.
 type ChatInput struct {
 	Message struct {
-		ID   string `json:"message_id"`
-		Body string `json:"body"`
+		ID    string `json:"message_id"`
+		Body  string `json:"body"`
+		Level string `json:"delivery_level,omitempty"`
 	} `json:"message"`
 	Receipt struct {
 		State string `json:"state"`
@@ -80,7 +83,9 @@ type ChatRelayAPI interface {
 }
 
 type ChatRelayOptions struct {
-	RequireInputCorrelation bool // Native receipts must name the exact SDK-reacted input.
+	RequireInputCorrelation bool   // Native receipts must name the exact SDK-reacted input.
+	Steer                   string // native or next-step, qualified by the actual selected adapter
+	DeliverTimed            func(ctx context.Context, messageID, body, level string, writing func()) error
 	// Deliver writes one person input to the owned harness; nil disables input.
 	// It calls writing once the harness write begins, after any wait behind
 	// other input: turn markers before that belong to other work.
@@ -112,6 +117,7 @@ type chatPendingInput struct {
 	// them, a confirmed one turns them into receipts.
 	armed, written, read bool
 	at                   time.Time
+	correlated           bool // mid-turn input always requires its own reaction/completion
 }
 
 // ChatRelay forwards one owned session's S1 stream to the server: live frames
@@ -133,6 +139,7 @@ type ChatRelay struct {
 	state     string
 	sequence  uint64
 	input     *chatPendingInput
+	consumed  []*chatPendingInput // bounded inputs reacted to during the current turn
 	attempted map[string]bool
 	order     []string
 	cursor    string
@@ -168,7 +175,14 @@ func (r *ChatRelay) Observe(ev ChatSessionEvent) {
 	u := ev.Update
 	if u.SessionUpdate == "state" {
 		r.state = u.State
-		if in := r.input; in != nil && in.armed && (!r.opts.RequireInputCorrelation || ev.InputID == in.id) {
+		pending := append([]*chatPendingInput{}, r.consumed...)
+		if r.input != nil {
+			pending = append(pending, r.input)
+		}
+		for _, in := range pending {
+			if !in.armed || (r.opts.RequireInputCorrelation || in.correlated) && ev.InputID != in.id {
+				continue
+			}
 			switch {
 			case in.started == 0 && u.State == "running" && ev.Sequence > in.after:
 				// The harness started a turn after agentd wrote the input.
@@ -180,7 +194,7 @@ func (r *ChatRelay) Observe(ev ChatSessionEvent) {
 				// The turn that consumed the input completed.
 				if in.written {
 					r.receipt(in.id, "read")
-					r.input = nil
+					r.clearInput(in)
 				} else {
 					in.read = true
 				}
@@ -203,6 +217,20 @@ func (r *ChatRelay) Observe(ev ChatSessionEvent) {
 		r.live++
 	}
 	r.signal()
+}
+
+// Called with mu held. Keep the current write and already-reacted inputs
+// separate so a second native steer can reach an active turn as well.
+func (r *ChatRelay) clearInput(in *chatPendingInput) {
+	if r.input == in {
+		r.input = nil
+	}
+	for i, prior := range r.consumed {
+		if prior == in {
+			r.consumed = append(r.consumed[:i], r.consumed[i+1:]...)
+			break
+		}
+	}
 }
 
 // Called with mu held.
@@ -390,7 +418,14 @@ func (r *ChatRelay) Run(ctx context.Context) {
 	var binding ChatRelayBinding
 	bound, flushing, poll := false, false, true
 	failures := 0
+	nextPoll := r.opts.After(chatRelayPoll)
 	for {
+		select {
+		case <-nextPoll:
+			poll = true
+			nextPoll = r.opts.After(chatRelayPoll)
+		default:
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -431,6 +466,29 @@ func (r *ChatRelay) Run(ctx context.Context) {
 			}
 			continue
 		}
+		ready := r.readyForInput()
+		if poll && ready {
+			poll = false
+			if err := classifyChatRelayError(r.deliverNext(ctx, binding)); err != nil {
+				switch {
+				case errors.Is(err, ErrChatRelayUnsupported):
+					r.unsupported(err)
+					return
+				case errors.Is(err, ErrChatUnbound):
+					bound = false
+				default:
+					if errors.Is(err, errChatDeliver) {
+						slog.Warn("chat input not written to the harness; the message stays sent")
+					}
+					failures++
+					if !r.wait(ctx, chatRelayBackoff(failures), true) {
+						return
+					}
+				}
+				continue
+			}
+			failures = 0
+		}
 		if item, ok := r.head(); ok {
 			err := classifyChatRelayError(r.send(ctx, binding, item))
 			switch {
@@ -465,33 +523,10 @@ func (r *ChatRelay) Run(ctx context.Context) {
 		if flushing {
 			return
 		}
-		ready := r.readyForInput()
-		if poll && ready {
-			poll = false
-			if err := classifyChatRelayError(r.deliverNext(ctx, binding)); err != nil {
-				switch {
-				case errors.Is(err, ErrChatRelayUnsupported):
-					r.unsupported(err)
-					return
-				case errors.Is(err, ErrChatUnbound):
-					bound = false
-				default:
-					if errors.Is(err, errChatDeliver) {
-						slog.Warn("chat input not written to the harness; the message stays sent")
-					}
-					failures++
-					if !r.wait(ctx, chatRelayBackoff(failures), true) {
-						return
-					}
-				}
-				continue
-			}
-			failures = 0
-			ready = r.readyForInput()
-		}
+
 		var next <-chan time.Time
-		if ready || r.awaiting() {
-			next = r.opts.After(chatRelayPoll)
+		if r.readyForInput() || r.awaiting() {
+			next = nextPoll
 		}
 		select {
 		case <-ctx.Done():
@@ -500,6 +535,7 @@ func (r *ChatRelay) Run(ctx context.Context) {
 		case <-r.wake:
 		case <-next:
 			poll = true
+			nextPoll = r.opts.After(chatRelayPoll)
 		}
 	}
 }
@@ -548,7 +584,23 @@ func (r *ChatRelay) readyForInput() bool {
 	if r.input != nil && r.input.started == 0 && r.opts.Now().Sub(r.input.at) >= chatRelayEvidence {
 		r.input = nil // No turn started: the message honestly stays "sent".
 	}
-	return r.opts.Deliver != nil && !r.closed && r.state == "idle" && r.input == nil
+	return r.canDeliver("simple") || r.canDeliver("steer")
+}
+
+// Called with mu held. Unsupported transports always wait for idle. A
+// next-step adapter owns its boundary wait; merely queueing is not evidence.
+func (r *ChatRelay) canDeliver(level string) bool {
+	if r.closed || r.opts.Deliver == nil && r.opts.DeliverTimed == nil || len(r.consumed) >= chatRelayReceiptLimit-1 {
+		return false
+	}
+	if level == "" || level == "simple" {
+		return r.state == "idle" && r.input == nil
+	}
+	if level != "steer" || r.opts.DeliverTimed == nil || r.opts.Steer != "native" && r.opts.Steer != "next-step" {
+		return false
+	}
+	return (r.state == "idle" || r.state == "running" || r.state == "requires_action") &&
+		(r.input == nil || r.input.written && r.input.started != 0)
 }
 
 func (r *ChatRelay) awaiting() bool {
@@ -575,7 +627,7 @@ func (r *ChatRelay) deliverNext(ctx context.Context, b ChatRelayBinding) error {
 				continue
 			}
 			settled = false
-			if next == nil {
+			if next == nil && r.canDeliver(in.Message.Level) {
 				next = in
 			}
 		}
@@ -583,15 +635,25 @@ func (r *ChatRelay) deliverNext(ctx context.Context, b ChatRelayBinding) error {
 			r.cursor, cursor = *inputs.Next, *inputs.Next
 		}
 		r.mu.Unlock()
-		if inputs.Next == nil || !settled {
+		if inputs.Next == nil {
 			break
 		}
+		cursor = *inputs.Next // scan past queued simple input without skipping it durably
 	}
 	if next == nil || next.Message.ID == "" {
 		return nil
 	}
+	// Do not inject a fetched input after a handover or a lost binding. The
+	// exact owned process/generation is checked again by the journalled write.
+	current, err := r.api.CurrentChatBinding(ctx, r.session)
+	if err != nil {
+		return err
+	}
+	if current != b {
+		return ErrChatUnbound
+	}
 	r.mu.Lock()
-	if r.closed || r.state != "idle" || r.input != nil {
+	if !r.canDeliver(next.Message.Level) {
 		r.mu.Unlock()
 		return nil
 	}
@@ -602,7 +664,10 @@ func (r *ChatRelay) deliverNext(ctx context.Context, b ChatRelayBinding) error {
 	}
 	r.attempted[next.Message.ID] = true
 	r.order = append(r.order, next.Message.ID)
-	pending := &chatPendingInput{id: next.Message.ID, at: r.opts.Now()}
+	pending := &chatPendingInput{id: next.Message.ID, at: r.opts.Now(), correlated: r.state != "idle"}
+	if r.input != nil {
+		r.consumed = append(r.consumed, r.input)
+	}
 	r.input = pending
 	r.mu.Unlock()
 	// A turn another input starts while this write waits is not its evidence.
@@ -613,7 +678,11 @@ func (r *ChatRelay) deliverNext(ctx context.Context, b ChatRelayBinding) error {
 			pending.armed, pending.after = true, r.sequence
 		}
 	}
-	err := r.opts.Deliver(ctx, next.Message.ID, next.Message.Body, arm)
+	if r.opts.DeliverTimed != nil {
+		err = r.opts.DeliverTimed(ctx, next.Message.ID, next.Message.Body, next.Message.Level, arm)
+	} else {
+		err = r.opts.Deliver(ctx, next.Message.ID, next.Message.Body, arm)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	in := r.input
@@ -720,12 +789,25 @@ func (s *Supervisor) newChatRelay(api ChatRelayAPI, entry *owned, runID string) 
 		Unsupported: s.chatGate.disable,
 	}
 	if entry.inboxCapable {
-		opts.Deliver = func(ctx context.Context, id, body string, writing func()) error {
+		// The selected adapter qualified this flag during registration. Older
+		// daemons and queue-only adapters never acquire native timing by name.
+		if entry.chat != nil && entry.chat.capabilities.Steer == "native" && entry.chatTiming {
+			opts.Steer = "native"
+			opts.RequireInputCorrelation = true
+		}
+		opts.DeliverTimed = func(ctx context.Context, id, body, level string, writing func()) error {
 			if !validChatID(id, 128) || len(body) > chatChunkBytes {
 				return errors.New("chat input exceeds the person message bound")
 			}
+			op := "inbox"
+			if level == "steer" {
+				if opts.Steer != "native" && opts.Steer != "next-step" {
+					return ErrUnsupported
+				}
+				op = "steer"
+			}
 			_, err := s.controlInbox(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: runID,
-				Generation: s.generation, CorrelationID: "chat:" + id, Operation: "inbox", Text: chatInputText(id, body), writing: writing}, false, true)
+				Generation: s.generation, CorrelationID: "chat:" + id, Operation: op, Text: chatInputText(id, body), writing: writing, chatInputID: id}, false, true)
 			return err
 		}
 	}
@@ -807,8 +889,9 @@ func (r *Remote) ChatInputs(ctx context.Context, s HarnessSession, b ChatRelayBi
 	var out ChatInputPage
 	err := r.chatWorker(ctx, s, "/api/chat-deliveries/outbox", struct {
 		chatRelayRequest
-		After string `json:"after,omitempty"`
-	}{chatProof(s, b), after}, &out)
+		After         string `json:"after,omitempty"`
+		IncludeTiming bool   `json:"include_timing,omitempty"`
+	}{chatProof(s, b), after, b.InputTiming != ""}, &out)
 	return out, err
 }
 
