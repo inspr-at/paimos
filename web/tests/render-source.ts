@@ -46,7 +46,13 @@ export function renderSource(path: string, props: Record<string, unknown>, modul
   const { outputText } = ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
   const exports: { default?: Vue.Component } = {}
   new Function('require', 'exports', outputText)((id: string) => {
-    if (id === 'vue') return Vue
+    if (id === 'vue') {
+      // A virtual host has no native input events. Preserve the compiled
+      // model-update callback and render its value; real typing stays in the
+      // retained browser case. This adapter owns no application state.
+      const modelValue = (element: RenderNode, binding: { value: unknown }) => { element.props.value = binding.value }
+      return { ...Vue, vModelText: { created: modelValue, beforeUpdate: modelValue } }
+    }
     if (id in modules) return modules[id]
     if (id.endsWith('.vue')) return { __esModule: true, default: boundary }
     if (id.endsWith('.css')) return {}
