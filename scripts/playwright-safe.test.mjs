@@ -625,21 +625,16 @@ test('root identity retries a first-ps miss and records only its verified start'
   } finally { probe.child.kill('SIGKILL'); await probe.completion }
 })
 
-// Risk: killing a root during its fixture preload can also kill an in-flight ps
-// child. The root exit then does not prove that its process group has been reaped.
-// Wait for suite code to be running before testing failed identity verification.
 test('unverifiable live roots terminate their group without an invalid journal entry', { timeout: 15000 }, async t => {
   const probe = detachedProbe({ stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }), entries = []
   let calls = 0
   try {
-    assert.equal(probe.child.connected, true, 'the root must have an IPC readiness channel')
-    const message = await Promise.race([
-      once(probe.child, 'message', { signal: t.signal }),
-      probe.completion.then(() => assert.fail('root exited before its readiness barrier')),
-    ])
-    assert.deepEqual(message, ['ready', undefined])
+    // The fixture preload runs synchronous ps children. Killing during that
+    // startup can orphan a ps zombie after Node has reaped the root itself.
+    // Establish a live, idle root before exercising identity failure.
+    assert.deepEqual(await once(probe.child, 'message', { signal: t.signal }), ['ready', undefined])
     await assert.rejects(recordRootGroup(probe.child, entry => entries.push(entry), {
-      start: () => { calls++; return '' }, attempts: 3, wait: async () => {},
+      start: () => { calls++; return '' }, attempts: 3,
     }), /spawned group terminated/)
     await probe.completion
     assert.equal(calls, 3)
