@@ -5,6 +5,7 @@ package authz
 // Route and scope declarations for workorders.
 func init() {
 	registerRoutes("workorders", map[string]string{
+		"POST /api/nodes/{nodeId}/run-once":                                "run.create",
 		"GET /api/work-orders":                                             "work_orders.read",
 		"GET /api/work-orders/{workOrderId}":                               "work_orders.read",
 		"PATCH /api/work-orders/{workOrderId}":                             "work_orders.write",

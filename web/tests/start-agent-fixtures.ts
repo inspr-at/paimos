@@ -14,7 +14,7 @@ const accountId = 'ac000000-0000-4000-8000-000000000001'
 const spareAccountId = 'ac000000-0000-4000-8000-000000000002'
 const laptopAccountId = 'ac000000-0000-4000-8000-000000000003'
 
-export async function mockStartAgent(page: Page, options: { ticketTitle?: string; wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'same-name-hosts' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
+export async function mockStartAgent(page: Page, options: { ticketTitle?: string; expertStart?: boolean; lostOnceResponse?: boolean; wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'same-name-hosts' | 'claude' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
   const work = fixtures()
   if (options.ticketTitle) work.nodes.find(node => node.id === 'n-1')!.title = options.ticketTitle
   const workParents = new Set(work.nodes.filter(node => ['work', 'epic', 'ticket', 'task'].includes(node.kind_slug)).map(node => node.parent_id))
@@ -25,7 +25,7 @@ export async function mockStartAgent(page: Page, options: { ticketTitle?: string
   }
   if (options.theme) work.preferences.theme = { choice: options.theme }
   // AEON-741: manual Start agent is an expert opt-in; these specs exercise it.
-  work.preferences['developer-ui'] = { show_expert_start: true }
+  work.preferences['developer-ui'] = { show_expert_start: options.expertStart ?? true }
   await mockWork(page, work, { admin: true })
   const profile: ModelProfile = { id: profileId, slug: 'Build · deliberate', harness: 'codex', family: 'openai', model: 'workspace-build', effort: 'high', tier: 'standard', enabled: true }
   if (options.catalog === 'pi-openrouter') Object.assign(profile, { harness: 'pi', family: 'unknown', model: 'openrouter/stealth/space-bunny-alpha', effort: 'off' })
@@ -73,16 +73,19 @@ export async function mockStartAgent(page: Page, options: { ticketTitle?: string
       account.windows.forEach(window => { window.provisional = true })
     }
     hosts[0].harnesses.push(unread)
+  }
+  if (options.catalog === 'two-hosts' || options.catalog === 'claude') {
     hosts.push({
       daemon_id: 'laptop', label: 'Laptop', harnesses: [{
         harness: 'claude', default_account_id: laptopAccountId, accounts: [{
-          ...spare, id: laptopAccountId, label: 'Laptop account', plan: 'Max', registered_by_principal_id: agentId, remaining_fraction: 0.1,
+          ...spare, wait: options.wait, id: laptopAccountId, label: 'Laptop account', plan: 'Max', registered_by_principal_id: agentId, remaining_fraction: 0.1,
           models: [{ model: 'other-model', family: 'anthropic', efforts: [{ effort: 'medium', model_profile_id: spareProfileId, version: '3' }] }],
           default_model_profile_id: spareProfileId,
         }],
       }],
     })
   }
+  if (options.catalog === 'claude') hosts.shift()
   if (options.catalog === 'same-name-hosts') {
     hosts[0].harnesses[0].accounts = [primary]
     // Keep identical grants/labels but a separate account on the old daemon.
@@ -92,7 +95,7 @@ export async function mockStartAgent(page: Page, options: { ticketTitle?: string
       accounts: [{ ...primary, id: laptopAccountId, last_probe_at: new Date(now - 180_000).toISOString(), remaining_fraction: 0.95 }],
     }] })
   }
-  const catalog = { as_of: new Date(now).toISOString(), role: 'build', hosts }
+  const catalog = { as_of: new Date(now).toISOString(), role: 'build', hosts: hosts.map(host => ({ ...host, harnesses: host.harnesses.map(h => ({ ...h, read_only_run: { supported: h.harness === 'claude', policy: h.harness === 'claude' ? 'no_tools' : 'unavailable', reason: h.harness === 'claude' ? '' : 'Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.' } })) })) }
   const account: AgentAccount = {
     id: accountId, account_key: 'should-not-render-key', harness: 'codex', daemon_id: 'workstation', label: 'Workspace account', plan: 'Pro', host_label: 'Work Mac',
     registered_by_principal_id: agentId, state: options.unavailable ? 'draining' : 'available', max_parallel_runs: 2,
@@ -101,6 +104,9 @@ export async function mockStartAgent(page: Page, options: { ticketTitle?: string
   }
   if (options.catalog === 'pi-openrouter') Object.assign(account, { harness: 'pi', provider: 'openrouter', model: 'stealth/space-bunny-alpha', model_status: 'known' })
   const state = { orders: [] as WorkOrder[], runs: [] as AgentRun[], sessions: [] as HarnessSession[], failQueue: !!options.failQueue, revoked: false, catalogMisses: options.catalog === 'retry' ? 1 : 0 }
+  const onceRequests = new Map<string, { signature: string; run: AgentRun }>()
+  const createdLeaves: { parent_id: string; title: string; body: string; fields: Record<string, unknown> }[] = []
+  let loseOnceResponse = !!options.lostOnceResponse
   const pins = options.pin ? [{ ...options.pin }] : [] as { ticket_id: string; harness: string; account_id?: string; group_id?: string }[]
   const calls: { method: string; path: string; body: Record<string, unknown> | null; query: URLSearchParams }[] = []
   await page.route('**/api/**', async route => {
@@ -108,6 +114,20 @@ export async function mockStartAgent(page: Page, options: { ticketTitle?: string
     const json = (value: unknown, status = 200) => route.fulfill({ status, json: value })
     const body = req.postData() ? req.postDataJSON() as Record<string, unknown> : null
     calls.push({ method, path, body, query: url.searchParams })
+    if (/^\/api\/nodes\/[^/]+\/run-once$/.test(path) && method === 'POST') {
+      if (state.failQueue) return json({ error: 'Temporary queue failure' }, 503)
+      const requestId = String(body!.request_id), signature = JSON.stringify(body)
+      const previous = onceRequests.get(requestId)
+      if (previous) return previous.signature === signature ? json(previous.run, 201) : json({ error: 'request already bound to other options' }, 409)
+      if (!body!.task && state.runs.some(run => ['queued', 'starting', 'running', 'waiting'].includes(run.status))) return json({ error: 'This leaf already has an active run.' }, 409)
+      const instruction = String(body!.instruction || body!.task || 'Ticket context')
+      const run = { id: requestId, run_once: true, instruction, repository_mutation_allowed: body!.repository_mutation_allowed,
+        work_order_id: 'order-once', agent_principal_id: String(body!.agent_principal_id), model_profile_id: String(body!.model_profile_id), requested_account_id: String(body!.requested_account_id), status: 'queued', model_evidence: 'unverified', input_tokens: 0, output_tokens: 0, cost_micros: 0, created_at: new Date().toISOString() } as AgentRun
+      if (body!.task) createdLeaves.push({ parent_id: path.split('/')[3]!, title: `Run once: ${body!.task}`, body: String(body!.task), fields: { hide_from_release_notes: true } })
+      state.runs.push(run); onceRequests.set(requestId, { signature, run })
+      if (loseOnceResponse) { loseOnceResponse = false; return route.abort('failed') }
+      return json(run, 201)
+    }
     const projectLead = path.match(/^\/api\/projects\/([^/]+)\/lead$/)
     if (projectLead && method === 'GET') return json({ project_id: projectLead[1], revision: 0, generation: 0, session_id: null, state: 'none', reason: '', process_active: false, automatic_launch_enabled: false })
     if (path === '/api/me/permissions') {
@@ -204,5 +224,5 @@ export async function mockStartAgent(page: Page, options: { ticketTitle?: string
       project: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' }, ticket: { id: 'n-1', key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning' }, agent: { id: agentId, name: 'Studio builder' },
     })
   }
-  return { state, calls, claim, account, profile, agentId, spareProfileId, spareAccountId, pins, catalog }
+  return { state, calls, claim, account, profile, agentId, spareProfileId, spareAccountId, pins, createdLeaves, catalog }
 }

@@ -61,7 +61,7 @@ describe('account catalog contract', () => {
     expect(isAccountCatalog(catalog([waiting]))).toBe(true)
     const view = presented(catalog([waiting])).view
     expect(view.status.label).toBe('Waiting for the first run’s reading')
-    expect(view.status.detail).toContain('queue')
+    expect(view.status.detail).toBe('The run queues and starts when this account is ready.')
   })
 
   it('fails closed when the catalog is missing, forbidden, or the wrong shape', async () => {
@@ -216,7 +216,7 @@ describe('account catalog contract', () => {
     for (const code of WAIT_CODES) {
       if (code === 'sign_in') continue
       inactive.hosts[0].harnesses[0].accounts[0].wait = { code, run_now_allowed: false }
-      expect(presented(inactive).view.status.detail, code).toBe('The run can queue and starts when this account is ready.')
+      expect(presented(inactive).view.status.detail, code).toBe('The run queues and starts when this account is ready.')
     }
     inactive.hosts[0].harnesses[0].accounts[0].wait = { code: 'schedule', run_now_allowed: true }
     expect(presented(inactive).view.status.detail).toBe('Queue it for then, or run this one now.')

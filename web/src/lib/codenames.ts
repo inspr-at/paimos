@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { shallowReactive } from 'vue'
-import type { ToastRelease } from './toast.ts'
+import type { ToastCounts, ToastRelease } from './toast.ts'
 
 // Marketing names front and centre (AEON-430): a release is known by its
 // codename; the calendar version ("26·09·30 11:53") is revealed on hover and
@@ -29,11 +29,12 @@ export function releaseAria(name: string, version: string): string {
   return name ? `${name}, version ${canonical(version)}` : `version ${canonical(version)}`
 }
 
-// The update toast's sentence. The name comes from the server's release detail,
-// else from what /api/version already told this page; only a release with no
-// known name shows as its version.
-export function updateToast(wordmark: string, version: string, detailName: string | undefined, about: string): { message: string; release: ToastRelease } {
+// The update toast's sentence, which ends at the name (AEON-1655). The name
+// comes from the server's release detail, else from what /api/version already
+// told this page; only a release with no known name shows as its version.
+// Counts of the release's notes by kind follow the sentence when there are any.
+export function updateToast(wordmark: string, version: string, detailName: string | undefined, counts?: ToastCounts): { message: string; release: ToastRelease } {
   const name = detailName || codenameOf(version)
   const before = `${wordmark} was updated to `
-  return { message: `${before}${name || version}${about}`, release: { version, name, before, after: about } }
+  return { message: `${before}${name || version}`, release: { version, name, before, after: '', ...(counts?.items.length ? { counts } : {}) } }
 }
