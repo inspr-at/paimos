@@ -7961,6 +7961,399 @@
           "group": "features"
         }
       ]
+    },
+    "261022082852.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 138,
+      "snapshot_sha256": "82597c71dcd0716682c5a8448a7da80dbc4ba61b697cdad31f47930667d12ddb",
+      "captured_at": "2026-10-22T08:31:00Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-1028",
+          "pill_en": "Display in compact header",
+          "pill_de": "Anzeige im kompakten Kopf",
+          "benefit_en": "In the collapsed header, sections, Hide closed and all display options stay one click away under Display.",
+          "benefit_de": "Im eingeklappten Kopf bleiben Bereiche, „Geschlossene ausblenden“ und alle Anzeigeoptionen mit einem Klick unter „Anzeige“ erreichbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1042",
+          "pill_en": "Calmer project header",
+          "pill_de": "Ruhigerer Projektkopf",
+          "benefit_en": "The project header no longer shows the ticket graph unless you turn it on in developer settings.",
+          "benefit_de": "Der Projektkopf zeigt den Ticket-Graphen nur noch, wenn man ihn in den Entwicklereinstellungen einschaltet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1188",
+          "pill_en": "Display in one place",
+          "pill_de": "Anzeige an einem Ort",
+          "benefit_en": "List display settings live in one place, wherever you open them from.",
+          "benefit_de": "Die Anzeigeeinstellungen einer Liste liegen an einem Ort, egal von wo man sie öffnet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1291",
+          "pill_en": "Owned agent sessions",
+          "pill_de": "Eigene Agentensitzungen",
+          "benefit_en": "PAIMOS starts, shows and hands over agent sessions it owns, with a live terminal view.",
+          "benefit_de": "PAIMOS startet, zeigt und übergibt eigene Agentensitzungen, mit einer Live-Terminalansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1406",
+          "pill_en": "Calm empty Desk",
+          "pill_de": "Ruhiger leerer Desk",
+          "benefit_en": "When nothing waits on you, the Decision Desk shows a calm picture instead of an empty error-like card.",
+          "benefit_de": "Wenn kein Handlungsbedarf besteht, zeigt der Decision Desk ein ruhiges Bild statt einer leeren, fehlerartigen Karte.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1414",
+          "pill_en": "Lighter account reads",
+          "pill_de": "Leichtere Kontenabfragen",
+          "benefit_en": "Looking at agent accounts no longer blocks anyone from saving tickets.",
+          "benefit_de": "Das Ansehen von Agentenkonten blockiert niemanden mehr beim Speichern von Tickets.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1448",
+          "pill_en": "Tighter Desk on phones",
+          "pill_de": "Kompakterer Desk am Handy",
+          "benefit_en": "On phones the Decision Desk no longer wastes space above the tabs when nothing waits.",
+          "benefit_de": "Am Handy verschwendet der Entscheidungs-Desk keinen Platz mehr über den Reitern, wenn nichts wartet.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1453",
+          "pill_en": "Views open your way",
+          "pill_de": "Ansichten wie gewohnt",
+          "benefit_en": "View switches remember the last choice or a chosen default across devices within a workspace. Direct links and session attention rules can choose another opening view.",
+          "benefit_de": "Ansichtsumschalter merken sich je Person und Arbeitsbereich die letzte Auswahl oder eine festgelegte Standardansicht geräteübergreifend. Direkte Links und Sitzungshinweise können die Startansicht vorgeben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1460",
+          "pill_en": "Denser ticket list",
+          "pill_de": "Kompaktere Ticketliste",
+          "benefit_en": "On a phone, more tickets fit on one screen without losing what matters.",
+          "benefit_de": "Auf dem Handy passen mehr Tickets auf einen Bildschirm, ohne dass Wichtiges verloren geht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1470",
+          "pill_en": "Titles keep room",
+          "pill_de": "Titel behalten Platz",
+          "benefit_en": "At narrower widths the ticket title keeps its space; less important columns step aside first and stay sortable.",
+          "benefit_de": "Bei schmaleren Breiten behält der Ticket-Titel seinen Platz; weniger wichtige Spalten weichen zuerst und bleiben sortierbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1471",
+          "pill_en": "Faster agent writes",
+          "pill_de": "Schnellere Agenten-Schreibzugriffe",
+          "benefit_en": "Agents sharing a key can handle more requests at the same time, so they wait less under load.",
+          "benefit_de": "Agenten mit demselben Schlüssel können mehr Anfragen gleichzeitig verarbeiten und warten unter Last weniger.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1474",
+          "pill_en": "Desk alerts in browser",
+          "pill_de": "Desk-Hinweise im Browser",
+          "benefit_en": "When a decision waits for you, this browser can show a notification that opens it, once it is turned on for this device.",
+          "benefit_de": "Wartet eine Entscheidung, kann dieser Browser eine Benachrichtigung zeigen, die sie öffnet, sobald das für dieses Gerät eingeschaltet ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1495",
+          "pill_en": "One inbox, both instances",
+          "pill_de": "Ein Eingang, beide Instanzen",
+          "benefit_en": "The owner sees every question waiting for them on both PAIMOS instances in one place, read-only, with a link into each Desk.",
+          "benefit_de": "Der Owner sieht alle offenen Fragen beider PAIMOS-Instanzen an einem Ort, nur lesend, mit Link in den jeweiligen Desk.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1498",
+          "pill_en": "Several accounts per harness",
+          "pill_de": "Mehrere Konten pro Harness",
+          "benefit_en": "You can connect several Claude or Codex accounts on one computer and let them work side by side.",
+          "benefit_de": "Mehrere Claude- oder Codex-Konten lassen sich auf einem Computer verbinden und arbeiten nebeneinander.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1501",
+          "pill_en": "Calm pairing output",
+          "pill_de": "Ruhige Kopplungsausgabe",
+          "benefit_en": "Pairing a computer shows the code once instead of repeating it while you approve it in the browser.",
+          "benefit_de": "Beim Koppeln eines Computers erscheint der Code einmal, statt sich während der Freigabe im Browser ständig zu wiederholen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1502",
+          "pill_en": "One-click approval",
+          "pill_de": "Freigabe mit einem Klick",
+          "benefit_en": "Approving a computer or an account takes one look and one click instead of a long form.",
+          "benefit_de": "Einen Computer oder ein Konto freizugeben braucht einen Blick und einen Klick statt eines langen Formulars.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1504",
+          "pill_en": "Touch ID really works",
+          "pill_de": "Touch ID funktioniert wirklich",
+          "benefit_en": "Pairing a Mac now really enables Touch ID confirmation, and if it can't, the reason is shown instead of an endless re-pair loop.",
+          "benefit_de": "Das Koppeln eines Mac aktiviert nun wirklich die Touch-ID-Bestätigung; geht das nicht, wird der Grund angezeigt statt einer endlosen Neu-Kopplung.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1514",
+          "pill_en": "Quota while idle",
+          "pill_de": "Kontingent auch im Leerlauf",
+          "benefit_en": "Every Claude and Codex account shows its real quota even when no agent is running.",
+          "benefit_de": "Jedes Claude- und Codex-Konto zeigt sein echtes Kontingent, auch wenn gerade kein Agent läuft.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1570",
+          "pill_en": "Start by hand works",
+          "pill_de": "Manueller Start klappt",
+          "benefit_en": "A ticket waiting in a lead's queue can still be started by hand.",
+          "benefit_de": "Ein Ticket in der Warteschlange eines Leads lässt sich weiterhin von Hand starten.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1585",
+          "pill_en": "Keys tied to people",
+          "pill_de": "Schlüssel an Personen gebunden",
+          "benefit_en": "API keys and agent runs can store the person they work for, and admins can list paired computers with the evidence for each owner.",
+          "benefit_de": "API-Schlüssel und Agentenläufe können die Person speichern, für die sie arbeiten, und Admins sehen gekoppelte Computer mit den Belegen zur Zuordnung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1586",
+          "pill_en": "Who may start runs",
+          "pill_de": "Wer Läufe starten darf",
+          "benefit_en": "Admins, and people granted a computer, can start runs on it; pairing a computer does not by itself grant this right.",
+          "benefit_de": "Admins und die für einen Computer berechtigten Personen können dort Läufe starten; das Koppeln allein gibt dieses Recht nicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1587",
+          "pill_en": "Runs kept apart",
+          "pill_de": "Läufe sauber getrennt",
+          "benefit_en": "Runs of different people on one shared computer keep their work apart: a run fetches project content with its own run permission, and the daemon's connection key alone reads metadata.",
+          "benefit_de": "Läufe verschiedener Personen auf einem gemeinsamen Computer bleiben getrennt: Projektinhalte holt ein Lauf mit seiner eigenen Laufberechtigung, der Verbindungsschlüssel des Daemons liest allein nur Metadaten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1588",
+          "pill_en": "Rules move to git",
+          "pill_de": "Regeln ziehen ins Git",
+          "benefit_en": "Admins can export the rules written in PAIMOS with their checksums and propose new rules through the reviewed pull-request path.",
+          "benefit_de": "Admins können die in PAIMOS geschriebenen Regeln samt Prüfsummen exportieren und neue Regeln über den geprüften Pull-Request-Weg vorschlagen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1589",
+          "pill_en": "Safety floor built in",
+          "pill_de": "Sicherheitsboden eingebaut",
+          "benefit_en": "Agent runs receive the pinned rule files plus a short safety floor; a run whose pinned rules are missing or too large stops before productive work.",
+          "benefit_de": "Agentenläufe erhalten die festgelegten Regeldateien und einen kurzen Sicherheitsboden; fehlen die Regeln oder sind sie zu groß, stoppt der Lauf vor produktiver Arbeit.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1590",
+          "pill_en": "Proof of rules sent",
+          "pill_de": "Nachweis gesendeter Regeln",
+          "benefit_en": "PAIMOS records which rule bytes agentd handed to which run and rejects tampered, foreign or expired receipts.",
+          "benefit_de": "PAIMOS hält fest, welche Regelbytes agentd an welchen Lauf übergeben hat, und weist manipulierte, fremde oder abgelaufene Belege zurück.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1591",
+          "pill_en": "Access per person",
+          "pill_de": "Zugriff wie die Person",
+          "benefit_en": "Requests made with a person-bound API key or by an agent run see at most what their person may see at that moment; withdrawn access applies from the next request.",
+          "benefit_de": "Anfragen mit einem personengebundenen API-Schlüssel oder aus einem Agentenlauf sehen höchstens, was die zugehörige Person in diesem Moment sehen darf; entzogener Zugriff gilt ab der nächsten Anfrage.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1592",
+          "pill_en": "Runs bound to people",
+          "pill_de": "Lauf an Person gebunden",
+          "benefit_en": "Agent runs record the person they work for (the starter, the routine owner or the original requester) and are refused before they start when that person has lost access.",
+          "benefit_de": "Agentenläufe speichern die Person, für die sie arbeiten (wer sie gestartet hat, die verantwortliche Person der Routine oder wer sie angefragt hat), und werden vor dem Start abgelehnt, wenn diese Person keinen Zugriff mehr hat.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1593",
+          "pill_en": "Consented native sessions",
+          "pill_de": "Native Sitzungen mit Zustimmung",
+          "benefit_en": "A person-approved native agent session can start, run and finish end to end, with the person's current consent checked at each step.",
+          "benefit_de": "Eine von einer Person freigegebene native Agentensitzung kann vollständig starten, laufen und enden; die aktuelle Zustimmung wird bei jedem Schritt geprüft.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1596",
+          "pill_en": "Clear daemon stop reason",
+          "pill_de": "Klarer Grund beim Daemon-Stopp",
+          "benefit_en": "When the daemon stops because its computer is disconnected or removed, it now says so instead of exiting silently.",
+          "benefit_de": "Stoppt der Daemon, weil sein Computer getrennt oder entfernt ist, nennt er jetzt den Grund, statt still zu beenden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1604",
+          "pill_en": "Edit shortcut always works",
+          "pill_de": "Bearbeiten-Kürzel greift immer",
+          "benefit_en": "Pressing e to edit works even right after a ticket page opens.",
+          "benefit_de": "Die Taste e zum Bearbeiten greift auch direkt nach dem Öffnen einer Ticketseite.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1608",
+          "pill_en": "Deliveries recorded again",
+          "pill_de": "Auslieferungen wieder erfasst",
+          "benefit_en": "Tickets in a verified release are marked Delivered again, so progress shows what is actually live.",
+          "benefit_de": "Tickets in einem geprüften Release werden wieder als ausgeliefert markiert, sodass der Fortschritt zeigt, was tatsächlich live ist.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1609",
+          "pill_en": "One language per screen",
+          "pill_de": "Eine Sprache pro Ansicht",
+          "benefit_en": "Every screen is in one language; no German panels inside an English app.",
+          "benefit_de": "Jede Ansicht ist in einer Sprache; keine deutschen Bereiche mehr in einer englischen App.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1610",
+          "pill_en": "Ready for other languages",
+          "pill_de": "Bereit für weitere Sprachen",
+          "benefit_en": "The whole app can switch language in one step once a translation is complete, never screen by screen.",
+          "benefit_de": "Die ganze App kann die Sprache in einem Schritt wechseln, sobald eine Übersetzung vollständig ist, nie Ansicht für Ansicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1612",
+          "pill_en": "Only real goals",
+          "pill_de": "Nur echte Ziele",
+          "benefit_en": "The Goals view lists what is being worked toward, without old release records.",
+          "benefit_de": "Die Zielansicht zeigt, woran gearbeitet wird, ohne alte Release-Einträge.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1613",
+          "pill_en": "Agents keep goals current",
+          "pill_de": "Agenten halten Ziele aktuell",
+          "benefit_en": "Agents can create and update goals, so the Goals view shows current plans and landing times.",
+          "benefit_de": "Agenten können Ziele anlegen und aktualisieren, sodass die Zielansicht aktuelle Pläne und Landezeiten zeigt.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1614",
+          "pill_en": "Hide goals for yourself",
+          "pill_de": "Ziele für sich ausblenden",
+          "benefit_en": "Each person can hide goals that don't matter to them right now, and bring them back from Display.",
+          "benefit_de": "Jede Person kann Ziele ausblenden, die gerade nicht relevant sind, und sie über Anzeige zurückholen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1615",
+          "pill_en": "Phone header fixed",
+          "pill_de": "Telefon-Kopfzeile repariert",
+          "benefit_en": "On phones the project header, Display and Filters work again without layout jumps.",
+          "benefit_de": "Auf Telefonen funktionieren Projektkopf, Anzeige und Filter wieder ohne Layoutsprünge.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1617",
+          "pill_en": "Tidier alerts offer",
+          "pill_de": "Ruhigeres Alarm-Angebot",
+          "benefit_en": "The browser-alerts offer on the Desk reads as one line with its action next to it.",
+          "benefit_de": "Das Angebot für Browser-Benachrichtigungen im Desk liest sich als eine Zeile mit der Aktion direkt daneben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1619",
+          "pill_en": "PR checks on time",
+          "pill_de": "Prüfungen rechtzeitig fertig",
+          "benefit_en": "Pull requests stop failing on a timeout after every test passed.",
+          "benefit_de": "Pull Requests scheitern nicht mehr an einer Zeitgrenze, obwohl alle Tests bestanden sind.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1622",
+          "pill_en": "Steady list header",
+          "pill_de": "Stabiler Listenkopf",
+          "benefit_en": "On phones the project description opens with More again, dragging the title column widens it, and a collapsed project header stays fully out of the way.",
+          "benefit_de": "Auf Telefonen öffnet sich die Projektbeschreibung wieder mit „Mehr“, das Ziehen der Titelspalte verbreitert sie, und ein eingeklappter Projektkopf bleibt vollständig aus dem Weg.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1626",
+          "pill_en": "Take over sessions locally",
+          "pill_de": "Sitzungen lokal übernehmen",
+          "benefit_en": "A person can attach to and take over their own agent session from their own computer, proven as that person, while agents and API keys can never take over.",
+          "benefit_de": "Eine Person kann sich vom eigenen Computer aus mit der eigenen Agentensitzung verbinden und sie übernehmen, als diese Person nachgewiesen; Agenten und API-Schlüssel können nie übernehmen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1631",
+          "pill_en": "Desk never falsely empty",
+          "pill_de": "Desk nie fälschlich leer",
+          "benefit_en": "If the Decision Desk can't load, it says so and tries again by itself within seconds, instead of showing 'Nothing waits for you' while questions are waiting.",
+          "benefit_de": "Kann der Decision Desk nicht laden, zeigt er das an und versucht es innerhalb von Sekunden selbst erneut, statt „Nichts wartet“ anzuzeigen, obwohl Fragen warten.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1632",
+          "pill_en": "Desk links open tickets",
+          "pill_de": "Desk-Links öffnen Tickets",
+          "benefit_en": "Clicking a ticket inside a Desk question opens it as a peek right there, instead of a 'Page not found' dead end.",
+          "benefit_de": "Ein Klick auf ein Ticket in einer Desk-Frage öffnet es direkt als Vorschau statt einer Sackgasse „Seite nicht gefunden“.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1633",
+          "pill_en": "Nightly tests green again",
+          "pill_de": "Nächtliche Tests wieder grün",
+          "benefit_en": "The nightly test run passes again, so new work can start without the safety hold.",
+          "benefit_de": "Der nächtliche Testlauf ist wieder grün, damit neue Arbeit ohne Sicherheitsstopp starten kann.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1635",
+          "pill_en": "Tests pass at night",
+          "pill_de": "Tests nachts stabil",
+          "benefit_en": "Builds no longer fail every night between midnight and 09:00 UTC because of one test.",
+          "benefit_de": "Builds scheitern nicht mehr jede Nacht zwischen Mitternacht und 09:00 UTC an einem einzelnen Test.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1637",
+          "pill_en": "Chat tab works again",
+          "pill_de": "Chat-Tab wieder nutzbar",
+          "benefit_en": "Switching from Events to Chat in a session works again, also on the phone.",
+          "benefit_de": "Der Wechsel von Events zu Chat in einer Sitzung funktioniert wieder, auch am Handy.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1642",
+          "pill_en": "Safer certificate checks",
+          "pill_de": "Sicherere Zertifikatsprüfung",
+          "benefit_en": "PAIMOS is built with a Go release that no longer trusts the compromised eMudhra certificates.",
+          "benefit_de": "PAIMOS wird mit einer Go-Version gebaut, die den kompromittierten eMudhra-Zertifikaten nicht mehr vertraut.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-998",
+          "pill_en": "One app language",
+          "pill_de": "Eine App-Sprache",
+          "benefit_en": "Updated app controls consistently use English; release notes and authored content retain their language choices.",
+          "benefit_de": "Überarbeitete App-Bedienelemente verwenden durchgehend Englisch; Release-Notes und verfasste Inhalte behalten ihre Sprachwahl.",
+          "group": "fixes"
+        }
+      ]
     }
   }
 }
