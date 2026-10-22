@@ -69,3 +69,54 @@ it('AEON-1213: shared preference reads retry failures, coalesce recovery and acc
   expect(empty.value.value).toBeNull()
   expect(fetch).toHaveBeenCalledTimes(3)
 })
+
+// The goals toolbar saves with delay 0 and the spec reloads on the next turn.
+// A channel macrotask loses that race: pagehide's fetch is not what the next
+// document reads. The write has to start from the click's own task, with
+// keepalive, and pagehide must not send a second copy of the same value.
+// A debounced save that has not reached its timer still leaves with the page.
+it('AEON-1614: a delay-0 save is on the wire with keepalive before the page hides', async () => {
+  const calls: RequestInit[] = []
+  const hides: Array<(event: Event) => void> = []
+  vi.stubGlobal('MessageChannel', class {
+    constructor() { throw new Error('a delay-0 save must not wait on a channel') }
+  })
+  vi.stubGlobal('window', {
+    addEventListener: (type: string, listener: (event: Event) => void) => { if (type === 'pagehide') hides.push(listener) },
+    removeEventListener() {},
+  })
+  vi.stubGlobal('fetch', vi.fn((_url: unknown, init?: RequestInit) => {
+    calls.push(init ?? {})
+    return Promise.resolve(new Response(JSON.stringify({ value: null })))
+  }))
+  Preferences.setPreferenceOwner(who('A'))
+  const pref = Preferences.usePreference<{ showWaiting: boolean }>('goals')
+  await pref.ready
+  await flush()
+  calls.length = 0
+  const saving = pref.save({ showWaiting: false }, 0)
+  const puts = () => calls.filter(init => init.method === 'PUT')
+  expect(puts()).toHaveLength(0)
+  await flush()
+  expect(puts()).toHaveLength(1)
+  expect(puts()[0]!.keepalive).toBe(true)
+  expect(puts()[0]!.signal).toBeUndefined()
+  expect(String(puts()[0]!.body)).toContain('"showWaiting":false')
+  expect(hides).toHaveLength(1)
+  hides[0]!(new Event('pagehide'))
+  await flush()
+  expect(puts()).toHaveLength(1)
+  expect(await saving).toBe(true)
+
+  calls.length = 0
+  vi.useFakeTimers()
+  const later = pref.save({ showWaiting: true }, 400)
+  expect(puts()).toHaveLength(0)
+  hides[0]!(new Event('pagehide'))
+  await flush()
+  expect(puts()).toHaveLength(1)
+  expect(puts()[0]!.keepalive).toBe(true)
+  expect(puts()[0]!.signal).toBeUndefined()
+  expect(String(puts()[0]!.body)).toContain('"showWaiting":true')
+  expect(await later).toBe(true)
+})

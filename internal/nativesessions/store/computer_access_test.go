@@ -17,7 +17,7 @@ import (
 // final native claim transaction. The barrier proves the change occurs in that
 // gap; legacy NULL actors and workspace admins retain their existing admission.
 func TestComputerStartNativeClaimRechecksAfterObservation(t *testing.T) {
-	for _, mode := range []string{"granted", "revoked", "legacy", "workspace_admin"} {
+	for _, mode := range []string{"granted", "revoked", "project_revoked", "person_deactivated", "legacy", "workspace_admin"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newStartFixture(t)
 			uid := func() string {
@@ -27,14 +27,14 @@ func TestComputerStartNativeClaimRechecksAfterObservation(t *testing.T) {
 				}
 				return id
 			}
-			leaf, order, run, parent, person := uid(), uid(), uid(), uid(), uid()
+			leaf, order, run, parent := uid(), uid(), uid(), uid()
+			person := f.person.ID
 			ref, lease := sha256.Sum256([]byte("computer start parent ref")), sha256.Sum256([]byte("computer start parent lease"))
 			f.seed(t, func(tx pgx.Tx) error {
 				for _, q := range []struct {
 					sql  string
 					args []any
 				}{
-					{`INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Run person')`, []any{f.person.TenantID, person}},
 					{`INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,computer_id) SELECT $1,$2,id,'computer',$3 FROM roles WHERE key='admin'`, []any{f.person.TenantID, person, f.intent.ComputerID}},
 					{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'NS-2',id,'Computer work',$3 FROM node_kinds WHERE slug='work'`, []any{f.person.TenantID, leaf, f.project}},
 					{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'NS-3',id,'Computer order',$3 FROM node_kinds WHERE slug='work_order'`, []any{f.person.TenantID, order, leaf}},
@@ -45,6 +45,16 @@ func TestComputerStartNativeClaimRechecksAfterObservation(t *testing.T) {
 					{`INSERT INTO account_reservations(tenant_id,run_id,window_id,reserved_units) SELECT $1,$2,id,1 FROM account_allowance_windows WHERE account_id=$3`, []any{f.person.TenantID, run, f.intent.AccountID}},
 				} {
 					if _, err := tx.Exec(t.Context(), q.sql, q.args...); err != nil {
+						return err
+					}
+				}
+				// The native intent and run serve the same person. A project Admin
+				// grant permits work without supplying a workspace computer grant.
+				if mode != "legacy" && mode != "workspace_admin" {
+					if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1 AND scope_type='workspace'`, person); err != nil {
+						return err
+					}
+					if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE key='admin'`, f.person.TenantID, person, f.project); err != nil {
 						return err
 					}
 				}
@@ -87,8 +97,17 @@ func TestComputerStartNativeClaimRechecksAfterObservation(t *testing.T) {
 					if err := agentpairing.Lock(t.Context(), tx); err != nil {
 						return err
 					}
-					_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1 AND scope_type='computer'`, person)
-					return err
+					switch mode {
+					case "project_revoked":
+						_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1 AND scope_type='project'`, person)
+						return err
+					case "person_deactivated":
+						_, err := tx.Exec(t.Context(), `UPDATE principals SET status='deactivated' WHERE id=$1`, person)
+						return err
+					default:
+						_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1 AND scope_type='computer'`, person)
+						return err
+					}
 				})
 			}
 			close(f.observer.release)
@@ -98,7 +117,7 @@ func TestComputerStartNativeClaimRechecksAfterObservation(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal("claim did not complete after observation")
 			}
-			if mode == "revoked" {
+			if mode == "revoked" || mode == "project_revoked" || mode == "person_deactivated" {
 				var failure *Failure
 				if !errors.As(err, &failure) || failure.Status != 403 || failure.Reason != nativecontract.ReasonPermissionRevoked {
 					t.Fatalf("revoked computer start: %v", err)
@@ -112,7 +131,7 @@ func TestComputerStartNativeClaimRechecksAfterObservation(t *testing.T) {
 					return err
 				}
 				want := "starting"
-				if mode == "revoked" {
+				if mode == "revoked" || mode == "project_revoked" || mode == "person_deactivated" {
 					want = "queued"
 				}
 				if state != want {

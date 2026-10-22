@@ -114,6 +114,7 @@ func (f *fixture) completion(t *testing.T, profileless ...bool) (string, agentru
 		_, err = tx.Exec(t.Context(), `UPDATE account_allowance_windows SET reserved=reserved+10 WHERE account_id=$1`, f.account)
 		return err
 	})
+	f.bindRunPerson(t, run)
 	return run, agentruns.Telemetry{Sequence: 1, Kind: "finished", Status: "completed", Input: 20, Cost: 1, ReviewRange: &reviewgate.CommitRange{Repository: "example/review-fixture", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40)}}
 }
 

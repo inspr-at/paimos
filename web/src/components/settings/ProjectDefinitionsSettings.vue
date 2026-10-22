@@ -2,7 +2,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useProfile } from '../../stores/profile'
 import { displayLanguage } from '../../lib/displayLanguage'
 import { statusName } from '../../lib/statusNames'
 import type { Project } from '../../stores/projects'
@@ -21,8 +20,8 @@ import SettingsCard from './SettingsCard.vue'
 import ProjectSettingsExplainer from './ProjectSettingsExplainer.vue'
 import DefinitionEditor from './DefinitionEditor.vue'
 
-const route = useRoute(), profile = useProfile()
-const language = computed(() => displayLanguage(profile.profile?.locale, 'definitions'))
+const route = useRoute()
+const language = computed(() => displayLanguage())
 const t = (en: string, de: string) => language.value === 'de' ? de : en
 const props = defineProps<{ project: Project }>(), session = useSession(), scope = useIdentityScope(), reads = scope.lane()
 const context = ref<DefinitionContext | null>(null), loading = ref(true), busy = ref(false), error = ref(''), stale = ref(false), editorEpoch = ref(0)

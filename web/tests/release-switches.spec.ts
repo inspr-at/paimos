@@ -173,29 +173,31 @@ test('EN and DE switch every text, round-trip in the address with the view, and 
   await expect(page).not.toHaveURL(/release_/)
 })
 
-test('the language is remembered per person and defaults to the profile', async ({ page }) => {
+test('the language is remembered per person and defaults to the app language', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 })
   await openRelease(page, V102, '', { locale: 'de-AT' })
-  await expect(radio(page, 'DE')).toHaveAttribute('aria-checked', 'true')
-  await expect(block(page, 'Lesbarer Risiko-Chip')).toBeVisible()
-  await expect(page).not.toHaveURL(/release_lang=/)
-  // EN chosen once stays EN on a fresh open without it in the address. It is kept on the
-  // server per person (AEON-1453): wait for the save before leaving the page.
-  const kept = page.waitForResponse(response => response.request().method() === 'PUT' && decodeURIComponent(new URL(response.url()).pathname) === '/api/preferences/view:releases.lang')
-  await radio(page, 'DE').focus()
-  await page.keyboard.press('ArrowLeft')
-  await expect(radio(page, 'EN')).toHaveAttribute('aria-checked', 'true')
-  await expect(radio(page, 'EN')).toBeFocused()
-  await kept
-  await page.goto(`/releases/${V102}`)
   await expect(radio(page, 'EN')).toHaveAttribute('aria-checked', 'true')
   await expect(block(page, 'Readable risk chip')).toBeVisible()
-  // Another person on this device starts from their own profile. The server keeps each
-  // person's preferences apart; the shared mock store stands in with an empty answer.
+  await expect(page).not.toHaveURL(/release_lang=/)
+  // DE chosen once stays DE on a fresh open without it in the address. It is kept on the
+  // server per person (AEON-1453): wait for the save before leaving the page.
+  const kept = page.waitForResponse(response => response.request().method() === 'PUT' && decodeURIComponent(new URL(response.url()).pathname) === '/api/preferences/view:releases.lang')
+  await radio(page, 'EN').focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(radio(page, 'DE')).toHaveAttribute('aria-checked', 'true')
+  await expect(radio(page, 'DE')).toBeFocused()
+  await expect(block(page, 'Lesbarer Risiko-Chip')).toBeVisible()
+  await kept
+  await page.goto(`/releases/${V102}`)
+  await expect(radio(page, 'DE')).toHaveAttribute('aria-checked', 'true')
+  await expect(block(page, 'Lesbarer Risiko-Chip')).toBeVisible()
+  // Another person on this device starts from the app language, not the shared profile.
+  // The server keeps each person's preferences apart; the shared mock store stands in with an empty answer.
   await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: '33333333-3333-4333-8333-333333333333', name: 'Ola Nordmann', kind: 'person', roles: ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
   await page.route('**/api/preferences/view*releases.lang', route => route.request().method() === 'GET' ? route.fulfill({ json: { key: 'view:releases.lang', value: null, updated_at: null } }) : route.fallback())
   await page.goto(`/releases/${V102}`)
-  await expect(radio(page, 'DE')).toHaveAttribute('aria-checked', 'true')
+  await expect(radio(page, 'EN')).toHaveAttribute('aria-checked', 'true')
+  await expect(block(page, 'Readable risk chip')).toBeVisible()
 })
 
 test('a missing translation shows the other language with a small badge, never blank', async ({ page }) => {

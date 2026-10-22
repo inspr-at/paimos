@@ -166,6 +166,30 @@ it('a hold or Shift+F10 opens the menu; the hold never also switches, movement c
   expect(opened).toEqual(['cards', 'list', 'goals'])
 })
 
+// AEON-1637 risk: Safari and Firefox apply WebIDL's receiver check to Window's timers (Chromium does
+// not). A default clock that calls setTimeout on another object throws on every touch of a segment.
+it('AEON-1637: the default hold clock calls the timers on Window, so a touch never throws and a hold still opens', () => {
+  const timers: (() => void)[] = [], cleared: unknown[] = []
+  const onWindow = (name: string, act: (...args: unknown[]) => unknown) => function (this: unknown, ...args: unknown[]) {
+    if (this !== undefined && this !== globalThis) throw new TypeError(`Can only call Window.${name} on instances of Window`)
+    return act(...args)
+  }
+  vi.stubGlobal('setTimeout', onWindow('setTimeout', run => timers.push(run as () => void)))
+  vi.stubGlobal('clearTimeout', onWindow('clearTimeout', id => { cleared.push(id) }))
+  const opened: string[] = []
+  const trigger = run(() => useViewMenuTrigger(id => opened.push(id)))
+  const segment = { isConnected: true, contains: (node: unknown) => node === segment } as unknown as HTMLElement
+  const pointer = (x = 0) => ({ pointerType: 'touch', isPrimary: true, button: 0, pointerId: 1, clientX: x, clientY: 0, currentTarget: segment }) as unknown as PointerEvent
+  // A tap: the hold starts and its release clears it, both on Window.
+  trigger.pointerdown(pointer(), 'chat'); trigger.pointerend(pointer())
+  expect(timers).toHaveLength(1)
+  expect(cleared).toEqual([1])
+  // A hold opens the menu once its timer fires.
+  trigger.pointerdown(pointer(), 'lead')
+  timers.at(-1)!()
+  expect(opened).toEqual(['lead'])
+})
+
 // The preference is already loaded, so ensureLoaded's continuation is queued before this
 // microtask. The write that follows must not land on whoever owns the switch by then.
 function personStore() {

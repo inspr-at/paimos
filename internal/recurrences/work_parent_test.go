@@ -92,6 +92,7 @@ func TestStoredLegacyTemplateCreatesQueuedWorkLeafAfterLockedReload(t *testing.T
 	f := setup(t)
 	in := f.input()
 	in.QueueEach = true
+	in.Definition = &Definition{Scope: DefinitionScope{Kind: "project", ProjectID: f.project}, OwnerPrincipalID: f.p.ID}
 	r := f.create(in)
 	f.tx(func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE recurrences SET template=jsonb_set(template,'{type}','"task"'::jsonb) WHERE id=$1`, r.ID)
