@@ -94,6 +94,12 @@ func exerciseRelatedDeliveryTruth(t *testing.T) {
 	if e.Delivery.State != "seen" || e.Delivery.DeliveredAt == nil || e.Delivery.SeenAt == nil {
 		t.Fatal("confirmed receipt missing from memo truth")
 	}
+	// A confirmed receipt is terminal. Exercise failure on a fresh correction's
+	// queued receipt instead of inventing a seen-to-failed transition.
+	q = f.answer(t, f.status(t, q.ID), "a later decision")
+	f.advance(10 * time.Second)
+	f.dispatch(t)
+	e = find(f.status(t, q.ID))
 	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE inbox_receipts SET state='failed',failure_reason='transport_error',handed_off_at=NULL WHERE message_id::text=$1`, e.EffectRef); err != nil {
 		t.Fatal(err)
 	}
