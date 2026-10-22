@@ -10906,7 +10906,7 @@
     ,
     {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: old waiting starts remain cancellable; actual failures and pickup timeout are distinct","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: automatic fitting, saved widths and resize controls preserve host columns","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: automatic fitting, saved widths and resize controls preserve host columns","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: grouped host remains stable at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
