@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/ownedprocess"
+	"github.com/inspr-at/paimos/internal/ownedprocess/processtest"
 )
 
 type terminalLifetimeHooks struct {
@@ -320,27 +320,27 @@ func TestTerminalLifetimeCancellationDuringWait(t *testing.T) {
 func TestTerminalCompletionKillsBackgroundGroupMembers(t *testing.T) {
 	for _, inherit := range []bool{false, true} {
 		t.Run(map[bool]string{false: "closed_output", true: "inherited_output"}[inherit], func(t *testing.T) {
-			// The only descendants are our fixture shell and sleep. The shell exits
-			// immediately; without group cleanup its child creates a sentinel later.
-			root := t.TempDir()
-			sentinel := filepath.Join(root, "escaped-child")
-			redirect := " >/dev/null 2>&1"
-			if inherit {
-				redirect = ""
-			}
-			child := newTerminalChild(t, "(sleep 1; printf escaped > '"+sentinel+"')"+redirect+" &\nprintf ready\nexit 0")
+			// The descendant blocks on a FIFO and holds a separate witness pipe.
+			// EOF proves group cleanup even when it closes stdout/stderr; shell
+			// builtins keep the fixture independent of external tools on PATH.
+			fixture := processtest.New(t, func(script string) string {
+				if inherit {
+					return script
+				}
+				return "{ " + script + "; } >/dev/null 2>&1"
+			})
+			child := newTerminalChild(t, fixture.Script+"; printf ready")
+			fixture.Ready(t)
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
+			fixture.ExitRoot()
 			out, err := collectTerminal(ctx, child.output, terminalGroupLifetime{child.lifetime})
 			// collectTerminal owns this reap; prevent fixture cleanup from reaping again.
 			child.waitOnce.Do(func() {})
 			if err != nil || out != "ready" {
 				t.Fatalf("terminal group completion: %q %v", out, err)
 			}
-			time.Sleep(1200 * time.Millisecond)
-			if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
-				t.Fatal("background child outlived terminal completion")
-			}
+			fixture.AssertExited(t)
 		})
 	}
 }

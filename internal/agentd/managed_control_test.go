@@ -69,6 +69,27 @@ func managedFixture(t *testing.T) (*Supervisor, *fakeAPI, *owned, *managedFake) 
 	e.budgetMu.Unlock()
 	return s, a, e, proc
 }
+
+// Service-cycle tests drive heartbeats and deliveries explicitly. Starting a
+// run here would let background watchers race fixture setup and consume work
+// between the service calls whose outcomes these tests assert.
+func managedServiceFixture(t *testing.T) (*Supervisor, *fakeAPI, *owned, *managedFake) {
+	t.Helper()
+	s, a, process := testSupervisor(t)
+	p := &managedFake{fakeProcess: process, identity: ownedprocess.Identity{ProcessID: strings.Repeat("b", 32), RootPID: process.PID(), GroupID: process.PID(), StartedAt: time.Now().UTC()}}
+	e := &owned{
+		record:  Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: a.run.ID, Generation: s.generation, State: "running", PID: p.PID(), Controls: map[string]replay{}},
+		harness: HarnessSession{ID: "session", ProjectID: "project", Model: a.profile.Model, ReasoningEffort: a.profile.Effort, Activity: "busy"},
+		process: p, managedPolicy: true, replies: map[string]InboxReplyTarget{}, harnessWake: make(chan struct{}, 1),
+		budgetProcess: p, tokenBudget: defaultTokenBudget, turnBudget: defaultTurnBudget,
+	}
+	s.runs[a.run.ID] = e
+	if err := s.journal.Put(e.record); err != nil {
+		t.Fatal(err)
+	}
+	return s, a, e, p
+}
+
 func TestManagedControlFencesAndNoReinjection(t *testing.T) {
 	s, a, e, p := managedFixture(t)
 	identity := p.identity
