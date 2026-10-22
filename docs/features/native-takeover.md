@@ -446,9 +446,9 @@ and verify the exact install/refresh order; unsafe bundle tests still prove
 that rejected inputs never reach offline dpkg. Both browser supervisor imports
 and their ownership regressions remain present.
 
-All 74 main-only files match the merged main byte-for-byte, every branch-only
-file matches reviewed head `9ce8ffb9f`, and the merged Go tier inventory retains
-every test row from both parents. No migration is introduced or renumbered.
+Before this validation note, all 74 main-only files matched the merged main
+byte-for-byte and every branch-only file matched reviewed head `9ce8ffb9f`.
+The merged Go tier inventory retains every test row from both parents. No migration is introduced or renumbered.
 The full required native package set, including receipts, integration and
 reporter contract checks, passed remotely with `-count=1` on `d03d36bce`.
 Focused local apt checks passed 4/4, root verification and uncertain group
@@ -467,6 +467,6 @@ The final guarded static retry was refused at the two-run capacity cap.
 Fresh `ticket-panel.spec.ts` validation was also refused by host-level and
 capacity guards. No browser or full static suite ran locally. This merge round
 therefore remains at 95% pending coordinator CI evidence for the full static
-release-workflow check and the browser spec. No test was skipped or removed,
+release-workflow check and the browser spec. No test was removed or newly skipped,
 no timeout was extended, and no product behavior outside conflict reconciliation
 was changed. No origin push, deployment, review gate or model CLI was run.
