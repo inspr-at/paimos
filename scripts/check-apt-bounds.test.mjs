@@ -46,7 +46,8 @@ async function run(command, options) {
       return { root, seconds: Number(seconds), command }
     }) : []
     const configPaths = existsSync(join(state, 'config-paths')) ? readFileSync(join(state, 'config-paths'), 'utf8').trim().split('\n') : []
-    return { status, stderr, stdout, error, calls, state, attempts, sources, sourceRoot, timeouts, configPaths }
+    const killGraces = existsSync(join(state, 'kill-graces')) ? readFileSync(join(state, 'kill-graces'), 'utf8').trim().split('\n').map(Number) : []
+    return { status, stderr, stdout, error, calls, state, attempts, sources, sourceRoot, timeouts, configPaths, killGraces }
   } finally { clearTimeout(deadline); fixtures.cleanup() }
 }
 
@@ -159,7 +160,7 @@ test('hosted Ubuntu mirror lists recover after fetch errors and stalls without c
     for (const mode of ['fetch-fail', 'mirror-stall']) {
       for (const command of ['apt aeon-apt-fixture-missing-tool', 'playwright install-deps chromium', 'playwright install --with-deps --only-shell chromium']) {
         const browser = command.includes('--with-deps')
-        const firstLimit = command.startsWith('apt ') ? 90 : 120
+        const firstLimit = command.startsWith('apt ') ? 60 : 120
         // Use an injected clock to spend the entire first-attempt allowance.
         // A stub returning 124 immediately would not prove time remains.
         const elapsed = [...(browser ? [0] : []), mode === 'mirror-stall' ? firstLimit : 0, 0, 0]
@@ -226,10 +227,59 @@ test('a failed fallback fetch fails with its status after exactly two attempts',
   }
 })
 
+// AEON-1652 fix4: trickling downloads never emit Err/Ign and can consume the
+// whole first cap plus SIGKILL grace. Retry only before dpkg has started.
+test('slow package downloads time out into fallback with a usable retry budget', async () => {
+  for (const timeoutStatus of [124, 137]) {
+    for (const command of ['apt aeon-apt-fixture-missing-tool', 'playwright install-deps chromium', 'playwright install --with-deps --only-shell chromium']) {
+      const apt = command.startsWith('apt '), browser = command.includes('--with-deps')
+      const firstLimit = apt ? 60 : 120, browserSeconds = browser ? 240 : 0
+      const elapsed = [...(browser ? [browserSeconds] : []), ...(apt ? [0] : []), firstLimit + 20, 20, 0]
+      const result = await run(`bash "${script}" ${command}`, { mode: 'slow-fetch', mirrorList: 'hosted', timeoutStatus, elapsed })
+      assert.equal(result.status, 0, `${timeoutStatus} ${command}: ${result.error}\n${result.stdout}\n${result.stderr}`)
+      assert.match(result.stdout, /^Get:2 .*fonts-ipafont-gothic/m)
+      assert.doesNotMatch(result.stdout, /^(Ign:|Err:|E:)/m, 'a timeout alone must trigger fallback')
+      assert.match(result.stdout, /retrying fetch once via archive\.ubuntu\.com/)
+      assert.match(result.stdout, /dependencies installed via archive\.ubuntu\.com \/ security\.ubuntu\.com/)
+      const dependencies = result.attempts.filter(attempt => attempt.config)
+      assert.equal(dependencies.length, apt ? 4 : 3, 'refresh fallback indexes and retry the install once')
+      assert.match(dependencies.at(-2).command, /update -qq$/)
+      assert.match(dependencies.at(-1).command, apt ? /install -y -qq aeon-apt-fixture-missing-tool$/ : /playwright install-deps chromium$/)
+      assert.doesNotMatch(dependencies.at(-1).sources['ubuntu.sources'], /mirror\+file:|azure\.archive\.ubuntu\.com/)
+      assert.match(dependencies.at(-1).sources['ubuntu.sources'], /http:\/\/archive\.ubuntu\.com\/ubuntu\//)
+      assert.ok(dependencies.every(attempt => attempt.root === '1'))
+      const timeouts = result.timeouts.filter(timeout => timeout.root === '1')
+      assert.deepEqual(result.killGraces, result.timeouts.map(() => 20), 'every timeout has the budgeted kill grace')
+      assert.equal(timeouts[0].seconds, firstLimit)
+      assert.equal(timeouts.at(-1).seconds, apt ? 90 : 240, 'retain a full install allowance after first-cap + kill grace + index refresh')
+      assert.ok(browserSeconds + firstLimit + 20 + 20 + timeouts.at(-1).seconds + 20 <= (apt ? 210 : 720), 'final kill grace fits inside the shared budget')
+      for (const [file, original] of Object.entries(result.sources)) assert.equal(readFileSync(join(result.sourceRoot, file), 'utf8'), original)
+      for (const config of result.configPaths) assert.equal(existsSync(config), false)
+      if (browser) assert.equal(result.attempts.filter(attempt => !attempt.config).length, 1)
+    }
+  }
+})
+
+test('timeouts after any dpkg activity fail without retrying', async () => {
+  for (const timeoutStatus of [124, 137]) {
+    for (const dpkgActivity of ['Preparing to unpack libtest.deb ...', 'Unpacking libtest (1.0) ...', 'Setting up libtest (1.0) ...', 'Selecting previously unselected package libtest.']) {
+      for (const command of ['apt aeon-apt-fixture-missing-tool', 'playwright install-deps chromium']) {
+        const apt = command.startsWith('apt ')
+        const result = await run(`bash "${script}" ${command}`, { mode: 'dpkg-timeout', timeoutStatus, dpkgActivity: `Ign:1 http://azure.archive.ubuntu.com/ubuntu noble InRelease\n${dpkgActivity}`, elapsed: [...(apt ? [0] : []), (apt ? 60 : 120) + 20] })
+        assert.equal(result.status, timeoutStatus, `${dpkgActivity}: ${result.error}\n${result.stdout}\n${result.stderr}`)
+        assert.ok(result.stdout.includes(dpkgActivity))
+        assert.equal(result.calls.length, apt ? 2 : 1)
+        assert.doesNotMatch(result.stdout, /retrying fetch|dependencies installed/)
+        for (const config of result.configPaths) assert.equal(existsSync(config), false)
+      }
+    }
+  }
+})
+
 test('both apt mirrors share the overall deadline', async () => {
-  const result = await run(`bash "${script}" apt aeon-apt-fixture-missing-tool`, { mode: 'fetch-fail', elapsed: [90, 120] })
+  const result = await run(`bash "${script}" apt aeon-apt-fixture-missing-tool`, { mode: 'fetch-fail', elapsed: [80, 130] })
   assert.equal(result.status, 124, `${result.error}\n${result.stdout}\n${result.stderr}`)
-  assert.deepEqual(result.timeouts.map(({ root, seconds }) => ({ root, seconds })), [{ root: '1', seconds: 90 }, { root: '1', seconds: 120 }])
+  assert.deepEqual(result.timeouts.map(({ root, seconds }) => ({ root, seconds })), [{ root: '1', seconds: 60 }, { root: '1', seconds: 110 }])
   assert.equal(result.calls.length, 2, 'the exhausted budget must prevent apt install')
   assert.ok(result.calls.every(call => call.includes('update -qq')))
   assert.doesNotMatch(result.stdout, /dependencies installed/)

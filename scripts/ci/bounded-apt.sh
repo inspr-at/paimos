@@ -20,7 +20,8 @@ run_root_timeout() {
 }
 
 run_timeout() {
-  local user=$1 seconds=$2 remaining effective_deadline=$deadline
+  # Reserve the final SIGKILL grace inside the shared wall-clock budget.
+  local user=$1 seconds=$2 remaining effective_deadline=$((deadline - 20))
   shift 2
   if [[ $user == root && $attempt_deadline -lt $effective_deadline ]]; then
     effective_deadline=$attempt_deadline
@@ -95,11 +96,19 @@ EOF
 }
 
 fetch_failure() {
+  # Never start another install after dpkg began mutating package state,
+  # including when an earlier fetch printed Ign/Err before the timeout.
+  if grep -Eq '^(Preparing to unpack|Unpacking |Setting up |Selecting previously unselected package)' "$log"; then
+    return 1
+  fi
   # Ignore Playwright's final wrapper error, but reject apt/dpkg errors even
   # when an earlier fetch in the same attempt printed Ign or Err lines.
   if grep -E '^E:|^dpkg: error' "$log" | grep -Ev '^E: (Failed to fetch (https?://|mirror\+file:)|Unable to fetch some archives|Some index files failed to download)' >/dev/null; then
     return 1
   fi
+  # A slow mirror can keep delivering bytes without a single fetch error.
+  # The root timeout reaped it before dpkg started, so fallback is safe.
+  [[ $status -eq 124 || $status -eq 137 ]] && return 0
   grep -Eq '^((W|E): Failed to fetch (https?://|mirror\+file:)|E: Unable to fetch some archives|Ign:[0-9]+ (https?://|mirror\+file:)|Err:[0-9]+ (https?://|mirror\+file:))' "$log"
 }
 
@@ -202,7 +211,7 @@ case "$mode" in
     done
     [[ $missing -eq 0 ]] && exit 0
     budget=210
-    first_attempt_seconds=90
+    first_attempt_seconds=60
     attempt=(attempt_apt "$@")
     ;;
   playwright)
@@ -215,8 +224,8 @@ case "$mode" in
   *) usage ;;
 esac
 
-# Both mirrors and the optional browser download share this budget. The final
-# root timeout has a 20-second kill grace, still inside the workflow step limit.
+# Both mirrors, the optional browser download and the final 20-second kill
+# grace share this budget, inside the workflow step limit.
 deadline=$(($(date +%s) + budget))
 attempt_deadline=$deadline
 retry=0
@@ -244,7 +253,7 @@ if [[ ${#source_files[@]} -gt 0 ]]; then
 fi
 echo "bounded-apt: using ${mirrors:-configured apt sources}"
 # Reserve time for a different mirror even if the first fetch never returns.
-# This cap covers the whole first attempt, including apt update + install.
+# This cap covers apt update + install, plus at most 20 seconds to reap it.
 attempt_deadline=$(($(date +%s) + first_attempt_seconds))
 if capture_attempt; then
   echo "bounded-apt: dependencies installed via ${mirrors:-configured apt sources}"

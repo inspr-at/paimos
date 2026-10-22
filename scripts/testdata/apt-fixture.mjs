@@ -22,12 +22,18 @@ cat "\${AEON_STUB_STATE:?}/clock"
 `)
   write('timeout', `#!/usr/bin/env bash
 state=\${AEON_STUB_STATE:?}
+grace=0
 while [[ "\${1:-}" == --* ]]; do
-  if [[ "\$1" == "--kill-after" ]]; then shift 2; else shift; fi
+  case "\$1" in
+    --kill-after) grace=\${2%s}; shift 2 ;;
+    --kill-after=*) grace=\${1#*=}; grace=\${grace%s}; shift ;;
+    *) shift ;;
+  esac
 done
 limit=\$1
 shift
 printf '%s|%s|%s\\n' "\${AEON_AS_ROOT:-0}" "\$limit" "\$*" >> "\$state/timeouts"
+printf '%s\\n' "\$grace" >> "\$state/kill-graces"
 advance_clock() {
   [[ -f "\$state/clock" ]] || return 0
   local index elapsed
@@ -56,7 +62,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 0.05
 done
 advance_clock
-exit 124
+exit "\$(cat "\$state/timeout-status")"
 `)
   const hold = `#!/usr/bin/env bash
 state=\${AEON_STUB_STATE:?}
@@ -130,7 +136,16 @@ if [[ "\$mode" == hung && "\$lines" -ge 2 ]]; then exit 0; fi
 # so an unprivileged SIGKILL leaves it for the next attempt. Only the root
 # timeout removes it. Ignore the removal and stay up until that timeout's
 # SIGKILL: exiting 0 would look like a successful install.
-echo 'Ign:1 http://azure.archive.ubuntu.com/ubuntu noble InRelease' >&2
+if [[ "\$mode" == slow-fetch || "\$mode" == dpkg-timeout ]]; then
+  # Index refreshes succeed; stall while downloading packages for install.
+  if [[ "\$*" == 'update -qq' ]]; then exit 0; fi
+  # Vendor mirror lists survive fallback, so check Ubuntu's selected source.
+  if ! grep -Eq '://azure.archive.ubuntu.com/|mirror[+]file:' "\$snapshot/sources.list" "\$snapshot/ubuntu.sources" 2>/dev/null; then exit 0; fi
+  echo 'Get:2 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 fonts-ipafont-gothic [3513 kB]' >&2
+  if [[ "\$mode" == dpkg-timeout ]]; then cat "\$state/dpkg-activity" >&2; fi
+else
+  echo 'Ign:1 http://azure.archive.ubuntu.com/ubuntu noble InRelease' >&2
+fi
 echo \$\$ > "\$state/apt.pid"
 touch "\$state/hung" "\$state/lock"
 # exec retains the pid; parent death and a hard deadline bound this hang too.
@@ -141,10 +156,12 @@ exec "\$AEON_FIXTURE_NODE" "\$AEON_FIXTURE_APT_HOLD" "\$PPID"
   return bin
 }
 
-export function aptFixture({ mode, shells = false, format = 'sources', elapsed, mirrorList = false }) {
+export function aptFixture({ mode, shells = false, format = 'sources', elapsed, mirrorList = false, timeoutStatus = 124, dpkgActivity = 'Unpacking libtest (1.0) ...' }) {
   const state = mkdtempSync(join(tmpdir(), 'aeon-apt-'))
   writeFileSync(join(state, 'mode'), mode)
   writeFileSync(join(state, 'calls'), '')
+  writeFileSync(join(state, 'timeout-status'), String(timeoutStatus))
+  writeFileSync(join(state, 'dpkg-activity'), dpkgActivity + '\n')
   const sourceRoot = join(state, 'apt')
   mkdirSync(join(sourceRoot, 'sources.list.d'), { recursive: true })
   const sources = format === 'list' ? {

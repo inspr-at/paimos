@@ -10,6 +10,8 @@ import (
 // AEON-933: hosted web shards failed because an unprivileged timeout left root
 // apt-get holding the lock. The node regression fails on 5d155476, whose
 // workflow commands are that unprivileged retry.
+// AEON-1652: also covers slow fetch timeouts (124/137), dpkg activity that
+// forbids retry, and the shared budget including SIGKILL grace.
 func TestRootAptTimeoutReapsBeforeRetry(t *testing.T) {
 	program := "node"
 	args := []string{"--test", "scripts/check-apt-bounds.test.mjs"}
