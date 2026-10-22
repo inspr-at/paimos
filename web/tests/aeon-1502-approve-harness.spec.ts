@@ -268,6 +268,9 @@ test("AEON-1502 first pairing 1280x800 en and de: Pair or Deny with the harness 
     // Neither Cursor nor Codex can be verified: today's default is verification off.
     await expect(review.locator('[data-review-facts]')).toHaveText(copy.factsOff)
     await expect(review.locator('.actions .go')).toHaveText([copy.pairButton, copy.deny])
+    // AEON-1611: the taller readable computer list must not retain the guide's
+    // scroll offset or leave keyboard focus on the form that just disappeared.
+    await expect(review.locator('[data-review-title]')).toBeFocused()
     const fit = await fitsWithoutScrolling(page, review)
     expect(fit.scrolled).toBe(0)
     expect(fit.bottom).toBeLessThanOrEqual(fit.viewport)
