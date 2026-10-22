@@ -50,7 +50,7 @@
     "web-shard": {
       "kind": "not-static",
       "reason": "Browser tier execution and infrastructure preparation.",
-      "runs_sha256": "601c133460c6b87d69d4087e12293d6eac12eb4cf373bc5ff6807fbaa5e593d8"
+      "runs_sha256": "d65cefcd32072e6ba28accdab5e1ab15238485c42f30e8212d1655ed78d38c8e"
     },
     "web": {
       "kind": "not-static",

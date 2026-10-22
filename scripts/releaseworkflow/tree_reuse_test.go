@@ -147,7 +147,7 @@ func TestReuseAlwaysPrimesMatchingMainCacheKeys(t *testing.T) {
 	prime := treeMap(jobs["cache-prime"])
 	web := treeMap(jobs["web-setup"])
 	goTests := treeMap(jobs["go-test"])
-	if prime["if"] != "github.event_name == 'push' && github.ref == 'refs/heads/main'" || prime["needs"] != "tree-reuse" || prime["runs-on"] != "ubuntu-latest" || prime["strategy"] != nil {
+	if prime["if"] != "github.event_name == 'push' && github.ref == 'refs/heads/main'" || prime["needs"] != nil || prime["runs-on"] != "ubuntu-latest" || prime["strategy"] != nil {
 		t.Fatal("every main push must schedule one hosted priming job, including self-hosted tests and queue reuse")
 	}
 	for _, name := range []string{"Resolve lockfile and Playwright cache keys", "Cache installed web dependencies", "Cache Playwright browsers"} {
