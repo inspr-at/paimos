@@ -159,8 +159,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     await expect(form.getByLabel('Host', { exact: true })).toBeVisible()
     const warning = form.locator('.settings-status')
     const warningLabel = warning.locator('strong'), warningDetail = warning.locator('.settings-warning-detail')
-    const label = width === 1024 ? 'Sign in again on the computer' : 'Waiting for capacity'
-    const detail = 'The run queues and starts when this account is ready.'
+    const label = width === 1024 ? 'Inactive login · switch to it on the computer' : 'Waiting for capacity'
+    const detail = width === 1024 ? 'Runs start once this login is active on the computer.' : 'The run queues and starts when this account is ready.'
     await expect(warning).toHaveText(`${label} · ${detail}`)
     await expect(warningLabel).toHaveText(label)
     await expect(warningLabel).toHaveCSS('font-weight', '600')
