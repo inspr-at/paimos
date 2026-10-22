@@ -185,6 +185,44 @@ export function presentChanges(changes: ReleaseChange[], locale?: string | null,
 export function presentRelease(r: Pick<Release, 'notes' | 'changes'>, locale?: string | null): PresentedChanges {
   return presentChanges(r.changes, locale, hasUsableNotes(r) ? r.notes.items : null)
 }
+// ---------- Counts by kind (AEON-1655) ----------
+// What a release's public notes hold, by kind: features, fixes (the server
+// makes a bug tag, type or kind a fix) and notes the server put under other.
+// Features and fixes are counted as the sheet tells them, so the update toast
+// and What's new agree. Without usable notes nothing is counted, never the
+// commits; kinds with none are left out.
+export interface NoteKindCount { kind: ChangeGroup; count: number }
+export function noteKindCounts(r: Pick<Release, 'notes' | 'changes'>): NoteKindCount[] {
+  if (!hasUsableNotes(r)) return []
+  const told = presentRelease(r)
+  const keys = new Set([...told.features, ...told.fixes].map(line => line.key))
+  const other = new Set<string>()
+  for (const item of r.notes.items) {
+    const key = item.key?.trim()
+    const text = localizedNote(item)
+    if (item.group === 'other' && key && !keys.has(key) && (text.pill.trim() || text.benefit.trim())) other.add(key)
+  }
+  const counts: NoteKindCount[] = [{ kind: 'features', count: told.features.length }, { kind: 'fixes', count: told.fixes.length }, { kind: 'other', count: other.size }]
+  return counts.filter(c => c.count > 0)
+}
+// The counts in words, as EN/DE pairs in the one app language (AEON-1609; the
+// catalog AEON-1610 takes them over): a short label beside each number, and
+// the whole line for a screen reader.
+type Pair = readonly [en: string, de: string]
+const NOTE_KIND_WORDS: Record<ChangeGroup, { short: readonly [one: Pair, many: Pair]; spoken: readonly [one: Pair, many: Pair] }> = {
+  features: { short: [['new', 'neu'], ['new', 'neu']], spoken: [['new feature', 'neue Funktion'], ['new features', 'neue Funktionen']] },
+  fixes: { short: [['fix', 'Korrektur'], ['fixes', 'Korrekturen']], spoken: [['fix', 'Korrektur'], ['fixes', 'Korrekturen']] },
+  other: { short: [['other', 'weitere'], ['other', 'weitere']], spoken: [['other change', 'weitere Änderung'], ['other changes', 'weitere Änderungen']] },
+}
+export interface NoteKindLine { items: (NoteKindCount & { label: string })[]; spoken: string }
+export function noteKindLine(counts: readonly NoteKindCount[], lang: ReleaseLang = displayLanguage()): NoteKindLine {
+  const at = lang === 'de' ? 1 : 0
+  const words = (c: NoteKindCount, set: 'short' | 'spoken') => NOTE_KIND_WORDS[c.kind][set][c.count === 1 ? 0 : 1][at]
+  return {
+    items: counts.map(c => ({ ...c, label: words(c, 'short') })),
+    spoken: counts.map(c => `${c.count} ${words(c, 'spoken')}`).join(', '),
+  }
+}
 // Compare follows the group the server already put on each change. A commit
 // is a feature or a fix without any pill or benefit. A shared commit stays in
 // that one group, so a frozen feature note does not pull a fixes commit into

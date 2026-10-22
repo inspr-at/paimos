@@ -259,5 +259,103 @@ test('an unnamed release reads as its calendar version in the toast, never as a 
   const toast = page.locator('.toast').filter({ hasText: 'was updated to' })
   await expect(toast).toBeVisible()
   await expect(toast.locator('.calendar-version')).toHaveAttribute('aria-label', versionLabel(SERVER))
-  expect(await toast.locator('> span').evaluate(el => el.textContent)).not.toContain(SERVER)
+  expect(await toast.locator('> span').first().evaluate(el => el.textContent)).not.toContain(SERVER)
+  // AEON-1655: a release without public notes shows nothing after its sentence.
+  await expect(toast.locator('.toast-counts')).toHaveCount(0)
+})
+
+// AEON-1655: the sentence ends at the name, without the gap the version stamp
+// used to leave, and the release's public notes follow as counts by kind.
+function countedHistory() {
+  const history = releaseHistory()
+  const newest = history.releases[0] as History['releases'][number] & Record<string, unknown>
+  const item = (key: string, group: 'features' | 'fixes', pill: string, benefit: string) => ({ key, group, pill_en: pill, pill_de: '', benefit_en: benefit, benefit_de: '' })
+  newest.notes = { source: 'embedded-product-notes', snapshot_sha256: 'a'.repeat(64), captured_at: newest.reserved_at, release_revision: 1, gaps: [], hidden: 0, items: [], public_items: [
+    item('AEON-75', 'features', 'Time entry editing', 'Correct and delete time entries in the Hours view.'),
+    item('AEON-76', 'features', 'Week totals', 'The week total stays in view while entries change.'),
+    item('AEON-78', 'fixes', 'Stable week total', 'Moving an entry to another day keeps the week total right.'),
+  ] }
+  return { history, newest, older: history.releases[1].version }
+}
+
+async function showUpdateToast(page: Page, history: History, running: string) {
+  await mockWork(page, fixtures())
+  const state = await mockReleases(page, history, { running })
+  await page.goto('/')
+  await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+  state.server = history.current
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  const toast = page.locator('.toast').filter({ hasText: 'was updated to' })
+  await expect(toast).toBeVisible()
+  return toast
+}
+
+test('the update toast ends at the release name and counts its public notes by kind, without a gap or a shift', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { history, newest, older } = countedHistory()
+  const toast = await showUpdateToast(page, history, older)
+  await expect(toast.locator('> span').first()).toHaveText(`PAIMOS AEON was updated to ${newest.codename}`)
+  const counts = toast.locator('.toast-counts')
+  await expect(counts.locator('.toast-count')).toHaveText(['2 new', '1 fix'])
+  await expect(counts.locator('.toast-count svg')).toHaveCount(2)
+  await expect(counts.locator('.sr-only')).toHaveText('2 new features, 1 fix')
+  await expect(toast.getByRole('button', { name: 'What’s new' })).toBeVisible()
+  await expect(toast.getByRole('button', { name: 'Reload' })).toBeVisible()
+  // No gap: the name is as wide as its text, and the counts follow at the toast's own spacing.
+  const fit = await toast.evaluate(el => {
+    const box = (s: string) => el.querySelector(s)!.getBoundingClientRect()
+    return { cell: box('.release-name').width, name: box('.rn-name').width, gap: box('.toast-counts').left - box('.rn-name').right }
+  })
+  expect(Math.abs(fit.cell - fit.name)).toBeLessThanOrEqual(0.5)
+  expect(fit.gap).toBeGreaterThan(0)
+  expect(fit.gap).toBeLessThanOrEqual(16)
+  // Revealing the calendar version on hover moves nothing.
+  const controls = () => toast.evaluate(el => [...el.querySelectorAll('.toast-counts, .toast-count, .toast-action, .toast-close, .release-name')].map(node => {
+    const r = node.getBoundingClientRect()
+    return [r.left, r.top, r.width, r.height]
+  }))
+  const before = await controls()
+  expect(before.length).toBe(7)
+  expect(before.every(([, , w, h]) => w > 0 && h > 0)).toBe(true)
+  await toast.locator('.release-name').hover()
+  await expect(toast.locator('.rn-stamp')).toHaveCSS('opacity', '1')
+  const after = await controls()
+  after.forEach((box, i) => box.forEach((v, j) => expect(Math.abs(v - before[i][j])).toBeLessThanOrEqual(0.5)))
+  await expect(toast.locator('.release-name')).toHaveAccessibleDescription(versionLabel(history.current, false))
+})
+
+test.describe('update toast counts', () => {
+  for (const width of [390, 1024, 1440]) {
+    for (const theme of ['light', 'dark'] as const) {
+      test(`toast ${width} ${theme}`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+        await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+        const { history, older } = countedHistory()
+        const toast = await showUpdateToast(page, history, older)
+        await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+        await expect(toast.locator('.toast-count')).toHaveText(['2 new', '1 fix'])
+        const geo = await toast.evaluate(el => {
+          const edges = (r: DOMRect) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom })
+          const box = (s: string) => edges(el.querySelector(s)!.getBoundingClientRect())
+          return { toast: edges(el.getBoundingClientRect()), sentence: box(':scope > span'), counts: box('.toast-counts'), action: box('.toast-action'), scroll: document.documentElement.scrollWidth - document.documentElement.clientWidth }
+        })
+        expect(geo.scroll).toBeLessThanOrEqual(1)
+        expect(geo.toast.left).toBeGreaterThanOrEqual(0)
+        expect(geo.toast.right).toBeLessThanOrEqual(width)
+        if (width === 390) {
+          // Phones: the counts wrap under the sentence, the actions under the counts.
+          expect(geo.counts.top).toBeGreaterThanOrEqual(geo.sentence.bottom - 0.5)
+          expect(geo.action.top).toBeGreaterThanOrEqual(geo.counts.bottom - 0.5)
+          expect(geo.counts.right).toBeLessThanOrEqual(geo.toast.right)
+        } else {
+          // Wider screens: one line, the counts between the sentence and the actions.
+          expect(geo.counts.left).toBeGreaterThan(geo.sentence.right)
+          expect(geo.action.left).toBeGreaterThan(geo.counts.right)
+          expect(Math.abs((geo.counts.top + geo.counts.bottom) / 2 - (geo.sentence.top + geo.sentence.bottom) / 2)).toBeLessThanOrEqual(2)
+        }
+        await page.screenshot({ path: testInfo.outputPath(`update-toast-${width}-${theme}.png`), animations: 'disabled' })
+        await toast.screenshot({ path: testInfo.outputPath(`update-toast-${width}-${theme}-toast.png`), animations: 'disabled' })
+      })
+    }
+  }
 })
