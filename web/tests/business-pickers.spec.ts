@@ -42,10 +42,17 @@ async function setup(page: Page) {
 
 test('AEON-1417: rejected rates remain in the hours picker and retry keeps controls still', async ({ page }, testInfo) => {
   test.setTimeout(120_000)
-  await setup(page)
+  const { business } = await setup(page)
   let rejected = true
   let held: ReturnType<typeof rateBarrier> | undefined
+  let listFailure: 'partial' | 'full' | undefined
   const reads: string[] = []
+  await page.route('**/api/nodes?*', route => {
+    const params = new URL(route.request().url()).searchParams
+    if (!listFailure || params.get('kind') !== 'cost_unit') return route.fallback()
+    if (listFailure === 'full') return route.fulfill({ status: 503, json: { error: 'cost unit list unavailable' } })
+    return route.fulfill({ json: { items: params.has('cursor') ? [] : business.units, next_cursor: 'still-more' } })
+  })
   await page.route('**/api/cost-units/*/rates', async route => {
     const id = route.request().url().split('/').at(-2)!
     reads.push(id)
@@ -172,6 +179,34 @@ test('AEON-1417: rejected rates remain in the hours picker and retry keeps contr
     held.release(); held = undefined
     await expect(confirmed).toBeVisible()
     checks.push({ view: 'rates-pending', width, theme, skeletonRetained: true, movementPx: 0 })
+
+    // Without a selection, list failures must describe the list, not a unit or missing rates.
+    for (const failure of ['partial', 'full'] as const) {
+      listFailure = failure
+      await page.goto('/business/hours')
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+      if (width === 390) await page.getByRole('button', { name: 'Log time', exact: true }).click()
+      await expect(form.getByRole('button', { name: 'Retry rates' })).toBeEnabled()
+      await expect(cost).toHaveValue('')
+      await expect(cost.locator('option')).toHaveCount(failure === 'partial' ? 3 : 1)
+      await form.getByRole('button', { name: /^Ticket:/ }).click()
+      await page.getByRole('combobox', { name: 'Ticket' }).fill('PHAROS-11')
+      await page.getByRole('option', { name: /PHAROS-11/ }).click()
+      const stable = await controlStability(page, {
+        cost, days: form.getByRole('radiogroup', { name: 'Day' }),
+        ticket: form.getByRole('button', { name: /^Ticket:/ }), log: form.getByRole('button', { name: 'Log', exact: true }),
+      })
+      const hint = failure === 'partial' ? 'Some cost units could not be loaded.' : 'Cost units could not be loaded.'
+      await stable.check(async () => {
+        await form.getByRole('button', { name: 'Log', exact: true }).click()
+        await expect(form.locator('.log-status')).toHaveText(hint)
+      })
+      stable.done()
+      await expect(cost).toHaveValue('')
+      await page.screenshot({ path: testInfo.outputPath(`hours-no-selection-${failure}-${width}-${theme}.png`), fullPage: true })
+      checks.push({ view: `hours-no-selection-${failure}`, width, theme, hint, controlsStable: true })
+    }
+    listFailure = undefined
   }
   await writeFile(testInfo.outputPath('checks.json'), JSON.stringify(checks, null, 2))
   await writeFile(testInfo.outputPath('checks.md'), JSON.stringify(checks, null, 2))

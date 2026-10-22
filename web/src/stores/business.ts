@@ -180,7 +180,10 @@ export const useBusiness = defineStore('business', () => {
         await Promise.all(Array.from({ length: Math.min(6, pending.length) }, worker))
         if (run === generation) costUnitsLoaded.value = true
       } catch (e) {
-        if (run === generation) costUnitsListError.value = e instanceof Error ? e.message : 'Cost units could not be loaded.'
+        if (run === generation) {
+          costUnitsListError.value = 'Cost units could not be loaded.'
+          console.error('Cost units could not be loaded.', e)
+        }
       } finally { if (run === generation) { costRequest = null; costUnitsLoading.value = false } }
     })()
     return costRequest
