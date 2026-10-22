@@ -609,12 +609,12 @@ defineExpose({ open, openOnce })
 .instruction.field { height: auto; resize: none; }
 .one-off .restriction-note { min-block-size: 3em; }
 .run-settings-fields { display: grid; gap: 16px; min-width: 0; }
-.run-settings-summary { padding-block: 12px; border-block: 1px solid var(--line); }
-.run-summary-line { display: flex; align-items: center; gap: 12px; }
+.run-settings-summary { min-width: 0; max-width: 100%; padding-block: 12px; border-block: 1px solid var(--line); }
+.run-summary-line { min-width: 0; display: flex; align-items: center; gap: 12px; }
 .run-summary-line p { flex: 1; min-width: 0; margin: 0; font-size: 13px; line-height: 1.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .settings-toggle { flex-shrink: 0; min-height: 44px; }
-.settings-status { min-block-size: 3em; margin: 4px 0 0; }
-.settings-warning { display: block; }
+.settings-status { min-width: 0; min-block-size: 3em; margin: 4px 0 0; }
+.settings-warning { display: block; min-width: 0; max-width: 100%; }
 .settings-status strong { font-weight: 600; }
 .settings-status.folded .settings-warning { display: flex; align-items: baseline; gap: 4px; }
 .settings-status.folded strong { flex-shrink: 0; white-space: nowrap; }

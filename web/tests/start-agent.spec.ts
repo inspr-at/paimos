@@ -174,6 +174,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     const detailLines = await warningDetail.evaluate(el => [...el.getClientRects()].map(rect => rect.y))
     expect(Math.abs(detailLines[0]! - labelLine)).toBeLessThanOrEqual(0.5)
     if (width !== 390) expect(detailLines).toHaveLength(1)
+    const expandedWarningHeight = await warning.evaluate(el => el.getBoundingClientRect().height)
     await expectStableControls({
       controls: { queue, cancel: form.getByRole('button', { name: 'Cancel', exact: true }), task, summary: form.locator('.run-summary-line'), ...(width === 390 ? { phone: form } : {}) },
       interactions: [
@@ -191,6 +192,12 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
           expect(labelBox).not.toBeNull()
           expect(detailBox).not.toBeNull()
           expect(Math.abs(labelBox!.y - detailBox!.y)).toBeLessThanOrEqual(0.5)
+          expect(detailBox!.width).toBeGreaterThan(0)
+          const summaryBox = (await summary.boundingBox())!
+          expect(labelBox!.x).toBeGreaterThanOrEqual(summaryBox.x - 0.5)
+          expect(detailBox!.x + detailBox!.width).toBeLessThanOrEqual(summaryBox.x + summaryBox.width + 0.5)
+          expect(await warning.locator('.settings-warning').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+          expect(Math.abs(await warning.evaluate(el => el.getBoundingClientRect().height) - expandedWarningHeight)).toBeLessThanOrEqual(0.5)
           expect(await warningLabel.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
           if (width === 390) expect(await warningDetail.evaluate(el => el.scrollWidth - el.clientWidth)).toBeGreaterThan(0)
           await form.screenshot({ path: info.outputPath(`AEON-1512-${width}-${theme}-warning-folded.png`) })
