@@ -301,7 +301,13 @@ func (s *Store) BeginWrite(ctx context.Context, b nativecontract.Binding, id str
 	}
 	after := cloneReceipt(before)
 	after.State = "write_started"
-	return s.advance(i, after)
+	r, err := s.advance(i, after)
+	if err == nil {
+		// An accepted/queued input restored before any possible I/O can still
+		// be authorized and first written during this journal lifetime.
+		delete(s.recoveredInputs, b.TenantID+"/"+id)
+	}
+	return r, err
 }
 
 // Observe consumes correlated evidence from the qualified owned provider

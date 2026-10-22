@@ -25,8 +25,9 @@ Unqualified and terminal sessions keep their inbox fallback.
 
 P3a fsyncs the possible-write marker before provider I/O. Confirmed replay in
 the same live journal returns its existing receipt without another native
-write. Restored input receipts retain their evidence but require reconciliation;
-they never report a successful live retry. Uncertainty holds the input and
+write. Restored write evidence requires reconciliation and never reports a
+successful live retry. An accepted input with no possible write can still be
+authorized for its first write. Uncertainty holds the input and
 prevents automatic reinjection; correlated late evidence can resolve the hold.
 The server projects native write acknowledgement separately from correlated
 turn evidence. Ordinary inbox hooks cannot concurrently consume an open

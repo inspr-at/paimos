@@ -189,6 +189,14 @@ func TestCrashBeforeNativeAckHoldsInputAndReplaysOnlyMetadata(t *testing.T) {
 			if replay, err := writer.Send(t.Context(), actor, op, in); err != nil || !reflect.DeepEqual(replay, r) || transport.writes.Load() != 1 {
 				t.Fatal("live replay changed evidence or repeated input", replay, err)
 			}
+			// Retain a separate input that never reached the possible-I/O marker.
+			pending, pendingOp := testInput(b, now), uuid.NewString()
+			writer.Authority = &testAuthority{denied: true}
+			accepted, err := writer.Send(t.Context(), actor, pendingOp, pending)
+			checkReason(t, err, nativecontract.ReasonPermissionRevoked)
+			if accepted.State != "accepted" || transport.writes.Load() != 1 {
+				t.Fatal("refused input reached native I/O", accepted)
+			}
 			if err := s.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -203,6 +211,13 @@ func TestCrashBeforeNativeAckHoldsInputAndReplaysOnlyMetadata(t *testing.T) {
 			}
 			if saved, err := s.Get(b, op); err != nil || !reflect.DeepEqual(saved, r) {
 				t.Fatal("restored evidence was lost", saved, err)
+			}
+			first, err := writer.Send(t.Context(), actor, pendingOp, pending)
+			if err != nil || first.State != "write_acknowledged" || transport.writes.Load() != 2 {
+				t.Fatal("authorized first write of unwritten input failed", first, err)
+			}
+			if replay, err := writer.Send(t.Context(), actor, pendingOp, pending); err != nil || !reflect.DeepEqual(replay, first) || transport.writes.Load() != 2 {
+				t.Fatal("first write after reopen was not idempotent", replay, err)
 			}
 		})
 	}
