@@ -166,12 +166,12 @@ test('AEON-1416: pending Hours Undo stays in its day and failed Undo shows plain
     const previous = page.getByRole('button', { name: 'Previous week' })
     const next = page.getByRole('button', { name: 'Next week' })
     const week = page.getByRole('group', { name: 'Week', exact: true })
-    const deletion = page.waitForResponse(response => response.request().method() === 'DELETE')
     await expectStableControls({
       controls: { previous, next, week, restoredEntry: row(page, 'e-4') },
-      scrollAreas: { week },
+      scrollAreas: { toolbar: page.locator('.toolbar') },
       interactions: [{ name: 'delete and immediately undo', run: async () => {
         await row(page, 'e-4').focus()
+        const deletion = page.waitForResponse(response => response.request().method() === 'DELETE')
         await page.keyboard.press('Delete')
         await deletion
         await expect(row(page, 'e-4')).toHaveCount(0)
@@ -185,7 +185,7 @@ test('AEON-1416: pending Hours Undo stays in its day and failed Undo shows plain
       } }],
     })
     await expectStableControls({
-      controls: { previous, next, week }, scrollAreas: { week },
+      controls: { previous, next, week }, scrollAreas: { toolbar: page.locator('.toolbar') },
       interactions: [{ name: 'failed Undo', run: async () => {
         release()
         await expect(row(page, 'e-4')).toHaveCount(0)

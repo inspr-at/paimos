@@ -120,11 +120,11 @@ test('AEON-1416: pending attachment Undo stays in place and failed Undo shows pl
     })
     const target = strip(page).locator('[data-attachment-id="att-1"]')
     const add = strip(page).getByRole('button', { name: 'Add', exact: true })
-    const deletion = page.waitForResponse(response => response.request().method() === 'DELETE')
     await expectStableControls({
       controls: { add, restoredAttachment: target }, scrollAreas: { strip: strip(page) },
       interactions: [{ name: 'delete and immediately undo', run: async () => {
         await target.focus()
+        const deletion = page.waitForResponse(response => response.request().method() === 'DELETE')
         await page.keyboard.press('Delete')
         await deletion
         await expect(target).toHaveCount(0)
