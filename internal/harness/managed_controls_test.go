@@ -11,6 +11,7 @@ import (
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/rules/doctrine"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/jackc/pgx/v5"
 	"net/http"
@@ -452,17 +453,25 @@ func TestManagedPinnedContextDefaultDoctrineSelectsKernels(t *testing.T) {
 		"docs/AGENTS-PROFILE-OWNER.md":  "# Person profile\n\n- Owner-only instructions.\n",
 		"docs/AGENTS-PROFILE-OTHER.md":  "# Person profile\n\n- Other person's instructions.\n",
 	}
+	grantDir := t.TempDir()
+	grant, err := json.Marshal(map[string]any{"grants": []map[string]string{{"tenant_id": f.person.TenantID, "repository": "fixture/private"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(grantDir, "fixture-read.allowlist.json"), grant, 0600); err != nil {
+		t.Fatal(err)
+	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		for _, source := range []struct {
-			repo, visibility string
-			paths            []string
-			files            map[string]string
+			repo, visibility, credential string
+			paths                        []string
+			files                        map[string]string
 		}{
-			{"fixture/company", "public", doctrine.DefaultPaths, public},
-			{"fixture/private", "private", []string{"docs/AGENTS-*.md", "docs/AGENTS-PROFILE-OWNER.md", "docs/AGENTS-PROFILE-OTHER.md"}, private},
+			{"fixture/company", "public", "", doctrine.DefaultPaths, public},
+			{"fixture/private", "private", "fixture-read", []string{"docs/AGENTS-*.md", "docs/AGENTS-PROFILE-OWNER.md", "docs/AGENTS-PROFILE-OTHER.md"}, private},
 		} {
 			var id string
-			if err := tx.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,commit_sha,paths,indexed_at) VALUES($1,$2,$3,$4,$5,clock_timestamp()) RETURNING id::text`, f.person.TenantID, source.repo, source.visibility, commit, source.paths).Scan(&id); err != nil {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,credential_ref,commit_sha,paths,indexed_at) VALUES($1,$2,$3,$4,$5,$6,clock_timestamp()) RETURNING id::text`, f.person.TenantID, source.repo, source.visibility, source.credential, commit, source.paths).Scan(&id); err != nil {
 				return err
 			}
 			for name, body := range source.files {
@@ -474,7 +483,12 @@ func TestManagedPinnedContextDefaultDoctrineSelectsKernels(t *testing.T) {
 		}
 		return nil
 	})
-	w = f.call(f.agent, "POST", endpoint, map[string]bool{"pinned_files": true}, lease)
+	req := httptest.NewRequest("POST", endpoint, strings.NewReader(`{"pinned_files":true}`))
+	req = req.WithContext(tenant.WithPrincipal(t.Context(), f.agent))
+	req.Header.Set("Authorization", "Bearer "+f.key)
+	req.Header.Set("X-Aeon-Worker-Lease", lease)
+	w = httptest.NewRecorder()
+	(doctrine.Credentials{Dir: grantDir}).CatalogMiddleware(f.mux).ServeHTTP(w, req)
 	expect(t, w, 200)
 	var got rules.Merged
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
