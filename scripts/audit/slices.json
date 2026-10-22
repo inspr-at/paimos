@@ -471,6 +471,7 @@
       "paths": [
         "web/src/**",
         "web/tests/**",
+        "web/tests/ticket-reviews.unit.test.ts",
         "web/tests/person-steps.spec.ts",
         "web/e2e/**",
         "web/perf/**",

@@ -20374,6 +20374,8 @@
     ,
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"touchScroll > runs from the touch until momentum is quiet, never while a finger is down","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/record-ownership.unit.test.ts","name":"P03: conflicted titles and failed comments retain their drafts and ignore late results after A changes to B","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/record-ownership.unit.test.ts","name":"P03: the same ticket retains its owned comment draft when expanded and returned","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/record-ownership.unit.test.ts","name":"S8-001: changing ticket clears description and comment drafts, including a late save","tier":"ESSENTIAL"}
@@ -24115,6 +24117,12 @@
     {"kind":"vitest","file":"tests/ticket-peek.unit.test.ts","name":"P03: peek routing preserves Agents, knowledge and graph context and returns focus to its opener","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/ticket-peek.unit.test.ts","name":"the route owns the panel even when a stale peek query survives navigation","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-reviews.unit.test.ts","name":"P03: late review results cannot cross ticket, project, person, tenant or unmount boundaries","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-reviews.unit.test.ts","name":"P03: review readiness requires full distinct commits, repository, author and both write grants","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-reviews.unit.test.ts","name":"P03: uncertain review retries reuse the exact request while edited requests get a fresh id","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/ticket-search.unit.test.ts","name":"shared palette and relation search includes canonical work for PHAROS-29","tier":"GATED-FULL"}
     ,

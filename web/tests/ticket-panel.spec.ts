@@ -2,6 +2,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors, type Call } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 // setSystemTime lets time flow (setFixedTime would freeze Vue's event timestamps).
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
@@ -55,6 +56,22 @@ test('the panel shows title, properties, Markdown sections, relations and the ti
 test('titles edit inline on click, save with Enter under a precondition, and cancel with Esc', async ({ page }) => {
   const data = fixtures(), revision = data.nodes.find(node => node.id === 'n-2')!.updated_at
   const calls = await mockWork(page, data)
+  const evidence = { evidence: '<script>verbatim source</script>', ready: false, score: 0 }
+  const intakeReads: string[] = []
+  await page.route('**/api/me/permissions?*', route => {
+    const grants = mockEffectivePermissions('admin', 'p-pharos')
+    grants.workspace.permissions.push('intake.read')
+    return route.fulfill({ json: grants })
+  })
+  await page.route('**/api/projects/p-pharos/intake?*', route => {
+    intakeReads.push(new URL(route.request().url()).searchParams.get('node_id') ?? '')
+    return route.fulfill({ json: { sources: [], turns: [], drafts: [{ id: 'origin', extensions: { 'x-p03.source@1': { version: '1.0', data: evidence } } }] } })
+  })
+  await page.route('**/api/nodes/n-2/agent-work', route => route.fulfill({ json: {
+    node_id: 'n-2', kind: 'ticket', currency: 'USD', usage_available: false, includes_descendants: false,
+    scope_truncated: false, list_truncated: false, totals: { session_count: 1 },
+    sessions: [{ id: 'p03-worker', ticket_node_id: 'n-2', ticket_key: 'PHAROS-12', harness: 'codex', label: 'Oracle worker', phase: 'working', duration_seconds: 45, duration_state: 'ongoing' }],
+  } }))
   await page.goto('/p/PHAROS/PHAROS-12')
   const ws = panel(page)
   await expect(ws.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
@@ -84,6 +101,13 @@ test('titles edit inline on click, save with Enter under a precondition, and can
   await expect(ws.getByRole('region', { name: 'Description' })).toContainText('Saved with the current ticket revision.')
   expect(writes(calls).at(-1)).toMatchObject({ path: '/api/nodes/n-2', body: { body: 'Saved with the current ticket revision.' } })
   expect(data.nodes.find(node => node.id === 'n-2')).toMatchObject({ title: 'Add an Oracle Cloud Always Free connector', body: 'Saved with the current ticket revision.', state: 'qa' })
+  const extension = ws.getByRole('region', { name: 'Extension data' })
+  await extension.getByLabel('x-p03.source · version 1.0', { exact: true }).click()
+  expect(JSON.parse((await extension.locator('pre').textContent())!)).toEqual(evidence)
+  await expect(extension.locator('script')).toHaveCount(0)
+  expect(intakeReads).toEqual(['n-2'])
+  const worker = ws.getByRole('region', { name: 'Agent work' }).getByRole('link', { name: /Oracle worker/ })
+  await expect(worker).toHaveAttribute('href', '/agents/p03-worker')
 })
 
 test('a title conflict shows the newer title and keeps the draft', async ({ page }) => {

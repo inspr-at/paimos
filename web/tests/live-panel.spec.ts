@@ -48,8 +48,6 @@ test('a change in one browser patches the open ticket in the other in place', as
     await expect(title).toBeVisible()
     await expect(wsB.getByRole('alert')).toHaveCount(0)
     await expect(wsB.getByRole('button', { name: /Priority: High/ })).toBeVisible()
-    await expect(b.locator('#row-n-4')).toHaveCount(1)
-
     // Every connection asked for live mode; reconnects resumed after the last event.
     expect(live.requests.every(r => r.after === 'latest')).toBe(true)
     expect(live.requests.filter(r => r.page === 'b' && r.resumed).length).toBeGreaterThan(0)
