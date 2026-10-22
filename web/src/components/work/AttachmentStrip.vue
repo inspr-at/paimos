@@ -9,7 +9,7 @@ import AppIcon from '../AppIcon.vue'
 // context column. Images open the viewer, other files are cards; drag to reorder
 // (or Alt+arrows), captions in the gallery, delete with an undo toast.
 const MIME = 'application/x-aeon-attachment'
-const props = defineProps<{ items: Attachment[]; uploads: Upload[]; layout: 'strip' | 'gallery'; canWrite: boolean; loading: boolean; error: string }>()
+const props = defineProps<{ items: Attachment[]; uploads: Upload[]; layout: 'strip' | 'gallery'; canWrite: boolean; loading: boolean; error: string; pending?: ReadonlySet<string> }>()
 const emit = defineEmits<{
   open: [id: string]; add: [files: File[]]; remove: [item: Attachment]; reorder: [id: string, to: number]
   caption: [item: Attachment, caption: string]; retry: [key: string]; cancel: [key: string]; reload: []
@@ -22,6 +22,7 @@ const draft = ref('')
 // Images whose picture could not be read (bytes not stored yet, or gone) show as a
 // file card that says so, not as a broken image.
 const unreadable = reactive(new Set<string>())
+const writable = (item: Attachment) => props.canWrite && !props.pending?.has(item.id)
 
 function pick() { picker.value?.click() }
 function picked(event: Event) {
@@ -31,7 +32,7 @@ function picked(event: Event) {
   if (files.length) emit('add', files)
 }
 function dragStart(event: DragEvent, item: Attachment) {
-  if (!props.canWrite) return
+  if (!writable(item)) return
   dragging.value = item.id
   event.dataTransfer?.setData(MIME, item.id)
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
@@ -44,7 +45,7 @@ function dragOver(event: DragEvent, index: number) {
   over.value = index + (after ? 1 : 0)
 }
 function drop(event: DragEvent) {
-  if (!dragging.value || over.value === null) return
+  if (!dragging.value || props.pending?.has(dragging.value) || over.value === null) return
   event.preventDefault(); event.stopPropagation()
   const from = props.items.findIndex(item => item.id === dragging.value)
   const to = over.value > from ? over.value - 1 : over.value
@@ -53,7 +54,7 @@ function drop(event: DragEvent) {
 }
 function dragEnd() { dragging.value = null; over.value = null }
 function keydown(event: KeyboardEvent, item: Attachment, index: number) {
-  if (!props.canWrite) return
+  if (!writable(item)) return
   const back = event.key === 'ArrowLeft' || event.key === 'ArrowUp', forward = event.key === 'ArrowRight' || event.key === 'ArrowDown'
   if (event.altKey && (back || forward)) {
     event.preventDefault()
@@ -61,8 +62,8 @@ function keydown(event: KeyboardEvent, item: Attachment, index: number) {
     void nextTick(() => document.querySelector<HTMLElement>(`[data-attachment-id="${item.id}"]`)?.focus())
   } else if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); emit('remove', item) }
 }
-function startCaption(item: Attachment) { if (!props.canWrite) return; editing.value = item.id; draft.value = item.caption; requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`[data-caption-for="${item.id}"]`)?.focus()) }
-function saveCaption(item: Attachment) { if (editing.value !== item.id) return; editing.value = null; if (draft.value.trim() !== item.caption) emit('caption', item, draft.value.trim()) }
+function startCaption(item: Attachment) { if (!writable(item)) return; editing.value = item.id; draft.value = item.caption; requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`[data-caption-for="${item.id}"]`)?.focus()) }
+function saveCaption(item: Attachment) { if (editing.value !== item.id) return; editing.value = null; if (writable(item) && draft.value.trim() !== item.caption) emit('caption', item, draft.value.trim()) }
 </script>
 
 <template>
@@ -83,22 +84,22 @@ function saveCaption(item: Attachment) { if (editing.value !== item.id) return; 
     <ol v-if="items.length || uploads.length" class="list" aria-label="Attachments">
       <li
         v-for="(item, index) in items" :key="item.id" class="item" :class="{ dragging: dragging === item.id, 'drop-before': over === index && dragging !== item.id, 'drop-after': over === index + 1 && index === items.length - 1 }"
-        :draggable="canWrite ? 'true' : undefined" @dragstart="dragStart($event, item)" @dragover="dragOver($event, index)" @drop="drop"
+        :aria-busy="pending?.has(item.id) || undefined" :draggable="writable(item) ? 'true' : undefined" @dragstart="dragStart($event, item)" @dragover="dragOver($event, index)" @drop="drop"
       >
         <button
           type="button" class="tile" :class="{ file: !isImage(item) || unreadable.has(item.id) }" :data-attachment-id="item.id"
-          :aria-label="`Open ${item.caption || item.name}${canWrite ? '. Alt and arrows move it, Delete removes it' : ''}`" @click="emit('open', item.id)" @keydown="keydown($event, item, index)"
+          :aria-label="`Open ${item.caption || item.name}${writable(item) ? '. Alt and arrows move it, Delete removes it' : ''}`" @click="emit('open', item.id)" @keydown="keydown($event, item, index)"
         >
           <img v-if="hasThumbnail(item) && !unreadable.has(item.id)" :src="contentUrl(item.id, 'thumb')" :alt="item.caption || item.name" loading="lazy" decoding="async" draggable="false" @error="unreadable.add(item.id)" />
           <span v-else class="file-card"><span class="badge">{{ fileKind(item) }}</span><span class="file-name">{{ item.name }}</span><span class="file-size">{{ unreadable.has(item.id) ? 'No preview' : fileSize(item.size) }}</span></span>
         </button>
-        <button v-if="canWrite" type="button" class="remove" :aria-label="`Delete ${item.name}`" data-tip="Delete · you can undo" @click="emit('remove', item)"><AppIcon name="close" :size="11" /></button>
+        <button v-if="canWrite" type="button" class="remove" :disabled="pending?.has(item.id)" :aria-label="`Delete ${item.name}`" data-tip="Delete · you can undo" @click="emit('remove', item)"><AppIcon name="close" :size="11" /></button>
         <template v-if="layout === 'gallery'">
           <input
-            v-if="editing === item.id" v-model="draft" class="caption-input" :data-caption-for="item.id" aria-label="Caption" maxlength="300"
+            v-if="editing === item.id" v-model="draft" class="caption-input" :disabled="!writable(item)" :data-caption-for="item.id" aria-label="Caption" maxlength="300"
             @keydown.enter.prevent="saveCaption(item)" @keydown.esc.prevent.stop="editing = null" @blur="saveCaption(item)"
           />
-          <button v-else type="button" class="caption" :class="{ unset: !item.caption }" :disabled="!canWrite && !item.caption" @click="startCaption(item)">{{ item.caption || (canWrite ? 'Add a caption' : item.name) }}</button>
+          <button v-else type="button" class="caption" :class="{ unset: !item.caption }" :disabled="pending?.has(item.id) || (!canWrite && !item.caption)" @click="startCaption(item)">{{ item.caption || (canWrite ? 'Add a caption' : item.name) }}</button>
         </template>
         <span v-else-if="item.caption" class="strip-caption">{{ item.caption }}</span>
       </li>

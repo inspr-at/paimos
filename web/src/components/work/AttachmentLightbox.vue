@@ -10,7 +10,7 @@ import AppIcon from '../AppIcon.vue'
 // a filmstrip through every attachment, fit / 100% / zoom with pan, and compare
 // for two screens (side by side, a slider, or onion skin for before and after).
 // Thumbs in the strip, the preview size on the stage, the original only at 100%+.
-const props = defineProps<{ items: Attachment[]; ticketKey: string; canWrite: boolean; setCaption: (item: Attachment, caption: string) => Promise<boolean>; names?: Map<string, string> }>()
+const props = defineProps<{ items: Attachment[]; ticketKey: string; canWrite: boolean; setCaption: (item: Attachment, caption: string) => Promise<boolean>; names?: Map<string, string>; pending?: ReadonlySet<string> }>()
 // Who added it: the name the server sent, or one the page already knows for that person.
 const addedBy = (item: Attachment) => typeof item.created_by === 'string' ? props.names?.get(item.created_by) ?? '' : item.created_by?.name ?? ''
 const emit = defineEmits<{ close: [] }>()
@@ -207,7 +207,7 @@ async function copyMarkdown() {
 }
 async function saveCaption() {
   const item = current.value
-  if (item && caption.value.trim() !== item.caption) await props.setCaption(item, caption.value.trim())
+  if (item && !props.pending?.has(item.id) && caption.value.trim() !== item.caption) await props.setCaption(item, caption.value.trim())
 }
 const onResize = () => fit()
 window.addEventListener('resize', onResize)
@@ -296,7 +296,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
 
         <aside v-if="details" class="details" aria-label="Attachment details">
           <p class="eyebrow">Caption</p>
-          <input v-model="caption" class="field caption" :disabled="!canWrite" placeholder="Add a caption" aria-label="Caption" maxlength="300" @keydown.enter.prevent="saveCaption" @blur="saveCaption" />
+          <input v-model="caption" class="field caption" :disabled="!canWrite || pending?.has(current.id)" placeholder="Add a caption" aria-label="Caption" maxlength="300" @keydown.enter.prevent="saveCaption" @blur="saveCaption" />
           <p class="eyebrow">File</p>
           <dl>
             <div><dt>Name</dt><dd>{{ current.name }}</dd></div>

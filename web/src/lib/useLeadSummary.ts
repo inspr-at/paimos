@@ -14,7 +14,11 @@ export function useLeadSummary(projectId: Ref<string>, projectKey: Ref<string>) 
   const leads = useProjectLeads(), queue = useWorkQueue(), live = useLiveAgents(), projection = useAgentProjection()
   const stopLive = live.watch()
   let stopProjection = () => {}
-  watch(projectId, id => { stopProjection(); stopProjection = projection.watchProjects({ project: id }) }, { immediate: true })
+  watch(projectId, (id, _before, cleanup) => {
+    stopProjection(); stopProjection = projection.watchProjects({ project: id })
+    const stopLead = leads.watch(id), stopQueue = queue.watch(id)
+    cleanup(() => { stopLead(); stopQueue() })
+  }, { immediate: true, flush: 'sync' })
   onScopeDispose(() => { stopLive(); stopProjection() })
   const view = computed(() => leads.views[projectId.value] ?? null)
   const lead = computed(() => view.value?.lead ?? null)

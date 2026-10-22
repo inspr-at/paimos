@@ -469,10 +469,8 @@ test('stale recovery skips a reused detached PID and releases the stale lock', a
   } finally { lock?.release(); sentinel.kill('SIGTERM'); await sentinelExit }
 })
 
-function detachedProbe({ ready = false } = {}) {
-  const child = fixtures.spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000); process.send?.("ready")'], {
-    stdio: ready ? ['ignore', 'ignore', 'ignore', 'ipc'] : 'ignore',
-  })
+function detachedProbe(options = {}) {
+  const child = fixtures.spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000); process.send?.("ready")'], { stdio: 'ignore', ...options })
   const completion = new Promise(resolve => child.once('exit', resolve))
   return { child, completion }
 }
@@ -620,16 +618,16 @@ test('root identity retries a first-ps miss and records only its verified start'
 // Risk: killing a root during its fixture preload can also kill an in-flight ps
 // child. The root exit then does not prove that its process group has been reaped.
 // Wait for suite code to be running before testing failed identity verification.
-test('unverifiable live roots terminate their group without an invalid journal entry', { timeout: 15000 }, async () => {
-  const probe = detachedProbe({ ready: true }), entries = []
+test('unverifiable live roots terminate their group without an invalid journal entry', { timeout: 15000 }, async t => {
+  const probe = detachedProbe({ stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }), entries = []
   let calls = 0
   try {
     assert.equal(probe.child.connected, true, 'the root must have an IPC readiness channel')
-    const [message] = await Promise.race([
-      once(probe.child, 'message'),
+    const message = await Promise.race([
+      once(probe.child, 'message', { signal: t.signal }),
       probe.completion.then(() => assert.fail('root exited before its readiness barrier')),
     ])
-    assert.equal(message, 'ready')
+    assert.deepEqual(message, ['ready', undefined])
     await assert.rejects(recordRootGroup(probe.child, entry => entries.push(entry), {
       start: () => { calls++; return '' }, attempts: 3, wait: async () => {},
     }), /spawned group terminated/)
