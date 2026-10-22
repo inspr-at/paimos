@@ -52,6 +52,11 @@ func TestRulesCompareCLIReportsBlockerAndRefusesUnsafeIO(t *testing.T) {
 	if err = os.WriteFile(loose, []byte(`{"items":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// WriteFile applies umask, so a 0077 runner would store a private file and
+	// the refusal below would not be testing a loose mode.
+	if err = os.Chmod(loose, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err = runCompare(t, io.Discard, "--context", "project", "--file", path, "--provenance", loose); err == nil {
 		t.Fatal("loose provenance file accepted")
 	}

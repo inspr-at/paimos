@@ -444,6 +444,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/lead-decisions", "nodes.read", false, 200, m.listLeadDecisions},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/lead-decisions", "harness.worker", true, 200, m.recordLeadDecision},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.read", false, 200, m.readRulesReceipts},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-delivery-manifest", "harness.worker", true, 200, m.prepareRulesDelivery},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-delivery-evidence", "harness.worker", true, 200, m.acknowledgeRulesDelivery},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-delivery-evidence", "harness.read", false, 200, m.readRulesDelivery},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.worker", true, 200, m.recordRulesReceipt},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/pause", "harness.control", false, 200, m.requestPause},
@@ -1145,6 +1148,9 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if agentKind != "agent" {
 		return nil, workorders.Fail(400, "agent principal required")
 	}
+	if p.RunID != "" && (in.RunID == nil || *in.RunID != p.RunID) {
+		return nil, workorders.Fail(403, "run capability target mismatch")
+	}
 	if in.RunID != nil {
 		var agentID, orderID string
 		err = tx.QueryRow(ctx, `SELECT agent_principal_id::text,work_order_id::text FROM agent_runs WHERE id=$1`, *in.RunID).Scan(&agentID, &orderID)
@@ -1769,6 +1775,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	}
 	if !validPhase(in.Phase) || in.ActivitySequence < 0 {
 		return nil, workorders.Fail(400, "invalid heartbeat")
+	}
+	if p.TransportComputerID != "" && p.RunID == "" && !in.AttachedHook {
+		return nil, workorders.Fail(403, "exact attached hook identity required")
 	}
 	ctx := r.Context()
 	if in.AttachedHook {

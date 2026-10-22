@@ -108,7 +108,8 @@
         "internal/db/migrations/1359_delivery_admission_publisher.sql"
       ],
       "exclude": [
-        "internal/db/migrations/1333_models_v2_migration.sql"
+        "internal/db/migrations/1333_models_v2_migration.sql",
+        "internal/db/migrations/1408_rules_delivery_evidence.sql"
       ]
     },
     {
@@ -240,7 +241,8 @@
         "internal/crossreview/routine_pr_app.go",
         "internal/crossreview/github_history_test.go",
         "internal/delivery/metrics_checks.go",
-        "internal/delivery/metrics_checks_test.go"
+        "internal/delivery/metrics_checks_test.go",
+        "internal/db/migrations/1408_rules_delivery_evidence.sql"
       ]
     },
     {

@@ -46,6 +46,8 @@ components:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
+        run_capability_required: {type: boolean, description: "Paired daemon must prepare a server-issued run capability before content reads or claim"}
+        upgrade_reason: {type: string, enum: [run_capability_upgrade_required], description: "Upgrade agentd to support run_content_v1"}
         acting_person_id: {type: [string, 'null'], format: uuid, description: 'Explicit immutable acting person after binding by the run writer; null until bound. Model-preference and requester stamps do not select this person.'}
         routine_budget: {allOf: [{$ref: '#/components/schemas/RoutineProviderBudget'}], description: 'Optional server-issued remaining actor grant. It grants no launch authority. Missing qualification or provider-call enforcement refuses budget-bearing routine work before any vendor process.'}
         routine_launch_id: {type: string, format: uuid, description: 'Optional immutable S11 launch intent. Its qualified binding lives in trace.routine_launch; optional lineage binds coordinator review/fix actors to the prior run, exact repository/base/head and review-policy digest. Missing or unsupported binding refuses automatic execution. Existing manual runs omit this property.'}

@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
@@ -33,6 +34,8 @@ import (
 // Remote uses a scoped agent key through AEON's public HTTP contract.
 // NewRemote callers should pin the base URL to HTTPS or a trusted loopback.
 type Remote struct {
+	runCapabilities      map[string]string
+	sessionRuns          map[string]string
 	activityModes        map[string]string
 	Client               *client.Client
 	mu                   sync.RWMutex
@@ -53,7 +56,13 @@ type Remote struct {
 func NewRemote(baseURL, token string) *Remote {
 	c := client.New(baseURL, token)
 	c.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Remote{Client: c}
+	r := &Remote{Client: c}
+	base := c.HTTP.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	c.HTTP.Transport = capabilityTransport{remote: r, base: base}
+	return r
 }
 
 // runCredential derives a local capability without exposing the daemon key to
@@ -182,7 +191,7 @@ func (r *Remote) Identity(ctx context.Context) (string, string, error) {
 
 func (r *Remote) Queued(ctx context.Context) ([]Run, error) {
 	var runs []Run
-	err := r.Client.DoWithHeaders(ctx, "GET", "/api/runs/queued?limit=100", nil, &runs, r.ledgerHeaders(map[string]string{reviewgate.PolicyHeader: reviewgate.Policy}))
+	err := r.Client.DoWithHeaders(ctx, "GET", "/api/runs/queued?limit=100", nil, &runs, r.ledgerHeaders(map[string]string{reviewgate.PolicyHeader: reviewgate.Policy, db.RunCapabilityPolicyHeader: db.RunCapabilityPolicy}))
 	return runs, err
 }
 
@@ -279,6 +288,7 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 	if s.ReasoningEffort != "" {
 		body["reasoning_effort"] = s.ReasoningEffort
 	}
+	ctx = r.RunContext(ctx, runID)
 	err := r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(s.ProjectID)+"/harness-sessions", body, &result)
 	if err != nil {
 		return HarnessSession{}, err
@@ -286,18 +296,30 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 	if result.ID == "" || result.ProjectID != s.ProjectID {
 		return HarnessSession{}, errors.New("harness registration binding mismatch")
 	}
+	r.mu.Lock()
+	if r.sessionRuns == nil {
+		r.sessionRuns = map[string]string{}
+	}
+	if r.runCapabilities[runID] != "" {
+		r.sessionRuns[result.ID] = runID
+	}
+	r.mu.Unlock()
 	result.Lease = s.Lease
 	result.Harness = harness
 	return result, nil
 }
 
 func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix string, body, dest any) error {
+	ctx = r.sessionContentContext(ctx, s.ID)
 	headers := map[string]string{rules.ClientMaximumHeader: strconv.Itoa(rules.SessionFileLimit(s.Harness))}
 	if s.Lease != "" && r.Client.Token != "" {
 		headers["Authorization"] = workerlease.Value(r.Client.Token, s.Lease)
 	}
 	err := r.Client.DoWithHeaders(ctx, "POST", harnessPath(s)+suffix, body, dest, headers)
 	var status *client.StatusError
+	if errors.As(err, &status) && status.Status == http.StatusForbidden && (suffix == "/yield" || suffix == "/stop" || suffix == "/confirm-exit" || strings.HasSuffix(suffix, "/complete")) {
+		err = r.Client.DoWithHeaders(withoutRunContent(ctx), "POST", harnessPath(s)+suffix, body, dest, headers)
+	}
 	if errors.As(err, &status) && status.Status == 410 && status.Message == "harness generation archived" {
 		return ErrHarnessArchived
 	}
@@ -516,6 +538,8 @@ func (r *Remote) Report(ctx context.Context, runID string, t Telemetry) error {
 // ReportForClaim preserves the durable run's fencing identity across restart
 // or another claim. Possession of these public strings grants no authority.
 func (r *Remote) ReportForClaim(ctx context.Context, runID, daemon, generation string, t Telemetry) error {
+	// Settlement is metadata transport and must survive lost content authority.
+	ctx = withoutRunContent(ctx)
 	if daemon == "" || generation == "" {
 		return errors.New("run has no daemon claim")
 	}
@@ -540,6 +564,9 @@ func (r *Remote) ReportForClaim(ctx context.Context, runID, daemon, generation s
 			status.Status == http.StatusConflict && status.Message == "daemon generation conflict" {
 			return fmt.Errorf("%w (HTTP %d)", ErrTelemetryAuthority, status.Status)
 		}
+	}
+	if err == nil && t.Kind == "finished" {
+		r.forgetRunContent(runID)
 	}
 	return err
 }

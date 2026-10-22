@@ -57,7 +57,7 @@ func scanSource(row pgx.Row) (Source, error) {
 }
 
 func listSources(ctx context.Context, tx pgx.Tx) ([]Source, error) {
-	rows, err := tx.Query(ctx, `SELECT `+sourceColumns+` FROM doctrine_sources ORDER BY visibility DESC, repository`)
+	rows, err := tx.Query(ctx, `SELECT `+sourceColumns+` FROM doctrine_sources ORDER BY visibility DESC, repository LIMIT 101`)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +69,9 @@ func listSources(ctx context.Context, tx pgx.Tx) ([]Source, error) {
 			return nil, err
 		}
 		out = append(out, s)
+	}
+	if len(out) > 100 {
+		return nil, gitFail("too many doctrine sources")
 	}
 	return out, rows.Err()
 }
@@ -169,7 +172,21 @@ func loadGuardCorpus(ctx context.Context, tx pgx.Tx, s Source) ([]byte, error) {
 }
 
 func cachedFiles(ctx context.Context, tx pgx.Tx, s Source) ([]File, error) {
-	rows, err := tx.Query(ctx, `SELECT path, blob_sha, content FROM doctrine_cache WHERE source_id=$1 AND commit_sha=$2 ORDER BY path`, s.ID, s.Commit)
+	return cachedFilesForDelivery(ctx, tx, s, nil)
+}
+
+func cachedFilesForDelivery(ctx context.Context, tx pgx.Tx, s Source, pinnedPaths []string) ([]File, error) {
+	query := `SELECT path, blob_sha, content FROM doctrine_cache WHERE source_id=$1 AND commit_sha=$2`
+	args := []any{s.ID, s.Commit}
+	if pinnedPaths != nil {
+		query += ` AND path=ANY($3) AND octet_length(content)<=64000`
+		args = append(args, pinnedPaths)
+	}
+	query += ` ORDER BY path`
+	if pinnedPaths != nil {
+		query += ` LIMIT 65`
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

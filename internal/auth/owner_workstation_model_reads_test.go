@@ -44,7 +44,7 @@ func TestWorkstationModelReadSnapshots(t *testing.T) {
 	if w := f.mark(f.owner, f.key.ID, f.computer, false); w.Code != http.StatusOK {
 		t.Fatalf("remove workstation designation: HTTP %d", w.Code)
 	}
-	if w := f.call(f.key.Token, http.MethodGet, "/api/models/resolve?role=build&mode=placement", "", ""); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "outside this computer's runtime authority") {
+	if w := f.call(f.key.Token, http.MethodGet, "/api/models/resolve?role=build&mode=placement", "", ""); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), `"code":"run_capability_upgrade_required"`) || strings.Contains(w.Body.String(), `"trace"`) || strings.Contains(w.Body.String(), `"preference"`) {
 		t.Fatalf("unmarked paired key bypassed runtime ceiling: HTTP %d", w.Code)
 	}
 	ordinary := decodeKey(t, keyRequest(f.m, f.owner, map[string]any{"name": "Synthetic ordinary reader", "scopes": []string{"models.read"}}))

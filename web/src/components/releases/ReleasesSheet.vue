@@ -8,7 +8,6 @@ import { codenameOf } from '../../lib/codenames'
 import { useDeveloperSettings } from '../../lib/developerSettings'
 import { groupByDay, isCalendarVersion, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, span, ticketsOf, visibleReleases, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { clockSince } from '../../lib/releaseStats'
-import { useProfile } from '../../stores/profile'
 import { useSession } from '../../stores/session'
 import { normalKey } from '../../lib/ticketLinks'
 import { absoluteTime, relativeTime } from '../../lib/work'
@@ -44,14 +43,13 @@ const emit = defineEmits<{ select: [version: string]; query: [key: 'release_lang
 const store = useReleases()
 const { showReservedVersions } = useDeveloperSettings()
 const version = useVersion()
-const profile = useProfile()
 const session = useSession()
 const route = useRoute()
 // EN | DE and Highlights | Details (AEON-323), two ViewSwitches (AEON-1453). Both live in
 // the address under their own keys, since the page behind the sheet may use ?view= itself,
 // so a link, a reload and a version change keep them; an address wins once. Without one,
 // the person's default or the choice used last, kept on the server for every device; the
-// language else follows the profile. The labels read the same in both languages.
+// language else follows the app language. The labels read the same in both languages.
 const LANGS = ['en', 'de'] as const
 const VIEWS = ['highlights', 'details'] as const
 const LANG_OPTIONS = [{ id: 'en', label: 'EN' }, { id: 'de', label: 'DE' }]
@@ -66,7 +64,7 @@ const asked = (key: SwitchKey) => { const value = pending[key] ?? route.query[ke
 const langKey = computed(() => session.identity ? releaseLangKey(session.identity.principal.id) : '')
 const local = ref<string | null>(null)
 watch(langKey, key => { try { local.value = key ? localStorage.getItem(key) : null } catch { local.value = null } }, { immediate: true })
-const langSwitch = useViewSwitch({ key: viewKey('releases.lang'), options: LANGS, fallback: () => releaseLang(null, profile.profile?.locale, local.value), link: () => asked('release_lang') })
+const langSwitch = useViewSwitch({ key: viewKey('releases.lang'), options: LANGS, fallback: () => releaseLang(null, null, local.value), link: () => asked('release_lang') })
 const viewSwitch = useViewSwitch({ key: viewKey('releases'), options: VIEWS, fallback: 'highlights', link: () => asked('release_view') })
 let langTicket = 0
 watch([langKey, langSwitch.loaded, local], ([key, loaded, value]) => {
