@@ -217,10 +217,15 @@ changes no operator accounts, host enrollment, browser frontend or deployment.
 
 ### P1 validation and handoff boundaries
 
-The required remote affected set passed on implementation commit `9488ff871`:
+The required remote affected set passed on implementation commit `7197331a3`:
 `internal/nativepty`, `internal/nativeattach`, `internal/agentd`,
-`internal/nativesessions/...` and `internal/reportercontract`. The pinned
-test-child host witness covers both eligible provider identities, including
+`internal/nativesessions/...`, `internal/reportercontract` and the additional
+`internal/nativecontract` checks. Focused `-race` tests passed for nativepty,
+host trust/transition/real-PTY fixtures and SQL lifecycle fixtures on
+`9488ff871`; the final metadata SQL fixtures passed `-race` on `7197331a3`.
+Guarded `ci-static --merge-main` exited 0 on `7197331a3`: 44 checks passed,
+zero optional skips. The pinned test-child host witness covers both eligible
+provider identities, including
 bounded read output, holder input, a measured 132×40 resize and confirmed owned
 exit. Exit barriers cover structured/TUI/structured switching; denied person,
 viewer, controller, sequence, grant, profile and daemon cases reach no I/O.
