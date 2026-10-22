@@ -41,9 +41,10 @@ sample. A pgx tracer counts real client statements and affected rows without
 recording arguments. Counts include tenant setup, transaction control, host and
 embedding tenant discovery, and endpoint SQL. Fixture setup, warm-up, assertion
 queries, outer authentication middleware and unrelated server workers are
-excluded. Baseline commit `3fdbd8049` ran on agm2; fixed commit `034b9d91f` ran
-on mbp2606 after agm2's capacity guard selected the approved fallback. These are
-statement counts, not latency or cross-host performance comparisons.
+excluded. Baseline commit `3fdbd8049` ran on the primary Linux test runner;
+fixed commit `034b9d91f` ran on the approved macOS fallback after the primary
+runner's capacity guard refused the run. These are statement counts, not latency
+or cross-host performance comparisons.
 
 | Per replayed minute | Before | After |
 | --- | ---: | ---: |
@@ -76,8 +77,9 @@ revocation guards and transaction rollback. Existing generation, warning,
 activity, progress, heartbeat-event and reporter-contract tests remain active.
 
 The complete host, modelprovider, harness, embedding, dbtest and reportercontract
-packages passed through `remote-test.sh` on agm2. The final clock-driven replay
-also passed through that entry point on mbp2606. Static validation remains a
-coordinator/hosted-CI handover: `ci-static-remote.sh` returned exit 3 with
-`remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job`.
+packages passed through `remote-test.sh` on the primary Linux test runner. The
+final clock-driven replay also passed through that entry point on the approved
+macOS fallback. Static validation remains a coordinator/hosted-CI handover:
+`ci-static-remote.sh` returned exit 3 with
+a refusal because shared remote capacity was reserved for CI overnight.
 No local heavy fallback or review gate was run.
