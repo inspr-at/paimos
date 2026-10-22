@@ -92,7 +92,7 @@ const eligibilityDay = computed<string>(previous => newStart.value ? utcDay.valu
 const inForce = (r: { unit: string; currency: string; effective_from: string; effective_until: string | null }) =>
   r.unit === 'hour' && (!seed || r.currency === seed.currency) && r.effective_from <= eligibilityDay.value && (!r.effective_until || r.effective_until > eligibilityDay.value)
 // Hourly cost units with a rate on that day (in the entry's currency when correcting).
-const hourly = computed(() => business.costUnits.filter(unit => unit.node.id === seed?.cost_unit_node_id || (!['cancelled', 'archived', 'done'].includes(unit.node.state) && (!!unit.ratesError || unit.rates.some(inForce)))))
+const hourly = computed(() => business.costUnits.filter(unit => unit.node.id === seed?.cost_unit_node_id || (!['cancelled', 'archived', 'done'].includes(unit.node.state) && (!!unit.ratesPending || !!unit.ratesError || unit.rates.some(inForce)))))
 watch(hourly, units => { if (!seed && !units.some(unit => unit.node.id === costUnitId.value)) costUnitId.value = units.length === 1 ? units[0].node.id : '' }, { immediate: true })
 watch(costUnitId, value => { if (value && !seed) lastCostUnit = value })
 const rate = computed<{ bill_amount: string; currency: string } | null>(() => {
@@ -107,8 +107,9 @@ const rate = computed<{ bill_amount: string; currency: string } | null>(() => {
 })
 const problem = computed(() => {
   if (!ticket.value) return 'Choose a ticket.'
-  if (!rate.value && business.costUnit(costUnitId.value)?.ratesError) return 'Rates for this cost unit could not be loaded. Retry rates below.'
-  if (!costUnitId.value && business.costUnitsPartial) return 'The cost unit list is incomplete. Retry rates below.'
+  if (!rate.value && business.costUnit(costUnitId.value)?.ratesError) return 'Rates for this cost unit could not be loaded.'
+  if (!rate.value && (!business.costUnitsLoaded || business.costUnit(costUnitId.value)?.ratesPending)) return 'Loading rates…'
+  if (!costUnitId.value && business.costUnitsPartial) return 'Some rates could not be loaded.'
   if (!costUnitId.value) return hourly.value.length ? 'Choose a cost unit.' : 'No cost unit has an hourly rate on this day. Add one under Rates.'
   if (!rate.value) return seed ? `This cost unit has no hourly rate in ${seed.currency} on that day.` : 'This cost unit has no hourly rate on this day.'
   if (!duration.value.trim()) return 'Enter how long, like 1h30 or 90m.'
@@ -229,9 +230,9 @@ defineExpose({ reset, focus: focusFirst, openPicker: () => { picker.value = pick
         <button type="button" class="btn sm ghost danger remove-btn" @click="emit('remove')"><AppIcon name="trash" :size="13" />Delete entry</button>
       </template>
     </div>
-    <div v-if="business.costUnitsError || business.costUnitsLoading" class="load-status rate-load-status">
-      <p role="status">{{ business.costUnitsLoading ? 'Loading rates…' : business.costUnitsError }}</p>
-      <button v-if="business.costUnitsError" type="button" class="btn sm" :disabled="business.costUnitsLoading" @click="business.loadCostUnits()">Retry rates</button>
+    <div v-if="business.costUnitsError" class="load-status rate-load-status">
+      <p role="status">Some rates could not be loaded.</p>
+      <button type="button" class="btn sm" :disabled="business.costUnitsLoading" @click="business.loadCostUnits()">Retry rates</button>
     </div>
     <PickerMenu v-if="picker" :anchor="picker" title="Ticket" :options="ticketOptions" :search="searchTickets" :current="ticket?.id" placeholder="Search tickets by key or title…" :width="380" empty="No ticket matches." @choose="chooseTicket" @close="closePicker" />
   </form>

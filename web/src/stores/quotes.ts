@@ -27,7 +27,7 @@ export const useQuotes = defineStore('quotes', () => {
       try {
         const list = await fetchQuotes()
         if (run !== generation) return
-        items.value = list.items; error.value = list.partial ? 'Only part of the quote list was loaded. Some quotes may be missing.' : ''; status.value = 0
+        items.value = list.items; error.value = list.partial ? 'Some quotes could not be loaded.' : ''; status.value = 0
       } catch (e) {
         if (run !== generation) return
         error.value = e instanceof Error ? e.message : 'Quotes could not be loaded.'

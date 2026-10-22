@@ -165,11 +165,15 @@ defineExpose({ open })
                   <span v-if="c.customer_no" class="number mono">{{ c.customer_no }}</span>
                 </li>
                 <li v-if="customers.items && !matches.length" class="none" role="presentation">No customer matches. Add one on the Customers page.</li>
-                <li v-else-if="!customers.items" class="none" role="presentation">{{ customers.error || 'Loading customers…' }}</li>
+                <li v-else-if="!customers.items && !customers.error" class="none" role="presentation">Loading customers…</li>
               </ul>
             </template>
           </div>
           <p v-if="touched && problems.customer" class="f-note bad" role="alert"><AppIcon name="alert" :size="12" />{{ problems.customer }}</p>
+          <div v-if="!fixedCustomer" class="load-status customer-load-status" :aria-hidden="!customers.error">
+            <p role="status">Some customers could not be loaded.</p>
+            <button type="button" class="btn sm" :disabled="customers.loading" @click="customers.load(true)">Retry customers</button>
+          </div>
         </div>
         <div class="f-row wide">
           <label class="f-label" for="new-quote-name">Title</label>
@@ -198,10 +202,6 @@ defineExpose({ open })
         <button type="button" class="btn" @click="close">Cancel</button>
         <button type="submit" class="btn primary" :disabled="busy || settings !== 'ready'"><AppIcon name="plus" :size="14" />{{ busy ? 'Creating…' : 'Create quote' }}</button>
       </footer>
-      <div v-if="!fixedCustomer && customers.error" class="load-status">
-        <p role="status">{{ customers.error }}</p>
-        <button type="button" class="btn sm" :disabled="customers.loading" @click="customers.load(true)">Retry customers</button>
-      </div>
     </form>
   </dialog>
 </template>
@@ -211,6 +211,9 @@ defineExpose({ open })
 .create::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .create-card { display: grid; gap: 16px; max-height: calc(100dvh - var(--create-top) - 12px); overflow: auto; padding: 20px 22px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 .create-body { display: grid; gap: 16px; }
+/* Reserve feedback beside its field so retry never moves Title or the actions. */
+.customer-load-status { margin-block: 0; }
+.customer-load-status[aria-hidden="true"] { visibility: hidden; pointer-events: none; }
 .create-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 h2 { font-size: 18px; }
 .lead { margin-top: 4px; max-width: 46ch; font-size: 13px; color: var(--ink-2); }
@@ -234,10 +237,9 @@ h2 { font-size: 18px; }
 .create-foot .f-hint { flex: 1; }
 @media (max-width: 600px) {
   .create { --create-top: 0px; margin: 0; width: 100%; max-width: 100%; height: 100dvh; max-height: 100dvh; }
-  .create-card { display: flex; flex-direction: column; height: 100%; max-height: 100%; overflow: hidden; border-radius: 0; padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  .create-card { display: flex; flex-direction: column; height: 100%; max-height: 100%; overflow: hidden; border-radius: 0; background: var(--surface); padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
   .create-head { flex-shrink: 0; }
   .create-body { flex: 1; min-height: 0; overflow-y: auto; align-content: start; padding: 3px; margin: -3px; }
-  .create-card > .load-status { order: 2; flex-shrink: 0; }
   .create-foot { order: 3; flex-shrink: 0; flex-wrap: wrap; }
   .create-foot .f-hint { display: none; }
   .create-foot .btn { flex: 1; height: 44px; }

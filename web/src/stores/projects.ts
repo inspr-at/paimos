@@ -95,7 +95,7 @@ export const useProjects = defineStore('projects', () => {
         loaded.value = true
         loadedAt = Date.now()
         partial.value = nodes.partial
-        error.value = nodes.partial ? 'Only part of the project details was loaded. Some project keys and descriptions may be missing.' : ''
+        error.value = nodes.partial ? 'Some project details could not be loaded.' : ''
       } catch (e) {
         if (started === generation) error.value = e instanceof Error ? e.message : 'Projects could not be loaded'
       } finally {

@@ -27,6 +27,7 @@ const UNITS: Unit[] = ['hour', 'day', 'item']
 const today = new Date().toISOString().slice(0, 10)
 const retired = (unit: CostUnit) => ['cancelled', 'archived', 'done'].includes(unit.node.state)
 const shown = computed(() => {
+  if (!business.costUnitsLoaded) return []
   const needle = term.value.trim().toLowerCase()
   return business.costUnits.filter(unit => showRetired.value || !retired(unit))
     .filter(unit => !needle || `${unit.node.key} ${unit.node.title}`.toLowerCase().includes(needle))
@@ -132,7 +133,7 @@ onMounted(async () => { await business.loadPlugins(); if (business.open.costs) v
     </div>
 
     <div v-if="business.costUnitsError" class="load-status">
-      <p role="status">{{ business.costUnitsLoading ? 'Loading rates…' : business.costUnitsError }}</p>
+      <p role="status">{{ business.costUnitsError }}</p>
       <button type="button" class="btn sm" :disabled="business.costUnitsLoading" @click="business.loadCostUnits()">Retry rates</button>
     </div>
     <section class="card glass-card" aria-label="Cost units and their rates">
@@ -192,7 +193,7 @@ onMounted(async () => { await business.loadPlugins(); if (business.open.costs) v
             </tr>
           </tbody>
         </table>
-        <p v-else class="no-rates">{{ unit.ratesError ? 'Rates could not be loaded. Use Retry rates above.' : 'No rate yet, so quotes and hours cannot use it.' }}</p>
+        <p v-else class="no-rates">{{ unit.ratesError ? 'Rates could not be loaded.' : unit.ratesPending ? 'Loading rates…' : 'No rate yet, so quotes and hours cannot use it.' }}</p>
       </div>
     </section>
   </BusinessPage>
