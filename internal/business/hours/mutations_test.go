@@ -162,13 +162,22 @@ func TestCorrectionDeleteTotalsDigestUndo(t *testing.T) {
 	if !entries[0].UpdatedAt.After(updated.UpdatedAt) {
 		t.Fatal("undo must advance entry validator")
 	}
-	requireStatus(t, f.correction(f.member, "DELETE", entries[0], nil, "If-Match", entryTag(entries[0])), 204)
+	w = f.correction(f.member, "DELETE", entries[0], nil, "If-Match", entryTag(entries[0]))
+	requireStatus(t, w, 204)
 	deleted := f.lastEvent("time_entry.deleted")
+	receipt := w.Header().Get(events.MutationEventHeader)
+	if receipt != fmt.Sprint(deleted.ID) {
+		t.Fatalf("delete receipt %q does not name its own event %d", receipt, deleted.ID)
+	}
 	empty, emptyHash := f.snapshot(period)
 	if empty.Revision != restored.Revision+1 || emptyHash == originalHash || f.totalsNow().DurationSeconds != 0 || len(f.totalsNow().Amounts) != 0 {
 		t.Fatal("delete did not update totals/digest")
 	}
-	requireStatus(t, f.correction(f.member, "DELETE", entries[0], nil), 404)
+	w = f.correction(f.member, "DELETE", entries[0], nil)
+	requireStatus(t, w, 404)
+	if w.Header().Get(events.MutationEventHeader) != "" {
+		t.Fatal("refused deletion supplied a receipt")
+	}
 	requireStatus(t, f.undo(f.admin, deleted), 201)
 	_, hash = f.snapshot(period)
 	if hash != originalHash || f.totalsNow().DurationSeconds != 1 {
@@ -176,8 +185,16 @@ func TestCorrectionDeleteTotalsDigestUndo(t *testing.T) {
 	}
 	requireStatus(t, f.undo(f.admin, deleted), 409)
 	entries = decode[[]Entry](t, f.call(f.member, "GET", "/time-entries", nil))
-	requireStatus(t, f.correction(f.admin, "DELETE", entries[0], nil, "If-Match", "*"), 204)
+	w = f.correction(f.admin, "DELETE", entries[0], nil, "If-Match", "*")
+	requireStatus(t, w, 204)
 	deleted = f.lastEvent("time_entry.deleted")
+	if second := w.Header().Get(events.MutationEventHeader); second != fmt.Sprint(deleted.ID) || second == receipt {
+		t.Fatalf("second deletion receipt %q, first %q", second, receipt)
+	}
+	requireStatus(t, f.call(f.admin, "POST", "/events/"+receipt+"/undo", nil), 409)
+	if f.totalsNow().DurationSeconds != 0 {
+		t.Fatal("old receipt restored the later deletion")
+	}
 	current, digest := f.snapshot(period)
 	requireStatus(t, f.call(f.admin, "POST", "/time-periods/"+period.ID+"/approve", approvalBody(current, digest)), 200)
 	requireStatus(t, f.undo(f.admin, deleted), 409)

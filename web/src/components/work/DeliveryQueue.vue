@@ -5,6 +5,8 @@ import { APIError, api } from '../../lib/api'
 import { can, onAccessRevalidate } from '../../lib/authz'
 import { createScope, scopeOwner } from '../../lib/identityScope'
 import { useSession } from '../../stores/session'
+import { createSharedRequests } from '../../lib/sharedRequests'
+import { eventNode } from '../../lib/agentProjection'
 
 const props = defineProps<{ projectId: string; nodeId: string; de: boolean }>()
 interface QueueRound { id: string; key: string; slug: string; pull_request: number | null; kind: string; round_number: number; state: string; hold_reason: string | null; reason: string; estimate_minutes: number }
@@ -13,18 +15,22 @@ const session = useSession()
 const read = computed(() => can('delivery_queue.read', props.projectId))
 const scope = createScope(() => scopeOwner(session.identity) ? `${scopeOwner(session.identity)}/${props.projectId}/${props.nodeId}` : '')
 const reader = scope.lane(), result = ref<QueuePage | null>(null), error = ref('')
+const polling = createSharedRequests(() => load(), {
+  events: ['enqueued', 'settings', 'transition', 'park', 'claim', 'rotate', 'decision', 'rebuilt'].map(kind => `delivery.work_queue.${kind}`),
+  relevant: (_key, _type, data) => { const project = eventNode(data); return !project || project === props.projectId },
+  invalidate: () => reader.cancel(), enabled: () => read.value,
+})
 async function load() {
   if (!read.value) return
   const path = `/projects/${encodeURIComponent(props.projectId)}/delivery-queue?ticket=${encodeURIComponent(props.nodeId)}&limit=20`
   return reader.run(({ after, signal }) => after(api(path, { signal }).then(async response => {
     if (!response.ok) throw new APIError(response.status, 'Delivery queue could not be loaded.')
     return response.json() as Promise<QueuePage>
-  }), value => { result.value = value; error.value = '' }), { failed: () => { error.value = props.de ? 'Die Arbeitswarteschlange konnte nicht geladen werden.' : 'Delivery queue could not be loaded.' } })
+  }), value => { result.value = value; error.value = '' }), { failed: cause => { if (cause instanceof APIError && [401, 403, 404].includes(cause.status)) result.value = null; error.value = props.de ? 'Die Arbeitswarteschlange konnte nicht geladen werden.' : 'Delivery queue could not be loaded.' } })
 }
-watch([() => props.projectId, () => props.nodeId, () => scopeOwner(session.identity), read], () => { scope.reset(); result.value = null; error.value = ''; void load() }, { immediate: true, flush: 'sync' })
+watch([() => props.projectId, () => props.nodeId, () => scopeOwner(session.identity), read], (_value, _before, cleanup) => { scope.reset(); result.value = null; error.value = ''; cleanup(polling.watch(`${props.projectId}/${props.nodeId}`)) }, { immediate: true, flush: 'sync' })
 const stopAccess = onAccessRevalidate({ reset: () => { scope.reset(); result.value = null; error.value = '' }, refresh: () => { void load() } })
-const poll = setInterval(() => { void load() }, 30_000)
-onBeforeUnmount(() => { clearInterval(poll); stopAccess(); scope.dispose() })
+onBeforeUnmount(() => { polling.stop(); stopAccess(); scope.dispose() })
 function kind(value: string) { return (props.de ? { first_build: 'Erstbau', fix: 'Korrektur', merge: 'Merge', land: 'Abschluss' } : { first_build: 'First build', fix: 'Fix', merge: 'Merge', land: 'Land' })[value as 'first_build'] ?? value }
 function state(value: string) { return (props.de ? { queued: 'Wartend', claimed: 'Beansprucht', running: 'Laufend', done: 'Erledigt', parked: 'Geparkt' } : { queued: 'Queued', claimed: 'Claimed', running: 'Running', done: 'Done', parked: 'Parked' })[value as 'queued'] ?? value }
 function reason(value: string) {

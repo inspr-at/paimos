@@ -6,7 +6,6 @@ import { can } from '../../lib/authz'
 import { leadActionAvailable, leadActionReason, decisionLine, LEAD_WORDS, unmanagedLeadCopy } from '../../lib/lead'
 import { leadOverlay, openStartLead } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
-import { usePoller } from '../../lib/usePolledData'
 import { useLeadSummary } from '../../lib/useLeadSummary'
 import { useProjectLeads } from '../../stores/projectLeads'
 import { useSession } from '../../stores/session'
@@ -35,7 +34,6 @@ const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval> | undefined
 const mayStart = computed(() => session.identity?.principal.kind === 'person' && leadActionAvailable(lead.value, 'start'))
 const mayDecide = computed(() => session.identity?.principal.kind === 'person' && can('questions.read', props.projectId) && can('questions.decide', props.projectId))
-const poller = usePoller(() => leads.load(props.projectId), 15_000)
 // Retain P2's honest failed-read states in the shared P4 panel body.
 const queueFailed = computed(() => !!queue.errors[props.projectId])
 const retrying = ref<'queue' | 'history' | null>(null)
@@ -47,8 +45,8 @@ async function retry(what: 'queue' | 'history') {
   try { await (what === 'queue' ? queue.load(props.projectId, true) : leads.load(props.projectId)) }
   finally { if (turn === retryTurn) retrying.value = null }
 }
-watch(() => [props.projectId, session.identity?.tenant.id, session.identity?.principal.id], () => { retryTurn++; retrying.value = null; void leads.load(props.projectId); void queue.load(props.projectId) }, { immediate: true })
-onMounted(async () => { poller.start(); clock = setInterval(() => { now.value = Date.now() }, 10_000); await nextTick(); showSection() })
+watch(() => [props.projectId, session.identity?.tenant.id, session.identity?.principal.id], () => { retryTurn++; retrying.value = null }, { immediate: true })
+onMounted(async () => { clock = setInterval(() => { now.value = Date.now() }, 10_000); await nextTick(); showSection() })
 // The queue chip on an Agents lead row opens the panel at Next up (AEON-1210), also when it is open already.
 const nextUp = ref<HTMLElement>()
 function showSection() {
@@ -61,7 +59,7 @@ function showSection() {
   return true
 }
 watch(() => [props.section, leadOverlay.section], () => { void nextTick(showSection) })
-onBeforeUnmount(() => { poller.stop(); clearInterval(clock) })
+onBeforeUnmount(() => { clearInterval(clock) })
 
 const time = (iso?: string | null) => iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''
 const minutes = (iso?: string | null) => iso ? Math.max(0, Math.round((now.value - new Date(iso).getTime()) / 60000)) : 0

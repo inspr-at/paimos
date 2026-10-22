@@ -42,7 +42,7 @@ func New(pool *pgxpool.Pool, registry *plugins.Registry, writer ...Writer) *Modu
 }
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/time-entries/{id}", m.mutateEntry)
-	mux.HandleFunc("DELETE /api/time-entries/{id}", m.mutateEntry)
+	mux.HandleFunc("DELETE /api/time-entries/{id}", events.WithMutationReceipt(m.mutateEntry))
 	for _, route := range []struct {
 		pattern, operation string
 		status             int
