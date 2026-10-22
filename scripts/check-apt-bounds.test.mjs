@@ -94,7 +94,8 @@ test('AEON-1420 retries repair interrupted dpkg and preserve a failed repair', a
     assert.deepEqual(readFileSync(join(recovered.state, 'repairs'), 'utf8').trim().split('\n'), ['--configure -a'])
     assert.ok(recovered.calls.length >= 2, 'a repaired install must actually retry apt')
     const refused = await run(`bash "${script}" ${args}`, { mode: 'repair-fails' })
-    assert.notEqual(refused.status, 0, 'a failed dpkg repair cannot report success')
+    assert.equal(refused.status, 1, 'a failed dpkg repair must fail the script')
+    assert.deepEqual(readFileSync(join(refused.state, 'repairs'), 'utf8').trim().split('\n'), ['--configure -a'])
     assert.equal(refused.calls.length, 1, 'do not continue with a broken package database')
   }
 })
@@ -112,7 +113,7 @@ test('AEON-1420 retry and kill budgets finish before the enclosing workflow dead
     assert.ok(elapsed > 0 && elapsed <= budget, `${args}: ${elapsed}s exceeds the ${budget}s total budget`)
     assert.ok(elapsed < workflowSeconds, `${args}: workflow cancellation would interrupt cleanup`)
     const timers = readFileSync(join(result.state, 'timers'), 'utf8').trim().split('\n')
-    assert.ok(timers.some(line => line.startsWith('1|')), 'apt and its kill deadline must still run as root')
+    assert.ok(timers.some(line => line.startsWith('1|') && /apt-get|playwright install-deps/.test(line)), 'apt and its kill deadline must still run as root')
     assert.ok(timers.every(line => Number(line.split('|')[1]) > 0), 'never start a command after its budget is exhausted')
   }
 })

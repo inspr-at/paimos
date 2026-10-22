@@ -27,7 +27,7 @@ done
 seconds=\$1
 shift
 printf '%s|%s|%s|%s\\n' "\${AEON_AS_ROOT:-0}" "\$seconds" "\$grace" "\$*" >> "\$state/timers"
-if [[ "\$(cat "\$state/mode")" == budget && "\$1" != dpkg ]]; then
+if [[ "\$(cat "\$state/mode")" == budget && "\$1" != dpkg && "\$*" != 'npx playwright install '* ]]; then
   clock=\$(cat "\$state/clock")
   echo \$((clock + seconds + grace)) > "\$state/clock"
   exit 124
