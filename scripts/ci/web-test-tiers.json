@@ -9462,6 +9462,8 @@
     ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"Undo of a stale picker removes only the ids that call added","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"a Lands day reads as a day in the row, its label and its history; a goal without work says so at the same height","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"a created goal is shown through search, the Done filter and a one-goal page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"a person who may not create goals sees no New goal, and no goal offers Link work, Edit or Delete","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

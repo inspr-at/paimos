@@ -8,7 +8,7 @@ import { api, APIError, getNode } from './api'
 import { ticketPath } from './work'
 import { statusName } from './statusNames'
 import type { DeliveryState } from './delivery'
-import { listDayMonth, listWeekday, type GoalRange, type RatePoint } from './goalRate'
+import { listDate, listDayMonth, listWeekday, type GoalRange, type RatePoint } from './goalRate'
 
 export type GoalState = 'moving' | 'queued' | 'paused' | 'done'
 export const GOAL_STATES: readonly GoalState[] = ['moving', 'queued', 'paused', 'done']
@@ -125,12 +125,18 @@ export function landsDay(at: string | undefined): string {
   if (Number.isNaN(when.getTime())) return ''
   return `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}-${String(when.getDate()).padStart(2, '0')}`
 }
+// A day stays a day (Tick round 1): its text, "Fri 30 Oct", is what the row, its label and
+// the ETA history show, never the 23:59 it is stored at.
+export function landsEta(day: string): { at: string; text: string } | null {
+  const at = landsAt(day)
+  return at ? { at, text: listDate(Date.parse(at)) } : null
+}
 export const createGoal = (title: string, projectId: string | null, lands: string) =>
-  write<GoalWriteResult>('/goals', 'POST', { title, project_id: projectId, ...(landsAt(lands) ? { eta: { at: landsAt(lands) } } : {}) }, writeKey())
+  write<GoalWriteResult>('/goals', 'POST', { title, project_id: projectId, ...(landsEta(lands) ? { eta: landsEta(lands) } : {}) }, writeKey())
 export const updateGoal = (id: string, change: { title?: string; lands?: string }) =>
   write<GoalWriteResult>(`/goals/${encodeURIComponent(id)}`, 'PATCH', {
     ...(change.title !== undefined ? { title: change.title } : {}),
-    ...(change.lands !== undefined ? { eta: landsAt(change.lands) ? { at: landsAt(change.lands) } : null } : {}),
+    ...(change.lands !== undefined ? { eta: landsEta(change.lands) } : {}),
   }, writeKey())
 // A goal holds at most this many linked items, and one call names at most this many (node_ids maxItems).
 export const MAX_LINKED = 20

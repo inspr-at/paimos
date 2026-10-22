@@ -156,9 +156,12 @@ the first row behind ⋯. Without that right the button is absent.
 - **The sheet** (the New project pattern): Title ("What should be true when this is
   done?"), Where (a project the person may write, or Whole workspace for people who
   may write the workspace; fixed while editing) and an optional Lands day, read as
-  the end of that day. Create goal closes the sheet. Search and the state filter
+  the end of that day. A day stays a day: the row, its label and the ETA history say
+  "Fri 30 Oct", never a clock time. Create goal closes the sheet. Search and the state filter
   clear so the new goal is on screen, and a goal past the first page is fetched
   and shown, before it opens with **Link work** focused. The toast says "Goal created".
+  Until work is linked its row reads "No work linked yet" with an empty track and no
+  percent, in the same height.
   Hide for me on that goal lets it go: no later read brings it back, and its Undo
   shows it again in the same search and filters.
 - **Link work** sits at the bottom of an opened goal and in its ⋯. It opens the
@@ -167,7 +170,8 @@ the first row behind ⋯. Without that right the button is absent.
   on the goal stays marked; choosing it says so and does not change Link {n}.
   One link names at most 20 items (a goal holds at most 20); a 21st pick says so.
   Link {n} keeps the width of "Link 20", so picking never moves or resizes it.
-  On a desktop the button stays above the results and a refusal. On a phone the
+  On a desktop the button sits on the search row, right of the field and as tall
+  as it, so the results start right under the search. On a phone the
   results scroll and the button stays pinned. The toast says "{n} linked" and Undo
   removes only the ids this call added; a link that changes nothing has no Undo.
   A link, its lookups and every Undo belong to the person who started them: a
@@ -186,7 +190,7 @@ The ⋯ groups what a person can do with a goal: change the goal (**Rename**, **
 goal**), work (**Link work…**), for me (Expand or Collapse, progress over time, Copy
 link and, for people, Hide for me or Unhide, AEON-1614) and state (**Delete goal**, in
 danger ink). People who may not edit the goal see only the "for me" group. On phones the ⋯ sits under the goal's Lands and opens as the
-shared bottom sheet.
+shared bottom sheet, without the key hints (F2, L, Del), as on every touch screen.
 
 - **Rename** (F2 on a focused goal row): the name becomes a text field over the same
   box, so neither the row nor its controls move. Enter saves ("Goal renamed", with

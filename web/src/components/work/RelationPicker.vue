@@ -199,7 +199,7 @@ let lastChoice = 'relates'
 </script>
 
 <template>
-  <FloatingPanel :anchor="anchor" :width="420" :tallest="520" :phone-sheet="!!picking" :fill-phone="!!picking" :label="picking ? `${picking.label}: ${subject}` : `Link ${subject} to another ticket`" cycle @close="restore => emit('close', restore)">
+  <FloatingPanel :anchor="anchor" :width="picking ? 480 : 420" :tallest="520" :phone-sheet="!!picking" :fill-phone="!!picking" :label="picking ? `${picking.label}: ${subject}` : `Link ${subject} to another ticket`" cycle @close="restore => emit('close', restore)">
     <div class="picker" :class="{ multi }" :aria-busy="busy">
       <p v-if="picking" class="head"><span class="eyebrow">{{ picking.label }}</span><span v-clip-tip="subject" class="hint">{{ subject }}</span></p>
       <p v-else class="head"><span class="eyebrow">Link {{ subject }}</span><span class="hint">{{ choice.hint }}</span></p>
@@ -310,7 +310,15 @@ let lastChoice = 'relates'
 .picker.multi .option[data-active] { background: var(--row-selected); }
 .pick-box { flex-shrink: 0; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--teal-ink); }
 .option[aria-selected="true"] .pick-box { box-shadow: inset 0 0 0 1px var(--chip-teal-line); background: var(--seg-on); }
-.confirm-row { display: flex; justify-content: flex-end; padding: 2px 2px 0; }
+/* Desktop: "Link {n}" sits on the search row, right of the field and as tall as it, so the
+   results start right under the search (Tick round 1). */
+.picker.multi { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "head head" "search link" "body body"; }
+.picker.multi > .head { grid-area: head; }
+.picker.multi > .search { grid-area: search; }
+.picker.multi > .confirm-row { grid-area: link; }
+.picker.multi > .picker-body { grid-area: body; }
+.confirm-row { display: flex; align-items: stretch; justify-content: flex-end; }
+.confirm-row .link-picked { height: auto; }
 /* Digits of one width: "Link 1" to "Link 20" all fit the reserved "Link 20". */
 .link-picked { gap: 6px; font-variant-numeric: tabular-nums; }
 .note { padding: 8px 10px; font-size: 12.5px; color: var(--ink-3); }
@@ -330,7 +338,8 @@ let lastChoice = 'relates'
   .picker.multi { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .picker.multi .head, .picker.multi .search, .picker.multi .confirm-row { flex: none; }
   .picker.multi .picker-body { order: 1; flex: 1 1 auto; min-height: 0; overflow: auto; }
-  .picker.multi .confirm-row { order: 2; }
+  .picker.multi .confirm-row { order: 2; padding: 2px 2px 0; }
+  .picker.multi .confirm-row .link-picked { height: 32px; }
 }
 
 @media (max-width: 720px) {

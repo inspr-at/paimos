@@ -100,8 +100,9 @@ onMounted(async () => { await nextTick(); focusAt(0) })
 .row-menu-item.off svg { color: var(--ink-3); opacity: .7; }
 .row-menu-keys { flex-shrink: 0; font: 500 11px/1 var(--mono); color: var(--ink-3); font-variant-ligatures: none; }
 .row-menu-item:focus-visible .row-menu-keys { color: var(--ink-2); }
-/* Touch screens have no keys to press. */
+/* Touch screens have no keys to press, and neither has the phone's bottom sheet (AEON-1618). */
 @media (pointer: coarse) { .row-menu-keys { display: none; } }
+:global(.floating.bottom) .row-menu-keys { display: none; }
 @media (hover: hover) { .row-menu-item:hover .row-menu-keys { color: var(--ink-2); } }
 .row-menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
 .row-menu-spin { animation: row-menu-spin .8s linear infinite; }

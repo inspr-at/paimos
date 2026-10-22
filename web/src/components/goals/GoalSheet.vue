@@ -66,7 +66,7 @@ function failed(cause: unknown) {
       </label>
       <div class="gs-f">
         <TargetDateField v-model="lands" label="Lands" optional="optional" empty="No date" clear="Clear the date" :text="dateText" :disabled="busy" />
-        <small>Optional. Progress fills in from linked work.</small>
+        <small>Progress fills in from linked work.</small>
       </div>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
     </form>

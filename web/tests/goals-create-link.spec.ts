@@ -8,9 +8,12 @@
 // does not cancel, an empty name is sent, Delete asks for confirmation instead of
 // offering Undo, Undo does not bring the goal back, the menu does not fit a phone,
 // or a person without edit rights can rename, link or delete by key.
+// Tick round 1: a Lands day reads "30 Oct 23:59" instead of "Fri 30 Oct"; a goal
+// without work reads "0%" and "0 of 0 done", or changes height once work arrives;
+// "Link {n}" leaves the search row; the phone ⋯ sheet shows key hints.
 // Screenshots go to each test's output directory.
 import { test, expect, type Page, type Locator, type TestInfo } from '@playwright/test'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { controlStability } from './control-stability'
 
 test.use({ timezoneId: 'Europe/Vienna', locale: 'en-GB' })
@@ -27,7 +30,7 @@ function world() {
     id: 'g-agent', title: 'Fleet hosts report health on their own', project_id: 'p-pharos', linked: [], eta: { source: 'agent', text: 'Fri 23 Oct', at: '2026-10-23T15:00:00Z', partial: false },
     outcomes: [{ id: '00000000-0000-4000-8000-000000000001', ref: 'probes', label: 'Probes report every minute', note: '', position: 1, keys: ['PHAROS-14'], state: 'queued', session_ids: [], eta: { source: 'none', partial: false }, passed: false, coverage: { estimated_leaves: 0, total_leaves: 1 }, weight: 1, handed_over: false }],
   }
-  return { data, goals: [agentGoal], writes: [] as { method: string; path: string; body: unknown }[], next: 1, pageLimit: 0 }
+  return { data, goals: [agentGoal], writes: [] as { method: string; path: string; body: unknown }[], next: 1, pageLimit: 0, etaEvents: [] as Record<string, unknown>[] }
 }
 type World = ReturnType<typeof world>
 const STATE: Record<string, string> = { done: 'done', 'in-progress': 'moving', qa: 'moving' }
@@ -54,10 +57,11 @@ async function mockGoals(page: Page, w: World, options: { readOnly?: boolean } =
   await page.route(/\/api\/goals(\?.*)?$/, async route => {
     const request = route.request()
     if (request.method() === 'POST') {
-      const body = request.postDataJSON() as { title: string; project_id: string | null; eta?: { at: string } }
+      const body = request.postDataJSON() as { title: string; project_id: string | null; eta?: { at: string; text?: string } }
       w.writes.push({ method: 'POST', path: '/goals', body })
       const id = `g-new${w.next++}`
-      w.goals.push({ id, title: body.title, project_id: body.project_id, linked: [], outcomes: [], eta: body.eta ? { source: 'agent', at: body.eta.at, partial: false } : { source: 'none', partial: false } })
+      w.goals.push({ id, title: body.title, project_id: body.project_id, linked: [], outcomes: [], eta: { source: 'none', partial: false } })
+      if (body.eta) setEta(w, w.goals.at(-1)!, body.eta)
       return written(route, { id, key: id.toUpperCase() })
     }
     const url = new URL(request.url())
@@ -93,9 +97,10 @@ async function mockGoals(page: Page, w: World, options: { readOnly?: boolean } =
     }
     if (!goal) return route.fulfill({ status: 404, json: { error: 'not found' } })
     if (request.method() === 'PATCH') {
-      const body = request.postDataJSON() as { title: string }
+      const body = request.postDataJSON() as { title?: string; eta?: { at: string; text?: string } | null }
       w.writes.push({ method: 'PATCH', path: `/goals/${id}`, body })
-      goal.title = body.title
+      if (body.title !== undefined) goal.title = body.title
+      if (body.eta !== undefined) setEta(w, goal, body.eta)
       return written(route, { id, key: id.toUpperCase() })
     }
     if (request.method() !== 'DELETE') return route.fallback()
@@ -112,8 +117,17 @@ async function mockGoals(page: Page, w: World, options: { readOnly?: boolean } =
     return route.fulfill({ status: 201, json: { id: event + 1, type: 'goal.restored', undo_of: event } })
   })
   await page.route(/\/api\/goals\/[^/]+\/series\?/, route => route.fulfill({ json: { range: '24h', expansion: 'full', points: [], read_through: 10, generation: 1 } }))
-  await page.route(/\/api\/goals\/[^/]+\/history/, route => route.fulfill({ json: { items: [], read_through: 10, generation: 1 } }))
+  await page.route(/\/api\/goals\/[^/]+\/history/, route => {
+    const id = new URL(route.request().url()).pathname.split('/')[3]
+    return route.fulfill({ json: { items: w.etaEvents.filter(event => event.node_id === id), read_through: 10, generation: 1 } })
+  })
   await page.route(/\/api\/nodes\/g-[a-z0-9]+$/, route => route.fulfill({ json: { id: 'g', key: 'G', kind_id: 'k-goal', title: 'Goal', body: '', fields: {}, state: 'open', parent_id: null, position: 1, created_at: iso(NOW - 300 * HOUR), updated_at: iso(NOW) } }))
+}
+// A person's Lands, kept as the server keeps it, with its value-bearing history event (newest first).
+function setEta(w: World, goal: GoalMock, eta: { at: string; text?: string } | null) {
+  const before = goal.eta
+  goal.eta = eta ? { source: 'agent', ...eta, by: me.id, partial: false } : { source: 'none', partial: false }
+  w.etaEvents.unshift({ id: 500 + w.etaEvents.length, actor_principal_id: me.id, node_id: goal.id, type: 'goal.eta_changed', before, after: goal.eta, at: iso(NOW) })
 }
 async function openGoals(page: Page, w: World, options: { readOnly?: boolean } = {}) {
   await mockGoals(page, w, options)
@@ -152,7 +166,8 @@ for (const [width, height] of [[1440, 900], [1024, 800], [390, 844]] as const) {
       await guard.check(async () => { await (await newGoalEntry(page, phone)).click(); await expect(sheet).toBeVisible() })
       await expect(page.locator('#goal-title')).toBeFocused()
       await expect(page.locator('#goal-title')).toHaveAttribute('placeholder', 'What should be true when this is done?')
-      await expect(sheet).toContainText('Optional. Progress fills in from linked work.')
+      // "Lands · optional" says it once; the hint only says what progress does.
+      await expect(sheet.locator('.gs-f > small')).toHaveText('Progress fills in from linked work.')
       await noOutcome(page, 'sheet')
       await shot(page, info, `sheet-empty-${name}`)
       await guard.check(async () => { await sheet.getByRole('button', { name: /^Cancel/ }).click(); await expect(sheet).toHaveCount(0) })
@@ -168,8 +183,8 @@ for (const [width, height] of [[1440, 900], [1024, 800], [390, 844]] as const) {
       await page.locator('#goal-go').click()
       await expect(sheet).toHaveCount(0)
       await expect(page.getByText('Goal created')).toBeVisible()
-      const created = w.writes.find(write => write.method === 'POST' && write.path === '/goals')!.body as { title: string; project_id: string; eta: { at: string } }
-      expect(created).toMatchObject({ title: 'Managed provisioning works end to end', project_id: 'p-pharos' })
+      const created = w.writes.find(write => write.method === 'POST' && write.path === '/goals')!.body as { title: string; project_id: string; eta: { at: string; text: string } }
+      expect(created).toMatchObject({ title: 'Managed provisioning works end to end', project_id: 'p-pharos', eta: { text: 'Fri 30 Oct' } })
       expect(new Date(created.eta.at).toISOString()).toBe('2026-10-30T22:59:00.000Z')
       const goal = goalRow(page, 'g-new1')
       await expect(goal).toHaveAttribute('data-open', '1')
@@ -252,6 +267,10 @@ for (const [width, height] of [[1440, 900], [390, 844]] as const) {
       expect(box.x + box.width).toBeLessThanOrEqual(width + 0.5)
       expect(box.y + box.height).toBeLessThanOrEqual(height + 0.5)
       if (phone) await expect(panel).toHaveClass(/\bbottom\b/)
+      // Key hints only where there are keys: the phone sheet shows none.
+      const keys = page.getByRole('menu').locator('.row-menu-keys')
+      await expect(keys).toHaveCount(3)
+      for (const hint of await keys.all()) await (phone ? expect(hint).toBeHidden() : expect(hint).toBeVisible())
       await shot(page, info, `menu-${name}`)
 
       // Rename in place: the row, its controls and the next row stay put (±0.5 px).
@@ -353,6 +372,17 @@ test('Link stays put across search results and a refusal, on a desktop and a pho
     await picker.locator('.option', { hasText: 'PHAROS-11' }).click()
     const link = picker.locator('.link-picked')
     await expect(link).toHaveAccessibleName(/^Link 1\b/)
+    const [field, linkBox, body] = [(await picker.locator('.search .field').boundingBox())!, (await link.boundingBox())!, (await picker.locator('.picker-body').boundingBox())!]
+    if (width > 760) {
+      // On the search row: right of the field, as tall as it; the results start right under the search.
+      expect(Math.abs(linkBox.y - field.y)).toBeLessThanOrEqual(0.5)
+      expect(Math.abs(linkBox.height - field.height)).toBeLessThanOrEqual(0.5)
+      expect(linkBox.x).toBeGreaterThanOrEqual(field.x + field.width)
+      expect(body.y - (field.y + field.height)).toBeLessThanOrEqual(8.5)
+    } else {
+      // Phones keep it pinned under the results.
+      expect(linkBox.y).toBeGreaterThanOrEqual(body.y + body.height)
+    }
     const guard = await controlStability(page, { link })
     await guard.check(async () => {
       await picker.locator('input').fill('PHAROS-12')
@@ -423,6 +453,65 @@ test('Link keeps its size and place while picking from 0 to 10 and back, on a de
     await page.keyboard.press('Escape')
     await expect(picker).toHaveCount(0)
     expect(w.writes.filter(write => write.path.endsWith('/work'))).toHaveLength(0)
+  }
+})
+
+test('a Lands day reads as a day in the row, its label and its history; a goal without work says so at the same height', async ({ page }, info) => {
+  test.setTimeout(60_000)
+  for (const [width, height] of [[1440, 900], [390, 844]] as const) {
+    await page.setViewportSize({ width, height })
+    const phone = width <= 760
+    const w = world()
+    await openGoals(page, w)
+    await (await newGoalEntry(page, phone)).click()
+    await page.locator('#goal-title').fill('Managed provisioning works end to end')
+    await page.locator('dialog input.native[type="date"]').evaluate((input: HTMLInputElement) => { input.value = '2026-10-30'; input.dispatchEvent(new Event('change', { bubbles: true })) })
+    await page.locator('#goal-go').click()
+    const goal = goalRow(page, 'g-new1'), row = goal.locator('.goal-row'), lands = goal.locator('.goal-eta')
+    await expect(goal).toHaveAttribute('data-open', '1')
+
+    // A day stays a day, like the agent's "Fri 23 Oct" beside it.
+    await expect(lands.locator('.t')).toHaveText('Fri 30 Oct')
+    await expect(lands).toHaveAttribute('aria-label', /^Fri 30 Oct\b/)
+    await expect(goalRow(page, 'g-agent').locator('.goal-eta .t')).toHaveText('Fri 23 Oct')
+
+    // No work yet: an empty track, no percent, "No work linked yet" where "N of M done" goes.
+    const progress = goal.locator('.goal-progress')
+    await expect(progress.locator('.of')).toHaveText('No work linked yet')
+    await expect(progress.locator('.pct')).toHaveText('')
+    await expect(progress).not.toContainText('%')
+    await expect(progress.locator('.bar > i')).toHaveCount(0)
+    await shot(page, info, `no-work-${width}`)
+    const before = (await row.boundingBox())!.height
+
+    // Linking work brings the percent and the count, and the row keeps its height (0 px).
+    await goal.locator('.link-work').click()
+    const picker = page.locator('.picker.multi')
+    await picker.locator('input').fill('PHAROS-11')
+    await picker.locator('.option', { hasText: 'PHAROS-11' }).click()
+    await picker.locator('.link-picked').click()
+    await expect(picker).toHaveCount(0)
+    await expect(progress.locator('.pct')).toHaveText(/^\d+%$/)
+    if (!phone) await expect(progress.locator('.of')).toHaveText(/^\d+ of 1 done$/)
+    expect(Math.abs((await row.boundingBox())!.height - before)).toBeLessThanOrEqual(0.5)
+
+    // Another day through Edit goal: sent as a day, and its history says what it was.
+    if (!phone) await row.hover()
+    await goal.locator('.row-more').click()
+    await page.getByRole('menuitem', { name: 'Edit goal' }).click()
+    await page.locator('dialog input.native[type="date"]').evaluate((input: HTMLInputElement) => { input.value = '2026-10-31'; input.dispatchEvent(new Event('change', { bubbles: true })) })
+    await page.locator('#goal-go').click()
+    await expect(page.locator('dialog.project-settings-sheet')).toHaveCount(0)
+    const patch = w.writes.filter(write => write.method === 'PATCH').at(-1)!.body as { eta: { at: string; text: string } }
+    expect(patch.eta.text).toBe('Sat 31 Oct')
+    expect(new Date(patch.eta.at).toISOString()).toBe('2026-10-31T22:59:00.000Z')
+    await expect(lands.locator('.t')).toHaveText('Sat 31 Oct')
+    await lands.hover()
+    const tip = page.locator('.goal-tip')
+    await expect(tip).toContainText('was Fri 30 Oct')
+    await shot(page, info, `lands-tip-${width}`)
+    for (const text of [await lands.innerText(), await lands.getAttribute('aria-label') ?? '', await tip.innerText()]) expect(text).not.toContain('23:59')
+    await page.mouse.move(0, 0)
   }
 })
 
