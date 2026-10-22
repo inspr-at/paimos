@@ -1841,6 +1841,12 @@
         "passed": 42,
         "wallSeconds": 48.4,
         "note": "Original browser cases stay unchanged; this is a baseline observation, not a measured prune saving."
+      },
+      "ledgerCheck": {
+        "sourceCommit": "683c41028",
+        "transportCommit": "7e3daea1f",
+        "command": "node --experimental-strip-types --test tests/test-prune-ledger.test.ts",
+        "result": "passed remotely through LEAD remote-spec.sh; protected lineage, missing-mapping counterexamples, P01 snapshot and visual approval checks remain enforced."
       }
     }
   }
