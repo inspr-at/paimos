@@ -2186,6 +2186,10 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStartRunBudgetExits","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunCleanupProcessOwnership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunCleanupRetainsSingleSettlementOnDeliveryFailure","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestStartRunContinuationExits","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStartRunExits","tier":"ESSENTIAL"}
