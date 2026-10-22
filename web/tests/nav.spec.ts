@@ -30,6 +30,19 @@ test('P02 keyboard places navigate outside fields and preserve text-field shortc
 test('P02 account menu keyboard focus returns through a route and browser Back', async ({ page }) => {
   const data = await setup(page)
   data.nodes.find(node => node.id === 'n-4')!.state = 'blocked'
+  await page.addInitScript(() => {
+    class Stream extends EventTarget {
+      readyState = 1
+      onopen: (() => void) | null = null
+      onerror: (() => void) | null = null
+      close() { this.readyState = 2 }
+      constructor() {
+        super()
+        queueMicrotask(() => { this.onopen?.(); this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 40, resumed: false }), lastEventId: '40' })) })
+      }
+    }
+    Object.assign(window, { EventSource: Stream })
+  })
   await page.goto('/')
   const account = page.getByRole('button', { name: /^Account for / })
   await account.focus(); await page.keyboard.press('Enter')

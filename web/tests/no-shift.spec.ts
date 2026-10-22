@@ -233,6 +233,7 @@ test('P02 floating search and selectors keep positive geometry through loading, 
   await ticket.focus(); await ticket.press('r')
   const dialog = page.getByRole('dialog', { name: 'Link PHAROS-12 to another ticket' })
   const search = dialog.getByRole('combobox')
+  await search.fill('PHAROS-1')
   await expect(dialog.getByRole('option').first()).toBeVisible()
   const controls = { search, selectors: dialog.getByRole('radiogroup'), clickedRow: dialog.getByRole('radio', { name: 'Blocked by', exact: true }) }
   await expectStableControls({ controls, scrollAreas: { dialog }, interactions: [
