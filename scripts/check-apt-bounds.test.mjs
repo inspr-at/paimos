@@ -444,7 +444,8 @@ test('one complete image bundle installs offline and invalid bundles retain netw
   assert.equal(corrupt.status, 0, corrupt.stderr)
   assert.deepEqual(corrupt.calls, ['playwright install-deps chromium'])
   assert.ok(corrupt.stderr.includes(`${join(bundleDir, 'archives/fish_1_amd64.deb')}: bundle checksum mismatch`), corrupt.stderr)
-  assert.match(corrupt.stderr, /st_mode=0o100644, owner=\d+:\d+/)
+  const corruptInfo = statSync(join(bundleDir, 'archives/fish_1_amd64.deb'))
+  assert.ok(corrupt.stderr.includes(`st_mode=0o${corruptInfo.mode.toString(8)}, owner=${corruptInfo.uid}:${corruptInfo.gid}`), corrupt.stderr)
 
   const exhausted = await run(state => `bash "${script}" bundle "${join(state, 'bundle')}"`, { mode: 'bundle-fetch-fail' })
   assert.equal(exhausted.status, 100, exhausted.stdout)
@@ -477,7 +478,7 @@ test('an interrupted first bundle fetch and a fallback fetch export only offline
     assert.ok(manifest.lists.includes('lists/mirror+file_old_binary-amd64_Packages'), 'retain usable indexes from the killed attempt')
     assert.ok(manifest.lists.includes('lists/archive.ubuntu.com_ubuntu_dists_noble_main_binary-amd64_Packages.lz4'))
     assert.ok(manifest.lists.includes('lists/archive.ubuntu.com_ubuntu_dists_noble_InRelease'))
-    for (const excluded of ['lists/_etc_apt_apt-mirrors.txt', 'lists/auxfiles', 'lists/partial', 'archives/partial']) {
+    for (const excluded of ['lists/auxfiles', 'lists/partial', 'archives/partial']) {
       assert.equal(existsSync(join(bundleDir, excluded)), false, `${excluded} must not reach the uploader`)
     }
     const offline = await run(`bash "${script}" apt libtest`, { mode: 'always-fail', bundleDir })
@@ -488,11 +489,13 @@ test('an interrupted first bundle fetch and a fallback fetch export only offline
     // mirror-list link even after the ownership and permission handoff.
     const allFiles = await run(state => {
       const copy = join(state, 'all-list-files.sh')
-      writeFileSync(copy, readFileSync(script, 'utf8').replace('if index_name(p.name)', "if p.name != 'auxfiles'"))
+      writeFileSync(copy, readFileSync(script, 'utf8')
+        .replace("for p in entries(root / 'lists') if index_name(p.name)", "for p in (root / 'lists').rglob('*') if p.is_file() and p.name != 'lock' and 'partial' not in p.parts")
+        .replace('if name in lists and', 'if False and'))
       return `bash "${copy}" bundle "${join(state, 'bundle')}"`
     }, options)
     assert.equal(allFiles.status, 1, allFiles.stdout)
-    assert.match(allFiles.stderr, /lists\/_etc_apt_apt-mirrors\.txt: symlink \(st_mode=0o120[0-7]+, owner=\d+:\d+\)/)
+    assert.match(allFiles.stderr, /lists\/auxfiles\/_etc_apt_apt-mirrors\.txt: symlink \(st_mode=0o120[0-7]+, owner=\d+:\d+\)/)
     assert.match(allFiles.stderr, /failed bundle tree/)
     assert.match(allFiles.stderr, /[-dlrwx]{10} \d+:\d+ \d+ .*archives\/fish_1_amd64\.deb/)
     assert.equal(existsSync(join(allFiles.state, 'bundle/manifest.json')), false)

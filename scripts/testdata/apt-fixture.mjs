@@ -175,11 +175,10 @@ import sys
 
 state, lists, sources = map(Path, sys.argv[1:])
 if not (state / 'interrupted-tree').exists():
-    # The file acquisition method can link a local mirror list into lists/.
+    # pkgAcqAuxFile uses lists/auxfiles; pkgAcqFile::Done links file: URIs.
     # A killed fetch leaves that link and auxiliary metadata for the retry.
-    (lists / '_etc_apt_apt-mirrors.txt').symlink_to(sources / 'apt-mirrors.txt')
     (lists / 'auxfiles').mkdir()
-    (lists / 'auxfiles/mirror-list').symlink_to(sources / 'apt-mirrors.txt')
+    (lists / 'auxfiles/_etc_apt_apt-mirrors.txt').symlink_to(sources / 'apt-mirrors.txt')
     (lists / 'auxfiles/stale').write_text('interrupted metadata')
     (lists / 'auxfiles/stale').chmod(0o000)
     (lists / 'mirror+file_old_binary-amd64_Packages').write_text('first attempt index')
