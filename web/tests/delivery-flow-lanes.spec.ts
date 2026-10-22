@@ -351,10 +351,11 @@ for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'],
 
 // ---------- AEON-1656: lanes grow instead of stacking ----------
 type Box = { x: number; y: number; w: number; h: number }
-/** Lane boxes by lane, every drawn bar of a lane (one box per step), and the frame's own parts. */
+/** Lane boxes by lane, every drawn bar of a lane (one box per step), and the frame's own parts, relative to the stage (page scroll does not count). */
 async function stage(page: Page) {
   return lanes(page).evaluate(host => {
-    const box = (el: Element) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height } }
+    const origin = host.getBoundingClientRect()
+    const box = (el: Element) => { const r = el.getBoundingClientRect(); return { x: r.x - origin.x, y: r.y - origin.y, w: r.width, h: r.height } }
     const laneBoxes: Record<string, { x: number; y: number; w: number; h: number }> = {}
     for (const el of host.querySelectorAll('.ln-lane')) laneBoxes[el.getAttribute('data-lane')!] = box(el)
     const bars = Array.from(host.querySelectorAll('[data-step]')).map(g => {
@@ -416,8 +417,8 @@ for (const [width, theme] of [[1440, 'light'], [1440, 'dark'], [1024, 'light'], 
     expect(stacked((await stage(page)).bars.filter(bar => inside(bar, build)))).toEqual([])
     await guard.check(() => zoom.getByRole('radio', { name: '30 min' }).click())
     await page.mouse.move(0, 0)
-    await page.locator('.fl').evaluate(el => el.scrollIntoView({ block: 'start' }))
-    await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-1656/flow-lanes-burst-${width}-${theme}.png`) })
+    await lanes(page).evaluate(el => el.scrollIntoView({ block: 'start' }))
+    await lanes(page).screenshot({ path: info.outputPath(`aeon-1656/flow-lanes-burst-${width}-${theme}.png`) })
   })
 }
 
@@ -446,7 +447,7 @@ test('above twelve rows a lane folds into "+N more" and expands in place, by poi
   expect(Math.abs(open.lanes.build!.h - before.lanes.build!.h - 5 * rowH)).toBeLessThanOrEqual(0.5)
   expect(stacked(open.bars)).toEqual([])
   expect(open.bars.filter(bar => inside(bar, open.lanes.build!)).length).toBeGreaterThan(before.bars.filter(bar => inside(bar, before.lanes.build!)).length)
-  await page.locator('.fl').screenshot({ path: info.outputPath('aeon-1656/flow-lanes-fold-open-1440-light.png') })
+  await lanes(page).screenshot({ path: info.outputPath('aeon-1656/flow-lanes-fold-open-1440-light.png') })
   // "fewer" folds it back; the keyboard reaches the same control.
   await guard.check(() => fold.click())
   await expect(fold).toHaveText('+5 more')
@@ -465,8 +466,8 @@ test('a live update grows the Builder lane only once the pointer has left, never
   const hovered = `[data-step="0:${RUN.c991}:5"]`
   const barBox = () => lanes(page).locator(`${hovered} .fl-seg`).first().boundingBox()
   const before = await stage(page)
+  expect(inside(before.bars.find(b => b.key === `0:${RUN.c991}:5`)!, before.lanes.ci!)).toBe(true)
   const bar = (await barBox())!
-  expect(inside({ x: bar.x, y: bar.y, w: bar.width, h: bar.height }, before.lanes.ci!)).toBe(true)
   await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2)
   // Three more builders arrive while the pointer rests on 991's checks, below the Builder lane.
   const reads = flow.reads.filter(r => r.includes('/delivery/flow?')).length
