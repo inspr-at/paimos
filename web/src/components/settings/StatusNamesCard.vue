@@ -11,17 +11,16 @@ import { can } from '../../lib/authz'
 import { displayLanguage } from '../../lib/displayLanguage'
 import { BUILT_IN_STATUS_NAMES, STATUS_LOCALES, STATUS_NAME_KEYS, cleanStatusNames, readStatusNames, renamedStatus, statusName, statusNameField, statusNameProblems, type StatusLocale, type StatusNameDrafts, type StatusNameKey, type StatusNameMap } from '../../lib/statusNames'
 import { useIdentityScope } from '../../lib/useIdentityScope'
-import { useProfile } from '../../stores/profile'
 import { useSession } from '../../stores/session'
 import { useStatusNames } from '../../stores/statusNames'
 import AppIcon from '../AppIcon.vue'
 import StatusIcon from '../work/StatusIcon.vue'
 import SettingsCard from './SettingsCard.vue'
 
-const session = useSession(), profile = useProfile(), store = useStatusNames()
+const session = useSession(), store = useStatusNames()
 const scope = useIdentityScope(() => can('settings.manage') && session.identity?.principal.kind === 'person')
-// The app reads in English for now (displayLanguage.ts); the copy is ready in both.
-const language = computed(() => displayLanguage(profile.profile?.locale))
+// The app reads in one language (displayLanguage.ts); the copy is ready in both.
+const language = computed(() => displayLanguage())
 const t = (en: string, de: string) => language.value === 'de' ? de : en
 const editable = computed(() => !!scope.owner.value)
 const LOCALE_NAME: Record<StatusLocale, [string, string]> = { en: ['English', 'Englisch'], de: ['German', 'Deutsch'] }

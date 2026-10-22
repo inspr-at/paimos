@@ -178,15 +178,16 @@ func endpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status i
 					return err
 				}
 			}
-			if workerSafety && p.KeyPersonID != "" {
+			if workerSafety && (p.KeyPersonID != "" || p.TransportComputerID != "") {
 				project, session := r.PathValue("projectId"), r.PathValue("sessionId")
 				if !UUID(project) || !UUID(session) || workerlease.Read(r) == "" {
 					return Fail(403, "harness worker proof rejected")
 				}
-				if err := authz.RequireTx(r.Context(), tx, p, scope, authz.Scope{ProjectID: project}); err != nil {
-					if !errors.Is(err, authz.ErrForbidden) {
-						return err
-					}
+				authorityErr := authz.RequireTx(r.Context(), tx, p, scope, authz.Scope{ProjectID: project})
+				if authorityErr != nil && !errors.Is(authorityErr, authz.ErrForbidden) {
+					return authorityErr
+				}
+				if authorityErr != nil || p.TransportComputerID != "" && p.RunID == "" {
 					// This view exists only inside an allowlisted safety handler.
 					// Its exact target lease is still required before any mutation.
 					if _, err := tx.Exec(r.Context(), `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.visible_nodes','',true)`, "{"+project+"}"); err != nil {

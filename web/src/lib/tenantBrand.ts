@@ -16,7 +16,8 @@ export interface SVGCleanup { removed_attribute_count: number; removed_attribute
 // The upload report contains names only; toast renders this message as text.
 export function logoCleanupMessage(settings: Pick<BrandSettings, 'cleaned' | 'svg_cleanup'>, locale?: string | null) {
   if (!settings.cleaned) return ''
-  const de = displayLanguage(locale) === 'de'
+  void locale
+  const de = displayLanguage() === 'de'
   const report = settings.svg_cleanup
   if (report?.removed_attribute_count) {
     const count = report.removed_attribute_count

@@ -192,6 +192,8 @@ type Error struct {
 }
 
 func (e *Error) Error() string                    { return e.Message }
+func (e *Error) HTTPStatus() int                  { return e.Status }
+func (e *Error) ErrorCode() string                { return e.Code }
 func fail(status int, code, message string) error { return &Error{status, code, message} }
 func WriteError(w http.ResponseWriter, err error) {
 	var conflict *workorders.BuildConflict
