@@ -50,6 +50,17 @@ runs through the paired transport. A no-launch verification refusal remains a
 metadata operation and does not require content authority. Pairing and API-key person migration remain
 separate rollout concerns.
 
+Paired attached inbox hooks have no run and retain an exact session path for
+heartbeat, drain, delivery completion and content-free notification hints. The
+server checks an unmanaged null-run session, its authenticated agent, exact
+worker lease and S1-03 generation ownership, the connected pairing and the
+key's existing live person/creator ceilings under the shared fence in every
+transaction. A person-created registration that merely names the paired agent
+does not qualify. The first heartbeat must attest the attached process identity;
+delivery and notifications require that verified binding. Attached hooks drain
+and receive message hints only for their exact session. These calls do not
+require an agentd upgrade or grant access to run, node or session content reads.
+
 The exact owned stop/yield/confirm-exit/control-completion safety routes retain
 their private worker-lease checks without a content capability. Person session
 controls (interrupt and stop) are not content or launch: a bare paired

@@ -1773,6 +1773,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	if !validPhase(in.Phase) || in.ActivitySequence < 0 {
 		return nil, workorders.Fail(400, "invalid heartbeat")
 	}
+	if p.TransportComputerID != "" && p.RunID == "" && !in.AttachedHook {
+		return nil, workorders.Fail(403, "exact attached hook identity required")
+	}
 	ctx := r.Context()
 	if in.AttachedHook {
 		if err := agentpairing.LockMutation(ctx, tx); err != nil {

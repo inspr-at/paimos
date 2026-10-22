@@ -7216,6 +7216,10 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestOwnedStopCapabilityKeepsUnmanagedControlFence","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestPairedAttachedHookNotificationsCeiling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestPairedAttachedHookTransportCeiling","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestPauseAllAcrossProjectsAndLongPausedHistory","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestPauseAllSkipReportsAreBoundedWithoutStarvingOtherProjects","tier":"GATED-FULL"}

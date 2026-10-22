@@ -11,11 +11,73 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// Risk: an attached hook cannot subscribe through paired auth, or its stream
+// keeps delivering after its person's ceiling is revoked between transactions.
+func TestPairedAttachedHookNotificationsCeiling(t *testing.T) {
+	v := attachedRecoveryAgent(t)
+	f := v.f
+	beat := map[string]any{"phase": "working", "activity_sequence": 2, "attached_hook": true, "process_ownership": v.identity}
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
+	server := httptest.NewServer(v.runtimeHandler(t, f.mux))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	r, err := http.NewRequestWithContext(ctx, "GET", server.URL+v.path+"/notifications", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Authorization", "Bearer "+f.key)
+	r.Header.Set("X-Aeon-Worker-Lease", v.lease)
+	resp, err := server.Client().Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 || resp.Header.Get("Aeon-Upgrade-Reason") != "" {
+		t.Fatalf("paired attached subscription status=%d upgrade=%q", resp.StatusCode, resp.Header.Get("Aeon-Upgrade-Reason"))
+	}
+	scanner := bufio.NewScanner(resp.Body)
+	next := func() bool {
+		t.Helper()
+		for scanner.Scan() {
+			if scanner.Text() == "event: harness.wake" {
+				if !scanner.Scan() || scanner.Text() != "data: {}" {
+					t.Fatal("attached wake leaked content or changed shape")
+				}
+				return true
+			}
+		}
+		return false
+	}
+	if !next() {
+		t.Fatal("missing attached subscription barrier")
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := inbox.AcceptMessageTx(t.Context(), tx, f.person, inbox.Acceptance{RecipientPrincipalID: f.agent.ID, RecipientSessionID: &v.session, Body: "private attached notification fixture", IdempotencyKey: uid()})
+		return err
+	})
+	if !next() {
+		t.Fatal("exact attached message did not wake its stream")
+	}
+	dbtest.BindRole(t, f.db, f.person.TenantID, v.keyOwner, "viewer")
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := events.Append(t.Context(), tx, f.person, events.Change{NodeID: &f.project, Type: "harness.control_requested", After: map[string]any{"session_id": v.session}})
+		return err
+	})
+	if next() {
+		t.Fatal("attached stream survived its person ceiling revocation")
+	}
+	if scanner.Err() != nil {
+		t.Fatal("attached stream did not close cleanly", scanner.Err())
+	}
+}
 
 func TestHarnessNotificationsCommitWakeLeaseAndRevocation(t *testing.T) {
 	// Risk: controls/messages still wait for polling, or the new channel leaks

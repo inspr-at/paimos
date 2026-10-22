@@ -187,7 +187,7 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			}
 			if p.TransportComputerID != "" && p.RunID == "" {
 				w.Header().Set("Aeon-Run-Content-Policy", db.RunCapabilityPolicy)
-				if r.Header.Get(db.RunCapabilityPolicyHeader) != db.RunCapabilityPolicy {
+				if r.Header.Get(db.RunCapabilityPolicyHeader) != db.RunCapabilityPolicy && !transportAttachedHookRoute(r) {
 					w.Header().Set("Aeon-Upgrade-Reason", "run_capability_upgrade_required")
 				}
 			}

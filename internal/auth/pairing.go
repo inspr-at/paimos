@@ -183,6 +183,9 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 				}
 			}
 		case "projects":
+			if p.TransportComputerID != "" && p.RunID == "" && transportAttachedHookRoute(r) && workerlease.Read(r) != "" {
+				return attachedHookAuthorityTx(r.Context(), tx, r, p)
+			}
 			if len(parts) >= 4 && validRouteUUID(parts[2]) && parts[3] == "harness-sessions" {
 				var own bool
 				if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM nodes n JOIN agent_runs r ON r.tenant_id=n.tenant_id AND r.work_order_id=n.id WHERE n.project_id=$1 AND r.agent_principal_id=$2)`, parts[2], p.ID).Scan(&own); err != nil {

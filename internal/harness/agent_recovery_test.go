@@ -150,20 +150,142 @@ func TestQueuedAgentDiagnosisUsesOnlyItsRunAccountAndFreshPairedHost(t *testing.
 // declarations as well as the handler; injecting a principal would miss them.
 func (v recoveryAgentFixture) runtimeCall(t *testing.T, path string, body any, lease ...string) *httptest.ResponseRecorder {
 	t.Helper()
+	return v.runtimeRequest(t, http.MethodPost, path, body, lease...)
+}
+
+func (v recoveryAgentFixture) runtimeHandler(t *testing.T, next http.Handler) http.Handler {
+	t.Helper()
 	module, err := auth.New(auth.Config{SessionKey: bytes.Repeat([]byte{1}, 32)}, v.f.db.App)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, r.Pattern = v.f.mux.Handler(r)
+		module.Middleware(next).ServeHTTP(w, r)
+	})
+}
+
+func (v recoveryAgentFixture) runtimeRequest(t *testing.T, method, path string, body any, lease ...string) *httptest.ResponseRecorder {
+	t.Helper()
 	raw, _ := json.Marshal(body)
-	r := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
+	r := httptest.NewRequest(method, path, bytes.NewReader(raw))
 	r.Header.Set("Authorization", "Bearer "+v.f.key)
 	if len(lease) > 0 {
 		r.Header.Set("X-Aeon-Worker-Lease", lease[0])
 	}
-	_, r.Pattern = v.f.mux.Handler(r)
 	w := httptest.NewRecorder()
-	module.Middleware(v.f.mux).ServeHTTP(w, r)
+	v.runtimeHandler(t, v.f.mux).ServeHTTP(w, r)
 	return w
+}
+
+func attachedRecoveryAgent(t *testing.T) recoveryAgentFixture {
+	t.Helper()
+	v := recoveryAgent(t)
+	v.f.tx(t, v.f.person, func(tx pgx.Tx) error {
+		// A hook registered by this agent, rather than a person registration
+		// that happens to copy its principal ID, has S1-03 ownership.
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET management='unmanaged',run_id=NULL,capabilities=ARRAY['inbox','status'],process_ownership=NULL,process_observed_at=NULL,started_by_principal_id=agent_principal_id WHERE id=$1`, v.session)
+		return err
+	})
+	return v
+}
+
+// Risk: restoring attached hooks accidentally admits a managed run, another
+// generation, or stale person authority through a computer's transport key.
+func TestPairedAttachedHookTransportCeiling(t *testing.T) {
+	for _, tc := range []struct{ name, change string }{
+		{"managed run", `UPDATE harness_sessions SET management='managed',run_id=$2 WHERE id=$1`},
+		{"person registration", `UPDATE harness_sessions SET started_by_principal_id=$2 WHERE id=$1`},
+		{"other principal", `UPDATE harness_sessions SET agent_principal_id=$2 WHERE id=$1`},
+		{"no inbox", `UPDATE harness_sessions SET capabilities=ARRAY['status'] WHERE id=$1`},
+		{"stopped", `UPDATE harness_sessions SET stopped_at=clock_timestamp() WHERE id=$1`},
+		{"archived", `UPDATE harness_sessions SET archived_at=clock_timestamp(),stopped_at=clock_timestamp(),recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest=decode(repeat('a',64),'hex'),recovery_actor_id=started_by_principal_id,recovery_reason='fixture archive' WHERE id=$1`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := attachedRecoveryAgent(t)
+			other := uid()
+			if tc.name == "other principal" {
+				v.f.addAgent(t, other, "Other attached computer")
+			}
+			v.f.tx(t, v.f.person, func(tx pgx.Tx) error {
+				args := []any{v.session}
+				switch tc.name {
+				case "managed run":
+					args = append(args, v.run)
+				case "person registration":
+					args = append(args, v.f.person.ID)
+				case "other principal":
+					args = append(args, other)
+				}
+				_, err := tx.Exec(t.Context(), tc.change, args...)
+				return err
+			})
+			denied := v.runtimeCall(t, v.path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 2, "attached_hook": true, "process_ownership": v.identity}, v.lease)
+			expect(t, denied, 403)
+			if strings.Contains(denied.Body.String(), "run_capability_upgrade_required") {
+				t.Fatal("attached authority refusal falsely demands an upgrade")
+			}
+		})
+	}
+	v := attachedRecoveryAgent(t)
+	f := v.f
+	other := uid()
+	f.addAgent(t, other, "Unrelated run agent")
+	beat := map[string]any{"phase": "working", "activity_sequence": 2, "attached_hook": true, "process_ownership": v.identity}
+	// No unrelated run in the project is needed to cross the pairing ceiling.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET agent_principal_id=$2 WHERE id=$1`, v.run, other)
+		return err
+	})
+	for _, suffix := range []string{"/drain", "/complete-delivery"} {
+		expect(t, v.runtimeCall(t, v.path+suffix, map[string]any{}, v.lease), 403)
+	}
+	expect(t, v.runtimeRequest(t, "GET", v.path+"/notifications", nil, v.lease), 403)
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, strings.Repeat("wrong", 8)), 403)
+	expect(t, v.runtimeCall(t, strings.Replace(v.path, f.project, uid(), 1)+"/heartbeat", beat, v.lease), 403)
+	w := v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease)
+	expect(t, w, 200)
+	if w.Header().Get("Aeon-Upgrade-Reason") != "" {
+		t.Fatal("valid attached hook received a false upgrade reason")
+	}
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 2}, v.lease), 403)
+	expect(t, v.runtimeCall(t, v.path+"/drain", map[string]any{}, v.lease), 200)
+	// Session proof must not become general project or node content authority.
+	expect(t, v.runtimeRequest(t, "GET", v.path, nil, v.lease), 403)
+	expect(t, v.runtimeRequest(t, "GET", "/api/nodes/"+f.ticket, nil, v.lease), 403)
+	for _, person := range []string{v.keyOwner, f.person.ID} {
+		if person == f.person.ID {
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET person_id=$2 WHERE id=$1`, f.agent.AuthKeyID, person)
+				return err
+			})
+		}
+		dbtest.BindRole(t, f.db, f.person.TenantID, person, "viewer")
+		expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 403)
+		expect(t, v.runtimeCall(t, v.path+"/drain", map[string]any{}, v.lease), 403)
+		dbtest.BindRole(t, f.db, f.person.TenantID, person, "admin")
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE principals SET status='deactivated' WHERE id=$1`, f.person.ID)
+		return err
+	})
+	expect(t, v.runtimeCall(t, v.path+"/drain", map[string]any{}, v.lease), 403)
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE principals SET status='active' WHERE id=$1`, f.person.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Revoke after HTTP admission, before the endpoint's final transaction.
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
+		f.mux.ServeHTTP(w, r)
+	})
+	r := httptest.NewRequest("POST", v.path+"/drain", strings.NewReader(`{}`))
+	r.Header.Set("Authorization", "Bearer "+f.key)
+	r.Header.Set("X-Aeon-Worker-Lease", v.lease)
+	w = httptest.NewRecorder()
+	v.runtimeHandler(t, next).ServeHTTP(w, r)
+	expect(t, w, 403)
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	expect(t, v.runtimeCall(t, v.path+"/drain", map[string]any{}, v.lease), 200)
 }
 func (v recoveryAgentFixture) claim(t *testing.T) []map[string]any {
 	t.Helper()

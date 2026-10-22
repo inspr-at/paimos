@@ -63,9 +63,77 @@ func transportControlCeilingRoute(r *http.Request) bool {
 	return false
 }
 
+// Attached hooks have no run. Only these exact session operations can use the
+// existing worker lease instead; neither registration nor content reads qualify.
+func transportAttachedHookRoute(r *http.Request) bool {
+	switch r.Pattern {
+	case "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat",
+		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/drain",
+		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery",
+		"GET /api/projects/{projectId}/harness-sessions/{sessionId}/notifications":
+		return true
+	}
+	return false
+}
+
+// The tenant/tree/pairing fence covers the final write and every stream recheck.
+// The exact S1-03 generation proof excludes person-created registrations that
+// merely name the paired principal. No issuer or pairing approver supplies a
+// person: RequireTx retains the key's existing live person/creator ceilings.
+func attachedHookAuthorityTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal) error {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	lease := workerlease.Read(r)
+	if !transportAttachedHookRoute(r) || p.TransportComputerID == "" || p.RunID != "" || len(parts) != 6 || !validRouteUUID(parts[2]) || !validRouteUUID(parts[4]) || lease == "" {
+		return authz.ErrForbidden
+	}
+	if err := agentpairing.Lock(ctx, tx); err != nil {
+		return err
+	}
+	if _, err := db.WorkerSessionPrincipalTx(ctx, tx, p, parts[2], parts[4], lease); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return authz.ErrForbidden
+		}
+		return err
+	}
+	var attached bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (
+ SELECT 1 FROM harness_sessions s
+ JOIN agent_pairing_computers c ON c.tenant_id=s.tenant_id AND c.principal_id=s.agent_principal_id
+ JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+ JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id
+ WHERE s.tenant_id=$1 AND s.project_id=$2 AND s.id=$3 AND s.agent_principal_id=$4
+ AND s.run_id IS NULL AND s.management='unmanaged' AND 'inbox'=ANY(s.capabilities)
+ AND s.archived_at IS NULL AND s.stopped_at IS NULL AND s.handed_over_to_id IS NULL
+ AND c.id=$5 AND c.key_id=$6 AND c.state='connected' AND q.state='redeemed'
+ AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp())
+ AND ($7 OR ('attached_reconnect_v1'=ANY(s.capabilities) AND s.process_ownership->>'daemon_id'=c.daemon_id)))`,
+		p.TenantID, parts[2], parts[4], p.ID, p.TransportComputerID, p.KeyID,
+		r.Pattern == "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat").Scan(&attached)
+	if err != nil {
+		return err
+	}
+	if !attached {
+		return authz.ErrForbidden
+	}
+	return authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: parts[2]})
+}
+
 func (m *Module) runContentBoundary(r *http.Request, p tenant.Principal) (*http.Request, tenant.Principal, error) {
 	values := r.Header.Values(db.RunCapabilityHeader)
 	if len(values) == 0 {
+		if p.TransportComputerID != "" && transportAttachedHookRoute(r) && workerlease.Read(r) != "" {
+			ctx := tenant.WithPrincipal(r.Context(), p)
+			guard := func(ctx context.Context, tx pgx.Tx, tid string) error {
+				if tid != p.TenantID {
+					return authz.ErrForbidden
+				}
+				return attachedHookAuthorityTx(ctx, tx, r, p)
+			}
+			if err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { return guard(ctx, tx, p.TenantID) }); err != nil {
+				return r, p, err
+			}
+			return r.WithContext(db.WithAdditionalTenantGuard(ctx, guard)), p, nil
+		}
 		if p.TransportComputerID != "" && !transportMetadataRoute(r) && !transportControlCeilingRoute(r) {
 			return r, p, &agentpairing.Error{Status: 403, Code: "run_capability_upgrade_required", Message: "Upgrade agentd: run_content_v1 capability required for content and launch"}
 		}
