@@ -135,6 +135,7 @@ if [[ "\$mode" == bundle-* ]]; then
   printf '%s\\n' "\$*" >> "\$state/downloads"
   if [[ "\$mode" == bundle-fetch-fail || "\$mode" == bundle-fetch-retry && \$(wc -l < "\$state/downloads") -le 2 ]]; then
     echo 'E: Failed to fetch http://azure.archive.ubuntu.com/ubuntu/pool/libtest.deb Connection timed out' >&2
+    echo 'E: Some files failed to download' >&2
     exit 100
   fi
   for name in fish zsh libtest fonts-test; do echo "\$name" > "\$archives/\${name}_1_amd64.deb"; done

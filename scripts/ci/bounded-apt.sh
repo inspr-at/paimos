@@ -242,7 +242,7 @@ fetch_failure() {
   fi
   # Ignore Playwright's final wrapper error, but reject apt/dpkg errors even
   # when an earlier fetch in the same attempt printed Ign or Err lines.
-  if grep -E '^E:|^dpkg: error' "$log" | grep -Ev '^E: (Failed to fetch (https?://|mirror\+file:)|Unable to fetch some archives|Some index files failed to download)' >/dev/null; then
+  if grep -E '^E:|^dpkg: error' "$log" | grep -Ev '^E: (Failed to fetch (https?://|mirror\+file:)|Unable to fetch some archives|Some index files failed to download|Some files failed to download$)' >/dev/null; then
     return 1
   fi
   # A slow mirror can keep delivering bytes without a single fetch error.
