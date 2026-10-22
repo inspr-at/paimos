@@ -143,8 +143,8 @@ were workflow-run metrics being skipped, workflow-job ingress being refused,
 and failed live job reads not rescheduling a completed backfill.
 
 The source exposes `last_read_error` (reason, missing permission when known, and
-check time), `retry_at`, and `last_event_at`. Any GitHub 403 from an Actions endpoint
-becomes `actions_read_missing`; a missing installation/repository becomes
+check time), `retry_at`, and `last_event_at`. An Actions 403 that is not classified
+as rate limiting becomes `actions_read_missing`; a missing installation/repository becomes
 `not_installed`; other read failures become `github_unavailable`. Permission and
 installation failures start at 30 minutes; other non-transient failures start at
 one minute. Repeated failures double the persisted delay, capped at one hour.
