@@ -443,7 +443,7 @@ function effortNote(choice: CascadeChoice, model: CatalogModel | undefined, effo
 function statusFor(account: CatalogAccount | undefined, accounts: CatalogAccount[], harness: string): CascadeStatus {
   if (!accounts.length) return { label: 'No enrolled account', detail: 'There is no account to pin for this host and harness.', tone: 'warn' }
   if (!account) return { label: 'Choose an account', detail: 'The run is pinned to the account you choose. It does not fall back to another one.', tone: 'warn' }
-  if (account.wait) return { label: capacityWaitText(account.wait, `${harnessLabel(harness)} agents`), detail: account.wait.run_now_allowed ? 'Queue it for then, or run this one now.' : 'The run can queue and starts when this account is ready.', tone: 'warn' }
+  if (account.wait) return { label: capacityWaitText(account.wait, `${harnessLabel(harness)} agents`), detail: account.wait.run_now_allowed ? 'Queue it for then, or run this one now.' : 'The run queues and starts when this account is ready.', tone: 'warn' }
   if (!account.available) {
     return { label: reasonLabel(account), detail: `${account.unavailable_reasons.map(reason => reasonText(account, reason)).join(' ')} The run can still queue. Routing rechecks this account and does not switch to another.`, tone: 'warn' }
   }

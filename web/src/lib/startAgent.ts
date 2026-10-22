@@ -37,6 +37,8 @@ export function startAgentCopy() {
     change: de ? 'Ändern' : 'Change',
     hide: de ? 'Schließen' : 'Hide',
     settings: de ? 'Laufeinstellungen' : 'Run settings',
+    accountsWarning: de ? 'Konten nicht verfügbar' : 'Accounts unavailable',
+    readOnlyWarning: de ? 'Nur lesend nicht verfügbar' : 'Read-only unavailable',
     loading: de ? 'Konten werden geladen…' : 'Loading accounts…',
     runsOn: (configuration: string) => de ? `Ausführung auf ${configuration}` : `Runs on ${configuration}`,
     skipWait: de ? 'Jetzt starten, Wartezeit überspringen' : 'Start now, skip the wait',

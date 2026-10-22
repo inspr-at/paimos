@@ -44,7 +44,7 @@ const dialog = ref<HTMLDialogElement>()
 const searchInput = ref<HTMLInputElement>()
 const taskInput = ref<HTMLInputElement>()
 const settingsOpen = ref(false)
-const lastSettingsWarning = ref('')
+const lastSettingsWarning = ref<{ label: string; detail: string }[]>([])
 const hostSelect = ref<HTMLSelectElement>()
 const tickets = ref<WorkNode[]>([])
 type StartTicket = WorkNode & Partial<Pick<ListItem, 'project'>>
@@ -118,13 +118,20 @@ const mayRunNow = computed(() => permitted.value && session.identity?.principal.
 const contextReady = computed(() => oneOff.value && newTicket.value ? can('nodes.write') && !projects.loading && !projects.error && !!selectedProject.value?.nodeUpdatedAt && !!task.value.trim() : ticket.value?.is_leaf === true)
 const canSubmit = computed(() => dispatchMode.value === 'manual' && permitted.value && !loading.value && !busy.value && !run.value && contextReady.value && !readOnlyReason.value && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
 const settingsSummary = computed(() => loading.value ? copy.loading : copy.runsOn(Object.values(view.value.requested).join(' · ')))
-const settingsWarning = computed(() => loading.value ? '' : [catalogGap.value ? catalogMessage.value : '', readOnlyReason.value, catalog.value && view.value.status.tone === 'warn' ? `${view.value.status.label} ${view.value.status.detail}` : ''].filter(Boolean).join(' '))
-watch(settingsWarning, warning => {
-  if (oneOff.value && visible.value && warning) { lastSettingsWarning.value = warning; settingsOpen.value = true }
+const settingsWarning = computed(() => {
+  const warnings: { label: string; detail: string }[] = []
+  if (loading.value) return warnings
+  if (catalogGap.value) warnings.push({ label: copy.accountsWarning, detail: catalogMessage.value })
+  if (readOnlyReason.value) warnings.push({ label: copy.readOnlyWarning, detail: readOnlyReason.value })
+  if (catalog.value && view.value.status.tone === 'warn') warnings.push(view.value.status)
+  return warnings
+})
+watch(() => settingsWarning.value.map(warning => `${warning.label} ${warning.detail}`).join(' '), warning => {
+  if (oneOff.value && visible.value && warning) { lastSettingsWarning.value = settingsWarning.value; settingsOpen.value = true }
 })
 function toggleSettings() {
   settingsOpen.value = !settingsOpen.value
-  if (!settingsOpen.value && !settingsWarning.value) lastSettingsWarning.value = ''
+  if (!settingsOpen.value && !settingsWarning.value.length) lastSettingsWarning.value = []
 }
 
 function resetTask() {
@@ -278,7 +285,7 @@ async function open(initial?: StartTicket, mode: 'expert' | 'once' = 'expert') {
   if (busy.value) return
   opener = document.activeElement as HTMLElement
   generation++; visible.value = true
-  oneOff.value = mode === 'once'; newTicket.value = !initial; projectId.value = ''; resetTask(); task.value = ''; settingsOpen.value = false; lastSettingsWarning.value = ''
+  oneOff.value = mode === 'once'; newTicket.value = !initial; projectId.value = ''; resetTask(); task.value = ''; settingsOpen.value = false; lastSettingsWarning.value = []
   ticket.value = initial?.is_leaf === true ? initial : null; query.value = ''; tickets.value = []; nextCursor.value = null
   authorFamily.value = authorFamilyFor(ticket.value)
   catalog.value = null; catalogGap.value = null; catalogMessage.value = ''
@@ -467,9 +474,9 @@ defineExpose({ open, openOnce })
             <label class="remember"><input v-model="mayChangeFiles" type="checkbox"> {{ copy.files }}</label>
           </div>
           <p v-if="oneOff" class="note restriction-note" role="status">{{ mayChangeFiles ? copy.writable : copy.readOnly }}</p>
-          <div v-if="oneOff" class="run-settings-summary" :class="{ warn: settingsWarning }">
+          <div v-if="oneOff" class="run-settings-summary" :class="{ warn: settingsWarning.length }">
             <div class="run-summary-line"><p>{{ settingsSummary }}</p><button type="button" class="btn ghost settings-toggle" :aria-expanded="settingsOpen" :aria-controls="`${uid}-settings`" @click="toggleSettings">{{ settingsOpen ? copy.hide : copy.change }}</button></div>
-            <p v-if="settingsWarning || lastSettingsWarning" class="note settings-status" :class="{ resolved: !settingsWarning }" :role="settingsWarning ? 'status' : undefined" :aria-hidden="!settingsWarning || undefined">{{ settingsWarning || lastSettingsWarning }}</p>
+            <p v-if="settingsWarning.length || lastSettingsWarning.length" class="note settings-status" :class="{ resolved: !settingsWarning.length }" :role="settingsWarning.length ? 'status' : undefined" :aria-hidden="!settingsWarning.length || undefined"><template v-for="(warning, index) in settingsWarning.length ? settingsWarning : lastSettingsWarning" :key="index">{{ index ? ' ' : '' }}<strong>{{ warning.label }}</strong><span> · {{ warning.detail }}</span></template></p>
             <button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button>
           </div>
           <template v-if="dispatchMode === 'manual'">
@@ -607,6 +614,7 @@ defineExpose({ open, openOnce })
 .run-summary-line p { flex: 1; min-width: 0; margin: 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .settings-toggle { flex-shrink: 0; min-height: 44px; }
 .settings-status { min-block-size: 3em; margin: 4px 0 0; }
+.settings-status strong { font-weight: 600; }
 .settings-status.resolved { visibility: hidden; }
 .run-settings-summary.warn .settings-status { color: var(--ink-2); }
 .queue-label { display: grid; }

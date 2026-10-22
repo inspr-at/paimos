@@ -56,7 +56,7 @@ describe('account catalog contract', () => {
     expect(isAccountCatalog(catalog([waiting]))).toBe(true)
     const view = presented(catalog([waiting])).view
     expect(view.status.label).toBe('Waiting for the first run’s reading')
-    expect(view.status.detail).toContain('queue')
+    expect(view.status.detail).toBe('The run queues and starts when this account is ready.')
   })
 
   it('fails closed when the catalog is missing, forbidden, or the wrong shape', async () => {

@@ -256,8 +256,14 @@ describe('Start Agent leaf selection', () => {
     await state.openOnce({ ...ticket, project }); await flush()
     expect(readLead).not.toHaveBeenCalled()
     expect(state.dispatchMode.value).toBe('manual')
+    const warning = [{ label: 'Read-only unavailable', detail: 'This account catalog has no qualified read-only one-off adapter. Refresh it or choose another harness.' }]
+    expect(state.settingsWarning.value).toEqual(warning)
+    expect(state.settingsOpen.value).toBe(true)
     state.instruction.value = 'Inspect this context'
     state.mayChangeFiles.value = true
+    await flush()
+    expect(state.settingsWarning.value).toEqual([])
+    expect(state.lastSettingsWarning.value).toEqual(warning)
     await state.submit()
     expect(launch).toHaveBeenCalledTimes(1)
     expect(state.instruction.value).toBe('Inspect this context')

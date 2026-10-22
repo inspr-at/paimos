@@ -28,7 +28,9 @@ test('Run once is available without developer settings and recovers an exact rea
   await form.getByLabel('Task', { exact: true }).fill('Inspect the supplied project context')
   await expect(form.getByRole('checkbox', { name: 'May change files', exact: true })).not.toBeChecked()
   await expect(form.getByRole('button', { name: /^Queue run/ })).toBeDisabled()
-  await expect(form.getByText(/Codex read-only sandboxing/)).toBeVisible()
+  const readOnlyWarning = form.locator('.settings-status')
+  await expect(readOnlyWarning.locator('strong')).toHaveText('Read-only unavailable')
+  await expect(readOnlyWarning.locator('span')).toHaveText('· Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.')
   await form.getByLabel('Host', { exact: true }).selectOption('laptop')
   const text = '  Inspect exactly this context.\nReturn the observations.'
   await form.getByLabel('Instruction (optional)', { exact: true }).fill(text)
@@ -130,7 +132,37 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     await expect(form.getByLabel('Task', { exact: true })).toBeFocused()
     await expect(form.locator('.settings-toggle')).toHaveAttribute('aria-expanded', 'true')
     await expect(form.getByLabel('Host', { exact: true })).toBeVisible()
-    await expect(form.locator('.run-settings-summary')).toContainText(width === 1024 ? 'Sign in again on the computer' : 'Waiting for capacity')
+    const warning = form.locator('.settings-status')
+    const warningLabel = warning.locator('strong'), warningDetail = warning.locator('span')
+    const label = width === 1024 ? 'Sign in again on the computer' : 'Waiting for capacity'
+    const detail = 'The run queues and starts when this account is ready.'
+    await expect(warning).toHaveText(`${label} · ${detail}`)
+    await expect(warningLabel).toHaveText(label)
+    await expect(warningLabel).toHaveCSS('font-weight', '600')
+    await expect(warningDetail).toHaveText(`· ${detail}`)
+    await expect(warningDetail).toHaveCSS('font-weight', '400')
+    for (const part of [warningLabel, warningDetail]) await expect(part).toHaveCSS('display', 'inline')
+    // The label and sentence start on the same line, with natural phone wrapping.
+    const labelLine = await warningLabel.evaluate(el => el.getClientRects()[0]!.y)
+    const detailLines = await warningDetail.evaluate(el => [...el.getClientRects()].map(rect => rect.y))
+    expect(Math.abs(detailLines[0]! - labelLine)).toBeLessThanOrEqual(0.5)
+    if (width !== 390) expect(detailLines).toHaveLength(1)
+    await expectStableControls({
+      controls: { queue, cancel: form.getByRole('button', { name: 'Cancel', exact: true }), task, summary: form.locator('.run-summary-line'), ...(width === 390 ? { phone: form } : {}) },
+      interactions: [
+        { name: 'fold warning settings', run: async () => {
+          await form.getByRole('button', { name: 'Hide', exact: true }).click()
+          await expect(form.getByLabel('Host', { exact: true })).toBeHidden()
+          await expect(warning).toHaveText(`${label} · ${detail}`)
+        } },
+        { name: 'expand warning settings', run: async () => {
+          await form.getByRole('button', { name: 'Change', exact: true }).click()
+          await expect(form.getByLabel('Host', { exact: true })).toBeVisible()
+          await expect(warning).toHaveText(`${label} · ${detail}`)
+        } },
+      ],
+      scrollAreas: { body: form.locator('.launch-body') },
+    })
     await form.locator('.run-settings-summary').scrollIntoViewIfNeeded()
     await form.screenshot({ path: info.outputPath(`AEON-1512-${width}-${theme}-warning.png`) })
   })
