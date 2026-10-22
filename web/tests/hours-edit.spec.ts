@@ -184,7 +184,8 @@ test('AEON-1416: pending Hours Undo stays in its day and failed Undo shows plain
         await expect(row(page, 'e-4')).toBeVisible()
         await expect(row(page, 'e-4')).toHaveAttribute('aria-busy', 'true')
         await expect(row(page, 'e-4').getByRole('button', { name: /^Edit / })).toBeDisabled()
-        await expect(row(page, 'e-4').getByRole('button', { name: /^Delete / })).toBeDisabled()
+        // Phones hide the row's Delete button; its mutation must stay disabled too.
+        await expect(row(page, 'e-4').getByRole('button', { name: /^Delete /, includeHidden: true })).toBeDisabled()
         await row(page, 'e-4').focus()
         await page.keyboard.press('Delete')
         await page.keyboard.press('e')
