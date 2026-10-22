@@ -431,9 +431,11 @@ test('agents: a person deactivates an agent (its keys go with it), it rests in a
   await trigger.click()
   await item.click()
   await dialog.getByRole('button', { name: 'Revoke keys and deactivate' }).click()
-  expect(calls(world, 'POST', new RegExp(`/members/${RELIC}/deactivate$`))).toHaveLength(1)
+  // A completed click does not mean its async POST has reached the mock. The
+  // settled UI is the barrier before checking either lifecycle request count.
   await expect(agents.getByRole('listitem').filter({ hasText: 'relic' })).toHaveCount(0)
   await expect(page.getByText('relic is deactivated')).toBeVisible()
+  expect(calls(world, 'POST', new RegExp(`/members/${RELIC}/deactivate$`))).toHaveLength(1)
   expect(world.keys.find(k => k.id === 'k-relic')?.revoked_at).toBeTruthy()
   await expect(fold).toContainText('2')
   // The row that held focus is gone: focus moves to a surviving agent's actions, never to the page.
@@ -445,10 +447,10 @@ test('agents: a person deactivates an agent (its keys go with it), it rests in a
   await expect(resting.getByRole('listitem')).toHaveCount(2)
   await expect(resting).toContainText('build-7 old')
   await resting.getByRole('button', { name: 'Reactivate relic' }).click()
-  expect(calls(world, 'POST', new RegExp(`/members/${RELIC}/reactivate$`))).toHaveLength(1)
   await expect(page.getByText('relic is active again; add a new key to connect it')).toBeVisible()
   await expect(agents.getByRole('listitem').filter({ hasText: 'relic' })).toContainText('0 active keys')
   await expect(resting.getByRole('listitem')).toHaveCount(1)
+  expect(calls(world, 'POST', new RegExp(`/members/${RELIC}/reactivate$`))).toHaveLength(1)
 })
 
 test('agents: a connected computer is not deactivated here; a refusal from the server is said', async ({ page }) => {
