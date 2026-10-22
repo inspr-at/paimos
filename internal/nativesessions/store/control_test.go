@@ -106,14 +106,21 @@ func TestOwnedInitialPTYUsesPersonStartAndPersistsOnlyExitMetadata(t *testing.T)
 	if err := f.d.Admin.QueryRow(t.Context(), `SELECT r.released_at IS NOT NULL,h.stopped_at IS NOT NULL,b.view->>'state' FROM native_session_roots r JOIN native_session_bindings b ON b.id=r.owned_session_id JOIN harness_sessions h ON h.id=b.current_harness_session_id WHERE b.id=$1`, b.OwnedSessionID).Scan(&released, &stopped, &state); err != nil || !released || !stopped || state != "stopped" {
 		t.Fatal("terminal root/harness settlement", released, stopped, state, err)
 	}
-	var raw []byte
-	if err := f.d.Admin.QueryRow(t.Context(), `SELECT after->'terminal' FROM events WHERE tenant_id=$1 AND type='native_session.stopped' AND after->>'owned_session_id'=$2`, f.person.TenantID, b.OwnedSessionID).Scan(&raw); err != nil {
+	var raw, public []byte
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT metadata->'terminal',after FROM events WHERE tenant_id=$1 AND type='native_session.stopped' AND after->>'owned_session_id'=$2`, f.person.TenantID, b.OwnedSessionID).Scan(&raw, &public); err != nil {
 		t.Fatal("persisted exit metadata", err)
 	}
 	var evidence daemon.TerminalEvidence
 	hash := sha256.Sum256(nil)
 	if err := json.Unmarshal(raw, &evidence); err != nil || evidence.RuntimeEpoch != b.RuntimeEpoch || evidence.OutputBytes != 0 || evidence.OutputSHA256 != hex.EncodeToString(hash[:]) {
 		t.Fatal("exit metadata", string(raw), err)
+	}
+	v, err := nativecontract.NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.ValidateJSON("NativeAuditEvent", public); err != nil {
+		t.Fatal("strict public lifecycle snapshot changed", err)
 	}
 }
 func (p *controlPTYFixture) Identity() nativecontract.NativeIdentity {
@@ -322,7 +329,7 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 	// The final PTY summary is recorded in the authorized successor admission
 	// transaction against the exact exited predecessor epoch.
 	var metadata []byte
-	if err := f.d.Admin.QueryRow(t.Context(), `SELECT after->'predecessor_terminal' FROM events WHERE tenant_id=$1 AND after->'predecessor_terminal'->>'runtime_epoch'=$2`, f.person.TenantID, takenBinding.RuntimeEpoch).Scan(&metadata); err != nil {
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT metadata->'predecessor_terminal' FROM events WHERE tenant_id=$1 AND metadata->'predecessor_terminal'->>'runtime_epoch'=$2`, f.person.TenantID, takenBinding.RuntimeEpoch).Scan(&metadata); err != nil {
 		t.Fatal("terminal lifecycle evidence", err)
 	}
 	var evidence daemon.TerminalEvidence

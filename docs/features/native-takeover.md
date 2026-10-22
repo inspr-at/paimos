@@ -198,8 +198,10 @@ continues to refuse while a process may still exist and never signals it.
 
 LEAD decision D4 supersedes raw transcript persistence for r140. Replay remains
 RAM-only and is erased on retirement. The existing event log retains lifecycle
-events, observed output byte/frame counts and a cumulative SHA-256 content hash
-for the exact terminal epoch, including an exited predecessor on hand-back.
+events, with observed output byte/frame counts and a cumulative SHA-256 content
+hash in the existing event metadata column for the exact terminal epoch,
+including an exited predecessor on hand-back. Public `NativeAuditEvent`
+snapshots keep their strict existing schema.
 PTY command journals contain receipt metadata and payload hashes. Raw terminal
 bytes, reasoning, interim chat and tool bodies never enter these paths. Counts
 describe observed output, not a durable or complete transcript. Existing final
@@ -212,3 +214,48 @@ native-history policy and OS fence. Initial server/profile terminal selection,
 the package G person command adapter and independently qualified watch export
 must be installed before enabling their production capabilities. This package
 changes no operator accounts, host enrollment, browser frontend or deployment.
+
+### P1 validation and handoff boundaries
+
+The required remote affected set passed on implementation commit `9488ff871`:
+`internal/nativepty`, `internal/nativeattach`, `internal/agentd`,
+`internal/nativesessions/...` and `internal/reportercontract`. The pinned
+test-child host witness covers both eligible provider identities, including
+bounded read output, holder input, a measured 132×40 resize and confirmed owned
+exit. Exit barriers cover structured/TUI/structured switching; denied person,
+viewer, controller, sequence, grant, profile and daemon cases reach no I/O.
+Slow viewers remain within the existing 64-frame/256-KiB ring and receive an
+explicit gap. Readiness failure retains its handle and exact owner stop path;
+an unconfirmed group retains occupancy. Fifteen new tests are ESSENTIAL.
+
+The SQL fixture proves that the existing event log stores the final predecessor
+counts/hash on hand-back and terminal exit metadata on natural EOF. Neither
+path stores raw output. There is no raw-transcript retention grant in r140.
+
+Minimal additions outside the primary host/launcher files are:
+
+- `internal/nativecontract/ports.go`: local conversation, pre-fork validation
+  and independently observed readiness ports; no public DTO change.
+- `internal/nativesessions/daemon/proof.go`: bounded content-free terminal
+  lifecycle evidence on the existing private proof.
+- `internal/nativesessions/store/types.go`: construction-only initial mode
+  policy, with the released structured default.
+- `internal/nativesessions/store/claim.go`: current start/profile mode selection
+  inside the existing admission transaction.
+- `internal/nativesessions/store/commands.go`: dispatch observed natural exit
+  through the existing private receipt route.
+- `internal/nativesessions/store/production.go`: current ownership checks and
+  lifecycle settlement in the existing access-change transaction.
+- `internal/nativesessions/store/start.go`: the narrow policy validator and
+  content-free metadata beside existing lifecycle snapshots.
+- `internal/nativesessions/store/control_test.go`: independent readiness and
+  SQL lifecycle/persistence qualification fixtures.
+- `internal/nativesessions/store/production_test.go`: the natural exit report
+  barrier in the existing paired-server fixture.
+- `scripts/ci/go-test-tiers.json`: only the fifteen new ESSENTIAL test rows,
+  written through the canonical tier writer.
+
+The new `internal/agentd/native_pty_unix_test.go` remains covered by the existing
+S2 `internal/agentd/**` audit slice. No migration, DSAR column inventory, public
+route, response schema, version, account enrollment or capability enablement is
+changed. The coordinator retains cross-family review, merge and release gates.

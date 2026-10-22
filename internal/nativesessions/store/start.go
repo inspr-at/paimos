@@ -320,16 +320,17 @@ func appendEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, proje
 		epoch = &view.CurrentBinding.RuntimeEpoch
 	}
 	after := map[string]any{"project_id": project, "owned_session_id": view.OwnedSessionID, "harness_session_id": harness, "runtime_epoch": epoch, "revision": view.Revision, "request_id": request, "state": view.State, "reason": view.Reason, "operation_id": operation}
-	// The existing authorized lifecycle transaction is the only persistence
-	// path. Live replay remains RAM-only; only aggregate counts and a content
-	// hash for this exact runtime are added to its lifecycle evidence.
+	// Keep the public NativeAuditEvent snapshot unchanged for strict consumers.
+	// The existing event metadata column holds only aggregate counts/hash in
+	// this same authorized transaction. Live replay remains RAM-only.
+	var metadata json.RawMessage
 	if proof, ok := ctx.Value(proofKey{}).(daemon.Proof); ok && proof.Terminal != nil && epoch != nil {
 		if proof.Terminal.RuntimeEpoch == *epoch {
-			after["terminal"] = *proof.Terminal
+			metadata, _ = json.Marshal(map[string]any{"terminal": *proof.Terminal})
 		} else if proof.Exit != nil && proof.Exit.RootExited && proof.Exit.GroupAbsent && proof.Terminal.RuntimeEpoch == proof.Identity.RuntimeEpoch {
-			after["predecessor_terminal"] = *proof.Terminal
+			metadata, _ = json.Marshal(map[string]any{"predecessor_terminal": *proof.Terminal})
 		}
 	}
-	_, err := events.Append(ctx, tx, p, events.Change{NodeID: &project, Type: kind, After: after})
+	_, err := events.Append(ctx, tx, p, events.Change{NodeID: &project, Type: kind, After: after, Metadata: metadata})
 	return err
 }
