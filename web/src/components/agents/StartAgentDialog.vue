@@ -100,6 +100,8 @@ const mayRunNow = computed(() => permitted.value && session.identity?.principal.
 const canSubmit = computed(() => dispatchMode.value === 'manual' && permitted.value && !loading.value && !busy.value && !run.value && ticket.value?.is_leaf === true && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
 const mayQueueForLead = computed(() => session.identity?.principal.kind === 'person' && !!dispatchProject.value && can('run.create', dispatchProject.value.id))
 const canQueueForLead = computed(() => dispatchMode.value === 'lead' && mayQueueForLead.value && !busy.value && !queue.busy && !queuedForLead.value && ticket.value?.is_leaf === true)
+const dismissLabel = computed(() => queuedForLead.value ? 'Close' : 'Cancel')
+const submitIcon = computed(() => busy.value ? 'clock' : dispatchMode.value === 'lead' ? queuedForLead.value ? 'check' : 'queue-add' : 'arrow')
 
 // Read the selected project's policy before asking for manual launch choices.
 // A delayed answer belongs only to this ticket revision and dialog opening.
@@ -439,7 +441,7 @@ defineExpose({ open })
         <div v-if="error" class="error" role="alert"><p>{{ error }}</p><button v-if="grantStale" type="button" class="btn sm" @click="loadCatalog">Refresh catalog</button></div>
         <p v-if="dispatchMode === 'manual' && !permitted" class="note">Starting an agent requires work-order write and run-create permission.</p>
         </div>
-        <footer><button type="button" class="btn" :disabled="busy" @click="close">Cancel<KeyCap k="Esc" class="hint" aria-hidden="true" /></button><button v-if="dispatchMode === 'manual' && mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">Run now once</button><button type="submit" class="btn primary" :disabled="dispatchMode === 'lead' ? !canQueueForLead : !canSubmit"><AppIcon :name="busy ? 'clock' : dispatchMode === 'lead' ? 'queue-add' : 'arrow'" :size="15" /><span class="queue-label"><span>{{ dispatchMode === 'lead' ? queuedForLead ? 'Queued' : busy ? 'Queueing…' : `Queue for ${w.l}` : busy ? 'Queueing…' : 'Queue run' }}</span><span aria-hidden="true">Queue for {{ w.l }}</span><span aria-hidden="true">Queue run</span><span aria-hidden="true">Queueing…</span></span><KeyCap k="mod" class="hint" aria-hidden="true" /><KeyCap k="enter" class="hint" aria-hidden="true" /></button></footer>
+        <footer><button type="button" class="btn" :disabled="busy" @click="close"><span class="queue-label"><span>{{ dismissLabel }}</span><span aria-hidden="true">Cancel</span><span aria-hidden="true">Close</span></span><KeyCap k="Esc" class="hint" aria-hidden="true" /></button><button v-if="dispatchMode === 'manual' && mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">Run now once</button><button type="submit" class="btn primary" :disabled="dispatchMode === 'lead' ? !canQueueForLead : !canSubmit"><AppIcon :name="submitIcon" :size="15" /><span class="queue-label"><span>{{ dispatchMode === 'lead' ? queuedForLead ? 'Queued' : busy ? 'Queueing…' : `Queue for ${w.l}` : busy ? 'Queueing…' : 'Queue run' }}</span><span aria-hidden="true">Queue for {{ w.l }}</span><span aria-hidden="true">Queue run</span><span aria-hidden="true">Queueing…</span></span><KeyCap k="mod" class="hint" aria-hidden="true" /><KeyCap k="enter" class="hint" aria-hidden="true" /></button></footer>
       </template>
 
       <template v-else>

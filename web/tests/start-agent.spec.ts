@@ -318,7 +318,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
       return route.fulfill({ json: entry })
     })
     await open(page)
-    const sheet = dialog(page), actions = sheet.locator('footer'), primary = actions.locator('button[type="submit"]')
+    const sheet = dialog(page), actions = sheet.locator('footer'), primary = actions.locator('button[type="submit"]'), secondary = actions.locator('button[type="button"]').first()
     const catalogsBefore = mock.calls.filter(call => call.path === '/api/agent-accounts/catalog').length
     await sheet.getByRole('searchbox').fill('PHAROS-11')
     await expectStableControls({
@@ -337,22 +337,32 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     expect(mock.calls.filter(call => call.path === '/api/agent-accounts/catalog')).toHaveLength(catalogsBefore)
     await sheet.screenshot({ path: info.outputPath(`AEON-1508-lead-hint-${width}-${theme}.png`) })
     await expectStableControls({
-      controls: { actions, primary, cancel: actions.getByRole('button', { name: 'Cancel', exact: true }), change: sheet.getByRole('button', { name: 'Change ticket', exact: true }), ...(width === 390 ? { frame: sheet } : {}) },
+      controls: { actions, primary, secondary, change: sheet.getByRole('button', { name: 'Change ticket', exact: true }), ...(width === 390 ? { frame: sheet } : {}) },
       scrollAreas: { body: sheet.locator('.launch-body') },
       interactions: [
         { name: 'failed queue request', run: async () => {
           await primary.click()
           await expect(sheet.getByRole('alert')).toHaveText('The lead queue is unavailable. Try again.')
           await expect(primary).toBeEnabled()
+          await expect(secondary).toHaveAccessibleName('Cancel')
         } },
         { name: 'successful retry', run: async () => {
           refuse = false
           const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
           await primary.focus()
+          const before = { primary: await primary.boundingBox(), secondary: await secondary.boundingBox() }
+          expect(before.primary).not.toBeNull()
+          expect(before.secondary).not.toBeNull()
           await page.keyboard.press(mac ? 'Meta+Enter' : 'Control+Enter')
           await expect(sheet.getByText('Queued for the lead. Nothing has started yet.', { exact: true })).toBeVisible()
           await expect(primary).toHaveAccessibleName('Queued')
           await expect(primary).toBeDisabled()
+          await expect(secondary).toHaveAccessibleName('Close')
+          await expect(secondary.locator('kbd')).toHaveText('Esc')
+          await expect(secondary).toBeEnabled()
+          await expect(primary.locator(':scope > svg > path')).toHaveAttribute('d', 'm3.4 8.4 3 3 6.2-6.8')
+          expect(await primary.boundingBox(), 'queued primary stays in exactly the same slot').toEqual(before.primary)
+          expect(await secondary.boundingBox(), 'Close stays in exactly the same slot as Cancel').toEqual(before.secondary)
         } },
       ],
     })
@@ -361,6 +371,10 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     expect(queueItems[0]?.queued.target_agent_id).toBeNull()
     expect(mock.calls.filter(call => call.method !== 'GET' && (call.path.startsWith('/api/work-orders') || call.path === '/api/agent-accounts/pins'))).toEqual([])
     await sheet.screenshot({ path: info.outputPath(`AEON-1508-queued-${width}-${theme}.png`) })
+    await secondary.click()
+    await expect(sheet).not.toBeVisible()
+    expect(queuePosts).toEqual([{ node_id: 'n-1' }, { node_id: 'n-1' }])
+    expect(queueItems).toHaveLength(1)
   })
 }
 

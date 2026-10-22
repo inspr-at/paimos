@@ -235,13 +235,24 @@ describe('Start Agent leaf selection', () => {
     expect(state.dispatchMode.value).toBe('lead')
     expect(state.canSubmit.value).toBe(false)
     expect(state.canQueueForLead.value).toBe(true)
+    expect(state.dismissLabel.value).toBe('Cancel')
+    expect(state.submitIcon.value).toBe('queue-add')
     await state.submit()
     expect(queueAdd).toHaveBeenCalledExactlyOnceWith(project.id, ticket.id)
     expect(state.queuedForLead.value).toBe(true)
     expect(state.canQueueForLead.value).toBe(false)
+    expect(state.dismissLabel.value).toBe('Close')
+    expect(state.submitIcon.value).toBe('check')
     expect(fetchCatalog).not.toHaveBeenCalled()
     expect(putPin).not.toHaveBeenCalled()
     expect(launch).not.toHaveBeenCalled()
+    state.close()
+    expect(state.visible.value).toBe(false)
+    expect(queueAdd).toHaveBeenCalledTimes(1)
+    readLead.mockResolvedValueOnce(configured)
+    await state.open({ ...ticket, project }); await flush()
+    expect(state.dismissLabel.value).toBe('Cancel')
+    expect(state.submitIcon.value).toBe('queue-add')
   })
 
   it('AEON-1508: a delayed lead read cannot replace the next ticket or a reopened dialog', async () => {
@@ -296,6 +307,8 @@ describe('Start Agent leaf selection', () => {
     queueAdd.mockReturnValueOnce(pending.promise)
     const saving = state.submit()
     expect(state.busy.value).toBe(true)
+    expect(state.dismissLabel.value).toBe('Cancel')
+    expect(state.submitIcon.value).toBe('clock')
     resetAccess()
     pending.resolve({ node_id: ticket.id }); await saving
     expect(state.visible.value).toBe(false)
@@ -303,6 +316,7 @@ describe('Start Agent leaf selection', () => {
     expect(state.projectLead.value).toBeNull()
     expect(state.queuedForLead.value).toBe(false)
     expect(state.busy.value).toBe(false)
+    expect(state.dismissLabel.value).toBe('Cancel')
   })
 
   it('AEON-1508: node-only entry points resolve their project with one bounded leaf read', async () => {
