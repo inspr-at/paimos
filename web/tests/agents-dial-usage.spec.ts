@@ -150,7 +150,7 @@ test('AEON-1511: enrolled accounts without readings stay visible, with a reason 
       scrollAreas: { dial: body(page) },
       interactions: [{ name: 'show Cursor quota explanation', run: async () => {
         await row(page, 'cursor').locator('.nm').click()
-        await expect(detail(page, 'cursor').locator('.ub-empty')).toHaveText("Cursor doesn't report its quota, so agents can't pace it. The agent count on the dial still caps it.")
+        await expect(detail(page, 'cursor').locator('.ub-empty')).toHaveText("Cursor doesn’t report its quota, so agents can’t pace it. The agent count on the dial still caps it.")
         await body(page).screenshot({ path: info.outputPath(`aeon-1511-${width}-${theme}-cursor.png`), animations: 'disabled' })
       } }, { name: 'return to a quota reading that is waiting', run: async () => {
         await row(page, 'claude').locator('.nm').click()
@@ -404,7 +404,7 @@ for (const width of [1440, 1024, 390]) {
     await row(page, 'cursor').locator('.nm').click()
     const cursor = detail(page, 'cursor')
     await expect(cursor.locator('.ub-hd')).toHaveText('Quota not available· 2 accounts')
-    await expect(cursor.locator('.ub-empty')).toHaveText('Cursor doesn\'t report its quota, so agents can\'t pace it. The agent count on the dial still caps it.')
+    await expect(cursor.locator('.ub-empty')).toHaveText('Cursor doesn’t report its quota, so agents can’t pace it. The agent count on the dial still caps it.')
     await expect(cursor.locator('.ub-plot svg')).toHaveCount(0)
     if (phone) await cursor.locator('.ub-acc-t').click()
     await expect(cursor.locator('.ub-nr')).toHaveText(['Quota not available', 'Quota not available'])

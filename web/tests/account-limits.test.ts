@@ -44,7 +44,7 @@ test('how an account is read, and its windows and last readings', () => {
   assert.equal(readingSupport('cursor'), 'Quota not available')
   assert.equal(noWindowLine('claude', 'build-7'), 'Claude reports its quota during a run, so readings start with the first run on each account.')
   assert.equal(noWindowLine('codex', 'build-7'), 'Codex reports its quota during a run, so readings start with the first run on each account.')
-  assert.equal(noWindowLine('cursor', 'build-7'), "Cursor doesn't report its quota, so agents can't pace it. The agent count on the dial still caps it.")
+  assert.equal(noWindowLine('cursor', 'build-7'), "Cursor doesn’t report its quota, so agents can’t pace it. The agent count on the dial still caps it.")
   const win = (kind: CapacityReading['window_kind'], bucket = '') => ({ reading: { window_kind: kind, bucket } } as CapacityWindow)
   assert.equal(windowLabel(win('weekly', 'seven_day_opus'), 'claude'), 'Weekly · Opus')
   assert.equal(windowLabel(win('5h', 'codex'), 'codex'), '5-hour')

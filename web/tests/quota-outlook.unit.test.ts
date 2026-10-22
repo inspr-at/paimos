@@ -29,7 +29,7 @@ describe('the answer in words', () => {
     expect(view('fast', 'codex')).toMatchObject({ kind: 'pace', head: 'Enough until the next refill (Tue\u00a009:12).', short: 'enough until refill', tip: 'Codex has enough until the refill Tue\u00a009:12' })
   })
   it('says what is missing instead of inventing it', () => {
-    expect(view('fast', 'cursor')).toMatchObject({ kind: 'not_reported', head: 'Quota not available', short: 'Quota not available · 2 accounts', tip: 'Cursor doesn\'t report its quota, so agents can\'t pace it. The agent count on the dial still caps it.' })
+    expect(view('fast', 'cursor')).toMatchObject({ kind: 'not_reported', head: 'Quota not available', short: 'Quota not available · 2 accounts', tip: 'Cursor doesn’t report its quota, so agents can’t pace it. The agent count on the dial still caps it.' })
     expect(usageView('grok', undefined, outlooks.fast.anchor_hour, 'UTC')).toMatchObject({ kind: 'none', head: 'No accounts yet', tip: '' })
     const old = structuredClone(group('fast', 'claude'))
     old.pool!.sampled_age_seconds = 3 * 3600

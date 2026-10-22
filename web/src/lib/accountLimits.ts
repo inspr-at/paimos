@@ -39,7 +39,7 @@ export const BLIND = new Set(['grok', 'cursor', 'pi'])
  * can promise idle reads; Claude/Codex otherwise need a run (AEON-1511). */
 export function missingQuota(harness: string, support?: AgentAccount['reading_support'], running = 0): { short: string; detail: string } {
   const name = HARNESS_NAME[harness] ?? harness
-  if (harness === 'cursor') return { short: 'Quota not available', detail: "Cursor doesn't report its quota, so agents can't pace it. The agent count on the dial still caps it." }
+  if (harness === 'cursor') return { short: 'Quota not available', detail: "Cursor doesn’t report its quota, so agents can’t pace it. The agent count on the dial still caps it." }
   if (support === 'statusline') return { short: 'Waiting for the status line', detail: `${name} quota appears when its status line reports it during a run.` }
   if (support === 'every_5_min') return { short: 'Waiting for a quota reading', detail: 'This account reports quota every five minutes. No reading has arrived yet.' }
   if (harness === 'claude' || harness === 'codex') return running > 0

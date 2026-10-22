@@ -298,7 +298,10 @@ defineExpose({ open })
               <option value="">{{ loading ? 'Loading accounts…' : 'Choose a host' }}</option>
               <option v-for="host in view.hosts" :key="host.value" :value="host.value">{{ host.label }}</option>
             </select>
-            <p v-if="notes.host" :id="`${uid}-host-note`" class="note">{{ notes.host }}</p>
+            <div class="host-notes">
+              <p v-if="notes.host" :id="`${uid}-host-note`" class="note">{{ notes.host }}</p>
+              <p v-for="(text, i) in view.hostNotes" :key="i" class="note sizer" :data-text="text" aria-hidden="true" />
+            </div>
           </div>
           <div class="select-field">
             <label :for="`${uid}-harness`">Harness</label>
@@ -414,10 +417,10 @@ label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; c
 .ticket-results > .note { padding: 12px; }
 .more { margin: 8px 12px; }
 .note { font-size: 12px; line-height: 1.5; color: var(--ink-2); margin-top: 6px; }
-.account-notes { display: grid; }
-.account-notes .note { grid-area: 1 / 1; }
-.account-notes .sizer { visibility: hidden; pointer-events: none; }
-.account-notes .sizer::before { content: attr(data-text); }
+.host-notes, .account-notes { display: grid; }
+.host-notes .note, .account-notes .note { grid-area: 1 / 1; }
+.host-notes .sizer, .account-notes .sizer { visibility: hidden; pointer-events: none; }
+.host-notes .sizer::before, .account-notes .sizer::before { content: attr(data-text); }
 .remember { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 13px; font-weight: 500; color: var(--ink-2); }
 .remember input { margin: 0; }
 .role-note { margin-top: 0; }

@@ -255,6 +255,12 @@ describe('account catalog contract', () => {
     const singleRunnable = presented(multiHost)
     expect(singleRunnable.filled).toMatchObject({ hostId: 'workstation', harness: 'codex', accountId: accountA })
     expect(singleRunnable.view.notes.host).toBe('Agents can start now. The quota shows once this account reports it.')
+    const unavailableHost = structuredClone(multiHost)
+    unavailableHost.hosts[0].harnesses[0].accounts[0].available = false
+    unavailableHost.hosts[0].harnesses[0].accounts[0].unavailable_reasons = ['probe']
+    const unavailableNote = presentCascade(context(unavailableHost), singleRunnable.filled, emptyTouch())
+    expect(unavailableNote.notes.host).toBe(singleRunnable.view.notes.host)
+    expect(unavailableNote.status.label).toBe('Sign-in probe is stale')
     expect(onlyFresh.view.notes.account).not.toContain('most allowance left')
     expect(onlyFresh.view.notes.account).not.toContain('100%')
     const unread = account({ id: accountA, label: 'Unread', remaining_fraction: null, windows: [{ ...window(5), provisional: true }] })

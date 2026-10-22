@@ -68,6 +68,8 @@ export interface CascadeStatus { label: string; detail: string; tone: 'neutral' 
 export interface CascadePresentation {
   hosts: CascadeOption[]; harnesses: CascadeOption[]; accounts: CascadeOption[]
   models: CascadeOption[]; efforts: CascadeOption[]; notes: CascadeNotes
+  /** Reserve the host explanation across harness/account choices on every host. */
+  hostNotes: string[]
   /** Reserve the account explanation's tallest candidate so later selectors stay put. */
   accountNotes: string[]
   roleNote: string; profileId: string; agentId: string; status: CascadeStatus; requested: RequestedRun
@@ -388,6 +390,7 @@ export function presentCascade(input: CascadeContext, choice: CascadeChoice, tou
       model: modelNote(choice, touch, account, models, input.role.role),
       effort: effortNote(choice, model, efforts, selectedEffort, account),
     },
+    hostNotes: hosts.length > 1 ? (catalog?.hosts ?? []).flatMap(item => item.harnesses.flatMap(h => h.accounts.map(a => hostAccountNote(a, h.harness)))) : [],
     accountNotes: [accountNote(choice, touch, accounts, undefined, defaultId), ...accounts.flatMap(item => [
       accountNote(choice, { ...touch, account: false }, accounts, item, defaultId), accountNote(choice, { ...touch, account: true }, accounts, item, defaultId),
     ])],
@@ -411,10 +414,13 @@ function hostNote(catalog: AgentAccountCatalog | null, hosts: CascadeOption[], c
   if (hosts.length === 1) return 'Only one host has an enrolled account.'
   if (!touch.host && choice.hostId) {
     const account = accountOf(harnessOf(hostOf(catalog, choice.hostId), choice.harness), choice.accountId)
-    if (account && allowanceKnown(account)) return 'Chosen because it has the account with the most allowance left.'
-    return account?.available ? catalogMissingQuota(choice.harness).detail : 'Allowance is unknown, so this host is not ranked by remaining allowance.'
+    return hostAccountNote(account, choice.harness)
   }
   return ''
+}
+function hostAccountNote(account: CatalogAccount | undefined, harness: string) {
+  if (account && allowanceKnown(account)) return 'Chosen because it has the account with the most allowance left.'
+  return catalogMissingQuota(harness).detail
 }
 function harnessNote(choice: CascadeChoice, host: CatalogHost | undefined) {
   if (!choice.hostId || !host) return ''
