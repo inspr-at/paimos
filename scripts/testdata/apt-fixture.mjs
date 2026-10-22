@@ -19,10 +19,19 @@ exec "$@"
 `)
   write('timeout', `#!/usr/bin/env bash
 state=\${AEON_STUB_STATE:?}
+grace=0
 while [[ "\${1:-}" == --* ]]; do
+  case "\$1" in --kill-after=*) grace=\${1#*=}; grace=\${grace%s} ;; esac
   if [[ "\$1" == "--kill-after" ]]; then shift 2; else shift; fi
 done
+seconds=\$1
 shift
+printf '%s|%s|%s|%s\\n' "\${AEON_AS_ROOT:-0}" "\$seconds" "\$grace" "\$*" >> "\$state/timers"
+if [[ "\$(cat "\$state/mode")" == budget && "\$1" != dpkg ]]; then
+  clock=\$(cat "\$state/clock")
+  echo \$((clock + seconds + grace)) > "\$state/clock"
+  exit 124
+fi
 # A previous attempt's hang marker must not make this attempt look hung
 # before it can take the lock or report that the lock is still held.
 rm -f "\$state/hung"
@@ -44,6 +53,18 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 0.05
 done
 exit 124
+`)
+  // A virtual clock proves cumulative retry limits without waiting minutes.
+  write('date', `#!/usr/bin/env bash
+[[ "\$*" == +%s ]] || exit 2
+cat "\${AEON_STUB_STATE:?}/clock"
+`)
+  write('dpkg', `#!/usr/bin/env bash
+state=\${AEON_STUB_STATE:?}
+[[ "\${AEON_AS_ROOT:-}" == 1 && "\$*" == '--configure -a' ]] || exit 2
+printf '%s\\n' "\$*" >> "\$state/repairs"
+[[ "\$(cat "\$state/mode")" != repair-fails ]] || exit 100
+touch "\$state/configured"
 `)
   const hold = `#!/usr/bin/env bash
 state=\${AEON_STUB_STATE:?}
@@ -69,6 +90,20 @@ if [[ "\$browser" -eq 1 ]]; then
   if [[ "\${AEON_AS_ROOT:-}" == 1 ]]; then echo root-browser >> "\$state/errors"; exit 1; fi
   exit 0
 fi
+if [[ "\$mode" == bounded-config ]]; then
+  if [[ -z "\${APT_CONFIG:-}" || ! -f "\$APT_CONFIG" ]]; then
+    echo 'E: apt acquisition limits were not passed through sudo' >&2
+    exit 100
+  fi
+  cat "\$APT_CONFIG" >> "\$state/configs"
+  printf '%s\\n' "\$APT_CONFIG" >> "\$state/config-paths"
+  exit 0
+fi
+if [[ "\$mode" == interrupted || "\$mode" == repair-fails ]]; then
+  [[ -f "\$state/configured" ]] && exit 0
+  echo 'E: dpkg was interrupted, you must manually run dpkg --configure -a' >&2
+  exit 100
+fi
 if [[ "\$mode" == always-fail ]]; then echo "Error: Installation process exited with code: 100" >&2; exit 100; fi
 if [[ "\$mode" == ok ]]; then exit 0; fi
 if [[ "\$mode" == hung && "\$deps" -eq 0 && "\$lines" -ge 2 ]]; then exit 0; fi
@@ -91,6 +126,7 @@ export function aptFixture({ mode, shells = false }) {
   const state = mkdtempSync(join(tmpdir(), 'aeon-apt-'))
   writeFileSync(join(state, 'mode'), mode)
   writeFileSync(join(state, 'calls'), '')
+  writeFileSync(join(state, 'clock'), '0\n')
   const bin = stubBin(state)
   if (shells) {
     for (const name of ['fish', 'zsh']) writeFileSync(join(bin, name), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 })

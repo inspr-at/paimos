@@ -68,3 +68,51 @@ test('three failed attempts fail the step and installed shells skip apt', async 
   const recovered = await run(`bash "${script}" apt zsh fish`, { mode: 'hung' })
   assert.equal(recovered.status, 0, recovered.stderr)
 })
+
+// AEON-1420: merge queues stalled on Ubuntu downloads, exceeded the four-minute
+// shell step and then retried apt against an interrupted dpkg database.
+test('AEON-1420 all dependency installs inherit apt acquisition limits through sudo', async () => {
+  for (const args of ['apt aeon-fixture-shell', 'playwright install-deps chromium', 'playwright install --with-deps --only-shell chromium']) {
+    const result = await run(`bash "${script}" ${args}`, { mode: 'bounded-config' })
+    assert.equal(result.status, 0, `${args}: ${result.error}\n${result.stderr}`)
+    const config = readFileSync(join(result.state, 'configs'), 'utf8')
+    for (const limit of ['Acquire::Retries "1";', 'Acquire::http::Timeout "10";', 'Acquire::https::Timeout "10";', 'DPkg::Lock::Timeout "10";', 'APT::Update::Error-Mode "any";']) {
+      assert.ok(config.includes(limit), `${args}: missing ${limit}`)
+    }
+    for (const path of readFileSync(join(result.state, 'config-paths'), 'utf8').trim().split('\n')) {
+      assert.ok(config.includes(`Dir::Etc::main "${path}";`), 'runner config fragments must not override our limits')
+      assert.equal(existsSync(path), false, 'the invocation must clean up its private apt configuration')
+    }
+  }
+})
+
+test('AEON-1420 retries repair interrupted dpkg and preserve a failed repair', async () => {
+  for (const args of ['apt aeon-fixture-shell', 'playwright install-deps chromium']) {
+    const recovered = await run(`bash "${script}" ${args}`, { mode: 'interrupted' })
+    assert.match(recovered.stderr, /dpkg was interrupted/, 'the first attempt must reach the interrupted database')
+    assert.equal(recovered.status, 0, `${args}: ${recovered.error}\n${recovered.stderr}`)
+    assert.deepEqual(readFileSync(join(recovered.state, 'repairs'), 'utf8').trim().split('\n'), ['--configure -a'])
+    assert.ok(recovered.calls.length >= 2, 'a repaired install must actually retry apt')
+    const refused = await run(`bash "${script}" ${args}`, { mode: 'repair-fails' })
+    assert.notEqual(refused.status, 0, 'a failed dpkg repair cannot report success')
+    assert.equal(refused.calls.length, 1, 'do not continue with a broken package database')
+  }
+})
+
+test('AEON-1420 retry and kill budgets finish before the enclosing workflow deadline', async () => {
+  for (const [args, budget, workflowSeconds] of [
+    ['apt aeon-fixture-shell', 210, 240],
+    ['playwright install-deps chromium', 720, 780],
+    ['playwright install --with-deps --only-shell chromium', 720, 780],
+  ]) {
+    const result = await run(`bash "${script}" ${args}`, { mode: 'budget' })
+    assert.notEqual(result.status, 0, 'exhausting the budget must fail the install')
+    assert.equal(result.error, '', 'the fixture deadline is only a hang guard')
+    const elapsed = Number(readFileSync(join(result.state, 'clock'), 'utf8'))
+    assert.ok(elapsed > 0 && elapsed <= budget, `${args}: ${elapsed}s exceeds the ${budget}s total budget`)
+    assert.ok(elapsed < workflowSeconds, `${args}: workflow cancellation would interrupt cleanup`)
+    const timers = readFileSync(join(result.state, 'timers'), 'utf8').trim().split('\n')
+    assert.ok(timers.some(line => line.startsWith('1|')), 'apt and its kill deadline must still run as root')
+    assert.ok(timers.every(line => Number(line.split('|')[1]) > 0), 'never start a command after its budget is exhausted')
+  }
+})
