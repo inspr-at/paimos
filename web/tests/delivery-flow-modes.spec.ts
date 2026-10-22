@@ -75,6 +75,9 @@ test('Live reads the recorded runs, follows a server hint, and keeps the time th
 test.describe('with motion', () => {
   test.use({ reducedMotion: 'no-preference' })
   test('Replay opens at the start of the latest release and auto-plays once per session', async ({ page }) => {
+    const at = new Date('2026-10-08T20:25:00Z')
+    await page.clock.install({ time: at })
+    await page.clock.pauseAt(new Date(at.getTime() + 1000))
     await page.setViewportSize({ width: 1440, height: 1300 })
     const flow = await setup(page)
     await page.goto('/p/AEON/delivery?view=flow')
@@ -84,6 +87,8 @@ test.describe('with motion', () => {
     await expect(page.getByTestId('flow-pick')).toHaveValue(RUN.r126)
     await expect.poll(() => flow.reads.includes(`run:${RUN.r126}`)).toBe(true)
     await expect(page.getByTestId('flow-head')).toContainText('Replay Release 126 · 18:21 to live and healthy 20:34 (2 h 13) in about a minute')
+    // Deliver the autoplay timer and animation frames explicitly.
+    await page.clock.runFor(1200)
     await expect(play(page)).toHaveAttribute('aria-label', 'Pause')
     await expect.poll(async () => (await clock(page).textContent())?.startsWith('18:21 · 0 min')).toBe(false)
     const guard = await controlStability(page, {
@@ -94,7 +99,7 @@ test.describe('with motion', () => {
     await guard.check(() => play(page).click())
     await expect(play(page)).toHaveAttribute('aria-label', 'Play')
     const paused = await clock(page).textContent()
-    await page.waitForTimeout(300)
+    await page.clock.runFor(300)
     await expect(clock(page)).toHaveText(paused!)
     // Where the time went, for the run replayed.
     await expect(page.getByTestId('flow-went')).toContainText('Release 126')
@@ -104,13 +109,16 @@ test.describe('with motion', () => {
     await expect(chip(page)).toHaveText('Live · now 20:25')
     await modes(page).getByRole('radio', { name: 'Replay' }).click()
     await expect(play(page)).toBeVisible()
-    await page.waitForTimeout(1200)
+    await page.clock.runFor(1200)
     await expect(play(page)).toHaveAttribute('aria-label', 'Play')
     await expect(clock(page)).toHaveText('18:21 · 0 min in')
   })
 })
 
 test('Replay under reduced motion shows the run still; the handle and Shift+arrows move the time', async ({ page }) => {
+  const at = new Date('2026-10-08T20:25:00Z')
+  await page.clock.install({ time: at })
+  await page.clock.pauseAt(new Date(at.getTime() + 1000))
   await page.setViewportSize({ width: 1440, height: 1300 })
   await setup(page)
   await page.goto('/p/AEON/delivery?view=flow&mode=replay')
@@ -118,7 +126,7 @@ test('Replay under reduced motion shows the run still; the handle and Shift+arro
   await expect(page.getByTestId('flow-rm')).toHaveText('Reduced motion: drag the time handle to step through.')
   await expect(page.getByTestId('flow-head')).toContainText('(2 h 13)')
   await expect(page.getByTestId('flow-head')).not.toContainText('in about a minute')
-  await page.waitForTimeout(1000)
+  await page.clock.runFor(1000)
   await expect(clock(page)).toHaveText('18:21 · 0 min in')
   await lanes(page).focus()
   await page.keyboard.press('Shift+ArrowRight')

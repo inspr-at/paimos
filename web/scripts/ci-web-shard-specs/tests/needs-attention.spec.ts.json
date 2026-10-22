@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/needs-attention.spec.ts",
-    "listedTests": 42,
+    "listedTests": 45,
     "tierTiming": {
       "caseSeconds": {
         "max": 40.214,

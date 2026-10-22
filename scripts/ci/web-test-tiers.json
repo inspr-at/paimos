@@ -11524,6 +11524,12 @@
     ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"three places in order of use; the active one is highlighted and the breadcrumb continues from it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"AEON-1639: attention search and singular turn-off copy keep controls still in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"AEON-1639: fallback truncation explains the ten-page scan with fewer than 500 groups","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"AEON-1639: preview loading has an honest reserved status slot before any write","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"Apply, Dismiss and Undo retain rows and control boxes on desktop and phone, in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a delayed action cannot resolve a different filtered record or offer stale Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -12473,6 +12479,8 @@
     {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1233: General edits, lifecycle and legacy links stay on the acted-on project and revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1233: approved P1 reference states and check.mjs audit against the build","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1639: project settings resolve literal hash IDs only inside their own root","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/project-sort.spec.ts","name":"Alt and the arrow keys move a card, announced; the card menu moves it too; the list moves with Alt up and down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -18150,6 +18158,8 @@
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"AEON-1639: turn-off copy uses a singular flag or plural flags in each catalog","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a finished fallback group scan shows the scanned project, count and facets","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a resolved fallback group scan cannot restore groups, counts or facets after a filter change","tier":"ESSENTIAL"}
@@ -19975,6 +19985,8 @@
     {"kind":"vitest","file":"tests/profile-permissions.unit.test.ts","name":"profile permissions describe the caller’s personal profile","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1226: saved repository failures take precedence over history and stale events","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1639: repository status icons render only their selected artwork","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1038: launch-off or unreadable policy refuses Start without a POST","tier":"GATED-FULL"}
     ,

@@ -76,8 +76,8 @@ async function focusAnchor() {
   const run = ++focusRun
   await nextTick()
   if (run !== focusRun || !route.hash) return
-  const target = root.value?.querySelector<HTMLElement>(`[id="${route.hash.slice(1)}"]`)
-  if (target) { target.scrollIntoView({ block: 'nearest' }); if (target.matches('input, textarea')) target.focus({ preventScroll: true }) }
+  const target = document.getElementById(route.hash.slice(1))
+  if (target && root.value?.contains(target)) { target.scrollIntoView({ block: 'nearest' }); if (target.matches('input, textarea')) target.focus({ preventScroll: true }) }
 }
 watch(() => route.fullPath, () => { overlay.value?.close(); closePicker(); void focusAnchor() }, { flush: 'post' })
 watch(() => [props.project.id, owner.value], () => { overlay.value?.close(); closePicker() }, { flush: 'sync' })
