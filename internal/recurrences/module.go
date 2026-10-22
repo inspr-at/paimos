@@ -108,8 +108,8 @@ func reply(w http.ResponseWriter, status int, out any, err error) {
 }
 
 // Management always checks the live binding inside the writing transaction.
-// Agent grants are explicit custom-role permissions, never implicit owner/admin
-// inheritance (authz.readGrants enforces that rule for every route).
+// Scoped agents need explicit custom-role grants; full-access keys also derive
+// recurrence authority from their live write grants in the target scope.
 func manage(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) error {
 	return authz.RequireTx(ctx, tx, p, Permission, authz.Scope{ProjectID: project})
 }
