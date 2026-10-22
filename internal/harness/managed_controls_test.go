@@ -11,6 +11,7 @@ import (
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/rules/doctrine"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/jackc/pgx/v5"
 	"net/http"
@@ -194,7 +195,7 @@ func TestManagedControlsIdentityReplayPrivacyAndExpiry(t *testing.T) {
 	w = f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease)
 	expect(t, w, 200)
 	controls := decode(t, w)["controls"].([]any)
-	if len(controls) != 1 || controls[0].(map[string]any)["text"] != "private steer fixture" {
+	if len(controls) != 1 || controls[0].(map[string]any)["text"] != "private steer fixture" || controls[0].(map[string]any)["author_principal_id"] != f.person.ID {
 		t.Fatal(w.Body.String())
 	}
 	w = f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease)
@@ -384,4 +385,138 @@ func TestManagedControlsRefuseUnmanagedAndUnknownPolicy(t *testing.T) {
 	expect(t, f.call(f.agent, "POST", path+"/managed-context", map[string]any{}, lease), 409)
 	body["advertised_capabilities"] = []string{"managed_control_v1"}
 	expect(t, f.call(f.person, "POST", base, body, ""), 400)
+}
+
+// Risk: an opted-in daemon must fail closed before launching with a missing,
+// partial or oversized pin; legacy requests keep their existing semantics.
+func TestManagedPinnedContextRefusesMissingAndOversizedPins(t *testing.T) {
+	f := fixture(t)
+	order, run := stateRun(t, f, f.project, "running", "MPC-10")
+	f.agent.KeyCreatorID = f.person.ID
+	lease := "pinned-context-lease-0000000000000000001"
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "pinned-context-ref-000000000000001", "worker_lease": lease, "management_mode": "managed", "role": "worker", "run_id": run, "work_order_id": order, "ticket_node_id": order, "work_shape": "ship"}, "")
+	expect(t, w, 201)
+	endpoint := base + "/" + decode(t, w)["id"].(string) + "/managed-context"
+	request := func(status int, code string) {
+		t.Helper()
+		w = f.call(f.agent, "POST", endpoint, map[string]bool{"pinned_files": true}, lease)
+		expect(t, w, status)
+		if code != "" && decode(t, w)["code"] != code {
+			t.Fatalf("wrong refusal: %s", w.Body.String())
+		}
+	}
+	request(409, "rules_pin_missing")
+	var source string
+	commit := strings.Repeat("a", 40)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,commit_sha,paths) VALUES($1,'fixture/company','public',$2,ARRAY['docs/AGENTS-KERNEL.md']) RETURNING id::text`, f.person.TenantID, commit).Scan(&source)
+	})
+	request(409, "rules_pin_missing")
+	content := []byte(strings.Repeat("R", 27603))
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO doctrine_cache(tenant_id,source_id,commit_sha,path,blob_sha,content) VALUES($1,$2,$3,'docs/AGENTS-KERNEL.md',$4,$5)`, f.person.TenantID, source, commit, doctrine.BlobSHA(content), content); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE doctrine_sources SET indexed_at=clock_timestamp() WHERE id=$1`, source)
+		return err
+	})
+	request(200, "")
+	var got rules.Merged
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.PinnedFiles) != 1 || got.PinnedFiles[0].Content != string(content) {
+		t.Fatal("measured pin not delivered")
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE doctrine_cache SET content=$2,blob_sha=$3 WHERE source_id=$1`, source, []byte(strings.Repeat("R", 64001)), doctrine.BlobSHA([]byte(strings.Repeat("R", 64001))))
+		return err
+	})
+	request(422, "rules_pack_too_large")
+}
+
+// Risk: the real docs/AGENTS-*.md default includes a >64 KB core and >128 KB
+// total. Only the always-on company kernels may enter a launch pack; a person's
+// explicitly indexed profile and role/on-demand packs must never leak into it.
+func TestManagedPinnedContextDefaultDoctrineSelectsKernels(t *testing.T) {
+	f := fixture(t)
+	order, run := stateRun(t, f, f.project, "running", "KERNEL-10")
+	f.agent.KeyCreatorID = f.person.ID
+	lease := "kernel-context-lease-0000000000000000001"
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "kernel-context-ref-000000000000001", "worker_lease": lease, "management_mode": "managed", "role": "worker", "run_id": run, "work_order_id": order, "ticket_node_id": order, "work_shape": "ship"}, "")
+	expect(t, w, 201)
+	endpoint := base + "/" + decode(t, w)["id"].(string) + "/managed-context"
+	commit := strings.Repeat("a", 40)
+	public := map[string]string{
+		"docs/AGENTS-KERNEL.md":      strings.Repeat("K", 6574),
+		"docs/AGENTS-CORE.md":        strings.Repeat("C", 67056),
+		"docs/AGENTS-VERSIONING.md":  strings.Repeat("V", 28000),
+		"docs/AGENTS-DOMAIN-DEV.md":  strings.Repeat("D", 22000),
+		"docs/AGENTS-DOMAIN-OPS.md":  strings.Repeat("O", 10000),
+		"docs/AGENTS-AGENT-BUILD.md": "# Builder role\n\n- Only for builders.\n",
+	}
+	private := map[string]string{
+		"docs/AGENTS-KERNEL-PRIVATE.md": strings.Repeat("P", 4149),
+		"docs/AGENTS-CORE-PRIVATE.md":   strings.Repeat("I", 67056),
+		"docs/AGENTS-PROFILE-OWNER.md":  "# Person profile\n\n- Owner-only instructions.\n",
+		"docs/AGENTS-PROFILE-OTHER.md":  "# Person profile\n\n- Other person's instructions.\n",
+	}
+	grantDir := t.TempDir()
+	grant, err := json.Marshal(map[string]any{"grants": []map[string]string{{"tenant_id": f.person.TenantID, "repository": "fixture/private"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(grantDir, "fixture-read.allowlist.json"), grant, 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		for _, source := range []struct {
+			repo, visibility, credential string
+			paths                        []string
+			files                        map[string]string
+		}{
+			{"fixture/company", "public", "", doctrine.DefaultPaths, public},
+			{"fixture/private", "private", "fixture-read", []string{"docs/AGENTS-*.md", "docs/AGENTS-PROFILE-OWNER.md", "docs/AGENTS-PROFILE-OTHER.md"}, private},
+		} {
+			var id string
+			if err := tx.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,credential_ref,commit_sha,paths,indexed_at) VALUES($1,$2,$3,$4,$5,$6,clock_timestamp()) RETURNING id::text`, f.person.TenantID, source.repo, source.visibility, source.credential, commit, source.paths).Scan(&id); err != nil {
+				return err
+			}
+			for name, body := range source.files {
+				content := []byte(body)
+				if _, err := tx.Exec(t.Context(), `INSERT INTO doctrine_cache(tenant_id,source_id,commit_sha,path,blob_sha,content) VALUES($1,$2,$3,$4,$5,$6)`, f.person.TenantID, id, commit, name, doctrine.BlobSHA(content), content); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	req := httptest.NewRequest("POST", endpoint, strings.NewReader(`{"pinned_files":true}`))
+	req = req.WithContext(tenant.WithPrincipal(t.Context(), f.agent))
+	req.Header.Set("Authorization", "Bearer "+f.key)
+	req.Header.Set("X-Aeon-Worker-Lease", lease)
+	w = httptest.NewRecorder()
+	(doctrine.Credentials{Dir: grantDir}).CatalogMiddleware(f.mux).ServeHTTP(w, req)
+	expect(t, w, 200)
+	var got rules.Merged
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.PinnedFiles) != 2 {
+		t.Fatalf("launch pack has %d files; want exactly the public and private kernels", len(got.PinnedFiles))
+	}
+	for i, want := range []struct{ repo, visibility, path, body string }{
+		{"fixture/company", "public", "docs/AGENTS-KERNEL.md", public["docs/AGENTS-KERNEL.md"]},
+		{"fixture/private", "private", "docs/AGENTS-KERNEL-PRIVATE.md", private["docs/AGENTS-KERNEL-PRIVATE.md"]},
+	} {
+		file := got.PinnedFiles[i]
+		if file.Repository != want.repo || file.Visibility != want.visibility || file.Path != want.path || file.Content != want.body || file.Commit != commit || file.BlobSHA != doctrine.BlobSHA([]byte(want.body)) {
+			t.Fatalf("launch pack entry %d does not match the pinned kernel", i)
+		}
+	}
+	if err := rules.ValidateManagedFiles(got, got.Context, time.Now()); err != nil {
+		t.Fatalf("kernel-only launch context is invalid: %v", err)
+	}
 }

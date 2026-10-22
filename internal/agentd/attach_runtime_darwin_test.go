@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 )
 
 // attachWrapperChildSelector is the exact -test.run value of the inert
@@ -62,7 +64,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestScanAttachProcargs(t *testing.T) {
-	path := "/bin/sleep"
+	path := fixturebin.Require(t, "sleep")
 	cleanEnv := []string{"PATH=/usr/bin:/bin", "NODE_OPTIONS=--require /fixture/marker.cjs", "NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem"}
 	t.Run("empty-argv0", func(t *testing.T) {
 		buf := procargsBuffer(t, path, []string{""}, []string{"BUN_OPTIONS=--preload /fixture/marker.cjs", "PATH=/usr/bin:/bin"}, true)
@@ -253,7 +255,7 @@ func procargsBuffer(t *testing.T, path string, argv, env []string, terminate boo
 // successful scan has walked the whole buffer rather than stopping at the cap.
 func sizedProcargs(t *testing.T, size int, denied bool) []byte {
 	t.Helper()
-	path := "/bin/sleep"
+	path := fixturebin.Require(t, "sleep")
 	prefix := procargsBuffer(t, path, []string{path, "20"}, nil, false)
 	suffix := []byte{0}
 	if denied {
@@ -454,7 +456,7 @@ func startProcargsArgvFixture(t *testing.T, argv, env []string) string {
 
 func startOmittedProcargsFixture(t *testing.T) string {
 	t.Helper()
-	cmd := exec.Command("/bin/sleep", "30")
+	cmd := exec.Command(fixturebin.Require(t, "sleep"), "30")
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + t.TempDir(), "BUN_OPTIONS=--preload /fixture/marker.cjs"}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)

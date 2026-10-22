@@ -12,6 +12,9 @@ import { useProfile } from '../../stores/profile'
 import { useProjects } from '../../stores/projects'
 import { readDeliveryMetrics } from '../../lib/deliveryNumbers'
 import { projectSettingsPath } from '../../lib/projectSettings'
+import { APIError } from '../../lib/api'
+import { createSharedRequests } from '../../lib/sharedRequests'
+import { eventNode } from '../../lib/agentProjection'
 
 const props = defineProps<{ nodeId: string; projectId: string; ticketKey?: string }>()
 const session = useSession(), profile = useProfile()
@@ -23,6 +26,11 @@ const de = computed(() => lang.value === 'de')
 const read = computed(() => can('delivery.read', props.projectId)), manage = computed(() => can('delivery.manage', props.projectId))
 const owner = () => scopeOwner(session.identity) ? `${scopeOwner(session.identity)}/${props.projectId}/${props.nodeId}` : ''
 const scope = createScope(owner), reader = scope.lane()
+const polling = createSharedRequests(() => { now.value = Date.now(); return load() }, {
+  events: ['delivery.state_changed', 'delivery.merge_done', 'delivery.merge_undone', 'delivery.routing_settings_changed', 'delivery.merge_backfill_applied'],
+  relevant: (_key, _type, data) => { const node = eventNode(data); return !node || node === props.nodeId || node === props.projectId },
+  invalidate: () => reader.cancel(), enabled: () => read.value,
+})
 const result = ref<DeliveryPage | null>(null), loading = ref(true), error = ref(''), mutationError = ref(''), busy = ref(''), now = ref(Date.now())
 const order = ref<string[]>([]), lifted = ref<string[]>([]), liftedAt = ref<Record<string, string>>({})
 const items = computed(() => {
@@ -52,7 +60,7 @@ function load() {
     liftedAt.value = nextAt
     if (sorted.length) { noRepository.value = false; return }
     return after(readDeliveryMetrics(props.projectId, signal).catch(() => null), metrics => { noRepository.value = metrics !== null && metrics.source === null })
-  }), { failed: cause => { error.value = cause instanceof Error ? cause.message : 'Delivery unavailable' }, settled: () => { loading.value = false } })
+  }), { failed: cause => { if (cause instanceof APIError && [401, 403, 404].includes(cause.status)) result.value = null; error.value = cause instanceof Error ? cause.message : 'Delivery unavailable' }, settled: () => { loading.value = false } })
 }
 function lift(item: DeliveryItem) {
   if (!manage.value || busy.value || item.state !== 'held') return
@@ -65,10 +73,9 @@ function lift(item: DeliveryItem) {
     liftedAt.value = { ...liftedAt.value, [id]: value.updated_at }
   }), { failed: cause => { mutationError.value = cause instanceof Error ? cause.message : 'The hold could not be lifted.' }, settled: () => { busy.value = '' } })
 }
-watch([() => props.nodeId, () => props.projectId, () => scopeOwner(session.identity), read], () => { reset(); void load() }, { immediate:true, flush:'sync' })
+watch([() => props.nodeId, () => props.projectId, () => scopeOwner(session.identity), read], (_value, _before, cleanup) => { reset(); cleanup(polling.watch(owner())) }, { immediate:true, flush:'sync' })
 const stopAccess = onAccessRevalidate({ reset, refresh: () => { void load() } })
-const poll = setInterval(() => { now.value = Date.now(); void load() }, 30_000)
-onBeforeUnmount(() => { scope.dispose(); clearInterval(poll); stopAccess() })
+onBeforeUnmount(() => { polling.stop(); scope.dispose(); stopAccess() })
 </script>
 <template>
   <section v-if="read" class="delivery" :lang="lang" :aria-label="de ? 'Lieferstatus' : 'Delivery'">

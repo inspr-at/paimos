@@ -841,6 +841,7 @@ func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
 }
 
 type claudeProcess struct {
+	rulesHash     atomic.Value
 	native        *NativeLeadSpec
 	serviceTier   string
 	answerMu      sync.Mutex
@@ -853,6 +854,11 @@ type claudeProcess struct {
 	controlMu      sync.Mutex
 	controls       map[string]chan bool
 	controlReasons map[string]string
+}
+
+func (p *claudeProcess) RulesDeliveryHash() string {
+	value, _ := p.rulesHash.Load().(string)
+	return value
 }
 
 type claudeReviewProcess struct{ *claudeProcess }
@@ -1055,6 +1061,7 @@ func (a *ClaudeAdapter) startBridge(ctx context.Context, r StartRequest, observe
 			c0.observe(raw)
 		}
 		var frame struct {
+			RulesSHA256     string             `json:"rules_sha256"`
 			Answer          string             `json:"answer"`
 			Kind            string             `json:"kind"`
 			Reason          string             `json:"reason"`
@@ -1151,6 +1158,14 @@ func (a *ClaudeAdapter) startBridge(ctx context.Context, r StartRequest, observe
 				}
 			}
 		case "session_started":
+			if r.Rules != "" && frame.RulesSHA256 != rulesDeliveryHash(r.Rules) {
+				select {
+				case cp.ready <- ErrRulesDeliveryMismatch:
+				default:
+				}
+				return
+			}
+			cp.rulesHash.Store(frame.RulesSHA256)
 			if native != nil {
 				var init struct {
 					SessionID string `json:"harness_session_id"`

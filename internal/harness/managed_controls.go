@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -235,7 +236,9 @@ func (m *Module) expireControls(r *http.Request, tx pgx.Tx, p tenant.Principal, 
 }
 
 func (m *Module) managedContext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	var in struct{}
+	var in struct {
+		PinnedFiles bool `json:"pinned_files,omitempty"`
+	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
@@ -249,6 +252,22 @@ func (m *Module) managedContext(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	h := s.Harness
 	if h == "claude" {
 		h = "claude-code"
+	}
+	if in.PinnedFiles {
+		if h != "claude-code" {
+			return nil, workorders.Fail(400, "pinned files require Claude")
+		}
+		// Opt-in agentd assembly has a measured pack ceiling and refuses
+		// overflow. Legacy registration/header defaults remain unchanged.
+		maximum := doctrine.ManagedPackMaxBytes
+		if len(r.Header.Values(rules.ClientMaximumHeader)) != 0 {
+			requested, e := rules.RequestMaximum(r)
+			if e != nil {
+				return nil, e
+			}
+			maximum = min(maximum, requested)
+		}
+		return rules.ForManagedFiles(r.Context(), tx, p, s.ProjectID, *s.WorkOrderID, h, maximum)
 	}
 	maximum, err := rules.RequestMaximum(r)
 	if err != nil {

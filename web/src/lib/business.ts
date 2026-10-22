@@ -5,6 +5,7 @@
 import { api, APIError } from './api'
 import { learnPictures } from './avatar'
 import { parseJSONExact } from '../components/business/money'
+import { mutationEventIds } from './crm'
 
 export type Unit = 'hour' | 'day' | 'item'
 export type QuoteState = 'draft' | 'issued' | 'accepted' | 'void'
@@ -173,24 +174,16 @@ export const createEntry = async (body: { period_id: string; cost_unit_node_id: 
 // does not fit. Both write an event that POST /events/{id}/undo reverses.
 export const updateEntry = async (e: TimeEntry, patch: EntryPatch) =>
   entry((await send<TimeEntry>(`/time-entries/${id(e.id)}`, 'PATCH', patch, { 'If-Unmodified-Since': e.updated_at })).data)
-export const deleteEntry = async (e: TimeEntry) => { await send<null>(`/time-entries/${id(e.id)}`, 'DELETE', undefined, { 'If-Unmodified-Since': e.updated_at }) }
+export async function deleteEntry(e: TimeEntry): Promise<string | null> {
+  const { response } = await send<null>(`/time-entries/${id(e.id)}`, 'DELETE', undefined, { 'If-Unmodified-Since': e.updated_at })
+  const ids = mutationEventIds(response)
+  return ids?.length === 1 ? ids[0] : null
+}
 export function conflictEntry(error: unknown): TimeEntry | null {
   const current = error instanceof APIError && error.status === 412 ? error.body.current : null
   return current && typeof current === 'object' ? entry(current as TimeEntry) : null
 }
-// DELETE answers 204 without the event, so undo finds the newest deletion of
-// this entry on its ticket's event log (the same way attachments do).
-export async function findEntryEvent(nodeId: string, entryId: string, type: 'time_entry.deleted' | 'time_entry.updated'): Promise<number | null> {
-  let after = 0, found: number | null = null
-  for (let page = 0; page < 50; page++) {
-    const body = await call<{ items: { id: unknown; type: string; before: { id?: string } | null; undo_of: unknown }[]; next_after: unknown }>(`/events?node_id=${id(nodeId)}&limit=200${after ? `&after=${after}` : ''}`)
-    for (const event of body.items ?? []) if (event.type === type && event.before?.id === entryId && event.undo_of == null) found = int(event.id)
-    if (!body.next_after) break
-    after = int(body.next_after)
-  }
-  return found
-}
-export async function undoEntryEvent(eventId: number): Promise<TimeEntry | null> {
+export async function undoEntryEvent(eventId: string): Promise<TimeEntry | null> {
   const event = await call<{ after: TimeEntry | null }>(`/events/${eventId}/undo`, 'POST')
   return event?.after ? entry(event.after) : null
 }
