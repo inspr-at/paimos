@@ -16,6 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
@@ -215,15 +216,16 @@ type VersionRef struct {
 	SHA256  string `json:"sha256"`
 }
 type Merged struct {
-	Context    Context      `json:"context"`
-	Versions   []VersionRef `json:"versions"`
-	Version    string       `json:"version"`
-	SHA256     string       `json:"sha256"`
-	Body       string       `json:"body"`
-	ByteSize   int          `json:"byte_size"`
-	Rules      []Rule       `json:"rules"`
-	Floor      string       `json:"floor"`
-	ValidUntil *time.Time   `json:"valid_until"`
+	PinnedFiles []doctrine.PinnedFile `json:"pinned_files,omitempty"`
+	Context     Context               `json:"context"`
+	Versions    []VersionRef          `json:"versions"`
+	Version     string                `json:"version"`
+	SHA256      string                `json:"sha256"`
+	Body        string                `json:"body"`
+	ByteSize    int                   `json:"byte_size"`
+	Rules       []Rule                `json:"rules"`
+	Floor       string                `json:"floor"`
+	ValidUntil  *time.Time            `json:"valid_until"`
 }
 type Error struct {
 	Status      int    `json:"-"`

@@ -1329,6 +1329,11 @@ components:
       type: "object"
       additionalProperties: false
       properties:
+        pinned_files:
+          type: array
+          maxItems: 64
+          description: "Only returned by opt-in Claude managed-context. Authorized public files precede private files; bytes are hash-checked and assembled by agentd."
+          items: {$ref: '#/components/schemas/ManagedPinnedRuleFile'}
         context:
           "$ref": "#/components/schemas/RuleContext"
         versions:

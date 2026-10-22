@@ -13,8 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 )
 
 // No vendor executable or process signal: ownership and outcomes are fixtures.
@@ -259,7 +261,7 @@ func TestSteerOnYieldedStartsNextTurn(t *testing.T) {
 	}
 	p.mu2.Lock()
 	defer p.mu2.Unlock()
-	if len(p.texts) != 1 || p.texts[0] != "continue" {
+	if len(p.texts) != 1 || p.texts[0] != labelledMessage("", "continue") {
 		t.Fatalf("texts %v", p.texts)
 	}
 	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "yielded-steer:applied:started_next_turn" {
@@ -279,7 +281,7 @@ func TestSteerMidTurnStaysQueued(t *testing.T) {
 	}
 	p.mu2.Lock()
 	defer p.mu2.Unlock()
-	if len(p.texts) != 1 || p.texts[0] != "later" {
+	if len(p.texts) != 1 || p.texts[0] != labelledMessage("", "later") {
 		t.Fatalf("texts %v", p.texts)
 	}
 	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "busy-steer:applied:queued_next_turn" {
@@ -367,8 +369,9 @@ func TestClaudeNotRunningBecomesNothingRunning(t *testing.T) {
 
 type managedRulesFixture struct {
 	*fakeAPI
-	bundle   rules.Merged
-	receipts int
+	bundle       rules.Merged
+	receipts     int
+	acknowledged []rules.RulesDeliveryAck
 }
 
 func (a *managedRulesFixture) ManagedContext(context.Context, HarnessSession) (rules.Merged, error) {
@@ -387,13 +390,14 @@ func TestManagedRulesValidateExactEphemeralContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	merged.PinnedFiles = []doctrine.PinnedFile{packFile("public", "fixture/company", "docs/AGENTS-KERNEL.md", "Pinned company rules.\n")}
 	api := &managedRulesFixture{bundle: merged}
 	s := &Supervisor{api: api, tenantID: c.TenantID, principalID: c.AgentID}
 	e := &owned{harness: HarnessSession{ID: id("7"), ProjectID: c.ProjectID}}
 	run := Run{WorkOrderID: c.TaskID}
 	profile := Profile{Harness: Claude}
 	body, err := s.managedRules(t.Context(), e, run, profile)
-	if err != nil || body != merged.Body || api.receipts != 1 {
+	if err != nil || !strings.Contains(body, merged.Body) || api.receipts != 0 {
 		t.Fatalf("rules handoff: %v", err)
 	}
 	api.bundle.Context.ProjectID = id("8")
@@ -405,8 +409,8 @@ func TestManagedRulesValidateExactEphemeralContext(t *testing.T) {
 	if _, err = s.managedRules(t.Context(), e, run, profile); err == nil {
 		t.Fatal("changed rules accepted")
 	}
-	if api.receipts != 1 {
-		t.Fatal("invalid rules receipted")
+	if api.receipts != 0 {
+		t.Fatal("new managed run wrote a legacy pre-launch receipt")
 	}
 }
 
@@ -437,6 +441,7 @@ func TestClaudeBridgeEphemeralRulesBudgetAndNativeClose(t *testing.T) {
 	if err = os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
 		t.Fatal(err)
 	}
+	truePath := fixturebin.Require(t, "true")
 	for _, tc := range []struct{ name, result, reason string }{
 		{"native_close", "", ""},
 		{"missing_usage", `yield {type:'result',subtype:'success'};`, "token_budget_exhausted"},
@@ -453,7 +458,7 @@ func TestClaudeBridgeEphemeralRulesBudgetAndNativeClose(t *testing.T) {
 			if err := os.WriteFile(sdkPath, []byte(fixture), 0600); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", root)
+			cmd := exec.Command(node, bridgePath, sdkPath, truePath, root)
 			input := `{"op":"start","prompt":"fixture","rules":"Ephemeral safety fixture","max_turns":3,"max_tokens":100}` + "\n"
 			if tc.reason == "" {
 				input += `{"op":"stop","correlation_id":"close-fixture"}` + "\n"
@@ -462,6 +467,9 @@ func TestClaudeBridgeEphemeralRulesBudgetAndNativeClose(t *testing.T) {
 			out, err := cmd.Output()
 			if err != nil {
 				t.Fatalf("bridge: %v (%s)", err, out)
+			}
+			if strings.Contains(string(out), `"kind":"session_started"`) && !strings.Contains(string(out), `"rules_sha256":"`+rulesDeliveryHash("Ephemeral safety fixture")+`"`) {
+				t.Fatal("bridge did not acknowledge its received rules bytes")
 			}
 			if strings.Contains(string(out), "Ephemeral safety fixture") {
 				t.Fatal("leaked rules")
@@ -597,6 +605,7 @@ func TestClaudeBridgeOnlyAllowsDaemonFileTools(t *testing.T) {
  yield {type:'result',modelUsage:{fixture:{inputTokens:1,outputTokens:1}}};
  }};
 }`
+	truePath := fixturebin.Require(t, "true")
 	for _, fixture := range []struct {
 		name                 string
 		routine, browserOnly bool
@@ -612,7 +621,7 @@ func TestClaudeBridgeOnlyAllowsDaemonFileTools(t *testing.T) {
 		}
 		frame, _ := json.Marshal(map[string]any{"op": "start", "prompt": "fixture", "max_tokens": 1,
 			"tools": RunTools{URL: "http://127.0.0.1:12345", Token: strings.Repeat("a", 64), Routine: fixture.routine, BrowserCaptureOnly: fixture.browserOnly}})
-		cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", workspace)
+		cmd := exec.Command(node, bridgePath, sdkPath, truePath, workspace)
 		cmd.Stdin = strings.NewReader(string(frame) + "\n")
 		out, err := cmd.Output()
 		if err != nil || !strings.Contains(string(out), `"kind":"budget_exhausted"`) {

@@ -88,6 +88,87 @@ func named(t *testing.T, j job, name string) (int, step) {
 	return -1, step{}
 }
 
+// Risk: setup actions can select vulnerable cached toolchains. Every workflow
+// pins the security patch; release assertions reject stale or lookalike versions.
+func TestReleaseToolchainsRequireExactSecurityPatches(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join(root(t), ".github/workflows/*.yml"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("workflow inventory: %v", err)
+	}
+	assertions := 0
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var w struct {
+			Jobs map[string]struct{ Steps []step }
+		}
+		if err := yaml.Unmarshal(body, &w); err != nil {
+			t.Fatalf("%s: %v", filepath.Base(file), err)
+		}
+		for id, j := range w.Jobs {
+			for i, setup := range j.Steps {
+				for _, tool := range []struct {
+					action, key, version, assertion, command, flag string
+					reports                                        []string
+				}{
+					{"actions/setup-go@", "go-version", "1.26.10", "Assert Go 1.26.10", "go", "version", []string{
+						"go version go1.26.10 linux/amd64", "go version go1.26.9 linux/amd64",
+						"go version go1.26.100 linux/amd64", "go version go1.26.10rc1 linux/amd64",
+					}},
+					{"actions/setup-node@", "node-version", "24.22.1", "Assert Node 24.22.1", "node", "--version", []string{
+						"v24.22.1", "v24.21.0", "v24.22.10", "v24.22.1-rc.1",
+					}},
+				} {
+					if !strings.HasPrefix(setup.Uses, tool.action) {
+						continue
+					}
+					if setup.With[tool.key] != tool.version {
+						t.Fatalf("%s/%s: %s must pin %s", filepath.Base(file), id, tool.key, tool.version)
+					}
+					if filepath.Base(file) != "release.yml" {
+						continue
+					}
+					assertions++
+					if i+1 >= len(j.Steps) || j.Steps[i+1].Name != tool.assertion {
+						t.Fatalf("%s: %s must immediately follow setup", id, tool.assertion)
+					}
+					guard := j.Steps[i+1]
+					if guard.If != "" || guard.ContinueOnError || guard.Run == "" {
+						t.Fatalf("%s: %s must be mandatory", id, tool.assertion)
+					}
+					for index, report := range tool.reports {
+						t.Run(id+"/"+tool.command+"/"+report, func(t *testing.T) {
+							dir := t.TempDir()
+							stub := "#!/bin/sh\n[ \"$#\" -eq 1 ] && [ \"$1\" = '" + tool.flag + "' ] || exit 90\nprintf '%s\\n' \"$PROBE_VERSION\"\n"
+							if err := os.WriteFile(filepath.Join(dir, tool.command), []byte(stub), 0700); err != nil {
+								t.Fatal(err)
+							}
+							cmd := exec.Command("bash", "-c", guard.Run)
+							cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "PROBE_VERSION="+report)
+							output, err := cmd.CombinedOutput()
+							if string(output) != report+"\n" {
+								t.Fatalf("version log: %v: %s", err, output)
+							}
+							if index == 0 {
+								if err != nil {
+									t.Fatalf("pinned version rejected: %v", err)
+								}
+							} else if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
+								t.Fatalf("expected version mismatch rejection, got %v", err)
+							}
+						})
+					}
+				}
+			}
+		}
+	}
+	if assertions != 3 {
+		t.Fatalf("expected three release toolchain assertions, found %d", assertions)
+	}
+}
+
 // Risk: a host's older pg_dump can neither read pg18 nor perform the vector-free
 // backup drill. Both CI lanes must use the clients from their exact service.
 // releaseYAML joins only job sections for invariant tests; the real publisher

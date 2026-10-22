@@ -137,7 +137,7 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 			if r.Method == "GET" {
 				return nil
 			}
-			if r.Method == "POST" && len(parts) == 4 && (parts[3] == "claim" || parts[3] == "telemetry") {
+			if r.Method == "POST" && len(parts) == 4 && (parts[3] == "claim" || parts[3] == "telemetry" || parts[3] == "capability") {
 				return nil
 			}
 		case "work-orders":
@@ -151,6 +151,9 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 				}
 			}
 		case "nodes":
+			if p.RunID != "" && r.Method == http.MethodPost && len(parts) == 4 && parts[2] == p.RunWorkOrderID && parts[3] == "comments" {
+				return nil
+			}
 			if r.Method != "GET" || len(parts) != 3 {
 				return deny
 			}
@@ -161,7 +164,7 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 				}
 				for _, key := range keys {
 					var own bool
-					if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM nodes n JOIN agent_runs r ON r.tenant_id=n.tenant_id AND r.work_order_id=n.id WHERE n.key=$1 AND r.agent_principal_id=$2)`, key, p.ID).Scan(&own); err != nil {
+					if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM nodes n JOIN agent_runs r ON r.tenant_id=n.tenant_id AND r.work_order_id=n.id WHERE n.key=$1 AND r.agent_principal_id=$2 AND ($3::uuid IS NULL OR r.id=$3))`, key, p.ID, nullableRunID(p.RunID)).Scan(&own); err != nil {
 						return err
 					}
 					if !own {
@@ -180,6 +183,9 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 				}
 			}
 		case "projects":
+			if p.TransportComputerID != "" && p.RunID == "" && transportAttachedHookRoute(r) && workerlease.Read(r) != "" {
+				return attachedHookAuthorityTx(r.Context(), tx, r, p)
+			}
 			if len(parts) >= 4 && validRouteUUID(parts[2]) && parts[3] == "harness-sessions" {
 				var own bool
 				if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM nodes n JOIN agent_runs r ON r.tenant_id=n.tenant_id AND r.work_order_id=n.id WHERE n.project_id=$1 AND r.agent_principal_id=$2)`, parts[2], p.ID).Scan(&own); err != nil {
@@ -205,4 +211,11 @@ func pairedIdentity(ctx context.Context, tx pgx.Tx, principal string) error {
 		return errServicePrincipal
 	}
 	return nil
+}
+
+func nullableRunID(id string) any {
+	if id == "" {
+		return nil
+	}
+	return id
 }

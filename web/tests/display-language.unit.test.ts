@@ -9,14 +9,12 @@ import { releaseLang } from '../src/lib/releases'
 const HANDOFF = 'A'.repeat(43)
 
 // Risk: a German regional profile translates a single card inside an English page.
-it('keeps the incomplete app in English and preserves the independent release-note choice', () => {
-  for (const locale of [undefined, null, '', 'de', 'de-AT', 'DE-de', 'en-GB', 'fr-FR']) expect(displayLanguage(locale)).toBe('en')
-  expect(displayLanguage(' de-AT ', 'release-notes')).toBe('de')
-  expect(displayLanguage('fr-FR', 'release-notes')).toBe('en')
+it('keeps every surface in the one app language and preserves an explicit release-note choice', () => {
+  expect(displayLanguage()).toBe('en')
   expect(releaseLang('en', 'de-AT', 'de')).toBe('en')
   expect(releaseLang(undefined, 'de-AT', 'en')).toBe('en')
-  expect(releaseLang(undefined, 'de-AT')).toBe('de')
-  expect(displayLanguage('de-AT')).toBe('en')
+  expect(releaseLang(undefined, 'de-AT')).toBe('en')
+  expect(releaseLang('de', 'en-GB')).toBe('de')
 })
 
 it('rejects direct and aliased locale detectors while allowing language selection and region formatting', () => {
@@ -36,24 +34,18 @@ it('rejects direct and aliased locale detectors while allowing language selectio
   expect(displayLanguageViolations('<template><Card :german="profile.profile?.locale === \'de\'" /></template>', 'components/New.vue')).toHaveLength(1)
 })
 
-// Risk: the START sheet detects the browser language on its own, so one card
-// can be German while the rest of the app stays English, or a German browser
-// is ignored before the draft is read (AEON-1441).
-it('follows the START handoff language, else the browser, through the shared helper', () => {
-  expect(displayLanguage('de-AT', 'start')).toBe('de')
-  expect(displayLanguage(' DE-de ', 'start')).toBe('de')
-  expect(displayLanguage('en-GB', 'start')).toBe('en')
-  expect(displayLanguage('fr-FR', 'start')).toBe('en')
-  expect(displayLanguage(undefined, 'start')).toBe('en')
-  expect(displayLanguage('de-AT')).toBe('en')
+// Risk: the START sheet follows the handoff or the browser on its own, so one
+// card is German while the rest of the app stays English (AEON-1441, AEON-1609).
+it('keeps the START sheet in the app language regardless of the handoff or the browser', () => {
+  expect(displayLanguage()).toBe('en')
   const source = readFileSync(new URL('../src/lib/importDraft.ts', import.meta.url), 'utf8')
   expect(displayLanguageViolations(source, 'lib/importDraft.ts'), source).toEqual([])
   expect(draftLanguage({ draft: HANDOFF, lang: 'en' }, 'de-AT')).toBe('en')
-  expect(draftLanguage({ draft: HANDOFF, lang: 'de' }, 'en-GB')).toBe('de')
-  expect(draftLanguage({ draft: HANDOFF, lang: null }, 'de-AT')).toBe('de')
-  expect(draftLanguage(null, 'de')).toBe('de')
+  expect(draftLanguage({ draft: HANDOFF, lang: 'de' }, 'en-GB')).toBe('en')
+  expect(draftLanguage({ draft: HANDOFF, lang: null }, 'de-AT')).toBe('en')
+  expect(draftLanguage(null, 'de')).toBe('en')
   expect(draftLanguage(null, 'fr-FR')).toBe('en')
-  expect(draftLanguage(null, ' de-AT ')).toBe('de')
+  expect(draftLanguage(null, ' de-AT ')).toBe('en')
 })
 
 // This whole-source guard also catches files that were not in AEON-998's inventory.

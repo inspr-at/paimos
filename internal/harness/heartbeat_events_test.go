@@ -141,7 +141,7 @@ func TestHeartbeatAttachedOwnershipAuditedOnce(t *testing.T) {
 	v := recoveryAgent(t)
 	f := v.f
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET management='unmanaged',run_id=NULL,capabilities=ARRAY['inbox','status'],process_ownership=NULL,process_observed_at=NULL,heartbeat_at=clock_timestamp() WHERE id=$1`, v.session)
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET management='unmanaged',run_id=NULL,capabilities=ARRAY['inbox','status'],process_ownership=NULL,process_observed_at=NULL,heartbeat_at=clock_timestamp(),started_by_principal_id=agent_principal_id WHERE id=$1`, v.session)
 		return err
 	})
 	count := func() int {

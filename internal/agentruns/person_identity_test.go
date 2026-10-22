@@ -20,28 +20,46 @@ import (
 	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Risk: legacy recurring work substitutes its creator/System as the run person,
 // or refusal rolls back the only audit along with partial occurrence resources.
 func TestRoutineUnresolvedRunPersonManualAndSchedulerAudits(t *testing.T) {
+	for _, clock := range []struct {
+		name string
+		at   time.Duration
+	}{{"00:30_UTC", 30 * time.Minute}, {"12:00_UTC", 12 * time.Hour}} {
+		t.Run(clock.name, func(t *testing.T) {
+			testRoutineUnresolvedRunPersonAuditsAt(t, clock.at)
+		})
+	}
+}
+
+func testRoutineUnresolvedRunPersonAuditsAt(t *testing.T, clock time.Duration) {
+	t.Helper()
 	f := setup(t)
-	m := recurrences.New(f.d.App)
-	m.Mount(f.mux)
-	var project string
 	var now time.Time
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
-			return err
-		}
+		return tx.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now)
+	})
+	now = now.UTC().Truncate(24 * time.Hour).Add(clock)
+	m := recurrences.New(routineAuditClock(t, f, now))
+	m.Mount(f.mux)
+	var project string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'UNRESOLVED-1','Routine output' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.person.TenantID).Scan(&project)
 	})
 	// A pre-definition routine has creator provenance but no authoritative owner.
 	in := recurrences.Input{ProjectID: project, ParentID: project, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one",
 		Template: recurrences.Template{Title: "Queued legacy work", Description: "Verify ownership", Type: "work", Priority: "high", EstimateHours: 1, Criteria: []string{"No invented actor"}},
-		Trigger:  recurrences.Trigger{Kind: "time", RRULE: "FREQ=DAILY", TimeOfDay: "09:00", Timezone: "UTC", StartDate: now.UTC().AddDate(0, 0, -2).Format(time.DateOnly)}}
+		// Backdating the cursor alone leaves no past slot before 09:00 UTC.
+		Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=DAILY", TimeOfDay: "09:00", Timezone: "UTC", StartDate: now.AddDate(0, 0, -2).Format(time.DateOnly)}}
 	var routine recurrences.Recurrence
 	f.call(t, f.person, "POST", "/api/recurrences", in, 201, &routine)
+	if !routine.CreatedAt.Equal(now) {
+		t.Fatalf("routine clock = %s, want %s", routine.CreatedAt, now)
+	}
 	// The scheduler must reach admission even before today's 09:00 occurrence.
 	// Derive both the schedule and its overdue cursor from the database clock.
 	due, err := recurrences.Preview(routine.Trigger, now.UTC().AddDate(0, 0, -3), 1)
@@ -78,6 +96,26 @@ func TestRoutineUnresolvedRunPersonManualAndSchedulerAudits(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// The fixture owns a private database. Only this pool resolves the clock
+// substitute before pg_catalog, so creation and scheduling share the same now
+// without adding a production clock API or changing another test's clock.
+func routineAuditClock(t *testing.T, f *fixture, now time.Time) *pgxpool.Pool {
+	t.Helper()
+	if _, err := f.d.App.Exec(t.Context(), `CREATE FUNCTION public.clock_timestamp() RETURNS timestamptz
+ LANGUAGE sql AS $$SELECT current_setting('aeon.test_now')::timestamptz$$`); err != nil {
+		t.Fatal(err)
+	}
+	cfg := f.d.App.Config()
+	cfg.ConnConfig.RuntimeParams["search_path"] = "public,pg_catalog"
+	cfg.ConnConfig.RuntimeParams["aeon.test_now"] = now.Format(time.RFC3339)
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
 }
 
 // Risk: preferences/requester provenance invents an actor, or a retry rewrites

@@ -35,19 +35,32 @@ type Cache struct {
 
 func (c Cache) hash() string { c.SHA256 = ""; return jsonDigest(c) }
 func ValidateMerged(m Merged, c Context, now time.Time) error {
+	return validateMerged(m, c, now, false)
+}
+
+// ValidateManagedFiles validates the database envelope independently of the
+// compiled floor. Pin bytes are checked again by agentd before any launch.
+func ValidateManagedFiles(m Merged, c Context, now time.Time) error {
+	if len(m.PinnedFiles) == 0 {
+		return errors.New("rules_pin_missing")
+	}
+	return validateMerged(m, c, now, true)
+}
+
+func validateMerged(m Merged, c Context, now time.Time, pinned bool) error {
 	if err := ValidateContext(c); err != nil {
 		return err
 	}
-	if m.Context != c || !utf8.ValidString(m.Body) || m.ByteSize != len(m.Body) || m.ByteSize > MaxBytes || m.ByteSize == 0 || m.SHA256 != digest([]byte(m.Body)) || m.Floor == "" || !containsFloor(m.Body, m.Floor) {
+	if m.Context != c || !utf8.ValidString(m.Body) || m.ByteSize != len(m.Body) || m.ByteSize > MaxBytes || m.ByteSize == 0 || m.SHA256 != digest([]byte(m.Body)) || (!pinned || m.Floor != "") && (m.Floor == "" || !containsFloor(m.Body, m.Floor)) {
 		return errors.New("rules response context, digest, byte budget or floor does not match")
 	}
 	if m.ValidUntil != nil && !now.Before(*m.ValidUntil) {
 		return errors.New("cached rules crossed an expiry boundary; fetch again or keep only the locked floor")
 	}
-	if len(m.Versions) == 0 || len(m.Rules) > MaxRules*100 {
+	if !pinned && len(m.Versions) == 0 || len(m.Rules) > MaxRules*100 {
 		return errors.New("rules response lacks version evidence or exceeds bounds")
 	}
-	if !releasehistory.ValidVersion(m.Version) {
+	if !releasehistory.ValidVersion(m.Version) && !(pinned && len(m.Versions) == 0 && m.Version == "floor-only") {
 		return errors.New("invalid merged version")
 	}
 	for _, v := range m.Versions {
