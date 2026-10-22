@@ -333,8 +333,8 @@ export const reasonText = (reason: string) => {
   }
   const parts = reason.split(';').map(part => part.trim().replace(/^(column|default|role):\s*/, '').trim()).filter(Boolean)
     .map(part => words[part] ?? part)
-  const plain = [...new Set(parts)].join('; ')
-  return plain ? plain.charAt(0).toLowerCase() + plain.slice(1) : 'no qualified account has room right now'
+    .map(part => part.charAt(0).toLowerCase() + part.slice(1))
+  return [...new Set(parts)].join(' and ') || 'no qualified account has room right now'
 }
 
 /** "04:00" within a day, else "14 Oct" (with the year when it differs); nothing for a time that has passed. */

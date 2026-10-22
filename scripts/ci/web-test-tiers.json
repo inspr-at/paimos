@@ -7814,6 +7814,14 @@
     ,
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"the bulk bar and its menus have no axe violations in light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: 200 cost units keep rate request concurrency at six","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: continuation on the last allowed page reports partial for every business directory","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: partial customer quote contact and project lists show retry beside retained results","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: rejected rates remain in the hours picker and retry keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"a partly set up overview shows status only, and its one link to Settings › Business stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"a role that manages plugins but not settings switches the parts in Settings › Business","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14516,6 +14524,8 @@
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1510: Sonnet explains a single catalog level and keeps every granted level selectable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"New menu restores its trigger without moving header controls at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"New menu restores its trigger without moving header controls at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -15205,6 +15215,8 @@
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"known fixture responses and decorative labelled versions are filtered precisely","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"layout shift audit arms after navigation and resets startup movement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"layout shift audit filters delayed entries by start time without rounding away small shifts","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"overlap rule ignores a card action and modal background but keeps peer collisions","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -18307,6 +18319,14 @@
     {"kind":"vitest","file":"tests/authz.unit.test.ts","name":"can() > review r2: a 401 latches until a later 200, and never refetches by itself","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/authz.unit.test.ts","name":"can() > unions project and workspace permissions only for that project","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: 200 units use at most six rate reads and a rejected unit remains visible until retry succeeds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: a cursor at every directory cap returns typed partial rows and the final complete page stays complete","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: a late rate response or failure cannot replace a newer confirmed rate update","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: changing the rate-cache owner retires pending reads and stops queued requests","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > accepts exactly 2,000 rows but rejects a continuation rather than returning a partial list","tier":"GATED-FULL"}
     ,

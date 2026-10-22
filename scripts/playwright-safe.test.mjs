@@ -629,7 +629,28 @@ test('unverifiable live roots terminate their group without an invalid journal e
     await probe.completion
     assert.equal(calls, 3)
     assert.deepEqual(entries, [])
-    assert.throws(() => process.kill(-probe.child.pid, 0), { code: 'ESRCH' })
+    // The root's exit does not prove that every group member has been reaped
+    // (for example a ps spawned by its fixture preload). Force that ordering
+    // once so an immediate group-exit assertion deterministically fails.
+    const kill = process.kill.bind(process)
+    let groupChecks = 0
+    const injected = t.mock.method(process, 'kill', (pid, signal) => {
+      if (pid === -probe.child.pid && signal === 0 && ++groupChecks === 1) return true
+      return kill(pid, signal)
+    })
+    try {
+      // Negative control: the old immediate check fails for this interleaving.
+      assert.throws(() => assert.throws(() => process.kill(-probe.child.pid, 0), { code: 'ESRCH' }), {
+        code: 'ERR_ASSERTION', message: 'Missing expected exception.',
+      })
+      groupChecks = 0
+      await waitFor(() => {
+        try { process.kill(-probe.child.pid, 0); return false }
+        catch (error) { assert.equal(error.code, 'ESRCH'); return true }
+      })
+      assert.ok(groupChecks >= 2, 'group disappearance must be checked after the root exits')
+      assert.throws(() => process.kill(-probe.child.pid, 0), { code: 'ESRCH' })
+    } finally { injected.mock.restore() }
   } finally { probe.child.kill('SIGKILL'); await probe.completion }
 })
 

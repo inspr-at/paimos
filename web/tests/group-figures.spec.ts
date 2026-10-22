@@ -191,7 +191,7 @@ test('AEON-1388 the first header cell swaps KEY for three controls in fixed slot
   await expect(keyHead(page).locator(':focus-visible')).toHaveCount(1)
   expect(await visibility(fold)).toBe('visible')
   same(rest, await boxes(slots))
-  // An active selection keeps them out.
+  // An active selection keeps the checkbox visible and KEY hidden after hover ends.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   await rows(page).first().locator('.row-check').check()
   await page.mouse.move(700, 600)

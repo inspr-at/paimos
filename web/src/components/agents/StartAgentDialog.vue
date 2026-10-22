@@ -84,7 +84,7 @@ const reported = computed(() => sessionConnected.value && managed.value && reque
 const permitted = computed(() => can('work_orders.write') && can('run.create'))
 const selectionVisible = computed(() => !!view.value.profileId && view.value.efforts.some(effort => effort.value === view.value.profileId) && view.value.models.some(model => model.value === choice.value.modelKey) && view.value.accounts.some(account => account.value === choice.value.accountId))
 // Notes that only restate a single option are filler; notes that explain a choice or a gap stay.
-const FILLER = [/^Only one (harness|model) /, /^This model grants one thinking level/, /^These harnesses have an enrolled account/, /^Only one host has/]
+const FILLER = [/^Only one (harness|model) /, /^These harnesses have an enrolled account/, /^Only one host has/]
 const note = (text: string) => text && !FILLER.some(pattern => pattern.test(text)) ? text : ''
 // The status box below already states an unavailable account's reason.
 const notes = computed(() => ({ host: note(view.value.notes.host), harness: note(view.value.notes.harness), account: selectedWait.value || view.value.status.detail.includes(view.value.notes.account) ? '' : view.value.notes.account, model: note(view.value.notes.model), effort: note(view.value.notes.effort) }))
@@ -427,7 +427,7 @@ defineExpose({ open })
               <option value="">Choose a thinking level</option>
               <option v-for="effort in view.efforts" :key="effort.value" :value="effort.value">{{ effort.label }}</option>
             </select>
-            <p v-if="notes.effort" :id="`${uid}-effort-note`" class="note">{{ notes.effort }}</p>
+            <p :id="`${uid}-effort-note`" class="note effort-note">{{ notes.effort }}</p>
           </div>
           </div>
           </template>
@@ -526,6 +526,7 @@ label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; c
 .host-notes .note, .account-notes .note { grid-area: 1 / 1; }
 .host-notes .sizer, .account-notes .sizer { visibility: hidden; pointer-events: none; }
 .host-notes .sizer::before, .account-notes .sizer::before { content: attr(data-text); }
+.effort-note { min-block-size: 3em; }
 .remember { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 13px; font-weight: 500; color: var(--ink-2); }
 .remember input { margin: 0; }
 .role-note { margin-top: 0; }
