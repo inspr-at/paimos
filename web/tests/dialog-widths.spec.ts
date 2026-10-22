@@ -70,7 +70,7 @@ test('shared sheet variants and Start agent follow window resizing within their 
   await page.getByRole('menuitem', { name: /^Start agent/ }).click()
   const start = dialog(page, 'Start agent')
   await expect(start).toBeVisible()
-  await resize(start, DIALOG_SCALE.l, false)
+  await resize(start, DIALOG_SCALE.l)
   await start.getByRole('button', { name: 'Cancel', exact: true }).click()
 })
 

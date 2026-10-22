@@ -15,6 +15,8 @@ import * as policy from '../src/lib/reviewPolicy'
 import * as identity from '../src/lib/identityScope'
 import * as reviews from '../src/lib/reviews'
 import * as policies from '../src/lib/policies'
+import * as sharedRequests from '../src/lib/sharedRequests'
+import * as agentProjection from '../src/lib/agentProjection'
 import * as api from '../src/lib/api'
 const session = Vue.reactive({ identity:{ tenant:{ id:'tenant' }, principal:{ id:'person', kind:'person' } } })
 const profile = Vue.reactive({ profile:{ locale:'en' } })
@@ -26,7 +28,7 @@ const json = (body:unknown, status=200) => new Response(JSON.stringify(body), { 
 const deferred = () => { let release!:(value:Response) => void; const promise = new Promise<Response>(resolve => { release=resolve }); return {promise,release} }
 async function settle() { for(let i=0;i<15;i++) await Promise.resolve(); await Vue.nextTick() }
 function setup<T>(file:string,props:object):T {
- const modules:Record<string,unknown> = { vue:{...Vue,onBeforeUnmount:(fn:() => void) => unmounts.push(fn)}, '../../lib/api':api, '../../lib/authz':{can:(key:string) => key.endsWith('.read') ? access.read : access.manage,onAccessRevalidate:() => () => {}}, '../../lib/delivery':delivery,'../../lib/reviewPolicy':policy,'../../lib/reviews':reviews,'../../lib/policies':policies,'../../lib/identityScope':identity,'../../lib/toast':{toast:(_text:string,options:{action:{run:() => void}}) => actions.push(options.action.run)},'../../stores/session':{useSession:() => session},'../../stores/profile':{useProfile:() => profile}, '../../stores/projects':{useProjects:() => ({projects:[{id:'project',routeKey:'AEON'}]})}, '../../lib/deliveryNumbers':deliveryNumbers, '../../lib/projectSettings':projectSettings, '../AppIcon.vue':{}, '../KeyCap.vue':{}, './DeliveryRow.vue':{}, './DeliveryQueue.vue':{}, './SettingsCard.vue':{} }
+ const modules:Record<string,unknown> = { vue:{...Vue,onBeforeUnmount:(fn:() => void) => unmounts.push(fn)}, '../../lib/api':api, '../../lib/sharedRequests':sharedRequests, '../../lib/agentProjection':agentProjection, '../../lib/authz':{can:(key:string) => key.endsWith('.read') ? access.read : access.manage,onAccessRevalidate:() => () => {}}, '../../lib/delivery':delivery,'../../lib/reviewPolicy':policy,'../../lib/reviews':reviews,'../../lib/policies':policies,'../../lib/identityScope':identity,'../../lib/toast':{toast:(_text:string,options:{action:{run:() => void}}) => actions.push(options.action.run)},'../../stores/session':{useSession:() => session},'../../stores/profile':{useProfile:() => profile}, '../../stores/projects':{useProjects:() => ({projects:[{id:'project',routeKey:'AEON'}]})}, '../../lib/deliveryNumbers':deliveryNumbers, '../../lib/projectSettings':projectSettings, '../AppIcon.vue':{}, '../KeyCap.vue':{}, './DeliveryRow.vue':{}, './DeliveryQueue.vue':{}, './SettingsCard.vue':{} }
  const {descriptor}=parse(readFileSync(new URL(`../src/components/${file}`,import.meta.url),'utf8'))
  const {content}=compileScript(descriptor,{id:file})
  const exports:{default?:{setup:(props:object,context:object) => T}}={}
@@ -34,7 +36,7 @@ function setup<T>(file:string,props:object):T {
  const scope=Vue.effectScope();scopes.push(scope)
  return scope.run(() => exports.default!.setup(props,{expose:() => {}}))!
 }
-beforeEach(() => { vi.useFakeTimers();vi.stubGlobal('navigator',{platform:'Mac'});session.identity.principal.id='person';access.manage=true;access.read=true;http.handle=async () => json(settings()) })
+beforeEach(() => { vi.useFakeTimers();vi.stubGlobal('document',Object.assign(new EventTarget(),{visibilityState:'visible'}));vi.stubGlobal('window',new EventTarget());vi.stubGlobal('navigator',{platform:'Mac'});session.identity.principal.id='person';access.manage=true;access.read=true;http.handle=async () => json(settings()) })
 afterEach(() => {for(const stop of unmounts.splice(0))stop();for(const scope of scopes.splice(0))scope.stop();actions.splice(0);vi.useRealTimers();vi.unstubAllGlobals()})
 type Ticket = { result:Vue.Ref<delivery.DeliveryPage|null>; lift:(item:delivery.DeliveryItem) => Promise<unknown>; load:() => Promise<unknown>; mutationError:Vue.Ref<string>; error:Vue.Ref<string>; lifted:Vue.Ref<string[]>; showSlot:Vue.ComputedRef<boolean> }
 type Card = { rules:Vue.Ref<policies.ReviewerRules|null>; base:Vue.Ref<policy.ReviewPolicySettings|null>; selected:Vue.Ref<string>; mode:Vue.Ref<string>; families:Vue.Ref<string[]>; save:() => Promise<unknown>; write:(policy:policy.ReviewPolicy|null,reset:boolean) => Promise<unknown>; message:Vue.Ref<string>; dirty:Vue.ComputedRef<boolean>; feedback:Vue.ComputedRef<string> }
