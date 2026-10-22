@@ -286,16 +286,32 @@ test.describe('gear menu', () => {
 
   test('help shows what is new and sends feedback to the owner’s inbox', async ({ page }) => {
     const state = await signIn(page, 'member')
+    let releaseRecipient!: () => void, releaseSend!: () => void
+    const recipient = new Promise<void>(resolve => { releaseRecipient = resolve })
+    const delivery = new Promise<void>(resolve => { releaseSend = resolve })
+    await page.route('**/api/inbox/feedback-recipient', async route => { await recipient; await route.fallback() })
+    await page.route('**/api/inbox/messages', async route => {
+      if (route.request().method() === 'POST') await delivery
+      await route.fallback()
+    })
     await home(page)
+    await page.evaluate(() => document.fonts.ready)
     await openGear(page)
-    await page.getByRole('menuitem', { name: 'Help & feedback' }).click()
+    const menu = page.getByRole('menu', { name: 'App and workspace' })
+    await menu.getByRole('menuitem', { name: 'Help & feedback' }).press('Enter')
     const pane = page.getByRole('dialog', { name: 'Help and feedback' })
     await expect(pane.getByRole('button', { name: 'Back to the menu' })).toBeFocused()
     await expect(pane).toContainText('Guaranteed inbox delivery')
     await expect(pane).toContainText('Every release says what it changes for you.')
+    await expect(pane.getByRole('textbox')).toBeDisabled()
+    releaseRecipient()
     const text = pane.getByLabel('Feedback for Ada Lindqvist')
+    await expect(text).toBeEnabled()
     await text.fill('The gear menu is lovely.')
     await pane.getByRole('button', { name: 'Send' }).click()
+    await expect(pane.getByRole('button', { name: 'Sending…' })).toBeDisabled()
+    await expect(pane.getByRole('status')).toHaveCount(0)
+    releaseSend()
     await expect(pane.getByRole('status')).toHaveText('Sent to Ada Lindqvist. Thank you.')
     expect(state.sent).toHaveLength(1)
     expect(state.sent[0]).toMatchObject({ recipient_principal_id: '99999999-9999-4999-8999-999999999999', idempotency_key: expect.any(String) })
@@ -303,8 +319,9 @@ test.describe('gear menu', () => {
     // Back returns to the menu on the Help row; What's new opens the release.
     await pane.getByRole('button', { name: 'Back to the menu' }).click()
     await expect(page.getByRole('menuitem', { name: 'Help & feedback' })).toBeFocused()
-    await page.getByRole('menuitem', { name: 'Help & feedback' }).click()
-    await page.getByRole('button', { name: 'See this release' }).click()
+    await menu.getByRole('menuitem', { name: 'Help & feedback' }).press('Enter')
+    await expect(pane.getByRole('button', { name: 'Back to the menu' })).toBeFocused()
+    await pane.getByRole('button', { name: 'See this release' }).click()
     await expect(page).toHaveURL(/[?&]releases=\d{12}\.\d+\.\d+/)
   })
 

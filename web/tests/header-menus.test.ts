@@ -94,3 +94,61 @@ test('P02 rendered account menus bind the current identity and preserve it when 
     assert.deepEqual(routes, ['/signin']); assert.equal(renderText(view.root), '')
   } finally { view.stop() }
 })
+
+test('P02 rendered help waits for its recipient and reuses a refused feedback identity until confirmed', async () => {
+  let releaseRecipient!: (recipient: { principal_id: string; name: string }) => void
+  const recipient = new Promise<{ principal_id: string; name: string }>(resolve => { releaseRecipient = resolve })
+  let finishSend!: () => void
+  const heldSend = new Promise<void>(resolve => { finishSend = resolve })
+  const calls: unknown[][] = [], commands: unknown[] = []
+  let refused = true
+  const version = '260922120000.0.0'
+  const view = renderSource('components/header/AppMenu.vue', {}, {
+    'vue-router': { useRoute: () => ({ fullPath: '/p/PHAROS' }), useRouter: () => ({ push() {} }) },
+    '../../lib/api': { api: async () => new Response('{}') },
+    '../../lib/codenames': { codenameOf: () => '', releaseAria: () => '', rememberCodename() {} },
+    '../../lib/authz': { can: (permission: string) => permission === 'inbox.send', myWorkspaceRole: () => 'member' },
+    '../../lib/commands': { command: ref(null), consume() {}, run: (command: unknown) => commands.push(command) },
+    '../../lib/feedback': { feedbackRecipient: () => recipient, sendFeedback: async (...args: unknown[]) => {
+      calls.push(args); await heldSend; if (refused) throw new Error('not delivered')
+    } },
+    '../../lib/headerMenus': menuWords,
+    '../../lib/releases': { displayHeadline: () => '', hasUsableNotes: () => true, localizedNote: (note: unknown) => note },
+    '../../lib/work': { relativeTime: () => '', absoluteTime: () => '' },
+    '../../stores/releases': { useReleases: () => ({ newCount: 0, current: version, history: { releases: [{ version,
+      notes: { items: [{ pill: 'Guaranteed inbox delivery', benefit: 'Every release says what it changes for you.' }] } }] }, load() {} }) },
+    '../../stores/session': { useSession: () => ({ identity: { principal: { id: 'alice', kind: 'person' }, tenant: { id: 'tenant' } } }) },
+    '../../stores/business': { useBusiness: () => ({ placeOpen: false }) },
+    '../../stores/version': { useVersion: () => ref({ version }) }, '../../lib/doctrineInbox': { doctrineInbox: { pending: 0 } },
+  })
+  const button = (label: string) => renderNodes(view.root, node => node.tag === 'button' && renderText(node) === label)[0]!
+  const field = () => renderNodes(view.root, node => node.tag === 'textarea')[0]!
+  const form = () => renderNodes(view.root, node => node.tag === 'form')[0]!
+  try {
+    const opening = (button('Help & feedback').props.onClick as Function)()
+    await nextTick(); assert.equal(field().props.disabled, true); assert.deepEqual(calls, [])
+    assert.match(renderText(view.root), /Guaranteed inbox delivery/)
+    releaseRecipient({ principal_id: 'owner-1', name: 'Ada Lindqvist' }); await opening; await nextTick()
+    assert.equal(field().props.disabled, false)
+    ;(field().props['onUpdate:modelValue'] as Function)('The gear menu is lovely.')
+    await nextTick()
+    const sending = (form().props.onSubmit as Function)({ preventDefault() {} })
+    await nextTick()
+    assert.equal(button('Sending…').props.disabled, true)
+    assert.doesNotMatch(renderText(view.root), /Sent to Ada/)
+    assert.equal(calls.length, 1)
+    finishSend(); await sending; await nextTick()
+    assert.match(renderText(view.root), /Your feedback was not sent/)
+    assert.equal(field().props.value, 'The gear menu is lovely.')
+    refused = false
+    await (form().props.onSubmit as Function)({ preventDefault() {} }); await nextTick()
+    assert.equal(calls.length, 2); assert.deepEqual(calls[0], calls[1])
+    assert.equal(calls[0]![0], 'owner-1')
+    assert.equal(calls[0]![1], `Feedback from the app (on /p/PHAROS, version ${version})\n\nThe gear menu is lovely.`)
+    assert.match(String(calls[0]![2]), /^[a-f0-9-]{36}$/)
+    assert.match(renderText(view.root), /Sent to Ada Lindqvist\. Thank you\./)
+    assert.equal(field().props.value, '')
+    ;(button('See this release').props.onClick as Function)()
+    assert.deepEqual(commands, [{ name: 'releases', version }])
+  } finally { finishSend(); view.stop() }
+})
