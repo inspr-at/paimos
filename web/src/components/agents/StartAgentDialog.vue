@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { listNodes, type WorkNode } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { useSession } from '../../stores/session'
+import { useProjects } from '../../stores/projects'
 import { deletePin, listPins, putPin, message, type AgentRun, type HarnessSession } from '../../lib/agents'
 import { getRun, listAllSessions, runNowOnce } from '../../lib/agentRows'
 import {
@@ -15,12 +16,25 @@ import { launchState, staleGrantRejection, startAgent } from '../../lib/startAge
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 
 // Shared by /agents and TicketWorkspace. The cascade is host, harness, account,
 // model, then thinking. Each later step is filled only from the catalog grant.
 const agents = useAgents()
 const session = useSession()
+const projects = useProjects()
+const person = computed(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '')
+const oneOff = ref(false)
+const newTicket = ref(true)
+const projectId = ref('')
+const task = ref('')
+const instruction = ref('')
+const mayChangeFiles = ref(false)
+let requestId = '', requestKey = ''
+const projectOptions = computed(() => projects.projects.filter(project => !project.archived && !project.frozen))
+const selectedProject = computed(() => projectOptions.value.find(project => project.id === projectId.value))
 const uid = useId()
+const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const dialog = ref<HTMLDialogElement>()
 const searchInput = ref<HTMLInputElement>()
 const hostSelect = ref<HTMLSelectElement>()
@@ -61,7 +75,7 @@ let searchGeneration = 0
 let catalogGeneration = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 const poll = usePoller(() => { now.value = Date.now(); if (run.value) return refresh() }, 3000, { enabled: () => visible.value && !!run.value })
-const role = computed(() => workRoleFor(ticket.value))
+const role = computed(() => workRoleFor(oneOff.value && newTicket.value ? null : ticket.value))
 const view = computed(() => presentCascade({ catalog: catalog.value, role: role.value, authorFamily: authorFamily.value }, choice.value, touch.value))
 const piModelBound = computed(() => choice.value.harness === 'pi' && view.value.models.length === 1)
 const cascadeLocked = computed(() => loading.value || catalogGap.value === 'failed' || catalogGap.value === 'forbidden' || catalogGap.value === 'family')
@@ -83,8 +97,23 @@ const onNarrow = (event: MediaQueryListEvent) => { narrow.value = event.matches 
 narrowQuery?.addEventListener('change', onNarrow)
 const accountLabel = (label: string) => narrow.value ? label.split(' · ').slice(0, 2).join(' · ') : label
 const selectedWait = computed(() => catalog.value?.hosts.find(h => h.daemon_id === choice.value.hostId)?.harnesses.find(h => h.harness === choice.value.harness)?.accounts.find(a => a.id === choice.value.accountId)?.wait)
+const readOnlyCapability = computed(() => catalog.value?.hosts.find(h => h.daemon_id === choice.value.hostId)?.harnesses.find(h => h.harness === choice.value.harness)?.read_only_run)
+const readOnlyReason = computed(() => !oneOff.value || mayChangeFiles.value || !choice.value.harness ? '' : readOnlyCapability.value?.supported && readOnlyCapability.value.policy === 'no_tools' ? '' : readOnlyCapability.value?.reason || 'This account catalog has no qualified read-only one-off adapter. Refresh it or choose another harness.')
 const mayRunNow = computed(() => permitted.value && session.identity?.principal.kind === 'person')
-const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && ticket.value?.is_leaf === true && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
+const contextReady = computed(() => oneOff.value && newTicket.value ? can('nodes.write') && !!selectedProject.value?.nodeUpdatedAt && !!task.value.trim() : ticket.value?.is_leaf === true)
+const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && contextReady.value && !readOnlyReason.value && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
+
+function resetTask() {
+  generation++; instruction.value = ''; mayChangeFiles.value = false; task.value = ''; error.value = ''
+  requestId = ''; requestKey = ''
+}
+watch([() => ticket.value?.id, projectId, newTicket], resetTask, { flush: 'sync' })
+watch(person, () => {
+  resetTask(); searchGeneration++; catalogGeneration++; pinGeneration++
+  visible.value = false; busy.value = false; checking.value = false
+  ticket.value = null; projectId.value = ''; runId.value = ''; managedId.value = ''; requested.value = null
+  catalog.value = null; tickets.value = []; poll.stop(); clearTimeout(searchTimer); dialog.value?.close()
+}, { flush: 'sync' })
 
 async function search(more = false) {
   const turn = ++searchGeneration
@@ -159,10 +188,11 @@ watch([() => ticket.value?.id, () => choice.value.harness, catalog], async () =>
     remember.value = true
   } catch { /* A missing pin leaves the checkbox clear. */ }
 })
-async function open(initial?: WorkNode) {
+async function open(initial?: WorkNode, mode: 'expert' | 'once' = 'expert') {
   if (busy.value) return
   opener = document.activeElement as HTMLElement
   generation++; visible.value = true
+  oneOff.value = mode === 'once'; newTicket.value = !initial; projectId.value = ''; resetTask()
   ticket.value = initial?.is_leaf === true ? initial : null; query.value = ''; tickets.value = []; nextCursor.value = null
   authorFamily.value = authorFamilyFor(ticket.value)
   catalog.value = null; catalogGap.value = null; catalogMessage.value = ''
@@ -172,11 +202,24 @@ async function open(initial?: WorkNode) {
   error.value = ''; checkError.value = ''; searchError.value = ''; grantStale.value = false
   dialog.value?.showModal()
   void loadCatalog()
+  if (oneOff.value) void projects.load()
   if (!ticket.value) void search()
   poll.start()
   await nextTick()
   if (ticket.value) hostSelect.value?.focus()
   else searchInput.value?.focus()
+}
+function openOnce(initial?: WorkNode) { return open(initial, 'once') }
+function escape() {
+  const active = document.activeElement
+  if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement && ['text', 'search'].includes(active.type)) { active.blur(); return }
+  close()
+}
+function formKey(event: KeyboardEvent) {
+  if (event.key !== 'Enter') return
+  if (!event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) {
+    event.preventDefault(); event.stopPropagation(); void submit()
+  } else if (event.target instanceof HTMLInputElement && ['text', 'search'].includes(event.target.type) && !event.ctrlKey && !event.metaKey) event.preventDefault()
 }
 function close() {
   if (busy.value) return
@@ -196,19 +239,33 @@ function changeTicket() {
   void nextTick(() => searchInput.value?.focus())
 }
 async function submit(runNow = false) {
-  if (!canSubmit.value || !ticket.value) return
+  if (!canSubmit.value) return
+  const context = oneOff.value && newTicket.value && selectedProject.value
+    ? { id: selectedProject.value.id, updated_at: selectedProject.value.nodeUpdatedAt! } as WorkNode
+    : ticket.value
+  if (!context) return
   busy.value = true; error.value = ''
+  const turn = generation, owner = person.value
+  const chosen = { ticket: { ...context }, agentId: view.value.agentId, profileId: view.value.profileId, accountId: choice.value.accountId, runNow }
+  const options = { instruction: instruction.value, repositoryMutationAllowed: mayChangeFiles.value, ...(newTicket.value ? { task: task.value } : {}) }
+  const signature = JSON.stringify([owner, chosen, options])
+  if (signature !== requestKey) { requestKey = signature; requestId = crypto.randomUUID() }
+  const isCurrent = () => turn === generation && visible.value && owner === person.value
   const pinned = { ...view.value.requested }
+  const pin = { ticket: oneOff.value && newTicket.value ? undefined : ticket.value?.id, harness: choice.value.harness, account: choice.value.accountId, remember: remember.value, remembered: remembered.value }
   const mark = writeMark()
   try {
-    if (choice.value.accountId && remember.value) await putPin({ ticket_id: ticket.value.id, harness: choice.value.harness, account_id: choice.value.accountId })
-    else if (remembered.value && !remember.value) await deletePin(ticket.value.id, choice.value.harness)
-    const result = await startAgent({ ticket: ticket.value, agentId: view.value.agentId, profileId: view.value.profileId, accountId: choice.value.accountId, runNow }, { run: agents.admitRun, runs: agents.admitRuns })
+    if (pin.ticket && pin.account && pin.remember) await putPin({ ticket_id: pin.ticket, harness: pin.harness, account_id: pin.account })
+    else if (pin.ticket && pin.remembered && !pin.remember) await deletePin(pin.ticket, pin.harness)
+    if (!isCurrent()) return
+    const result = await startAgent({ ...chosen, ...(oneOff.value ? { runOnce: { ...options, requestId } } : {}), isCurrent }, { run: agents.admitRun, runs: agents.admitRuns })
+    if (!isCurrent()) return
     runId.value = result.run.id; reused.value = result.reused; requested.value = pinned
     void agents.afterWrite()
     await refresh()
     await nextTick(); dialog.value?.querySelector<HTMLElement>('[data-result]')?.focus()
   } catch (e) {
+    if (!isCurrent()) return
     // A pin or a work order may already be written when a later step fails: the lists re-read either way.
     if (wroteSince(mark)) void agents.afterWrite()
     if (staleGrantRejection(e)) {
@@ -220,7 +277,7 @@ async function submit(runNow = false) {
       error.value = 'This account no longer allows that model. Nothing was queued, and another account was not used. Refresh the catalog, then choose a model it offers.'
     } else error.value = `${message(e)} Your selections are kept. Retrying checks for an existing work order and run first.`
   }
-  finally { busy.value = false }
+  finally { if (isCurrent()) busy.value = false }
 }
 async function overrideQueued() {
   if (!run.value || busy.value) return
@@ -247,21 +304,42 @@ async function refresh() {
   finally { checking.value = false }
 }
 onBeforeUnmount(() => { narrowQuery?.removeEventListener('change', onNarrow); generation++; searchGeneration++; catalogGeneration++; poll.stop(); clearTimeout(searchTimer) })
-defineExpose({ open })
+defineExpose({ open, openOnce })
 </script>
 
 <template>
-  <dialog ref="dialog" class="launch-dialog" :aria-labelledby="`${uid}-title`" @cancel.prevent="close">
-    <form class="launch-card" @submit.prevent="submit()">
+  <dialog ref="dialog" class="launch-dialog" :aria-labelledby="`${uid}-title`" @cancel.prevent="escape">
+    <form class="launch-card" @submit.prevent="submit()" @keydown="formKey">
       <header class="launch-head">
-        <h2 :id="`${uid}-title`">Start agent</h2>
+        <h2 :id="`${uid}-title`">{{ oneOff ? 'Run once' : 'Start agent' }}</h2>
         <button type="button" class="icon-btn flat" aria-label="Close start agent" :disabled="busy" @click="close"><AppIcon name="close" /></button>
       </header>
 
       <template v-if="!run">
-        <fieldset :disabled="busy" class="launch-fields">
+        <div class="launch-body">
+        <fieldset :disabled="busy" class="launch-fields" :class="{ 'one-off': oneOff }">
           <legend class="sr-only">Run setup</legend>
-          <div class="ticket-field">
+          <div v-if="oneOff" class="context-choice select-field">
+            <label :for="`${uid}-context`">Context</label>
+            <select :id="`${uid}-context`" v-model="newTicket" class="field">
+              <option :value="true">Create a ticket in a project</option>
+              <option :value="false">Use an existing ticket</option>
+            </select>
+          </div>
+          <div v-if="oneOff && newTicket" class="new-ticket">
+            <div class="select-field">
+              <label :for="`${uid}-project`">Project</label>
+              <select :id="`${uid}-project`" v-model="projectId" class="field"><option value="">Choose a project</option><option v-for="project in projectOptions" :key="project.id" :value="project.id">{{ project.routeKey }} · {{ project.title }}</option></select>
+            </div>
+            <div class="select-field">
+              <label :for="`${uid}-task`">Task</label>
+              <input :id="`${uid}-task`" v-model="task" class="field" maxlength="160" />
+            </div>
+            <p class="note">A visible Run once ticket is created in this project and excluded from release notes.</p>
+            <p v-if="!can('nodes.write')" class="note">Creating a ticket requires node-write permission. An existing ticket can be selected instead.</p>
+            <p v-if="projects.error" class="note bad" role="alert">{{ projects.error }} <button type="button" class="btn sm" @click="projects.load(true)">Retry projects</button></p>
+          </div>
+          <div v-if="!oneOff || !newTicket" class="ticket-field">
             <label :for="`${uid}-search`">Ticket</label>
             <div v-if="ticket" class="chosen-ticket">
               <AppIcon name="ticket" :size="18" />
@@ -282,6 +360,15 @@ defineExpose({ open })
               </div>
             </template>
           </div>
+          <div v-if="oneOff" class="instruction-field select-field">
+            <label :for="`${uid}-instruction`">Instruction (optional)</label>
+            <textarea :id="`${uid}-instruction`" v-model="instruction" class="field instruction" maxlength="2000" rows="3" />
+            <p class="note">When empty, the ticket text is used; a ticket without text uses its title.</p>
+          </div>
+          <div v-if="oneOff" class="restriction-field">
+            <label class="remember"><input v-model="mayChangeFiles" type="checkbox"> May change files</label>
+          </div>
+          <p v-if="oneOff" class="note restriction-note" role="status">{{ readOnlyReason || (mayChangeFiles ? 'The ordinary managed run tools and workspace checks apply.' : 'Read-only: no tools, repository access or external actions. The supplied task context is used.') }}</p>
           <p v-if="view.roleNote && role.source !== 'default'" class="note role-note">{{ view.roleNote }}</p>
           <div v-if="role.role === 'review-gate'" class="select-field">
             <label :for="`${uid}-family`">Author family</label>
@@ -316,7 +403,7 @@ defineExpose({ open })
               <option v-for="account in view.accounts" :key="account.value" :value="account.value">{{ accountLabel(account.label) }}</option>
             </select>
             <p v-if="notes.account" :id="`${uid}-account-note`" class="note">{{ notes.account }}</p>
-            <label v-if="choice.accountId" class="remember"><input v-model="remember" type="checkbox"> Remember for this ticket</label>
+            <label v-if="choice.accountId && !oneOff" class="remember"><input v-model="remember" type="checkbox"> Remember for this ticket</label>
           </div>
           <div class="pair" :class="{ 'pi-bound': piModelBound }">
           <div class="select-field">
@@ -344,10 +431,12 @@ defineExpose({ open })
         <div v-if="catalogGap === 'failed' || catalogGap === 'forbidden'" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
         <div v-if="error" class="error" role="alert"><p>{{ error }}</p><button v-if="grantStale" type="button" class="btn sm" @click="loadCatalog">Refresh catalog</button></div>
         <p v-if="!permitted" class="note">Starting an agent requires work-order write and run-create permission.</p>
-        <footer><button type="button" class="btn" :disabled="busy" @click="close">Cancel</button><button v-if="mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">Run now once</button><button type="submit" class="btn primary" :disabled="!canSubmit"><AppIcon :name="busy ? 'clock' : 'arrow'" :size="15" />{{ busy ? 'Queueing…' : 'Queue run' }}</button></footer>
+        </div>
+        <footer><button type="button" class="btn" :disabled="busy" @click="close">Cancel</button><button v-if="mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">Run now once</button><button type="submit" class="btn primary" :disabled="!canSubmit"><AppIcon :name="busy ? 'clock' : 'arrow'" :size="15" /><span class="queue-label"><span :class="{ inactive: busy }">Queue run</span><span :class="{ inactive: !busy }">Queueing…</span></span><template v-if="oneOff"><KeyCap k="mod" /><KeyCap k="enter" /></template></button></footer>
       </template>
 
       <template v-else>
+        <div class="launch-body">
         <div class="run-result" data-result tabindex="-1" role="status">
           <span class="result-icon"><AppIcon :name="managed ? 'check' : 'clock'" :size="24" /></span>
           <p class="eyebrow">{{ reused ? 'Existing run' : 'Run created' }}</p>
@@ -375,9 +464,11 @@ defineExpose({ open })
             <p v-else-if="!reported.modelKnown || !reported.accountKnown || !reported.thinkingKnown" class="note">The session has not reported every field.</p>
           </div>
           <p class="note mono">Run {{ run.id.slice(0, 8) }}</p>
+          <p v-if="run.run_once" class="note">{{ run.repository_mutation_allowed ? 'May change files' : 'Read-only · no tools or repository access' }}</p>
         </div>
         <button v-if="mayRunNow && run.status === 'queued' && run.wait?.run_now_allowed" type="button" class="btn" :disabled="busy" @click="overrideQueued">Run now once</button>
         <p v-if="checkError" class="error" role="alert">{{ checkError }}</p>
+        </div>
         <footer class="result-footer"><button type="button" class="btn ghost" :disabled="checking" @click="refresh"><AppIcon name="refresh" :size="14" />Refresh status</button><button type="button" class="btn" :disabled="busy" @click="close">Close</button><RouterLink class="btn primary" :to="managed ? `/agents/${managed.id}` : '/agents'" @click="close">{{ managed ? 'Open session' : 'Go to Agents' }}<AppIcon name="arrow" :size="15" /></RouterLink></footer>
       </template>
     </form>
@@ -385,9 +476,22 @@ defineExpose({ open })
 </template>
 
 <style scoped>
-.launch-dialog { width: min(var(--dialog-l), calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: auto; scrollbar-gutter: stable; }
+.launch-dialog { position: fixed; inset: 16px auto auto 50%; transform: translateX(-50%); margin: 0; width: min(var(--dialog-l), calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: hidden; }
 .launch-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(5px); }
-.launch-card { padding: 22px 24px 20px; }
+.launch-card { padding: 22px 24px 20px; display: flex; flex-direction: column; max-height: calc(100dvh - 34px); min-height: 0; }
+.launch-head { order: 0; flex-shrink: 0; }
+.launch-body { order: 2; overflow-y: auto; scrollbar-gutter: stable; min-height: 0; }
+.launch-card > footer { order: 1; flex-shrink: 0; margin: 0 0 16px; padding: 0 0 16px; border-top: 0; border-bottom: 1px solid var(--line); }
+.one-off .context-choice { order: -1; }
+.one-off .instruction-field { order: 10; }
+.one-off .restriction-field { order: 11; }
+.one-off .ticket-field, .one-off .new-ticket { order: 20; }
+.new-ticket { display: grid; gap: 14px; }
+.instruction.field { height: auto; resize: none; }
+.one-off .restriction-note { order: 30; }
+.queue-label { display: grid; }
+.queue-label > span { grid-area: 1 / 1; }
+.queue-label .inactive { visibility: hidden; }
 .launch-head { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }
 .launch-head h2 { font-size: 21px; letter-spacing: -.4px; }
 .launch-head .icon-btn { margin-left: auto; flex-shrink: 0; }
@@ -442,8 +546,10 @@ footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
 .pair.pi-bound { grid-template-columns: minmax(0, 1fr) 130px; }
 .field.pinned-model { font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; }
 @media (max-width: 600px) {
-  .launch-dialog { max-height: calc(100dvh - 16px); width: calc(100vw - 16px); border-radius: 18px; }
-  .launch-card { padding: 20px 16px; }
+  .launch-dialog { inset: 0; transform: none; max-height: 100dvh; height: 100dvh; width: 100%; border-radius: 0; }
+  .launch-card { padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); height: 100%; max-height: 100dvh; }
+  .launch-body { flex: 1; }
+  .launch-card > footer { order: 3; margin: 14px 0 0; padding: 14px 0 0; border-bottom: 0; border-top: 1px solid var(--line); }
   .pair, .pair.pi-bound { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .launch-head { margin-bottom: 14px; }
   .launch-fields { gap: 14px; }

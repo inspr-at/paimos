@@ -14458,6 +14458,22 @@
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"New menu restores its trigger without moving header controls at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once controls stay still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once controls stay still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once controls stay still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once controls stay still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once controls stay still at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once controls stay still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once is available without developer settings and recovers an exact read-only request","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once resets task choices on context changes and never reuses a different instruction","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"a catalog miss stays empty until retry","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"a connected session keeps the request separate from what it reports","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -20856,9 +20872,15 @@
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"run now once > uses the server wait reason on a queued run","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > binds a one-off retry to its exact context, instruction and restriction","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > copies ticket content and criteria, readies with revision, then queues the selected agent/profile","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > does not queue after a revision conflict or unblock an order implicitly","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > does not reuse a one-off run for an ordinary ticket start","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > drops an old one-off response after the context or person changes","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > judges the launch result by the run ledger: a newer row that landed while the POST was in flight stands","tier":"GATED-FULL"}
     ,

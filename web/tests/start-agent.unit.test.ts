@@ -58,6 +58,38 @@ function backend(options: { existing?: WorkOrder[]; runs?: AgentRun[]; failPatch
 afterEach(() => vi.unstubAllGlobals())
 
 describe('work-order launch', () => {
+  it('binds a one-off retry to its exact context, instruction and restriction', async () => {
+    const sent: { path: string; body: Record<string, unknown> }[] = []
+    let lose = true
+    vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body))
+      sent.push({ path, body })
+      if (lose) { lose = false; throw new TypeError('lost response after commit') }
+      return new Response(JSON.stringify({ ...queued, id: body.request_id, run_once: true, instruction: body.instruction, repository_mutation_allowed: body.repository_mutation_allowed }), { status: 201 })
+    }))
+    const chosen = { ...selection, ticket: { ...ticket, updated_at: '2026-10-22T08:00:00Z' }, runOnce: { requestId: 'once-request', instruction: '  Inspect exactly this.\n', repositoryMutationAllowed: false }, isCurrent: () => true }
+    await expect(startAgent(chosen, admission())).rejects.toThrow('No connection')
+    const result = await startAgent(chosen, admission())
+    expect(result.run).toMatchObject({ id: 'once-request', run_once: true, instruction: '  Inspect exactly this.\n', repository_mutation_allowed: false })
+    expect(sent).toEqual([sent[0], sent[0]])
+    expect(sent[0]).toEqual({ path: '/api/nodes/ticket/run-once', body: { request_id: 'once-request', expected_updated_at: '2026-10-22T08:00:00Z', instruction: '  Inspect exactly this.\n', repository_mutation_allowed: false, agent_principal_id: 'agent', model_profile_id: 'model' } })
+  })
+  it('drops an old one-off response after the context or person changes', async () => {
+    let answer!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { answer = resolve })))
+    let current = true
+    const page = { run: vi.fn(), runs: vi.fn() }
+    const pending = startAgent({ ...selection, runOnce: { requestId: 'once', instruction: 'Inspect', repositoryMutationAllowed: false }, isCurrent: () => current }, page)
+    current = false
+    answer(new Response(JSON.stringify(queued), { status: 201 }))
+    await expect(pending).rejects.toThrow('context or person changed')
+    expect(page.run).not.toHaveBeenCalled()
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+  })
+  it('does not reuse a one-off run for an ordinary ticket start', async () => {
+    backend({ existing: [order], runs: [{ ...queued, run_once: true, instruction: 'Another task', repository_mutation_allowed: false }] })
+    await expect(startAgent(selection, admission())).rejects.toThrow('already has an active run')
+  })
   it('rejects a freshly read parent or unknown shape before any work-order write', async () => {
     for (const is_leaf of [false, undefined]) {
       const calls = backend()

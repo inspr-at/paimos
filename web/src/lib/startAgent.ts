@@ -13,7 +13,7 @@
 import { api, APIError, getNode, listNodes, type WorkNode } from './api.ts'
 import { capacityWaitText } from './capacityWait.ts'
 import type { AgentRun } from './agents.ts'
-import { createRun, listRuns, runNowOnce, type AgentRunRow } from './agentRows.ts'
+import { createRun, createRunOnce, listRuns, runNowOnce, type AgentRunRow } from './agentRows.ts'
 import type { Wire } from './wire.ts'
 
 export interface WorkOrder {
@@ -26,7 +26,11 @@ export interface WorkOrder {
 // here looks at it or hands it on (AEON-449): the decision to reuse a run, and the
 // result the dialog shows, are the rows that stand, never a copy a later read can outrank.
 export interface RunAdmission { run: (wire: Wire<AgentRunRow>) => AgentRun; runs: (wires: Wire<AgentRunRow>[]) => AgentRun[] }
-export interface StartSelection { ticket: WorkNode; agentId: string; profileId: string; accountId?: string; runNow?: boolean }
+export interface StartSelection {
+  ticket: WorkNode; agentId: string; profileId: string; accountId?: string; runNow?: boolean
+  runOnce?: { requestId: string; task?: string; instruction: string; repositoryMutationAllowed: boolean }
+  isCurrent?: () => boolean
+}
 export const activeRun = (run: AgentRun) => ['queued', 'starting', 'running', 'waiting'].includes(run.status)
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -45,18 +49,34 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 // cross-client idempotency, and conflicts are surfaced instead of overwritten.
 export async function startAgent(selection: StartSelection, admission: RunAdmission): Promise<{ run: AgentRun; reused: boolean }> {
   const { agentId, profileId, accountId } = selection
+  const current = () => { if (selection.isCurrent && !selection.isCurrent()) throw new Error('The selected context or person changed. Open Run once again.') }
+  current()
+  if (selection.runOnce) {
+    const options = { ...selection.runOnce }
+    const wire = await createRunOnce(selection.ticket.id, {
+      request_id: options.requestId, expected_updated_at: selection.ticket.updated_at,
+      ...(options.task === undefined ? {} : { task: options.task }), instruction: options.instruction,
+      repository_mutation_allowed: options.repositoryMutationAllowed, agent_principal_id: agentId, model_profile_id: profileId,
+      ...(accountId ? { requested_account_id: accountId } : {}), ...(selection.runNow ? { capacity_override: 'now' } : {}),
+    })
+    current()
+    return { run: admission.run(wire), reused: false }
+  }
   const ticket = await getNode(selection.ticket.id)
+  current()
   if (ticket.is_leaf !== true) throw new Error('Select a work leaf before starting an agent.')
   const orders: WorkOrder[] = []
   let cursor: string | undefined
   do {
     const page = await listNodes({ parent_id: ticket.id, kind: ['work_order'], limit: 200, cursor })
+    current()
     // Keep reads bounded even on tickets with a long work-order history.
     for (let offset = 0; offset < page.items.length; offset += 6) {
       orders.push(...await Promise.all(page.items.slice(offset, offset + 6).map(n => request<WorkOrder>(`/work-orders/${encodeURIComponent(n.id)}`))))
     }
     cursor = page.next_cursor ?? undefined
   } while (cursor)
+  current()
   const candidates = orders.filter(o => o.kind !== 'review' && !['done', 'cancelled'].includes(o.status) && (!o.assignee_principal_id || o.assignee_principal_id === agentId))
   if (candidates.length > 1) throw new Error('This ticket has several active work orders for this agent. Resolve them before starting another run.')
   let order = candidates[0]
@@ -65,9 +85,10 @@ export async function startAgent(selection: StartSelection, admission: RunAdmiss
     let runCursor: string | undefined
     do {
       const page = await listRuns({ work_order: order.node_id, cursor: runCursor, limit: 200 })
+      current()
       const live = admission.runs(page.items).filter(activeRun)
       if (live.length) {
-        const same = live.find(r => r.agent_principal_id === agentId && r.model_profile_id === profileId
+        const same = live.find(r => !r.run_once && r.agent_principal_id === agentId && r.model_profile_id === profileId
           && (!accountId || r.requested_account_id === accountId))
         if (same) return { run: selection.runNow && same.status === 'queued' ? admission.run(await runNowOnce(same.id)) : same, reused: true }
         throw new Error('This work order already has an active run. Follow it in Agents before starting another.')
@@ -75,6 +96,7 @@ export async function startAgent(selection: StartSelection, admission: RunAdmiss
       runCursor = page.next_cursor ?? undefined
     } while (runCursor)
   } else {
+    current()
     const acceptance = typeof ticket.fields.acceptance_criteria === 'string' ? ticket.fields.acceptance_criteria.trim() : ''
     order = await request<WorkOrder>('/work-orders', 'POST', {
       title: `${ticket.key}: ${ticket.title}`, parent_id: ticket.id, assignee_principal_id: agentId,
@@ -82,16 +104,20 @@ export async function startAgent(selection: StartSelection, admission: RunAdmiss
       criteria: [acceptance || `Complete ${ticket.key} as described and attach evidence of the result.`],
     })
   }
+  current()
   if (order.status === 'draft' || !order.assignee_principal_id) {
     order = await request<WorkOrder>(`/work-orders/${encodeURIComponent(order.node_id)}`, 'PATCH', {
       expected_revision: order.revision, assignee_principal_id: agentId,
       ...(order.status === 'draft' ? { status: 'ready' } : {}),
     })
   }
-  const run = admission.run(await createRun(order.node_id, {
+  current()
+  const wire = await createRun(order.node_id, {
     agent_principal_id: agentId, model_profile_id: profileId, ...(accountId ? { requested_account_id: accountId } : {}),
     ...(selection.runNow ? { capacity_override: 'now' as const } : {}),
-  }))
+  })
+  current()
+  const run = admission.run(wire)
   return { run, reused: false }
 }
 

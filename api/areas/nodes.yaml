@@ -9,6 +9,30 @@
 # aeon:owner internal/parentbenefits
 # aeon:owner internal/ticketwork
 paths:
+  /nodes/{nodeId}/run-once:
+    post:
+      operationId: createRunOnce
+      description: 'Person only. Requires nodes.read, work_orders.write and run.create on the current context, and nodes.write when creating a work leaf in a project. Atomically creates a visible leaf named Run once: <task> (hidden from release notes), or uses the selected work leaf, then creates/readies its work order and queues through the ordinary run admission path. Identical request_id retries return the same run; changed input refuses. No permissions are granted. Empty instruction uses the ticket body, or its title when the body is empty. Read-only defaults to the qualified no-tools ceiling; unsupported harnesses refuse before any resources commit.'
+      security: *auth
+      parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/RunCreate'}
+                - type: object
+                  required: [request_id, expected_updated_at]
+                  properties:
+                    task: {type: string, maxLength: 160, description: 'Required task text when the selected context is a project. Creates a visible leaf in that project.'}
+                    expected_updated_at: {type: string, format: date-time, description: 'Revision of the selected project or leaf at the moment of submission. A changed context refuses before a new run is queued.'}
+      responses:
+        '201': {description: 'Queued run, or the original run on an identical retry', content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /nodes:
     get:
       operationId: listNodes

@@ -28,6 +28,20 @@ var ErrVerificationUnavailable = errors.New("verification blocked: this adapter 
 // Unknown/future adapters cannot accidentally inherit the managed tool path.
 type VerificationAdapter interface{ VerificationSupported() bool }
 
+// ReadOnlyRunAdapter qualifies the ordinary one-off ceiling independently of
+// reviewer/probe capabilities. Unknown adapters fail before workspace or routing.
+type ReadOnlyRunAdapter interface{ ReadOnlyRunSupported() bool }
+
+func (*ClaudeAdapter) ReadOnlyRunSupported() bool {
+	return agentverification.ReadOnlyRunFor(Claude).Supported
+}
+
+func readOnlyRun(r Run) bool {
+	return r.RunOnce && r.RepositoryMutationAllowed != nil && !*r.RepositoryMutationAllowed
+}
+
+var ErrReadOnlyRunUnavailable = errors.New("read-only one-off execution is not available for this adapter")
+
 func (*ClaudeAdapter) VerificationSupported() bool { return verificationSupported(Claude) }
 
 func (*PiAdapter) VerificationSupported() bool { return verificationSupported(Pi) }
@@ -72,6 +86,17 @@ func validExecutionMode(r Run, adapter Adapter) error {
 // approved account. Check immutable policy/capability before routing;
 // adapters still require the strict, routed binding in validExecutionMode.
 func validQueuedExecutionMode(r Run, adapter Adapter) error {
+	if r.RunOnce {
+		if r.Purpose != "managed" || r.ReadOnlyReview || r.RepositoryMutationAllowed == nil {
+			return errors.New("one-off run binding is incomplete or unsafe")
+		}
+		if readOnlyRun(r) {
+			a, ok := adapter.(ReadOnlyRunAdapter)
+			if !ok || !a.ReadOnlyRunSupported() {
+				return ErrReadOnlyRunUnavailable
+			}
+		}
+	}
 	if r.RoutineBudget != nil {
 		if _, ok := adapter.(RoutineBudgetAdapter); !ok {
 			return ErrBudgetEnforcementUnavailable

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { sessionListReads } from './agents-fixtures'
@@ -9,6 +8,91 @@ import { me } from './work-fixtures'
 
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Start agent', exact: true })
 const newAgent = (page: Page) => page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })
+const onceDialog = (page: Page) => page.getByRole('dialog', { name: 'Run once', exact: true })
+async function openOnce(page: Page) {
+  await page.goto('/agents')
+  await newAgent(page).click()
+  await page.getByRole('menuitem', { name: /^Run once/ }).click()
+  await expect(onceDialog(page)).toBeVisible()
+}
+
+test('Run once is available without developer settings and recovers an exact read-only request', async ({ page }) => {
+  const mock = await mockStartAgent(page, { expertStart: false, catalog: 'two-hosts', lostOnceResponse: true })
+  await page.goto('/agents')
+  await newAgent(page).click()
+  await expect(page.getByRole('menuitem', { name: /^Start agent manually/ })).toHaveCount(0)
+  await page.getByRole('menuitem', { name: /^Run once/ }).click()
+  const form = onceDialog(page)
+  await form.getByLabel('Project', { exact: true }).selectOption('p-pharos')
+  await form.getByLabel('Task', { exact: true }).fill('Inspect the supplied project context')
+  await expect(form.getByRole('checkbox', { name: 'May change files', exact: true })).not.toBeChecked()
+  await expect(form.getByRole('button', { name: /^Queue run/ })).toBeDisabled()
+  await expect(form.getByText(/Codex read-only sandboxing/)).toBeVisible()
+  await form.getByLabel('Host', { exact: true }).selectOption('laptop')
+  const text = '  Inspect exactly this context.\nReturn the observations.'
+  await form.getByLabel('Instruction (optional)', { exact: true }).fill(text)
+  await form.getByRole('button', { name: /^Queue run/ }).click()
+  await expect(form.getByRole('alert')).toContainText('Your selections are kept')
+  await expect(form.getByLabel('Instruction (optional)', { exact: true })).toHaveValue(text)
+  await expect(form.getByRole('checkbox', { name: 'May change files', exact: true })).not.toBeChecked()
+  await form.getByRole('button', { name: /^Queue run/ }).dblclick()
+  await expect(form.getByRole('heading', { name: 'Queued', exact: true })).toBeVisible()
+  const writes = mock.calls.filter(call => call.path.endsWith('/run-once'))
+  expect(writes).toHaveLength(2)
+  expect(writes[0]?.body).toEqual(writes[1]?.body)
+  expect(writes[0]?.body).toMatchObject({ instruction: text, repository_mutation_allowed: false, task: 'Inspect the supplied project context' })
+  expect(mock.state.runs).toHaveLength(1)
+  expect(mock.createdLeaves).toEqual([{ parent_id: 'p-pharos', title: 'Run once: Inspect the supplied project context', body: 'Inspect the supplied project context', fields: { hide_from_release_notes: true } }])
+})
+
+test('Run once resets task choices on context changes and never reuses a different instruction', async ({ page }) => {
+  const mock = await mockStartAgent(page, { expertStart: false, lostOnceResponse: true })
+  await openOnce(page)
+  const form = onceDialog(page)
+  await form.getByLabel('Project', { exact: true }).selectOption('p-pharos')
+  await form.getByLabel('Task', { exact: true }).fill('Project task')
+  await form.getByLabel('Instruction (optional)', { exact: true }).fill('Old context instruction')
+  await form.getByRole('checkbox', { name: 'May change files', exact: true }).check()
+  await form.getByLabel('Context', { exact: true }).selectOption({ label: 'Use an existing ticket' })
+  await expect(form.getByLabel('Instruction (optional)', { exact: true })).toHaveValue('')
+  await expect(form.getByRole('checkbox', { name: 'May change files', exact: true })).not.toBeChecked()
+  await form.getByRole('searchbox').fill('PHAROS-11')
+  await form.getByRole('button', { name: /PHAROS-11 Connect Hetzner/ }).click()
+  await form.getByLabel('Instruction (optional)', { exact: true }).fill('First instruction')
+  await form.getByRole('checkbox', { name: 'May change files', exact: true }).check()
+  await form.getByRole('button', { name: /^Queue run/ }).click()
+  await expect(form.getByRole('alert')).toContainText('Your selections are kept')
+  await form.getByLabel('Instruction (optional)', { exact: true }).fill('Changed instruction')
+  await form.getByRole('button', { name: /^Queue run/ }).click()
+  await expect(form.getByRole('alert')).toContainText('already has an active run')
+  const writes = mock.calls.filter(call => call.path.endsWith('/run-once'))
+  expect(writes[0]?.body?.request_id).not.toBe(writes[1]?.body?.request_id)
+  expect(mock.state.runs).toHaveLength(1)
+  expect(mock.state.runs[0]?.instruction).toBe('First instruction')
+})
+
+for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+  test(`Run once controls stay still at ${width} ${theme}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await mockStartAgent(page, { expertStart: false, catalog: 'two-hosts', theme })
+    await openOnce(page)
+    const form = onceDialog(page)
+    await form.getByLabel('Host', { exact: true }).selectOption('laptop')
+    await form.getByLabel('Project', { exact: true }).selectOption('p-pharos')
+    await form.getByLabel('Task', { exact: true }).fill('Ausführliche Bestandsaufnahme der bereitgestellten Projektinformationen')
+    const checkbox = form.getByRole('checkbox', { name: 'May change files', exact: true })
+    await expectStableControls({
+      controls: { queue: form.getByRole('button', { name: /^Queue run/ }), cancel: form.getByRole('button', { name: 'Cancel', exact: true }), context: form.getByLabel('Context', { exact: true }), host: form.getByLabel('Host', { exact: true }), harness: form.getByLabel('Harness', { exact: true }), account: form.getByLabel('Account', { exact: true }), thinking: form.getByLabel('Thinking', { exact: true }), selectors: form.locator('.pair').first(), instruction: form.getByLabel('Instruction (optional)', { exact: true }), restriction: checkbox, project: form.getByLabel('Project', { exact: true }), task: form.getByLabel('Task', { exact: true }), ...(width === 390 ? { phone: form } : {}) },
+      interactions: [
+        { name: 'allow changes explicitly', run: () => checkbox.check() },
+        { name: 'restore read-only', run: () => checkbox.uncheck() },
+        { name: 'long German instruction', run: () => form.getByLabel('Instruction (optional)', { exact: true }).fill('Die bereitgestellten Informationen vollständig auswerten und mögliche Unklarheiten verständlich zusammenfassen. '.repeat(8)) },
+      ],
+      scrollAreas: { body: form.locator('.launch-body') },
+    })
+    await form.screenshot({ path: info.outputPath(`AEON-1512-${width}-${theme}.png`) })
+  })
+}
 async function open(page: Page, ticket = false) {
   // Ticket dispatch now uses the Queue/assignee menu (work-queue.spec.ts).
   // Keep the explicit account cascade covered through the /agents New menu.
@@ -293,8 +377,7 @@ for (const theme of ['light', 'dark']) {
 
 for (const theme of ['light', 'dark'] as const) {
   for (const width of [1600, 390]) {
-    test(`screenshot ${width} ${theme}`, async ({ page }) => {
-      mkdirSync('../.agent-shots', { recursive: true })
+    test(`screenshot ${width} ${theme}`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme })
       await mockStartAgent(page)
@@ -303,11 +386,11 @@ for (const theme of ['light', 'dark'] as const) {
       const accounts = page.locator('#agent-accounts')
       // AEON-686: the Accounts overview lists each account as a row; its logins open in the docked panel.
       await expect(accounts.locator('.list-row[data-account]').first()).toBeVisible()
-      await accounts.screenshot({ path: `../.agent-shots/acu1-accounts-${width}-${theme}.png` })
+      await accounts.screenshot({ path: info.outputPath(`acu1-accounts-${width}-${theme}.png`) })
       await open(page)
       await ready(page)
       await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
-      await dialog(page).screenshot({ path: `../.agent-shots/acu1-start-${width}-${theme}.png` })
+      await dialog(page).screenshot({ path: info.outputPath(`acu1-start-${width}-${theme}.png`) })
     })
   }
 }

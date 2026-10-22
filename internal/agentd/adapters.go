@@ -982,6 +982,9 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	if err := validExecutionMode(r.Run, a); err != nil {
 		return nil, err
 	}
+	if readOnlyRun(r.Run) && r.Tools != nil {
+		return nil, errors.New("read-only one-off runs cannot have tools")
+	}
 	return a.startBridge(ctx, r, observe, nil)
 }
 
@@ -1240,7 +1243,7 @@ func (a *ClaudeAdapter) startBridge(ctx context.Context, r StartRequest, observe
 	if !servicetier.Valid(tier) {
 		return p.failStart(errors.New("invalid serving tier"))
 	}
-	frame := map[string]any{"op": "start", "service_tier": tier, "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "read_only_review": r.Run.ReadOnlyReview, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens, "capabilities": append([]string{}, r.Capabilities...)}
+	frame := map[string]any{"op": "start", "service_tier": tier, "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "read_only_review": r.Run.ReadOnlyReview, "read_only_run": readOnlyRun(r.Run), "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens, "capabilities": append([]string{}, r.Capabilities...)}
 	if native != nil {
 		frame["profile"] = "native"
 		frame["native_grant"] = native.bridgeGrant()

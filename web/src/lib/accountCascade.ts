@@ -53,7 +53,7 @@ export interface CatalogAccount {
   remaining_fraction: number | null; windows: CatalogWindow[]; models: CatalogModel[]
   default_model_profile_id: string | null
 }
-export interface CatalogHarness { harness: string; accounts: CatalogAccount[]; default_account_id: string | null }
+export interface CatalogHarness { harness: string; accounts: CatalogAccount[]; default_account_id: string | null; read_only_run?: { supported: boolean; policy: string; reason: string } }
 export interface CatalogHost { daemon_id: string; label: string; harnesses: CatalogHarness[] }
 export interface AgentAccountCatalog { as_of: string; role: string; hosts: CatalogHost[] }
 export type CatalogGap = 'failed' | 'forbidden' | 'family' | null
