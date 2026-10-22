@@ -387,6 +387,9 @@ share a 220-second budget, including each root timeout's kill grace, leaving
 cover the healthy cached-index path and exhausted root cleanup budget. Both
 regressions are exercised through the existing
 `TestRootAptTimeoutReapsBeforeRetry` entry in the Go tier inventory.
+Both fail remotely on reviewed head `23437389f` with tests only, in scratch
+snapshot `ff4d59543`: the cache check observes an unnecessary update, and
+the budget check observes three independent 150-second root deadlines.
 
 The ticket-panel shortcut spec previously sent `s` when the title appeared,
 before the project permission response necessarily enabled status changes.
@@ -402,3 +405,29 @@ contain the shell installation fix and regressions required by this CI brief;
 `web/tests/ticket-panel.spec.ts` adds the permission barrier and readiness
 assertions for its reported CI failure. Existing source files and registered
 test entries own these checks; no new source file or tier entry is needed.
+
+FIX4 validation on implementation head `56c64ac20`: all required native Go
+packages passed remotely on Linux with `-count=1`: `nativepty`, `nativeattach`,
+`agentd`, `nativesessions/...`, `reportercontract`, plus `nativereceipts`,
+`nativeintegration/...` and `nativecontract`. The focused
+`TestRootAptTimeoutReapsBeforeRetry` passed remotely, including all six Node
+cases and both new regressions. The entire `ticket-panel.spec.ts` passed
+46/46 through the approved remote browser entry point with one worker;
+the supervisor reported zero remaining owned processes.
+
+The additional full `scripts/releaseworkflow` Linux run encountered existing
+fixtures requiring `/bin/bash`, absent on the NixOS runner (for example,
+`TestBuilderVersionAssertionFailsClosed`: `/bin/bash: bad interpreter: No such
+file or directory`, and `TestReleaseBinariesRefuseWarmOrUnverifiedGo`:
+`fork/exec /bin/bash: no such file or directory`). Those fixture files are
+unchanged. After the remote static entry point refused for capacity, the full
+package passed in the permitted single-package local fallback with
+`GOMAXPROCS=2 go test -p 2 -parallel 2 ./scripts/releaseworkflow -count=1`.
+No browser or full static suite ran locally.
+
+The full guarded `ci-static --merge-main` remained unproven after bounded
+capacity retries: the remote entry point returned exit 3 for its two-run cap
+or host guard. The complete static set, including its web unit infrastructure,
+tier/shard and audit checks, therefore needs the coordinator's CI handover.
+This round retains 95% status until that evidence exists. No origin push,
+deployment, review gate or model CLI was run.
