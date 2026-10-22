@@ -11620,6 +11620,8 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReleaseBinariesRefuseWarmOrUnverifiedGo","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestReleaseToolchainsRequireExactSecurityPatches","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReuseAggregatesIgnoreAmbientImpactKillSwitch","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReuseAlwaysPrimesMatchingMainCacheKeys","tier":"GATED-FULL"}
