@@ -174,6 +174,10 @@ func (p *codexProcess) ControlChat(ctx context.Context, op, text, inputID string
 }
 
 func (p *codexProcess) controlChat(ctx context.Context, op, text, inputID string) (resultErr error) {
+	// Include an after-turn boundary wait in the existing control budget.
+	// Waiting ordinary input must not hold the supervisor's control fence forever.
+	ctx, cancel := operationContext(ctx)
+	defer cancel()
 	var idle, ended bool
 	var thread, turn string
 	for {
@@ -237,8 +241,6 @@ func (p *codexProcess) controlChat(ctx context.Context, op, text, inputID string
 		}
 		op = "steer"
 	}
-	ctx, cancel := operationContext(ctx)
-	defer cancel()
 	if op == "steer" {
 		var result struct {
 			TurnID string `json:"turnId"`
