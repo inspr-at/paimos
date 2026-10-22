@@ -99,16 +99,20 @@ test('collapsing the project header pauses the backdrop and expanding resumes it
   await page.getByRole('radio', { name: 'Collapsed project header', exact: true }).click()
   await expect(page.locator('#project-header-fold')).toBeHidden()
   await expect(page.locator('[data-header-glimpse="on"]')).toBeAttached()
+  await expect(canvas).toHaveAttribute('data-motion', 'still')
   // v-show keeps the canvas mounted. Its box is empty; motion has to stop.
-  await expect.poll(() => column.evaluate(el => {
-    const box = el.getBoundingClientRect()
+  // Query and measure in one browser evaluation after the pause acknowledgment.
+  // CI held locator.evaluate's element-handle read past the poll's budget.
+  await expect.poll(() => column.evaluateAll(elements => {
+    if (elements.length !== 1) return false
+    const box = elements[0]!.getBoundingClientRect()
     return box.width <= 0 && box.height <= 0
   })).toBe(true)
-  await expect(canvas).toHaveAttribute('data-motion', 'still')
   await page.getByRole('radio', { name: 'Comfortable project header', exact: true }).click()
   await expect(page.locator('#project-header-fold')).toBeVisible()
-  await expect.poll(() => column.evaluate(el => {
-    const box = el.getBoundingClientRect()
+  await expect.poll(() => column.evaluateAll(elements => {
+    if (elements.length !== 1) return false
+    const box = elements[0]!.getBoundingClientRect()
     return box.width > 0 && box.height > 0
   })).toBe(true)
   await expect(canvas).toHaveAttribute('data-motion', 'on')
