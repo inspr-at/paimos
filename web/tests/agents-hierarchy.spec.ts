@@ -143,6 +143,9 @@ test('AEON-1360 cross-project children nest with their own work and survive thei
   }
   await writeFile(info.outputPath('aeon-1649-checks.json'), JSON.stringify(checks, null, 2))
   await writeFile(info.outputPath('aeon-1649-checks.md'), '```json\n' + JSON.stringify(checks, null, 2) + '\n```\n')
+  // Keep the existing project-filter assertion in its original tall viewport;
+  // resizing evidence must not leave the page scrolled beneath its popover.
+  await page.setViewportSize({ width: 1440, height: 1600 })
   const filter = page.locator('.sessions .tb-filter')
   const guard = await controlStability(page, { filter })
   await guard.check(async () => {
