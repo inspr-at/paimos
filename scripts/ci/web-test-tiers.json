@@ -12216,6 +12216,8 @@
     ,
     {"kind":"browser","file":"tests/polish-round.spec.ts","name":"PL1 tickets-empty 390 light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/portal-admin.spec.ts","name":"AEON-1683: portal publishing and moderation retain the current binding after a stale write","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/portal-admin.spec.ts","name":"a stale release-history publish reloads the link that is there now","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/portal-admin.spec.ts","name":"portal settings publish, moderate and hide at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14703,6 +14705,8 @@
     {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 reduced motion: nothing slides and no one-off plays","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 slides pause off-screen and in a hidden tab","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1683: live and static status icons respect native focus and reduced motion without moving controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/status-time.spec.ts","name":"AEON-1359 screenshots at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -18717,6 +18721,8 @@
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"the hint draws its keys instead of typing arrow symbols, in both languages","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"the wheel pans or zooms the window and never moves the time; a plain vertical wheel is left to the page","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"AEON-1683: rapid section switches retain exactly one live stream and bounded reads per activation","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-modes.unit.test.ts","name":"Compare calls an unfinished release elapsed so far, not live","tier":"ESSENTIAL"}
     ,

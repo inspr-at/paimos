@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/portal-admin.spec.ts",
-    "listedTests": 3,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.787,
