@@ -30,18 +30,31 @@ test('Agents retries a stalled session read and keeps the loaded table through t
   await page.goto('/agents')
   await expect(sessionRows(page).first()).toBeVisible()
   expect(attempts).toBeGreaterThanOrEqual(2)
+  await expect.poll(() => page.evaluate(async () => {
+    const agents = (await import('/src/stores/agents.ts')).useAgents()
+    return agents.loaded && !agents.loading
+  })).toBe(true)
   fail = true
   for (let n = 1; n <= 3; n++) {
     const before = attempts
     // Join the table's complete refresh, including its status update. Counting
     // transport settlements can include a different reader or finish before
     // the last retry; another online event would then invalidate that failure.
-    const outcome = await page.evaluate(async () => {
+    // Observe its action without starting a read, so a missing online handler fails.
+    const error = await page.evaluate(async () => {
       const agents = (await import('/src/stores/agents.ts')).useAgents()
-      window.dispatchEvent(new Event('online'))
-      return agents.refreshSessions()
+      await new Promise<void>((resolve, reject) => {
+        const stop = agents.$onAction(({ name, after, onError }) => {
+          if (name !== 'loadAll') return
+          stop()
+          after(() => resolve())
+          onError(reject)
+        })
+        window.dispatchEvent(new Event('online'))
+      })
+      return agents.sessionsError
     })
-    expect(outcome).toEqual({ ok: false, error: 'No connection' })
+    expect(error).toBe('No connection')
     await expect.poll(() => attempts).toBeGreaterThanOrEqual(before + 3)
     await expect(page.getByRole('region', { name: 'Agents', exact: true }).getByRole('status').filter({ hasText: 'Update delayed' })).toBeVisible()
     await expect(sessionRows(page).first()).toBeVisible()
