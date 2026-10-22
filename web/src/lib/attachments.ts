@@ -4,7 +4,7 @@
 // the three content sizes (thumb for strips, preview for the viewer, original only
 // at 100%). Positions are decimal strings; created_by is the principal id.
 import { api, APIError, sessionEnded } from './api.ts'
-import { mutationEventIds } from './crm'
+import { mutationEventIds } from './crm.ts'
 
 export interface Attachment {
   id: string; node_id: string; name: string; content_type: string; size: number; sha256: string

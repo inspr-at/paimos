@@ -8,7 +8,7 @@ import type { Attachment } from '../src/lib/attachments'
 import type { TimeEntry } from '../src/lib/business'
 import { deferred, flush, sourceModule } from './record-source'
 
-const Attachments = sourceModule<typeof import('../src/lib/attachments')>('lib/attachments.ts', { './api.ts': API, './crm': Receipts })
+const Attachments = sourceModule<typeof import('../src/lib/attachments')>('lib/attachments.ts', { './api.ts': API, './crm.ts': Receipts })
 const Business = sourceModule<typeof import('../src/lib/business')>('lib/business.ts', {
   './api': API, './avatar': { learnPictures() {} }, './crm': Receipts,
   '../components/business/money': { parseJSONExact: JSON.parse },
