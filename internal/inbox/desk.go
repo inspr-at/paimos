@@ -111,7 +111,7 @@ func RecordDeskReply(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Desk
 		if tag.RowsAffected() == 0 {
 			continue
 		}
-		if err := recordAcceptanceReceiptWith(ctx, tx, p, notice.ID, collect); err != nil {
+		if err := insertReceiptWith(ctx, tx, p, notice.ID, "queued", receiptTarget{}, "", "", collect); err != nil {
 			return err
 		}
 		notices = append(notices, notice)
