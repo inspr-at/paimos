@@ -1830,6 +1830,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestManagedStartWaitsForHostCapacityBeforeRouteAndClaim","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestManagedToolsCloseBeforeServeClosesListener","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestManagedToolsRunBinding","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestMetadataOverflowDoesNotInventEffort","tier":"GATED-FULL"}

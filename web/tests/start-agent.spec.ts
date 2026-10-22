@@ -6,6 +6,7 @@ import { sessionListReads } from './agents-fixtures'
 import { mockStartAgent } from './start-agent-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { me } from './work-fixtures'
+import { absoluteTime } from '../src/lib/work'
 import type { QueueWireEntry } from '../src/lib/workQueue'
 
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Start agent', exact: true })
@@ -256,6 +257,64 @@ test('changing host replaces the granted model', async ({ page }) => {
   await expect(dialog(page).getByLabel('Model', { exact: true }).locator('option:checked')).toHaveText('other-model')
   await expect(dialog(page).getByRole('option', { name: 'workspace-build' })).toHaveCount(0)
   await expect(dialog(page).getByLabel('Thinking', { exact: true }).locator('option:checked')).toHaveText('Medium')
+})
+
+test('same-name hosts distinguish offline pairings and queue only the chosen account', async ({ page }, info) => {
+  const mock = await mockStartAgent(page, { catalog: 'same-name-hosts' })
+  await open(page, true)
+  const frame = dialog(page)
+  const host = frame.getByLabel('Host', { exact: true })
+  const account = frame.getByLabel('Account', { exact: true })
+  const oldProbe = mock.catalog.hosts.find(item => item.daemon_id === 'workstation-old')!.harnesses[0].accounts[0]
+  const offlineLabel = `Work Mac · Offline · last seen ${absoluteTime(oldProbe.last_probe_at)}`
+  await expect(host.locator('option')).toHaveText(['Choose a host', 'Work Mac · Online', offlineLabel])
+  await expect(host).toHaveValue('workstation')
+  await expect(account).toHaveValue(mock.account.id)
+  await host.selectOption('workstation-old')
+  await expect(account).not.toHaveValue(mock.account.id)
+  const oldAccount = await account.inputValue()
+  expect(oldAccount).not.toBe(mock.account.id)
+  await expect(account.locator('option').filter({ hasText: 'Workspace account' })).toHaveCount(1)
+  const checkHostControls = () => expectStableControls({
+    controls: {
+      host, hostGroup: frame.locator('.pair').first(), account,
+      harness: frame.getByLabel('Harness', { exact: true }), model: frame.getByLabel('Model', { exact: true }),
+      thinking: frame.getByLabel('Thinking', { exact: true }),
+      queue: frame.getByRole('button', { name: 'Queue run', exact: true }), cancel: frame.getByRole('button', { name: 'Cancel', exact: true }),
+    },
+    scrollAreas: { frame },
+    interactions: ['workstation', 'workstation-old', 'workstation'].map(id => ({ name: `choose ${id}`, run: async () => {
+      await host.selectOption(id)
+      await expect(account).toHaveValue(id === 'workstation' ? mock.account.id : oldAccount)
+    } })),
+  })
+  // Evidence is local to this run, with no visual equality assertions.
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    await host.selectOption('workstation-old')
+    await frame.screenshot({ path: info.outputPath(`same-name-hosts-${width}-${theme}.png`) })
+    await checkHostControls()
+  }
+  // When both same-name daemons report online, retain distinct ordinals and
+  // exercise the same controls with the longer/shorter host labels.
+  oldProbe.last_probe_at = new Date(Date.parse(mock.catalog.as_of) - 2000).toISOString()
+  await frame.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await open(page, true)
+  await expect(host.locator('option')).toHaveText(['Choose a host', 'Work Mac · Online · pairing 1', 'Work Mac · Online · pairing 2'])
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    await host.selectOption('workstation-old')
+    await frame.screenshot({ path: info.outputPath(`same-name-online-hosts-${width}-${theme}.png`) })
+    await checkHostControls()
+  }
+  await frame.getByRole('button', { name: 'Queue run', exact: true }).click()
+  await expect(frame.getByRole('heading', { name: 'Queued', exact: true })).toBeVisible()
+  await expect(frame.locator('.requested')).toContainText('Work Mac · Online · pairing 1')
+  const launches = mock.calls.filter(call => call.method === 'POST' && call.path.endsWith('/runs'))
+  expect(launches).toHaveLength(1)
+  expect(launches[0].body?.requested_account_id).toBe(mock.account.id)
 })
 
 test('failed prerequisites keep launch disabled and read-only people have no action', async ({ page }) => {

@@ -14550,6 +14550,8 @@
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"reports Sign-in probe is stale and still pins that account","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"same-name hosts distinguish offline pairings and queue only the chosen account","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"screenshot 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"screenshot 1600 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -17756,9 +17758,13 @@
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > defaults to the greatest remaining fraction and the routed profile, with a UUID tie","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > distinguishes stale, missing and failed host probes without mistaking account capacity for offline","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > does not invent a model when the role has no route or the grant is empty","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > fails closed when the catalog is missing, forbidden, or the wrong shape","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > keeps same-name pairings distinct and prefers the online daemon over stale allowance","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > labels the requested snapshot and reports a different or unknown session separately","tier":"GATED-FULL"}
     ,
