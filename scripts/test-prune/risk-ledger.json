@@ -1115,7 +1115,7 @@
     {"id":"retained-go:internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink","kind":"retained","owner":"internal/themes","risk":"Preserve the existing backend/API/migration regression; browser pruning cannot replace it.","package":"P01","verificationNote":"Existing test, no prune change.","verification":{"status":"planned","nativeKeys":[],"evidence":null}},
     {"id":"runtime:record-ownership.unit.test.ts","kind":"runtime","owner":"web/tests/record-ownership.unit.test.ts","risk":"Same-ticket drafts, conflicted titles, failed comments and late A-to-B callbacks execute actual component setup.","package":"P03","existsAtSnapshot":true,"verification":{"status":"verified","nativeKeys":["vitest:tests/record-ownership.unit.test.ts:P03: conflicted titles and failed comments retain their drafts and ignore late results after A changes to B","vitest:tests/record-ownership.unit.test.ts:P03: the same ticket retains its owned comment draft when expanded and returned"],"evidence":"Positive suite passed: agm2-ci d874f64d8f-37523. Matching draft/review controls failed at intended assertions."}},
     {"id":"runtime:ticket-reviews.unit.test.ts","kind":"runtime","owner":"web/tests/ticket-reviews.unit.test.ts","risk":"Actual review readiness, exact commits, uncertain retry IDs and ownership boundaries.","package":"P03","existsAtSnapshot":false,"verification":{"status":"verified","nativeKeys":["vitest:tests/ticket-reviews.unit.test.ts:P03: late review results cannot cross ticket, project, person, tenant or unmount boundaries","vitest:tests/ticket-reviews.unit.test.ts:P03: review readiness requires full distinct commits, repository, author and both write grants","vitest:tests/ticket-reviews.unit.test.ts:P03: uncertain review retries reuse the exact request while edited requests get a fresh id"],"evidence":"Positive suite passed: agm2-ci d874f64d8f-37523. Matching draft/review controls failed at intended assertions."}},
-    {"id":"runtime:attachment-deletion.unit.test.ts","kind":"runtime","owner":"web/tests/attachment-deletion.unit.test.ts","risk":"Existing receipt, rollback, pending locks and stale attachment-owner cases.","package":"P03","existsAtSnapshot":true,"verification":{"status":"planned","nativeKeys":["vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: Hours Undo is immediate, keeps its view and uses plain failures or silent DELETE 404","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: Hours ignores superseded Undo and locks optimistic rows until confirmation","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: a superseded attachment Undo never paints or sends the old receipt","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: attachment Undo keeps its own receipt across two deletion cycles","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: attachment Undo restores immediately through reloads and rolls back failures","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: confirmed attachment Undo rejects an older list and trusts a subsequent read","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: deletion receipts keep exact IDs and refuse missing or ambiguous receipts","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: pending attachment Undo blocks Delete, caption and reorder until confirmation","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: upload cleanup revokes each preview once and rejects late completions"],"evidence":"Positive suite passed: agm2-ci d874f64d8f-37523. Existing assertions retained; no new negative control claimed."}}
+    {"id":"runtime:attachment-deletion.unit.test.ts","kind":"runtime","owner":"web/tests/attachment-deletion.unit.test.ts","risk":"Existing receipt, rollback, pending locks and stale attachment-owner cases.","package":"P03","existsAtSnapshot":true,"verification":{"status":"planned","nativeKeys":["vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: a superseded attachment Undo never paints or sends the old receipt","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: attachment Undo keeps its own receipt across two deletion cycles","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: attachment Undo restores immediately through reloads and rolls back failures","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: confirmed attachment Undo rejects an older list and trusts a subsequent read","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: deletion receipts keep exact IDs and refuse missing or ambiguous receipts","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: pending attachment Undo blocks Delete, caption and reorder until confirmation","vitest:tests/attachment-deletion.unit.test.ts:AEON-1416: upload cleanup revokes each preview once and rejects late completions"],"evidence":"Positive suite passed: agm2-ci d874f64d8f-37523. Existing assertions retained; no new negative control claimed."}}
   ],
   "implementationPackages": {
     "P03": {
@@ -1344,16 +1344,19 @@
         ],
         "baselinePassed": 82,
         "baselineReportedMinutes": 3.2,
-        "replacementCommit": "d2ef12b86",
-        "replacementPassed": 80,
-        "replacementFailed": 2,
-        "replacementReportedMinutes": 2.6,
-        "status": "Two added-oracle errors corrected in f14bafc15; rerun refused: remote busy (host guard). Failed run is not acceptance proof or savings."
+        "replacementCommit": "d7c646a65",
+        "replacementPassed": 82,
+        "replacementFailed": 0,
+        "replacementReportedMinutes": 2.5,
+        "status": "82/82 passed on mbp2606. Subsequent restored removal/expiry/inline-conflict assertions in 53741be53 and the remaining four changed specs still require final browser validation; refused for remote capacity."
       },
       "measuredRunnerTimeChange": {
-        "status": "no-valid-before-after-comparison",
+        "status": "measured-subset-without-pruning",
         "savingsClaim": false,
-        "note": "All 177 browser registrations retained. Baseline 82-case subset passed in 3.2m; modified failed subset reported 2.6m. No post-prune measurement."
+        "beforeReportedMinutes": 3.2,
+        "afterReportedMinutes": 2.5,
+        "reportedDeltaMinutes": -0.7,
+        "scope": "Same 82-case subset; baseline 20eea5be1 and expanded d7c646a65. All 177 original browser registrations remain. No post-prune measurement exists; shared-runner timing is not attributed to case savings."
       },
       "planCorrections": [
         "The editor uses a native textarea. Runtime fit math does not replace actual scroll/font/preview geometry.",
