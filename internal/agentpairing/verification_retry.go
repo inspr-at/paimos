@@ -15,14 +15,15 @@ import (
 )
 
 type verificationRetry struct {
-	AccountID   string    `json:"account_id"`
-	RunID       string    `json:"run_id"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	WorkOrderID string    `json:"-"`
+	actingPersonID string
+	AccountID      string    `json:"account_id"`
+	RunID          string    `json:"run_id"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	WorkOrderID    string    `json:"-"`
 }
 
 func (v verificationRetry) audit() map[string]any {
-	return map[string]any{"account_id": v.AccountID, "run_id": v.RunID, "work_order_id": v.WorkOrderID, "expires_at": v.ExpiresAt, "allowance": 1, "unit": "requests", "max_duration_seconds": VerificationSeconds}
+	return map[string]any{"acting_person_id": v.actingPersonID, "source_rule": "person_requested_verification", "account_id": v.AccountID, "run_id": v.RunID, "work_order_id": v.WorkOrderID, "expires_at": v.ExpiresAt, "allowance": 1, "unit": "requests", "max_duration_seconds": VerificationSeconds}
 }
 
 func (m *Module) verifyAgain(w http.ResponseWriter, r *http.Request, p tenant.Principal) {

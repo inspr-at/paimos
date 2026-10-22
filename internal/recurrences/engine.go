@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -221,7 +222,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string) error {
 			failure := fmt.Errorf("recurrence %s: %w", claimed.ID, err)
 			failures = append(failures, failure)
 			slog.ErrorContext(ctx, "recurrence failed; continuing tenant pass", "recurrence_id", claimed.ID, "err", err)
-			if err := m.recordFailure(ctx, actor, claimed); err != nil {
+			if err := m.recordFailure(ctx, actor, claimed, err); err != nil {
 				failures = append(failures, fmt.Errorf("record recurrence %s failure: %w", claimed.ID, err))
 			}
 			continue
@@ -289,7 +290,7 @@ func (m *Module) consumePublication(ctx context.Context, tx pgx.Tx, actor tenant
 // Existing node locks precede the recurrence lock and the event counter stays
 // last. Foreground work can make us yield; the returned/logged failure remains
 // visible and the next tenant pass retries the row.
-func (m *Module) recordFailure(ctx context.Context, actor tenant.Principal, r Recurrence) error {
+func (m *Module) recordFailure(ctx context.Context, actor tenant.Principal, r Recurrence, cause error) error {
 	return db.InTenant(ctx, m.pool, actor.TenantID, func(tx pgx.Tx) error {
 		got, err := lock(ctx, tx, actor.TenantID, true)
 		if err != nil || !got {
@@ -301,6 +302,12 @@ func (m *Module) recordFailure(ctx context.Context, actor tenant.Principal, r Re
 		}
 		if _, err = load(ctx, tx, r.ID, true); err != nil {
 			return err
+		}
+		var refusal *workqueue.PersonAdmissionError
+		if errors.As(cause, &refusal) {
+			if _, err := events.Append(ctx, tx, actor, events.Change{Type: "run.admission_refused", After: map[string]string{"reason": refusal.Code, "source_rule": "routine"}}); err != nil {
+				return err
+			}
 		}
 		return record(ctx, tx, actor, r.ProjectID, "recurrence.failed", nil, map[string]string{"recurrence_id": r.ID, "reason": "processing_failed"})
 	})

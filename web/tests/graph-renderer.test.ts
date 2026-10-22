@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { graphLayout, glimpseCore, cloudStride, glimpseFramePaints, glimpseOrbDelta, glimpseOrbFinish, glimpsePointInside, glimpseRadius, glimpseShotRadius, GLIMPSE_SHOT_DELTA, holdsIndexColour, labelPosition, onCanvas, type GraphData } from '../src/lib/graphRenderer.ts'
+import { graphLayout, glimpseCore, cloudStride, glimpseFramePaints, glimpseStaleWideFrame, glimpseOrbDelta, glimpseOrbFinish, glimpsePointInside, glimpseRadius, glimpseShotRadius, GLIMPSE_SHOT_DELTA, holdsIndexColour, labelPosition, onCanvas, type GraphData } from '../src/lib/graphRenderer.ts'
 
 test('glimpse orbs stay 4–8px across every node weight', () => {
   for (const weight of [-1, 0, 1, 10, 1000, NaN, Infinity]) {
@@ -43,6 +43,31 @@ test('a glimpse frame paints only while its measured box is connected and non-em
   assert.equal(glimpseFramePaints(true, -1, 180), false)
   assert.equal(glimpseFramePaints(false, 1280, 180), false)
   assert.equal(glimpseFramePaints(false, 0, 0), false)
+})
+
+test('a stale wide glimpse box does not paint once the visual viewport has left 1280', () => {
+  // At a 1280px viewport, two 28px gutters leave a 1224px host. Its
+  // measurement can lag the shrink to 390px (AEON-1471); comparing the host
+  // against the layout breakpoint misses that stale software-GL frame.
+  assert.equal(glimpseStaleWideFrame(1224, 390, 1), true)
+  assert.equal(glimpseStaleWideFrame(1224, 1280, 1), false)
+  assert.equal(glimpseStaleWideFrame(1280, 390, 1), true)
+  assert.equal(glimpseStaleWideFrame(1600, 1278, 1), true)
+  // One-pixel catch-up is tolerated; a larger stale box must wait.
+  assert.equal(glimpseStaleWideFrame(1224, 1223, 1), false)
+  assert.equal(glimpseStaleWideFrame(1224, 1222, 1), true)
+  assert.equal(glimpseStaleWideFrame(1280, 1279, 1), false)
+  assert.equal(glimpseStaleWideFrame(1280, 1280, 1), false)
+  assert.equal(glimpseStaleWideFrame(390, 390, 1), false)
+  assert.equal(glimpseStaleWideFrame(1279, 390, 1), true)
+  // Pinch-zoom reports a narrower visual width while the layout stays wide.
+  assert.equal(glimpseStaleWideFrame(1224, 390, 1.5), false)
+  assert.equal(glimpseStaleWideFrame(1280, 390, 1.5), false)
+  assert.equal(glimpseStaleWideFrame(1280, null, 1), false)
+  assert.equal(glimpseStaleWideFrame(Number.NaN, 390, 1), false)
+  assert.equal(glimpseStaleWideFrame(Number.POSITIVE_INFINITY, 390, 1), false)
+  assert.equal(glimpseStaleWideFrame(1224, Number.NaN, 1), false)
+  assert.equal(glimpseStaleWideFrame(1224, Number.POSITIVE_INFINITY, 1), false)
 })
 
 test('glimpse links reject off-view endpoints including partial orbs and invalid coordinates', () => {

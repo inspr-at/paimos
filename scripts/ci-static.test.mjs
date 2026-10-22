@@ -379,7 +379,7 @@ test('version warnings compare installed versions with workflow pins', t => {
   for (const [name, version] of [['node', 'v23.0.0'], ['go', 'go version go1.25.0 darwin/arm64']]) {
     const path = join(cwd, name); writeFileSync(path, `#!/bin/sh\necho '${version}'\n`); chmodSync(path, 0o755)
   }
-  assert.equal(versionWarnings('node-version: "24"\ngo-version: "1.26"', { PATH: cwd }).length, 2)
+  assert.equal(versionWarnings('node-version: "24.22.1"\ngo-version: "1.26.10"', { PATH: cwd }).length, 2)
   assert.equal(versionWarnings('node-version: "23"\ngo-version: "1.25"', { PATH: cwd }).length, 0)
 })
 

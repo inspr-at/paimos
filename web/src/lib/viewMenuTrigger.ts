@@ -3,6 +3,7 @@
 // touch, and Shift+F10 or the context-menu key on a focused segment. A completed hold
 // consumes its own click, so holding a segment never also switches to it. No hover hint.
 import { onScopeDispose } from 'vue'
+import { browserClock, type HoldClock } from './pressHold'
 
 export const HOLD_MS = 500
 const SLOP = 8
@@ -11,8 +12,11 @@ export function isMenuKey(event: KeyboardEvent) {
   return event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey)
 }
 
-export function useViewMenuTrigger(open: (id: string, anchor: HTMLElement) => void, schedule: { set: typeof setTimeout; clear: typeof clearTimeout } = { set: setTimeout, clear: clearTimeout }) {
-  let press: { pointerId: number; x: number; y: number; timer: ReturnType<typeof setTimeout> } | undefined
+// The browser clock calls the timers on Window. Safari and Firefox reject setTimeout called on any
+// other object, so a { set: setTimeout } default threw on every touch of a segment with a menu: on
+// iPhones the session tabs showed an error toast and did not switch (AEON-1637).
+export function useViewMenuTrigger(open: (id: string, anchor: HTMLElement) => void, schedule: HoldClock = browserClock) {
+  let press: { pointerId: number; x: number; y: number; timer: unknown } | undefined
   let held: HTMLElement | undefined
   function cancel() { if (press) schedule.clear(press.timer); press = undefined }
   function pointerdown(event: PointerEvent, id: string) {
@@ -20,7 +24,7 @@ export function useViewMenuTrigger(open: (id: string, anchor: HTMLElement) => vo
     held = undefined
     if ((event.pointerType !== 'touch' && event.pointerType !== 'pen') || event.isPrimary === false || event.button !== 0) return
     const element = event.currentTarget as HTMLElement
-    const started = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, timer: undefined as unknown as ReturnType<typeof setTimeout> }
+    const started = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, timer: undefined as unknown }
     started.timer = schedule.set(() => {
       if (press !== started) return
       press = undefined

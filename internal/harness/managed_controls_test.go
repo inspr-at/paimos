@@ -3,19 +3,144 @@ package harness_test
 
 import (
 	"encoding/json"
+	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/rules/doctrine"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/jackc/pgx/v5"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+// Risk: revoking the run person prevents an owned stop, or a safety exception
+// leaks task/steer content and admits unrelated worker mutations.
+func TestRunPersonRevocationKeepsOnlyOwnedSafetyControls(t *testing.T) {
+	for _, revoke := range []string{"deactivation", "project_access"} {
+		t.Run(revoke, func(t *testing.T) {
+			f := fixture(t)
+			order, run := stateRun(t, f, f.project, "running", "SAFETY-10")
+			lease := "safety-controls-worker-lease-00000000001"
+			base := "/api/projects/" + f.project + "/harness-sessions"
+			w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "private-host", "harness_session_ref": "safety-controls-ref-0000000000001", "worker_lease": lease, "management_mode": "managed", "role": "worker", "run_id": run, "work_order_id": order, "ticket_node_id": order, "work_shape": "ship", "advertised_capabilities": []string{"managed_control_v1", "steer", "stop"}}, "")
+			expect(t, w, 201)
+			id := decode(t, w)["id"].(string)
+			path := base + "/" + id
+			identity := ownedprocess.Identity{DaemonID: "fixture", Generation: strings.Repeat("a", 32), ProcessID: strings.Repeat("b", 32), RootPID: 1234, GroupID: 1234, StartedAt: time.Now().UTC().Truncate(time.Second)}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				if err := agentruns.SetActingPersonTx(t.Context(), tx, f.person.TenantID, run, f.person.ID); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET daemon_id=$2,daemon_generation=$3 WHERE id=$1`, run, identity.DaemonID, identity.Generation)
+				return err
+			})
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1, "process_ownership": identity, "doing": "Reviewing task content"}, lease), 200)
+			controls := map[string]string{}
+			for _, kind := range []string{"steer", "stop"} {
+				body := map[string]any{"request_id": uid(), "kind": kind, "expected_ownership": identity}
+				if kind == "steer" {
+					body["text"] = "private-steer-content"
+				}
+				w = f.call(f.person, "POST", path+"/managed-controls", body, "")
+				expect(t, w, 201)
+				controls[kind] = decode(t, w)["id"].(string)
+			}
+			// Keep the independently authenticated computer transport active.
+			// The run's starting person, never its key issuer, is revoked.
+			var admin string
+			keyParts := strings.SplitN(f.key, "_", 3)
+			prefix := strings.ReplaceAll(f.person.TenantID, "-", "") + keyParts[1][:16]
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Retained transport administrator') RETURNING id::text`, f.person.TenantID).Scan(&admin); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$2,prefix=$3 WHERE id=$1`, f.agent.AuthKeyID, admin, prefix)
+				return err
+			})
+			f.key = "aeon_" + prefix + "_" + keyParts[2]
+			dbtest.BindRole(t, f.db, f.person.TenantID, admin, "admin")
+			f.agent.KeyID, f.agent.KeyCreatorID = f.agent.AuthKeyID, admin
+			// Exercise the real paired metadata transport, with no run content
+			// capability. Pairing provenance is distinct from the revoked actor.
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				request, computer := uid(), uid()
+				if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,'135791357',repeat('c',64),repeat('c',64),repeat('c',64),'{"platform":"darwin","arch":"arm64"}',repeat('c',64),'redeemed',$3)`, f.person.TenantID, request, admin); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) VALUES($1,$2,$3,$4,$5,'fixture',repeat('c',64))`, f.person.TenantID, computer, request, f.agent.ID, f.agent.AuthKeyID)
+				return err
+			})
+			am, err := auth.New(auth.Config{Env: "dev", PublicURL: "https://safety.test", SessionKey: []byte(strings.Repeat("f", 32))}, f.db.App)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := (&httpapi.Server{Mux: f.mux, Pool: f.db.App, Middleware: []func(http.Handler) http.Handler{am.Middleware}}).Handler()
+			workerCall := func(target string, body any, proof string) *httptest.ResponseRecorder {
+				raw, err := json.Marshal(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				r := httptest.NewRequest("POST", target, strings.NewReader(string(raw)))
+				workerlease.Install(r.Header, f.key, proof)
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, r)
+				return w
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				query := `UPDATE principals SET status='deactivated' WHERE id=$1`
+				if revoke == "project_access" {
+					query = `DELETE FROM role_bindings WHERE principal_id=$1`
+				}
+				_, err := tx.Exec(t.Context(), query, f.person.ID)
+				return err
+			})
+			expect(t, workerCall(path+"/yield", map[string]any{}, "wrong-lease-with-at-least-32-characters"), 403)
+			expect(t, workerCall(base+"/"+uid()+"/yield", map[string]any{}, lease), 403)
+			w = workerCall(path+"/yield", map[string]any{}, lease)
+			expect(t, w, 200)
+			result := decode(t, w)
+			offered := result["controls"].([]any)
+			if len(offered) != 1 || offered[0].(map[string]any)["id"] != controls["stop"] {
+				t.Fatalf("safety yield offered non-stop work: %s", w.Body.String())
+			}
+			for _, forbidden := range []string{"private-", "Reviewing task content", "ticket_node_id", "work_order_id", "model", "handover", "host"} {
+				if strings.Contains(w.Body.String(), forbidden) {
+					t.Fatalf("safety response exposed %s: %s", forbidden, w.Body.String())
+				}
+			}
+			expect(t, workerCall(path+"/managed-context", map[string]any{}, lease), 403)
+			expect(t, workerCall(path+"/controls/"+controls["steer"]+"/complete", map[string]any{"outcome": "applied", "reason": "agentd_applied"}, lease), 403)
+			expect(t, workerCall(path+"/controls/"+controls["stop"]+"/complete", map[string]any{"outcome": "applied", "reason": "native_close_exited"}, lease), 200)
+			expect(t, workerCall(path+"/stop", map[string]any{"reason": "paused", "handover": map[string]any{}}, lease), 403)
+			w = workerCall(path+"/stop", map[string]any{"reason": "process_exited"}, lease)
+			expect(t, w, 200)
+			if strings.Contains(w.Body.String(), "private-") || len(decode(t, w)) != 5 {
+				t.Fatalf("stop returned task content: %s", w.Body.String())
+			}
+			expect(t, workerCall(path+"/confirm-exit", map[string]any{"reason": "process_exited"}, lease), 200)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var stops, leaks int
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE type='harness.stopped' AND actor_principal_id=$2),count(*) FILTER(WHERE type IN ('harness.yielded','harness.stopped','harness.control_claimed','harness.control_completed') AND (before::text LIKE '%private-%' OR after::text LIKE '%private-%')) FROM events WHERE after->>'id'=$1 OR before->>'id'=$1`, id, f.agent.ID).Scan(&stops, &leaks); err != nil {
+					return err
+				}
+				if stops != 1 || leaks != 0 {
+					t.Fatalf("safety audit lost actor or included content: stops=%d leaks=%d", stops, leaks)
+				}
+				return nil
+			})
+		})
+	}
+}
 
 func TestManagedControlsIdentityReplayPrivacyAndExpiry(t *testing.T) {
 	f := fixture(t)
@@ -70,7 +195,7 @@ func TestManagedControlsIdentityReplayPrivacyAndExpiry(t *testing.T) {
 	w = f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease)
 	expect(t, w, 200)
 	controls := decode(t, w)["controls"].([]any)
-	if len(controls) != 1 || controls[0].(map[string]any)["text"] != "private steer fixture" {
+	if len(controls) != 1 || controls[0].(map[string]any)["text"] != "private steer fixture" || controls[0].(map[string]any)["author_principal_id"] != f.person.ID {
 		t.Fatal(w.Body.String())
 	}
 	w = f.call(f.agent, "POST", path+"/yield", map[string]any{}, lease)
@@ -260,4 +385,138 @@ func TestManagedControlsRefuseUnmanagedAndUnknownPolicy(t *testing.T) {
 	expect(t, f.call(f.agent, "POST", path+"/managed-context", map[string]any{}, lease), 409)
 	body["advertised_capabilities"] = []string{"managed_control_v1"}
 	expect(t, f.call(f.person, "POST", base, body, ""), 400)
+}
+
+// Risk: an opted-in daemon must fail closed before launching with a missing,
+// partial or oversized pin; legacy requests keep their existing semantics.
+func TestManagedPinnedContextRefusesMissingAndOversizedPins(t *testing.T) {
+	f := fixture(t)
+	order, run := stateRun(t, f, f.project, "running", "MPC-10")
+	f.agent.KeyCreatorID = f.person.ID
+	lease := "pinned-context-lease-0000000000000000001"
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "pinned-context-ref-000000000000001", "worker_lease": lease, "management_mode": "managed", "role": "worker", "run_id": run, "work_order_id": order, "ticket_node_id": order, "work_shape": "ship"}, "")
+	expect(t, w, 201)
+	endpoint := base + "/" + decode(t, w)["id"].(string) + "/managed-context"
+	request := func(status int, code string) {
+		t.Helper()
+		w = f.call(f.agent, "POST", endpoint, map[string]bool{"pinned_files": true}, lease)
+		expect(t, w, status)
+		if code != "" && decode(t, w)["code"] != code {
+			t.Fatalf("wrong refusal: %s", w.Body.String())
+		}
+	}
+	request(409, "rules_pin_missing")
+	var source string
+	commit := strings.Repeat("a", 40)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,commit_sha,paths) VALUES($1,'fixture/company','public',$2,ARRAY['docs/AGENTS-KERNEL.md']) RETURNING id::text`, f.person.TenantID, commit).Scan(&source)
+	})
+	request(409, "rules_pin_missing")
+	content := []byte(strings.Repeat("R", 27603))
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO doctrine_cache(tenant_id,source_id,commit_sha,path,blob_sha,content) VALUES($1,$2,$3,'docs/AGENTS-KERNEL.md',$4,$5)`, f.person.TenantID, source, commit, doctrine.BlobSHA(content), content); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE doctrine_sources SET indexed_at=clock_timestamp() WHERE id=$1`, source)
+		return err
+	})
+	request(200, "")
+	var got rules.Merged
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.PinnedFiles) != 1 || got.PinnedFiles[0].Content != string(content) {
+		t.Fatal("measured pin not delivered")
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE doctrine_cache SET content=$2,blob_sha=$3 WHERE source_id=$1`, source, []byte(strings.Repeat("R", 64001)), doctrine.BlobSHA([]byte(strings.Repeat("R", 64001))))
+		return err
+	})
+	request(422, "rules_pack_too_large")
+}
+
+// Risk: the real docs/AGENTS-*.md default includes a >64 KB core and >128 KB
+// total. Only the always-on company kernels may enter a launch pack; a person's
+// explicitly indexed profile and role/on-demand packs must never leak into it.
+func TestManagedPinnedContextDefaultDoctrineSelectsKernels(t *testing.T) {
+	f := fixture(t)
+	order, run := stateRun(t, f, f.project, "running", "KERNEL-10")
+	f.agent.KeyCreatorID = f.person.ID
+	lease := "kernel-context-lease-0000000000000000001"
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "kernel-context-ref-000000000000001", "worker_lease": lease, "management_mode": "managed", "role": "worker", "run_id": run, "work_order_id": order, "ticket_node_id": order, "work_shape": "ship"}, "")
+	expect(t, w, 201)
+	endpoint := base + "/" + decode(t, w)["id"].(string) + "/managed-context"
+	commit := strings.Repeat("a", 40)
+	public := map[string]string{
+		"docs/AGENTS-KERNEL.md":      strings.Repeat("K", 6574),
+		"docs/AGENTS-CORE.md":        strings.Repeat("C", 67056),
+		"docs/AGENTS-VERSIONING.md":  strings.Repeat("V", 28000),
+		"docs/AGENTS-DOMAIN-DEV.md":  strings.Repeat("D", 22000),
+		"docs/AGENTS-DOMAIN-OPS.md":  strings.Repeat("O", 10000),
+		"docs/AGENTS-AGENT-BUILD.md": "# Builder role\n\n- Only for builders.\n",
+	}
+	private := map[string]string{
+		"docs/AGENTS-KERNEL-PRIVATE.md": strings.Repeat("P", 4149),
+		"docs/AGENTS-CORE-PRIVATE.md":   strings.Repeat("I", 67056),
+		"docs/AGENTS-PROFILE-OWNER.md":  "# Person profile\n\n- Owner-only instructions.\n",
+		"docs/AGENTS-PROFILE-OTHER.md":  "# Person profile\n\n- Other person's instructions.\n",
+	}
+	grantDir := t.TempDir()
+	grant, err := json.Marshal(map[string]any{"grants": []map[string]string{{"tenant_id": f.person.TenantID, "repository": "fixture/private"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(grantDir, "fixture-read.allowlist.json"), grant, 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		for _, source := range []struct {
+			repo, visibility, credential string
+			paths                        []string
+			files                        map[string]string
+		}{
+			{"fixture/company", "public", "", doctrine.DefaultPaths, public},
+			{"fixture/private", "private", "fixture-read", []string{"docs/AGENTS-*.md", "docs/AGENTS-PROFILE-OWNER.md", "docs/AGENTS-PROFILE-OTHER.md"}, private},
+		} {
+			var id string
+			if err := tx.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,credential_ref,commit_sha,paths,indexed_at) VALUES($1,$2,$3,$4,$5,$6,clock_timestamp()) RETURNING id::text`, f.person.TenantID, source.repo, source.visibility, source.credential, commit, source.paths).Scan(&id); err != nil {
+				return err
+			}
+			for name, body := range source.files {
+				content := []byte(body)
+				if _, err := tx.Exec(t.Context(), `INSERT INTO doctrine_cache(tenant_id,source_id,commit_sha,path,blob_sha,content) VALUES($1,$2,$3,$4,$5,$6)`, f.person.TenantID, id, commit, name, doctrine.BlobSHA(content), content); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	req := httptest.NewRequest("POST", endpoint, strings.NewReader(`{"pinned_files":true}`))
+	req = req.WithContext(tenant.WithPrincipal(t.Context(), f.agent))
+	req.Header.Set("Authorization", "Bearer "+f.key)
+	req.Header.Set("X-Aeon-Worker-Lease", lease)
+	w = httptest.NewRecorder()
+	(doctrine.Credentials{Dir: grantDir}).CatalogMiddleware(f.mux).ServeHTTP(w, req)
+	expect(t, w, 200)
+	var got rules.Merged
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.PinnedFiles) != 2 {
+		t.Fatalf("launch pack has %d files; want exactly the public and private kernels", len(got.PinnedFiles))
+	}
+	for i, want := range []struct{ repo, visibility, path, body string }{
+		{"fixture/company", "public", "docs/AGENTS-KERNEL.md", public["docs/AGENTS-KERNEL.md"]},
+		{"fixture/private", "private", "docs/AGENTS-KERNEL-PRIVATE.md", private["docs/AGENTS-KERNEL-PRIVATE.md"]},
+	} {
+		file := got.PinnedFiles[i]
+		if file.Repository != want.repo || file.Visibility != want.visibility || file.Path != want.path || file.Content != want.body || file.Commit != commit || file.BlobSHA != doctrine.BlobSHA([]byte(want.body)) {
+			t.Fatalf("launch pack entry %d does not match the pinned kernel", i)
+		}
+	}
+	if err := rules.ValidateManagedFiles(got, got.Context, time.Now()); err != nil {
+		t.Fatalf("kernel-only launch context is invalid: %v", err)
+	}
 }

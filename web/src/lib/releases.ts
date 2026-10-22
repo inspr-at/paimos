@@ -260,21 +260,27 @@ export function displayText(text: string, keys: Iterable<string>) {
 export function hasUsableNotes(r: Pick<Release, 'notes'>): r is Pick<Release, 'notes'> & { notes: ReleaseNotes } {
   return !!r.notes && r.notes.source !== 'unavailable'
 }
-// The viewer's language. German locales use DE; everything else, including a
-// missing profile, uses EN.
+// The viewer's language. An explicit reader choice is exactly "en" or "de"
+// (the sheet's switch, the address, a remembered choice). A profile or browser
+// locale, including de-AT, is not that choice: it follows the one app language.
 export function noteLocale(locale?: string | null): 'en' | 'de' {
-  return displayLanguage(locale, 'release-notes')
+  const raw = locale?.trim().toLowerCase()
+  if (raw === 'en' || raw === 'de') return raw
+  return displayLanguage()
 }
 // The release history's own language and view, chosen in its header (AEON-323).
-// The address wins, then this person's last choice on this device, then the
-// profile locale. The view is Highlights unless the address says Details.
+// The address wins, then this person's last choice, then the app language.
+// The profile locale does not select German. The view is Highlights unless
+// the address says Details.
 export type ReleaseLang = 'en' | 'de'
 export type ReleaseView = 'highlights' | 'details'
 const first = (value: unknown) => Array.isArray(value) ? value[0] : value
 export function releaseLang(value: unknown, profileLocale?: string | null, remembered?: string | null): ReleaseLang {
   const raw = first(value)
   if (raw === 'en' || raw === 'de') return raw
-  return remembered === 'en' || remembered === 'de' ? remembered : noteLocale(profileLocale)
+  if (remembered === 'en' || remembered === 'de') return remembered
+  void profileLocale
+  return displayLanguage()
 }
 export function releaseView(value: unknown): ReleaseView {
   return first(value) === 'details' ? 'details' : 'highlights'

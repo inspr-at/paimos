@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -388,7 +389,7 @@ func validateRoutineCheckout(ctx context.Context, r RoutineRepository, w Routine
 func routineGit(ctx context.Context, repository string, args ...string) (string, error) {
 	flags := []string{"--no-replace-objects", "--no-pager", "-C", repository, "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "core.attributesFile=" + os.DevNull}
 	environment := []string{}
-	for _, entry := range os.Environ() {
+	for _, entry := range harnesslaunch.WithoutTransportCredentials(os.Environ()) {
 		if !strings.HasPrefix(entry, "GIT_") && !strings.HasPrefix(entry, "LC_ALL=") {
 			environment = append(environment, entry)
 		}

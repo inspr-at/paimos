@@ -112,6 +112,7 @@ func TestRoutineLaunchClaimReplayAndCurrentAuthority(t *testing.T) {
 	o := f.order(t, nil)
 	run := f.run(t, o)
 	ids := f.reserve(t, run)
+	computer, request = f.pairedRunComputer(t)
 	var account string
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `SELECT account_id::text FROM agent_runs WHERE id=$1`, run.ID).Scan(&account); err != nil {
@@ -123,10 +124,9 @@ func TestRoutineLaunchClaimReplayAndCurrentAuthority(t *testing.T) {
 		}{
 			{`UPDATE nodes SET parent_id=$2 WHERE id=$1`, []any{o.NodeID, *occurrence.NodeID}},
 			{`UPDATE routine_runs SET work_order_id=$2,agent_run_id=$3 WHERE id=$1`, []any{occurrence.Run.ID, o.NodeID, run.ID}},
-			{`INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,'123456789',$3,$3,$3,'{"platform":"darwin","arch":"arm64"}',$3,'redeemed',$4)`, []any{f.person.TenantID, request, strings.Repeat("e", 64), f.person.ID}},
-			{`INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,ledger_generation) SELECT $1,$2,$3,$4,id,'daemon-test',$5,$6 FROM agent_keys WHERE principal_id=$4 LIMIT 1`, []any{f.person.TenantID, computer, request, f.agent.ID, strings.Repeat("e", 64), ledger}},
+			{`UPDATE agent_pairing_computers SET ledger_generation=$2 WHERE id=$1`, []any{computer, ledger}},
 			{`UPDATE agent_pairing_requests SET computer_id=$2 WHERE id=$1`, []any{request, computer}},
-			{`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,ongoing_approved_at,verification_expires_at) VALUES($1,$2,$3,$4,$5,clock_timestamp(),clock_timestamp()+interval '1 hour')`, []any{f.person.TenantID, account, computer, request, f.profile}},
+			{`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,ongoing_approved_at,verification_expires_at) VALUES($1,$2,$3,$4,$5,clock_timestamp(),clock_timestamp()+interval '1 hour') ON CONFLICT DO NOTHING`, []any{f.person.TenantID, account, computer, request, f.profile}},
 		}
 		for _, query := range queries {
 			if _, err := tx.Exec(t.Context(), query.sql, query.args...); err != nil {

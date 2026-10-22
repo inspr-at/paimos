@@ -1202,6 +1202,12 @@
     ,
     "browser:tests/recurrences.spec.ts:renaming legacy monthly and event definitions leaves their trigger unchanged"
     ,
+    "browser:tests/release-groups.spec.ts:a German profile stays in English; an explicit DE choice uses the German pill and falls back when German is empty"
+    ,
+    "browser:tests/release-historic.spec.ts:a German profile reads the backfilled pills and benefits in English"
+    ,
+    "browser:tests/release-switches.spec.ts:the language is remembered per person and defaults to the app language"
+    ,
     "browser:tests/role-picker-layout.spec.ts:a description distinguishes duplicate role names when it is present in the payload"
     ,
     "browser:tests/role-picker-layout.spec.ts:a rejected role change and another choice keep actions still at 1440"
@@ -1623,6 +1629,8 @@
     "browser:tests/theme-settings.spec.ts:Theme settings 390 light: preview, derived colours, marker and overlay stay still"
     ,
     "browser:tests/theme-settings.spec.ts:derived contrast preserves chosen colours and staged edits apply only after Save"
+    ,
+    "browser:tests/ticket-benefits.spec.ts:a German profile stays in English; an explicit DE choice shows German and falls back when German is empty"
     ,
     "browser:tests/ui-audit-dark-1024.spec.ts:offline route and state audit dark 1024"
     ,
@@ -6426,6 +6434,42 @@
     ,
     {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"touch › AEON-1535 P3: O, A, R and D and a tap choose the right row, and choosing moves nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: a reader who presses e before permissions load gets no editor","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: c is spent when the person enters and leaves a field before permissions load","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: c pressed before project permissions load focuses the comment box once they arrive","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e is spent by a refreshed denial that lands after the request it waited on, so a later grant opens nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e is spent when a dialog opens and closes before permissions load","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e pressed before project permissions load opens the editor once they arrive","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e pressed while the ticket loads opens the editor when the ticket arrives after its permissions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e remembered for one ticket does not edit the ticket opened next","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Escape closes an open peek menu before the ticket and keeps the memo draft","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: the peek opens the ticket’s full page at its canonical address","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1637-session-tab-events.spec.ts","name":"AEON-1637: 1440 dark a tap leaves Events for Lead, Details and Chat without an error, from a link and from the default","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1637-session-tab-events.spec.ts","name":"AEON-1637: 1440 light a tap leaves Events for Lead, Details and Chat without an error, from a link and from the default","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1637-session-tab-events.spec.ts","name":"AEON-1637: 390 dark a tap leaves Events for Lead, Details and Chat without an error, from a link and from the default","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1637-session-tab-events.spec.ts","name":"AEON-1637: 390 light a tap leaves Events for Lead, Details and Chat without an error, from a link and from the default","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8570,8 +8614,6 @@
     ,
     {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 Desk opens waiting definitions and resolves only after the last admin decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 German definitions copy covers every P3 string and singular notices","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 default decisions preserve every row notice copy and focus in all viewports","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 failed stale and identity-bound decisions never claim success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -8579,6 +8621,8 @@
     {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 workspace defaults differences empty inherited and viewer match the approved states","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1528 definitions remeasure resize locale and longer decisions without shifting unchanged content","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1609 a de-AT browser and German profile keep Definitions in English","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 Add and row menus stay anchored at every width with the approved copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -9448,6 +9492,24 @@
     ,
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"900: items nest under their goal at the step icons' x, labels run from the key to the ETA in at most two lines with the badge in the meta line; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 dark: Hide for me, Undo, Display › Show (Done goals, Hidden goals, Waiting on you), Unhide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 dark: the toolbar's Waiting on you toggle hides and shows the band, Display › Show follows, and the count stays without moving anything","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: Hide for me, Undo, Display › Show (Done goals, Hidden goals, Waiting on you), Unhide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: Waiting on you off leaves no band, keeps the header Desk count, and stays off from the first paint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: the toolbar's Waiting on you toggle hides and shows the band, Display › Show follows, and the count stays without moving anything","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 dark: the toolbar toggle steps aside; the ⋯ row reads \"Waiting on you · 1\", hides and shows the band, and keeps the count while hidden","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 dark: the ⋯ Goal display menu has the three Show rows; the opened goal hides, Undo restores, Hidden goals shows it and Unhide brings it back","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 light: the toolbar toggle steps aside; the ⋯ row reads \"Waiting on you · 1\", hides and shows the band, and keeps the count while hidden","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 light: the ⋯ Goal display menu has the three Show rows; the opened goal hides, Undo restores, Hidden goals shows it and Unhide brings it back","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1024 dark: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1024 light: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10274,13 +10336,13 @@
     ,
     {"kind":"browser","file":"tests/idle-requests.spec.ts","name":"AEON-1117 shares mounted reads and event transport, fences stale answers and recovers missed events and access","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff and German at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -12930,7 +12992,7 @@
     ,
     {"kind":"browser","file":"tests/release-groups.spec.ts","name":"Enter and Space expand the commit disclosure and leave the release where it is","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-groups.spec.ts","name":"a German locale uses the German pill and benefit, and an empty German field falls back to English","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-groups.spec.ts","name":"a German profile stays in English; an explicit DE choice uses the German pill and falls back when German is empty","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-groups.spec.ts","name":"a search that matches only a commit subject opens that disclosure","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13006,7 +13068,7 @@
     ,
     {"kind":"browser","file":"tests/release-historic-tenant.spec.ts","name":"historic notes in a non-PPM tenant: filters and views at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-historic.spec.ts","name":"a German profile reads the backfilled pills and benefits in German","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-historic.spec.ts","name":"a German profile reads the backfilled pills and benefits in English","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-historic.spec.ts","name":"a told ticket without commits keeps its block, without a disclosure","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13066,7 +13128,7 @@
     ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"the ticket release field follows native membership after reload, reopen and undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-presentation.spec.ts","name":"a German profile reads the German presentation and pills, with English where German is empty","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/release-presentation.spec.ts","name":"a German profile reads the presentation and pills in English","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/release-presentation.spec.ts","name":"a presented release leads with its header, then the ticket blocks at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -13108,7 +13170,7 @@
     ,
     {"kind":"browser","file":"tests/release-switches.spec.ts","name":"switches fit 390 light in both views, and Details passes axe","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-switches.spec.ts","name":"the language is remembered per person and defaults to the profile","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-switches.spec.ts","name":"the language is remembered per person and defaults to the app language","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-switches.spec.ts","name":"the list and Compare badge a name shown in the other language","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14844,7 +14906,7 @@
     ,
     {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"empty capped scope still warns that deeper sessions may exist","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"a German language setting shows the German pill and sentence, and an empty German field falls back to English","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"a German profile stays in English; an explicit DE choice shows German and falls back when German is empty","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"backfilled notes say they were written after the release at 1600px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -16584,6 +16646,8 @@
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a hit-bitmap pixel belongs to a node only when it is opaque and holds its index colour","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a stale wide glimpse box does not paint once the visual viewport has left 1280","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a ticket adapter needs no knowledge schema and engines cannot mutate the source","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"elliptic anchors stay distinct for small, prime and composite graph sizes","tier":"GATED-FULL"}
@@ -17170,7 +17234,7 @@
     ,
     {"kind":"node","file":"tests/releases.test.ts","name":"headlines read without the ticket keys their chips show, in sentence case","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/releases.test.ts","name":"language and view: the address, then the remembered choice, then the profile; Highlights by default","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/releases.test.ts","name":"language and view: the address, then the remembered choice, then the app language; Highlights by default","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/releases.test.ts","name":"names in the rail and in Compare say when they fell back to the other language","tier":"GATED-FULL"}
     ,
@@ -17699,6 +17763,8 @@
     {"kind":"vitest","file":"tests/accounts-needs.unit.test.ts","name":"the Accounts part > lists a low quota by the workspace thresholds, and nothing else when the matrix reports nothing","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/accounts-needs.unit.test.ts","name":"the Accounts part > lists a new account that asks first and one row for projects in Unassigned","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/aeon-1632-no-work-id-links.unit.test.ts","name":"AEON-1632: no web source builds a /work/<id> link","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agent-appearance.unit.test.ts","name":"personal behaviour writes preserve stored accessibility choices while a theme is active","tier":"GATED-FULL"}
     ,
@@ -18674,11 +18740,11 @@
     ,
     {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"the Filters sheet filters and links to the Display menu instead of holding display settings","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"follows the START handoff language, else the browser, through the shared helper","tier":"ESSENTIAL"}
-    ,
     {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"has no app locale switches outside the shared helper","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"keeps the incomplete app in English and preserves the independent release-note choice","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"keeps every surface in the one app language and preserves an explicit release-note choice","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"keeps the START sheet in the app language regardless of the handoff or the browser","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"rejects direct and aliased locale detectors while allowing language selection and region formatting","tier":"ESSENTIAL"}
     ,
@@ -18809,6 +18875,8 @@
     {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"what the rows and the footer show > the footer says Live with the last ETA time, or Reconnecting with the last update, in one slot","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"what the rows and the footer show > the status note is one line with its author and age, without a fold chevron, and renders nothing without a note","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-waiting-toggle.unit.test.ts","name":"Waiting on you: one setting for the toolbar toggle and Display › Show > a flip from either control shows in both, keeps the other Goals preferences, and the count stays while the band is hidden","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/graph-focus.unit.test.ts","name":"contains a rejected exit and tolerates a missing exit API","tier":"GATED-FULL"}
     ,
@@ -19875,6 +19943,8 @@
     {"kind":"vitest","file":"tests/position.unit.test.ts","name":"the server position decides before the order the reads started in","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/preferences-owner.unit.test.ts","name":"AEON-1213: shared preference reads retry failures, coalesce recovery and accept an empty value","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/preferences-owner.unit.test.ts","name":"AEON-1614: a delay-0 save is on the wire with keepalive before the page hides","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/preferences-owner.unit.test.ts","name":"S9-001: a queued tail behind A's in-flight write is cancelled on sign-out","tier":"ESSENTIAL"}
     ,
@@ -23861,6 +23931,8 @@
     {"kind":"vitest","file":"tests/version-crossfade.unit.test.ts","name":"reveals seconds with shared opacity for a Pretty value of undefined","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/version-crossfade.unit.test.ts","name":"touch does not hover; keyboard focus survives pointer exit and leaves on blur; disposal removes listeners","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"AEON-1637: the default hold clock calls the timers on Window, so a touch never throws and a hold still opens","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/view-switch.unit.test.ts","name":"a delayed default never writes one person's choice into the next person's preferences","tier":"ESSENTIAL"}
     ,

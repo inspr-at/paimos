@@ -362,8 +362,12 @@ func secondWorkerHandoff(t *testing.T, f *fixture, project string, first qEntry)
 	var h agentruns.WorkerHandoff
 	f.call(t, f.person, "GET", "/api/runs/"+second.Run.ID+"/handoff", nil, 200, &h)
 	body := claimBody(f.reserve(t, second.Run))
+	body["daemon_id"] = "daemon-other"
+	f.legacyAccount(t, second.Run.ID)
+	f.key(t, f.other, []string{"run.claim"})
+	f.pairedRunComputer(t, f.other)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET registered_by_principal_id=$2 WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1)`, second.Run.ID, f.other.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET registered_by_principal_id=$2,daemon_id='daemon-other' WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1)`, second.Run.ID, f.other.ID)
 		return err
 	})
 	body["handoff"] = agentruns.WorkerPickup{TicketRevision: h.TicketRevision, WorkOrderRevision: h.WorkOrderRevision, BriefSHA256: h.BriefSHA256, WorktreeID: strings.Repeat("a", 64)}
