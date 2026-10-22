@@ -101,15 +101,17 @@ test('AEON-1360 cross-project children nest with their own work and survive thei
     counts.cross_project = []
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
-    await page.goto('/agents')
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await signal(page, 'harness.registered')
     const parent = row(page, lead), fold = parent.locator('[data-fold="family"]')
+    await expect(fold).toHaveAccessibleName('Fold Release lead’s workers: 2 workers, 1 working')
     const controls = { parent, fold, actions: parent.locator('.c-actions'), filter: page.locator('.sessions .tb-filter') }
     const stable = await controlStability(page, controls)
     await stable.check(async () => {
       await fold.click()
       await expect(row(page, child)).toHaveCount(0)
       await expect(parent.locator('.l2t')).toContainText('2 workers')
+      await expect(parent.locator('.l2t')).not.toContainText('includes 1 from AEON')
     })
     const before = await Promise.all(Object.values(controls).map(control => control.boundingBox()))
     await stable.check(async () => {
