@@ -236,6 +236,8 @@ let activeInputUUID = "";
 let activeCorrelationID = "";
 let activeNativeTurnRef = "";
 const correlations = new Map();
+// Content-free reactions survive control acknowledgement until their own result.
+const reactedCorrelations = new Map();
 function deleteCorrelation(uuid) {
   const state = correlations.get(uuid);
   if (state?.timer) clearTimeout(state.timer);
@@ -263,6 +265,10 @@ function observeReaction(message) {
   if (!state || state.reacted) return;
   state.reacted = true;
   state.resolveReaction();
+  if (!native) {
+    if (reactedCorrelations.size >= MAX_PENDING_STEERS) reactedCorrelations.delete(reactedCorrelations.keys().next().value);
+    reactedCorrelations.set(uuid, state.correlationID);
+  }
   if (native) {
     const turnRef = message?.uuid ?? message?.message?.id;
     if (start.native_c0 === true && !validID(turnRef, 128)) { state.reacted = false; return; }
@@ -573,7 +579,7 @@ const handleControlLine = (line) => {
       if (request.op === "steer" || request.op === "inbox") {
         expireCorrelations();
         if (typeof request.text !== "string" || request.text.length === 0 ||
-            Buffer.byteLength(request.text) > (request.op === "inbox" ? MAX_INBOX_BYTES : MAX_STEER_BYTES) || request.text.includes("\0") || (request.op === "steer" && !interruptReceipt)) {
+            Buffer.byteLength(request.text) > (request.op === "inbox" || request.chat_input === true ? MAX_INBOX_BYTES : MAX_STEER_BYTES) || request.text.includes("\0") || (request.op === "steer" && !interruptReceipt)) {
           fail("app_server_protocol", correlationID);
           return;
         }
@@ -781,7 +787,9 @@ try {
         emit({ kind: "turn_completed" });
         break;
       }
-      emit({ kind: "turn_completed", ...(native ? { correlation_id: activeCorrelationID } : {}), ...(start.native_c0 === true ? { native_turn_ref: activeNativeTurnRef } : {}) });
+      const completedCorrelation = native ? activeCorrelationID : reactedCorrelations.get(message.user_message_uuid);
+      if (!native) reactedCorrelations.delete(message.user_message_uuid);
+      emit({ kind: "turn_completed", ...(completedCorrelation ? { correlation_id: completedCorrelation } : {}), ...(start.native_c0 === true ? { native_turn_ref: activeNativeTurnRef } : {}) });
       if (start.purpose === "pairing_verification" || start.read_only_review === true) {
         verificationSucceeded = message.subtype === "success" && message.is_error !== true;
         if (start.read_only_review === true && verificationSucceeded) {

@@ -5792,6 +5792,24 @@
     ,
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native replies use negotiated next-step timing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native replies use negotiated queue timing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 closing chat closes its stream and rejects a late initial history read","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"Outline on a phone: Expand all from the Display sheet closes it and returns focus","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"desktop Display buttons open the Display menu at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

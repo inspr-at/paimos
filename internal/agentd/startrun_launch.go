@@ -213,6 +213,12 @@ func (s *Supervisor) registerRunHarness(ctx context.Context, claimed claimedRun,
 	// input additionally needs inbox delivery.
 	if relayable && !verification && !review && relayChatHarness(profile.Harness) && sessionChatCapabilities(profile.Harness, caps).Deltas && s.chatGate.enabled() {
 		caps = append(caps, chatCapability)
+		// Only the concrete adapters implementing exact-input reactions qualify.
+		// A custom adapter with the same family name does not inherit the claim.
+		switch adapter.(type) {
+		case *ClaudeAdapter, *CodexAdapter:
+			caps = append(caps, chatTimingCapability)
+		}
 	}
 	registration := HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB, AccountLabel: route.AccountLabel, DisplayLabel: run.RecoveryLabel}
 	if profile.Harness != Codex {
@@ -220,6 +226,13 @@ func (s *Supervisor) registerRunHarness(ctx context.Context, claimed claimedRun,
 	}
 	entry.harness, err = s.api.RegisterHarness(ctx, registration,
 		s.principalID, run.ID, run.WorkOrderID, profile.Harness, host, caps)
+	if err != nil && slices.Contains(caps, chatTimingCapability) && chatCapabilityRefused(err) {
+		// A strict older server may support chat but not its timing extension.
+		// Retry without only the extension before trying the pre-chat fallback.
+		caps = slices.DeleteFunc(caps, func(c string) bool { return c == chatTimingCapability })
+		entry.harness, err = s.api.RegisterHarness(ctx, registration,
+			s.principalID, run.ID, run.WorkOrderID, profile.Harness, host, caps)
+	}
 	if err != nil && slices.Contains(caps, chatCapability) && chatCapabilityRefused(err) {
 		// An older server rejects the capability before writing anything. The
 		// run registers without live chat; only the relay is switched off.
@@ -231,6 +244,7 @@ func (s *Supervisor) registerRunHarness(ctx context.Context, claimed claimedRun,
 	if err != nil {
 		return runHarness{}, err
 	}
+	entry.chatTiming = slices.Contains(caps, chatTimingCapability)
 	cleanup.registered = true
 	if api, ok := s.api.(serviceTierAPI); ok {
 		report := servicetier.Advertised(profile.Harness, profile.Model, "unknown")

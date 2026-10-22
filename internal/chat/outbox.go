@@ -20,6 +20,8 @@ type outboxSend struct {
 	ClientID string  `json:"client_message_id"`
 	Body     string  `json:"body"`
 	ReplyTo  *string `json:"reply_to,omitempty"`
+	Level    string  `json:"delivery_level,omitempty"`
+	Session  string  `json:"expected_session_id,omitempty"`
 }
 type finalSend struct {
 	WorkerBindingRequest
@@ -50,6 +52,9 @@ func validFinal(in outboxSend) error {
 	if in.Body == "" || !utf8.ValidString(in.Body) || strings.ContainsRune(in.Body, 0) || len(in.ClientID) < 1 || len(in.ClientID) > 64 || !utf8.ValidString(in.ClientID) || strings.ContainsRune(in.ClientID, 0) || in.ReplyTo != nil && !workorders.UUID(*in.ReplyTo) {
 		return workorders.Fail(400, "invalid final chat message")
 	}
+	if in.Level != "" && in.Level != "simple" && in.Level != "steer" || in.Session != "" && !workorders.UUID(in.Session) {
+		return workorders.Fail(400, "invalid chat timing")
+	}
 	return nil
 }
 func (m *Module) sendOutbox(r *http.Request, tx pgx.Tx, p tenant.Principal, in outboxSend) (any, error) {
@@ -73,11 +78,36 @@ func (m *Module) sendOutbox(r *http.Request, tx pgx.Tx, p tenant.Principal, in o
 	if _, err = tx.Exec(r.Context(), `SELECT 1 FROM harness_sessions WHERE id=$1 FOR NO KEY UPDATE`, session); err != nil {
 		return nil, err
 	}
-	return storeFinal(r.Context(), tx, p, c.Thread, project, c.Person, recipient, "", session, in)
+	if in.Session != "" && in.Session != session {
+		return nil, workorders.Fail(409, "chat binding changed")
+	}
+	if in.Level == "steer" {
+		// Steering can interrupt a managed turn. Chat ownership and chat.send
+		// do not grant control authority; recheck it under the access fence in
+		// this same transaction before accepting any native input.
+		if err = require(r.Context(), tx, p, "harness.control", project); err != nil {
+			return nil, err
+		}
+		timing, err := inputTimingTx(r.Context(), tx, session)
+		if err != nil {
+			return nil, err
+		}
+		if timing != "native" && timing != "next-step" {
+			return nil, workorders.Fail(409, "chat timing unavailable")
+		}
+	}
+	out, err := storeFinal(r.Context(), tx, p, c.Thread, project, c.Person, recipient, "", session, in)
+	if in.Level == "" { // Preserve strict legacy response DTOs unless opted in.
+		out.Message.Level = ""
+	}
+	return out, err
 }
 func (m *Module) finalMessage(r *http.Request, tx pgx.Tx, p tenant.Principal, in finalSend) (any, error) {
 	if err := validFinal(in.outboxSend); err != nil {
 		return nil, err
+	}
+	if in.Level != "" || in.Session != "" {
+		return nil, workorders.Fail(400, "agent finals have no input timing")
 	}
 	if err := accessFence(r.Context(), tx, p); err != nil {
 		return nil, err
@@ -92,15 +122,27 @@ func (m *Module) finalMessage(r *http.Request, tx pgx.Tx, p tenant.Principal, in
 	if err = workerKeyPermissionTx(r.Context(), tx, r, p, "chat.send"); err != nil {
 		return nil, err
 	}
-	return storeFinal(r.Context(), tx, p, in.ConversationID, s.ProjectID, p.ID, s.OwnerPersonID, s.ID, "", in.outboxSend)
+	out, err := storeFinal(r.Context(), tx, p, in.ConversationID, s.ProjectID, p.ID, s.OwnerPersonID, s.ID, "", in.outboxSend)
+	out.Message.Level = ""
+	return out, err
 }
 
-const outboxColumns = `id::text,sent_event_id,body,reply_to_id::text`
+// The existing content-free acceptance event is immutable and FK-retained
+// with its message. It stores timing atomically without a schema migration.
+const chatDeliveryLevelSQL = `coalesce((SELECT e.after->>'delivery_level' FROM events e WHERE e.tenant_id=inbox_messages.tenant_id AND e.id=inbox_messages.sent_event_id),'simple')`
+const outboxColumns = `id::text,sent_event_id,body,reply_to_id::text,` + chatDeliveryLevelSQL
+
+func inputLevel(level string) string {
+	if level == "" {
+		return "simple"
+	}
+	return level
+}
 
 func scanOutbox(row pgx.Row, thread string) (historyMessage, error) {
 	o := historyMessage{Conversation: thread, Payload: "inline"}
 	var seq int64
-	err := row.Scan(&o.ID, &seq, &o.Body, &o.ReplyTo)
+	err := row.Scan(&o.ID, &seq, &o.Body, &o.ReplyTo, &o.Level)
 	o.Sequence = strconv.FormatInt(seq, 10)
 	o.Event = o.Sequence
 	return o, err
@@ -110,8 +152,17 @@ func storeFinal(ctx context.Context, tx pgx.Tx, p tenant.Principal, thread, proj
 	key := "chat/" + thread + "/" + in.ClientID
 	existing, err := scanOutbox(tx.QueryRow(ctx, `SELECT `+outboxColumns+` FROM inbox_messages WHERE chat_thread_id=$1 AND sender_principal_id=$2 AND idempotency_key=$3 FOR NO KEY UPDATE`, thread, sender, key), thread)
 	if err == nil {
-		if existing.Body != in.Body || (existing.ReplyTo == nil) != (in.ReplyTo == nil) || existing.ReplyTo != nil && *existing.ReplyTo != *in.ReplyTo {
+		if existing.Body != in.Body || existing.Level != inputLevel(in.Level) || (existing.ReplyTo == nil) != (in.ReplyTo == nil) || existing.ReplyTo != nil && *existing.ReplyTo != *in.ReplyTo {
 			return o, workorders.Fail(409, "chat client message ID conflicts")
+		}
+		if in.Session != "" {
+			var sameSession bool
+			if err = tx.QueryRow(ctx, `SELECT coalesce(recipient_session_id=$2::uuid,false) FROM inbox_messages WHERE id=$1`, existing.ID, in.Session).Scan(&sameSession); err != nil {
+				return o, err
+			}
+			if !sameSession {
+				return o, workorders.Fail(409, "chat client message ID conflicts")
+			}
 		}
 		o.Message = existing
 		o.Receipt, err = receiptTx(ctx, tx, thread, existing)
@@ -138,7 +189,7 @@ func storeFinal(ctx context.Context, tx pgx.Tx, p tenant.Principal, thread, proj
 	}
 	// All FK parents are locked before event-counter acquisition. Only final
 	// text enters the inbox; the private event contains identifiers, never text.
-	e, err := events.Append(ctx, tx, p, events.Change{NodeID: &project, Type: "chat.live_message", After: map[string]string{"conversation_id": thread, "message_id": id}})
+	e, err := events.Append(ctx, tx, p, events.Change{NodeID: &project, Type: "chat.live_message", After: map[string]string{"conversation_id": thread, "message_id": id, "delivery_level": inputLevel(in.Level)}})
 	if err != nil {
 		return o, err
 	}
@@ -201,13 +252,24 @@ func (m *Module) listOutbox(r *http.Request, tx pgx.Tx, p tenant.Principal, _ st
 			return nil, err
 		}
 	}
-	return outboxPageTx(r.Context(), tx, c, limit, "", "")
+	out, err := outboxPageTx(r.Context(), tx, c, limit, "", "")
+	if r.URL.Query().Get("include_timing") != "true" {
+		omitOutboxTiming(&out)
+	}
+	return out, err
+}
+
+func omitOutboxTiming(page *outboxPage) {
+	for i := range page.Items {
+		page.Items[i].Message.Level = ""
+	}
 }
 
 type workerPageRequest struct {
 	WorkerBindingRequest
-	After string `json:"after,omitempty"`
-	Limit int    `json:"limit,omitempty"`
+	After         string `json:"after,omitempty"`
+	Limit         int    `json:"limit,omitempty"`
+	IncludeTiming bool   `json:"include_timing,omitempty"`
 }
 
 func (m *Module) workerOutbox(r *http.Request, tx pgx.Tx, p tenant.Principal, in workerPageRequest) (any, error) {
@@ -231,7 +293,11 @@ func (m *Module) workerOutbox(r *http.Request, tx pgx.Tx, p tenant.Principal, in
 			return nil, err
 		}
 	}
-	return outboxPageTx(r.Context(), tx, c, in.Limit, p.ID, s.ID)
+	out, err := outboxPageTx(r.Context(), tx, c, in.Limit, p.ID, s.ID)
+	if !in.IncludeTiming {
+		omitOutboxTiming(&out)
+	}
+	return out, err
 }
 func outboxPageTx(ctx context.Context, tx pgx.Tx, c historyCursor, limit int, recipient, session string) (outboxPage, error) {
 	o := outboxPage{Contract: "chat-live-v1", Items: []outboxResult{}}

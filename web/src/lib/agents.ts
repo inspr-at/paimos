@@ -75,7 +75,7 @@ export interface ProjectMessage {
   optimistic?: boolean; send_failed?: boolean; client_id?: string; resend_of?: string; queue_pending?: boolean; cancelled?: boolean
   // Chat-native messages (AEON-1071) live only in this chat thread; replies and
   // read evidence for them use its routes. chat_seen: its read marker has them.
-  chat_thread?: string; chat_seen?: boolean
+  chat_thread?: string; chat_seen?: boolean; chat_timing?: ChatInputTiming
   recipient_session_id?: string; sender_session_id?: string; sender_label?: string; from?: string
   id: string; sender_principal_id: string; recipient_principal_id: string; to: string; body: string; reply_to?: string | null
   sent_event_id: number; is_action_request: boolean; expects_reply: boolean; delivery_level: 'simple' | 'steer'
@@ -144,21 +144,23 @@ export interface ChatCancelResult { contract: 'chat-v1'; message_id: string; res
 export const cancelSessionMessage = (projectId: string, messageId: string) => request<ChatCancelResult>(`/projects/${enc(projectId)}/messages/${enc(messageId)}/cancel`, 'POST')
 // AEON-1071: the person's own chat thread whose current binding is this
 // session. 404 means no live stream for it (unbound, or chat is disabled).
-export async function chatThreadForSession(sessionId: string): Promise<{ status: number; thread?: string }> {
-  const response = await api(`/chat-sessions/${enc(sessionId)}/thread`)
+export type ChatInputTiming = 'native' | 'next-step' | 'queue'
+export async function chatThreadForSession(sessionId: string): Promise<{ status: number; thread?: string; timing?: ChatInputTiming }> {
+  const response = await api(`/chat-sessions/${enc(sessionId)}/thread`, { headers: { 'Aeon-Chat-Timing': '1' } })
   if (!response.ok) return { status: response.status }
-  const body = await response.json().catch(() => null) as { conversation_id?: unknown } | null
-  return typeof body?.conversation_id === 'string' && body.conversation_id ? { status: 200, thread: body.conversation_id } : { status: 502 }
+  const body = await response.json().catch(() => null) as { conversation_id?: unknown; input_timing?: unknown } | null
+  const timing = body?.input_timing === 'native' || body?.input_timing === 'next-step' || body?.input_timing === 'queue' ? body.input_timing : undefined
+  return typeof body?.conversation_id === 'string' && body.conversation_id ? { status: 200, thread: body.conversation_id, timing } : { status: 502 }
 }
 // The newest page of that chat thread. Chat-native finals live only here,
 // never in the project message list (AEON-1071).
-export interface ChatHistoryMessage { message_id: string; sent_event_position: string; body: string; reply_to?: string | null; sender_principal_id?: string; created_at?: string }
+export interface ChatHistoryMessage { message_id: string; sent_event_position: string; body: string; reply_to?: string | null; sender_principal_id?: string; created_at?: string; delivery_level?: 'simple' | 'steer' }
 export type ChatReadState = 'seen' | 'known_unread' | 'unknown' | 'neutral'
-export const chatThreadMessages = (threadId: string, limit = 50) => request<{ items: { message: ChatHistoryMessage; person_read_state?: ChatReadState }[] }>(`/chat-threads/${enc(threadId)}/messages?limit=${limit}`)
+export const chatThreadMessages = (threadId: string, limit = 50) => request<{ items: { message: ChatHistoryMessage; person_read_state?: ChatReadState }[] }>(`/chat-threads/${enc(threadId)}/messages?limit=${limit}&include_timing=true`)
 // A person's input to the thread. A reply to a chat-native message must go
 // here: the project message route only knows project messages as parents.
 export interface ChatOutboxResult { contract: string; message: ChatHistoryMessage; receipt: { message_id: string; state: string } }
-export const sendChatMessage = (threadId: string, body: { client_message_id: string; body: string; reply_to?: string }) => request<ChatOutboxResult>(`/chat-threads/${enc(threadId)}/outbox`, 'POST', body)
+export const sendChatMessage = (threadId: string, body: { client_message_id: string; body: string; reply_to?: string; delivery_level?: 'simple' | 'steer'; expected_session_id?: string }) => request<ChatOutboxResult>(`/chat-threads/${enc(threadId)}/outbox`, 'POST', body)
 // Exactly the chat-native messages that were on screen; never a watermark.
 export const markChatSeen = (threadId: string, ids: string[]) => request<unknown>(`/chat-threads/${enc(threadId)}/read-marker`, 'PUT', { visible_message_ids: ids, migration_epoch: '0' })
 export const messageStatuses = (ids: string[]) => request<{ items: MessageStatus[] }>(`/inbox/message-status?ids=${ids.map(enc).join(',')}`)
