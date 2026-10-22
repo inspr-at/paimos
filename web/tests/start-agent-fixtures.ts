@@ -14,8 +14,9 @@ const accountId = 'ac000000-0000-4000-8000-000000000001'
 const spareAccountId = 'ac000000-0000-4000-8000-000000000002'
 const laptopAccountId = 'ac000000-0000-4000-8000-000000000003'
 
-export async function mockStartAgent(page: Page, options: { wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
+export async function mockStartAgent(page: Page, options: { ticketTitle?: string; wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
   const work = fixtures()
+  if (options.ticketTitle) work.nodes.find(node => node.id === 'n-1')!.title = options.ticketTitle
   const workParents = new Set(work.nodes.filter(node => ['work', 'epic', 'ticket', 'task'].includes(node.kind_slug)).map(node => node.parent_id))
   for (const node of work.nodes) {
     if (!['work', 'epic', 'ticket', 'task'].includes(node.kind_slug)) continue
@@ -87,6 +88,8 @@ export async function mockStartAgent(page: Page, options: { wait?: CapacityWait;
     const json = (value: unknown, status = 200) => route.fulfill({ status, json: value })
     const body = req.postData() ? req.postDataJSON() as Record<string, unknown> : null
     calls.push({ method, path, body, query: url.searchParams })
+    const projectLead = path.match(/^\/api\/projects\/([^/]+)\/lead$/)
+    if (projectLead && method === 'GET') return json({ project_id: projectLead[1], revision: 0, generation: 0, session_id: null, state: 'none', reason: '', process_active: false, automatic_launch_enabled: false })
     if (path === '/api/me/permissions') {
       const permissions = mockEffectivePermissions(options.readOnly ? 'viewer' : 'admin', url.searchParams.get('project_id') ?? undefined)
       if (!options.readOnly) permissions.workspace.permissions.push('run.create', 'run.read', 'models.read', 'account.read', 'work_orders.read')

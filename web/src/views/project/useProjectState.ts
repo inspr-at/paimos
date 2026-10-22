@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { type ListItem } from '../../lib/api'
 import { can } from '../../lib/authz'
@@ -18,7 +18,6 @@ import { useSession } from '../../stores/session'
 import { useWorkQueue } from '../../stores/workQueue'
 import { useWorkVocabulary } from '../../stores/workVocabulary'
 import { useReleases } from '../../stores/releases'
-import { usePoller } from '../../lib/usePolledData'
 import FilterSheet from '../../components/work/FilterSheet.vue'
 import ListToolbar from '../../components/work/ListToolbar.vue'
 import { KNOWLEDGE_VIEWS, PROJECT_SECTIONS, projectSection, ticketView, type ProjectSection, type TicketView } from '../../components/work/projectNavigation'
@@ -58,10 +57,7 @@ export function useProjectState() {
   const queueSnapshot = computed(() => projectId.value ? queue.snapshots[projectId.value] : undefined)
   const queueError = computed(() => projectId.value ? queue.errors[projectId.value] : undefined)
   const mayQueue = computed(() => session.identity?.principal.kind === 'person' && can('run.create', projectId.value ?? undefined))
-  const queuePoller = usePoller(() => projectId.value ? queue.load(projectId.value) : undefined, 20_000)
-  watch(projectId, id => { queueAnchor.value = null; assigneeMenu.value = null; if (id) { void queue.load(id); void releases.load() } }, { immediate: true })
-  onMounted(() => queuePoller.start())
-  onBeforeUnmount(() => queuePoller.stop())
+  watch(projectId, (id, _before, cleanup) => { queueAnchor.value = null; assigneeMenu.value = null; if (id) { cleanup(queue.watch(id)); void releases.load() } }, { immediate: true, flush: 'sync' })
   function closeQueue(restore: boolean) { const anchor = queueAnchor.value; queueAnchor.value = null; if (restore) anchor?.focus() }
   const section = computed(() => projectSection(route))
   // ---------- View switches (AEON-1453): per person, per project, on the server ----------
@@ -151,5 +147,5 @@ export function useProjectState() {
   const skipGuard = ref(false)
   function ticketPath(key: string) { return `/p/${encodeURIComponent(routeKey.value)}/${encodeURIComponent(key)}` }
 
-  return { sectionSwitch, ticketSwitch, knowledgeSwitch, ticketOpeningQuery, route, router, projects, session, projectSections, projectKey, ticketKey, recovery, recovering, authorizedProject, project, projectId, routeKey, queue, releases, vocabulary, queueAnchor, assigneeMenu, queueSnapshot, queueError, mayQueue, queuePoller, closeQueue, section, headerDensity, ticketsHeader, sectionPath, ticketSectionQuery, onKnowledge, filters, density, setDensity, showHeaderGraph, developerLoading, headerGraph, glimpseShown, glimpseActive, now, activeTicketView, knowledgeActive, knowledgeType, knowledgeSlug, knowledgeEntryOpen, knowledgeFilters, knowledgeView, knowledgeDisplay, fullViewQuery, viewMode, settingsActive, deliveryActive, graphActive, graphState, ticketGraphView, outlineActive, toolbarWrap, stickMark, toolbar, table, panel, filterSheet, scrollRoot, toolbarHeight, stuck, cursorId, collapsed, statusMenu, creating, fullView, me, workspaceOwner, workspacePerson, writable, nodeDeletable, nodeMovable, relationLinkable, relationUnlinkable, commentable, commentDeletable, attachable, knowledgeWritable, knowledgeDeletable, skipGuard, ticketPath }
+  return { sectionSwitch, ticketSwitch, knowledgeSwitch, ticketOpeningQuery, route, router, projects, session, projectSections, projectKey, ticketKey, recovery, recovering, authorizedProject, project, projectId, routeKey, queue, releases, vocabulary, queueAnchor, assigneeMenu, queueSnapshot, queueError, mayQueue, closeQueue, section, headerDensity, ticketsHeader, sectionPath, ticketSectionQuery, onKnowledge, filters, density, setDensity, showHeaderGraph, developerLoading, headerGraph, glimpseShown, glimpseActive, now, activeTicketView, knowledgeActive, knowledgeType, knowledgeSlug, knowledgeEntryOpen, knowledgeFilters, knowledgeView, knowledgeDisplay, fullViewQuery, viewMode, settingsActive, deliveryActive, graphActive, graphState, ticketGraphView, outlineActive, toolbarWrap, stickMark, toolbar, table, panel, filterSheet, scrollRoot, toolbarHeight, stuck, cursorId, collapsed, statusMenu, creating, fullView, me, workspaceOwner, workspacePerson, writable, nodeDeletable, nodeMovable, relationLinkable, relationUnlinkable, commentable, commentDeletable, attachable, knowledgeWritable, knowledgeDeletable, skipGuard, ticketPath }
 }

@@ -374,6 +374,7 @@ func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 	if w.Code != 204 {
 		t.Fatalf("delete %d %s", w.Code, w.Body.String())
 	}
+	receipt := w.Header().Get(events.MutationEventHeader)
 	w = request(t, mux, p, "GET", "/api/attachments/"+a.ID+"/content", "", nil)
 	if w.Code != 404 {
 		t.Fatalf("deleted content %d", w.Code)
@@ -388,13 +389,38 @@ func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	w = request(t, mux, p, "POST", "/api/events/"+strconv.FormatInt(eventID, 10)+"/undo", "", nil)
+	if receipt != strconv.FormatInt(eventID, 10) {
+		t.Fatalf("delete receipt %q does not name its own event %d", receipt, eventID)
+	}
+	w = request(t, mux, p, "POST", "/api/events/"+receipt+"/undo", "", nil)
 	if w.Code != 201 {
 		t.Fatalf("undo %d %s", w.Code, w.Body.String())
 	}
 	w = request(t, mux, p, "GET", "/api/attachments/"+a.ID+"/content", "", nil)
 	if w.Code != 200 {
 		t.Fatalf("restored %d", w.Code)
+	}
+	// A later deletion gets its own receipt; the first receipt cannot undo it.
+	w = request(t, mux, p, "DELETE", "/api/attachments/"+a.ID, "", nil)
+	secondReceipt := w.Header().Get(events.MutationEventHeader)
+	if w.Code != 204 || secondReceipt == "" || secondReceipt == receipt {
+		t.Fatalf("second deletion %d receipt %q", w.Code, secondReceipt)
+	}
+	w = request(t, mux, p, "DELETE", "/api/attachments/"+a.ID, "", nil)
+	if w.Code != 404 || w.Header().Get(events.MutationEventHeader) != "" {
+		t.Fatalf("refused deletion supplied a receipt: %d %v", w.Code, w.Header())
+	}
+	w = request(t, mux, p, "POST", "/api/events/"+receipt+"/undo", "", nil)
+	if w.Code != 409 {
+		t.Fatalf("old receipt undid the later deletion: %d %s", w.Code, w.Body.String())
+	}
+	w = request(t, mux, p, "GET", "/api/attachments/"+a.ID, "", nil)
+	if w.Code != 404 {
+		t.Fatalf("old receipt restored the attachment: %d", w.Code)
+	}
+	w = request(t, mux, p, "POST", "/api/events/"+secondReceipt+"/undo", "", nil)
+	if w.Code != 201 {
+		t.Fatalf("second receipt undo %d %s", w.Code, w.Body.String())
 	}
 	report, err := Verify(t.Context(), d.App, store, p.TenantID)
 	if err != nil || report.Checked != 1 || len(report.Issues) != 0 {

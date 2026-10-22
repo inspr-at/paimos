@@ -26,10 +26,10 @@ paths:
         '412': {$ref: '#/components/responses/Error'}
     delete:
       operationId: removeAttachment
-      description: Tenant staff people only.
+      description: 'Tenant staff people only. Returns the exact attachment.removed event receipt for Undo; never search for a later removal when the receipt is unavailable.'
       security: *auth
       responses:
-        '204': {description: Soft deleted}
+        '204': {description: 'Soft deleted', headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}}
         '404': {$ref: '#/components/responses/Error'}
   /attachments/{id}/content:
     parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
