@@ -4,6 +4,7 @@ package agentd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -230,6 +231,8 @@ func reviewWorkspaceDirs(workspace string) (string, string, error) {
 	return gitDir, commonDir, nil
 }
 
+var errRepositoryUnborn = errors.New("repository has no commits")
+
 func reviewWorkspaceHEAD(gitDir, commonDir string) (string, error) {
 	value, err := reviewMetadataFile(filepath.Join(gitDir, "HEAD"))
 	for depth := 0; err == nil && depth < 8; depth++ {
@@ -245,6 +248,9 @@ func reviewWorkspaceHEAD(gitDir, commonDir string) (string, error) {
 		if os.IsNotExist(err) {
 			packed, e := reviewMetadataFile(filepath.Join(commonDir, "packed-refs"))
 			if e != nil {
+				if os.IsNotExist(e) {
+					return "", errors.Join(errReviewContext, errRepositoryUnborn)
+				}
 				break
 			}
 			var resolved string
@@ -262,6 +268,7 @@ func reviewWorkspaceHEAD(gitDir, commonDir string) (string, error) {
 			if resolved != "" {
 				return resolved, nil
 			}
+			return "", errors.Join(errReviewContext, errRepositoryUnborn)
 		}
 	}
 	return "", errReviewContext

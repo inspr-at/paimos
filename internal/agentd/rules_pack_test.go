@@ -269,6 +269,58 @@ func TestPinnedRulesWithoutCheckoutRequirePin(t *testing.T) {
 	}
 }
 
+// Risk: builder instruction reads must not require a GitHub origin, walk
+// history or consume uncommitted files/replacement objects as instructions.
+func TestPinnedRulesBuilderUsesOnlyCommittedHEADWithoutOrigin(t *testing.T) {
+	for _, remote := range []string{"", "https://gitlab.example/group/subgroup/project.git", "../local-repository", "https://github.com/fixture/repository.git"} {
+		t.Run(remote, func(t *testing.T) {
+			r := newLaunchedRepo(t)
+			if remote != "" {
+				r.run("remote", "add", "origin", remote)
+			}
+			parent := workspaceHEAD(t.Context(), r.dir)
+			if err := os.WriteFile(filepath.Join(r.dir, "AGENTS.md"), []byte("Committed builder rules.\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			r.run("add", "AGENTS.md")
+			r.run("commit", "-m", "builder rules")
+			commit := workspaceHEAD(t.Context(), r.dir)
+			r.run("replace", commit, parent)
+			// A missing ancestor makes copying or checking full history fail.
+			// Reading HEAD's tree and its blob must still succeed.
+			if err := os.Remove(filepath.Join(r.dir, ".git", "objects", parent[:2], parent[2:])); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(r.dir, "AGENTS.md"), []byte("Dirty instructions.\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			s, api, _ := testPinnedSupervisor(t)
+			entry := &owned{harness: HarnessSession{ProjectID: api.context.ProjectID}}
+			prompt := "Coordinator task"
+			body, err := s.prepareClaudeRules(t.Context(), entry, api.run, Profile{Harness: Claude}, preparedRun{workspace: r.dir}, &prompt, nil)
+			if err != nil {
+				t.Fatalf("builder rules refused for origin %q: %v", remote, err)
+			}
+			if !strings.HasPrefix(body, hardSafetyFloor) || !strings.Contains(body, "Company rules.") || !strings.Contains(body, "Committed builder rules.\n") || strings.Contains(body, "Dirty instructions.") || !strings.Contains(body, commit) {
+				t.Fatal("builder pack lost committed instructions, floor or pins")
+			}
+		})
+	}
+	t.Run("unborn", func(t *testing.T) {
+		dir, git := evidenceRepo(t)
+		git(dir, "init", "-b", "main")
+		if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("Uncommitted instructions.\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		s, api, _ := testPinnedSupervisor(t)
+		prompt := "Coordinator task"
+		body, err := s.prepareClaudeRules(t.Context(), &owned{harness: HarnessSession{ProjectID: api.context.ProjectID}}, api.run, Profile{Harness: Claude}, preparedRun{workspace: dir}, &prompt, nil)
+		if err != nil || !strings.HasPrefix(body, hardSafetyFloor) || !strings.Contains(body, "Company rules.") || strings.Contains(body, `"kind":"repository"`) || strings.Contains(body, "Uncommitted instructions.") {
+			t.Fatal("unborn checkout lost floor/pins or read uncommitted rules", err)
+		}
+	})
+}
+
 // Risk: labelling the pairing probe changes the exact instruction the adapter
 // and the model are bound to, while skipping the pack would launch without the floor.
 func TestPinnedRulesVerificationProbeKeepsImmutableTask(t *testing.T) {

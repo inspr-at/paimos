@@ -1948,6 +1948,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPiVerificationBlocksBeforeAnyVendorProcess","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesBuilderUsesOnlyCommittedHEADWithoutOrigin","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesLaunchRefusesBeforeAdapter","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesPackGoldenFloorAndDatabaseLayers","tier":"ESSENTIAL"}
@@ -7195,6 +7197,8 @@
     {"kind":"go","package":"internal/harness","name":"TestManagedDeliveryFailureNotifiesSenderOnce","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestManagedForceStopHumanConfirmationAndGenerationFences","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestManagedPinnedContextDefaultDoctrineSelectsKernels","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestManagedPinnedContextRefusesMissingAndOversizedPins","tier":"ESSENTIAL"}
     ,

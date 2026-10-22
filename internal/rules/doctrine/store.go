@@ -172,19 +172,21 @@ func loadGuardCorpus(ctx context.Context, tx pgx.Tx, s Source) ([]byte, error) {
 }
 
 func cachedFiles(ctx context.Context, tx pgx.Tx, s Source) ([]File, error) {
-	return cachedFilesForDelivery(ctx, tx, s, false)
+	return cachedFilesForDelivery(ctx, tx, s, nil)
 }
 
-func cachedFilesForDelivery(ctx context.Context, tx pgx.Tx, s Source, pinned bool) ([]File, error) {
+func cachedFilesForDelivery(ctx context.Context, tx pgx.Tx, s Source, pinnedPaths []string) ([]File, error) {
 	query := `SELECT path, blob_sha, content FROM doctrine_cache WHERE source_id=$1 AND commit_sha=$2`
-	if pinned {
-		query += ` AND path LIKE '%.md' AND octet_length(content)<=64000`
+	args := []any{s.ID, s.Commit}
+	if pinnedPaths != nil {
+		query += ` AND path=ANY($3) AND octet_length(content)<=64000`
+		args = append(args, pinnedPaths)
 	}
 	query += ` ORDER BY path`
-	if pinned {
+	if pinnedPaths != nil {
 		query += ` LIMIT 65`
 	}
-	rows, err := tx.Query(ctx, query, s.ID, s.Commit)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -443,10 +443,10 @@ func TestManagedPinnedFilesKeepDatabaseLayers(t *testing.T) {
 	commit := strings.Repeat("a", 40)
 	var source string
 	if err := db.InTenant(tenant.WithPrincipal(t.Context(), admin), w.d.App, w.tid, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,commit_sha,paths,indexed_at) VALUES($1,'fixture/company','public',$2,ARRAY['docs/KERNEL.md'],clock_timestamp()) RETURNING id::text`, w.tid, commit).Scan(&source); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,commit_sha,paths,indexed_at) VALUES($1,'fixture/company','public',$2,ARRAY['docs/AGENTS-KERNEL.md'],clock_timestamp()) RETURNING id::text`, w.tid, commit).Scan(&source); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO doctrine_cache(tenant_id,source_id,commit_sha,path,blob_sha,content) VALUES($1,$2,$3,'docs/KERNEL.md',$4,$5)`, w.tid, source, commit, doctrine.BlobSHA(doc), doc)
+		_, err := tx.Exec(t.Context(), `INSERT INTO doctrine_cache(tenant_id,source_id,commit_sha,path,blob_sha,content) VALUES($1,$2,$3,'docs/AGENTS-KERNEL.md',$4,$5)`, w.tid, source, commit, doctrine.BlobSHA(doc), doc)
 		return err
 	}); err != nil {
 		t.Fatal(err)

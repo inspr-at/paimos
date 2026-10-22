@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/rulesimport"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -82,7 +83,7 @@ func loadCatalog(ctx context.Context, tx pgx.Tx, pinned bool) (Catalog, error) {
 	}
 	totalBytes, totalFiles := 0, 0
 	for _, s := range sources {
-		expectedFiles := 0
+		var pinnedPaths []string
 		stale := false
 		if s.CredentialRef != "" {
 			var tenantID string
@@ -108,43 +109,26 @@ func loadCatalog(ctx context.Context, tx pgx.Tx, pinned bool) (Catalog, error) {
 			if s.IndexedAt == nil || !shaPattern.MatchString(s.Commit) {
 				return Catalog{}, ErrPinMissing
 			}
-			var count, size, largest int
-			if err := tx.QueryRow(ctx, `SELECT count(*),coalesce(sum(octet_length(content)),0),coalesce(max(octet_length(content)),0) FROM doctrine_cache WHERE source_id=$1 AND commit_sha=$2 AND path LIKE '%.md'`, s.ID, s.Commit).Scan(&count, &size, &largest); err != nil {
+			var size int
+			pinnedPaths, size, err = pinnedKernelPaths(ctx, tx, s)
+			if err != nil {
 				return Catalog{}, err
 			}
-			if count == 0 {
-				return Catalog{}, ErrPinMissing
-			}
-			expectedFiles = count
-			totalFiles += count
+			totalFiles += len(pinnedPaths)
 			totalBytes += size
-			if totalFiles > ManagedMaxFiles || totalBytes > ManagedPackMaxBytes || largest > ManagedFileMaxBytes {
+			if totalFiles > ManagedMaxFiles || totalBytes > ManagedPackMaxBytes {
 				return Catalog{}, ErrPackTooLarge
 			}
 		}
 		if s.IndexedAt == nil {
 			continue
 		}
-		files, err := cachedFilesForDelivery(ctx, tx, s, pinned)
+		files, err := cachedFilesForDelivery(ctx, tx, s, pinnedPaths)
 		if err != nil {
 			return Catalog{}, err
 		}
-		if pinned && len(files) != expectedFiles {
+		if pinned && len(files) != len(pinnedPaths) {
 			return Catalog{}, ErrPinMissing
-		}
-		if pinned {
-			for _, pattern := range s.Paths {
-				matched := false
-				for _, file := range files {
-					if ok, _ := path.Match(pattern, file.Path); ok {
-						matched = true
-						break
-					}
-				}
-				if !matched {
-					return Catalog{}, ErrPinMissing
-				}
-			}
 		}
 		for _, file := range Render(s.Repository, s.Commit, s.Visibility == "private", files) {
 			for _, rule := range file.Rules {
@@ -181,6 +165,51 @@ func loadCatalog(ctx context.Context, tx pgx.Tx, pinned bool) (Catalog, error) {
 		return strings.Compare(a.Path, b.Path)
 	})
 	return cat, nil
+}
+
+// Select metadata before loading bytes: on-demand packs can exceed the managed
+// file budget, and person/role files have no audience binding on this channel.
+func pinnedKernelPaths(ctx context.Context, tx pgx.Tx, s Source) ([]string, int, error) {
+	rows, err := tx.Query(ctx, `SELECT path,octet_length(content) FROM doctrine_cache WHERE source_id=$1 AND commit_sha=$2 AND path LIKE '%.md' ORDER BY path LIMIT 65`, s.ID, s.Commit)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	selected := []string{}
+	matched := make([]bool, len(s.Paths))
+	count, total := 0, 0
+	for rows.Next() {
+		var name string
+		var size int
+		if err := rows.Scan(&name, &size); err != nil {
+			return nil, 0, err
+		}
+		count++
+		if count > MaxFiles {
+			return nil, 0, ErrPackTooLarge
+		}
+		for i, pattern := range s.Paths {
+			if ok, _ := path.Match(pattern, name); ok {
+				matched[i] = true
+			}
+		}
+		file, err := rulesimport.Classify(name, size)
+		if err != nil || file.Kind != "kernel" || file.Layer != rulesimport.LayerCompany || file.Placement != rulesimport.PlacementAlwaysOn {
+			continue
+		}
+		if size > ManagedFileMaxBytes || size > ManagedPackMaxBytes-total {
+			return nil, 0, ErrPackTooLarge
+		}
+		total += size
+		selected = append(selected, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if count == 0 || slices.Contains(matched, false) {
+		return nil, 0, ErrPinMissing
+	}
+	return selected, total, nil
 }
 
 // FloorPointer keeps a doctrine-backed floor in the existing bounded floor
