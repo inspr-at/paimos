@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package fixturebin resolves the true and sleep executables that test
-// fixtures exec. NixOS runners have neither /bin/true nor /bin/sleep; both
-// commands are on PATH. Call Require once per test and reuse the path.
+// Package fixturebin resolves POSIX commands that test fixtures exec.
+// NixOS runners have no /bin/true, /bin/sleep, or /bin/cat; those commands
+// are on PATH. Call Require once per test and reuse the path.
 package fixturebin
 
 import (

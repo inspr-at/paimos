@@ -544,7 +544,8 @@ func TestCodexSeparateHomesBindQuotaAndIdentityToEachProfile(t *testing.T) {
 		}
 	}
 	reset := time.Now().Add(time.Hour).Unix()
-	path := fakeScript(t, fmt.Sprintf(`identity=$(/bin/cat "$CODEX_HOME/active-login") || exit 10
+	cat := fixturebin.Quote(fixturebin.Require(t, "cat"))
+	path := fakeScript(t, fmt.Sprintf(`identity=$(%s "$CODEX_HOME/active-login") || exit 10
 used=11
 [ "$identity" != second@example.test ] || used=22
 if [ "$1" = login ]; then echo 'Logged in using ChatGPT'; exit 0; fi
@@ -555,7 +556,7 @@ case "$line" in
 *'"id":2'*) printf '{"id":2,"result":{"account":{"type":"chatgpt","email":"%%s"}}}\n' "$identity";;
 *'"id":3'*) printf '{"id":3,"result":{"rateLimits":{"primary":{"usedPercent":%%s,"windowDurationMins":300,"resetsAt":%d}}}}\n' "$used";;
 esac
-done`, reset))
+done`, cat, reset))
 	a := NewCodexAdapter(path, map[string]string{"first": first, "second": second})
 	a.SetExpectedEmails(map[string]string{"first": "first@example.test", "second": "second@example.test"})
 	qualifyCodexFixture(t, a)

@@ -31,6 +31,7 @@ func acpProbeExecutable(t *testing.T, body string) string {
 
 func TestACPLauncherProbeFailureCauses(t *testing.T) {
 	sleepExec := fixturebin.ShellExec(t, "sleep", "30")
+	head := fixturebin.Quote(fixturebin.Require(t, "head"))
 	for _, harness := range []string{Gemini, OpenCode} {
 		for _, tc := range []struct {
 			name, body, failure string
@@ -39,7 +40,7 @@ func TestACPLauncherProbeFailureCauses(t *testing.T) {
 			{"version only", "printf '1.14.48\\n'", ProbeUnverified, false},
 			{"empty", "exit 0", ProbeProtocol, false},
 			{"two streams", "echo version; echo diagnostic >&2", ProbeProtocol, false},
-			{"overflow", "head -c 4097 /dev/zero", ProbeProtocol, false},
+			{"overflow", head + " -c 4097 /dev/zero", ProbeProtocol, false},
 			{"nonzero is not sign-out", "echo 'Not logged in'; exit 1", ProbeLaunchFailed, false},
 			{"timeout", sleepExec, ProbeTimeout, true},
 		} {
