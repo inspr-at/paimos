@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -209,7 +210,17 @@ const columns = `id::text,work_order_id::text,agent_principal_id::text,model_pro
  coalesce((SELECT q.handover FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),'null'::jsonb),
  coalesce((SELECT q.service_tier FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),''),
  (SELECT q.display_label FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),routine_launch_id::text,acting_person_id::text,
- coalesce(trace ? 'run_once',false),CASE WHEN trace ? 'run_once' THEN coalesce((trace->'run_once'->>'repository_mutation_allowed')::boolean,false) ELSE true END`
+ coalesce(trace ? 'run_once',false),CASE WHEN trace ? 'run_once' THEN coalesce(trace->'run_once'->'repository_mutation_allowed'='true'::jsonb,false) ELSE true END`
+
+var errInvalidRunOnceBinding = workorders.Fail(409, "invalid one-off run binding")
+
+func skipInvalidRunBinding(ctx context.Context, p tenant.Principal, v Run, err error) bool {
+	if !errors.Is(err, errInvalidRunOnceBinding) {
+		return false
+	}
+	slog.WarnContext(ctx, "skipping run with invalid one-off binding", "tenant_id", p.TenantID, "run_id", v.ID)
+	return true
+}
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
@@ -219,7 +230,7 @@ func scan(row pgx.Row) (Run, error) {
 			RunOnce *runOnceBinding `json:"run_once"`
 		}
 		if json.Unmarshal(v.Trace, &binding) != nil || binding.RunOnce == nil || binding.RunOnce.RepositoryMutationAllowed == nil || binding.RunOnce.RequestDigest == "" {
-			return v, workorders.Fail(409, "invalid one-off run binding")
+			return v, errInvalidRunOnceBinding
 		}
 		v.Instruction = binding.RunOnce.Instruction
 	}
@@ -375,6 +386,9 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	out := []Run{}
 	for rows.Next() {
 		v, err := scan(rows)
+		if skipInvalidRunBinding(r.Context(), p, v, err) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -675,7 +689,7 @@ func createRunTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, orderID str
 		allowed := in.mutationAllowed()
 		dispatchTrace.RunOnce = &runOnceBinding{Instruction: instruction, RepositoryMutationAllowed: &allowed, RequestDigest: in.RequestDigest}
 	}
-	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override,residency,prefs_person_id,trace,id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,coalesce($12::uuid,gen_random_uuid())) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride, modelprefs.Stamp(requirement), person, dispatchTrace, in.RequestID))
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override,residency,prefs_person_id,trace,id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,coalesce($12::uuid,gen_random_uuid())) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride, modelprefs.Stamp(requirement), person, dispatchTrace, requestedRunID(p.TenantID, in.RequestID)))
 	if err != nil {
 		return nil, err
 	}

@@ -53,7 +53,7 @@ func TestRunOnceBindsContextOptionsAndCurrentAuthority(t *testing.T) {
 	}
 	in["repository_mutation_allowed"] = true
 	run := call(in, 201)
-	if run.ID != in["request_id"] || !run.RunOnce || !run.RepositoryMutationAllowed || run.ReadOnlyReview || run.Purpose != "managed" || run.Instruction != in["instruction"] || run.ActingPersonID == nil || *run.ActingPersonID != f.person.ID {
+	if run.ID == in["request_id"] || !run.RunOnce || !run.RepositoryMutationAllowed || run.ReadOnlyReview || run.Purpose != "managed" || run.Instruction != in["instruction"] || run.ActingPersonID == nil || *run.ActingPersonID != f.person.ID {
 		t.Fatalf("lost one-off binding: %+v", run)
 	}
 	if again := call(in, 201); again.ID != run.ID {
@@ -68,6 +68,27 @@ func TestRunOnceBindsContextOptionsAndCurrentAuthority(t *testing.T) {
 	in["repository_mutation_allowed"] = false
 	call(in, 409)
 	in["repository_mutation_allowed"] = true
+	// A still-authorized person passes the final synthetic-person recheck;
+	// the ordinary account, reservation and claim fences must also succeed.
+	claim := func(run agentruns.Run, ids []string) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, _ := json.Marshal(claimBody(ids))
+		r := httptest.NewRequest("POST", "/api/runs/"+run.ID+"/claim", strings.NewReader(string(raw)))
+		r = r.WithContext(tenant.WithPrincipal(r.Context(), f.agent))
+		r.Header.Set("Authorization", "Bearer "+f.token)
+		r.Header.Set(agentverification.RunOncePolicyHeader, agentverification.RunOncePolicy)
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		return w
+	}
+	w := claim(run, f.reserve(t, run))
+	var accepted agentruns.Run
+	if err := json.Unmarshal(w.Body.Bytes(), &accepted); err != nil || w.Code != 200 || accepted.Status != "starting" || accepted.ID != run.ID || accepted.ActingPersonID == nil || *accepted.ActingPersonID != f.person.ID || !accepted.RunOnce || !accepted.RepositoryMutationAllowed {
+		t.Fatalf("authorized one-off claim: %d %s (%v)", w.Code, w.Body.String(), err)
+	}
+	if f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='starting'`, run.ID) != 1 {
+		t.Fatal("authorized claim did not persist")
+	}
 	// A selected leaf uses its task body when the optional instruction is empty.
 	var leaf string
 	var leafRevision time.Time
@@ -108,13 +129,7 @@ func TestRunOnceBindsContextOptionsAndCurrentAuthority(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, f.person.ID, role)
 		return err
 	})
-	raw, _ := json.Marshal(claimBody(ids))
-	r := httptest.NewRequest("POST", "/api/runs/"+readOnly.ID+"/claim", strings.NewReader(string(raw)))
-	r = r.WithContext(tenant.WithPrincipal(r.Context(), f.agent))
-	r.Header.Set("Authorization", "Bearer "+f.token)
-	r.Header.Set(agentverification.RunOncePolicyHeader, agentverification.RunOncePolicy)
-	w := httptest.NewRecorder()
-	f.mux.ServeHTTP(w, r)
+	w = claim(readOnly, ids)
 	if w.Code != 403 || !strings.Contains(w.Body.String(), `"code":"permission_revoked"`) {
 		t.Fatalf("wrong final-claim refusal: %d %s", w.Code, w.Body.String())
 	}
@@ -123,5 +138,47 @@ func TestRunOnceBindsContextOptionsAndCurrentAuthority(t *testing.T) {
 	}
 	if f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.admission_refused' AND after->>'reason'='permission_revoked'`) != 1 {
 		t.Fatal("revoked one-off claim lost its refusal audit")
+	}
+}
+
+// Risk: a malformed persisted binding poisons every list page (or hides its
+// next page), while a direct read or claim must continue to fail closed.
+func TestRunOnceMalformedBindingDoesNotPoisonLists(t *testing.T) {
+	f := setup(t)
+	order := f.order(t, nil)
+	good := f.run(t, order)
+	bad := uuid()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,id,work_order_id,agent_principal_id,model_profile_id,requested_model,trace,created_at)
+ SELECT tenant_id,$2,work_order_id,agent_principal_id,model_profile_id,requested_model,'{"run_once":{"repository_mutation_allowed":"broken"}}',created_at+interval '1 second' FROM agent_runs WHERE id=$1`, good.ID, bad)
+		return err
+	})
+	w := f.request(f.person, "GET", "/api/runs?limit=1", "", "")
+	var page struct {
+		Items []agentruns.Run `json:"items"`
+		Next  *string         `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil || w.Code != 200 || len(page.Items) != 0 || page.Next == nil {
+		t.Fatalf("malformed first page: %d %s (%v)", w.Code, w.Body.String(), err)
+	}
+	w = f.request(f.person, "GET", "/api/runs?limit=1&cursor="+*page.Next, "", "")
+	page.Next = nil
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil || w.Code != 200 || len(page.Items) != 1 || page.Items[0].ID != good.ID || page.Next != nil {
+		t.Fatalf("valid following page lost: %d %s (%v)", w.Code, w.Body.String(), err)
+	}
+	// Polling advertises the policy explicitly; use the real request handler.
+	r := httptest.NewRequest("GET", "/api/runs/queued", nil)
+	r = r.WithContext(tenant.WithPrincipal(r.Context(), f.agent))
+	r.Header.Set("Authorization", "Bearer "+f.token)
+	r.Header.Set(agentverification.RunOncePolicyHeader, agentverification.RunOncePolicy)
+	w = httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	var queued []agentruns.Run
+	if err := json.Unmarshal(w.Body.Bytes(), &queued); err != nil || w.Code != 200 || len(queued) != 1 || queued[0].ID != good.ID {
+		t.Fatalf("queued list poisoned: %d %s (%v)", w.Code, w.Body.String(), err)
+	}
+	w = f.request(f.person, "GET", "/api/runs/"+bad, "", "")
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "invalid one-off run binding") {
+		t.Fatalf("malformed direct read did not fail closed: %d %s", w.Code, w.Body.String())
 	}
 }

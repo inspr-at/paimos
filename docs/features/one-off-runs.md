@@ -4,19 +4,21 @@ Agents → New → **Run once** is available to a person with `run.create` and
 `work_orders.write`, without enabling the developer manual-start setting. The
 expert **Start agent manually** entry remains available under that setting.
 
-A run always belongs to a work leaf. Choose an existing ticket, or choose a
-project and enter a short task. The latter creates a visible `Run once: <task>`
+A run always belongs to a work leaf. Enter a short task first, then choose an
+existing ticket or a project. The latter creates a visible `Run once: <task>`
 ticket with `hide_from_release_notes=true`. Creating that ticket additionally
 requires `nodes.write`. The dialog does not grant permissions or change an
 account's permissions.
 
 The separate instruction is optional and limited to 2,000 characters. A supplied
-instruction is retained exactly. An empty instruction uses the selected ticket's
-current body, or its title if the body is empty. The direct work-order run API
+instruction is retained exactly. In the dialog an empty instruction uses the
+entered task; with no task, it uses the selected ticket's current body, or its
+title if the body is empty. The direct work-order run API
 uses that work order's body/title as its fallback. Newly created orders copy the
 ticket text, falling back to the ticket title. The selected context and its revision, person,
 account, profile, instruction and file permission are captured on submission.
-Failures retain the choices. Changing context or person resets the task choices;
+Failures retain the choices. Changing context resets the instruction and file
+permission while keeping the entered task. Changing person clears all choices;
 a late response cannot start or populate another person's dialog.
 
 **May change files** is off by default. The read-only ceiling currently qualifies
@@ -29,8 +31,8 @@ qualification reason and refuse read-only startup. Selecting **May change
 files** uses the ordinary managed tools and workspace checks.
 
 `POST /nodes/{nodeId}/run-once` composes normal node creation, work-order
-preparation and the existing run writer in one transaction. The request UUID is
-the run UUID; the existing unique key makes identical retries return the same
+preparation and the existing run writer in one transaction. The server derives
+the run UUID from the tenant and request UUID; the existing unique key makes identical retries return the same
 run even after a lost response or completion. The run's personal-data-classified
 `trace.run_once` binds the exact request digest, effective instruction and ceiling.
 Changed input with the same UUID returns 409. An active leaf run prevents a
@@ -42,6 +44,16 @@ remain authoritative. Final claim repeats the initiating person's current
 daemon must advertise `run_once_v1`; old daemons cannot pick up or claim these
 runs. One-off runs require a fresh Run once request to restart; automatic vendor
 continuation and the generic restart path cannot widen the saved ceiling.
+
+Host, harness, account, model and thinking use the existing computed defaults,
+shown in one summary. **Change** opens these settings below it; a quota, sign-in,
+wait or read-only qualification warning opens them automatically. Project
+revisions refresh each time the dialog opens. Both launch modes show the
+platform's submit keycaps. A queued run's wait override is labelled **Start now,
+skip the wait**.
+
+Malformed persisted one-off bindings are skipped and logged on run lists;
+pagination continues past them. Direct reads and claims still refuse them.
 
 The dialog reuses the existing account cascade and shared controls. No design was
 attached to AEON-1512: **needs Opus design** and Tick's visual review after CI.

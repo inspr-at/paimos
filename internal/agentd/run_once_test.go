@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/servicetier"
 )
 
@@ -81,11 +80,8 @@ func TestRunOnceReadOnlyCeilingAndInstruction(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bridge, _ := claudeAssets.ReadFile("claudeassets/bridge.mjs")
-		bridgePath, sdkPath := filepath.Join(root, "bridge.mjs"), filepath.Join(root, "sdk.mjs")
-		if err := os.WriteFile(bridgePath, bridge, 0600); err != nil {
-			t.Fatal(err)
-		}
+		vendor := fakeVendorPath(t, "claude")
+		_, sdkPath := claudeAdapterDependencies(t, vendor)
 		const sdk = `export function query({prompt,options:o}) {
           if (o.tools.length || o.allowedTools.length || o.plugins.length || o.settingSources.length || Object.keys(o.mcpServers).length || !o.strictMcpConfig || o.maxTurns!==1 || o.additionalDirectories.length) throw new Error('unsafe options');
           return {streamInput:async()=>{},close:()=>{},async *[Symbol.asyncIterator]() {
@@ -103,11 +99,33 @@ func TestRunOnceReadOnlyCeilingAndInstruction(t *testing.T) {
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, fixturebin.Require(t, "true"), root)
-		cmd.Stdin = strings.NewReader(`{"op":"start","purpose":"managed","read_only_run":true,"prompt":"Inspect exactly this supplied task.","model":"once-model","effort":"high","tools":null,"capabilities":["status","stop"]}` + "\n")
-		output, err := cmd.CombinedOutput()
-		if err != nil || !strings.Contains(string(output), `"kind":"chat_final","text":"Inspection complete."`) {
-			t.Fatalf("read-only bridge failed ceiling/task: %v %s", err, output)
+		r := adapterRequest(t)
+		r.Run.Purpose, r.Run.RunOnce, r.Run.RepositoryMutationAllowed = "managed", true, &no
+		r.Profile.Harness, r.Profile.Model = Claude, "once-model"
+		r.Workspace, r.Prompt = root, "Inspect exactly this supplied task."
+		r.Capabilities = []string{"status", "stop"}
+		adapter := NewClaudeAdapter(node, sdkPath, vendor, map[string]string{"account": root})
+		final := make(chan string, 1)
+		process, err := adapter.Start(ctx, r, func(event AdapterEvent) {
+			if event.Chat != nil && event.Chat.SessionUpdate == "final" && event.Chat.Content != nil {
+				select {
+				case final <- event.Chat.Content.Text:
+				default:
+				}
+			}
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
+		t.Cleanup(func() { _ = process.Stop(t.Context()); _ = process.Wait() })
+		select {
+		case text := <-final:
+			if text != "Inspection complete." {
+				t.Fatalf("read-only bridge result: %q", text)
+			}
+		case <-ctx.Done():
+			t.Fatal("real ClaudeAdapter.Start did not deliver the qualified read-only result", ctx.Err())
+		}
+
 	})
 }

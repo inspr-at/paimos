@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
-import { launchState, staleGrantRejection, startAgent, type WorkOrder } from '../src/lib/startAgent'
+import { launchState, staleGrantRejection, startAgent, startAgentCopy, type WorkOrder } from '../src/lib/startAgent'
 import { APIError } from '../src/lib/api'
 import type { AgentRun } from '../src/lib/agents'
 import type { AgentRunRow } from '../src/lib/agentRows'
@@ -171,28 +171,29 @@ describe('Start Agent leaf selection', () => {
     const listNodes = vi.fn(async (_params: unknown) => ({ items: [ticket, { ...ticket, id: 'parent', is_leaf: false }, { ...ticket, id: 'unknown', is_leaf: undefined }], next_cursor: 'next-page' as string | null }))
     const launch = vi.fn(async () => { throw new Error('launch captured') })
     const putPin = vi.fn()
+    const loadProjects = vi.fn(async () => {})
     const session = reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } } })
     const choice = { hostId: 'host', harness: 'codex', accountId: 'account', modelKey: 'model', profileId: 'profile' }
     const made = setupSource('components/agents/StartAgentDialog.vue', {}, {
       '../../lib/api': { listNodes },
       '../../lib/authz': { can: () => true },
       '../../stores/session': { useSession: () => session },
-      '../../stores/projects': { useProjects: () => ({ projects: [], load: async () => {}, error: '' }) },
+      '../../stores/projects': { useProjects: () => ({ projects: [{ id: 'project', nodeUpdatedAt: 'fresh-revision' }], load: loadProjects, error: '' }) },
       '../../lib/agents': { listPins: async () => [], putPin, deletePin: vi.fn(), message: (e: Error) => e.message },
       '../../lib/agentRows': {},
       '../../lib/accountCascade': {
         ...Cascade,
         fetchAccountCatalog: async () => ({ catalog: { hosts: [] }, gap: null, message: '' }),
         fillDefaults: () => ({ ...choice }),
-        presentCascade: () => ({ agentId: 'agent', profileId: 'profile', efforts: [{ value: 'profile' }], models: [{ value: 'model' }], accounts: [{ value: 'account' }], requested: {} }),
+        presentCascade: () => ({ agentId: 'agent', profileId: 'profile', efforts: [{ value: 'profile' }], models: [{ value: 'model' }], accounts: [{ value: 'account' }], requested: {}, status: { tone: 'neutral', label: 'Available', detail: '' } }),
       },
       '../../lib/position': { writeMark: () => 0, wroteSince: () => false },
-      '../../lib/startAgent': { launchState, staleGrantRejection, startAgent: launch },
+      '../../lib/startAgent': { launchState, staleGrantRejection, startAgent: launch, startAgentCopy },
       '../../stores/agents': { useAgents: () => ({ runs: {}, admitRun: vi.fn(), admitRuns: vi.fn(), afterWrite: vi.fn() }) },
       '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
     })
     stops.push(made.stop)
-    return { state: made.state, listNodes, launch, putPin, session }
+    return { state: made.state, listNodes, launch, putPin, session, loadProjects }
   }
   it('queries canonical leaves on every page and excludes parents and unknown shapes from mixed results', async () => {
     const { state, listNodes } = dialogSetup()
@@ -262,6 +263,23 @@ describe('Start Agent leaf selection', () => {
     expect(state.instruction.value).toBe('')
     expect(state.mayChangeFiles.value).toBe(false)
     expect(state.ticket.value).toBeNull()
+  })
+  it('refreshes project revisions on every open and keeps a task entered before choosing its project', async () => {
+    const { state, loadProjects, launch } = dialogSetup()
+    await state.openOnce(); await flush()
+    expect(loadProjects).toHaveBeenLastCalledWith(true)
+    state.task.value = 'Inspect project context'
+    state.projectId.value = 'project'
+    state.mayChangeFiles.value = true
+    await state.submit()
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+      ticket: expect.objectContaining({ id: 'project', updated_at: 'fresh-revision' }),
+      runOnce: expect.objectContaining({ task: 'Inspect project context' }),
+    }), expect.any(Object))
+    state.close()
+    await state.openOnce(); await flush()
+    expect(loadProjects).toHaveBeenCalledTimes(2)
+    expect(state.task.value).toBe('')
   })
 })
 

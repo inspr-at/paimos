@@ -74,16 +74,43 @@ test('Run once resets task choices on context changes and never reuses a differe
 for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
   test(`Run once controls stay still at ${width} ${theme}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1000 })
-    await mockStartAgent(page, { expertStart: false, catalog: 'two-hosts', theme })
+    await mockStartAgent(page, { expertStart: false, catalog: 'claude', theme })
     await openOnce(page)
     const form = onceDialog(page)
-    await form.getByLabel('Host', { exact: true }).selectOption('laptop')
+    const task = form.getByLabel('Task', { exact: true })
+    await expect(task).toBeFocused()
+    const firstField = form.locator('.launch-fields input, .launch-fields select, .launch-fields textarea').first()
+    await expect(firstField).toHaveAttribute('id', await task.getAttribute('id') as string)
+    const summary = form.locator('.run-settings-summary')
+    await expect(summary).toContainText('Runs on Laptop · Claude Code · Laptop account · Max · other-model · Medium')
+    await expect(form.getByLabel('Host', { exact: true })).toBeHidden()
+    await task.fill('Ausführliche Bestandsaufnahme der bereitgestellten Projektinformationen')
     await form.getByLabel('Project', { exact: true }).selectOption('p-pharos')
-    await form.getByLabel('Task', { exact: true }).fill('Ausführliche Bestandsaufnahme der bereitgestellten Projektinformationen')
+    await expect(task).toHaveValue('Ausführliche Bestandsaufnahme der bereitgestellten Projektinformationen')
+    const queue = form.getByRole('button', { name: 'Queue run', exact: true })
+    await expect(queue.locator('kbd')).toHaveCount(2)
+    await expect(form.getByText('Read-only: no tools, no repository access, no external actions.', { exact: true })).toBeVisible()
+    const ordered = await form.locator('.launch-fields input:not([type="checkbox"]), .launch-fields select, .launch-fields textarea, .restriction-field').evaluateAll(elements => elements.filter(el => (el as HTMLElement).offsetParent !== null).map(el => el.id || el.className))
+    expect(ordered.slice(0, 4).map(id => id.split('-').at(-1))).toEqual(['task', 'context', 'project', 'instruction'])
+    await form.screenshot({ path: info.outputPath(`AEON-1512-${width}-${theme}.png`) })
+    // Explicit expansion can grow downward; existing controls stay anchored.
+    await expectStableControls({
+      controls: { queue, cancel: form.getByRole('button', { name: 'Cancel', exact: true }), task, context: form.getByLabel('Context', { exact: true }), project: form.getByLabel('Project', { exact: true }), instruction: form.getByLabel('Instruction (optional)', { exact: true }), ...(width === 390 ? { phone: form } : {}) },
+      scrollAreas: { body: form.locator('.launch-body') },
+      interactions: [{ name: 'expand run settings', run: async () => {
+        await summary.getByRole('button', { name: 'Change', exact: true }).click()
+        await expect(form.getByLabel('Host', { exact: true })).toBeVisible()
+      } }],
+    })
+    await expect(form.getByLabel('Host', { exact: true })).toHaveValue('laptop')
+    await expect(form.getByLabel('Harness', { exact: true })).toHaveValue('claude')
+    await expect(form.getByLabel('Account', { exact: true }).locator('option:checked')).toContainText('Laptop account')
+    await expect(form.getByLabel('Model', { exact: true }).locator('option:checked')).toHaveText('other-model')
+    await expect(form.getByLabel('Thinking', { exact: true }).locator('option:checked')).toHaveText('Medium')
     const checkbox = form.getByRole('checkbox', { name: 'May change files', exact: true })
     if (width === 390) expect(await checkbox.evaluate(el => el.parentElement!.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44)
     await expectStableControls({
-      controls: { queue: form.getByRole('button', { name: /^Queue run/ }), cancel: form.getByRole('button', { name: 'Cancel', exact: true }), context: form.getByLabel('Context', { exact: true }), host: form.getByLabel('Host', { exact: true }), harness: form.getByLabel('Harness', { exact: true }), account: form.getByLabel('Account', { exact: true }), thinking: form.getByLabel('Thinking', { exact: true }), selectors: form.locator('.pair').first(), instruction: form.getByLabel('Instruction (optional)', { exact: true }), restriction: checkbox, project: form.getByLabel('Project', { exact: true }), task: form.getByLabel('Task', { exact: true }), ...(width === 390 ? { phone: form } : {}) },
+      controls: { queue, cancel: form.getByRole('button', { name: 'Cancel', exact: true }), context: form.getByLabel('Context', { exact: true }), host: form.getByLabel('Host', { exact: true }), harness: form.getByLabel('Harness', { exact: true }), account: form.getByLabel('Account', { exact: true }), thinking: form.getByLabel('Thinking', { exact: true }), selectors: form.locator('.pair').first(), instruction: form.getByLabel('Instruction (optional)', { exact: true }), restriction: checkbox, project: form.getByLabel('Project', { exact: true }), task, ...(width === 390 ? { phone: form } : {}) },
       interactions: [
         { name: 'allow changes explicitly', run: () => checkbox.check() },
         { name: 'restore read-only', run: () => checkbox.uncheck() },
@@ -91,7 +118,18 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
       ],
       scrollAreas: { body: form.locator('.launch-body') },
     })
-    await form.screenshot({ path: info.outputPath(`AEON-1512-${width}-${theme}.png`) })
+    await form.locator('.run-settings-fields').scrollIntoViewIfNeeded()
+    await form.screenshot({ path: info.outputPath(`AEON-1512-${width}-${theme}-expanded.png`) })
+    await form.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await page.unrouteAll({ behavior: 'wait' })
+    await mockStartAgent(page, { expertStart: false, catalog: 'claude', theme, wait: { code: width === 1024 ? 'sign_in' : 'allowance', run_now_allowed: false } })
+    await openOnce(page)
+    await expect(form.getByLabel('Task', { exact: true })).toBeFocused()
+    await expect(form.locator('.settings-toggle')).toHaveAttribute('aria-expanded', 'true')
+    await expect(form.getByLabel('Host', { exact: true })).toBeVisible()
+    await expect(form.locator('.run-settings-summary')).toContainText(width === 1024 ? 'Sign in again on the computer' : 'Waiting for capacity')
+    await form.locator('.run-settings-summary').scrollIntoViewIfNeeded()
+    await form.screenshot({ path: info.outputPath(`AEON-1512-${width}-${theme}-warning.png`) })
   })
 }
 async function open(page: Page, ticket = false) {
@@ -120,6 +158,7 @@ test('creates, readies and queues a ticket, then follows claim and managed regis
   const mock = await mockStartAgent(page)
   await open(page)
   await ready(page)
+  await expect(dialog(page).getByRole('button', { name: 'Queue run', exact: true }).locator('kbd')).toHaveCount(2)
   await expect(dialog(page).getByRole('option', { name: 'ungranted-model' })).toHaveCount(0)
   await expect(dialog(page).getByText('should-not-render-key')).toHaveCount(0)
   await expect(dialog(page).getByText('Selected because it has the most allowance left.')).toBeVisible()

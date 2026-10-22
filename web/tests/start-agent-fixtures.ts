@@ -14,7 +14,7 @@ const accountId = 'ac000000-0000-4000-8000-000000000001'
 const spareAccountId = 'ac000000-0000-4000-8000-000000000002'
 const laptopAccountId = 'ac000000-0000-4000-8000-000000000003'
 
-export async function mockStartAgent(page: Page, options: { expertStart?: boolean; lostOnceResponse?: boolean; wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
+export async function mockStartAgent(page: Page, options: { expertStart?: boolean; lostOnceResponse?: boolean; wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'claude' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
   const work = fixtures()
   const workParents = new Set(work.nodes.filter(node => ['work', 'epic', 'ticket', 'task'].includes(node.kind_slug)).map(node => node.parent_id))
   for (const node of work.nodes) {
@@ -60,17 +60,18 @@ export async function mockStartAgent(page: Page, options: { expertStart?: boolea
   const hosts = options.catalog === 'empty-grants' || options.offline || options.unavailable
     ? [{ daemon_id: 'workstation', label: 'Work Mac', harnesses: [{ harness: 'codex', accounts: [primary], default_account_id: available ? accountId : null }] }]
     : [{ daemon_id: 'workstation', label: 'Work Mac', harnesses: [{ harness: options.catalog?.startsWith('pi') ? 'pi' : 'codex', accounts: [primary, spare], default_account_id: accountId }] }]
-  if (options.catalog === 'two-hosts') {
+  if (options.catalog === 'two-hosts' || options.catalog === 'claude') {
     hosts.push({
       daemon_id: 'laptop', label: 'Laptop', harnesses: [{
         harness: 'claude', default_account_id: laptopAccountId, accounts: [{
-          ...spare, id: laptopAccountId, label: 'Laptop account', plan: 'Max', registered_by_principal_id: agentId, remaining_fraction: 0.1,
+          ...spare, wait: options.wait, id: laptopAccountId, label: 'Laptop account', plan: 'Max', registered_by_principal_id: agentId, remaining_fraction: 0.1,
           models: [{ model: 'other-model', family: 'anthropic', efforts: [{ effort: 'medium', model_profile_id: spareProfileId, version: '3' }] }],
           default_model_profile_id: spareProfileId,
         }],
       }],
     })
   }
+  if (options.catalog === 'claude') hosts.shift()
   const catalog = { as_of: new Date(now).toISOString(), role: 'build', hosts: hosts.map(host => ({ ...host, harnesses: host.harnesses.map(h => ({ ...h, read_only_run: { supported: h.harness === 'claude', policy: h.harness === 'claude' ? 'no_tools' : 'unavailable', reason: h.harness === 'claude' ? '' : 'Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.' } })) })) }
   const account: AgentAccount = {
     id: accountId, account_key: 'should-not-render-key', harness: 'codex', daemon_id: 'workstation', label: 'Workspace account', plan: 'Pro', host_label: 'Work Mac',

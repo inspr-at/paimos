@@ -20860,6 +20860,8 @@
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > rechecks leaf eligibility at submission before remembering an account or launching","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > refreshes project revisions on every open and keeps a task entered before choosing its project","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > refuses non-leaf selection and initial targets while keeping confirmed leaves launchable","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > tells the person to narrow a ticket search that hits the aggregate limit","tier":"ESSENTIAL"}

@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -63,12 +65,24 @@ func validateRunOnce(p tenant.Principal, in CreateInput) error {
 }
 
 // RunRequestDigest binds retries to both the context and exact submitted options.
-// The request UUID is also the run UUID, so its existing unique key is the durable
-// idempotency fence. No new persistence, grants or launcher is required.
+// The tenant-scoped request UUID derives the run UUID; its unique key remains
+// the durable idempotency fence without exposing another tenant's UUIDs.
 func RunRequestDigest(context string, input any) string {
 	raw, _ := json.Marshal(input)
 	sum := sha256.Sum256(append(append([]byte(context), 0), raw...))
 	return hex.EncodeToString(sum[:])
+}
+
+func requestedRunID(tenantID string, requestID *string) *string {
+	if requestID == nil {
+		return nil
+	}
+	sum := sha256.Sum256([]byte(strings.ToLower(tenantID) + "\x00" + strings.ToLower(*requestID)))
+	// UUIDv8: a server-defined, tenant-scoped name, never the caller's global id.
+	sum[6] = (sum[6] & 0x0f) | 0x80
+	sum[8] = (sum[8] & 0x3f) | 0x80
+	id := fmt.Sprintf("%x-%x-%x-%x-%x", sum[:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
+	return &id
 }
 
 // FindRequestedRunTx requires the caller's tenant/tree fence and current context
@@ -80,7 +94,12 @@ func FindRequestedRunTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in C
 	if in.RequestID == nil {
 		return nil, nil
 	}
-	v, err := load(ctx, tx, *in.RequestID, false)
+	v, err := load(ctx, tx, *requestedRunID(p.TenantID, in.RequestID), false)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Preserve retries of pre-expansion one-off runs in this tenant. RLS
+		// prevents a legacy id belonging to another tenant from being observed.
+		v, err = load(ctx, tx, *in.RequestID, false)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

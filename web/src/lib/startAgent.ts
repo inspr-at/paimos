@@ -15,6 +15,35 @@ import { capacityWaitText } from './capacityWait.ts'
 import type { AgentRun } from './agents.ts'
 import { createRun, createRunOnce, listRuns, runNowOnce, type AgentRunRow } from './agentRows.ts'
 import type { Wire } from './wire.ts'
+import { displayLanguage } from './displayLanguage.ts'
+
+// One catalog for the Run once surface and the shared launch actions. The app
+// language decides the copy; browser and account locales never switch it.
+export function startAgentCopy() {
+  const de = displayLanguage() === 'de'
+  return {
+    once: de ? 'Einmal ausführen' : 'Run once',
+    task: de ? 'Aufgabe' : 'Task',
+    context: de ? 'Kontext' : 'Context',
+    createTicket: de ? 'Ticket in einem Projekt erstellen' : 'Create a ticket in a project',
+    existingTicket: de ? 'Vorhandenes Ticket verwenden' : 'Use an existing ticket',
+    project: de ? 'Projekt' : 'Project',
+    chooseProject: de ? 'Projekt auswählen' : 'Choose a project',
+    instruction: de ? 'Anweisung (optional)' : 'Instruction (optional)',
+    instructionHelp: de ? 'Ohne Anweisung wird die Aufgabe verwendet; ohne Aufgabe der Tickettext oder der Titel.' : 'When empty, the task is used; without a task, the ticket text or its title is used.',
+    files: de ? 'Dateien dürfen geändert werden' : 'May change files',
+    readOnly: de ? 'Nur lesend: keine Werkzeuge, kein Repository-Zugriff, keine externen Aktionen.' : 'Read-only: no tools, no repository access, no external actions.',
+    writable: de ? 'Die üblichen Werkzeuge und Prüfungen des Arbeitsbereichs gelten.' : 'The ordinary managed run tools and workspace checks apply.',
+    change: de ? 'Ändern' : 'Change',
+    hide: de ? 'Schließen' : 'Hide',
+    settings: de ? 'Laufeinstellungen' : 'Run settings',
+    loading: de ? 'Konten werden geladen…' : 'Loading accounts…',
+    runsOn: (configuration: string) => de ? `Ausführung auf ${configuration}` : `Runs on ${configuration}`,
+    skipWait: de ? 'Jetzt starten, Wartezeit überspringen' : 'Start now, skip the wait',
+    queue: de ? 'Lauf einreihen' : 'Queue run',
+    queueing: de ? 'Wird eingereiht…' : 'Queueing…',
+  }
+}
 
 export interface WorkOrder {
   kind?: 'build' | 'review'

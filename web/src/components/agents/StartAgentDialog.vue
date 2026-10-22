@@ -12,7 +12,7 @@ import {
   type AgentAccountCatalog, type AuthorFamily, type CascadeChoice, type CascadeStep, type CascadeTouch, type CatalogGap, type RequestedRun,
 } from '../../lib/accountCascade'
 import { wroteSince, writeMark } from '../../lib/position'
-import { launchState, staleGrantRejection, startAgent } from '../../lib/startAgent'
+import { launchState, staleGrantRejection, startAgent, startAgentCopy } from '../../lib/startAgent'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
 import AppIcon from '../AppIcon.vue'
@@ -23,6 +23,7 @@ import KeyCap from '../KeyCap.vue'
 const agents = useAgents()
 const session = useSession()
 const projects = useProjects()
+const copy = startAgentCopy()
 const person = computed(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '')
 const oneOff = ref(false)
 const newTicket = ref(true)
@@ -37,6 +38,8 @@ const uid = useId()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const dialog = ref<HTMLDialogElement>()
 const searchInput = ref<HTMLInputElement>()
+const taskInput = ref<HTMLInputElement>()
+const settingsOpen = ref(false)
 const hostSelect = ref<HTMLSelectElement>()
 const tickets = ref<WorkNode[]>([])
 const ticket = ref<WorkNode | null>(null)
@@ -100,17 +103,20 @@ const selectedWait = computed(() => catalog.value?.hosts.find(h => h.daemon_id =
 const readOnlyCapability = computed(() => catalog.value?.hosts.find(h => h.daemon_id === choice.value.hostId)?.harnesses.find(h => h.harness === choice.value.harness)?.read_only_run)
 const readOnlyReason = computed(() => !oneOff.value || mayChangeFiles.value || !choice.value.harness ? '' : readOnlyCapability.value?.supported && readOnlyCapability.value.policy === 'no_tools' ? '' : readOnlyCapability.value?.reason || 'This account catalog has no qualified read-only one-off adapter. Refresh it or choose another harness.')
 const mayRunNow = computed(() => permitted.value && session.identity?.principal.kind === 'person')
-const contextReady = computed(() => oneOff.value && newTicket.value ? can('nodes.write') && !!selectedProject.value?.nodeUpdatedAt && !!task.value.trim() : ticket.value?.is_leaf === true)
+const contextReady = computed(() => oneOff.value && newTicket.value ? can('nodes.write') && !projects.loading && !projects.error && !!selectedProject.value?.nodeUpdatedAt && !!task.value.trim() : ticket.value?.is_leaf === true)
 const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && contextReady.value && !readOnlyReason.value && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
+const settingsSummary = computed(() => loading.value ? copy.loading : copy.runsOn(Object.values(view.value.requested).join(' · ')))
+const settingsWarning = computed(() => loading.value ? '' : [catalogGap.value ? catalogMessage.value : '', readOnlyReason.value, catalog.value && view.value.status.tone === 'warn' ? `${view.value.status.label} ${view.value.status.detail}` : ''].filter(Boolean).join(' '))
+watch(settingsWarning, warning => { if (oneOff.value && visible.value && warning) settingsOpen.value = true })
 
 function resetTask() {
-  generation++; instruction.value = ''; mayChangeFiles.value = false; task.value = ''; error.value = ''
+  generation++; instruction.value = ''; mayChangeFiles.value = false; error.value = ''
   remember.value = false; remembered.value = ''
   requestId = ''; requestKey = ''
 }
 watch([() => ticket.value?.id, projectId, newTicket], resetTask, { flush: 'sync' })
 watch(person, () => {
-  resetTask(); searchGeneration++; catalogGeneration++; pinGeneration++
+  resetTask(); task.value = ''; searchGeneration++; catalogGeneration++; pinGeneration++
   visible.value = false; busy.value = false; checking.value = false
   ticket.value = null; projectId.value = ''; runId.value = ''; managedId.value = ''; requested.value = null
   catalog.value = null; tickets.value = []; poll.stop(); clearTimeout(searchTimer); dialog.value?.close()
@@ -193,7 +199,7 @@ async function open(initial?: WorkNode, mode: 'expert' | 'once' = 'expert') {
   if (busy.value) return
   opener = document.activeElement as HTMLElement
   generation++; visible.value = true
-  oneOff.value = mode === 'once'; newTicket.value = !initial; projectId.value = ''; resetTask()
+  oneOff.value = mode === 'once'; newTicket.value = !initial; projectId.value = ''; resetTask(); task.value = ''; settingsOpen.value = false
   ticket.value = initial?.is_leaf === true ? initial : null; query.value = ''; tickets.value = []; nextCursor.value = null
   authorFamily.value = authorFamilyFor(ticket.value)
   catalog.value = null; catalogGap.value = null; catalogMessage.value = ''
@@ -203,11 +209,12 @@ async function open(initial?: WorkNode, mode: 'expert' | 'once' = 'expert') {
   error.value = ''; checkError.value = ''; searchError.value = ''; grantStale.value = false; checking.value = false
   dialog.value?.showModal()
   void loadCatalog()
-  if (oneOff.value) void projects.load()
+  if (oneOff.value) void projects.load(true)
   if (!ticket.value) void search()
   poll.start()
   await nextTick()
-  if (ticket.value) hostSelect.value?.focus()
+  if (oneOff.value) taskInput.value?.focus()
+  else if (ticket.value) hostSelect.value?.focus()
   else searchInput.value?.focus()
 }
 function openOnce(initial?: WorkNode) { return open(initial, 'once') }
@@ -248,7 +255,7 @@ async function submit(runNow = false) {
   busy.value = true; error.value = ''
   const turn = generation, owner = person.value
   const chosen = { ticket: { ...context }, agentId: view.value.agentId, profileId: view.value.profileId, accountId: choice.value.accountId, runNow }
-  const options = { instruction: instruction.value, repositoryMutationAllowed: mayChangeFiles.value, ...(newTicket.value ? { task: task.value } : {}) }
+  const options = { instruction: (instruction.value.trim() || newTicket.value) ? instruction.value : task.value, repositoryMutationAllowed: mayChangeFiles.value, ...(newTicket.value ? { task: task.value } : {}) }
   const signature = JSON.stringify([owner, chosen, options])
   if (signature !== requestKey) { requestKey = signature; requestId = crypto.randomUUID() }
   const isCurrent = () => turn === generation && visible.value && owner === person.value
@@ -315,7 +322,7 @@ defineExpose({ open, openOnce })
   <dialog ref="dialog" class="launch-dialog" :aria-labelledby="`${uid}-title`" @cancel.prevent="escape">
     <form class="launch-card" @submit.prevent="submit()" @keydown="formKey">
       <header class="launch-head">
-        <h2 :id="`${uid}-title`">{{ oneOff ? 'Run once' : 'Start agent' }}</h2>
+        <h2 :id="`${uid}-title`">{{ oneOff ? copy.once : 'Start agent' }}</h2>
         <button type="button" class="icon-btn flat" aria-label="Close start agent" :disabled="busy" @click="close"><AppIcon name="close" /></button>
       </header>
 
@@ -323,21 +330,21 @@ defineExpose({ open, openOnce })
         <div class="launch-body">
         <fieldset :disabled="busy" class="launch-fields" :class="{ 'one-off': oneOff }">
           <legend class="sr-only">Run setup</legend>
+          <div v-if="oneOff" class="select-field">
+            <label :for="`${uid}-task`">{{ copy.task }}</label>
+            <input :id="`${uid}-task`" ref="taskInput" v-model="task" class="field" maxlength="160" />
+          </div>
           <div v-if="oneOff" class="context-choice select-field">
-            <label :for="`${uid}-context`">Context</label>
+            <label :for="`${uid}-context`">{{ copy.context }}</label>
             <select :id="`${uid}-context`" v-model="newTicket" class="field">
-              <option :value="true">Create a ticket in a project</option>
-              <option :value="false">Use an existing ticket</option>
+              <option :value="true">{{ copy.createTicket }}</option>
+              <option :value="false">{{ copy.existingTicket }}</option>
             </select>
           </div>
           <div v-if="oneOff && newTicket" class="new-ticket">
             <div class="select-field">
-              <label :for="`${uid}-project`">Project</label>
-              <select :id="`${uid}-project`" v-model="projectId" class="field"><option value="">Choose a project</option><option v-for="project in projectOptions" :key="project.id" :value="project.id">{{ project.routeKey }} · {{ project.title }}</option></select>
-            </div>
-            <div class="select-field">
-              <label :for="`${uid}-task`">Task</label>
-              <input :id="`${uid}-task`" v-model="task" class="field" maxlength="160" />
+              <label :for="`${uid}-project`">{{ copy.project }}</label>
+              <select :id="`${uid}-project`" v-model="projectId" class="field"><option value="">{{ copy.chooseProject }}</option><option v-for="project in projectOptions" :key="project.id" :value="project.id">{{ project.routeKey }} · {{ project.title }}</option></select>
             </div>
             <p class="note">A visible Run once ticket is created in this project and excluded from release notes.</p>
             <p v-if="!can('nodes.write')" class="note">Creating a ticket requires node-write permission. An existing ticket can be selected instead.</p>
@@ -365,14 +372,20 @@ defineExpose({ open, openOnce })
             </template>
           </div>
           <div v-if="oneOff" class="instruction-field select-field">
-            <label :for="`${uid}-instruction`">Instruction (optional)</label>
+            <label :for="`${uid}-instruction`">{{ copy.instruction }}</label>
             <textarea :id="`${uid}-instruction`" v-model="instruction" class="field instruction" maxlength="2000" rows="3" />
-            <p class="note">When empty, the ticket text is used; a ticket without text uses its title.</p>
+            <p class="note">{{ copy.instructionHelp }}</p>
           </div>
           <div v-if="oneOff" class="restriction-field">
-            <label class="remember"><input v-model="mayChangeFiles" type="checkbox"> May change files</label>
+            <label class="remember"><input v-model="mayChangeFiles" type="checkbox"> {{ copy.files }}</label>
           </div>
-          <p v-if="oneOff" class="note restriction-note" role="status">{{ readOnlyReason || (mayChangeFiles ? 'The ordinary managed run tools and workspace checks apply.' : 'Read-only: no tools, repository access or external actions. The supplied task context is used.') }}</p>
+          <p v-if="oneOff" class="note restriction-note" role="status">{{ mayChangeFiles ? copy.writable : copy.readOnly }}</p>
+          <div v-if="oneOff" class="run-settings-summary" :class="{ warn: settingsWarning }">
+            <div class="run-summary-line"><p>{{ settingsSummary }}</p><button type="button" class="btn ghost settings-toggle" :aria-expanded="settingsOpen" :aria-controls="`${uid}-settings`" @click="settingsOpen = !settingsOpen">{{ settingsOpen ? copy.hide : copy.change }}</button></div>
+            <p class="note settings-status" role="status">{{ settingsWarning || (!loading && catalog ? view.status.label : '') }}</p>
+            <button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button>
+          </div>
+          <div v-show="!oneOff || settingsOpen" :id="`${uid}-settings`" class="run-settings-fields" :aria-label="oneOff ? copy.settings : undefined">
           <p v-if="view.roleNote && role.source !== 'default'" class="note role-note">{{ view.roleNote }}</p>
           <div v-if="role.role === 'review-gate'" class="select-field">
             <label :for="`${uid}-family`">Author family</label>
@@ -429,14 +442,15 @@ defineExpose({ open, openOnce })
             <p v-if="notes.effort" :id="`${uid}-effort-note`" class="note">{{ notes.effort }}</p>
           </div>
           </div>
+          </div>
         </fieldset>
 
-        <div v-if="!loading && !catalogGap && catalog" class="dispatch-status" :class="{ warn: view.status.tone === 'warn' }" role="status"><AppIcon :name="view.status.tone === 'warn' ? 'clock' : 'info'" :size="17" /><div><strong>{{ view.status.label }}</strong><p>{{ view.status.detail }}</p></div></div>
-        <div v-if="catalogGap === 'failed' || catalogGap === 'forbidden'" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
+        <div v-if="!oneOff && !loading && !catalogGap && catalog" class="dispatch-status" :class="{ warn: view.status.tone === 'warn' }" role="status"><AppIcon :name="view.status.tone === 'warn' ? 'clock' : 'info'" :size="17" /><div><strong>{{ view.status.label }}</strong><p>{{ view.status.detail }}</p></div></div>
+        <div v-if="!oneOff && (catalogGap === 'failed' || catalogGap === 'forbidden')" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
         <div v-if="error" class="error" role="alert"><p>{{ error }}</p><button v-if="grantStale" type="button" class="btn sm" @click="loadCatalog">Refresh catalog</button></div>
         <p v-if="!permitted" class="note">Starting an agent requires work-order write and run-create permission.</p>
         </div>
-        <footer><button type="button" class="btn" :disabled="busy" @click="close">Cancel</button><button v-if="mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">Run now once</button><button type="submit" class="btn primary" :disabled="!canSubmit"><AppIcon :name="busy ? 'clock' : 'arrow'" :size="15" /><span class="queue-label"><span :class="{ inactive: busy }">Queue run</span><span :class="{ inactive: !busy }">Queueing…</span></span><template v-if="oneOff"><KeyCap k="mod" /><KeyCap k="enter" /></template></button></footer>
+        <footer><button type="button" class="btn" :disabled="busy" @click="close">Cancel</button><button v-if="mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">{{ copy.skipWait }}</button><button type="submit" class="btn primary" :disabled="!canSubmit" :aria-label="busy ? copy.queueing : copy.queue" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'"><AppIcon :name="busy ? 'clock' : 'arrow'" :size="15" /><span class="queue-label"><span :class="{ inactive: busy }">{{ copy.queue }}</span><span :class="{ inactive: !busy }">{{ copy.queueing }}</span></span><KeyCap k="mod" /><KeyCap k="enter" /></button></footer>
       </template>
 
       <template v-else>
@@ -470,7 +484,7 @@ defineExpose({ open, openOnce })
           <p class="note mono">Run {{ run.id.slice(0, 8) }}</p>
           <p v-if="run.run_once" class="note">{{ run.repository_mutation_allowed ? 'May change files' : 'Read-only · no tools or repository access' }}</p>
         </div>
-        <button v-if="mayRunNow && run.status === 'queued' && run.wait?.run_now_allowed" type="button" class="btn" :disabled="busy" @click="overrideQueued">Run now once</button>
+        <button v-if="mayRunNow && run.status === 'queued' && run.wait?.run_now_allowed" type="button" class="btn" :disabled="busy" @click="overrideQueued">{{ copy.skipWait }}</button>
         <p v-if="checkError" class="error" role="alert">{{ checkError }}</p>
         </div>
         <footer class="result-footer"><button type="button" class="btn ghost" :disabled="checking" @click="refresh"><AppIcon name="refresh" :size="14" />Refresh status</button><button type="button" class="btn" :disabled="busy" @click="close">Close</button><RouterLink class="btn primary" :to="managed ? `/agents/${managed.id}` : '/agents'" @click="close">{{ managed ? 'Open session' : 'Go to Agents' }}<AppIcon name="arrow" :size="15" /></RouterLink></footer>
@@ -486,13 +500,16 @@ defineExpose({ open, openOnce })
 .launch-head { order: 0; flex-shrink: 0; }
 .launch-body { order: 2; overflow-y: auto; scrollbar-gutter: stable; min-height: 0; }
 .launch-card > footer { order: 1; flex-shrink: 0; margin: 0 0 16px; padding: 0 0 16px; border-top: 0; border-bottom: 1px solid var(--line); }
-.one-off .context-choice { order: -1; }
-.one-off .instruction-field { order: 10; }
-.one-off .restriction-field { order: 11; }
-.one-off .ticket-field, .one-off .new-ticket { order: 20; }
 .new-ticket { display: grid; gap: 14px; }
 .instruction.field { height: auto; resize: none; }
-.one-off .restriction-note { order: 30; }
+.one-off .restriction-note { min-block-size: 3em; }
+.run-settings-fields { display: grid; gap: 16px; min-width: 0; }
+.run-settings-summary { padding-block: 12px; border-block: 1px solid var(--line); }
+.run-summary-line { display: flex; align-items: start; gap: 12px; }
+.run-summary-line p { flex: 1; min-width: 0; margin: 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.settings-toggle { flex-shrink: 0; min-height: 44px; }
+.settings-status { min-block-size: 3em; margin: 4px 0 0; }
+.run-settings-summary.warn .settings-status { color: var(--ink-2); }
 .queue-label { display: grid; }
 .queue-label > span { grid-area: 1 / 1; }
 .queue-label .inactive { visibility: hidden; }
@@ -556,7 +573,7 @@ footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
   .launch-card > footer { order: 3; margin: 14px 0 0; padding: 14px 0 0; border-bottom: 0; border-top: 1px solid var(--line); }
   .pair, .pair.pi-bound { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .launch-head { margin-bottom: 14px; }
-  .launch-fields { gap: 14px; }
+  .launch-fields, .run-settings-fields { gap: 14px; }
   .dispatch-status { margin-top: 16px; }
   footer { margin-top: 18px; padding-top: 16px; }
   .launch-head .icon-btn { width: 44px; height: 44px; }
