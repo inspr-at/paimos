@@ -488,6 +488,14 @@ func (m *Module) reportRollout(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+	fact, err := rolloutMetricFact(in, m.now())
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if fact != nil {
+		batch.Evidence = []metricFactInput{*fact}
+	}
 	changed, err := m.flowWrite(r.Context(), p.TenantID, &p, func(ctx context.Context, tx pgx.Tx, apply func([]flowBatch) error) error {
 		if _, err := projectSettings(ctx, tx, project); err != nil {
 			return err

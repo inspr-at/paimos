@@ -210,9 +210,10 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Revision int64           `json:"revision"`
-		State    string          `json:"state"`
-		Hold     json.RawMessage `json:"hold_reason"`
+		Revision     int64           `json:"revision"`
+		MergeOutcome string          `json:"merge_outcome"`
+		State        string          `json:"state"`
+		Hold         json.RawMessage `json:"hold_reason"`
 	}
 	if err := decode(w, r, &in); err != nil {
 		respondError(w, err)
@@ -225,6 +226,10 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Revision < 1 || progress && (len(in.Hold) > 0 || in.State != "running" && in.State != "done") || !progress && (in.State != "" && in.State != "queued" && in.State != "parked" || in.State == "" && len(in.Hold) == 0) {
 		respondError(w, fail(400, "invalid round transition"))
+		return
+	}
+	if in.MergeOutcome != "" && (!progress || in.State != "done" || in.MergeOutcome != "scripted" && in.MergeOutcome != "model") {
+		respondError(w, fail(400, "merge_outcome requires completed merge progress"))
 		return
 	}
 	var hold *string
@@ -247,6 +252,9 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 		}
 		if before.Revision != in.Revision {
 			return nil, 200, fail(409, "round changed; reload first")
+		}
+		if in.MergeOutcome != "" && (before.Kind != "merge" || before.PR == nil) {
+			return nil, 200, fail(400, "merge_outcome belongs to a merge round with a pull request")
 		}
 		out := before
 		if progress {
@@ -302,7 +310,34 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 		if err = saveRoundTx(r.Context(), tx, p.TenantID, out); err != nil {
 			return nil, 200, err
 		}
-		err = appendQueueChanges(r.Context(), tx, p, []events.Change{queueChange(project, "transition", queueSnapshot{Project: project, Round: &before}, queueSnapshot{Project: project, Round: &out}, out.Updated)})
+		changes := []events.Change{queueChange(project, "transition", queueSnapshot{Project: project, Round: &before}, queueSnapshot{Project: project, Round: &out}, out.Updated)}
+		if in.MergeOutcome != "" {
+			source, err := loadMetricSourceTx(r.Context(), tx, project, false)
+			if err != nil {
+				return nil, 200, err
+			}
+			if source == nil {
+				return nil, 200, fail(409, "link a repository before reporting merge resolution")
+			}
+			var head string
+			err = tx.QueryRow(r.Context(), `SELECT head_sha FROM delivery_items WHERE project_id=$1 AND ticket_node_id=$2 AND repository=$3 AND pull_request=$4`, project, out.Ticket, source.Repository, out.PR).Scan(&head)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, 200, fail(409, "merge round no longer links to the project repository")
+			}
+			if err != nil {
+				return nil, 200, err
+			}
+			if err := lockMergeEventParentsTx(r.Context(), tx, p, &project); err != nil {
+				return nil, 200, err
+			}
+			fact := metricFactInput{Kind: "merge_round", Key: "round/" + out.ID, PullRequest: out.PR, HeadSHA: &head, At: out.Updated, Outcome: in.MergeOutcome}
+			evidence, err := metricEvidenceTx(r.Context(), tx, p.TenantID, project, source.Repository, []metricFactInput{fact}, out.Updated)
+			if err != nil {
+				return nil, 200, err
+			}
+			changes = append(changes, evidence...)
+		}
+		err = appendQueueChanges(r.Context(), tx, p, changes)
 		return out, 200, err
 	})
 }

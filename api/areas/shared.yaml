@@ -412,6 +412,7 @@ components:
       additionalProperties: false
       required: [facts]
       properties:
+        repository: {type: string, maxLength: 200, description: 'Optional captured repository binding; a changed project source refuses the entire report with 409.'}
         facts:
           type: array
           minItems: 1

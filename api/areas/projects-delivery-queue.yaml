@@ -157,4 +157,7 @@ components:
       type: "object"
       additionalProperties: false
       required: ["revision","state"]
-      properties: {"revision":{"type":"integer","format":"int64","minimum":1},"state":{"type":"string","enum":["running","done"]}}
+      properties:
+        revision: {type: integer, format: int64, minimum: 1}
+        state: {type: string, enum: [running, done]}
+        merge_outcome: {type: string, enum: [scripted, model], description: 'Optional measured resolution, only when completing a merge round linked to the current project repository and PR. Emits delivery evidence in the same transaction; never grants merge authority.'}
