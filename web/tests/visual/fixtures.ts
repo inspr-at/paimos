@@ -89,7 +89,7 @@ export const sessionChat: VisualSetup = async (page, _profile, theme) => {
   Object.assign(message, { body: `## Übergabebericht\n\n${LONG}.\n\n\`git status --short\` bleibt lesbar.\n\n[Prüfbericht öffnen](https://example.invalid/report)`,
     sender_session_id: worker.id, sender_principal_id: worker.agent_principal_id, recipient_principal_id: me.id,
     created_at: new Date(NOW - 60_000).toISOString() })
-  await mockAgents(page, data)
+  await mockAgents(page, data, { now: () => NOW })
   await page.goto(`/agents/${worker.id}?tab=messages`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await expect(panel.locator('.chat-composer')).toBeVisible()
@@ -176,7 +176,7 @@ export const quoteEditor: VisualSetup = async (page, _profile, theme) => {
 
 export const publicQuote: VisualSetup = async (page, _profile, theme) => {
   await work(page, theme)
-  await mockPublicQuote(page, { acceptable: true })
+  await mockPublicQuote(page, { acceptable: true, now: NOW })
   await page.goto('/offers/sel-demo/tok-example')
   await expect(page.locator('#pq-title')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Prüfen und annehmen', exact: true })).toBeVisible()
@@ -198,7 +198,7 @@ export const capacity: VisualSetup = async (page, _profile, theme) => {
   await work(page, theme)
   const data = agentsData(CAPACITY_NOW), capacity = capacityWorld()
   data.accounts = capacity.accounts as unknown as typeof data.accounts
-  await mockAgents(page, data, { capacity })
+  await mockAgents(page, data, { capacity, now: () => CAPACITY_NOW })
   await mockDailyPlan(page, { example: 'pace' })
   await page.goto('/settings/capacity')
   await page.locator('button[data-pace="claude"]').click()
@@ -223,7 +223,7 @@ export const startAgent: VisualSetup = async (page, _profile, theme) => {
 
 export const ticketWorkspace: VisualSetup = async (page, _profile, theme) => {
   await work(page, theme)
-  await mockAgents(page, agentsData())
+  await mockAgents(page, agentsData(), { now: () => NOW })
   await page.goto('/p/PHAROS/PHAROS-11')
   const ticket = page.getByRole('complementary', { name: 'Ticket details' })
   await expect(ticket.locator('.attachments')).toBeVisible()
@@ -237,7 +237,7 @@ export const accountUseMatrix: VisualSetup = async (page, _profile, theme) => {
   await work(page, theme)
   const data = agentsData(CAPACITY_NOW), capacity = capacityWorld()
   data.accounts = capacity.accounts as unknown as typeof data.accounts
-  await mockAgents(page, data, { capacity })
+  await mockAgents(page, data, { capacity, now: () => CAPACITY_NOW })
   const contexts = [{ id: 'ctx-default', name: 'Default', kind: 'default' }, { id: 'ctx-long', name: LONG, kind: 'regular' }]
   const accounts = data.accounts.slice(0, 3).map((account, index) => ({ id: account.id, label: index === 0 ? LONG : account.label,
     harness: account.harness, plan: account.plan, billing_mode: 'subscription', owner_id: null }))
