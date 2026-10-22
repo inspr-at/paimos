@@ -834,8 +834,8 @@ func TestDeliveryFlowWorkflowRunShowsRunningChecks(t *testing.T) {
 	if step, ended, outcome := flowStepRow(t, f, "github_app", "run/501/1"); step != "ci" || ended == nil || outcome == nil || *outcome != "red" {
 		t.Fatalf("completed: %s %v %v", step, ended, outcome)
 	}
-	if runs, _, _ := metricCounts(t, f); runs != 0 {
-		t.Fatalf("completed workflow run wrote %d metric runs", runs)
+	if runs, _, _ := metricCounts(t, f); runs != 1 {
+		t.Fatalf("completed workflow run must write one exact metric attempt, got %d", runs)
 	}
 	events := flowEventCount(t, f)
 	auditSend(t, f, "workflow_run", "flow-live-done", workflowRunBody("completed", 501, 1, "pull_request", p.Branch, p.Head, defaultCIWorkflow, created, &started, "failure", 7), 204)

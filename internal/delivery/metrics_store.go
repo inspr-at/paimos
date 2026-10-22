@@ -44,7 +44,12 @@ func upsertRunsTx(ctx context.Context, tx pgx.Tx, tid, repository, source string
 			jobsAt = &at
 			var err error
 			if r.JobsComplete {
-				if required, err = encodeStoredJobs(jobFacts{Conclusions: r.Required, Complete: true}); err != nil {
+				facts := jobFacts{Conclusions: r.Required, Complete: true, Waits: r.JobWaits, WorstWaitMS: r.WorstWaitMS}
+				if err := hydrateJobWaitsTx(ctx, tx, repository, r.ID, r.Attempt, &facts); err != nil {
+					return err
+				}
+				r.WorstWaitMS = facts.WorstWaitMS
+				if required, err = encodeStoredJobs(facts); err != nil {
 					return err
 				}
 			} else if required, err = json.Marshal(r.Required); err != nil {
@@ -126,6 +131,16 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 			Default string `json:"default_branch"`
 		} `json:"repository"`
 		Pull  githubPullFact `json:"pull_request"`
+		Job   metricJob      `json:"workflow_job"`
+		Check struct {
+			Head  string `json:"head_sha"`
+			Suite struct {
+				ID int64 `json:"id"`
+			} `json:"check_suite"`
+			App struct {
+				Slug string `json:"slug"`
+			} `json:"app"`
+		} `json:"check_run"`
 		Suite struct {
 			ID     int64  `json:"id"`
 			Head   string `json:"head_sha"`
@@ -146,7 +161,7 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 	if err := json.Unmarshal(raw, &e); err != nil {
 		return webhookFailed, nil, errRead
 	}
-	if name != "pull_request" && name != "check_suite" && name != "status" {
+	if name != "pull_request" && name != "check_suite" && name != "check_run" && name != "workflow_run" && name != "workflow_job" && name != "status" {
 		return webhookNothingToRecord, nil, nil
 	}
 	scope, err := m.jobScope(ctx)
@@ -158,9 +173,18 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 		return webhookNotConfigured, nil, nil
 	}
 	var runs []metricRun
+	var jobs []metricJob
 	var pulls []metricPull
 	var marks []metricMark
 	switch name {
+	case "workflow_run", "workflow_job":
+		if name == "workflow_job" {
+			jobs = []metricJob{e.Job}
+		}
+		runs, err = m.liveMetricRuns(ctx, name, raw, scope)
+		if err != nil {
+			return webhookFailed, nil, err
+		}
 	case "pull_request":
 		// Only pulls into the default branch with an opened time are facts.
 		if e.Repository.Default == "" || e.Pull.Base.Ref != e.Repository.Default || e.Pull.Created.IsZero() {
@@ -171,8 +195,15 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 			return webhookFailed, nil, err
 		}
 		pulls = []metricPull{pull}
-	case "check_suite":
+	case "check_run", "check_suite":
 		reader, ok := m.github.(metricsReader)
+		if name == "check_run" {
+			if e.Check.App.Slug != "github-actions" || e.Check.Suite.ID <= 0 {
+				return webhookNothingToRecord, nil, nil
+			}
+			e.Suite.ID, e.Suite.Head = e.Check.Suite.ID, e.Check.Head
+			e.Suite.App.Slug, e.Suite.Status = e.Check.App.Slug, "completed"
+		}
 		if !ok || e.Suite.App.Slug != "github-actions" || e.Suite.Status != "completed" {
 			return webhookNothingToRecord, nil, nil
 		}
@@ -198,6 +229,20 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 			}
 		}
 		err = reader.MetricsRead(ctx, m.config.TenantID, func(get func(string, any) error, source string) error {
+			if name == "check_run" {
+				var suite metricCheckSuite
+				if err := get(fmt.Sprintf("/check-suites/%d", e.Suite.ID), &suite); err != nil {
+					return err
+				}
+				if suite.ID != e.Suite.ID || suite.Head != e.Suite.Head {
+					return errRead
+				}
+				// One completed check is not a completed workflow. Never store
+				// a partial job map while its sibling checks are still running.
+				if suite.Status != "completed" {
+					return nil
+				}
+			}
 			if source == historyChecks {
 				var suite metricCheckSuite
 				if err := get(fmt.Sprintf("/check-suites/%d", e.Suite.ID), &suite); err != nil {
@@ -247,7 +292,7 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 	default:
 		return webhookNothingToRecord, nil, nil
 	}
-	if len(runs)+len(pulls)+len(marks) == 0 {
+	if len(runs)+len(pulls)+len(marks)+len(jobs) == 0 {
 		return webhookNothingToRecord, nil, nil
 	}
 	// Checks and queue facts belong to linked deliveries even when metrics are
@@ -257,17 +302,45 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 	}
 	at := m.now()
 	service := db.AllProjects(ctx, "delivery metric webhook facts")
+	needsJobs := false
+	for _, run := range runs {
+		needsJobs = needsJobs || run.Attempt == 1 && jobRunEvent(run.Event) && scope.ci(run) && !run.JobsComplete
+	}
 	err = db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+			return err
+		}
+		var linked bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_metric_sources WHERE repository=$1)`, m.config.Repository).Scan(&linked); err != nil || !linked {
+			return err
+		}
+		for _, job := range jobs {
+			if err := upsertMetricJobTx(ctx, tx, m.config.TenantID, m.config.Repository, job); err != nil {
+				return err
+			}
+		}
 		if err := upsertRunsTx(ctx, tx, m.config.TenantID, m.config.Repository, "webhook", runs, at); err != nil {
 			return err
 		}
 		if err := upsertPullsTx(ctx, tx, m.config.TenantID, m.config.Repository, "webhook", pulls, at); err != nil {
 			return err
 		}
-		return upsertMarksTx(ctx, tx, m.config.TenantID, m.config.Repository, "webhook", marks, at)
+		if err := upsertMarksTx(ctx, tx, m.config.TenantID, m.config.Repository, "webhook", marks, at); err != nil {
+			return err
+		}
+		if needsJobs {
+			// A completed history job otherwise sleeps forever after a live
+			// best-effort job read failed. Resume its idempotent jobs pass.
+			_, err := tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_pending=true WHERE repository=$1 AND backfill_actor_id IS NOT NULL`, m.config.Repository)
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return webhookFailed, nil, err
+	}
+	if needsJobs {
+		m.wakeMetrics()
 	}
 	return webhookRecorded, runs, nil
 }
@@ -380,6 +453,14 @@ func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now ti
 				return in, err
 			}
 			r.Required, r.JobsComplete = conclusions, complete
+			if complete {
+				var stored storedJobFacts
+				if err := json.Unmarshal(required, &stored); err != nil {
+					rows.Close()
+					return in, err
+				}
+				r.JobWaits = stored.Waits
+			}
 		}
 		in.Runs = append(in.Runs, r)
 	}

@@ -81,9 +81,70 @@ Continuation with omitted `days` and Check again retain the selected window,
 including after a first automatic read fails before committing a cursor. Once
 a cursor exists, selecting another window requires `restart`.
 
+## Job and attempt ingestion (AEON-1658)
+
+Completed `workflow_run` deliveries now write exact run attempts into
+`delivery_metric_runs`, including earlier attempts returned by Actions. Completed
+GitHub Actions `check_run` deliveries resolve their completed suite to the same
+run identity. A completed job never stands in for an unfinished workflow. Job
+maps are read only after the workflow completes, and retain every conclusion
+within the existing 500-job bound. Redelivery and repeated backfill pages converge
+on `(tenant, repository, run, attempt)`.
+
+The installation-bound `workflow_job` queued, waiting, in-progress and completed
+events store only run/attempt/job IDs and queue/start timestamps in
+`delivery_metric_jobs` (expansion 1422). No logs, steps, runner names or runner
+labels are projected. The complete REST job list supplies job identities, so
+early or late job events can fill missing queue timestamps. Runner wait is
+withheld while any non-skipped job's wait is unknown. Historical jobs without
+queue timestamps stay partial; backfill does not invent a queue time from the
+workflow's start. Confirmed flaky executions remain withheld under the existing
+measurement contract: a successful rerun is a workflow rescue, not proof that
+the same case, workflow revision and runner class failed and passed.
+
+A failed best-effort live job read wakes the durable history worker, including
+after an earlier history window finished. Each jobs step makes at most 40 reads,
+including pagination; an attempt that crosses the budget is retried whole.
+Full-budget unfinished Actions steps pause for one minute. GitHub rate-limit
+responses retain their bounded Retry-After/reset hint in the existing persisted
+retry deadline. The jobs pass reads only the selected history window. Authority
+and source revision are checked again under the tenant fence before committing
+backfilled facts.
+
+### Coordinator backfill on pm.barta.cm
+
+After deployment, use an existing PPM identity with `delivery.manage` on AEON
+and the App's already-granted Actions read capability. This worker does not
+trigger production repairs. No new key is needed. The existing endpoint starts
+one bounded step and the server continues the durable job.
+
+Live attempt ingestion needs the App's `workflow_run` subscription; live runner
+queue times also need `workflow_job` delivery. The coordinator checks those
+subscriptions through the existing App administration path when verifying
+coverage. This repository change does not alter host-owned App settings.
+
+Start and inspect the seven-day window:
+
+```sh
+/Users/markus/.aeon/lead/aeon/pm --instance ppm me
+/Users/markus/.aeon/lead/aeon/pm --instance ppm curl /api/projects/23e3f45b-27e4-43c7-985b-bb0c66179fb3/delivery/metrics/backfill -X POST --data '{"days":7,"restart":true}'
+/Users/markus/.aeon/lead/aeon/pm --instance ppm curl /api/projects/23e3f45b-27e4-43c7-985b-bb0c66179fb3/delivery/metrics
+```
+
+Read `source.backfill`, `source.history_source`, `source.last_read_error` and
+`source.retry_at` to follow progress. An explicit continuation POST uses `{}`;
+honour `retry_at` and stop only at `state: done`. Repeating the same completed
+window is idempotent. Checks-only history cannot recover attempts or runner
+waits, and remains explicitly partial. During implementation the assigned
+worker's live metrics GET returned 403 (`agent key scope required`), so its
+production cursor, App grants and job population could not be inspected; no
+claim is made that the production backfill had never run. The code-level gaps
+were workflow-run metrics being skipped, workflow-job ingress being refused,
+and failed live job reads not rescheduling a completed backfill.
+
 The source exposes `last_read_error` (reason, missing permission when known, and
-check time), `retry_at`, and `last_event_at`. Any GitHub 403 from an Actions endpoint
-becomes `actions_read_missing`; a missing installation/repository becomes
+check time), `retry_at`, and `last_event_at`. An Actions 403 that is not classified
+as rate limiting becomes `actions_read_missing`; a missing installation/repository becomes
 `not_installed`; other read failures become `github_unavailable`. Permission and
 installation failures start at 30 minutes; other non-transient failures start at
 one minute. Repeated failures double the persisted delay, capped at one hour.
