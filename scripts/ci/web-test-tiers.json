@@ -14524,6 +14524,8 @@
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1509 inactive Claude login keeps its account pin and deliberate pause guidance","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1510: Sonnet explains a single catalog level and keeps every granted level selectable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"New menu restores its trigger without moving header controls at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

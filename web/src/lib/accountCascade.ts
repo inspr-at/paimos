@@ -394,9 +394,13 @@ function modelLabel(model: CatalogModel, models: CatalogModel[]) {
   const duplicate = models.filter(item => item.model === model.model).length > 1
   return duplicate && family ? `${name} · ${family}` : name
 }
+function accountWaitText(account: CatalogAccount, harness: string, subject = 'Agents') {
+  if (harness === 'claude' && account.wait?.code === 'sign_in') return 'Inactive login · switch to it on the computer'
+  return account.wait ? capacityWaitText(account.wait, subject) : ''
+}
 function accountOptionLabel(account: CatalogAccount, harness: string) {
   const plan = accountPlan(account)
-  const extra = account.wait ? capacityWaitText(account.wait) : account.available ? allowancePhrase(account, harness) : account.unavailable_reasons.map(reason => reasonText(account, reason).replace(/\.$/, '')).join('; ')
+  const extra = account.wait ? accountWaitText(account, harness) : account.available ? allowancePhrase(account, harness) : account.unavailable_reasons.map(reason => reasonText(account, reason).replace(/\.$/, '')).join('; ')
   return [accountName(account), plan, extra].filter(Boolean).join(' · ')
 }
 
@@ -477,7 +481,7 @@ function accountNote(choice: CascadeChoice, touch: CascadeTouch, accounts: Catal
   if (!choice.harness) return ''
   if (!accounts.length) return 'No account is enrolled for this harness on this host.'
   if (!account) return 'Choose an account. An unavailable account stays listed with the reason it cannot be the default.'
-  if (account.wait) return capacityWaitText(account.wait)
+  if (account.wait) return accountWaitText(account, choice.harness)
   if (!account.available) return account.unavailable_reasons.map(reason => reasonText(account, reason)).join(' ')
   const allowance = allowanceSentence(account, choice.harness)
   if (accounts.length === 1) return `Only one account is enrolled here. ${allowance}`
@@ -503,7 +507,11 @@ function effortNote(choice: CascadeChoice, model: CatalogModel | undefined, effo
 function statusFor(account: CatalogAccount | undefined, accounts: CatalogAccount[], harness: string): CascadeStatus {
   if (!accounts.length) return { label: 'No enrolled account', detail: 'There is no account to pin for this host and harness.', tone: 'warn' }
   if (!account) return { label: 'Choose an account', detail: 'The run is pinned to the account you choose. It does not fall back to another one.', tone: 'warn' }
-  if (account.wait) return { label: capacityWaitText(account.wait, `${harnessLabel(harness)} agents`), detail: account.wait.run_now_allowed ? 'Queue it for then, or run this one now.' : 'The run can queue and starts when this account is ready.', tone: 'warn' }
+  if (account.wait) return {
+    label: accountWaitText(account, harness, `${harnessLabel(harness)} agents`),
+    detail: account.wait.code === 'sign_in' ? 'Runs start once this login is active on the computer.' : account.wait.run_now_allowed ? 'Queue it for then, or run this one now.' : 'The run can queue and starts when this account is ready.',
+    tone: 'warn',
+  }
   if (!account.available) {
     return { label: reasonLabel(account), detail: `${account.unavailable_reasons.map(reason => reasonText(account, reason)).join(' ')} The run can still queue. Routing rechecks this account and does not switch to another.`, tone: 'warn' }
   }

@@ -237,7 +237,7 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
     // attempt count remain in recordRootGroup.
     try { await recordRootGroup(child, entry => appendFileSync(groupLog, `${JSON.stringify(entry)}\n`), { wait: rootIdentityWait }) }
     catch (error) {
-      rootCleanupIncomplete = error.unverifiedGroup === child.pid
+      rootCleanupIncomplete = error.unverifiedGroup === child.pid || error.unconfirmedGroup === child.pid
       if (!rootCleanupIncomplete) await exited
       throw error
     }

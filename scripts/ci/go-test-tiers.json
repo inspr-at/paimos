@@ -1870,7 +1870,37 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostAbandonsStartRefusedBeforeFork","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostInitialPTYWaitsForProviderReadiness","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostLimitsCountOnlyLiveWork","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYCurrentHolderInputAndResize","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYExportOutageKeepsRuntimeAndReportsGap","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYFailedSuccessorStillAcceptsExactOwnerStop","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYOutputEOFAndLifecycleMetadata","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYPreIORefusalDoesNotFaultSession","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYReadinessFailureRetainsHandleUntilExitReport","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYRejectsUntrustedOrStaleWrites","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYRevalidatesAfterPreparationBeforeIO","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYSourceGapsAndSlowViewerStayBounded","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYTransitionsWaitForBothOwnedExits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYTypingRetiresReportsAndPreservesStop","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYUncertainInputRequiresRecovery","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYUnconfirmedExitKeepsOccupancy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPinnedPTYStartsReadsWritesAndExits","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPollIsolatesSessionWithRefusedReports","tier":"ESSENTIAL"}
     ,
@@ -8774,9 +8804,13 @@
     ,
     {"kind":"go","package":"internal/nativepty","name":"TestPTYResizeTwoHolderTabsAndViewers","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYUnixInitialConversationReadinessAndCancellation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativepty","name":"TestPTYUnixOwnershipResizeAndExit","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativepty","name":"TestPTYUnixPasteDrainsOutputWhileInputIsBlocked","reason":"AEON-1288 FIX2: blocked PTY paste drains child output and acknowledges all 8 KiB","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYUnixReadinessCancellationDoesNotReleaseWriter","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativepty","name":"TestTakeoverClientLossAndExpiredLeaseDoNotRestart","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
@@ -8817,6 +8851,8 @@
     {"kind":"go","package":"internal/nativereceipts","name":"TestCrashBeforeNativeAckHoldsInputAndReplaysOnlyMetadata","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativereceipts","name":"TestFinalOutboxSurvivesOutageExitAndLostAck","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativereceipts","name":"TestPTYReceiptRetirementPreservesPendingAndStopCapacity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativereceipts","name":"TestPrivateStoreBoundsAndRejectsSymlinkOrSharedState","tier":"ESSENTIAL"}
     ,
@@ -8871,6 +8907,8 @@
     {"kind":"go","package":"internal/nativesessions/store","name":"TestCoordinatorClaimsReserveQuotaBudgets","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestNativeSessionDSARInventoryMatchesSchema","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestOwnedInitialPTYUsesPersonStartAndPersistsOnlyExitMetadata","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch","tier":"ESSENTIAL"}
     ,

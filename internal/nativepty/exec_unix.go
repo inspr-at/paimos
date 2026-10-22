@@ -33,6 +33,11 @@ type CommandPlan struct {
 	Args, Environment []string
 	Provider          string
 	Require           func(context.Context, nativecontract.PTYLaunchSpec) error
+	// Initial starts bind the exact server conversation, without inventing a
+	// resume ref. Ready parses bounded provider output and returns its observed
+	// native session identity, or an empty string while initialization continues.
+	ConversationRef string
+	Ready           func(nativecontract.TerminalFrame) (string, error)
 }
 type CommandBuilder interface {
 	Prepare(context.Context, nativecontract.PTYLaunchSpec) (CommandPlan, error)
@@ -48,7 +53,7 @@ func (l *ExecLauncher) OpenPTY(ctx context.Context, spec nativecontract.PTYLaunc
 	if l == nil || l.Builder == nil || !ownedprocess.TrackingSupported() {
 		return nil, refuse(nativecontract.ReasonQualificationMissing)
 	}
-	if !ValidSize(int64(spec.Cols), int64(spec.Rows)) || spec.Mode != "terminal" || spec.Lifetime == nil || spec.ResumeRef == "" {
+	if !ValidSize(int64(spec.Cols), int64(spec.Rows)) || spec.Mode != "terminal" || spec.Lifetime == nil {
 		return nil, refuse(nativecontract.ReasonInvalidInput)
 	}
 	plan, err := l.Builder.Prepare(ctx, spec)
@@ -57,6 +62,9 @@ func (l *ExecLauncher) OpenPTY(ctx context.Context, spec nativecontract.PTYLaunc
 	}
 	if plan.Require == nil {
 		return nil, refuse(nativecontract.ReasonQualificationMissing)
+	}
+	if spec.ResumeRef == "" && (spec.ConversationRef == "" || len(spec.ConversationRef) > 256 || plan.ConversationRef != spec.ConversationRef || plan.Ready == nil) {
+		return nil, refuse(nativecontract.ReasonIdentityMismatch)
 	}
 	if err = boundedCommand(plan, spec); err != nil {
 		return nil, err
@@ -92,6 +100,12 @@ func (l *ExecLauncher) OpenPTY(ctx context.Context, spec nativecontract.PTYLaunc
 		master.Close()
 		return nil, err
 	}
+	if spec.Revalidate != nil {
+		if err = spec.Revalidate(ctx); err != nil {
+			master.Close()
+			return nil, err
+		}
+	}
 	if err = ctx.Err(); err != nil {
 		master.Close()
 		return nil, err
@@ -109,10 +123,16 @@ func (l *ExecLauncher) OpenPTY(ctx context.Context, spec nativecontract.PTYLaunc
 		return nil, refuse(nativecontract.ReasonNativeFailure)
 	}
 	now := time.Now()
-	digest := sha256.Sum256([]byte(uuid.NewString()))
+	processID := uuid.NewString()
+	digest := sha256.Sum256([]byte(processID))
 	r := &execPTY{master: master, masterFD: masterFD, binding: cloneBinding(spec.Binding), life: ownedprocess.Track(cmd), cmd: cmd,
-		identity: nativecontract.NativeIdentity{Provider: plan.Provider, RuntimeEpoch: spec.Binding.RuntimeEpoch, NativeSessionRef: spec.ResumeRef, PID: cmd.Process.Pid, StartedAt: now, ProcessIdentityDigest: hex.EncodeToString(digest[:])},
-		cols:     spec.Cols, rows: spec.Rows, frames: make(chan nativecontract.TerminalFrame, 8), done: make(chan struct{}), readerDone: make(chan struct{}), readStop: make(chan struct{})}
+		ownership: ownedprocess.Identity{DaemonID: spec.Binding.DaemonID, Generation: spec.Binding.DaemonGeneration, ProcessID: processID, RootPID: cmd.Process.Pid, GroupID: cmd.Process.Pid, StartedAt: now},
+		identity:  nativecontract.NativeIdentity{Provider: plan.Provider, RuntimeEpoch: spec.Binding.RuntimeEpoch, NativeSessionRef: spec.ResumeRef, PID: cmd.Process.Pid, StartedAt: now, ProcessIdentityDigest: hex.EncodeToString(digest[:])},
+		cols:      spec.Cols, rows: spec.Rows, frames: make(chan nativecontract.TerminalFrame, 8), done: make(chan struct{}), readerDone: make(chan struct{}), readStop: make(chan struct{}), readyDone: make(chan struct{}), readiness: plan.Ready}
+	if plan.Ready == nil {
+		r.readyErr = refuse(nativecontract.ReasonQualificationMissing)
+		close(r.readyDone)
+	}
 	verifyErr := r.life.Verify()
 	go r.readFrames()
 	go r.observe(spec.Lifetime)
@@ -202,6 +222,7 @@ type execPTY struct {
 	masterFD                   int
 	binding                    nativecontract.Binding
 	identity                   nativecontract.NativeIdentity
+	ownership                  ownedprocess.Identity
 	life                       *ownedprocess.Lifetime
 	cmd                        *exec.Cmd
 	cols, rows                 int
@@ -211,12 +232,40 @@ type execPTY struct {
 	exit                       nativecontract.ExitEvidence
 	exitErr                    error
 	closed                     bool
+	readiness                  func(nativecontract.TerminalFrame) (string, error)
+	readyDone                  chan struct{}
+	readyErr                   error
 }
 
 var _ nativecontract.PTYRuntime = (*execPTY)(nil)
 
-func (r *execPTY) Identity() nativecontract.NativeIdentity     { return r.identity }
+func (r *execPTY) Identity() nativecontract.NativeIdentity {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.identity
+}
 func (r *execPTY) Frames() <-chan nativecontract.TerminalFrame { return r.frames }
+
+func (r *execPTY) Ownership() (ownedprocess.Identity, error) {
+	if err := r.life.Verify(); err != nil {
+		return ownedprocess.Identity{}, refuse(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	return r.ownership, nil
+}
+
+func (r *execPTY) Ready(ctx context.Context) (nativecontract.NativeIdentity, error) {
+	select {
+	case <-ctx.Done():
+		return nativecontract.NativeIdentity{}, ctx.Err()
+	case <-r.readyDone:
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.closed {
+			return r.identity, refuse(nativecontract.ReasonOwnershipUnconfirmed)
+		}
+		return r.identity, r.readyErr
+	}
+}
 
 func (r *execPTY) check(ctx context.Context, binding nativecontract.Binding, expires time.Time) error {
 	if err := ctx.Err(); err != nil {
@@ -328,6 +377,25 @@ func poll(ctx context.Context, fd int, events int16, expires time.Time) error {
 func (r *execPTY) readFrames() {
 	defer close(r.readerDone)
 	defer close(r.frames)
+	pending := r.readiness != nil
+	finishReady := func(ref string, err error) {
+		if !pending {
+			return
+		}
+		r.mu.Lock()
+		if err == nil && (ref == "" || len(ref) > 256 || r.identity.NativeSessionRef != "" && r.identity.NativeSessionRef != ref) {
+			err = refuse(nativecontract.ReasonIdentityMismatch)
+		}
+		if err == nil {
+			r.identity.NativeSessionRef = ref
+		}
+		r.readyErr = err
+		r.mu.Unlock()
+		pending = false
+		r.readiness = nil
+		close(r.readyDone)
+	}
+	defer func() { finishReady("", refuse(nativecontract.ReasonOwnershipUnconfirmed)) }()
 	buffer := make([]byte, 4096) // base64 plus envelope remain below export bound
 	defer clear(buffer)
 	for {
@@ -345,6 +413,17 @@ func (r *execPTY) readFrames() {
 		if n > 0 {
 			r.sequence++
 			frame := nativecontract.TerminalFrame{TerminalEpoch: r.binding.RuntimeEpoch, Sequence: strconv.FormatUint(r.sequence, 10), DataBase64: base64.StdEncoding.EncodeToString(buffer[:n]), Rows: int64(rows), Cols: int64(cols), Reset: r.sequence == 1}
+			if pending {
+				ref, readyErr := r.readiness(frame)
+				if ref != "" || readyErr != nil {
+					finishReady(ref, readyErr)
+				}
+				// Initialization has a bounded RAM spool too. Refuse excessive
+				// pre-ready output instead of deadlocking the waiting launcher.
+				if pending && len(r.frames) == cap(r.frames) {
+					finishReady("", refuse(nativecontract.ReasonBufferFull))
+				}
+			}
 			select {
 			case r.frames <- frame:
 			case <-r.readStop:
@@ -397,6 +476,14 @@ func (r *execPTY) Wait(ctx context.Context) (nativecontract.ExitEvidence, error)
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		return r.exit, r.exitErr
+	}
+}
+func (r *execPTY) ObserveExit(ctx context.Context) (nativecontract.ExitEvidence, error) {
+	select {
+	case <-r.done:
+		return r.Wait(ctx)
+	default:
+		return nativecontract.ExitEvidence{}, refuse(nativecontract.ReasonOwnershipUnconfirmed)
 	}
 }
 func (r *execPTY) Close(ctx context.Context) (nativecontract.ExitEvidence, error) {

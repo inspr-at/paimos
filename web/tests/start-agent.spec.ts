@@ -151,6 +151,88 @@ async function readyAccount(page: Page) {
   await expect(dialog(page).getByLabel('Thinking', { exact: true })).not.toHaveValue('')
 }
 
+// Risk: rotation sends a person to the pause toggle, queues another login,
+// or moves phone selectors/actions when the login advice wraps differently.
+test('AEON-1509 inactive Claude login keeps its account pin and deliberate pause guidance', async ({ page }, info) => {
+  const mock = await mockStartAgent(page, { catalog: 'two-hosts' })
+  mock.catalog.hosts.splice(0, 1)
+  const harness = mock.catalog.hosts[0].harnesses[0]
+  const active = { ...harness.accounts[0], label: 'Aktives Claude-Konto für gemeinsame Entwicklungsprojekte' }
+  const inactive = { ...active, id: mock.spareAccountId, label: 'Weiteres Claude-Konto für gemeinsame Entwicklungsprojekte', state: 'unavailable', last_probe_ok: false, available: false, unavailable_reasons: ['state' as const, 'probe' as const], wait: { code: 'sign_in' as const, run_now_allowed: false } }
+  const paused = { ...inactive, id: 'ac000000-0000-4000-8000-000000000004', label: 'Paused Claude login', state: 'draining', wait: { code: 'state' as const, run_now_allowed: false } }
+  harness.accounts = [active, inactive, paused]
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await open(page)
+  await readyAccount(page)
+  const sheet = dialog(page)
+  const account = sheet.getByLabel('Account', { exact: true })
+  await expect(account).toHaveValue(active.id)
+  await expect(sheet.getByText('Account available', { exact: true })).toBeVisible()
+  await expect(account.locator(`option[value="${inactive.id}"]`)).toContainText('Inactive login · switch to it on the computer')
+  await expect(account.locator(`option[value="${inactive.id}"]`)).not.toContainText('Settings')
+  await account.selectOption(inactive.id)
+  // Phone options keep name and plan; the selected login's full advice stays
+  // in the status below the controls.
+  await page.setViewportSize({ width: 390, height: 1000 })
+  await expect(sheet.getByRole('status').locator('strong')).toHaveText('Inactive login · switch to it on the computer')
+  await expect(sheet.getByRole('status').locator('p')).toHaveText('Runs start once this login is active on the computer.')
+  await expect(sheet.getByRole('button', { name: 'Run now once', exact: true })).toHaveCount(0)
+  const queue = sheet.getByRole('button', { name: 'Queue run', exact: true })
+  for (const theme of ['light', 'dark']) for (const height of [1000, 844]) {
+    await page.setViewportSize({ width: 390, height })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    const frame = await sheet.boundingBox()
+    expect(frame).not.toBeNull()
+    expect(Math.abs(frame!.y), `${theme} ${height}: phone sheet starts at the viewport top`).toBeLessThanOrEqual(0.5)
+    expect(Math.abs(frame!.height - height), `${theme} ${height}: phone sheet fills the viewport`).toBeLessThanOrEqual(0.5)
+    await expect(queue).toBeInViewport()
+    await expectStableControls({
+      controls: {
+        frame: sheet, close: sheet.getByRole('button', { name: 'Close start agent', exact: true }),
+        account, host: sheet.getByLabel('Host', { exact: true }), harness: sheet.getByLabel('Harness', { exact: true }),
+        model: sheet.getByLabel('Model', { exact: true }), thinking: sheet.getByLabel('Thinking', { exact: true }),
+        selectors: sheet.locator('.launch-fields'), cancel: sheet.getByRole('button', { name: 'Cancel', exact: true }), queue,
+      },
+      scrollAreas: { dialog: sheet, body: sheet.locator('.launch-body') },
+      interactions: [
+        { name: 'choose deliberately paused login', run: async () => {
+          await account.selectOption(paused.id)
+          await expect(sheet.getByRole('status')).toContainText('Paused in Settings / Accounts')
+          await expect(sheet.getByRole('status').locator('p')).toHaveText('The run can queue and starts when this account is ready.')
+          await expect(queue).toBeInViewport()
+        } },
+        { name: 'return to inactive login', run: async () => {
+          await account.selectOption(inactive.id)
+          await expect(sheet.getByRole('status').locator('strong')).toHaveText('Inactive login · switch to it on the computer')
+          await expect(sheet.getByRole('status').locator('p')).toHaveText('Runs start once this login is active on the computer.')
+          await expect(sheet.getByRole('status')).not.toContainText('Settings')
+          await expect(queue).toBeInViewport()
+        } },
+        { name: 'read login advice in the scrolling body', run: async () => {
+          await sheet.getByRole('status').scrollIntoViewIfNeeded()
+          await expect(sheet.getByRole('status')).toBeInViewport()
+          await expect(queue).toBeInViewport()
+        } },
+        { name: 'return to the account selector', run: async () => {
+          await account.scrollIntoViewIfNeeded()
+          await expect(account).toBeInViewport()
+          await expect(queue).toBeInViewport()
+        } },
+      ],
+    })
+  }
+  for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await page.screenshot({ path: info.outputPath(`AEON-1509/start-agent-${width}-${theme}.png`), fullPage: true })
+  }
+  await sheet.getByRole('button', { name: 'Queue run', exact: true }).click()
+  await expect(sheet.getByRole('heading', { name: 'Queued', exact: true })).toBeVisible()
+  const queued = mock.calls.filter(call => call.method === 'POST' && call.path.endsWith('/runs'))
+  expect(queued).toHaveLength(1)
+  expect(queued[0].body?.requested_account_id).toBe(inactive.id)
+})
+
 test('an empty model grant is not filled from the tenant catalog', async ({ page }) => {
   await mockStartAgent(page, { catalog: 'empty-grants' })
   await open(page)

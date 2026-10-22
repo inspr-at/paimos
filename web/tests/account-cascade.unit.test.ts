@@ -4,6 +4,7 @@ import {
   allowanceWindowLabel, authorFamilyFor, chooseStep, displayText, emptyChoice, emptyTouch, fetchAccountCatalog, fillDefaults, isAccountCatalog, presentCascade, publicModelId, sessionReport, workRoleFor,
   type AgentAccountCatalog, type CatalogAccount, type CascadeChoice, type CascadeTouch,
 } from '../src/lib/accountCascade'
+import { WAIT_CODES } from '../src/lib/capacityWait'
 import { absoluteTime } from '../src/lib/work'
 
 const NOW = Date.parse('2026-09-27T12:00:00Z')
@@ -200,6 +201,29 @@ describe('account catalog contract', () => {
     expect(view.status.detail).toContain('no allowance headroom')
     expect(view.status.detail).toContain('does not switch to another')
     expect(allowanceWindowLabel(window(5))).not.toContain('secret')
+
+    const inactive = catalog([account({ state: 'unavailable', last_probe_ok: false, available: false, unavailable_reasons: ['state', 'probe'], wait: { code: 'sign_in', run_now_allowed: false } })])
+    inactive.hosts[0].harnesses[0].harness = 'claude'
+    const login = presented(inactive).view
+    for (const text of [login.accounts[0].label, login.notes.account, login.status.label]) {
+      expect(text).toContain('Inactive login · switch to it on the computer')
+      expect(text).not.toContain('Settings')
+    }
+    expect(login.profileId).toBe(profileA)
+    expect(login.status.detail).toBe('Runs start once this login is active on the computer.')
+    inactive.hosts[0].harnesses[0].accounts[0].wait = { code: 'state', run_now_allowed: false }
+    expect(presented(inactive).view.status.label).toContain('Paused in Settings / Accounts')
+    for (const code of WAIT_CODES) {
+      if (code === 'sign_in') continue
+      inactive.hosts[0].harnesses[0].accounts[0].wait = { code, run_now_allowed: false }
+      expect(presented(inactive).view.status.detail, code).toBe('The run can queue and starts when this account is ready.')
+    }
+    inactive.hosts[0].harnesses[0].accounts[0].wait = { code: 'schedule', run_now_allowed: true }
+    expect(presented(inactive).view.status.detail).toBe('Queue it for then, or run this one now.')
+    inactive.hosts[0].harnesses[0].harness = 'codex'
+    inactive.hosts[0].harnesses[0].accounts[0].wait = { code: 'sign_in', run_now_allowed: false }
+    expect(presented(inactive).view.status.label).toBe('Sign in again on the computer')
+    expect(presented(inactive).view.status.detail).toBe('Runs start once this login is active on the computer.')
   })
 
   it('reads the ticket work type and does not guess an author family', () => {

@@ -726,6 +726,72 @@ test('supervisor retains its lock when an unjournalled root group cannot be conf
   }
 })
 
+// Process-control risk: root exit is not proof that its entire group is gone.
+// Hold that kernel observation behind a barrier, without real orphan timing.
+test('root verification failure waits for group disappearance after root exit', async t => {
+  const child = { pid: 12345, exitCode: null, signalCode: null }, entries = [], signals = []
+  let groupAlive = true, release, waiting
+  const barrier = new Promise(resolve => { release = resolve })
+  const reached = new Promise(resolve => { waiting = resolve })
+  t.mock.method(process, 'kill', (pid, signal) => {
+    assert.ok(pid === child.pid || pid === -child.pid, 'only the newly spawned group is inspected')
+    if (signal === 'SIGKILL') { signals.push([pid, signal]); child.signalCode = signal; return true }
+    assert.equal(signal, 0)
+    if (pid === child.pid) return true
+    if (groupAlive) throw Object.assign(new Error('group awaiting reaping'), { code: 'EPERM' })
+    throw Object.assign(new Error('group gone'), { code: 'ESRCH' })
+  })
+  const pending = recordRootGroup(child, entry => entries.push(entry), {
+    start: () => '', attempts: 1, wait: async () => { waiting('waiting'); await barrier },
+  })
+  const rejected = assert.rejects(pending, /spawned group terminated/)
+  try {
+    assert.equal(await Promise.race([reached, pending.then(() => 'settled', () => 'settled')]), 'waiting')
+    assert.equal(child.signalCode, 'SIGKILL', 'root has exited while its group remains observable')
+    assert.equal(groupAlive, true)
+    assert.deepEqual(entries, [], 'unverified roots never enter the ownership journal')
+    groupAlive = false
+    release()
+    await rejected
+    assert.deepEqual(signals, [[-child.pid, 'SIGKILL']], 'cleanup never signals an unverified group twice')
+    assert.throws(() => process.kill(-child.pid, 0), { code: 'ESRCH' })
+  } finally { groupAlive = false; release(); await rejected }
+})
+
+test('unconfirmed root group exit retains the supervisor lock and empty journal', async t => {
+  const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-unconfirmed-root-')), 'suite.lock')
+  const child = Object.assign(new EventEmitter(), { pid: 12345, exitCode: null, signalCode: null })
+  const originalPS = childProcess.spawnSync
+  let probes = 0
+  const ps = t.mock.method(childProcess, 'spawnSync', (command, args, options) =>
+    command === 'ps' && args[0] === '-p' && args[1] === String(child.pid) ? { status: 1, stdout: '' } : originalPS(command, args, options))
+  const spawn = t.mock.method(childProcess, 'spawn', () => child)
+  t.mock.method(process, 'kill', (pid, signal) => {
+    assert.ok(pid === child.pid || pid === -child.pid)
+    if (signal === 'SIGKILL') {
+      child.signalCode = signal
+      queueMicrotask(() => child.emit('exit', null, signal))
+    } else {
+      assert.equal(signal, 0)
+      if (pid === -child.pid) probes++
+    }
+    return true
+  })
+  syncBuiltinESMExports()
+  try {
+    await assert.rejects(runOwnedCommand('fixture-root', [], {
+      lockPath: path, heartbeat: false, rootIdentityWait: async () => {},
+    }), error => error.unconfirmedGroup === child.pid && /Could not confirm spawned process group exit; host lock retained/.test(error.message))
+    assert.equal(probes, 200, 'cleanup has a bounded observation budget')
+    assert.equal(existsSync(path), true, 'an empty journal cannot authorize releasing uncertain ownership')
+    const owner = JSON.parse(readFileSync(path, 'utf8')), journal = `${path}.${owner.token}.groups`
+    assert.equal(readFileSync(journal, 'utf8'), '', 'no invalid identity is manufactured for recovery')
+  } finally {
+    spawn.mock.restore(); ps.mock.restore(); syncBuiltinESMExports()
+    for (const file of readdirSync(join(path, '..'))) fs.unlinkSync(join(path, '..', file))
+  }
+})
+
 test('root retries allow a fast child to exit normally instead of failing verification', { timeout: 15000 }, async () => {
   const child = spawn(process.execPath, ['-e', 'process.exit(7)'], { detached: true, stdio: 'ignore' })
   const exited = new Promise(resolve => child.once('exit', resolve)), entries = []
