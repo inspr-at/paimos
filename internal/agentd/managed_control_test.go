@@ -52,15 +52,7 @@ func (p *managedFake) Control(_ context.Context, op, text string) error {
 }
 func managedFixture(t *testing.T) (*Supervisor, *fakeAPI, *owned, *managedFake) {
 	t.Helper()
-	return managedFixtureWithAPI(t, func(api *fakeAPI) API { return api })
-}
-
-func managedFixtureWithAPI(t *testing.T, wrap func(*fakeAPI) API) (*Supervisor, *fakeAPI, *owned, *managedFake) {
-	t.Helper()
 	s, a, p := testSupervisor(t)
-	// StartRun launches watchHarness, which reads the API even when the fake
-	// has no notification stream. Install wrappers before that goroutine starts.
-	s.api = wrap(a)
 	if err := s.StartRun(t.Context(), a.run); err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +69,28 @@ func managedFixtureWithAPI(t *testing.T, wrap func(*fakeAPI) API) (*Supervisor, 
 	e.budgetMu.Unlock()
 	return s, a, e, proc
 }
+
+// Manual service-cycle tests own their inputs and failures. Construct an owned
+// run without StartRun's background heartbeat, which could consume those inputs
+// between explicit cycles or race a replacement API. Scheduler tests use their
+// own injected hint and tick channels.
+func managedServiceFixture(t *testing.T) (*Supervisor, *fakeAPI, *owned, *managedFake) {
+	t.Helper()
+	s, a, process := testSupervisor(t)
+	proc := &managedFake{fakeProcess: process, identity: ownedprocess.Identity{ProcessID: strings.Repeat("b", 32), RootPID: process.PID(), GroupID: process.PID(), StartedAt: time.Now().UTC()}}
+	entry := &owned{
+		record:  Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: a.run.ID, Generation: s.generation, State: "running", PID: proc.PID(), Controls: map[string]replay{}},
+		harness: HarnessSession{ID: "session", ProjectID: "project", Model: a.profile.Model, ReasoningEffort: a.profile.Effort, Activity: "idle"},
+		process: proc, managedPolicy: true, replies: map[string]InboxReplyTarget{}, harnessWake: make(chan struct{}, 1),
+		budgetProcess: proc, tokenBudget: defaultTokenBudget, turnBudget: defaultTurnBudget,
+	}
+	s.runs[a.run.ID] = entry
+	if err := s.journal.Put(entry.record); err != nil {
+		t.Fatal(err)
+	}
+	return s, a, entry, proc
+}
+
 func TestManagedControlFencesAndNoReinjection(t *testing.T) {
 	s, a, e, p := managedFixture(t)
 	identity := p.identity

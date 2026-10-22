@@ -38,28 +38,15 @@ type pauseTestAPI struct {
 }
 
 func (a *pauseTestAPI) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, phase string) (*HarnessPause, error) {
-	a.mu.Lock()
-	var pause *HarnessPause
-	if a.pause != nil {
-		copy := *a.pause
-		pause = &copy
-	}
-	a.mu.Unlock()
-	return pause, a.fakeAPI.HeartbeatHarness(ctx, s, phase)
+	return a.pause, a.fakeAPI.HeartbeatHarness(ctx, s, phase)
 }
 
 func TestPauseHeartbeatUsesExistingInboxAndNeverStopsProcess(t *testing.T) {
-	api := &pauseTestAPI{}
-	s, _, e, p := managedFixtureWithAPI(t, func(base *fakeAPI) API {
-		api.fakeAPI = base
-		return api
-	})
+	s, a, e, p := managedServiceFixture(t)
 	e.mu.Lock()
 	e.inboxCapable = true
 	e.mu.Unlock()
-	api.mu.Lock()
-	api.pause = &HarnessPause{ControlID: "12345678-1234-1234-9234-123456789012", State: "requested", DeadlineAt: time.Now().Add(time.Minute)}
-	api.mu.Unlock()
+	s.api = &pauseTestAPI{fakeAPI: a, pause: &HarnessPause{ControlID: "12345678-1234-1234-9234-123456789012", State: "requested", DeadlineAt: time.Now().Add(time.Minute)}}
 	for range 2 {
 		if err := s.heartbeatHarness(t.Context(), e); err != nil {
 			t.Fatal(err)
@@ -78,19 +65,13 @@ func TestPauseHeartbeatUsesExistingInboxAndNeverStopsProcess(t *testing.T) {
 }
 
 func TestScheduledPauseWaitsAndEscalationIsDeliveredOnce(t *testing.T) {
-	start := time.Now().Add(time.Minute)
-	pause := &HarnessPause{ControlID: "12345678-1234-1234-9234-123456789012", State: "requested", Level: "pause", StartsAt: &start, DeadlineAt: time.Now().Add(10 * time.Minute), Note: "Keep the failing test"}
-	api := &pauseTestAPI{}
-	s, _, e, p := managedFixtureWithAPI(t, func(base *fakeAPI) API {
-		api.fakeAPI = base
-		return api
-	})
+	s, a, e, p := managedServiceFixture(t)
 	e.mu.Lock()
 	e.inboxCapable = true
 	e.mu.Unlock()
-	api.mu.Lock()
-	api.pause = pause
-	api.mu.Unlock()
+	start := time.Now().Add(time.Minute)
+	pause := &HarnessPause{ControlID: "12345678-1234-1234-9234-123456789012", State: "requested", Level: "pause", StartsAt: &start, DeadlineAt: time.Now().Add(10 * time.Minute), Note: "Keep the failing test"}
+	s.api = &pauseTestAPI{fakeAPI: a, pause: pause}
 	if err := s.heartbeatHarness(t.Context(), e); err != nil {
 		t.Fatal(err)
 	}
@@ -99,17 +80,13 @@ func TestScheduledPauseWaitsAndEscalationIsDeliveredOnce(t *testing.T) {
 		t.Fatal("scheduled request delivered early")
 	}
 	p.mu2.Unlock()
-	api.mu.Lock()
 	pause.Deliver = true
-	api.mu.Unlock()
 	for range 2 {
 		if err := s.heartbeatHarness(t.Context(), e); err != nil {
 			t.Fatal(err)
 		}
 	}
-	api.mu.Lock()
 	pause.Level = "pause_quickly"
-	api.mu.Unlock()
 	for range 2 {
 		if err := s.heartbeatHarness(t.Context(), e); err != nil {
 			t.Fatal(err)
@@ -173,14 +150,9 @@ func TestStopNowUsesOwnedExecutorAndRejectsWrongGeneration(t *testing.T) {
 }
 
 func TestPauseWakeHintAnchorsBeforeHeartbeatRoundTrip(t *testing.T) {
-	api := &pauseTestAPI{}
-	s, _, e, _ := managedFixtureWithAPI(t, func(base *fakeAPI) API {
-		api.fakeAPI = base
-		return api
-	})
-	api.mu.Lock()
-	api.pause = &HarnessPause{WakeInMS: 250}
-	api.mu.Unlock()
+	s, a, e, _ := managedServiceFixture(t)
+	api := &pauseTestAPI{fakeAPI: a, pause: &HarnessPause{WakeInMS: 250}}
+	s.api = api
 	start := time.Now()
 	if err := s.heartbeatHarness(t.Context(), e); err != nil {
 		t.Fatal(err)
@@ -191,9 +163,7 @@ func TestPauseWakeHintAnchorsBeforeHeartbeatRoundTrip(t *testing.T) {
 	if wake.Before(start.Add(250*time.Millisecond)) || wake.After(time.Now().Add(250*time.Millisecond)) {
 		t.Fatal("wake hint was lost")
 	}
-	api.mu.Lock()
 	api.pause = nil
-	api.mu.Unlock()
 	if err := s.heartbeatHarness(t.Context(), e); err != nil {
 		t.Fatal(err)
 	}
