@@ -115,12 +115,12 @@ onMounted(() => {
   ensureProbe()
   inkEpoch.value++
   void document.fonts?.ready.then(() => { inkCache.clear(); inkEpoch.value++ })
-  window.addEventListener('pointermove', onPointerTrack, { passive: true })
-  document.addEventListener('pointerout', onPointerOut)
+  window.addEventListener?.('pointermove', onPointerTrack, { passive: true })
+  document.addEventListener?.('pointerout', onPointerOut)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('pointermove', onPointerTrack)
-  document.removeEventListener('pointerout', onPointerOut)
+  window.removeEventListener?.('pointermove', onPointerTrack)
+  document.removeEventListener?.('pointerout', onPointerOut)
   observer?.disconnect()
   probeSvg?.remove()
   probeSvg = null
