@@ -36,8 +36,11 @@ func (a *replayInboxAPI) CompleteHarnessDelivery(ctx context.Context, s HarnessS
 }
 
 func (a *replayInboxAPI) HeartbeatHarness(ctx context.Context, s HarnessSession, phase string) error {
-	if a.beatErr != nil {
-		return a.beatErr
+	a.mu.Lock()
+	beatErr := a.beatErr
+	a.mu.Unlock()
+	if beatErr != nil {
+		return beatErr
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -46,13 +49,19 @@ func (a *replayInboxAPI) HeartbeatHarness(ctx context.Context, s HarnessSession,
 }
 
 func TestUncertainDeliveryDoesNotMaskHeartbeatFailure(t *testing.T) {
-	s, a, e, p := managedFixture(t)
+	beatErr := errors.New("fixture heartbeat failure")
+	api := &replayInboxAPI{fail: true}
+	s, a, e, p := managedFixtureWithAPI(t, func(base *fakeAPI) API {
+		api.fakeAPI = base
+		return api
+	})
 	e.mu.Lock()
 	e.inboxCapable = true
 	e.mu.Unlock()
 	p.fail = true
-	beatErr := errors.New("fixture heartbeat failure")
-	s.api = &replayInboxAPI{fakeAPI: a, fail: true, beatErr: beatErr}
+	api.mu.Lock()
+	api.beatErr = beatErr
+	api.mu.Unlock()
 	a.harnessDeliveries = []HarnessDelivery{{ID: "uncertain", Body: "input"}}
 	if err := s.serviceHarness(t.Context(), e); !errors.Is(err, beatErr) || errors.Is(err, ErrControlUnconfirmed) {
 		t.Fatal("heartbeat error masked by uncertain delivery", err)
@@ -112,14 +121,16 @@ func TestIdleInboxLeaseReplayAndTerminalFence(t *testing.T) {
 }
 
 func TestInboxUnconfirmedDoesNotReinject(t *testing.T) {
-	s, a, e, p := managedFixture(t)
+	api := &replayInboxAPI{fail: true}
+	s, a, e, p := managedFixtureWithAPI(t, func(base *fakeAPI) API {
+		api.fakeAPI = base
+		return api
+	})
 	e.mu.Lock()
 	e.inboxCapable = true
 	e.mu.Unlock()
 	p.fail = true
 	a.harnessDeliveries = []HarnessDelivery{{ID: "uncertain", Body: "one input"}}
-	api := &replayInboxAPI{fakeAPI: a, fail: true}
-	s.api = api
 	if err := s.serviceHarness(t.Context(), e); !errors.Is(err, ErrControlUnconfirmed) {
 		t.Fatal(err)
 	}

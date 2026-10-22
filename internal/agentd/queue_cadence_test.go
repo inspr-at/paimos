@@ -293,11 +293,12 @@ func TestRemoteProbeBatchUnavailableFallsBackWithoutWideningAuthority(t *testing
 
 type queueHintRetryAPI struct {
 	*fakeAPI
-	status, calls int
+	status int
+	calls  atomic.Int64
 }
 
 func (a *queueHintRetryAPI) WatchQueue(context.Context, func()) error {
-	a.calls++
+	a.calls.Add(1)
 	return &client.StatusError{Status: a.status}
 }
 
@@ -313,8 +314,8 @@ func TestSupervisorQueueHintsUnavailableBackoff(t *testing.T) {
 				defer cancel()
 				go s.RunQueueHints(ctx)
 				synctest.Wait()
-				if api.calls != 1 {
-					t.Fatalf("initial hint subscriptions=%d", api.calls)
+				if calls := api.calls.Load(); calls != 1 {
+					t.Fatalf("initial hint subscriptions=%d", calls)
 				}
 				delay := emptyQueueInterval
 				if status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusNotFound || status == http.StatusMethodNotAllowed {
@@ -322,20 +323,20 @@ func TestSupervisorQueueHintsUnavailableBackoff(t *testing.T) {
 				}
 				time.Sleep(delay - time.Nanosecond) // Virtual clock inside the synctest bubble.
 				synctest.Wait()
-				if api.calls != 1 {
-					t.Fatalf("HTTP %d retried before %s: subscriptions=%d", status, delay, api.calls)
+				if calls := api.calls.Load(); calls != 1 {
+					t.Fatalf("HTTP %d retried before %s: subscriptions=%d", status, delay, calls)
 				}
 				time.Sleep(time.Nanosecond)
 				synctest.Wait()
-				if api.calls != 2 {
-					t.Fatalf("HTTP %d did not retry at %s: subscriptions=%d", status, delay, api.calls)
+				if calls := api.calls.Load(); calls != 2 {
+					t.Fatalf("HTTP %d did not retry at %s: subscriptions=%d", status, delay, calls)
 				}
 				cancel()
 				synctest.Wait()
 				time.Sleep(5 * time.Minute)
 				synctest.Wait()
-				if api.calls != 2 {
-					t.Fatalf("cancelled hint watcher retried: subscriptions=%d", api.calls)
+				if calls := api.calls.Load(); calls != 2 {
+					t.Fatalf("cancelled hint watcher retried: subscriptions=%d", calls)
 				}
 			})
 		})

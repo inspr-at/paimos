@@ -52,7 +52,15 @@ func (p *managedFake) Control(_ context.Context, op, text string) error {
 }
 func managedFixture(t *testing.T) (*Supervisor, *fakeAPI, *owned, *managedFake) {
 	t.Helper()
+	return managedFixtureWithAPI(t, func(api *fakeAPI) API { return api })
+}
+
+func managedFixtureWithAPI(t *testing.T, wrap func(*fakeAPI) API) (*Supervisor, *fakeAPI, *owned, *managedFake) {
+	t.Helper()
 	s, a, p := testSupervisor(t)
+	// StartRun launches watchHarness, which reads the API even when the fake
+	// has no notification stream. Install wrappers before that goroutine starts.
+	s.api = wrap(a)
 	if err := s.StartRun(t.Context(), a.run); err != nil {
 		t.Fatal(err)
 	}

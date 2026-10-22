@@ -42,11 +42,12 @@ func (a *pauseTestAPI) HeartbeatHarnessPause(ctx context.Context, s HarnessSessi
 }
 
 func TestPauseHeartbeatUsesExistingInboxAndNeverStopsProcess(t *testing.T) {
-	s, a, e, p := managedFixture(t)
+	s, _, e, p := managedFixtureWithAPI(t, func(api *fakeAPI) API {
+		return &pauseTestAPI{fakeAPI: api, pause: &HarnessPause{ControlID: "12345678-1234-1234-9234-123456789012", State: "requested", DeadlineAt: time.Now().Add(time.Minute)}}
+	})
 	e.mu.Lock()
 	e.inboxCapable = true
 	e.mu.Unlock()
-	s.api = &pauseTestAPI{fakeAPI: a, pause: &HarnessPause{ControlID: "12345678-1234-1234-9234-123456789012", State: "requested", DeadlineAt: time.Now().Add(time.Minute)}}
 	for range 2 {
 		if err := s.heartbeatHarness(t.Context(), e); err != nil {
 			t.Fatal(err)
@@ -65,13 +66,14 @@ func TestPauseHeartbeatUsesExistingInboxAndNeverStopsProcess(t *testing.T) {
 }
 
 func TestScheduledPauseWaitsAndEscalationIsDeliveredOnce(t *testing.T) {
-	s, a, e, p := managedFixture(t)
+	start := time.Now().Add(time.Minute)
+	pause := &HarnessPause{ControlID: "12345678-1234-1234-9234-123456789012", State: "requested", Level: "pause", StartsAt: &start, DeadlineAt: time.Now().Add(10 * time.Minute), Note: "Keep the failing test"}
+	s, _, e, p := managedFixtureWithAPI(t, func(api *fakeAPI) API {
+		return &pauseTestAPI{fakeAPI: api, pause: pause}
+	})
 	e.mu.Lock()
 	e.inboxCapable = true
 	e.mu.Unlock()
-	start := time.Now().Add(time.Minute)
-	pause := &HarnessPause{ControlID: "12345678-1234-1234-9234-123456789012", State: "requested", Level: "pause", StartsAt: &start, DeadlineAt: time.Now().Add(10 * time.Minute), Note: "Keep the failing test"}
-	s.api = &pauseTestAPI{fakeAPI: a, pause: pause}
 	if err := s.heartbeatHarness(t.Context(), e); err != nil {
 		t.Fatal(err)
 	}
@@ -150,9 +152,11 @@ func TestStopNowUsesOwnedExecutorAndRejectsWrongGeneration(t *testing.T) {
 }
 
 func TestPauseWakeHintAnchorsBeforeHeartbeatRoundTrip(t *testing.T) {
-	s, a, e, _ := managedFixture(t)
-	api := &pauseTestAPI{fakeAPI: a, pause: &HarnessPause{WakeInMS: 250}}
-	s.api = api
+	api := &pauseTestAPI{pause: &HarnessPause{WakeInMS: 250}}
+	s, _, e, _ := managedFixtureWithAPI(t, func(base *fakeAPI) API {
+		api.fakeAPI = base
+		return api
+	})
 	start := time.Now()
 	if err := s.heartbeatHarness(t.Context(), e); err != nil {
 		t.Fatal(err)
