@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/db"
@@ -28,25 +29,38 @@ func TestRoutineUnresolvedRunPersonManualAndSchedulerAudits(t *testing.T) {
 	m := recurrences.New(f.d.App)
 	m.Mount(f.mux)
 	var project string
+	var now time.Time
 	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
+			return err
+		}
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'UNRESOLVED-1','Routine output' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.person.TenantID).Scan(&project)
 	})
 	// A pre-definition routine has creator provenance but no authoritative owner.
 	in := recurrences.Input{ProjectID: project, ParentID: project, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one",
 		Template: recurrences.Template{Title: "Queued legacy work", Description: "Verify ownership", Type: "work", Priority: "high", EstimateHours: 1, Criteria: []string{"No invented actor"}},
-		Trigger:  recurrences.Trigger{Kind: "time", RRULE: "FREQ=DAILY", TimeOfDay: "09:00", Timezone: "UTC"}}
+		Trigger:  recurrences.Trigger{Kind: "time", RRULE: "FREQ=DAILY", TimeOfDay: "09:00", Timezone: "UTC", StartDate: now.UTC().AddDate(0, 0, -2).Format(time.DateOnly)}}
 	var routine recurrences.Recurrence
 	f.call(t, f.person, "POST", "/api/recurrences", in, 201, &routine)
+	// The scheduler must reach admission even before today's 09:00 occurrence.
+	// Derive both the schedule and its overdue cursor from the database clock.
+	due, err := recurrences.Preview(routine.Trigger, now.UTC().AddDate(0, 0, -3), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !due[0].Before(now.UTC().Truncate(24 * time.Hour)) {
+		t.Fatalf("fixture has no occurrence before today's UTC midnight: %s", due[0])
+	}
 	var failure map[string]any
 	f.call(t, f.person, "POST", "/api/recurrences/"+routine.ID+"/run-now", map[string]string{"idempotency_key": "unresolved"}, 409, &failure)
 	if failure["code"] != "run_person_unresolved" {
 		t.Fatalf("manual refused for wrong reason: %v", failure)
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE recurrences SET next_at=clock_timestamp()-interval '2 days' WHERE id=$1`, routine.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE recurrences SET next_at=$2 WHERE id=$1`, routine.ID, due[0])
 		return err
 	})
-	err := m.RunTenant(t.Context(), f.person.TenantID)
+	err = m.RunTenant(t.Context(), f.person.TenantID)
 	var refusal *workqueue.PersonAdmissionError
 	if !errors.As(err, &refusal) || refusal.Code != "run_person_unresolved" {
 		t.Fatalf("scheduler refused for wrong reason: %v", err)
