@@ -116,7 +116,14 @@ backfilled facts.
 After deployment, use an existing PPM identity with `delivery.manage` on AEON
 and the App's already-granted Actions read capability. This worker does not
 trigger production repairs. No new key is needed. The existing endpoint starts
-one bounded step and the server continues the durable job:
+one bounded step and the server continues the durable job.
+
+Live attempt ingestion needs the App's `workflow_run` subscription; live runner
+queue times also need `workflow_job` delivery. The coordinator checks those
+subscriptions through the existing App administration path when verifying
+coverage. This repository change does not alter host-owned App settings.
+
+Start and inspect the seven-day window:
 
 ```sh
 /Users/markus/.aeon/lead/aeon/pm --instance ppm me
