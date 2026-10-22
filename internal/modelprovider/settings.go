@@ -11,6 +11,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -66,12 +68,27 @@ type Service struct {
 	pool   *pgxpool.Pool
 	key    []byte
 	client *http.Client
+
+	configMu sync.Mutex
+	configs  map[string]cachedConfig
+	now      func() time.Time
+}
+
+const providerConfigRefresh = 30 * time.Second
+const maxCachedTenants = 256
+
+// Only ciphertext is retained. Request-bound chat consent still uses resolve,
+// which reads the current configuration rather than this worker cache.
+type cachedConfig struct {
+	config Config
+	sealed []byte
+	until  time.Time
 }
 
 // New reuses the host session master and the existing AES-GCM vault with a
 // provider-specific derivation and tenant-bound authenticated encryption.
 func New(pool *pgxpool.Pool, master []byte) *Service {
-	s := &Service{pool: pool, client: newClient()}
+	s := &Service{pool: pool, client: newClient(), configs: make(map[string]cachedConfig), now: time.Now}
 	if len(master) >= 32 {
 		sum := sha256.Sum256(append([]byte("aeon/workspace-model-provider/v1\x00"), master...))
 		s.key = sum[:]
@@ -190,7 +207,64 @@ func (s *Service) Save(ctx context.Context, p tenant.Principal, in Write) (Confi
 		}})
 		return err
 	})
+	if err == nil {
+		// Invalidate after commit, under the same mutex as refresh, so an
+		// overlapping old read cannot repopulate the cache after this save.
+		s.configMu.Lock()
+		delete(s.configs, p.TenantID)
+		s.configMu.Unlock()
+	}
 	return out, err
+}
+
+// embeddingConfig avoids idle rereads, including an unconfigured tenant. Saves
+// invalidate locally; other replicas and direct database changes are observed
+// within 30 seconds. Expired entries are never served after a refresh error.
+func (s *Service) embeddingConfig(ctx context.Context, tenantID string) (Config, []byte, error) {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return Config{}, nil, err
+	}
+	now := s.now()
+	prior, found := s.configs[tenantID]
+	if found && now.Before(prior.until) {
+		return prior.config, prior.sealed, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	next := prior
+	err := db.InTenant(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
+		if found {
+			var id string
+			var revision int64
+			err := tx.QueryRow(ctx, `SELECT id::text,revision FROM workspace_model_provider`).Scan(&id, &revision)
+			if errors.Is(err, pgx.ErrNoRows) {
+				next = cachedConfig{}
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if id == prior.config.ProviderID && revision == prior.config.Revision {
+				return nil
+			}
+		}
+		var err error
+		next.config, next.sealed, err = load(ctx, tx)
+		return err
+	})
+	if err != nil {
+		delete(s.configs, tenantID)
+		return Config{}, nil, err
+	}
+	next.until = now.Add(providerConfigRefresh)
+	if len(s.configs) >= maxCachedTenants && !found {
+		// Bound resident tenant state without an independent cleanup loop.
+		clear(s.configs)
+	}
+	s.configs[tenantID] = next
+	return next.config, next.sealed, nil
 }
 
 func (s *Service) resolve(ctx context.Context, tenantID string) (Config, Secret, error) {
