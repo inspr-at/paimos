@@ -507,6 +507,39 @@ for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only
     await expect(note).toHaveCount(0)
   }
 
+  // On phones the second row leaves with the sent draft (AEON-1438 design); desktop keeps every control still.
+  if (width > 720) await guard.check(sendReply)
+  else { await sendReply(); await expect(panel.locator('.composer')).not.toHaveClass(/two/) }
+  guard.done()
+  if (width === 1440) {
+    // The divider's minimum details width and wide focus preset must also
+    // keep the field and primary actions still when the transport changes.
+    const divider = page.getByRole('separator', { name: 'Resize the session list' })
+    for (const key of ['End', 'Home']) {
+      await divider.press(key)
+      if (key === 'End') await expect(panel).toHaveCSS('width', '380px')
+      else await expect(panel).toHaveCSS('width', /^(?:[7-9]\d{2}|\d{4})px$/)
+      await composer.fill('Keep this draft when cancelling a reply.')
+      await composer.blur()
+      const resized = await controlStability(page, { composer, send, stop })
+      await resized.check(async () => {
+        await row.hover()
+        await row.getByRole('button', { name: 'Reply', exact: true }).click()
+        await expect(steer).toHaveCount(0)
+        await expect(note).toHaveText('Chat replies arrive between turns')
+      })
+      await resized.check(async () => {
+        await panel.getByRole('button', { name: 'Cancel the reply', exact: true }).click()
+        await expect(steer).toBeEnabled()
+        await expect(note).toHaveCount(0)
+        await expect(composer).toHaveValue('Keep this draft when cancelling a reply.')
+      })
+      resized.done()
+    }
+  }
+  expect(data.sent.some(message => message.body === 'Ship it after the smoke test.')).toBe(false)
+})
+
 // AEON-1082: the session stays explicitly paused mid-turn throughout both
 // sends. The relay's real boundary interleaving is tested in Go; here the
 // selected mode, exact target, legacy compatibility and stable controls cross
@@ -585,36 +618,4 @@ for (const timing of ['next-step', 'queue'] as const) test(`AEON-1082 chat-nativ
   }
   await expect.poll(() => outbox.length).toBe(1)
   expect(outbox[0]).toMatchObject({ delivery_level: timing === 'next-step' ? 'steer' : 'simple', expected_session_id: worker.id })
-})
-  // On phones the second row leaves with the sent draft (AEON-1438 design); desktop keeps every control still.
-  if (width > 720) await guard.check(sendReply)
-  else { await sendReply(); await expect(panel.locator('.composer')).not.toHaveClass(/two/) }
-  guard.done()
-  if (width === 1440) {
-    // The divider's minimum details width and wide focus preset must also
-    // keep the field and primary actions still when the transport changes.
-    const divider = page.getByRole('separator', { name: 'Resize the session list' })
-    for (const key of ['End', 'Home']) {
-      await divider.press(key)
-      if (key === 'End') await expect(panel).toHaveCSS('width', '380px')
-      else await expect(panel).toHaveCSS('width', /^(?:[7-9]\d{2}|\d{4})px$/)
-      await composer.fill('Keep this draft when cancelling a reply.')
-      await composer.blur()
-      const resized = await controlStability(page, { composer, send, stop })
-      await resized.check(async () => {
-        await row.hover()
-        await row.getByRole('button', { name: 'Reply', exact: true }).click()
-        await expect(steer).toHaveCount(0)
-        await expect(note).toHaveText('Chat replies arrive between turns')
-      })
-      await resized.check(async () => {
-        await panel.getByRole('button', { name: 'Cancel the reply', exact: true }).click()
-        await expect(steer).toBeEnabled()
-        await expect(note).toHaveCount(0)
-        await expect(composer).toHaveValue('Keep this draft when cancelling a reply.')
-      })
-      resized.done()
-    }
-  }
-  expect(data.sent.some(message => message.body === 'Ship it after the smoke test.')).toBe(false)
 })

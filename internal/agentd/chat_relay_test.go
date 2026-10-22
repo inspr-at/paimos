@@ -281,18 +281,19 @@ export function query({prompt}) {
 }
 
 type fakeRelayAPI struct {
-	mu        sync.Mutex
-	binding   ChatRelayBinding
-	bindErrs  []error
-	lookups   int
-	live      []ChatSessionEvent
-	liveErrs  []error
-	liveGate  chan struct{}
-	finals    []string
-	finalErrs []error
-	inputs    []ChatInput
-	receipts  []string
-	calls     chan string
+	mu         sync.Mutex
+	binding    ChatRelayBinding
+	bindErrs   []error
+	lookups    int
+	live       []ChatSessionEvent
+	liveErrs   []error
+	liveGate   chan struct{}
+	finals     []string
+	finalErrs  []error
+	inputs     []ChatInput
+	inputPages map[string]ChatInputPage
+	receipts   []string
+	calls      chan string
 }
 
 func newFakeRelayAPI() *fakeRelayAPI {
@@ -353,9 +354,12 @@ func (f *fakeRelayAPI) PersistChatFinal(_ context.Context, _ HarnessSession, _ C
 	return err
 }
 
-func (f *fakeRelayAPI) ChatInputs(context.Context, HarnessSession, ChatRelayBinding, string) (ChatInputPage, error) {
+func (f *fakeRelayAPI) ChatInputs(_ context.Context, _ HarnessSession, _ ChatRelayBinding, after string) (ChatInputPage, error) {
 	f.mu.Lock()
 	page := ChatInputPage{Items: append([]ChatInput(nil), f.inputs...)}
+	if f.inputPages != nil {
+		page = f.inputPages[after]
+	}
 	f.mu.Unlock()
 	f.note("inputs")
 	return page, nil
@@ -535,6 +539,57 @@ func TestChatRelayTimingRespectsActiveTurnAndInputEvidence(t *testing.T) {
 			}
 		})
 	}
+	t.Run("bounded-page-scan-preserves-the-earlier-queue", func(t *testing.T) {
+		api := newFakeRelayAPI()
+		api.binding.InputTiming = "native"
+		api.inputPages = map[string]ChatInputPage{}
+		cursor := ""
+		for i := range chatRelayInputPages {
+			next := fmt.Sprintf("page-%d", i+1)
+			input := chatInput(fmt.Sprintf("after-%d", i), "sent")
+			if i%2 == 1 {
+				input.Receipt.State = "read"
+			}
+			api.inputPages[cursor] = ChatInputPage{Items: []ChatInput{input}, Next: &next}
+			cursor = next
+		}
+		input := chatInput("native-behind-queued-pages", "sent")
+		input.Message.Level = "steer"
+		api.inputPages[cursor] = ChatInputPage{Items: []ChatInput{input}}
+		var writes []string
+		r := NewChatRelay(api, HarnessSession{}, ChatRelayOptions{Steer: "native", RequireInputCorrelation: true,
+			DeliverTimed: func(_ context.Context, id, _, _ string, writing func()) error {
+				writing()
+				writes = append(writes, id)
+				return nil
+			},
+		})
+		state := func(seq uint64, id, value string) {
+			u := chatState(value)
+			r.Observe(ChatSessionEvent{Sequence: seq, InputID: id, Update: &u})
+		}
+		state(1, "earlier", "running")
+		if err := r.deliverNext(t.Context(), api.binding); err != nil {
+			t.Fatal(err)
+		}
+		if len(writes) != 0 || r.cursor != "" || r.steerCursor != cursor {
+			t.Fatalf("bounded scan skipped or wrote queued input: writes=%v cursor=%q scan=%q", writes, r.cursor, r.steerCursor)
+		}
+		if err := r.deliverNext(t.Context(), api.binding); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(writes, []string{"native-behind-queued-pages"}) {
+			t.Fatalf("steer starved behind queued pages: %v", writes)
+		}
+		state(2, "native-behind-queued-pages", "running")
+		state(3, "native-behind-queued-pages", "idle")
+		if err := r.deliverNext(t.Context(), api.binding); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(writes, []string{"native-behind-queued-pages", "after-0"}) {
+			t.Fatalf("queued prefix lost after the turn: %v", writes)
+		}
+	})
 }
 
 // Risk: a lost acknowledgement for native chat steering reinjects content,

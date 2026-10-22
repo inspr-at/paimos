@@ -129,24 +129,25 @@ type ChatRelay struct {
 	session HarnessSession
 	opts    ChatRelayOptions
 
-	mu        sync.Mutex
-	items     []chatRelayItem // S1 order; receipts are kept separately
-	receipts  []chatRelayItem
-	live      int
-	finals    int
-	dropped   uint64
-	nextID    uint64
-	state     string
-	sequence  uint64
-	input     *chatPendingInput
-	consumed  []*chatPendingInput // bounded inputs reacted to during the current turn
-	attempted map[string]bool
-	order     []string
-	cursor    string
-	closed    bool
-	closing   chan struct{}
-	wake      chan struct{}
-	done      chan struct{}
+	mu          sync.Mutex
+	items       []chatRelayItem // S1 order; receipts are kept separately
+	receipts    []chatRelayItem
+	live        int
+	finals      int
+	dropped     uint64
+	nextID      uint64
+	state       string
+	sequence    uint64
+	input       *chatPendingInput
+	consumed    []*chatPendingInput // bounded inputs reacted to during the current turn
+	attempted   map[string]bool
+	order       []string
+	cursor      string
+	steerCursor string // bounded active-turn scan, without skipping queued simple input
+	closed      bool
+	closing     chan struct{}
+	wake        chan struct{}
+	done        chan struct{}
 }
 
 func NewChatRelay(api ChatRelayAPI, session HarnessSession, opts ChatRelayOptions) *ChatRelay {
@@ -451,6 +452,7 @@ func (r *ChatRelay) Run(ctx context.Context) {
 					// the attempted set, which survives the reset.
 					r.mu.Lock()
 					r.cursor = ""
+					r.steerCursor = ""
 					r.mu.Unlock()
 				}
 				binding, bound, failures, poll = b, true, 0, true
@@ -624,6 +626,13 @@ func (r *ChatRelay) awaiting() bool {
 func (r *ChatRelay) deliverNext(ctx context.Context, b ChatRelayBinding) error {
 	r.mu.Lock()
 	cursor := r.cursor
+	steering := r.state != "idle" && (r.opts.Steer == "native" || r.opts.Steer == "next-step")
+	if steering && r.steerCursor != "" {
+		cursor = r.steerCursor
+	} else if !steering {
+		r.steerCursor = ""
+	}
+	contiguous := cursor == r.cursor
 	r.mu.Unlock()
 	var next *ChatInput
 	for page := 0; page < chatRelayInputPages && next == nil; page++ {
@@ -633,6 +642,11 @@ func (r *ChatRelay) deliverNext(ctx context.Context, b ChatRelayBinding) error {
 		}
 		settled := true
 		r.mu.Lock()
+		if steering && r.state == "idle" {
+			r.steerCursor = ""
+			r.mu.Unlock()
+			return nil // restart from the earliest queued input after the boundary
+		}
 		for i := range inputs.Items {
 			in := &inputs.Items[i]
 			if in.Receipt.State != "sent" || r.attempted[in.Message.ID] {
@@ -643,8 +657,16 @@ func (r *ChatRelay) deliverNext(ctx context.Context, b ChatRelayBinding) error {
 				next = in
 			}
 		}
-		if settled && inputs.Next != nil {
+		if settled && contiguous && inputs.Next != nil {
 			r.cursor, cursor = *inputs.Next, *inputs.Next
+		}
+		contiguous = contiguous && settled
+		if steering {
+			if inputs.Next == nil {
+				r.steerCursor = ""
+			} else if next == nil {
+				r.steerCursor = *inputs.Next
+			}
 		}
 		r.mu.Unlock()
 		if inputs.Next == nil {
