@@ -6,11 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -244,6 +246,153 @@ func TestDisabledFeaturesMakeNoRequestsAndConnectionTestIsExplicit(t *testing.T)
 }
 
 func TestWorkspaceEmbeddingsUseSameEndpointAndKey(t *testing.T) {
+
+	// R9: repeated disabled-provider resolution must avoid database reads,
+	// while a later settings save must invalidate that negative result.
+	t.Run("idle configuration reads", func(t *testing.T) {
+		f := setup(t)
+		pool, counts := dbtest.CountedPool(t, f.d.App)
+		s := New(pool, bytes.Repeat([]byte{9}, 32))
+		now := time.Now()
+		s.now = func() time.Time { return now }
+		for pass := 0; pass < 30; pass++ {
+			p, err := s.Embeddings(t.Context(), f.admin.TenantID)
+			if err != nil || p != nil {
+				t.Fatalf("disabled embeddings: %v", err)
+			}
+		}
+		reads, _ := counts.Count(func(sql string) bool {
+			return strings.HasPrefix(sql, "SELECT ") && strings.Contains(sql, "FROM workspace_model_provider")
+		})
+		t.Logf("30 idle embedding passes: provider reads=%d", reads)
+		if reads != 1 {
+			t.Errorf("unchanged provider reads=%d, want 1", reads)
+		}
+		expectedKey := "test-only-provider-initial"
+		calls := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			if r.Header.Get("Authorization") != "Bearer "+expectedKey {
+				t.Error("cached provider used an obsolete credential")
+			}
+			vec := make([]float32, embedding.Dimensions)
+			vec[0] = 1
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"index": 0, "embedding": vec}}})
+		}))
+		defer srv.Close()
+		settings := Settings{Enabled: true, BaseURL: srv.URL, ChatModel: "fixture-chat", EmbeddingModel: "fixture-embed", Features: Features{Embeddings: true}}
+		key := Secret(expectedKey)
+		cfg, err := s.Save(tenant.WithPrincipal(t.Context(), f.admin), f.admin, Write{Settings: settings, APIKey: &key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		initial, err := s.Embeddings(t.Context(), f.admin.TenantID)
+		if err != nil || initial == nil {
+			t.Fatal("save did not invalidate disabled configuration", err)
+		}
+		if _, err := initial.Embed(t.Context(), []string{"fixture"}); err != nil {
+			t.Fatal(err)
+		}
+		// R1/R3: a warm worker cache must not bypass a request's fresh
+		// authorization guard before a search can send data to the provider.
+		denied := errors.New("fixture request authority revoked")
+		request := db.WithTenantGuard(tenant.WithPrincipal(t.Context(), f.admin), func(context.Context, pgx.Tx, string) error { return denied })
+		if p, err := s.Embeddings(request, f.admin.TenantID); !errors.Is(err, denied) || p != nil {
+			t.Fatal("cached request bypassed current authority", err)
+		}
+		rollback := errors.New("fixture configuration rollback")
+		err = db.InTransaction(t.Context(), pool, func(ctx context.Context) error {
+			if err := db.InTenant(ctx, pool, f.admin.TenantID, func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `UPDATE workspace_model_provider SET settings=jsonb_set(settings,'{enabled}','false'),revision=revision+1`)
+				return err
+			}); err != nil {
+				return err
+			}
+			if p, err := s.Embeddings(ctx, f.admin.TenantID); err != nil || p != nil {
+				t.Fatal("transaction did not read its own configuration", err)
+			}
+			return rollback
+		})
+		if !errors.Is(err, rollback) {
+			t.Fatal("configuration transaction failed for another reason", err)
+		}
+		if p, err := s.Embeddings(t.Context(), f.admin.TenantID); err != nil || p == nil || p.Model() != initial.Model() {
+			t.Fatal("uncommitted configuration escaped into the worker cache", err)
+		}
+		// A second replica misses the local invalidation, so its independently
+		// injected clock must force revision refresh at the exact TTL boundary.
+		replica := New(pool, bytes.Repeat([]byte{9}, 32))
+		replica.now = s.now
+		prior, err := replica.Embeddings(t.Context(), f.admin.TenantID)
+		if err != nil || prior == nil {
+			t.Fatal("replica configuration unavailable", err)
+		}
+		settings.EmbeddingModel = "rotated-embed"
+		expectedKey = "test-only-provider-rotated"
+		key = Secret(expectedKey)
+		cfg, err = s.Save(tenant.WithPrincipal(t.Context(), f.admin), f.admin, Write{Settings: settings, ExpectedRevision: cfg.Revision, APIKey: &key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rotated, err := s.Embeddings(t.Context(), f.admin.TenantID)
+		if err != nil || rotated == nil || rotated.Model() == prior.Model() {
+			t.Fatal("rotation did not invalidate configuration", err)
+		}
+		if _, err := rotated.Embed(t.Context(), []string{"fixture"}); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(providerConfigRefresh - time.Nanosecond)
+		counts.Reset()
+		cached, err := replica.Embeddings(t.Context(), f.admin.TenantID)
+		if err != nil || cached == nil || cached.Model() != prior.Model() {
+			t.Fatal("configuration expired before the boundary", err)
+		}
+		if n, _ := counts.Count(func(string) bool { return true }); n != 0 {
+			t.Errorf("unexpired cache ran %d statements", n)
+		}
+		now = now.Add(time.Nanosecond)
+		refreshed, err := replica.Embeddings(t.Context(), f.admin.TenantID)
+		if err != nil || refreshed == nil || refreshed.Model() != rotated.Model() {
+			t.Fatal("bounded refresh did not observe rotation", err)
+		}
+		if _, err := refreshed.Embed(t.Context(), []string{"fixture"}); err != nil {
+			t.Fatal(err)
+		}
+		if calls != 3 {
+			t.Errorf("explicit embedding requests=%d, want 3", calls)
+		}
+		now = now.Add(providerConfigRefresh)
+		counts.Reset()
+		if _, err := replica.Embeddings(t.Context(), f.admin.TenantID); err != nil {
+			t.Fatal(err)
+		}
+		versionReads, _ := counts.Count(func(sql string) bool { return sql == "SELECT id::text,revision FROM workspace_model_provider" })
+		fullReads, _ := counts.Count(func(sql string) bool {
+			return sql == "SELECT id::text,settings,credential,revision FROM workspace_model_provider"
+		})
+		if versionReads != 1 || fullReads != 0 {
+			t.Errorf("unchanged revision reads: version=%d full=%d", versionReads, fullReads)
+		}
+		settings.Enabled = false
+		if _, err := s.Save(tenant.WithPrincipal(t.Context(), f.admin), f.admin, Write{Settings: settings, ExpectedRevision: cfg.Revision}); err != nil {
+			t.Fatal(err)
+		}
+		if p, err := s.Embeddings(t.Context(), f.admin.TenantID); err != nil || p != nil {
+			t.Fatal("disable did not invalidate configuration", err)
+		}
+		if p, err := s.Embeddings(t.Context(), f.other.TenantID); err != nil || p != nil {
+			t.Fatal("cached provider crossed tenants", err)
+		}
+		now = now.Add(providerConfigRefresh)
+		pool.Close()
+		if p, err := replica.Embeddings(t.Context(), f.admin.TenantID); err == nil || p != nil {
+			t.Fatal("refresh failure served stale configuration")
+		}
+		replica.pool = f.d.App
+		if p, err := replica.Embeddings(t.Context(), f.admin.TenantID); err != nil || p != nil {
+			t.Fatal("refresh recovery missed disable", err)
+		}
+	})
 	f := setup(t)
 	seedSearchNode(t, f, f.admin)
 	calls := 0
