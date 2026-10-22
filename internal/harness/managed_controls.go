@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -200,7 +201,7 @@ func (m *Module) queueManagedControl(r *http.Request, tx pgx.Tx, p tenant.Princi
 }
 
 func (m *Module) expireControls(r *http.Request, tx pgx.Tx, p tenant.Principal, s Session) error {
-	rows, err := tx.Query(r.Context(), `UPDATE harness_controls SET state='completed',outcome='rejected',reason=CASE WHEN state='claimed' THEN 'outcome_unconfirmed' ELSE 'authorization_expired' END,claimed_at=coalesce(claimed_at,clock_timestamp()),completed_at=clock_timestamp() WHERE session_id=$1 AND state<>'completed' AND expires_at<=clock_timestamp() RETURNING `+controlColumns, s.ID)
+	rows, err := tx.Query(r.Context(), `UPDATE harness_controls SET state='completed',outcome='rejected',reason=CASE WHEN state='claimed' THEN 'outcome_unconfirmed' ELSE 'authorization_expired' END,claimed_at=coalesce(claimed_at,clock_timestamp()),completed_at=clock_timestamp() WHERE session_id=$1 AND state<>'completed' AND expires_at<=clock_timestamp() AND (NOT $2::boolean OR kind='stop' AND coalesce(request_payload->>'pause','false')<>'true') RETURNING `+controlColumns, s.ID, safetyOnly(r.Context()))
 	if err != nil {
 		return err
 	}
@@ -235,7 +236,9 @@ func (m *Module) expireControls(r *http.Request, tx pgx.Tx, p tenant.Principal, 
 }
 
 func (m *Module) managedContext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	var in struct{}
+	var in struct {
+		PinnedFiles bool `json:"pinned_files,omitempty"`
+	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
@@ -249,6 +252,22 @@ func (m *Module) managedContext(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	h := s.Harness
 	if h == "claude" {
 		h = "claude-code"
+	}
+	if in.PinnedFiles {
+		if h != "claude-code" {
+			return nil, workorders.Fail(400, "pinned files require Claude")
+		}
+		// Opt-in agentd assembly has a measured pack ceiling and refuses
+		// overflow. Legacy registration/header defaults remain unchanged.
+		maximum := doctrine.ManagedPackMaxBytes
+		if len(r.Header.Values(rules.ClientMaximumHeader)) != 0 {
+			requested, e := rules.RequestMaximum(r)
+			if e != nil {
+				return nil, e
+			}
+			maximum = min(maximum, requested)
+		}
+		return rules.ForManagedFiles(r.Context(), tx, p, s.ProjectID, *s.WorkOrderID, h, maximum)
 	}
 	maximum, err := rules.RequestMaximum(r)
 	if err != nil {
@@ -264,6 +283,11 @@ func (m *Module) managedContext(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 }
 
 func controlRequesterAuthorized(r *http.Request, tx pgx.Tx, p tenant.Principal, s Session, c Control) (bool, error) {
+	if safetyOnly(r.Context()) {
+		// Stopping grants no execution authority. Still fence the exact process
+		// and generation; an old stop must not signal a replacement process.
+		return c.Kind == "stop" && (c.ExpectedGeneration == nil || *c.ExpectedGeneration == s.ID) && (c.ExpectedOwnership == nil || s.ProcessOwnership != nil && *c.ExpectedOwnership == *s.ProcessOwnership), nil
+	}
 	if c.Kind == "stop" && c.ExpectedOwnership != nil {
 		allowed, err := routineStopAuthorizedTx(r.Context(), tx, s, c)
 		if allowed || err != nil {

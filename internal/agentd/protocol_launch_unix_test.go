@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -79,6 +80,125 @@ func (a *checkedWireAdapter) Start(context.Context, StartRequest, func(AdapterEv
 		return nil, err
 	}
 	return &piProcess{wireProcess: p}, nil
+}
+
+// Risk: startup cleanup takes resources from the monitor after Start succeeds,
+// or settles an ambiguous fork as never launched. A real root and descendant
+// remain behind FIFO barriers until ownership and cleanup have been asserted.
+func TestStartRunCleanupProcessOwnership(t *testing.T) {
+	fault := errors.New("fixture launch handoff failed")
+	for _, mode := range []string{"running", "started_report_failed", "start_unconfirmed"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newStartRunExitFixture(t)
+			f.tools("fixture-local-capability")
+			f.s.heartbeatInterval = time.Hour
+			fixture := processtest.New(t)
+			shell, err := filepath.EvalSymlinks("/bin/sh")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var process *wireProcess
+			// Registered last so a failed assertion cannot leave a real child
+			// behind or make the supervisor cleanup wait on a held FIFO.
+			t.Cleanup(func() {
+				fixture.ExitChild()
+				fixture.ExitRoot()
+				if process != nil {
+					_ = process.Stop(context.Background())
+					process.discardReader()
+				}
+				fixture.AssertExited(t)
+			})
+			f.adapter.startProcess = func(_ context.Context, request StartRequest, _ func(AdapterEvent)) (Process, error) {
+				var err error
+				process, err = launchWire(shell, []string{"-c", fixture.Script}, request.Workspace, nil, "test", nil)
+				if err != nil {
+					return nil, err
+				}
+				fixture.Ready(t)
+				if mode == "start_unconfirmed" {
+					return nil, fault
+				}
+				return &refusedProcess{process}, nil
+			}
+			if mode == "started_report_failed" {
+				f.api.reportErr = fault
+			}
+			err = f.s.StartRun(f.ctx, f.run)
+			if mode == "running" && err != nil || mode != "running" && !errors.Is(err, fault) {
+				t.Fatalf("wrong handoff outcome: %v", err)
+			}
+			if process == nil || process.ProcessExited() {
+				t.Fatal("startup cleanup killed a live process")
+			}
+			entry := f.s.runs[f.run.ID]
+			if mode == "start_unconfirmed" {
+				f.assert(err, startRunExitWant{err: fault, routes: 1, claims: 1, registrations: 1, stops: 1, starts: 1,
+					state: "ownership_lost", launch: launchAttempted, tools: "closed", chat: "closed", checkout: true})
+				select {
+				case <-f.adapter.request.Lifetime.Done():
+				default:
+					t.Fatal("failed startup retained its run context")
+				}
+				if !f.s.blockedAccounts[f.run.AccountID] || entry.process != nil || entry.monitorDone != nil || entry.record.ExitObserved {
+					t.Fatal("ambiguous launch lost its ownership fence")
+				}
+				return
+			}
+			entry.mu.Lock()
+			done, owned := entry.monitorDone, entry.process
+			entry.mu.Unlock()
+			if owned == nil || owned.PID() != process.PID() || done == nil || len(f.api.harnessStops) != 0 {
+				t.Fatal("startup did not transfer the live process and harness")
+			}
+			entry.chat.mu.Lock()
+			chatClosed := entry.chat.closed
+			entry.chat.mu.Unlock()
+			if chatClosed {
+				t.Fatal("startup closed monitor-owned chat")
+			}
+			connection, err := net.DialTimeout("tcp", entry.tools.listener.Addr().String(), time.Second)
+			if err != nil {
+				t.Fatal("startup closed monitor-owned tools", err)
+			}
+			_ = connection.Close()
+			f.power.check(t, 1, 0)
+			f.api.lock.Lock()
+			f.api.reportErr = nil
+			f.api.lock.Unlock()
+			fixture.ExitChild()
+			fixture.ExitRoot()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("monitor never completed fixture cleanup")
+			}
+			fixture.AssertExited(t)
+			f.api.lock.Lock()
+			finals := 0
+			for _, report := range f.api.accepted {
+				if report.Kind == "finished" {
+					finals++
+					if report.Status != "completed" {
+						t.Errorf("wrong fixture exit outcome: %+v", report)
+					}
+				}
+			}
+			attempts := len(f.api.reportGenerations)
+			f.api.lock.Unlock()
+			wantAttempts := 2
+			if mode == "started_report_failed" {
+				wantAttempts++ // The same durable started report is replayed first.
+			}
+			f.api.mu.Lock()
+			stops := len(f.api.harnessStops)
+			f.api.mu.Unlock()
+			if finals != 1 || attempts != wantAttempts || stops != 1 {
+				t.Fatalf("settlement/cleanup repeated: finals=%d attempts=%d harness closes=%d", finals, attempts, stops)
+			}
+			f.power.check(t, 1, 1)
+		})
+	}
 }
 
 func TestWireRejectedOwnershipReleasesDispatch(t *testing.T) {

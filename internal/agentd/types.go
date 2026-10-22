@@ -47,6 +47,9 @@ var (
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
+	RunCapabilityRequired     bool            `json:"run_capability_required,omitempty"`
+	UpgradeReason             string          `json:"upgrade_reason,omitempty"`
+	ActingPersonID            string          `json:"acting_person_id"`
 	RoutineLaunchID           *string         `json:"routine_launch_id,omitempty"`
 	ReservationsSettled       *bool           `json:"reservations_settled,omitempty"`
 	Trace                     json.RawMessage `json:"trace,omitempty"`
@@ -118,6 +121,7 @@ type HarnessSession struct {
 }
 
 type HarnessControl struct {
+	AuthorPrincipalID  string `json:"author_principal_id,omitempty"`
 	ExpectedGeneration string `json:"expected_generation"`
 	RequestPayload     *struct {
 		StopNow bool `json:"stop_now"`

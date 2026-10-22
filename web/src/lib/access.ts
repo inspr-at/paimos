@@ -394,6 +394,9 @@ export function auditSentence(event: AuditEvent, names: Names): { actor: string;
   }
 }
 
-export const fullAccessLabel = (locale?: string) => displayLanguage(locale) === 'de'
-  ? 'Vollzugriff (immer alle Agentenberechtigungen)'
-  : 'Full access (always all agent permissions)'
+export function fullAccessLabel(locale?: string) {
+  void locale
+  return displayLanguage() === 'de'
+    ? 'Vollzugriff (immer alle Agentenberechtigungen)'
+    : 'Full access (always all agent permissions)'
+}

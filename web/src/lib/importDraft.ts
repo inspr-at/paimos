@@ -63,12 +63,14 @@ export const getImportDraft = (held: HeldDraft, signal?: AbortSignal) =>
 export const createFromDraft = (held: HeldDraft, body: DraftCreate) =>
   api('/import/project-draft/create', { method: 'POST', headers: { [HEADER]: held.draft, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, 30_000).then(answer<DraftCreated>)
 
-/** The page's language before the draft is read: the handoff's, else the browser's. */
-export function draftLanguage(held: HeldDraft | null, browserLanguage: string | null = typeof navigator === 'undefined' ? null : navigator.language): DraftLanguage {
-  return held?.lang ?? displayLanguage(browserLanguage, 'start')
+/** The sheet's language is the one app language. The handoff's lang and the browser do not switch it. */
+export function draftLanguage(held: HeldDraft | null, browserLanguage: string | null = null): DraftLanguage {
+  void held
+  void browserLanguage
+  return displayLanguage()
 }
 
-// The assistant's words follow the conversation's language; its content stays as sent.
+// Sheet copy follows the one app language. German copy stays for the catalog (AEON-1610). Draft content stays as sent.
 export const IMPORT_COPY = {
   en: {
     title: 'New project from START', from: (host: string, when: string) => `From your conversation on ${host} · ${when}`, create: 'What you’ll create',
