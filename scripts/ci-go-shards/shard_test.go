@@ -260,6 +260,7 @@ func TestWorkflowShardLayouts(t *testing.T) {
 			} `yaml:"strategy"`
 			Steps []struct {
 				Name string
+				ID   string            `yaml:"id"`
 				If   string            `yaml:"if"`
 				Uses string            `yaml:"uses"`
 				Run  string            `yaml:"run"`
@@ -292,15 +293,19 @@ func TestWorkflowShardLayouts(t *testing.T) {
 	if job.Steps[0].With["persist-credentials"] != false {
 		t.Fatal("routed checkout must remain credential-free")
 	}
-	// Pool runners retain their Go caches on disk; only hosted runners should
-	// transfer dependency and build caches through GitHub.
-	if job.Steps[1].With["cache"] != "${{ runner.environment == 'github-hosted' }}" || job.Steps[1].With["cache-dependency-path"] != "go.sum" {
-		t.Fatal("Go setup caching must be hosted-only and use go.sum")
+	// Pool runners retain their Go caches on disk. setup-go also saves its
+	// cache, so only hosted main pushes may enable it; PR/queue jobs restore
+	// the separately primed build cache without writing transient refs.
+	const hosted = "runner.environment == 'github-hosted'"
+	const mainHosted = "github.event_name == 'push' && github.ref == 'refs/heads/main' && " + hosted
+	if job.Steps[1].ID != "setup-go" || job.Steps[1].With["cache"] != "${{ "+mainHosted+" }}" || job.Steps[1].With["cache-dependency-path"] != "go.sum" {
+		t.Fatal("Go setup caching must be hosted-main-push-only and use go.sum")
 	}
-	foundCache := false
+	restoreIndex, saveIndex, testIndex := -1, -1, -1
 	foundFreshTests := false
-	for _, step := range job.Steps {
+	for index, step := range job.Steps {
 		if strings.HasPrefix(step.Name, "Test this shard") {
+			testIndex = index
 			tierRunner, err := os.ReadFile(filepath.Join(root, "scripts/test-tiers/cli.mjs"))
 			if err != nil {
 				t.Fatal(err)
@@ -308,24 +313,34 @@ func TestWorkflowShardLayouts(t *testing.T) {
 			foundFreshTests = step.Env["GOFLAGS"] == "-count=1" && strings.Contains(step.Run, "cli.mjs run go --shard") && strings.Contains(string(tierRunner), "'-count=1'")
 		}
 		if strings.HasPrefix(step.Uses, "actions/cache@") {
-			foundCache = true
-			if step.If != "runner.environment == 'github-hosted'" {
-				t.Fatal("Go build cache restore and save must run only on GitHub-hosted runners")
+			t.Fatal("Go build caches must use separate restore/save actions to avoid PR/queue writes")
+		}
+		if strings.HasPrefix(step.Uses, "actions/cache/restore@") {
+			if restoreIndex != -1 || step.ID != "go-cache" || step.If != hosted {
+				t.Fatal("Go build cache must have one hosted-only restore bound to go-cache outputs")
 			}
+			restoreIndex = index
 			if step.With["path"] != "${{ steps.go-cache-path.outputs.path }}" {
-				t.Fatal("cache must persist the actual GOCACHE path")
+				t.Fatal("cache must restore the actual GOCACHE path")
 			}
 			key, _ := step.With["key"].(string)
-			for _, dimension := range []string{"runner.os", "runner.arch", "steps.setup-go.outputs.go-version", "hashFiles('go.sum')", "strategy.job-total", "matrix.shard", "github.head_ref || github.ref_name", "github.sha"} {
-				if !strings.Contains(key, "${{ "+dimension+" }}") {
-					t.Fatalf("cache key missing %s", dimension)
-				}
+			const mainPrefix = "go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-main-"
+			if key != mainPrefix+"${{ github.sha }}" {
+				t.Fatal("cache key must target main and bind platform, toolchain, go.sum, shard layout, shard and commit")
 			}
 			restore, _ := step.With["restore-keys"].(string)
-			prefix := strings.TrimSuffix(key, "${{ github.sha }}")
-			mainPrefix := strings.Replace(prefix, "${{ github.head_ref || github.ref_name }}", "main", 1)
-			if restore != prefix+"\n"+mainPrefix+"\n" {
-				t.Fatal("cache must restore this branch before main without crossing platforms, toolchains, dependencies or shards")
+			primePrefix := strings.Replace(mainPrefix, "${{ strategy.job-total }}", "7", 1)
+			if restore != mainPrefix+"\n"+primePrefix+"\n" {
+				t.Fatal("cache must restore matching main artifacts, then the seven-shard main prime without crossing platforms, toolchains, dependencies or shards")
+			}
+		}
+		if strings.HasPrefix(step.Uses, "actions/cache/save@") {
+			if saveIndex != -1 || step.If != mainHosted+" && steps.go-cache.outputs.cache-hit != 'true'" {
+				t.Fatal("Go build cache must have one hosted-main-push-only save guarded by the restore result")
+			}
+			saveIndex = index
+			if step.With["path"] != "${{ steps.go-cache-path.outputs.path }}" || step.With["key"] != "${{ steps.go-cache.outputs.cache-primary-key }}" {
+				t.Fatal("cache save must persist the actual GOCACHE using the restore action's primary key")
 			}
 		}
 		if strings.Contains(step.Run, "cli.mjs run go --full --timing") {
@@ -337,8 +352,8 @@ func TestWorkflowShardLayouts(t *testing.T) {
 			}
 		}
 	}
-	if !foundCache {
-		t.Fatal("missing explicit rolling Go build cache")
+	if restoreIndex == -1 || saveIndex == -1 || testIndex == -1 || restoreIndex >= testIndex || saveIndex <= testIndex {
+		t.Fatal("Go build cache must restore before testing and save only after testing")
 	}
 	if !foundFreshTests {
 		t.Fatal("all shard layouts and events must execute fresh tests and reject cached success")
