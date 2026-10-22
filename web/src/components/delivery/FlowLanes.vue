@@ -8,12 +8,15 @@
 // adds the avatar: the PAIMOS Orbit agent cube carrying the run's parcel, at the
 // playhead on the main run's current step (a clock badge while waiting, a red one in
 // an incident); in Compare it stops at a finish line only for the target or a run that has ended.
-import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
+// AEON-1656: a lane grows to every row its concurrent steps need and the stage grows with
+// it; above twelve rows a "+N more" row expands the lane in place. A live update only grows
+// what lies below the pointer; what is above it keeps its place until the pointer leaves.
+import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import type { DeliveryLanguage } from '../../lib/delivery'
 import {
-  CHAR_W, criticalPath, fitLabel, keyInput, laneFrame, minutesText, pick, placeIncidentCaption, rowPieces, runEnd, setTime, setWindow, stepAt, tickStep, timeLabel, wheelInput,
-  type FlowData, type FlowLevel, type FlowRun, type FlowStep, type LaneItem, type LaneSet, type Timeline,
+  CHAR_W, criticalPath, fitLabel, keyInput, laneFrame, laneRows, minutesText, pick, placeIncidentCaption, placeLane, rowPieces, runEnd, setTime, setWindow, stepAt, tickStep, timeLabel, wheelInput,
+  type FlowData, type FlowLevel, type FlowRun, type FlowStep, type LaneGeo, type LaneItem, type LaneRows, type LaneSet, type Timeline,
 } from '../../lib/deliveryFlow'
 import type { FlowText } from '../../lib/deliveryFlowText'
 
@@ -22,7 +25,8 @@ const emit = defineEmits<{ select: [item: LaneItem | null]; scrub: [] }>()
 /** The lane the arrow keys are on; the moment panel marks the same lane. */
 const focusLane = defineModel<number>('focusLane', { default: 0 })
 
-const LANES_H = 330, AX = 20, GAPS = 4
+// The stage is at least LANES_H tall. Below the last lane: FOOT for the incident caption and the playhead pill, then the axis.
+const LANES_H = 330, AX = 20, GAPS = 4, TOP = 18, FOOT = 22
 const clipId = `ln-clip-${useId()}`
 const host = ref<HTMLElement>()
 const width = ref(0)
@@ -71,6 +75,39 @@ function textWidth(value: string): number {
   inkCache.set(value, ink)
   return ink
 }
+
+// ---------- Growth below the pointer (AEON-1656) ----------
+// `drawn` is the geometry last drawn; `pointerY` the clientY of a hovering mouse or pen. While
+// the pointer is at or below the stage's top, a redraw keeps everything above it in place
+// (placeLane). Once it has left, `release` redraws at the natural heights.
+let drawn: { rowH: number; lanes: Map<string, LaneGeo> } | null = null
+let held = false
+let pointerY: number | null = null
+const release = ref(0)
+function anchorY(): number | null {
+  if (pointerY == null || !host.value) return null
+  const y = pointerY - host.value.getBoundingClientRect().top
+  return y >= 0 ? y : null
+}
+function onPointerTrack(event: PointerEvent) {
+  if (event.pointerType === 'touch') return
+  pointerY = event.clientY
+  if (held && anchorY() == null) release.value++
+}
+function onPointerOut(event: PointerEvent) {
+  if (event.relatedTarget) return
+  pointerY = null
+  if (held) release.value++
+}
+/** Lanes a person expanded past the cap, by `${set}:${lane}`; a new view starts collapsed and unheld. */
+const expanded = ref(new Set<string>())
+watch(() => props.sets.map(set => set.main.id).join('|'), () => { expanded.value = new Set(); drawn = null })
+function toggleFold(key: string) {
+  const next = new Set(expanded.value)
+  if (!next.delete(key)) next.add(key)
+  expanded.value = next
+}
+
 onMounted(() => {
   width.value = host.value?.clientWidth ?? 0
   observer = new ResizeObserver(() => { width.value = host.value?.clientWidth ?? 0 })
@@ -78,8 +115,12 @@ onMounted(() => {
   ensureProbe()
   inkEpoch.value++
   void document.fonts?.ready.then(() => { inkCache.clear(); inkEpoch.value++ })
+  window.addEventListener('pointermove', onPointerTrack, { passive: true })
+  document.addEventListener('pointerout', onPointerOut)
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', onPointerTrack)
+  document.removeEventListener('pointerout', onPointerOut)
   observer?.disconnect()
   probeSvg?.remove()
   probeSvg = null
@@ -101,35 +142,44 @@ const at = (m: number) => timeLabel(props.data, m)
 const words = (step: FlowStep) => pick(props.level === 'simple' ? step.simple : step.expert, props.lang)
 const actor = (lane: string) => (narrow.value ? props.text.actors.short : props.text.actors[props.level])[lane as 'you']
 
-interface LaneRow { key: string; set: LaneSet; lane: string; y: number; h: number; label: string; alt: boolean }
+interface LaneRow { key: string; set: LaneSet; lane: string; y: number; h: number; rowH: number; fold: LaneRows; label: string; alt: boolean }
 interface Piece {
-  key: string; kind: 'step' | 'cluster'; x: number; y: number; w: number; h: number
+  key: string; kind: 'step' | 'cluster' | 'fold'; x: number; y: number; w: number; h: number
+  /** A fold row's lane key; its items are the steps it hides. */
+  lane?: string
   item?: LaneItem; items?: LaneItem[]; from?: number; to?: number
   rects: { x: number; w: number; cls: string }[]; label: string; labelX: number; icon: 'clock' | 'refresh' | null; iconX: number; textCls: string
 }
 const layout = computed(() => {
   void inkEpoch.value
-  const g = geo.value, H = LANES_H, sets = props.sets, now = props.data.now
+  void release.value
+  const g = geo.value, sets = props.sets, now = props.data.now
   const headH = rel.value ? 16 : 0
-  const totalRows = sets.reduce((n, s) => n + s.lanes.reduce((m, a) => m + (s.rows[a] ?? 1), 0), 0)
-  const laneN = sets.reduce((n, s) => n + s.lanes.length, 0)
-  const rowH = Math.min(32, Math.max(15, Math.floor((H - AX - 40 - headH * sets.length - laneN * GAPS - (sets.length - 1) * 10) / Math.max(1, totalRows))))
+  const folds = new Map<string, LaneRows>()
+  sets.forEach((s, si) => { for (const lane of s.lanes) folds.set(`${si}:${lane}`, laneRows(s, lane, expanded.value.has(`${si}:${lane}`))) })
+  const totalRows = [...folds.values()].reduce((n, fold) => n + fold.total, 0)
+  // Rows share the 330 px stage down to 15 px each; more rows than that make the stage taller.
+  const fitH = Math.min(32, Math.max(15, Math.floor((LANES_H - AX - TOP - FOOT - headH * sets.length - folds.size * GAPS - (sets.length - 1) * 24) / Math.max(1, totalRows))))
+  const anchor = drawn ? anchorY() : null
+  const rowH = anchor != null ? drawn!.rowH : fitH
   const lanes: LaneRow[] = [], pieces: Piece[] = [], titles: { y: number; text: string }[] = []
   const incidents: { key: string; x: number; y: number; w: number; h: number; fut: boolean }[] = []
   const incidentLabels: { key: string; x: number; y: number; text: string; full: string; healthyX: number | null }[] = []
   const connectors: { key: string; d: string; cx: number; cy: number }[] = []
   const targets: { key: string; x: number; w: number; label: string; lx: number }[] = []
   const finishes: { key: string; x: number; y0: number; y1: number; target: boolean }[] = []
-  let y = 18
+  let y = TOP, end = TOP
   sets.forEach((set, si) => {
     if (rel.value && set.title) { titles.push({ y: y + 10, text: pick(set.title, props.lang) }); y += headH }
     const top = y
     for (const lane of set.lanes) {
-      const h = (set.rows[lane] ?? 1) * rowH + GAPS
-      lanes.push({ key: `${si}:${lane}`, set, lane, y, h, label: actor(lane), alt: lanes.length % 2 === 1 })
-      y += h
+      const key = `${si}:${lane}`, fold = folds.get(key)!
+      const place = placeLane(drawn?.lanes.get(key), fold.total, y, rowH, GAPS, anchor)
+      lanes.push({ key, set, lane, y, h: place.h, rowH: place.rowH, fold, label: actor(lane), alt: lanes.length % 2 === 1 })
+      y += place.h
     }
     const bottom = y
+    end = bottom
     const inc = set.main.incident
     if (inc && inc.end > props.timeline.v0 && inc.start < props.timeline.v1) {
       const ix0 = g.X(inc.start), ix1 = g.X(inc.end), open = live.value && now! < inc.end
@@ -146,12 +196,12 @@ const layout = computed(() => {
     }
     const placed = new Map<FlowStep, Piece>()
     for (const row of lanes.filter(l => l.set === set)) {
-      const items = set.items.filter(i => i.lane === row.lane)
-      for (let r = 0; r < (set.rows[row.lane] ?? 1); r++) {
-        const sy = row.y + GAPS / 2 + r * rowH, sh = rowH - 3
+      const items = set.items.filter(i => i.lane === row.lane), sh = Math.max(1, row.rowH - 3)
+      for (let r = 0; r < row.fold.bars; r++) {
+        const sy = row.y + GAPS / 2 + r * row.rowH
         for (const p of rowPieces(items.filter(i => i.row === r).sort((a, b) => a.step.start - b.step.start), g.X, g.x0, g.x1)) {
           if (p.kind === 'cluster') {
-            const piece: Piece = { key: `${si}:c:${row.lane}:${r}:${p.from}`, kind: 'cluster', x: p.x, y: sy + 2, w: p.w, h: sh - 4, items: p.items, from: p.from, to: p.to, rects: [], label: `+${p.items.length}`, labelX: p.x + p.w / 2, icon: null, iconX: 0, textCls: '' }
+            const piece: Piece = { key: `${si}:c:${row.lane}:${r}:${p.from}`, kind: 'cluster', x: p.x, y: sy + 2, w: p.w, h: Math.max(1, sh - 4), items: p.items, from: p.from, to: p.to, rects: [], label: `+${p.items.length}`, labelX: p.x + p.w / 2, icon: null, iconX: 0, textCls: '' }
             pieces.push(piece)
             for (const item of p.items) placed.set(item.step, { ...piece, y: sy, h: sh })
             continue
@@ -160,6 +210,13 @@ const layout = computed(() => {
           pieces.push(piece)
           placed.set(p.item.step, piece)
         }
+      }
+      // The row after the bars: "+N more" holds the hidden steps, so hand-overs, the avatar and a selection still point at it.
+      if (row.fold.fold) {
+        const hidden = row.fold.fold.hidden
+        const piece: Piece = { key: `${si}:f:${row.lane}`, kind: 'fold', lane: row.key, x: g.x0, y: row.y + GAPS / 2 + row.fold.bars * row.rowH, w: g.x1 - g.x0, h: sh, items: hidden, rects: [], label: '', labelX: 0, icon: null, iconX: 0, textCls: '' }
+        pieces.push(piece)
+        for (const item of hidden) placed.set(item.step, piece)
       }
     }
     // Hand-overs of the main run: dotted connectors between lanes.
@@ -179,7 +236,24 @@ const layout = computed(() => {
     if (rel.value && path.length && arrived(set.main)) finishes.push({ key: `${si}:f`, x: g.X(Math.max(...path.map(s => s.end))), y0: top - 2, y1: bottom + 2, target: !!set.main.isTarget })
     y += 24
   })
-  return { rowH, lanes, pieces, titles, incidents, incidentLabels, connectors, targets, finishes }
+  held = lanes.some(l => l.rowH !== fitH || Math.abs(l.h - (l.fold.total * fitH + GAPS)) > 0.01)
+  drawn = { rowH, lanes: new Map(lanes.map(l => [l.key, { y: l.y, h: l.h, rowH: l.rowH }])) }
+  const H = Math.max(LANES_H, Math.ceil(end + FOOT + AX))
+  return { rowH, H, lanes, pieces, titles, incidents, incidentLabels, connectors, targets, finishes }
+})
+/** Each lane's "+N more" or "fewer" control, in the label column beside its fold row. */
+const foldControls = computed(() => {
+  const lab = narrow.value ? 2 : 8
+  return layout.value.lanes.flatMap(lane => {
+    const fold = lane.fold.fold
+    if (!fold) return []
+    const n = fold.hidden.length
+    return [{
+      key: lane.key, more: fold.kind === 'more', top: lane.y + GAPS / 2 + lane.fold.bars * lane.rowH, h: Math.max(1, lane.rowH - 3), left: lab,
+      text: fold.kind === 'more' ? `+${n} ${props.text.more}` : props.text.fewer,
+      aria: (fold.kind === 'more' ? props.text.foldMore : props.text.foldFewer).replace('{lane}', lane.label).replace('{n}', String(n)),
+    }]
+  })
 })
 
 function stepPiece(item: LaneItem, x: number, y: number, w: number, h: number, set: LaneSet, si: number): Piece {
@@ -196,7 +270,7 @@ function stepPiece(item: LaneItem, x: number, y: number, w: number, h: number, s
   const label = h >= 12 ? fitLabel({ tag: set.multi ? run.tag : undefined, text: words(s), since, duration: icon ? minutesText(s.end - s.start) : undefined, room, pad }) : ''
   return {
     key: `${si}:${run.id}:${run.steps.indexOf(s)}`, kind: 'step', item, x, y, w, h, rects, label, labelX: lx + pad,
-    icon: icon && room > 14 ? icon : null, iconX: lx + 4, textCls: `fl-t ${s.kind}${fut ? ' fut' : ''}`,
+    icon: icon && room > 14 && h >= 12 ? icon : null, iconX: lx + 4, textCls: `fl-t ${s.kind}${fut ? ' fut' : ''}`,
   }
 }
 
@@ -214,7 +288,7 @@ const playhead = computed(() => {
   const g = geo.value, xp = g.X(props.timeline.T)
   if (xp < g.x0 - 1 || xp > g.x1 + 1) return null
   const label = at(props.timeline.T), w = label.length * 6.6 + 26, hit = coarse || narrow.value ? 44 : 14
-  return { x: xp, label, w, hit, y: LANES_H - AX - 19 }
+  return { x: xp, label, w, hit, y: layout.value.H - AX - 19 }
 })
 // The avatar of each set's main run, at the playhead, or at its finish line once the target or a recorded end is reached.
 const avatars = computed(() => {
@@ -243,6 +317,8 @@ const selBox = computed(() => {
 
 // ---------- Keyboard: the lanes are one focusable group ----------
 function onKey(event: KeyboardEvent) {
+  // Keys on a fold button are the button's own (Enter and Space press it).
+  if (event.target !== event.currentTarget) return
   if (event.altKey || event.ctrlKey || event.metaKey) return
   const result = keyInput(props.timeline, event.key, event.shiftKey)
   if (!result) return
@@ -268,6 +344,7 @@ const dragging = ref(false)
 const localX = (event: PointerEvent | WheelEvent) => event.clientX - (host.value?.getBoundingClientRect().left ?? 0)
 function onDown(event: PointerEvent) {
   if (event.button !== 0) return
+  if ((event.target as Element).closest?.('.ln-more')) return
   const part = (event.target as Element).closest?.('[data-part]')?.getAttribute('data-part')
   const t = props.timeline
   drag = { kind: part === 'ph' ? 'ph' : 'pan', x: localX(event), v0: t.v0, v1: t.v1, moved: part === 'ph', target: event.target, id: event.pointerId }
@@ -291,8 +368,10 @@ function onUp(event: PointerEvent) {
   if (!d || d.id !== event.pointerId) return
   drag = null; dragging.value = false
   if (d.moved || d.kind !== 'pan') return
-  // A click selects (or clears); it never moves the time. A "+N" zooms in.
+  // A click selects (or clears); it never moves the time. A "+N" zooms in; a fold row expands or collapses its lane.
   const target = d.target as Element | null
+  const fold = target?.closest?.('[data-fold]')?.getAttribute('data-fold')
+  if (fold) { toggleFold(fold); return }
   const cluster = target?.closest?.('[data-cluster]')?.getAttribute('data-cluster')
   if (cluster) {
     const [a, b] = cluster.split('|').map(Number) as [number, number]
@@ -317,27 +396,32 @@ defineExpose({ setTime: (m: number) => setTime(props.timeline, m) })
 </script>
 
 <template>
-  <div ref="host" class="fl-stage" :class="{ dragging }" tabindex="0" role="group" :aria-roledescription="text.chart" :aria-label="text.lanesLabel" data-testid="flow-lanes"
+  <div ref="host" class="fl-stage" :class="{ dragging }" :style="{ height: `${layout.H}px` }" tabindex="0" role="group" :aria-roledescription="text.chart" :aria-label="text.lanesLabel" data-testid="flow-lanes"
     @keydown="onKey" @pointerdown="onDown" @pointermove="onMove" @pointerup="onUp" @pointercancel="onCancel" @lostpointercapture="onCancel" @wheel="onWheel">
-    <svg v-if="width" :viewBox="`0 0 ${geo.W} ${LANES_H}`" :width="geo.W" :height="LANES_H" aria-hidden="true">
-      <defs><clipPath :id="clipId"><rect :x="geo.x0" y="0" :width="geo.x1 - geo.x0" :height="LANES_H" /></clipPath></defs>
+    <svg v-if="width" :viewBox="`0 0 ${geo.W} ${layout.H}`" :width="geo.W" :height="layout.H" aria-hidden="true">
+      <defs><clipPath :id="clipId"><rect :x="geo.x0" y="0" :width="geo.x1 - geo.x0" :height="layout.H" /></clipPath></defs>
       <rect v-for="(lane, i) in layout.lanes" :key="lane.key" class="ln-lane" :class="{ alt: lane.alt, focus: i === focusLane }" x="0" :y="lane.y" :width="geo.W" :height="lane.h" :data-lane="lane.lane" />
       <g>
         <template v-for="tick in grid" :key="tick.x">
-          <line class="fl-grid" :x1="tick.x" :x2="tick.x" y1="16" :y2="LANES_H - 18" />
-          <text class="fl-axis" :x="tick.x" :y="LANES_H - 5" text-anchor="middle">{{ tick.label }}</text>
+          <line class="fl-grid" :x1="tick.x" :x2="tick.x" y1="16" :y2="layout.H - 18" />
+          <text class="fl-axis" :x="tick.x" :y="layout.H - 5" text-anchor="middle">{{ tick.label }}</text>
         </template>
       </g>
       <g>
-        <text v-for="lane in layout.lanes" :key="lane.key" class="fl-lab" :x="narrow ? 2 : 8" :y="lane.y + Math.min(lane.h, layout.rowH + 4) / 2 + 4">{{ lane.label }}</text>
+        <text v-for="lane in layout.lanes" :key="lane.key" class="fl-lab" :x="narrow ? 2 : 8" :y="lane.y + Math.min(lane.h, lane.rowH + 4) / 2 + 4">{{ lane.label }}</text>
         <text v-for="title in layout.titles" :key="title.y" class="fl-ttl" x="0" :y="title.y">{{ title.text }}</text>
       </g>
       <g :clip-path="`url(#${clipId})`">
         <rect v-for="band in layout.incidents" :key="band.key" class="fl-inc" :class="{ fut: band.fut }" :x="band.x" :y="band.y" :width="band.w" :height="band.h" rx="5" />
-        <g v-for="piece in layout.pieces" :key="piece.key" :data-step="piece.kind === 'step' ? piece.key : undefined" :data-cluster="piece.kind === 'cluster' ? `${piece.from}|${piece.to}` : undefined">
+        <g v-for="piece in layout.pieces" :key="piece.key" :data-step="piece.kind === 'step' ? piece.key : undefined" :data-cluster="piece.kind === 'cluster' ? `${piece.from}|${piece.to}` : undefined"
+          :data-fold="piece.kind === 'fold' ? piece.lane : undefined">
           <template v-if="piece.kind === 'cluster'">
             <rect class="ln-cluster" :x="piece.x" :y="piece.y" :width="piece.w" :height="piece.h" :rx="piece.h / 2" />
             <text class="ln-clut" :x="piece.labelX" :y="piece.y + piece.h / 2 + 3.6" text-anchor="middle">{{ piece.label }}</text>
+          </template>
+          <template v-else-if="piece.kind === 'fold'">
+            <path class="ln-fold" :d="`M${piece.x},${piece.y + piece.h / 2}H${piece.x + piece.w}`" />
+            <rect class="ln-foldhit" :x="piece.x" :y="piece.y - 1" :width="piece.w" :height="piece.h + 2" />
           </template>
           <template v-else>
             <rect v-for="(r, i) in piece.rects" :key="i" :class="r.cls" :x="r.x" :y="piece.y" :width="r.w" :height="piece.h" rx="4" />
@@ -365,8 +449,8 @@ defineExpose({ setTime: (m: number) => setTime(props.timeline, m) })
         </g>
       </g>
       <g v-if="nowX != null">
-        <line class="fl-now" :x1="nowX" :x2="nowX" y1="14" :y2="LANES_H - AX + 2" />
-        <text class="fl-nowt" :x="nowX + 4" :y="LANES_H - AX - 2">{{ text.now }}</text>
+        <line class="fl-now" :x1="nowX" :x2="nowX" y1="14" :y2="layout.H - AX + 2" />
+        <text class="fl-nowt" :x="nowX + 4" :y="layout.H - AX - 2">{{ text.now }}</text>
       </g>
       <g v-for="av in avatars" :key="av.key" class="fl-av" :class="{ waiting: av.waiting, incident: av.incident, done: av.done }" :transform="`translate(${av.x},${av.y})`" data-testid="flow-avatar">
         <g transform="translate(-13,-27) scale(.8)">
@@ -384,21 +468,25 @@ defineExpose({ setTime: (m: number) => setTime(props.timeline, m) })
         <g class="av-wait" transform="translate(11,-24)"><circle class="av-wait-bg" r="6.2" /><path class="av-wait-h" d="M0-3.2V0l2 1.4" /></g>
       </g>
       <g v-if="playhead" class="ln-phg" data-part="ph" data-testid="flow-playhead">
-        <line class="ln-ph" :x1="playhead.x" :x2="playhead.x" y1="10" :y2="LANES_H - AX + 2" />
-        <rect class="ln-phhit" data-part="ph" :x="playhead.x - playhead.hit / 2" y="8" :width="playhead.hit" :height="LANES_H - AX - 6" />
+        <line class="ln-ph" :x1="playhead.x" :x2="playhead.x" y1="10" :y2="layout.H - AX + 2" />
+        <rect class="ln-phhit" data-part="ph" :x="playhead.x - playhead.hit / 2" y="8" :width="playhead.hit" :height="layout.H - AX - 6" />
         <rect class="ln-phpill" data-part="ph" :x="playhead.x - playhead.w / 2" :y="playhead.y" :width="playhead.w" height="18" rx="9" />
         <path class="ln-phgrip" :d="`M${playhead.x - playhead.w / 2 + 7},${playhead.y + 6}v6M${playhead.x - playhead.w / 2 + 10},${playhead.y + 6}v6`" />
         <text class="ln-pht" :x="playhead.x + 5" :y="playhead.y + 12.6" text-anchor="middle">{{ playhead.label }}</text>
       </g>
     </svg>
     <template v-if="width">
+      <button v-for="f in foldControls" :key="`${f.key}:fold`" type="button" class="ln-more" :aria-expanded="!f.more" :aria-label="f.aria" data-testid="flow-lane-fold"
+        :style="{ top: `${f.top}px`, height: `${f.h}px`, left: `${f.left}px` }" @click="toggleFold(f.key)">
+        <span>{{ f.text }}</span><AppIcon :name="f.more ? 'chevron' : 'chevron-up'" :size="12" />
+      </button>
       <span v-for="l in layout.incidentLabels" :key="`${l.key}:full`" class="sr-only">{{ l.full }}</span>
     </template>
   </div>
 </template>
 
 <style scoped>
-.fl-stage { position: relative; height: 330px; margin-top: 8px; border-radius: 10px; cursor: grab; touch-action: pan-y; -webkit-user-select: none; user-select: none; }
+.fl-stage { position: relative; min-height: 330px; margin-top: 8px; border-radius: 10px; cursor: grab; touch-action: pan-y; -webkit-user-select: none; user-select: none; }
 .fl-stage.dragging { cursor: grabbing; }
 .fl-stage:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .fl-stage svg { display: block; width: 100%; height: 100%; overflow: visible; }
@@ -444,6 +532,15 @@ defineExpose({ setTime: (m: number) => setTime(props.timeline, m) })
 .ln-cluster { fill: var(--surface-raised); stroke: var(--ink-3); stroke-width: 1; cursor: zoom-in; }
 .ln-clut { font: 600 10px var(--mono); fill: var(--ink-2); pointer-events: none; }
 .ln-selbox { fill: none; stroke: var(--ink); stroke-width: 2; pointer-events: none; }
+/* A fold row: one dotted hairline where the hidden rows would be; the row and its label expand the lane. */
+.ln-fold { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 2 3; pointer-events: none; }
+.ln-foldhit { fill: transparent; cursor: pointer; }
+[data-fold]:hover .ln-fold { stroke: var(--ink-2); }
+.ln-more { position: absolute; display: inline-flex; align-items: center; gap: 3px; min-width: 0; padding: 0 4px 0 0; border: 0; border-radius: 6px; background: none; color: var(--ink-2); font: 600 11px var(--font); white-space: nowrap; cursor: pointer; }
+.ln-more:hover { color: var(--ink); }
+.ln-more:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* A finger gets 44 px, reaching up into the empty label column of the rows above. */
+@media (pointer: coarse) { .ln-more::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: max(100%, 44px); } }
 .fl-av { pointer-events: none; }
 .av-core { fill: color-mix(in srgb, var(--teal) 30%, var(--surface-raised)); stroke: var(--teal-ink); stroke-width: 1.6; stroke-linejoin: round; }
 .av-light { fill: color-mix(in srgb, var(--teal) 12%, var(--surface-raised)); }
