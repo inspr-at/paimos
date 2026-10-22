@@ -10,9 +10,10 @@ import { resetPositions } from '../src/lib/position'
 import { wired } from './wire-fixtures'
 import type { WorkNode } from '../src/lib/api'
 import * as Cascade from '../src/lib/accountCascade'
-import { flush, setupSource } from './record-source'
+import { deferred, flush, setupSource } from './record-source'
+import { LEAD_WORDS, canLaunchLead, leadLaunchReason, type ProjectLead } from '../src/lib/lead'
 
-const ticket = { id: 'ticket', key: 'AEON-181', title: 'Start agent', is_leaf: true, body: 'Build the launch flow.', fields: { acceptance_criteria: 'Queue, then show a managed session.' } } as unknown as WorkNode
+const ticket = { id: 'ticket', key: 'AEON-181', title: 'Start agent', is_leaf: true, project: null, updated_at: 'revision-1', body: 'Build the launch flow.', fields: { acceptance_criteria: 'Queue, then show a managed session.' } } as unknown as WorkNode
 const order = { node_id: 'order', status: 'draft', revision: 3, assignee_principal_id: 'agent', criteria: [] } as WorkOrder
 const queued = { id: 'run', work_order_id: 'order', agent_principal_id: 'agent', model_profile_id: 'model', status: 'queued' } as AgentRun
 const selection = { ticket, agentId: 'agent', profileId: 'model' }
@@ -137,17 +138,20 @@ describe('Start Agent leaf selection', () => {
     vi.stubGlobal('document', { activeElement: null })
     const listNodes = vi.fn(async (_params: unknown) => ({ items: [ticket, { ...ticket, id: 'parent', is_leaf: false }, { ...ticket, id: 'unknown', is_leaf: undefined }], next_cursor: 'next-page' as string | null }))
     const launch = vi.fn(async () => { throw new Error('launch captured') })
-    const putPin = vi.fn()
+    const putPin = vi.fn(), readLead = vi.fn<(id: string) => Promise<ProjectLead>>()
+    const queueAdd = vi.fn(async (_project: string, id: string) => ({ node_id: id }))
+    const fetchCatalog = vi.fn(async () => ({ catalog: { hosts: [] }, gap: null, message: '' }))
+    let resetAccess = () => {}
     const choice = { hostId: 'host', harness: 'codex', accountId: 'account', modelKey: 'model', profileId: 'profile' }
     const made = setupSource('components/agents/StartAgentDialog.vue', {}, {
       '../../lib/api': { listNodes },
-      '../../lib/authz': { can: () => true },
+      '../../lib/authz': { can: () => true, onAccessRevalidate: ({ reset }: { reset: () => void }) => { resetAccess = reset; return () => {} } },
       '../../stores/session': { useSession: () => ({ identity: { principal: { kind: 'person' } } }) },
       '../../lib/agents': { listPins: async () => [], putPin, deletePin: vi.fn(), message: (e: Error) => e.message },
       '../../lib/agentRows': {},
       '../../lib/accountCascade': {
         ...Cascade,
-        fetchAccountCatalog: async () => ({ catalog: { hosts: [] }, gap: null, message: '' }),
+        fetchAccountCatalog: fetchCatalog,
         fillDefaults: () => ({ ...choice }),
         presentCascade: () => ({ agentId: 'agent', profileId: 'profile', efforts: [{ value: 'profile' }], models: [{ value: 'model' }], accounts: [{ value: 'account' }], requested: {} }),
       },
@@ -155,9 +159,11 @@ describe('Start Agent leaf selection', () => {
       '../../lib/startAgent': { launchState, staleGrantRejection, startAgent: launch },
       '../../stores/agents': { useAgents: () => ({ runs: {}, admitRun: vi.fn(), admitRuns: vi.fn(), afterWrite: vi.fn() }) },
       '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
+      '../../lib/lead': { LEAD_WORDS, canLaunchLead, leadLaunchReason, readLead },
+      '../../stores/workQueue': { useWorkQueue: () => ({ add: queueAdd, busy: false }) },
     })
     stops.push(made.stop)
-    return { state: made.state, listNodes, launch, putPin }
+    return { state: made.state, listNodes, launch, putPin, readLead, queueAdd, fetchCatalog, resetAccess: () => resetAccess() }
   }
   it('queries canonical leaves on every page and excludes parents and unknown shapes from mixed results', async () => {
     const { state, listNodes } = dialogSetup()
@@ -207,6 +213,121 @@ describe('Start Agent leaf selection', () => {
     await state.submit()
     expect(putPin).not.toHaveBeenCalled()
     expect(launch).not.toHaveBeenCalled()
+  })
+
+  const project = { id: 'project', key: 'AEON', title: 'Aeon' }
+  const configured: ProjectLead = { project_id: project.id, revision: 4, generation: 1, session_id: null, state: 'paused', reason: 'admission_not_configured', process_active: false, automatic_launch_enabled: false }
+
+  // Risk: filling a manual launch form for configured work used to fail only
+  // after its work order and pin had already been written.
+  it('AEON-1508: configured work offers the lead queue before any catalog, pin or manual launch', async () => {
+    const { state, readLead, queueAdd, fetchCatalog, launch, putPin } = dialogSetup()
+    const pending = deferred<ProjectLead>()
+    readLead.mockReturnValueOnce(pending.promise)
+    await state.open({ ...ticket, project })
+    expect(readLead).toHaveBeenCalledExactlyOnceWith(project.id)
+    expect(state.dispatchMode.value).toBe('checking')
+    expect(state.canSubmit.value).toBe(false)
+    await state.submit()
+    expect(queueAdd).not.toHaveBeenCalled()
+    expect(fetchCatalog).not.toHaveBeenCalled()
+    pending.resolve(configured); await flush()
+    expect(state.dispatchMode.value).toBe('lead')
+    expect(state.canSubmit.value).toBe(false)
+    expect(state.canQueueForLead.value).toBe(true)
+    expect(state.dismissLabel.value).toBe('Cancel')
+    expect(state.submitIcon.value).toBe('queue-add')
+    await state.submit()
+    expect(queueAdd).toHaveBeenCalledExactlyOnceWith(project.id, ticket.id)
+    expect(state.queuedForLead.value).toBe(true)
+    expect(state.canQueueForLead.value).toBe(false)
+    expect(state.dismissLabel.value).toBe('Close')
+    expect(state.submitIcon.value).toBe('check')
+    expect(fetchCatalog).not.toHaveBeenCalled()
+    expect(putPin).not.toHaveBeenCalled()
+    expect(launch).not.toHaveBeenCalled()
+    state.close()
+    expect(state.visible.value).toBe(false)
+    expect(queueAdd).toHaveBeenCalledTimes(1)
+    readLead.mockResolvedValueOnce(configured)
+    await state.open({ ...ticket, project }); await flush()
+    expect(state.dismissLabel.value).toBe('Cancel')
+    expect(state.submitIcon.value).toBe('queue-add')
+  })
+
+  it('AEON-1508: a delayed lead read cannot replace the next ticket or a reopened dialog', async () => {
+    const { state, readLead, fetchCatalog } = dialogSetup()
+    const pending = deferred<ProjectLead>()
+    readLead.mockReturnValueOnce(pending.promise)
+    await state.open({ ...ticket, project })
+    state.selectTicket({ ...ticket, id: 'other-ticket', project: null }); await flush()
+    expect(state.dispatchMode.value).toBe('manual')
+    pending.resolve(configured); await flush()
+    expect(state.dispatchMode.value).toBe('manual')
+    expect(state.dispatchProject.value).toBeNull()
+    expect(fetchCatalog).toHaveBeenCalledTimes(1)
+    const old = deferred<ProjectLead>()
+    readLead.mockReturnValueOnce(old.promise)
+    state.selectTicket({ ...ticket, project })
+    state.close()
+    readLead.mockResolvedValueOnce({ ...configured, revision: 0, state: 'none' })
+    await state.open({ ...ticket, project }); await flush()
+    old.resolve(configured); await flush()
+    expect(state.dispatchMode.value).toBe('manual')
+    expect(state.canSubmit.value).toBe(true)
+  })
+
+  it('AEON-1508: unreadable project settings keep manual launch disabled until a successful retry', async () => {
+    const { state, readLead, queueAdd, launch, fetchCatalog } = dialogSetup()
+    readLead.mockRejectedValueOnce(new APIError(403, 'Permission denied'))
+    await state.open({ ...ticket, project }); await flush()
+    expect(state.dispatchMode.value).toBe('failed')
+    expect(state.dispatchError.value).toContain('Permission denied')
+    expect(state.canSubmit.value).toBe(false)
+    await state.submit()
+    expect(queueAdd).not.toHaveBeenCalled()
+    expect(launch).not.toHaveBeenCalled()
+    expect(fetchCatalog).not.toHaveBeenCalled()
+    readLead.mockResolvedValueOnce(configured)
+    await state.checkDispatch()
+    expect(state.dispatchMode.value).toBe('lead')
+    expect(state.canQueueForLead.value).toBe(true)
+  })
+
+  it('AEON-1508: queue failures stay visible and an access reset discards an in-flight result', async () => {
+    const { state, readLead, queueAdd, resetAccess } = dialogSetup()
+    readLead.mockResolvedValue(configured)
+    await state.open({ ...ticket, project }); await flush()
+    queueAdd.mockRejectedValueOnce(new Error('Queue refused: acceptance criteria are missing'))
+    await state.submit()
+    expect(state.queuedForLead.value).toBe(false)
+    expect(state.error.value).toBe('Queue refused: acceptance criteria are missing')
+    expect(state.canQueueForLead.value).toBe(true)
+    const pending = deferred<{ node_id: string }>()
+    queueAdd.mockReturnValueOnce(pending.promise)
+    const saving = state.submit()
+    expect(state.busy.value).toBe(true)
+    expect(state.dismissLabel.value).toBe('Cancel')
+    expect(state.submitIcon.value).toBe('clock')
+    resetAccess()
+    pending.resolve({ node_id: ticket.id }); await saving
+    expect(state.visible.value).toBe(false)
+    expect(state.ticket.value).toBeNull()
+    expect(state.projectLead.value).toBeNull()
+    expect(state.queuedForLead.value).toBe(false)
+    expect(state.busy.value).toBe(false)
+    expect(state.dismissLabel.value).toBe('Cancel')
+  })
+
+  it('AEON-1508: node-only entry points resolve their project with one bounded leaf read', async () => {
+    const { state, listNodes, readLead, fetchCatalog } = dialogSetup()
+    listNodes.mockResolvedValueOnce({ items: [{ ...ticket, project }], next_cursor: null })
+    readLead.mockResolvedValueOnce(configured)
+    await state.open({ ...ticket, project: undefined }); await flush()
+    expect(listNodes).toHaveBeenCalledExactlyOnceWith({ ids: [ticket.id], shape: ['leaf'], limit: 1, rollups: 'omit' })
+    expect(readLead).toHaveBeenCalledExactlyOnceWith(project.id)
+    expect(state.dispatchMode.value).toBe('lead')
+    expect(fetchCatalog).not.toHaveBeenCalled()
   })
 })
 

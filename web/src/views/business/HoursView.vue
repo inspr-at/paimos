@@ -1,11 +1,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { APIError, getNode, listNodes } from '../../lib/api'
-import { conflictEntry, createEntry, createPeriod, deleteEntry, findEntryEvent, listEntries, listPeriods, PERIOD_HISTORY_START, undoEntryEvent, updateEntry, type EntryPatch, type TimeEntry, type TimePeriod } from '../../lib/business'
+import { conflictEntry, createEntry, createPeriod, deleteEntry, listEntries, listPeriods, PERIOD_HISTORY_START, undoEntryEvent, updateEntry, type EntryPatch, type TimeEntry, type TimePeriod } from '../../lib/business'
 import { command, consume } from '../../lib/commands'
-import { dismiss, toast } from '../../lib/toast'
+import { captureToastOwner, dismiss, toast } from '../../lib/toast'
 import { absoluteTime, plural } from '../../lib/work'
 import { addDays, dayKey, isoWeek, parseDayKey, periodLabel, startOfWeek, timeOfDay, weekDays, weekLabel, WEEKDAYS } from '../../lib/week'
 import { formatClock, formatSpan } from '../../components/business/duration'
@@ -158,6 +158,8 @@ async function log(request: LogRequest) {
 // in place (only what changed is sent, against the revision it was read at) or
 // deletes it with a short server-side undo. Approved periods stay as approved.
 const UNDO_MS = 6000
+const pendingRestores = reactive(new Set<string>())
+const removals = new Map<string, number>()
 const editing = ref<string | null>(null)
 // The version the draft corrects; after a conflict, the newer entry.
 const editBase = ref<TimeEntry | null>(null)
@@ -222,6 +224,7 @@ function correctionProblem(e: unknown): string {
 }
 const approvedMeanwhile = (e: unknown) => e instanceof APIError && e.status === 409 && /approved|immutable/.test(e.message)
 function startEdit(e: TimeEntry) {
+  if (pendingRestores.has(e.id)) return
   const reason = lockReason(e)
   if (reason) { toast(reason); return }
   editing.value = e.id; editBase.value = e; conflict.value = null; cursor.value = e.id
@@ -254,8 +257,12 @@ async function save(patch: EntryPatch, ticket: LogTicket) {
     toast(`Not saved: ${correctionProblem(e)}`, { tone: 'error' })
   } finally { saving.value = false }
 }
-type Deletion = 'deleted' | 'gone' | 'failed'
+type Deletion = { status: 'deleted'; eventId: string | null } | { status: 'gone' | 'failed' }
+let deletionView = 0
+watch([person, me, weekStart, view], () => { deletionView++ }, { flush: 'sync' })
+onBeforeUnmount(() => { deletionView++ })
 function remove(listed: TimeEntry) {
+  if (pendingRestores.has(listed.id)) return
   const base = editing.value === listed.id && editBase.value ? editBase.value : listed
   const reason = lockReason(base)
   if (reason) { toast(reason); return }
@@ -264,38 +271,58 @@ function remove(listed: TimeEntry) {
   if (editing.value === base.id) { editing.value = null; editBase.value = null; conflict.value = null }
   dropEntry(base)
   const key = keyOf(base)
+  const removal = (removals.get(base.id) ?? 0) + 1
+  removals.set(base.id, removal)
+  const current = () => removals.get(base.id) === removal
+  const toastOwner = captureToastOwner(), started = deletionView
+  const owner = () => current() && toastOwner()
+  const here = () => owner() && started === deletionView
   let toastId = 0
-  const done: Promise<Deletion> = deleteEntry(base).then(() => { bump(base.period_id); return 'deleted' as const }, err => {
+  const done: Promise<Deletion> = deleteEntry(base).then(eventId => {
+    if (here()) bump(base.period_id)
+    return { status: 'deleted', eventId }
+  }, err => {
     dismiss(toastId)
-    if (err instanceof APIError && err.status === 404) return 'gone' as const
+    if (!owner()) return { status: 'failed' }
+    if (err instanceof APIError && err.status === 404) return { status: 'gone' }
     const newer = conflictEntry(err)
-    if (newer) { putEntry(newer); toast('This entry changed meanwhile, so it was not deleted. The newer version is shown.', { tone: 'error' }); return 'failed' as const }
-    putEntry(base)
-    if (approvedMeanwhile(err)) { toast('The period was approved meanwhile, so this entry is locked.', { tone: 'error' }); void loadWeek() }
+    if (newer) { if (here()) putEntry(newer); toast('This entry changed meanwhile, so it was not deleted. The newer version is shown.', { tone: 'error' }); return { status: 'failed' } }
+    if (here()) putEntry(base)
+    if (approvedMeanwhile(err)) { toast('The period was approved meanwhile, so this entry is locked.', { tone: 'error' }); if (here()) void loadWeek() }
     else toast(`Not deleted: ${correctionProblem(err)}`, { tone: 'error' })
-    return 'failed' as const
+    return { status: 'failed' }
   })
-  toastId = toast(`Deleted ${formatSpan(base.duration_seconds)} on ${key}.`, { timeout: UNDO_MS, action: { label: 'Undo', run: () => void undoRemove(base, done, toastId) } })
+  let undoStarted = false
+  toastId = toast(`Deleted ${formatSpan(base.duration_seconds)} on ${key}.`, { timeout: UNDO_MS, action: { label: 'Undo', run: () => {
+    if (undoStarted) return
+    undoStarted = true
+    void undoRemove(base, done, toastId, { owner, here, current, key })
+  } } })
   void focusEntry(after)
 }
-// Undo shows the entry again at once and reverses the deletion on the server.
-async function undoRemove(e: TimeEntry, done: Promise<Deletion>, toastId: number) {
+// Only the confirmed deletion's receipt can bring this entry back.
+async function undoRemove(e: TimeEntry, done: Promise<Deletion>, toastId: number, context: { owner: () => boolean; here: () => boolean; current: () => boolean; key: string }) {
   dismiss(toastId)
-  putEntry(e)
+  if (!context.owner()) return
+  pendingRestores.add(e.id)
+  if (context.here()) { putEntry(e); void focusEntry(e.id) }
   try {
     const outcome = await done
-    if (outcome === 'gone') { dropEntry(e); return }
-    if (outcome === 'failed') return
-    const event = await findEntryEvent(e.node_id, e.id, 'time_entry.deleted')
-    if (event === null) throw new Error('no deletion to undo')
-    const restored = await undoEntryEvent(event)
-    putEntry(restored ?? e); bump(e.period_id)
-    toast(`Restored ${formatSpan(e.duration_seconds)} on ${keyOf(e)}.`)
-    void focusEntry(e.id)
+    if (outcome.status === 'gone' && context.here()) dropEntry(e)
+    if (outcome.status !== 'deleted' || !context.owner()) return
+    if (!outcome.eventId) throw new Error('The exact deletion receipt is unavailable. Reload to check the entry.')
+    const restored = await undoEntryEvent(outcome.eventId)
+    if (!context.owner()) return
+    if (!restored || restored.id !== e.id || restored.period_id !== e.period_id || restored.principal_id !== e.principal_id || restored.node_id !== e.node_id) throw new Error('The restored entry could not be confirmed.')
+    if (context.here()) { putEntry(restored); bump(e.period_id); void focusEntry(e.id) }
+    toast(`Restored ${formatSpan(e.duration_seconds)} on ${context.key}.`)
   } catch (err) {
-    dropEntry(e)
+    if (!context.owner()) return
+    console.error('Hours Undo failed', err)
     toast(err instanceof APIError && err.status === 409 ? 'The entry could not be restored: its period was approved or it changed meanwhile.' : 'The entry could not be restored.', { tone: 'error' })
-    void loadWeek()
+    if (context.here()) { dropEntry(e); void loadWeek() }
+  } finally {
+    if (context.current()) pendingRestores.delete(e.id)
   }
 }
 function rowKey(event: KeyboardEvent, e: TimeEntry) {
@@ -525,6 +552,7 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
           <ul class="entries" :aria-label="`${WEEKDAYS[group.i]} ${group.day.getDate()}`">
             <li
               v-for="e in group.list" :key="e.id" class="entry" :class="{ editing: editing === e.id, locked: !!lockReason(e) }" :data-entry="e.id"
+              :aria-busy="pendingRestores.has(e.id) || undefined"
               :tabindex="editing !== e.id && tabStop === e.id ? 0 : -1" :aria-describedby="editing === e.id ? undefined : `entry-help-${e.id}`"
               @keydown="rowKey($event, e)" @click="rowClick($event, e)" @focus="cursor = e.id"
             >
@@ -551,11 +579,11 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
                 <span class="e-act">
                   <span v-if="lockReason(e)" class="lock" :data-tip="lockReason(e)"><AppIcon name="lock" :size="13" /></span>
                   <template v-else>
-                    <button type="button" class="icon-btn sm flat" tabindex="-1" :aria-label="`Edit ${timeOfDay(e.started_at)} on ${keyOf(e)}`" data-tip="Edit · e" @click="startEdit(e)"><AppIcon name="edit" :size="13" /></button>
-                    <button type="button" class="icon-btn sm flat del" tabindex="-1" :aria-label="`Delete ${timeOfDay(e.started_at)} on ${keyOf(e)}`" data-tip="Delete · Del" @click="remove(e)"><AppIcon name="trash" :size="13" /></button>
+                    <button type="button" class="icon-btn sm flat" tabindex="-1" :disabled="pendingRestores.has(e.id)" :aria-label="`Edit ${timeOfDay(e.started_at)} on ${keyOf(e)}`" data-tip="Edit · e" @click="startEdit(e)"><AppIcon name="edit" :size="13" /></button>
+                    <button type="button" class="icon-btn sm flat del" tabindex="-1" :disabled="pendingRestores.has(e.id)" :aria-label="`Delete ${timeOfDay(e.started_at)} on ${keyOf(e)}`" data-tip="Delete · Del" @click="remove(e)"><AppIcon name="trash" :size="13" /></button>
                   </template>
                 </span>
-                <span :id="`entry-help-${e.id}`" class="sr-only">{{ lockReason(e) || 'Press e to edit, Delete to delete.' }}</span>
+                <span :id="`entry-help-${e.id}`" class="sr-only">{{ pendingRestores.has(e.id) ? 'Restoring entry…' : lockReason(e) || 'Press e to edit, Delete to delete.' }}</span>
               </template>
             </li>
           </ul>

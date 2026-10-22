@@ -253,7 +253,7 @@ export async function mockBusiness(page: Page, data: BusinessData, options: Busi
         data.entries.splice(data.entries.indexOf(current), 1)
         event('time_entry.deleted', { ...current }, null)
         period.revision += 1
-        return route.fulfill({ status: 204, body: '' })
+        return route.fulfill({ status: 204, body: '', headers: { 'X-Aeon-Event-Ids': String(data.events[data.events.length - 1].id) } })
       }
       const patch = body as { node_id?: string; cost_unit_node_id?: string; started_at?: string; ended_at?: string; duration_seconds?: number; note?: string }
       const next = { ...current }

@@ -4,6 +4,7 @@
 // the three content sizes (thumb for strips, preview for the viewer, original only
 // at 100%). Positions are decimal strings; created_by is the principal id.
 import { api, APIError, sessionEnded } from './api.ts'
+import { mutationEventIds } from './crm.ts'
 
 export interface Attachment {
   id: string; node_id: string; name: string; content_type: string; size: number; sha256: string
@@ -102,25 +103,15 @@ export async function patchAttachment(item: Attachment, patch: { caption?: strin
   })
   return one(await json(response))
 }
-export async function deleteAttachment(id: string, keepalive = false): Promise<void> {
-  await json(await api(`/attachments/${encodeURIComponent(id)}`, { method: 'DELETE', keepalive }))
+// A deletion appends exactly one event. Missing or ambiguous receipts cannot
+// identify this removal and must never be replaced with a history search.
+export async function deleteAttachment(id: string, keepalive = false): Promise<string | null> {
+  const response = await api(`/attachments/${encodeURIComponent(id)}`, { method: 'DELETE', keepalive })
+  await json(response)
+  const ids = mutationEventIds(response)
+  return ids?.length === 1 ? ids[0] : null
 }
-
-// Server undo: the removal is an event; its undo restores the attachment. The
-// DELETE answers without the event, so the ticket's events are read (oldest
-// first, in pages) for the newest removal of this attachment.
-interface EventRow { id: number; type: string; after: { id?: string } | null; undo_of: number | null }
-export async function findRemovalEvent(nodeId: string, attachmentId: string): Promise<number | null> {
-  let after = 0, found: number | null = null
-  for (let page = 0; page < 50; page++) {
-    const body = await json<{ items: EventRow[]; next_after: number | null }>(await api(`/events?node_id=${encodeURIComponent(nodeId)}&limit=200${after ? `&after=${after}` : ''}`))
-    for (const event of body.items) if (event.type === 'attachment.removed' && event.after?.id === attachmentId && event.undo_of == null) found = event.id
-    if (!body.next_after) break
-    after = body.next_after
-  }
-  return found
-}
-export async function undoEvent(eventId: number): Promise<Attachment | null> {
+export async function undoEvent(eventId: string): Promise<Attachment | null> {
   const event = await json<{ after: Attachment | null }>(await api(`/events/${eventId}/undo`, { method: 'POST' }))
   return event?.after ?? null
 }
