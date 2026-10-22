@@ -92,7 +92,7 @@ func validQueuedExecutionMode(r Run, adapter Adapter) error {
 		}
 		if readOnlyRun(r) {
 			a, ok := adapter.(ReadOnlyRunAdapter)
-			if !ok || !a.ReadOnlyRunSupported() {
+			if !ok || !a.ReadOnlyRunSupported() || !agentverification.ReadOnlyRunFor(adapter.Name()).Supported {
 				return ErrReadOnlyRunUnavailable
 			}
 		}

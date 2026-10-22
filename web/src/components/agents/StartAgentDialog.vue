@@ -105,6 +105,7 @@ const canSubmit = computed(() => permitted.value && !loading.value && !busy.valu
 
 function resetTask() {
   generation++; instruction.value = ''; mayChangeFiles.value = false; task.value = ''; error.value = ''
+  remember.value = false; remembered.value = ''
   requestId = ''; requestKey = ''
 }
 watch([() => ticket.value?.id, projectId, newTicket], resetTask, { flush: 'sync' })
@@ -173,14 +174,14 @@ function selectTicket(item: WorkNode) {
   void loadCatalog()
 }
 let pinGeneration = 0
-watch([() => ticket.value?.id, () => choice.value.harness, catalog], async () => {
-  const id = ticket.value?.id
+watch([() => oneOff.value && newTicket.value ? undefined : ticket.value?.id, () => choice.value.harness, catalog], async () => {
+  const id = oneOff.value && newTicket.value ? undefined : ticket.value?.id
   const harness = choice.value.harness
   const turn = ++pinGeneration
   if (!visible.value || !id || !harness) return
   try {
     const pins = await listPins(id)
-    if (turn !== pinGeneration || !visible.value || ticket.value?.id !== id || choice.value.harness !== harness) return
+    if (turn !== pinGeneration || !visible.value || oneOff.value && newTicket.value || ticket.value?.id !== id || choice.value.harness !== harness) return
     const pin = pins.find(item => item.harness === harness && item.account_id)
     if (!pin?.account_id || touch.value.account || !view.value.accounts.some(account => account.value === pin.account_id)) return
     remembered.value = pin.account_id

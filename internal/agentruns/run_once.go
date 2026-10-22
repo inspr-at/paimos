@@ -50,6 +50,9 @@ func validateRunOnce(p tenant.Principal, in CreateInput) error {
 	if in.RequestID == nil || !workorders.UUID(*in.RequestID) {
 		return workorders.Fail(400, "one-off request_id required")
 	}
+	if !workorders.UUID(in.Agent) || !workorders.UUID(in.Profile) || in.Account != nil && !workorders.UUID(*in.Account) {
+		return workorders.Fail(400, "agent, model profile and valid account required")
+	}
 	if in.Instruction != nil && (!utf8.ValidString(*in.Instruction) || len(*in.Instruction) > 8000 || utf8.RuneCountInString(*in.Instruction) > 2000) {
 		return workorders.Fail(400, "one-off instruction exceeds 2000 characters")
 	}
