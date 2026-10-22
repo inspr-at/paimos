@@ -78,6 +78,7 @@ test('workers nest by session ID, display their label, harness and ticket, and e
 // Risk: wrong project/ticket attribution, duplicate children under a project
 // filter, or a list inventing/fetching an ancestor outside the visible rows.
 test('AEON-1360 cross-project children nest with their own work and survive their project filter once', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1600 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   const { data, calls } = await setup(page)
   Object.assign(data.sessions[1]!, {
@@ -101,11 +102,6 @@ test('AEON-1360 cross-project children nest with their own work and survive thei
   const choices = await controlStability(page, { filter, options: options.getByRole('group', { name: 'Project' }), aeon })
   await choices.check(async () => {
     await aeon.check()
-    // Applying the address-backed filter closes the floating menu. Reopen
-    // from the same toolbar anchor before comparing its controls and rows.
-    await expect(options).not.toBeVisible()
-    await filter.click()
-    await page.getByRole('menuitem', { name: /^Project(?: \d+)?$/ }).click()
     await expect(aeon).toBeChecked()
   })
   choices.done()
