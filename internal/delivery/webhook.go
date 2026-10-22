@@ -187,6 +187,28 @@ func documentedWebhookActions(name string) []string {
 // projectWebhook consumes a receipt that has already passed authentication and
 // installation binding. Its ledger remains separate from durable checkpoints.
 func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte, e envelope) (webhookOutcome, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	for attempt := 0; ; attempt++ {
+		outcome, err := m.projectWebhookAttempt(ctx, name, id, raw, e)
+		if !errors.Is(err, pgx.ErrNoRows) || attempt == 2 {
+			return outcome, err
+		}
+		// A queue check can precede the queued-head ledger fact, especially at
+		// startup. Release the observation session between attempts so another
+		// webhook or reconciliation can supply that fact. Retry twice within
+		// the same deadline; persistent misses keep the receipt retryable.
+		delay := time.NewTimer(250 * time.Millisecond * time.Duration(1<<attempt))
+		select {
+		case <-delay.C:
+		case <-ctx.Done():
+			delay.Stop()
+			return webhookFailed, ctx.Err()
+		}
+	}
+}
+
+func (m *Module) projectWebhookAttempt(ctx context.Context, name, id string, raw []byte, e envelope) (webhookOutcome, error) {
 	// Workflow events feed metrics and flow without changing a live delivery
 	// observation. Their receipt checkpoints own those projections.
 	if name == "workflow_run" || name == "workflow_job" {
@@ -198,8 +220,6 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 	if name == "status" && admissionStatusEcho(raw) {
 		return webhookNothingToRecord, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
 	ctx, release, err := m.tryObservationLock(ctx)
 	if err != nil {
 		return webhookFailed, err
