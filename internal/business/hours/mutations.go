@@ -156,9 +156,11 @@ func (m *Module) mutateEntry(w http.ResponseWriter, r *http.Request) {
 			}
 			change.Type, change.After = "time_entry.updated", out
 		}
-		if _, err = m.writer.Append(r.Context(), tx, p, change); err != nil {
+		event, err := m.writer.Append(r.Context(), tx, p, change)
+		if err != nil {
 			return err
 		}
+		events.RecordMutation(r.Context(), event.ID)
 		return bumpPeriod(r.Context(), tx, period.ID)
 	})
 	if err != nil {

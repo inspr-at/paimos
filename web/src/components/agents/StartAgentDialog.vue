@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
-import { listNodes, type WorkNode } from '../../lib/api'
-import { can } from '../../lib/authz'
+import { listNodes, type ListItem, type ListProject, type WorkNode } from '../../lib/api'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import { useProjects } from '../../stores/projects'
 import { deletePin, listPins, putPin, message, type AgentRun, type HarnessSession } from '../../lib/agents'
@@ -15,12 +15,15 @@ import { wroteSince, writeMark } from '../../lib/position'
 import { launchState, staleGrantRejection, startAgent, startAgentCopy } from '../../lib/startAgent'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
+import { canLaunchLead, leadLaunchReason, LEAD_WORDS, readLead, type ProjectLead } from '../../lib/lead'
+import { useWorkQueue } from '../../stores/workQueue'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 
 // Shared by /agents and TicketWorkspace. The cascade is host, harness, account,
 // model, then thinking. Each later step is filled only from the catalog grant.
 const agents = useAgents()
+const queue = useWorkQueue()
 const session = useSession()
 const projects = useProjects()
 const copy = startAgentCopy()
@@ -34,8 +37,9 @@ const mayChangeFiles = ref(false)
 let requestId = '', requestKey = ''
 const projectOptions = computed(() => projects.projects.filter(project => !project.archived && !project.frozen))
 const selectedProject = computed(() => projectOptions.value.find(project => project.id === projectId.value))
+const w = LEAD_WORDS
+const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const uid = useId()
-const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const dialog = ref<HTMLDialogElement>()
 const searchInput = ref<HTMLInputElement>()
 const taskInput = ref<HTMLInputElement>()
@@ -43,7 +47,13 @@ const settingsOpen = ref(false)
 const lastSettingsWarning = ref('')
 const hostSelect = ref<HTMLSelectElement>()
 const tickets = ref<WorkNode[]>([])
-const ticket = ref<WorkNode | null>(null)
+type StartTicket = WorkNode & Partial<Pick<ListItem, 'project'>>
+const ticket = ref<StartTicket | null>(null)
+const dispatchMode = ref<'manual' | 'checking' | 'lead' | 'failed'>('manual')
+const dispatchProject = ref<ListProject | null>(null)
+const projectLead = ref<ProjectLead | null>(null)
+const dispatchError = ref('')
+const queuedForLead = ref(false)
 const query = ref('')
 const searching = ref(false)
 const searchError = ref('')
@@ -77,12 +87,13 @@ let opener: HTMLElement | null = null
 let generation = 0
 let searchGeneration = 0
 let catalogGeneration = 0
+let dispatchGeneration = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 const poll = usePoller(() => { now.value = Date.now(); if (run.value) return refresh() }, 3000, { enabled: () => visible.value && !!run.value })
 const role = computed(() => workRoleFor(oneOff.value && newTicket.value ? null : ticket.value))
 const view = computed(() => presentCascade({ catalog: catalog.value, role: role.value, authorFamily: authorFamily.value }, choice.value, touch.value))
 const piModelBound = computed(() => choice.value.harness === 'pi' && view.value.models.length === 1)
-const cascadeLocked = computed(() => loading.value || catalogGap.value === 'failed' || catalogGap.value === 'forbidden' || catalogGap.value === 'family')
+const cascadeLocked = computed(() => dispatchMode.value !== 'manual' || loading.value || catalogGap.value === 'failed' || catalogGap.value === 'forbidden' || catalogGap.value === 'family')
 const state = computed(() => run.value ? launchState(run.value) : null)
 const sessionConnected = computed(() => !!managed.value && managed.value.phase !== 'stopped')
 const reported = computed(() => sessionConnected.value && managed.value && requested.value ? sessionReport(managed.value, requested.value) : null)
@@ -105,7 +116,7 @@ const readOnlyCapability = computed(() => catalog.value?.hosts.find(h => h.daemo
 const readOnlyReason = computed(() => !oneOff.value || mayChangeFiles.value || !choice.value.harness ? '' : readOnlyCapability.value?.supported && readOnlyCapability.value.policy === 'no_tools' ? '' : readOnlyCapability.value?.reason || 'This account catalog has no qualified read-only one-off adapter. Refresh it or choose another harness.')
 const mayRunNow = computed(() => permitted.value && session.identity?.principal.kind === 'person')
 const contextReady = computed(() => oneOff.value && newTicket.value ? can('nodes.write') && !projects.loading && !projects.error && !!selectedProject.value?.nodeUpdatedAt && !!task.value.trim() : ticket.value?.is_leaf === true)
-const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && contextReady.value && !readOnlyReason.value && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
+const canSubmit = computed(() => dispatchMode.value === 'manual' && permitted.value && !loading.value && !busy.value && !run.value && contextReady.value && !readOnlyReason.value && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
 const settingsSummary = computed(() => loading.value ? copy.loading : copy.runsOn(Object.values(view.value.requested).join(' · ')))
 const settingsWarning = computed(() => loading.value ? '' : [catalogGap.value ? catalogMessage.value : '', readOnlyReason.value, catalog.value && view.value.status.tone === 'warn' ? `${view.value.status.label} ${view.value.status.detail}` : ''].filter(Boolean).join(' '))
 watch(settingsWarning, warning => {
@@ -123,11 +134,72 @@ function resetTask() {
 }
 watch([() => ticket.value?.id, projectId, newTicket], resetTask, { flush: 'sync' })
 watch(person, () => {
-  resetTask(); task.value = ''; searchGeneration++; catalogGeneration++; pinGeneration++
+  resetTask(); task.value = ''; searchGeneration++; catalogGeneration++; pinGeneration++; dispatchGeneration++
   visible.value = false; busy.value = false; checking.value = false
   ticket.value = null; projectId.value = ''; runId.value = ''; managedId.value = ''; requested.value = null
+  dispatchProject.value = null; projectLead.value = null; dispatchMode.value = 'manual'; queuedForLead.value = false
   catalog.value = null; tickets.value = []; poll.stop(); clearTimeout(searchTimer); dialog.value?.close()
 }, { flush: 'sync' })
+const mayQueueForLead = computed(() => session.identity?.principal.kind === 'person' && !!dispatchProject.value && can('run.create', dispatchProject.value.id))
+const canQueueForLead = computed(() => dispatchMode.value === 'lead' && mayQueueForLead.value && !busy.value && !queue.busy && !queuedForLead.value && ticket.value?.is_leaf === true)
+const dismissLabel = computed(() => queuedForLead.value ? 'Close' : 'Cancel')
+const submitIcon = computed(() => busy.value ? 'clock' : dispatchMode.value === 'lead' ? queuedForLead.value ? 'check' : 'queue-add' : 'arrow')
+
+// Read the selected project's policy before asking for manual launch choices.
+// A delayed answer belongs only to this ticket revision and dialog opening.
+async function checkDispatch() {
+  const selected = ticket.value, turn = ++dispatchGeneration
+  dispatchMode.value = selected ? 'checking' : 'manual'
+  dispatchProject.value = null; projectLead.value = null; dispatchError.value = ''; queuedForLead.value = false; error.value = ''; grantStale.value = false
+  catalogGeneration++; catalog.value = null; loading.value = false
+  if (oneOff.value) { dispatchMode.value = 'manual'; void loadCatalog(); return }
+  if (!selected) return
+  const { id, updated_at: revision } = selected
+  const current = () => turn === dispatchGeneration && visible.value && ticket.value?.id === id && ticket.value?.updated_at === revision
+  try {
+    // Search rows already carry the project; node-only entry points resolve it
+    // with one bounded list read rather than guessing from a key or parent.
+    let project = selected.project
+    if (project === undefined) {
+      const page = await listNodes({ ids: [selected.id], shape: ['leaf'], limit: 1, rollups: 'omit' })
+      if (!current()) return
+      project = page.items.find(item => item.id === selected.id && item.is_leaf === true)?.project
+      if (project === undefined) throw new Error('The ticket’s project could not be read. Choose the ticket again.')
+    }
+    if (project) {
+      const lead = await readLead(project.id)
+      if (!current()) return
+      if (lead.project_id !== project.id || !Number.isSafeInteger(lead.revision) || lead.revision < 0) throw new Error('The project’s start settings could not be read.')
+      dispatchProject.value = project
+      projectLead.value = lead
+      if (lead.revision > 0) { dispatchMode.value = 'lead'; return }
+    }
+    if (!current()) return
+    dispatchMode.value = 'manual'
+    void loadCatalog()
+  } catch (e) {
+    if (!current()) return
+    dispatchMode.value = 'failed'
+    dispatchError.value = `Start settings could not be checked. ${message(e)}`
+  }
+}
+
+async function queueForLead() {
+  if (!canQueueForLead.value || !ticket.value || !dispatchProject.value) return
+  const { id, updated_at: revision } = ticket.value, project = dispatchProject.value.id, turn = generation
+  const identity = () => `${session.identity?.tenant?.id}:${session.identity?.principal.id}`
+  const actor = identity()
+  const current = () => turn === generation && visible.value && identity() === actor && ticket.value?.id === id && ticket.value?.updated_at === revision && dispatchProject.value?.id === project
+  busy.value = true; error.value = ''
+  try {
+    const result = await queue.add(project, id)
+    if (!current()) return
+    if (!result || result.node_id !== id) throw new Error('The queue addition could not be confirmed. Reload before trying again.')
+    queuedForLead.value = true
+    void agents.afterWrite()
+  } catch (e) { if (current()) error.value = message(e) }
+  finally { if (turn === generation) busy.value = false }
+}
 
 async function search(more = false) {
   const turn = ++searchGeneration
@@ -176,15 +248,15 @@ function setFamily(value: string) {
   choice.value = emptyChoice()
   void loadCatalog()
 }
-function selectTicket(item: WorkNode) {
-  if (item.is_leaf !== true) return
+function selectTicket(item: StartTicket) {
+  if (busy.value || item.is_leaf !== true) return
   ticket.value = item
   authorFamily.value = authorFamilyFor(item)
   touch.value = emptyTouch()
   choice.value = emptyChoice()
   remember.value = false
   remembered.value = ''
-  void loadCatalog()
+  void checkDispatch()
 }
 let pinGeneration = 0
 watch([() => oneOff.value && newTicket.value ? undefined : ticket.value?.id, () => choice.value.harness, catalog], async () => {
@@ -202,7 +274,7 @@ watch([() => oneOff.value && newTicket.value ? undefined : ticket.value?.id, () 
     remember.value = true
   } catch { /* A missing pin leaves the checkbox clear. */ }
 })
-async function open(initial?: WorkNode, mode: 'expert' | 'once' = 'expert') {
+async function open(initial?: StartTicket, mode: 'expert' | 'once' = 'expert') {
   if (busy.value) return
   opener = document.activeElement as HTMLElement
   generation++; visible.value = true
@@ -215,7 +287,8 @@ async function open(initial?: WorkNode, mode: 'expert' | 'once' = 'expert') {
   runId.value = ''; requested.value = null; managedId.value = ''; reused.value = false
   error.value = ''; checkError.value = ''; searchError.value = ''; grantStale.value = false; checking.value = false
   dialog.value?.showModal()
-  void loadCatalog()
+  void checkDispatch()
+  if (!oneOff.value && !ticket.value) void loadCatalog()
   if (oneOff.value) void projects.load(true)
   if (!ticket.value) void search()
   poll.start()
@@ -224,13 +297,14 @@ async function open(initial?: WorkNode, mode: 'expert' | 'once' = 'expert') {
   else if (ticket.value) hostSelect.value?.focus()
   else searchInput.value?.focus()
 }
-function openOnce(initial?: WorkNode) { return open(initial, 'once') }
+function openOnce(initial?: StartTicket) { return open(initial, 'once') }
 function escape() {
   const active = document.activeElement
-  if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement && ['text', 'search'].includes(active.type)) { active.blur(); return }
+  if (active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement || active instanceof HTMLInputElement && ['text', 'search'].includes(active.type)) { active.blur(); return }
   close()
 }
 function formKey(event: KeyboardEvent) {
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); escape(); return }
   if (event.key !== 'Enter') return
   if (!event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) {
     event.preventDefault(); event.stopPropagation(); void submit()
@@ -238,7 +312,7 @@ function formKey(event: KeyboardEvent) {
 }
 function close() {
   if (busy.value) return
-  generation++; searchGeneration++; catalogGeneration++; visible.value = false
+  generation++; searchGeneration++; catalogGeneration++; dispatchGeneration++; visible.value = false
   poll.stop(); clearTimeout(searchTimer)
   dialog.value?.close(); opener?.focus({ preventScroll: true })
 }
@@ -249,11 +323,13 @@ function changeTicket() {
   choice.value = emptyChoice()
   remember.value = false
   remembered.value = ''
+  void checkDispatch()
   void loadCatalog()
   void search()
   void nextTick(() => searchInput.value?.focus())
 }
 async function submit(runNow = false) {
+  if (dispatchMode.value === 'lead') { if (!runNow) await queueForLead(); return }
   if (!canSubmit.value) return
   const context = oneOff.value && newTicket.value && selectedProject.value
     ? { id: selectedProject.value.id, updated_at: selectedProject.value.nodeUpdatedAt! } as WorkNode
@@ -321,7 +397,11 @@ async function refresh() {
   } catch { if (turn === generation) checkError.value = 'Status could not be refreshed. The last reported state is shown.' }
   finally { if (turn === generation) checking.value = false }
 }
-onBeforeUnmount(() => { narrowQuery?.removeEventListener('change', onNarrow); generation++; searchGeneration++; catalogGeneration++; poll.stop(); clearTimeout(searchTimer) })
+const stopAccess = onAccessRevalidate({ reset: () => {
+  busy.value = false; close()
+  ticket.value = null; dispatchProject.value = null; projectLead.value = null; dispatchMode.value = 'manual'; queuedForLead.value = false
+} })
+onBeforeUnmount(() => { stopAccess(); narrowQuery?.removeEventListener('change', onNarrow); generation++; searchGeneration++; catalogGeneration++; dispatchGeneration++; poll.stop(); clearTimeout(searchTimer) })
 defineExpose({ open, openOnce })
 </script>
 
@@ -392,6 +472,7 @@ defineExpose({ open, openOnce })
             <p v-if="settingsWarning || lastSettingsWarning" class="note settings-status" :class="{ resolved: !settingsWarning }" :role="settingsWarning ? 'status' : undefined" :aria-hidden="!settingsWarning || undefined">{{ settingsWarning || lastSettingsWarning }}</p>
             <button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button>
           </div>
+          <template v-if="dispatchMode === 'manual'">
           <div v-show="!oneOff || settingsOpen" :id="`${uid}-settings`" class="run-settings-fields" :aria-label="oneOff ? copy.settings : undefined">
           <p v-if="view.roleNote && role.source !== 'default'" class="note role-note">{{ view.roleNote }}</p>
           <div v-if="role.role === 'review-gate'" class="select-field">
@@ -450,14 +531,24 @@ defineExpose({ open, openOnce })
           </div>
           </div>
           </div>
+          </template>
         </fieldset>
 
-        <div v-if="!oneOff && !loading && !catalogGap && catalog" class="dispatch-status" :class="{ warn: view.status.tone === 'warn' }" role="status"><AppIcon :name="view.status.tone === 'warn' ? 'clock' : 'info'" :size="17" /><div><strong>{{ view.status.label }}</strong><p>{{ view.status.detail }}</p></div></div>
-        <div v-if="!oneOff && (catalogGap === 'failed' || catalogGap === 'forbidden')" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
-        <div v-if="error" class="error" role="alert"><p>{{ error }}</p><button v-if="grantStale" type="button" class="btn sm" @click="loadCatalog">Refresh catalog</button></div>
-        <p v-if="!permitted" class="note">Starting an agent requires work-order write and run-create permission.</p>
+        <div v-if="dispatchMode === 'lead'" class="lead-notice" role="status">
+          <strong>This project starts work through its {{ w.l }}.</strong>
+          <p>{{ queuedForLead ? `Queued for the ${w.l}. Nothing has started yet.` : `Queue this ticket for the ${w.l}; it chooses the host, harness, account, model and thinking when dispatching work.` }}</p>
+          <p v-if="!canLaunchLead(projectLead)">{{ leadLaunchReason(projectLead) }} Queued work stays queued.</p>
+          <p v-else-if="projectLead?.state === 'paused'">The {{ w.l }} is paused. Queued work waits until it resumes.</p>
+          <p v-if="!mayQueueForLead">Queueing for the {{ w.l }} requires a person with permission to queue work in this project.</p>
         </div>
-        <footer><button type="button" class="btn" :disabled="busy" @click="close">Cancel</button><button v-if="mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">{{ copy.skipWait }}</button><button type="submit" class="btn primary" :disabled="!canSubmit" :aria-label="busy ? copy.queueing : copy.queue" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'"><AppIcon :name="busy ? 'clock' : 'arrow'" :size="15" /><span class="queue-label"><span :class="{ inactive: busy }">{{ copy.queue }}</span><span :class="{ inactive: !busy }">{{ copy.queueing }}</span></span><KeyCap k="mod" /><KeyCap k="enter" /></button></footer>
+        <p v-else-if="dispatchMode === 'checking'" class="note" role="status">Checking how this project starts work…</p>
+        <div v-else-if="dispatchMode === 'failed'" class="error" role="alert"><p>{{ dispatchError }}</p><button type="button" class="btn sm" @click="checkDispatch">Retry start settings</button></div>
+        <div v-if="!oneOff && dispatchMode === 'manual' && !loading && !catalogGap && catalog" class="dispatch-status" :class="{ warn: view.status.tone === 'warn' }" role="status"><AppIcon :name="view.status.tone === 'warn' ? 'clock' : 'info'" :size="17" /><div><strong>{{ view.status.label }}</strong><p>{{ view.status.detail }}</p></div></div>
+        <div v-if="!oneOff && dispatchMode === 'manual' && (catalogGap === 'failed' || catalogGap === 'forbidden')" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
+        <div v-if="error" class="error" role="alert"><p>{{ error }}</p><button v-if="grantStale" type="button" class="btn sm" @click="loadCatalog">Refresh catalog</button></div>
+        <p v-if="dispatchMode === 'manual' && !permitted" class="note">Starting an agent requires work-order write and run-create permission.</p>
+        </div>
+        <footer><button type="button" class="btn" :disabled="busy" @click="close"><span class="queue-label"><span>{{ dismissLabel }}</span><span aria-hidden="true">Cancel</span><span aria-hidden="true">Close</span></span><KeyCap k="Esc" class="hint" aria-hidden="true" /></button><button v-if="dispatchMode === 'manual' && mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">{{ copy.skipWait }}</button><button type="submit" class="btn primary" :disabled="dispatchMode === 'lead' ? !canQueueForLead : !canSubmit" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'"><AppIcon :name="submitIcon" :size="15" /><span class="queue-label"><span>{{ dispatchMode === 'lead' ? queuedForLead ? 'Queued' : busy ? 'Queueing…' : `Queue for ${w.l}` : busy ? copy.queueing : copy.queue }}</span><span aria-hidden="true">Queue for {{ w.l }}</span><span aria-hidden="true">{{ copy.queue }}</span><span aria-hidden="true">{{ copy.queueing }}</span></span><KeyCap k="mod" class="hint" aria-hidden="true" /><KeyCap k="enter" class="hint" aria-hidden="true" /></button></footer>
       </template>
 
       <template v-else>
@@ -522,6 +613,9 @@ defineExpose({ open, openOnce })
 .queue-label > span { grid-area: 1 / 1; }
 .queue-label .inactive { visibility: hidden; }
 .launch-head { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }
+.lead-notice { margin-top: 18px; font-size: 14px; line-height: 1.6; }
+.lead-notice p { margin-top: 8px; color: var(--ink-2); }
+.queue-label > [aria-hidden] { visibility: hidden; }
 .launch-head h2 { font-size: 21px; letter-spacing: -.4px; }
 .launch-head .icon-btn { margin-left: auto; flex-shrink: 0; }
 .result-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--row-selected); color: var(--teal-ink); flex-shrink: 0; }
@@ -555,7 +649,7 @@ label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; c
 .error { color: var(--danger); background: var(--danger-bg); border-radius: 10px; padding: 12px; margin-top: 14px; font-size: 13px; line-height: 1.5; }
 .error .btn { margin-top: 8px; }
 .bad { color: var(--danger); }
-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+footer { order: 1; display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
 footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
 @media (pointer: coarse), (max-width: 600px) { footer .btn, .remember { min-height: 44px; } }
 .run-result { display: grid; justify-items: center; text-align: center; padding: 14px 0; gap: 12px; outline: none; }
@@ -575,7 +669,7 @@ footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
 .pair.pi-bound { grid-template-columns: minmax(0, 1fr) 130px; }
 .field.pinned-model { font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; }
 @media (max-width: 600px) {
-  .launch-dialog { inset: 0; transform: none; max-height: 100dvh; height: 100dvh; width: 100%; border-radius: 0; }
+  .launch-dialog { inset: 0; transform: none; max-height: 100dvh; height: 100dvh; width: 100%; max-width: 100vw; border-radius: 0; }
   .launch-dialog.run-once { max-width: none; }
   .launch-card { padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); height: 100%; max-height: 100dvh; }
   .launch-body { flex: 1; }
@@ -584,7 +678,7 @@ footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
   .launch-head { margin-bottom: 14px; }
   .launch-fields, .run-settings-fields { gap: 14px; }
   .dispatch-status { margin-top: 16px; }
-  footer { margin-top: 18px; padding-top: 16px; }
+  footer { order: 3; margin: 16px 0 0; padding: 16px 0 0; border-bottom: 0; border-top: 1px solid var(--line); }
   .launch-head .icon-btn { width: 44px; height: 44px; }
   .chosen-ticket { flex-wrap: wrap; }
   .chosen-ticket .btn { min-height: 44px; }
