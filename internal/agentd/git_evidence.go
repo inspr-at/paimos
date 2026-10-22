@@ -5,6 +5,7 @@ package agentd
 import (
 	"context"
 	"fmt"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"os"
 	"os/exec"
 	"strings"
@@ -178,7 +179,7 @@ func gitOutput(ctx context.Context, workspace string, args ...string) (string, e
 	cmd := exec.CommandContext(ctx, "git", append([]string{"--no-pager"}, args...)...)
 	cmd.Dir = workspace
 	cmd.Stdin = nil
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_PAGER=cat")
+	cmd.Env = append(harnesslaunch.WithoutTransportCredentials(os.Environ()), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_PAGER=cat")
 	raw, err := cmd.Output()
 	if err != nil {
 		return "", err

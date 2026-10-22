@@ -5,11 +5,10 @@ import { can, onAccessRevalidate } from '../../lib/authz'
 import { displayLanguage } from '../../lib/displayLanguage'
 import { deskPushBrowser, deviceSubscriptionHash, phoneRequest, phoneSettings, setDeskSubscription, type PhoneSettings } from '../../lib/phoneApprovals'
 import { useIdentityScope } from '../../lib/useIdentityScope'
-import { useProfile } from '../../stores/profile'
 import { useSession } from '../../stores/session'
 
-const profile = useProfile(), session = useSession()
-const de = computed(() => displayLanguage(profile.profile?.locale) === 'de')
+const session = useSession()
+const de = computed(() => displayLanguage() === 'de')
 const text = (en: string, german: string) => de.value ? german : en
 const settings = ref<PhoneSettings | null>(null), hash = ref(''), busy = ref(false), failed = ref(false)
 const browser = ref(deskPushBrowser())

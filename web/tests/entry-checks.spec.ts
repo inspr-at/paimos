@@ -164,6 +164,10 @@ test('AEON-1315 entry checklist preserves controls and refuses or audits status 
   await mockWork(page, data)
   let defined = true, agent = false, checked = false
   const entries: EntryRecord[] = [], moves: { state: string; override_reason?: string }[] = []
+  // Keep the audited move pending until the click completes. Its assertion
+  // must wait for the write response, regardless of request scheduling.
+  let releaseOverride!: () => void
+  const overrideGate = new Promise<void>(resolve => { releaseOverride = resolve })
   const check = (id: string, label: string, passed: boolean, extra: Partial<EntryCheck> = {}): EntryCheck => ({ id, label, applicable: true, passed, reason: passed ? '' : 'Required before this status', can_tick: false, ...extra })
   const block = (to_status: string, checks: EntryCheck[]): EntryBlock => ({ to_status, checks, total: checks.filter(c => c.applicable).length, passed: checks.filter(c => c.applicable && c.passed).length })
   const snapshot = (): EntryChecks => ({ node_id: node.id, revision: node.updated_at,
@@ -187,6 +191,7 @@ test('AEON-1315 entry checklist preserves controls and refuses or audits status 
       const body = request.postDataJSON() as { state?: string; override_reason?: string; fields?: Record<string, unknown> }
       const result = snapshot().blocks.find(b => b.to_status === body.state), missing = result?.checks.filter(c => c.applicable && !c.passed) ?? []
       if (missing.length && (!body.override_reason?.trim() || agent)) return json({ error: 'entry_checks_failed', code: 'entry_checks_failed', to_status: body.state, failed: missing, override_allowed: !agent }, 409)
+      if (body.override_reason) await overrideGate
       if (body.state) { moves.push({ state: body.state, override_reason: body.override_reason }); node.state = body.state; if (result) entries.push({ ...result, by: me, at: node.updated_at, override_reason: missing.length ? body.override_reason! : null, definition_id: 'definition', definition_revision: node.created_at }) }
       if (body.fields) node.fields = body.fields
       forward(); return json(wire())
@@ -216,7 +221,15 @@ test('AEON-1315 entry checklist preserves controls and refuses or audits status 
   await expect(refused.getByRole('textbox', { name: 'Why move it now?' })).toBeVisible()
   await expect(move).toBeDisabled()
   await refused.getByRole('textbox', { name: 'Why move it now?' }).fill('Time-sensitive review; evidence follows the approved work')
+  const overridden = page.waitForResponse(response => {
+    const request = response.request()
+    return new URL(response.url()).pathname === `/api/nodes/${node.id}` && request.method() === 'PATCH'
+      && request.postDataJSON().state === 'qa' && request.postDataJSON().override_reason === 'Time-sensitive review; evidence follows the approved work'
+  })
   await move.click()
+  expect(moves).toEqual([])
+  releaseOverride()
+  expect((await overridden).status()).toBe(200)
   expect(moves.at(-1)).toEqual({ state: 'qa', override_reason: 'Time-sensitive review; evidence follows the approved work' })
   await expect(workspace.getByRole('button', { name: 'Done 1/2 · waiting for you' })).toBeVisible()
   for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark']) {

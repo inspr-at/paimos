@@ -73,7 +73,7 @@ func NeedsNode(path string) (_ bool, resultErr error) {
 // and Node injection settings with the reviewed interpreter and service PATH.
 func Environment(base []string, nodePath string) []string {
 	result := make([]string, 0, len(base)+1)
-	for _, entry := range base {
+	for _, entry := range WithoutTransportCredentials(base) {
 		key, _, _ := strings.Cut(entry, "=")
 		if key != "PATH" && key != "NODE_OPTIONS" && key != "NODE_PATH" {
 			result = append(result, entry)
@@ -119,4 +119,28 @@ func Validate(path, nodePath string) (resultErr error) {
 		return ErrStart
 	}
 	return nil
+}
+
+// WithoutTransportCredentials removes daemon credentials from every inherited
+// child environment, including aliases containing an Aeon credential value.
+// Provider/account credentials keep their existing separate launch policy.
+func WithoutTransportCredentials(base []string) []string {
+	out := make([]string, 0, len(base))
+	for _, entry := range base {
+		key, value, _ := strings.Cut(entry, "=")
+		upper := strings.ToUpper(key)
+		private := false
+		if strings.HasPrefix(upper, "AEON_") || strings.HasPrefix(upper, "PAIMOS_") {
+			for _, part := range []string{"TOKEN", "SECRET", "KEY", "PASSWORD", "CREDENTIAL", "DATABASE", "COOKIE"} {
+				if strings.Contains(upper, part) {
+					private = true
+					break
+				}
+			}
+		}
+		if !private && !strings.Contains(value, "aeon_") && !strings.Contains(value, "Aeon-Worker ") {
+			out = append(out, entry)
+		}
+	}
+	return out
 }

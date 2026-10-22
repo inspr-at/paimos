@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
+import { createPinia } from 'pinia'
 import { draftFor, type DeskItem, type DeskOutcomeAvailability, type DeskTicket } from '../src/lib/decisionDesk'
 import { approvalItem } from '../src/lib/decisionDeskApi'
 import DecisionDeskMemo from '../src/components/agents/DecisionDeskMemo.vue'
@@ -41,6 +42,8 @@ async function htmlFor(item: DeskItem, extra: { ticket?: (row: DeskItem) => Desk
     items: [item], round: [item.id], start: item.id, arrivalsCount: 0, allowed: () => true, decide: vi.fn(async () => item), ...extra,
   }) })
   app.component('RouterLink', { props: ['to'], setup: (_, { slots }) => () => slots.default?.() })
+  // AEON-1632: ticket links read their project's address from the projects store.
+  app.use(createPinia())
   return renderToString(app)
 }
 function tag(html: string, testId: string): string {

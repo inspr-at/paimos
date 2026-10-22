@@ -444,6 +444,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/lead-decisions", "nodes.read", false, 200, m.listLeadDecisions},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/lead-decisions", "harness.worker", true, 200, m.recordLeadDecision},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.read", false, 200, m.readRulesReceipts},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-delivery-manifest", "harness.worker", true, 200, m.prepareRulesDelivery},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-delivery-evidence", "harness.worker", true, 200, m.acknowledgeRulesDelivery},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-delivery-evidence", "harness.read", false, 200, m.readRulesDelivery},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.worker", true, 200, m.recordRulesReceipt},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/pause", "harness.control", false, 200, m.requestPause},
@@ -479,7 +482,12 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/archive", "harness.recover", false, 200, m.archive},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop", "harness.force_stop", false, 201, m.forceStop},
 	} {
-		handler := workorders.Endpoint(m.pool, route.scope, route.agent, route.status, route.fn)
+		handler := workorders.Endpoint(m.pool, route.scope, route.agent, route.status, func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+			return workqueue.PersonAdmissionTx(r.Context(), tx, p, route.pattern, func(step pgx.Tx) (any, error) { return route.fn(r, step, p) })
+		})
+		if workerlease.SafetyRoute(&http.Request{Pattern: route.pattern}) {
+			handler = workorders.WorkerSafetyEndpoint(m.pool, route.status, safetyHandler(route.fn))
+		}
 		if route.pattern == "GET /api/projects/{projectId}/harness-sessions/{sessionId}" || route.pattern == "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat" {
 			handler = reportercontract.WithHeader(reportercontract.HarnessSession, handler)
 		} else if route.pattern == "GET /api/projects/{projectId}/lead" {
@@ -870,6 +878,9 @@ func worker(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal)
 	return s, proof(s, r, p)
 }
 func record(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, kind string, before, after any) error {
+	if workorders.WorkerSafetyOnly(ctx) {
+		before, after = safetyMetadata(before), safetyMetadata(after)
+	}
 	if batch, ok := ctx.Value(controlEventKey{}).(*controlEventBatch); ok {
 		return batch.add(p, s, kind, before, after)
 	}
@@ -1137,6 +1148,9 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if agentKind != "agent" {
 		return nil, workorders.Fail(400, "agent principal required")
 	}
+	if p.RunID != "" && (in.RunID == nil || *in.RunID != p.RunID) {
+		return nil, workorders.Fail(403, "run capability target mismatch")
+	}
 	if in.RunID != nil {
 		var agentID, orderID string
 		err = tx.QueryRow(ctx, `SELECT agent_principal_id::text,work_order_id::text FROM agent_runs WHERE id=$1`, *in.RunID).Scan(&agentID, &orderID)
@@ -1173,13 +1187,33 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		return nil, err
 	}
 	var owner *string
-	ownerID := p.KeyCreatorID
+	ownerID := ""
+	if in.RunID == nil && in.ParentID == nil {
+		ownerID = p.KeyCreatorID
+	}
 	if p.Kind == tenant.Person {
 		ownerID = p.ID
 	}
 	if ownerID != "" {
 		if err = tx.QueryRow(ctx, `SELECT coalesce(linked_to,id)::text FROM principals WHERE id=$1 AND kind='person'`, ownerID).Scan(&owner); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, err
+		}
+	}
+	if in.RunID != nil {
+		if err := tx.QueryRow(ctx, `SELECT acting_person_id::text FROM agent_runs WHERE tenant_id=$1 AND id=$2`, p.TenantID, *in.RunID).Scan(&owner); err != nil {
+			return nil, err
+		}
+	}
+	if in.ParentID != nil {
+		var parentPerson *string
+		if err := tx.QueryRow(ctx, `SELECT r.acting_person_id::text FROM harness_sessions s LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id WHERE s.tenant_id=$1 AND s.id=$2 AND s.project_id=$3`, p.TenantID, *in.ParentID, projectID).Scan(&parentPerson); err != nil {
+			return nil, err
+		}
+		if parentPerson != nil {
+			if owner != nil && *owner != *parentPerson {
+				return nil, workorders.Fail(409, "run_person_conflict")
+			}
+			owner = parentPerson
 		}
 	}
 	var expired *Session
@@ -1742,6 +1776,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	if !validPhase(in.Phase) || in.ActivitySequence < 0 {
 		return nil, workorders.Fail(400, "invalid heartbeat")
 	}
+	if p.TransportComputerID != "" && p.RunID == "" && !in.AttachedHook {
+		return nil, workorders.Fail(403, "exact attached hook identity required")
+	}
 	ctx := r.Context()
 	if in.AttachedHook {
 		if err := agentpairing.LockMutation(ctx, tx); err != nil {
@@ -1998,6 +2035,9 @@ func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	case "stopped", "process_exited", "process_failed", "ownership_lost", "force_stopped", "token_budget_exhausted", "turn_budget_exhausted", "paused":
 	default:
 		return nil, workorders.Fail(400, "invalid stop reason")
+	}
+	if safetyOnly(r.Context()) && (in.Handover != nil || in.Reason == "paused") {
+		return nil, workorders.Fail(403, "safety stop cannot carry a handover")
 	}
 	ctx := r.Context()
 	s, err := worker(ctx, tx, r, p)

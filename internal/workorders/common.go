@@ -76,6 +76,26 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 // EndpointPrepared decodes/prepares before acquiring the final transaction's
 // fences. The request shares one deadline across both phases.
 func EndpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status int, prepare func(*http.Request, tenant.Principal) (*http.Request, error), fn func(*http.Request, pgx.Tx, tenant.Principal) (any, error)) http.HandlerFunc {
+	return endpointPrepared(pool, scope, agentOnly, status, prepare, fn, false)
+}
+
+type workerSafetyKey struct{}
+
+// WorkerSafetyOnly marks the exact worker stop/yield fallback. Its handlers
+// must prove the target lease and return only allowlisted control metadata.
+func WorkerSafetyOnly(ctx context.Context) bool {
+	value, _ := ctx.Value(workerSafetyKey{}).(bool)
+	return value
+}
+
+// WorkerSafetyEndpoint retains live transport-key admission, but lets an exact
+// worker stop or yield after its run person loses authority. No other endpoint
+// may use this exception; content and new execution remain person-bound.
+func WorkerSafetyEndpoint(pool *pgxpool.Pool, status int, fn func(*http.Request, pgx.Tx, tenant.Principal) (any, error)) http.HandlerFunc {
+	return endpointPrepared(pool, "harness.worker", true, status, nil, fn, true)
+}
+
+func endpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status int, prepare func(*http.Request, tenant.Principal) (*http.Request, error), fn func(*http.Request, pgx.Tx, tenant.Principal) (any, error), workerSafety bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		p, ok := tenant.PrincipalFrom(r.Context())
@@ -145,13 +165,35 @@ func EndpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status i
 			// Replacing it with the bearer row can widen secondary permissions or
 			// hide the target before that check reports a revoked grant.
 			if lease := workerlease.Read(r); lease != "" {
-				p, err = db.WorkerRunPrincipalTx(r.Context(), tx, p, lease)
+				if workerSafety {
+					p, err = db.WorkerSessionPrincipalTx(r.Context(), tx, p, r.PathValue("projectId"), r.PathValue("sessionId"), lease)
+				} else {
+					p, err = db.WorkerRunPrincipalTx(r.Context(), tx, p, lease)
+				}
 				if err != nil {
 					return Fail(403, "run principal rejected")
 				}
 				r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 				if err := RefreshPrincipal(r.Context(), tx, p); err != nil {
 					return err
+				}
+			}
+			if workerSafety && (p.KeyPersonID != "" || p.TransportComputerID != "") {
+				project, session := r.PathValue("projectId"), r.PathValue("sessionId")
+				if !UUID(project) || !UUID(session) || workerlease.Read(r) == "" {
+					return Fail(403, "harness worker proof rejected")
+				}
+				authorityErr := authz.RequireTx(r.Context(), tx, p, scope, authz.Scope{ProjectID: project})
+				if authorityErr != nil && !errors.Is(authorityErr, authz.ErrForbidden) {
+					return authorityErr
+				}
+				if authorityErr != nil || p.TransportComputerID != "" && p.RunID == "" {
+					// This view exists only inside an allowlisted safety handler.
+					// Its exact target lease is still required before any mutation.
+					if _, err := tx.Exec(r.Context(), `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.visible_nodes','',true)`, "{"+project+"}"); err != nil {
+						return err
+					}
+					r = r.WithContext(context.WithValue(r.Context(), workerSafetyKey{}, true))
 				}
 			}
 			result, err = fn(r, tx, p)

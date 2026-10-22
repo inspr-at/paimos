@@ -145,8 +145,8 @@ func (m *Module) notificationHint(r *http.Request, p tenant.Principal, eventID i
 		if err := proof(s, r, p); err != nil {
 			return err
 		}
-		if s.Management != "managed" {
-			return workorders.Fail(409, "managed worker required")
+		if s.Management != "managed" && !has(s, "attached_reconnect_v1") {
+			return workorders.Fail(409, "managed worker or paired attached hook required")
 		}
 		if eventID == 0 {
 			return nil
@@ -160,7 +160,7 @@ func (m *Module) notificationHint(r *http.Request, p tenant.Principal, eventID i
     AND e.node_id=$3::uuid AND (e.after->>'session_id'=$4 OR e.after->>'id'=$4 OR e.after->'session'->>'id'=$4))
    OR EXISTS(SELECT 1 FROM inbox_messages m WHERE m.tenant_id=$1 AND m.sent_event_id=$2
     AND m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.recipient_principal_id=$5::uuid
-    AND (m.recipient_session_id IS NULL OR m.recipient_session_id=$4::uuid))`, p.TenantID, eventID, s.ProjectID, s.ID, s.AgentPrincipalID).Scan(&relevant)
+    AND ((m.recipient_session_id IS NULL AND $6) OR m.recipient_session_id=$4::uuid))`, p.TenantID, eventID, s.ProjectID, s.ID, s.AgentPrincipalID, s.Management == "managed").Scan(&relevant)
 	})
 	return relevant, err
 }

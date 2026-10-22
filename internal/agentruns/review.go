@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 // BindRoutineCompletion records durable continuation demand from accepted
@@ -33,7 +34,7 @@ func BindRoutineCompletion(boundary httpapi.Module, completion UsageRecorder) er
 // QueueRoutineFixTx retains the previous writer's order and checkout identity.
 // Its caller resolves the current registry route and persists the shared budget
 // hold and launch before committing. Ordinary HTTP clients cannot use it.
-func QueueRoutineFixTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, routine, previous, profile, account string, trace json.RawMessage) (Run, error) {
+func QueueRoutineFixTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, routine, previous, profile, account string, trace json.RawMessage, pending *[]events.Change) (Run, error) {
 	var order, agent, project, owner string
 	err := tx.QueryRow(ctx, `SELECT ar.work_order_id::text,ar.agent_principal_id::text,r.output_project_id::text,r.owner_principal_id::text FROM agent_runs ar JOIN routine_attempts a ON a.agent_run_id=ar.id JOIN routine_runs r ON r.id=a.run_id WHERE ar.id=$1 AND r.id=$2 AND a.role IN ('build','fix') AND ar.status IN ('completed','failed') AND ar.account_id=$3`, previous, routine, account).Scan(&order, &agent, &project, &owner)
 	if err != nil {
@@ -54,7 +55,19 @@ func QueueRoutineFixTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, routi
 	if err := tx.QueryRow(ctx, `SELECT m.model FROM model_profiles m JOIN agent_accounts a ON a.harness=m.harness WHERE m.id=$1 AND m.enabled AND a.id=$2 AND a.registered_by_principal_id=$3 AND aeon_account_allows_profile(a.harness,a.allowed_model_profile_ids,m.id)`, profile, account, agent).Scan(&model); err != nil {
 		return Run{}, err
 	}
-	return scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,prefs_person_id,retry_of_run_id,trace) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+columns, p.TenantID, order, agent, profile, model, account, p.ID, previous, trace))
+	actingPerson, err := workqueue.ResolveRunPersonTx(ctx, tx, p, "fix", previous)
+	if err != nil {
+		return Run{}, err
+	}
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,prefs_person_id,retry_of_run_id,trace) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+columns, p.TenantID, order, agent, profile, model, account, p.ID, previous, trace))
+	if err != nil {
+		return Run{}, err
+	}
+	if err := bindRunPerson(ctx, tx, p, &v, actingPerson, "fix", pending); err != nil {
+		return Run{}, err
+	}
+
+	return v, nil
 }
 
 // QueueReview is the narrow cross-principal dispatch path. It requires an
@@ -79,6 +92,14 @@ func QueueReviewDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, o w
 	if o.Kind != "review" || o.Review == nil || o.Review.ProfileID == nil || *o.Review.ProfileID != profileID || o.Assignee == nil || *o.Assignee != agentID || o.Review.ReviewerFamily == nil || *o.Review.ReviewerFamily == o.Review.AuthorFamily || !reviewgate.ValidFamily(o.Review.AuthorFamily) {
 		return Run{}, workorders.Fail(409, "independent review binding required")
 	}
+	personRule, personSource := "personal", ""
+	if o.Review.AuthorRunID != nil {
+		personRule, personSource = "review", *o.Review.AuthorRunID
+	}
+	actingPerson, err := workqueue.ResolveRunPersonTx(ctx, tx, p, personRule, personSource)
+	if err != nil {
+		return Run{}, err
+	}
 	if err := dispatchable(ctx, tx, o); err != nil {
 		return Run{}, err
 	}
@@ -94,7 +115,7 @@ func QueueReviewDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, o w
 		return Run{}, err
 	}
 	var model, harness, family string
-	err := tx.QueryRow(ctx, `SELECT p.model,p.harness,p.family FROM model_profiles p JOIN agent_accounts a ON a.tenant_id=p.tenant_id AND a.harness=p.harness
+	err = tx.QueryRow(ctx, `SELECT p.model,p.harness,p.family FROM model_profiles p JOIN agent_accounts a ON a.tenant_id=p.tenant_id AND a.harness=p.harness
         WHERE p.id=$1 AND a.id=$2 AND a.registered_by_principal_id=$3 AND p.enabled AND p.family=$4
         AND aeon_account_allows_profile(a.harness,a.allowed_model_profile_ids,p.id)`, profileID, accountID, agentID, *o.Review.ReviewerFamily).Scan(&model, &harness, &family)
 	if err != nil {
@@ -128,6 +149,9 @@ func QueueReviewDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, o w
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+columns, p.TenantID, o.NodeID, agentID, profileID, model, accountID, modelprefs.Stamp(residency), personID, trace))
 	if err != nil {
 		return v, err
+	}
+	if err = bindRunPerson(ctx, tx, p, &v, actingPerson, personRule, pending); err != nil {
+		return Run{}, err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE work_order_reviews SET run_id=$2 WHERE work_order_id=$1 AND run_id IS NULL`, o.NodeID, v.ID); err != nil {
 		return v, err

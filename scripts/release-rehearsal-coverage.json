@@ -9,7 +9,7 @@
     {
       "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
       "mode": "action",
-      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "sha256": "c4401fc2b7e83eee42ca50e14e56c3e2910a05a92df0aaefef4cb9e72e8d4461",
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
     },
     {
@@ -21,7 +21,7 @@
     {
       "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
       "mode": "action",
-      "sha256": "5b339059aa562d791cec4176ce4e5f792af97de8ac805e0bf4d5ca3217d89d61",
+      "sha256": "5e82b99efcc41f00dc92f9225df01345b2a5fef38a57e6725f41015c33401d88",
       "step": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
     },
     {
@@ -83,7 +83,7 @@
     {
       "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
       "mode": "action",
-      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "sha256": "c4401fc2b7e83eee42ca50e14e56c3e2910a05a92df0aaefef4cb9e72e8d4461",
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
     },
     {
@@ -95,7 +95,7 @@
     {
       "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
       "mode": "action",
-      "sha256": "5b339059aa562d791cec4176ce4e5f792af97de8ac805e0bf4d5ca3217d89d61",
+      "sha256": "5e82b99efcc41f00dc92f9225df01345b2a5fef38a57e6725f41015c33401d88",
       "step": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
     },
     {
@@ -128,8 +128,14 @@
     {
       "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
       "mode": "action",
-      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "sha256": "c4401fc2b7e83eee42ca50e14e56c3e2910a05a92df0aaefef4cb9e72e8d4461",
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    },
+    {
+      "counterpart": "TestReleaseToolchainsRequireExactSecurityPatches",
+      "mode": "test",
+      "sha256": "7b3109898e0c31abc549f169275236fdbef148c11293f330f797d899495eb44a",
+      "step": "Assert Node 24.22.1"
     },
     {
       "counterpart": "TestRehearsalReleaseTagValidation",
@@ -214,8 +220,14 @@
     {
       "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
       "mode": "action",
-      "sha256": "d1612e89f849a699f2684c05aa6f64a7f1dec30a9e98efe9b56380ad1b933ab6",
+      "sha256": "2daf9c0d1763bf89b7383f98466df30a3967b5e225c7058d0f23d7a38cbdf8c2",
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    },
+    {
+      "counterpart": "TestReleaseToolchainsRequireExactSecurityPatches",
+      "mode": "test",
+      "sha256": "7b3109898e0c31abc549f169275236fdbef148c11293f330f797d899495eb44a",
+      "step": "Assert Node 24.22.1"
     },
     {
       "counterpart": "TestRehearsalReleaseTagValidation",
@@ -262,8 +274,14 @@
     {
       "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
       "mode": "action",
-      "sha256": "5b339059aa562d791cec4176ce4e5f792af97de8ac805e0bf4d5ca3217d89d61",
+      "sha256": "5e82b99efcc41f00dc92f9225df01345b2a5fef38a57e6725f41015c33401d88",
       "step": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
+    },
+    {
+      "counterpart": "TestReleaseToolchainsRequireExactSecurityPatches",
+      "mode": "test",
+      "sha256": "42bd65951f3c52442dd583daa3058ffcc0e7915237dd8167a286ba2312916a01",
+      "step": "Assert Go 1.26.10"
     },
     {
       "counterpart": "image-dry-run/Release history fixture",
@@ -426,7 +444,7 @@
     {
       "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
       "mode": "action",
-      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "sha256": "c4401fc2b7e83eee42ca50e14e56c3e2910a05a92df0aaefef4cb9e72e8d4461",
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
     },
     {
@@ -458,7 +476,7 @@
     {
       "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
       "mode": "action",
-      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "sha256": "c4401fc2b7e83eee42ca50e14e56c3e2910a05a92df0aaefef4cb9e72e8d4461",
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
     },
     {

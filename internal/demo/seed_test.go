@@ -114,6 +114,11 @@ func TestDemoSeedTwice(t *testing.T) {
 	if kinds != 5 || knowledge < 8 || agents != 3 || sessions != 3 || finished != 3 || pending < 1 || hours < 3 || rates != 1 || tickets < 40 {
 		t.Fatalf("kinds %d knowledge %d agents %d sessions %d finished %d pending %d hours %d rates %d tickets %d", kinds, knowledge, agents, sessions, finished, pending, hours, rates, tickets)
 	}
+	bound := scalar(t, database, first.TenantID, `SELECT count(*) FROM agent_runs r JOIN principals person ON person.tenant_id=r.tenant_id AND person.id=r.acting_person_id JOIN principals agent ON agent.tenant_id=r.tenant_id AND agent.id=r.agent_principal_id WHERE r.status='completed' AND person.name='Demo Operator' AND agent.name IN ('Lumen Scribe','Harbor Clerk','Glass Scout')`)
+	computers := scalar(t, database, first.TenantID, `SELECT count(*) FROM agent_pairing_computers c JOIN principals agent ON agent.tenant_id=c.tenant_id AND agent.id=c.principal_id WHERE c.state='connected' AND agent.name IN ('Lumen Scribe','Harbor Clerk','Glass Scout')`)
+	if bound != 3 || computers != 3 {
+		t.Fatalf("demo claim provenance: bound runs %d, claim computers %d", bound, computers)
+	}
 	assertCaptureState(t, database, first.TenantID)
 	assertShowcaseState(t, database, first.TenantID)
 	second, err := Seed(ctx, database.App, "lumen-demo")
@@ -216,6 +221,7 @@ func seedRows(t *testing.T, database *dbtest.DB, tenantID string) []string {
 	// probes, allowance windows, approvals, journeys or historical evidence.
 	for _, table := range []string{
 		"node_relations", "agent_accounts", "account_allowance_windows", "account_reservations",
+		"agent_pairing_requests", "agent_pairing_computers",
 		"model_profiles", "model_role_routes", "model_security_role_routes", "approval_requests", "approval_decisions", "agent_runs", "run_telemetry",
 		"work_orders", "work_criteria", "work_evidence", "agent_delivery_votes",
 		"harness_sessions", "harness_instruction_provenance", "harness_instruction_provenance_items",
