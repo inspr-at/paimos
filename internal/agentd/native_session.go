@@ -885,9 +885,7 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	}
 	// A possible fork returned with an error is still this host's resource.
 	if process != nil {
-		e.mu.Lock()
-		e.transport = &nativeObservedTransport{NativeTransport: process, owner: e}
-		e.mu.Unlock()
+		err = errors.Join(err, e.retainTransport(process))
 	}
 	if err != nil {
 		if e.terminal != nil {
@@ -921,15 +919,6 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	if err = e.save("running"); err != nil {
 		return out, err
 	}
-	t := &nativeObservedTransport{NativeTransport: process, owner: e}
-	e.mu.Lock()
-	e.transport = t
-	e.mu.Unlock()
-	d, err := delivery.New(delivery.DeliveryOptions{Binding: b, Journal: journal, Transport: t, Authority: e, Reports: e, Finals: e, Now: s.capacityNow, Retention: e.retention, Release: e.release, Refused: func(err error) bool { _ = e.fault(err); return e.faulted() != nil }})
-	if err != nil {
-		return out, err
-	}
-	e.delivery = d
 	out, err = e.ready(ctx, g)
 	if err != nil {
 		return out, err

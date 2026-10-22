@@ -131,7 +131,11 @@ func TestNativeHostPinnedPTYStartsReadsWritesAndExits(t *testing.T) {
 			if e.ownership == nil || e.ownership.RootPID != e.transport.Identity().PID || f.launcher.opens != 0 {
 				t.Fatal("PTY did not retain its exact owner")
 			}
-			sub := subscribeNativePTY(t, f, b)
+			cursor, err := nativecontract.EventID(out.Session.Generation, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sub := subscribeNativePTY(t, f, b, cursor)
 			readUntil := func(want string) {
 				t.Helper()
 				var output strings.Builder

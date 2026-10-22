@@ -155,6 +155,10 @@ Only enrolled Claude Code and Codex CLI profiles are eligible; ordinary
 structured starts continue without allocating a PTY. The released server
 policy still selects structured starts. Production terminal launch, TUI
 qualification, screen export and the person PTY command adapter remain closed.
+The construction-only `store.Options.StartMode` port pins the approved provider
+and profile matrix inside the existing person start transaction; nil keeps its
+structured default. Its decision is rechecked on claim replay and initial
+readiness reporting. No production composition installs a terminal matrix.
 
 An initial command plan must bind the server conversation without inventing a
 vendor resume reference. Its bounded readiness parser observes the native

@@ -18,7 +18,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/nativecontract"
-	"github.com/inspr-at/paimos/internal/nativeintegration/delivery"
 	"github.com/inspr-at/paimos/internal/nativepty"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
@@ -68,6 +67,13 @@ func (w *nativePTYWrite) WithWrite(ctx context.Context, caller nativepty.Caller,
 		}
 		if !now.Before(access.Deadline) || !now.Before(w.intent.ExpiresAt) || !now.Before(e.grant.Policy.ExpiresAt) {
 			return nativeRefusal(nativecontract.ReasonControllerExpired)
+		}
+		profile, err := e.host.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: binding.TenantID, OwnerPersonID: e.owner.OwnerPersonID, AccountID: e.local.Intent.AccountID, AccountKey: e.local.AccountKey, WorkspaceID: e.local.Intent.WorkspaceID, Harness: e.local.Intent.Harness, Policy: e.grant.Policy, BindingRevision: e.profile.ProfileBindingRevision})
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(profile, e.profile) {
+			return nativeRefusal(nativecontract.ReasonIdentityMismatch)
 		}
 		if _, err := e.journal.BeginWrite(ctx, binding, w.intent.Receipt.OperationID); err != nil {
 			return err
@@ -507,9 +513,7 @@ func (e *nativeOwned) openSuccessor(ctx context.Context, spec nativecontract.Lau
 	}
 	// Retain every returned handle, including one returned with an error.
 	if transport != nil {
-		e.mu.Lock()
-		e.transport = &nativeObservedTransport{NativeTransport: transport, owner: e}
-		e.mu.Unlock()
+		err = errors.Join(err, e.retainTransport(transport))
 	}
 	if err != nil {
 		return out, err
@@ -537,11 +541,6 @@ func (e *nativeOwned) openSuccessor(ctx context.Context, spec nativecontract.Lau
 		}
 		e.ownership = &owned
 	}
-	d, err := delivery.New(delivery.DeliveryOptions{Binding: *fresh, Journal: e.journal, Transport: e.transport, Authority: e, Reports: e, Finals: e, Now: s.capacityNow, Retention: e.retention, Release: e.release, Refused: func(err error) bool { _ = e.fault(err); return e.faulted() != nil }})
-	if err != nil {
-		return out, err
-	}
-	e.delivery = d
 	var commandID struct {
 		RequestID string `json:"request_id"`
 	}
@@ -579,7 +578,7 @@ func (e *nativeOwned) startTerminalFrames(view nativecontract.SessionView, pty n
 	// is separately installed and qualified; it still needs the viewer's
 	// current person/watch consent at every delivery via LocalAuthority.
 	view.Capabilities.TerminalView = e.host.caps.TerminalView
-	export := live != nil && view.Capabilities.TerminalView
+	export := live != nil && view.Capabilities.TerminalView && view.Capabilities.EventsSupported && e.host.caps.EventsSupported
 	if export {
 		if err := live.Register(view); err != nil {
 			return err
@@ -752,6 +751,9 @@ func (e *nativeOwned) finishTerminalExit(ctx context.Context, terminal *nativeTe
 	return e.finishTerminalExitLocked(ctx, terminal, x)
 }
 func (e *nativeOwned) finishTerminalExitLocked(ctx context.Context, terminal *nativeTerminalTransport, x nativecontract.ExitEvidence) error {
+	if terminal == nil || !x.RootExited || !x.GroupAbsent || x.ObservedAt.IsZero() || x.ProcessIdentityDigest != terminal.Identity().ProcessIdentityDigest {
+		return nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	}
 	if e.transition != nil || e.terminal != terminal || e.exited {
 		return nil
 	}

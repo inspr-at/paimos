@@ -1876,6 +1876,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYCurrentHolderInputAndResize","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYFailedSuccessorStillAcceptsExactOwnerStop","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYOutputEOFAndLifecycleMetadata","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYReadinessFailureRetainsHandleUntilExitReport","tier":"ESSENTIAL"}

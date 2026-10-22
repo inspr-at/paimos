@@ -72,6 +72,12 @@ func (q nativePTYQualificationFixture) Require(context.Context, nativecontract.A
 	return q.err
 }
 
+type nativePTYRevokedProfile struct{}
+
+func (nativePTYRevokedProfile) Resolve(context.Context, nativecontract.ProfileRequest) (nativecontract.LocalProfile, error) {
+	return nativecontract.LocalProfile{}, nativeRefusal(nativecontract.ReasonIdentityMismatch)
+}
+
 type nativePTYRuntimeFixture struct {
 	mu                         sync.Mutex
 	identity                   nativecontract.NativeIdentity
@@ -313,7 +319,7 @@ func TestNativeHostPTYCurrentHolderInputAndResize(t *testing.T) {
 }
 
 func TestNativeHostPTYRejectsUntrustedOrStaleWrites(t *testing.T) {
-	for _, kind := range []string{"missing proof", "agent key", "viewer", "stale binding", "stale epoch", "revoked grant", "replaced daemon", "size bounds"} {
+	for _, kind := range []string{"missing proof", "agent key", "viewer", "stale binding", "stale epoch", "revoked grant", "revoked profile", "replaced daemon", "size bounds"} {
 		t.Run(kind, func(t *testing.T) {
 			f, l, a := nativePTYHost(t)
 			startNativePTY(t, f, a)
@@ -342,6 +348,9 @@ func TestNativeHostPTYRejectsUntrustedOrStaleWrites(t *testing.T) {
 			case "revoked grant":
 				a.deny = nativeRefusal(nativecontract.ReasonPermissionRevoked)
 				want = nativecontract.ReasonPermissionRevoked
+			case "revoked profile":
+				f.h.profiles = nativePTYRevokedProfile{}
+				want = nativecontract.ReasonIdentityMismatch
 			case "replaced daemon":
 				f.s.generation = uuid.NewString()
 				want = nativecontract.ReasonWrongGeneration
@@ -427,8 +436,10 @@ func enableNativePTYRelay(t *testing.T, f *nativeHostFixture) {
 		t.Fatal(err)
 	}
 	f.h.caps.TerminalView = true
+	f.h.caps.EventsSupported = true
+	f.server.eventsSupported = true
 }
-func subscribeNativePTY(t *testing.T, f *nativeHostFixture, b nativecontract.Binding) nativecontract.Subscription {
+func subscribeNativePTY(t *testing.T, f *nativeHostFixture, b nativecontract.Binding, after ...string) nativecontract.Subscription {
 	t.Helper()
 	f.server.mu.Lock()
 	view := f.server.byOwned(b.OwnedSessionID).view
@@ -437,7 +448,11 @@ func subscribeNativePTY(t *testing.T, f *nativeHostFixture, b nativecontract.Bin
 	fence := func(_ context.Context, fn func(nativecontract.ValidationContext) error) error {
 		return fn(nativecontract.ValidationContext{Binding: &b, Generation: view.Generation, PrincipalKind: "person", Capabilities: &view.Capabilities, View: "terminal", Mode: "terminal", State: "taken"})
 	}
-	sub, err := f.h.config.Live.SubscribeView(t.Context(), b, stream.Viewer{Query: nativecontract.StreamQuery{Generation: view.Generation, View: "terminal"}, Fence: fence})
+	cursor := ""
+	if len(after) > 0 {
+		cursor = after[0]
+	}
+	sub, err := f.h.config.Live.SubscribeView(t.Context(), b, stream.Viewer{Query: nativecontract.StreamQuery{Generation: view.Generation, View: "terminal", After: cursor}, Fence: fence})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,6 +640,38 @@ func TestNativeHostPTYUnconfirmedExitKeepsOccupancy(t *testing.T) {
 	}
 	if err := f.h.Close(t.Context()); !errors.Is(err, ErrProcessesUnconfirmed) {
 		t.Fatal("uncertain exit reported clean shutdown", err)
+	}
+}
+
+// Risk: a returned handle plus a readiness error retains the predecessor's
+// command delivery binding, stranding the exact new owner when stopped.
+func TestNativeHostPTYFailedSuccessorStillAcceptsExactOwnerStop(t *testing.T) {
+	f, l, a := nativePTYHost(t)
+	f.server.startMode = "structured"
+	f.launcher.now = f.server.now.Add(-2 * time.Second)
+	l.pty.now = f.server.now.Add(-time.Second)
+	l.pty.readyErr = nativeRefusal(nativecontract.ReasonQualificationMissing)
+	b, _ := f.start(t, 0)
+	take := nativecontract.TakeIntent{RequestID: uuid.NewString(), ExpectedBinding: b, ControllerEpoch: a.access.Controller.Epoch, ExpectedRevision: 3, Cols: 120, Rows: 36, ExpiresAt: a.access.Deadline}
+	f.server.queue(b, "take", take.RequestID, take)
+	_, err := f.h.Take(t.Context(), take)
+	requireNativeReason(t, err, nativecontract.ReasonQualificationMissing)
+	f.server.mu.Lock()
+	fresh := f.server.byOwned(b.OwnedSessionID).binding
+	f.server.mu.Unlock()
+	if fresh.RuntimeEpoch == b.RuntimeEpoch || f.groups(t) != 1 {
+		t.Fatal("failed successor lost its exact hold")
+	}
+	stop := nativecontract.Stop{RequestID: uuid.NewString(), ExpectedBinding: fresh, Kind: "graceful", ExpectedProcessIdentityDigest: l.pty.Identity().ProcessIdentityDigest, ExpiresAt: a.access.Deadline}
+	f.server.queue(fresh, "stop", stop.RequestID, stop)
+	if _, err := f.h.Stop(t.Context(), stop); err != nil {
+		t.Fatal("stop retained successor", err)
+	}
+	if f.groups(t) != 0 {
+		t.Fatal("stopped failed successor retained its local hold")
+	}
+	if _, _, closes := l.pty.counts(); closes != 1 {
+		t.Fatal("owner stop did not clean up exactly once", closes)
 	}
 }
 

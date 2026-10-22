@@ -392,6 +392,7 @@ func (r *execPTY) readFrames() {
 		r.readyErr = err
 		r.mu.Unlock()
 		pending = false
+		r.readiness = nil
 		close(r.readyDone)
 	}
 	defer func() { finishReady("", refuse(nativecontract.ReasonOwnershipUnconfirmed)) }()

@@ -40,6 +40,7 @@ type nativeHostServer struct {
 	rejected         []nativecontract.Receipt
 	completed        chan nativecontract.Receipt
 	startMode        string
+	eventsSupported  bool
 	terminalEvidence []daemon.TerminalEvidence
 }
 type nativeHostSession struct {
@@ -131,6 +132,7 @@ func (f *nativeHostServer) claim(proof daemon.Proof, in nativecontract.Claim) (a
 			s.view.Harness = local.Intent.Harness
 			s.view.Capabilities.Steer, s.view.Capabilities.Quota = "unsupported", "unsupported"
 			s.view.Capabilities.QualificationDigest = strings.Repeat("e", 64)
+			s.view.Capabilities.EventsSupported = f.eventsSupported
 			f.sessions[local.Intent.RequestID] = s
 		} else if f.revoked[local.Intent.RequestID] {
 			return nil, http.StatusForbidden, nativecontract.ReasonPermissionRevoked
