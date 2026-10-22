@@ -644,19 +644,20 @@ type nativeDrain struct {
 	operation string
 }
 type nativeOwned struct {
-	inboxWake     chan struct{}
-	owner         nativecontract.CommandActor
-	pendingEvents []nativecontract.ProviderEvent
-	eventMu       sync.Mutex
-	claimDeadline time.Time
-	released      chan struct{}
-	releaseOnce   sync.Once
-	releasedAt    time.Time
-	ownership     *ownedprocess.Identity
-	cancel        context.CancelFunc
-	observations  map[string]nativecontract.NativeEvidence
-	exit          *nativecontract.ExitEvidence
-	drains        map[string]nativeDrain // input ID -> final route, until grant expiry
+	inboxWake      chan struct{}
+	inboxConnected bool
+	owner          nativecontract.CommandActor
+	pendingEvents  []nativecontract.ProviderEvent
+	eventMu        sync.Mutex
+	claimDeadline  time.Time
+	released       chan struct{}
+	releaseOnce    sync.Once
+	releasedAt     time.Time
+	ownership      *ownedprocess.Identity
+	cancel         context.CancelFunc
+	observations   map[string]nativecontract.NativeEvidence
+	exit           *nativecontract.ExitEvidence
+	drains         map[string]nativeDrain // input ID -> final route, until grant expiry
 	// recorded: the possible lead record may exist. refused: report delivery
 	// was refused for good, so only exit reconciliation and stop still run.
 	recorded      bool
@@ -1627,7 +1628,11 @@ func (e *nativeOwned) retireInput(id string) {
 	e.mu.Lock()
 	delete(e.operations, id)
 	wake := e.inboxWake
+	connected := e.inboxConnected
 	e.mu.Unlock()
+	if !connected {
+		return
+	} // The ordinary owner poll remains the disconnect fallback.
 	select {
 	case wake <- struct{}{}:
 	default:

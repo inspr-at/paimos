@@ -16,11 +16,17 @@ func (e *nativeOwned) watchInbox(ctx context.Context) {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		_ = e.host.remote.WatchHarness(ctx, session, func() {
+			e.mu.Lock()
+			e.inboxConnected = true
+			e.mu.Unlock()
 			select {
 			case wake <- struct{}{}:
 			default:
 			}
 		})
+		e.mu.Lock()
+		e.inboxConnected = false
+		e.mu.Unlock()
 		if !waitHarnessReconnect(ctx, jitterHarnessReconnect(backoff)) {
 			return
 		}
