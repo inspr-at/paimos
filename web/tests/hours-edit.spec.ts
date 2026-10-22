@@ -166,9 +166,12 @@ test('AEON-1416: pending Hours Undo stays in its day and failed Undo shows plain
     const previous = page.getByRole('button', { name: 'Previous week' })
     const next = page.getByRole('button', { name: 'Next week' })
     const week = page.getByRole('group', { name: 'Week', exact: true })
+    // Shared 44px hit areas extend 2px past the 40px phone buttons. The
+    // padded page contains them; it is the boundary that must not overflow.
+    const scrollAreas = { page: page.locator('.biz-page') }
     await expectStableControls({
       controls: { previous, next, week, restoredEntry: row(page, 'e-4') },
-      scrollAreas: { toolbar: page.locator('.toolbar') },
+      scrollAreas,
       interactions: [{ name: 'delete and immediately undo', run: async () => {
         await row(page, 'e-4').focus()
         const deletion = page.waitForResponse(response => response.request().method() === 'DELETE')
@@ -185,7 +188,7 @@ test('AEON-1416: pending Hours Undo stays in its day and failed Undo shows plain
       } }],
     })
     await expectStableControls({
-      controls: { previous, next, week }, scrollAreas: { toolbar: page.locator('.toolbar') },
+      controls: { previous, next, week }, scrollAreas,
       interactions: [{ name: 'failed Undo', run: async () => {
         release()
         await expect(row(page, 'e-4')).toHaveCount(0)
