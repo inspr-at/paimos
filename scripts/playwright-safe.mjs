@@ -145,7 +145,7 @@ export default class ProgressReporter {
 export async function runOwnedCommand(command, args, { cwd, env = process.env, lockPath = suiteLockPath, graceMs = 5000, capture = false, captureLimitBytes = 64 * 1024 * 1024, rootIdentityWait, lockOptions = {}, maxHoldMs = holdLimitMs, clock = { now: Date.now, setTimeout, clearTimeout }, heartbeat = true } = {}) {
   if (process.platform === 'win32') throw new Error('Browser supervision requires POSIX process groups; use Linux CI on Windows')
   const start = Date.now()
-  let lock, groupLog, snapshot, child, interrupt, peak = 0, timer, monitoringError, journalCreated = false, stdout = '', stderr = '', capturedBytes = 0, progress, leaseTimer, timedOut = false
+  let lock, groupLog, snapshot, child, interrupt, peak = 0, timer, monitoringError, journalCreated = false, rootCleanupIncomplete = false, stdout = '', stderr = '', capturedBytes = 0, progress, leaseTimer, timedOut = false
   const browserCount = rows => rows.filter(row => /chrom(?:e|ium)|headless_shell/i.test(row.name)).length
   const rowsOwned = () => snapshot.snapshot().rows
   const signalOwned = signal => {
@@ -236,7 +236,11 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
     // against the production retry window. Identity checks and the bounded
     // attempt count remain in recordRootGroup.
     try { await recordRootGroup(child, entry => appendFileSync(groupLog, `${JSON.stringify(entry)}\n`), { wait: rootIdentityWait }) }
-    catch (error) { await exited; throw error }
+    catch (error) {
+      rootCleanupIncomplete = error.unverifiedGroup === child.pid || error.unconfirmedGroup === child.pid
+      if (!rootCleanupIncomplete) await exited
+      throw error
+    }
     if (interrupt) signalOwned(interrupt)
     console.error('AEON_PW_PROCESSES before=0 (new owned group)')
     sample()
@@ -274,7 +278,7 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
         const deadline = Date.now() + 2000
         while (rowsOwned().length && Date.now() < deadline) await delay(50)
         const state = snapshot.snapshot()
-        releasable = state.rows.length === 0 && state.unverified.length === 0 && state.issues.length === 0
+        releasable = !rootCleanupIncomplete && state.rows.length === 0 && state.unverified.length === 0 && state.issues.length === 0
       }
       if (releasable) {
         await progress?.close(); progress = undefined

@@ -20,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -49,6 +50,23 @@ func requireStart(ctx context.Context, tx pgx.Tx, p tenant.Principal, project st
 		}
 	}
 	return nil
+}
+
+func (s *Store) initialMode(ctx context.Context, tx pgx.Tx, actor nativecontract.Actor, intent nativecontract.StartIntent, policy nativecontract.Policy) (string, error) {
+	if s.startMode == nil {
+		return "structured", nil
+	}
+	mode, err := s.startMode(ctx, tx, actor, intent, policy)
+	if err != nil {
+		return "", err
+	}
+	if mode != "structured" && mode != "terminal" {
+		return "", fail(503, nativecontract.ReasonQualificationMissing)
+	}
+	if mode == "terminal" && (actor.PrincipalKind != "person" || len(actor.KeyCeiling) != 0 || intent.Role != "coordinator" || intent.Harness != "claude" && intent.Harness != "codex") {
+		return "", fail(403, nativecontract.ReasonWrongPrincipal)
+	}
+	return mode, nil
 }
 
 func (s *Store) authorize(ctx context.Context, tx pgx.Tx, actor nativecontract.Actor, project string, intent nativecontract.StartIntent) (Authorization, error) {
@@ -301,6 +319,18 @@ func appendEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, proje
 		harness = &view.CurrentBinding.HarnessSessionID
 		epoch = &view.CurrentBinding.RuntimeEpoch
 	}
-	_, err := events.Append(ctx, tx, p, events.Change{NodeID: &project, Type: kind, After: map[string]any{"project_id": project, "owned_session_id": view.OwnedSessionID, "harness_session_id": harness, "runtime_epoch": epoch, "revision": view.Revision, "request_id": request, "state": view.State, "reason": view.Reason, "operation_id": operation}})
+	after := map[string]any{"project_id": project, "owned_session_id": view.OwnedSessionID, "harness_session_id": harness, "runtime_epoch": epoch, "revision": view.Revision, "request_id": request, "state": view.State, "reason": view.Reason, "operation_id": operation}
+	// Keep the public NativeAuditEvent snapshot unchanged for strict consumers.
+	// The existing event metadata column holds only aggregate counts/hash in
+	// this same authorized transaction. Live replay remains RAM-only.
+	var metadata json.RawMessage
+	if proof, ok := ctx.Value(proofKey{}).(daemon.Proof); ok && proof.Terminal != nil && epoch != nil {
+		if proof.Terminal.RuntimeEpoch == *epoch {
+			metadata, _ = json.Marshal(map[string]any{"terminal": *proof.Terminal})
+		} else if proof.Exit != nil && proof.Exit.RootExited && proof.Exit.GroupAbsent && proof.Terminal.RuntimeEpoch == proof.Identity.RuntimeEpoch {
+			metadata, _ = json.Marshal(map[string]any{"predecessor_terminal": *proof.Terminal})
+		}
+	}
+	_, err := events.Append(ctx, tx, p, events.Change{NodeID: &project, Type: kind, After: after, Metadata: metadata})
 	return err
 }

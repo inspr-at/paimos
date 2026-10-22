@@ -197,7 +197,7 @@ async function drop(w: AllowanceWindow) {
       </template>
       <div v-else-if="!budget" class="fact">
         <dt>Limits</dt>
-        <dd class="quiet">{{ noWindowLine(account.harness, host) }}<p v-if="learnedSpend" class="learned-use">{{ learnedSpend }}</p></dd>
+        <dd class="quiet">{{ noWindowLine(account.harness, host, account.reading_support) }}<p v-if="learnedSpend" class="learned-use">{{ learnedSpend }}</p></dd>
       </div>
 
       <div v-if="recent.length" class="fact">

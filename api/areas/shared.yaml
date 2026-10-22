@@ -334,6 +334,7 @@ components:
         revision: {$ref: '#/components/schemas/ChatPosition'}
         binding_epoch: {$ref: '#/components/schemas/ChatPosition'}
         readiness: {$ref: '#/components/schemas/ChatReadiness'}
+        input_timing: {type: string, enum: [native, next-step, queue], description: "Included by the session lookup only with the Aeon-Chat-Timing: 1 header. Negotiated timing for the exact bound session and the viewer's current harness.control permission on its project; without that permission, queue is After this turn. Missing means an older server: omit timing request fields."}
     CurrentAgentActivity:
       type: object
       required: [text, source, at]
@@ -894,7 +895,7 @@ components:
         ticket_node_id: {type: [string, 'null'], format: uuid}
         parallel_reason: {$ref: '#/components/schemas/BuildParallelReason'}
         work_order_id: {type: [string, 'null'], format: uuid}
-        parent_harness_session_id: {type: [string, 'null'], format: uuid, description: 'Parent generation in this project. Children register distinct session references and worker leases under the same authenticated agent, including when parent and child use the same harness.'}
+        parent_harness_session_id: {type: [string, 'null'], format: uuid, description: 'Live parent generation on the selected instance. Across projects, both projects must be visible and both generations must have the same verified canonical person and tenant. Cross-project links are attribution only and are returned separately as cross_project_parent_harness_session_id; project, ticket and execution authority stay with the child. Unknown persons are refused. Same-project registration retains its existing rules.'}
         display_label:
           type: [string, 'null']
           maxLength: 128
@@ -966,6 +967,7 @@ components:
         ticket_node_id: {type: [string, 'null'], format: uuid}
         work_order_id: {type: [string, 'null'], format: uuid}
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
+        cross_project_parent_harness_session_id: {type: string, format: uuid, readOnly: true, description: 'Verified cross-project lineage for display only. Omitted when absent or when the parent is inaccessible. Never grants parent control, reparent, run or work authority. The legacy same-project parent field remains unchanged.'}
         owner_principal_id: {type: [string, 'null'], format: uuid, readOnly: true, description: 'Canonical person who owns this generation; null or omitted when no owner is recorded. Wind-down selects only the caller-owned running sessions, even for administrators.'}
         started_by_principal_id: {type: string, format: uuid, readOnly: true, description: 'Principal who registered this generation. Omitted on legacy generations.'}
         parallel_reason: {$ref: '#/components/schemas/BuildParallelReason', readOnly: true}

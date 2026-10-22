@@ -38,13 +38,13 @@ it('AEON-1424: a reset drops an in-flight customers or quotes list and the next 
   const customers = useCustomers()
   const quotes = useQuotes()
 
-  const staleCustomers = deferred<Customer[]>()
-  const freshCustomers = deferred<Customer[]>()
+  const staleCustomers = deferred<Awaited<ReturnType<typeof listCustomers>>>()
+  const freshCustomers = deferred<Awaited<ReturnType<typeof listCustomers>>>()
   const staleContacts = new Map([['old', card]])
   const freshContacts = new Map([['new', card]])
   const contactReads = [staleContacts, freshContacts]
   vi.mocked(listCustomers).mockReturnValueOnce(staleCustomers.promise).mockReturnValueOnce(freshCustomers.promise)
-  vi.mocked(contactDirectory).mockImplementation(() => Promise.resolve(contactReads.shift() ?? new Map()))
+  vi.mocked(contactDirectory).mockImplementation(() => Promise.resolve({ items: contactReads.shift() ?? new Map(), partial: false }))
   const firstCustomers = customers.load()
   customers.load()
   expect(listCustomers).toHaveBeenCalledTimes(1)
@@ -54,22 +54,22 @@ it('AEON-1424: a reset drops an in-flight customers or quotes list and the next 
   const secondCustomers = customers.load()
   expect(listCustomers).toHaveBeenCalledTimes(2)
   expect(contactDirectory).toHaveBeenCalledTimes(2)
-  staleCustomers.resolve([customer])
+  staleCustomers.resolve({ items: [customer], partial: false })
   await firstCustomers
   expect(customers.items).toBeNull()
   expect(customers.error).toBe('')
   expect(customers.directory.size).toBe(0)
   expect(customers.loading).toBe(true)
   const freshRows = [customer]
-  freshCustomers.resolve(freshRows)
+  freshCustomers.resolve({ items: freshRows, partial: false })
   await secondCustomers
   expect(customers.items).toEqual(freshRows)
   expect(customers.directory).toBe(freshContacts)
   expect(customers.loading).toBe(false)
   expect(customers.error).toBe('')
 
-  const staleQuotes = deferred<QuoteRow[]>()
-  const freshQuotes = deferred<QuoteRow[]>()
+  const staleQuotes = deferred<Awaited<ReturnType<typeof fetchQuotes>>>()
+  const freshQuotes = deferred<Awaited<ReturnType<typeof fetchQuotes>>>()
   vi.mocked(fetchQuotes).mockReturnValueOnce(staleQuotes.promise).mockReturnValueOnce(freshQuotes.promise)
   const firstQuotes = quotes.load()
   quotes.load()
@@ -80,14 +80,14 @@ it('AEON-1424: a reset drops an in-flight customers or quotes list and the next 
   expect(quotes.status).toBe(0)
   const secondQuotes = quotes.load()
   expect(fetchQuotes).toHaveBeenCalledTimes(2)
-  staleQuotes.resolve([quote])
+  staleQuotes.resolve({ items: [quote], partial: false })
   await firstQuotes
   expect(quotes.items).toBeNull()
   expect(quotes.error).toBe('')
   expect(quotes.status).toBe(0)
   expect(quotes.loading).toBe(true)
   const freshQuoteRows = [quote]
-  freshQuotes.resolve(freshQuoteRows)
+  freshQuotes.resolve({ items: freshQuoteRows, partial: false })
   await secondQuotes
   expect(quotes.items).toEqual(freshQuoteRows)
   expect(quotes.loading).toBe(false)
@@ -95,7 +95,7 @@ it('AEON-1424: a reset drops an in-flight customers or quotes list and the next 
   expect(quotes.status).toBe(0)
 
   customers.reset()
-  const offlineCustomers = deferred<Customer[]>()
+  const offlineCustomers = deferred<Awaited<ReturnType<typeof listCustomers>>>()
   vi.mocked(listCustomers).mockReturnValueOnce(offlineCustomers.promise)
   const offlineCustomerFlight = customers.load()
   offlineCustomers.reject(new Error('offline'))
@@ -105,7 +105,7 @@ it('AEON-1424: a reset drops an in-flight customers or quotes list and the next 
   expect(customers.loading).toBe(false)
 
   quotes.reset()
-  const offlineQuotes = deferred<QuoteRow[]>()
+  const offlineQuotes = deferred<Awaited<ReturnType<typeof fetchQuotes>>>()
   vi.mocked(fetchQuotes).mockReturnValueOnce(offlineQuotes.promise)
   const offlineQuoteFlight = quotes.load()
   offlineQuotes.reject(Object.assign(new Error('offline'), { status: 503 }))
@@ -116,7 +116,7 @@ it('AEON-1424: a reset drops an in-flight customers or quotes list and the next 
   expect(quotes.loading).toBe(false)
 
   customers.reset()
-  const failedCustomers = deferred<Customer[]>()
+  const failedCustomers = deferred<Awaited<ReturnType<typeof listCustomers>>>()
   vi.mocked(listCustomers).mockReturnValueOnce(failedCustomers.promise)
   const customerFlight = customers.load()
   customers.reset()
@@ -127,7 +127,7 @@ it('AEON-1424: a reset drops an in-flight customers or quotes list and the next 
   expect(customers.loading).toBe(false)
 
   quotes.reset()
-  const failedQuotes = deferred<QuoteRow[]>()
+  const failedQuotes = deferred<Awaited<ReturnType<typeof fetchQuotes>>>()
   vi.mocked(fetchQuotes).mockReturnValueOnce(failedQuotes.promise)
   const quoteFlight = quotes.load()
   quotes.reset()

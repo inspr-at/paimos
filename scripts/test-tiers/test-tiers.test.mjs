@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput, registryImpact, webShardPlan, fullGateTests, driftCases, browserScopeNoneAllowlist, fullWebShards, fullWebShardCount, nightlyWebShardPlan, assertWebShardBudget } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
-import { aggregate, jobMinutes, readReports } from './measure.mjs'
+import { aggregate, jobMinutes, readReports, pollJobInventory } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
 import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, effectiveLane, sourceTree, promotionsBetween, registryChangesBetween, sizeWebDecision } from './diff.mjs'
 import { runnerDecision, runnerSelection, browserRunnerIdentity, run, main as tierRunnerMain } from './cli.mjs'
@@ -31,6 +31,7 @@ import './tiers-merge-driver.test.mjs'
 import '../merge-drivers/merge-drivers.test.mjs'
 import '../nightly-ticket.test.mjs'
 import { requiredJobs } from '../ci-tree-reuse.mjs'
+import { withoutOptionalAptDownload } from '../check-apt-bounds.mjs'
 
 const fullWebShardJSON = `[${fullWebShards.join(',')}]`
 
@@ -1265,7 +1266,7 @@ test('AEON-1451 the full web layout and the essential gate stay inside the shard
   assert.match(shardJob,/timeout-minutes: 20\n/)
   assert.match(shardJob,/PW_RETRIES: '0'/)
   assert.equal(shardJob.includes(`github.event_name == 'pull_request' && needs.ci-plan.outputs.web_shards || '${spaced}'`),true)
-  assert.doesNotMatch(shardJob,/continue-on-error|max-attempts/)
+  assert.doesNotMatch(withoutOptionalAptDownload(shardJob),/continue-on-error|max-attempts/)
   assert.deepEqual(requiredJobs.filter(name=>name.startsWith('web-shard (')),fullWebShards.map(shard=>`web-shard (${shard})`))
 })
 
@@ -1301,21 +1302,19 @@ test('AEON-1453 sixteen full web shards stay over the budget',()=>{
   assert.throws(()=>assertWebShardBudget(sixteen),{name:'Error',
     message:`Web shard ${worst.shard} predicts ${worst.seconds.toFixed(1)}s, over the ${sixteen.budgetSeconds}s budget`})
   const full=webShardPlan(gate,policy,{mode:'full'})
-  assert.equal(fullWebShardCount,20)
+  assert.equal(fullWebShardCount,22)
   assert.deepEqual(full.shards,fullWebShards)
   assertWebShardBudget(full)
   for(const bin of full.projections) assert.ok(bin.seconds<=full.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
   assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
 })
 
-test('AEON-1603 twenty shards keep main incl. AEON-1502 under 860s and eighteen over the 900s guard',()=>{
-  // AEON-1619: hosted shards 2, 13 and 14 are heavier than the nineteen-bin
-  // plan once their specs use run 39574698693 launch-wall shares. Nineteen
-  // fits the 900s budget and misses the 860s target. Eighteen overflows that
-  // budget. Twenty keeps the live catalogue, including AEON-1502's
-  // approve-harness spec and the extra account-use-matrix case, at or under
-  // 860s. The 900s budget and 120s overhead are unchanged. Do not pin the live
-  // projected seconds (AEON-1483).
+test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 860s and eighteen over the 900s guard',()=>{
+  // Risk: #871 adds nine chat cases and pushes twenty shards past 860s.
+  // Prove that neither twenty nor twenty-one can reach 800s even with
+  // perfect packing. The full gate must retain every case and measured
+  // timing, the original 860s target and the 900s guard. Live projected
+  // seconds remain unpinned (AEON-1483).
   const policy=loadWebPolicy()
   const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
   const matrix='tests/account-use-matrix.spec.ts'
@@ -1326,21 +1325,39 @@ test('AEON-1603 twenty shards keep main incl. AEON-1502 under 860s and eighteen 
   assert.ok(harnessRows.every(row=>row.tier==='ESSENTIAL'),harness)
   assert.equal(gate.find(row=>row.file===matrix&&row.name===matrixCase)?.tier,'ESSENTIAL')
   assert.ok(policy.groups.some(group=>group.specs?.some(spec=>spec.file===harness)),`${harness} has a shard weight`)
-  const full=webShardPlan(gate,policy,{mode:'full'})
-  assert.equal(fullWebShardCount,20)
-  assert.equal(full.timeoutSeconds,1200)
-  assert.equal(full.budgetSeconds,900)
-  assert.equal(full.overheadSeconds,120)
-  assert.equal(full.headroom,0.25)
-  assert.deepEqual(full.shards,fullWebShards)
-  assertWebShardBudget(full)
-  assert.ok(full.projectedMaxSeconds<=860,`main incl. AEON-1502 busiest shard ${full.projectedMaxSeconds.toFixed(3)}s`)
-  for(const bin of full.projections) assert.ok(bin.seconds<=full.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
-  assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
-  const nineteen=webShardPlan(gate,policy,{mode:'full',maximum:19})
-  assert.equal(nineteen.shards.length,19)
-  assert.equal(nineteen.fitsBudget,true)
-  assert.ok(nineteen.projectedMaxSeconds>860,`nineteen-shard main must miss 860s, got ${nineteen.projectedMaxSeconds.toFixed(3)}s`)
+  const assertFullGate=(rows,shardPolicy)=>{
+    const full=webShardPlan(rows,shardPolicy,{mode:'full'})
+    assert.equal(fullWebShardCount,22)
+    assert.equal(full.timeoutSeconds,1200)
+    assert.equal(full.budgetSeconds,900)
+    assert.equal(full.overheadSeconds,120)
+    assert.equal(full.headroom,0.25)
+    assert.deepEqual(full.shards,fullWebShards)
+    assertWebShardBudget(full)
+    assert.ok(full.projectedMaxSeconds<=860,`busiest shard ${full.projectedMaxSeconds.toFixed(3)}s`)
+    for(const bin of full.projections) assert.ok(bin.seconds<=full.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
+    assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),rows.length)
+    return full
+  }
+  const full=assertFullGate(gate,policy)
+  // Risk: treating the 800s rebalance goal as a hard budget rejects normal
+  // catalogue growth. Exercise the same invariants above 800s, below 860s,
+  // with deterministic timings independent of the live inventory.
+  const growthGate=fullWebShards.map(shard=>({kind:'browser',file:`tests/growth-${shard}.spec.ts`,name:'case'}))
+  const growthPolicy={groups:[{specs:growthGate.map(row=>({file:row.file,tierTiming:{seconds:710,selectedTests:1}}))}]}
+  assert.equal(assertFullGate(growthGate,growthPolicy).projectedMaxSeconds,830)
+  const overTargetPolicy={groups:[{specs:growthGate.map(row=>({file:row.file,tierTiming:{seconds:741,selectedTests:1}}))}]}
+  assert.throws(()=>assertFullGate(growthGate,overTargetPolicy),{name:'AssertionError',message:'busiest shard 861.000s'})
+  const weights=tierWeights(policy,gate)
+  const workSeconds=[...new Set(gate.map(row=>row.file))].reduce((sum,file)=>sum+weights[file],0)
+  for(const count of [20,21]) {
+    const lowerBound=full.overheadSeconds+workSeconds/count
+    assert.ok(lowerBound>800,`${count} shards could meet 800s; measured lower bound ${lowerBound.toFixed(3)}s`)
+  }
+  const previous=webShardPlan(gate,policy,{mode:'full',maximum:20})
+  assert.equal(previous.shards.length,20)
+  assert.equal(previous.fitsBudget,true)
+  assert.ok(previous.projectedMaxSeconds>800,`twenty-shard main must miss 800s, got ${previous.projectedMaxSeconds.toFixed(3)}s`)
   const narrow=webShardPlan(gate,policy,{mode:'full',maximum:18})
   assert.equal(narrow.shards.length,18)
   assert.equal(narrow.budgetSeconds,900)
@@ -1765,7 +1782,7 @@ test('offline replay CLI prints every real PR with selected counts, effective la
     assert.ok(['full','essential','static'].includes(row.new))
     assert.equal(row.newCases,Object.values(row.newKinds).reduce((sum,n)=>sum+n,0))
     assert.ok(row.new==='full'||row.newCases<=row.oldCases,`PR ${row.number} narrowed selection must not grow`)
-    assert.equal(row.newJobs,row.lane==='spec-only'?12:row.new==='static'?16:row.new==='essential'?24:45)
+    assert.equal(row.newJobs,row.lane==='spec-only'?12:row.new==='static'?16:row.new==='essential'?24:47)
   }
 })
 
@@ -2184,6 +2201,69 @@ test('job accounting includes setup in minutes and reports missing artifacts rat
   assert.equal(measurement.measured.goRunnerMinutes,2)
   assert.equal(measurement.coverage,'incomplete')
   assert.deepEqual(measurement.missingEvidence,['go-test-1'])
+})
+
+// Risk: Actions status propagation lag can falsely mark passed shards as
+// interrupted. This fixed go-static regression is outside the tier inventories.
+test('AEON-1349 measurements re-poll stale jobs within a deadline and preserve incomplete evidence',async()=>{
+  const env={GITHUB_REPOSITORY:'example/aeon',GITHUB_RUN_ID:'1349'}
+  const finished={status:'completed',conclusion:'success',started_at:'2026-10-14T14:26:50Z',completed_at:'2026-10-14T14:28:50Z'}
+  const row={kind:'browser',file:'tests/fixture.spec.ts',name:'passed case',tier:'ESSENTIAL'}
+  const evidence=reportCases([row],[{key:key(row),status:'passed',started:true}],1,'web-shard-12')
+  for(const fixture of [
+    {states:['queued','in_progress','completed'],waited:10_000,coverage:'reported'},
+    {states:['completed','completed'],upstreamLag:true,waited:5_000,coverage:'reported'},
+    {states:['completed'],waited:0,coverage:'reported'},
+    {states:['completed'],collector:'tier-measurements / pr-tree-v1:fixture',waited:0,coverage:'reported'},
+    {states:['completed'],collector:'nightly-tier-measurements',waited:0,coverage:'reported'},
+    {states:['in_progress'],waited:60_000,coverage:'incomplete',reason:'Actions job in_progress'},
+    {states:['completed'],cancelled:true,waited:0,coverage:'incomplete',reason:'Actions job cancelled'},
+    {states:['completed'],missing:true,waited:0,coverage:'incomplete'},
+  ]) {
+    let clock=0,poll=-1
+    const calls=[],waits=[]
+    const collector=fixture.collector??'tier-measurements'
+    const jobs=await pollJobInventory(env,{
+      now:()=>clock,
+      wait:async ms=>{waits.push(ms);clock+=ms},
+      execute:(bin,args,{timeout})=>{
+        assert.equal(bin,'gh')
+        assert.equal(args[0],'api')
+        const page=Number(new URL(args[1],'https://api.github.com/').searchParams.get('page'))
+        assert.equal(args[1],`repos/example/aeon/actions/runs/1349/jobs?filter=latest&per_page=100&page=${page}`)
+        assert.equal(timeout,60_000-clock,'API calls share the polling deadline')
+        if(page===1)poll++
+        calls.push([poll,page])
+        const status=fixture.states[Math.min(poll,fixture.states.length-1)]
+        const shard={...finished,name:`${collector.startsWith('nightly-')?'nightly-':''}web-shard (12)`,status,
+          conclusion:status==='completed'?'success':null}
+        if(fixture.cancelled)Object.assign(shard,{conclusion:'cancelled',runner_id:null,steps:[],started_at:null,completed_at:null})
+        const inventory=[{name:collector,status:'in_progress'},
+          ...Array.from({length:99},(_,i)=>({...finished,name:`upstream-${i}`,
+            ...(i===0&&fixture.upstreamLag&&poll===0?{status:'in_progress',conclusion:null}:{})})),shard]
+        return JSON.stringify({total_count:inventory.length,jobs:inventory.slice((page-1)*100,page*100)})
+      },
+    })
+    assert.equal(clock,fixture.waited)
+    assert.equal(waits.reduce((sum,ms)=>sum+ms,0),fixture.waited)
+    assert.ok(waits.every(ms=>ms>0&&ms<=5_000))
+    assert.equal(calls.length,2*(fixture.waited===60_000?12:fixture.states.length))
+    assert.deepEqual(calls.map(([,page])=>page),Array.from({length:calls.length},(_,i)=>i%2+1),'every poll refreshes both pages')
+    assert.equal(jobs.length,101,'re-polls replace rather than append the inventory')
+    const measured=aggregate(fixture.missing?[]:[evidence],jobs)
+    assert.equal(measured.coverage,fixture.coverage)
+    assert.deepEqual(measured.missingEvidence,fixture.missing?['web-shard-12']:[])
+    assert.deepEqual(measured.incompleteEvidence,fixture.reason?[{job:'web-shard-12',status:'interrupted',reason:fixture.reason}]:[])
+    assert.equal(measured.classes.ESSENTIAL?.passed,fixture.missing?undefined:1)
+    assert.equal(measured.measured.webRunnerMinutes,fixture.cancelled||fixture.waited===60_000?0:2)
+  }
+  for(const runner_id of [undefined,null,0]) for(const timestamps of [{},{started_at:null,completed_at:null}]) {
+    const cancelled={name:'web-shard (12)',status:'completed',conclusion:'cancelled',runner_id,steps:[],...timestamps}
+    assert.equal(jobMinutes(cancelled),null,'queued cancellation never acquired a runner')
+    assert.equal(aggregate([], [cancelled]).coverage,'incomplete','runnerless cancellation still lacks test evidence')
+    assert.throws(()=>jobMinutes({...cancelled,runner_id:1}),/Invalid job timestamps: web-shard \(12\)/)
+    assert.throws(()=>jobMinutes({...cancelled,steps:[{name:'Checkout'}]}),/Invalid job timestamps: web-shard \(12\)/)
+  }
 })
 
 test('skipped jobs have no runner duration and cannot hide missing test evidence',()=>{

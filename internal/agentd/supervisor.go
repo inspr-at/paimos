@@ -147,6 +147,7 @@ type owned struct {
 	capacityPending  map[string]capacity.Reading
 	vendorLimit      *capacity.LimitHit
 	inboxCapable     bool
+	chatTiming       bool // selected adapter and server negotiated exact-input steering
 	queueInput       bool // Owned ACP transport; input is applied only after turn end.
 	pending          []HarnessControl
 	process          Process
@@ -1216,7 +1217,7 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 		live := entry.record.Generation == s.generation && !entry.harnessArchived && (entry.record.State == "starting" || entry.record.State == "running")
 		entry.mu.Unlock()
 		if live && chat != nil {
-			chat.publish(*ev.Chat)
+			chat.publishCorrelated(*ev.Chat, ev.InputID)
 		}
 		// This event can carry content: never let it fall through to telemetry.
 		return
@@ -1893,6 +1894,7 @@ func (s *Supervisor) control(ctx context.Context, req ControlRequest, fromRecove
 // text grants no recovery/control authority, including messages from ourselves.
 func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromRecoveryQueue, fromHarness bool) (Receipt, error) {
 	inbox := fromHarness && req.Operation == "inbox"
+	chat := fromHarness && validChatID(req.chatInputID, 128) && req.CorrelationID == "chat:"+req.chatInputID && (inbox || req.Operation == "steer")
 	if req.Operation == "inbox" && !inbox {
 		return Receipt{}, ErrUnsupported
 	}
@@ -1909,7 +1911,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	if (isSetting(req.Operation) && !validSettingValue(req.Operation, req.Value)) || (!isSetting(req.Operation) && req.Value != "") {
 		return Receipt{}, ErrUnsupported
 	}
-	if len(req.Text) > 64<<10 && !(inbox && len(req.Text) <= inboxTextLimit) || (req.Operation != "steer" && !inbox && req.Text != "") {
+	if len(req.Text) > 64<<10 && !((inbox || chat) && len(req.Text) <= inboxTextLimit) || (req.Operation != "steer" && !inbox && req.Text != "") {
 		return Receipt{}, errors.New("invalid control body")
 	}
 	s.mu.Lock()
@@ -1925,7 +1927,10 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	defer entry.controlMu.Unlock()
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
-	if (entry.managedPolicy && !fromRecoveryQueue && !inbox) || (isSetting(req.Operation) && req.Operation != "tier" && !entry.managedPolicy) {
+	if (entry.managedPolicy && !fromRecoveryQueue && !inbox && !chat) || (isSetting(req.Operation) && req.Operation != "tier" && !entry.managedPolicy) {
+		return Receipt{}, ErrUnsupported
+	}
+	if chat && req.Operation == "steer" && !entry.chatTiming {
 		return Receipt{}, ErrUnsupported
 	}
 
@@ -1954,7 +1959,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	if entry.record.Generation != s.generation || entry.process == nil || entry.record.State != "running" || entry.harnessArchived {
 		return Receipt{}, ErrNotOwned
 	}
-	if inbox && (!entry.inboxCapable || entry.stopRequested || entry.protocolFailed || entry.budgetStopReason() != "") {
+	if (inbox || chat) && (!entry.inboxCapable || entry.stopRequested || entry.protocolFailed || entry.budgetStopReason() != "") {
 		return Receipt{}, ErrNotOwned
 	}
 	if entry.queueInput && req.Operation == "steer" {
@@ -2016,7 +2021,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		ctx, cancel = context.WithDeadline(ctx, req.deadline)
 		defer cancel()
 	}
-	queuedInput := inbox || entry.queueInput && req.Operation == "steer"
+	queuedInput := inbox || chat || entry.queueInput && req.Operation == "steer"
 	if queuedInput {
 		// Persist uncertainty before touching the child. A crash or lost vendor
 		// response must never authorize reinjection of the same lease.
@@ -2085,7 +2090,13 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		if req.writing != nil {
 			req.writing()
 		}
-		err = proc.Control(ctx, req.Operation, req.Text)
+		if correlated, ok := proc.(interface {
+			ControlChat(context.Context, string, string, string) error
+		}); chat && ok {
+			err = correlated.ControlChat(ctx, req.Operation, req.Text, req.chatInputID)
+		} else {
+			err = proc.Control(ctx, req.Operation, req.Text)
+		}
 		entry.mu.Lock()
 	}
 	if err != nil {

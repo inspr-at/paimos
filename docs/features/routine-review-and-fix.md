@@ -16,6 +16,9 @@ or CI admission closes advancement. The project’s required product taste and
 merge gates remain coordinator-owned. An independent `ok` produces an exact-head
 pending pipeline handoff, with no merge, deployment or Done authority.
 
+Each re-review covers the original build plus every fix so far, using the
+original build's base commit and the latest fix's head commit.
+
 Fixes use the current fix route and keep the previous writer’s account, order
 and checkout identity. Changed ownership or missing local process/resource exit
 proof refuses continuation. The approved fix-round and shared recovery limits

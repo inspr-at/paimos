@@ -667,15 +667,16 @@ export function tierWeights(manifest, rows) {
 
 // Full mode and non-PR events stay on this fixed bin count so the merge-queue
 // literal matches the plan. Essential PR matrices grow from four up to this cap.
-// Twenty bins (AEON-1619): hosted shards 2, 13 and 14 no longer fit nineteen
-// under the 860s target once their specs use run 39574698693 launch-wall
-// shares. Nineteen still fits the 900s budget and misses 860s. Eighteen
-// overflows the 900s budget. The 900s budget and 120s overhead stay the guard.
+// Twenty-two bins (AEON-1667): AEON-1619's measured work on main plus #871
+// totals 14,808.646s. Even perfect packing needs 860.432s with twenty bins
+// and 825.174s with twenty-one, including setup. Twenty-two is the minimum
+// that meets the 800s headroom target. The 860s target, 900s budget and 120s
+// overhead stay unchanged; timing weights and case selection are retained.
 // Exact overflow shard numbers and predicted seconds live only on the
 // synthetic catalogue in the tier tests. Do not re-pin them when main adds or
 // re-times a spec (AEON-1483). A live shard that no longer fits fails the
 // budget invariant.
-export const fullWebShardCount = 20
+export const fullWebShardCount = 22
 export const fullWebShards = Array.from({ length: fullWebShardCount }, (_, index) => index + 1)
 
 // Size nightly independently of the PR layout, using the runner's catalogue

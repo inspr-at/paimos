@@ -221,6 +221,10 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 		if grant.OwnerPersonID != r.OwnerPersonID || !samePolicy(grant.Policy, r.policy) || !reflect.DeepEqual(grant.Launch, r.launch) || !reflect.DeepEqual(grant.RunID, r.runID) {
 			return fail(409, nativecontract.ReasonIdentityMismatch)
 		}
+		mode, err := s.initialMode(ctx, tx, r.actor.actor(), r.Intent, grant.Policy)
+		if err != nil {
+			return err
+		}
 		if err = targetStart(ctx, tx, r.ProjectID, r.Intent, true); err != nil {
 			return err
 		}
@@ -238,6 +242,9 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 		}
 		admit := agentaccounts.NativeAdmission{TenantID: p.TenantID, ProjectID: r.ProjectID, OwnerPersonID: r.OwnerPersonID, PrincipalID: p.ID, OwnedSessionID: r.OwnedSessionID, AccountID: r.Intent.AccountID, ComputerID: r.Intent.ComputerID, Harness: r.Intent.Harness, ModelProfileID: r.Intent.ModelProfileID, DaemonID: daemon.DaemonID, DaemonGeneration: daemon.DaemonGeneration, LedgerGeneration: daemon.LedgerGeneration, WorkID: r.Intent.WorkID, RunID: grant.RunID}
 		if len(r.claimDigest) > 0 {
+			if r.view.Mode != mode {
+				return fail(403, nativecontract.ReasonQualificationMissing)
+			}
 			if !bytes.Equal(r.claimDigest, digest) {
 				return fail(409, nativecontract.ReasonIdentityMismatch)
 			}
@@ -303,7 +310,7 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 		r.view.CurrentBinding = &binding
 		r.view.Revision = 2
 		r.view.State = "starting"
-		r.view.Mode = "structured"
+		r.view.Mode = mode
 		r.view.Capabilities = grant.Capabilities
 		viewRaw, _ := json.Marshal(r.view)
 		_, err = tx.Exec(ctx, `UPDATE native_session_bindings SET run_id=$2,current_harness_session_id=$3,runtime_epoch=$4,daemon_generation=$5,ledger_generation=$6,binding_revision=2,view=$7,terminal_viewer_url=$8 WHERE id=$1`, r.OwnedSessionID, grant.RunID, harnessID, epoch, daemon.DaemonGeneration, daemon.LedgerGeneration, viewRaw, observed.TerminalViewerURL)

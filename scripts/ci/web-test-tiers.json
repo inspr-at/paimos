@@ -5792,6 +5792,24 @@
     ,
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native replies use negotiated next-step timing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native replies use negotiated queue timing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 closing chat closes its stream and rejects a late initial history read","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"Outline on a phone: Expand all from the Display sheet closes it and returns focus","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"desktop Display buttons open the Display menu at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -6680,6 +6698,18 @@
     ,
     {"kind":"browser","file":"tests/agent-names.spec.ts","name":"the saved word names the lead on the project band","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 390px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"Agents links to Connect your machine","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"Homebrew offers two commands and removal after draining","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -7110,6 +7140,10 @@
     ,
     {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1497: loading keeps the reserved heights, a failed read says so with Try again, stale readings say their age","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1511: enrolled accounts without readings stay visible, with a reason and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"touch quota retries › AEON-1511: quota retry targets stay usable on touch screens without moving controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1024 dark wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1024 light wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -7269,6 +7303,8 @@
     {"kind":"browser","file":"tests/agents-head.spec.ts","name":"one head line; a count filters Sessions, keeps ancestors as context and clears with × or Esc at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-head.spec.ts","name":"one head line; a count filters Sessions, keeps ancestors as context and clears with × or Esc at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-hierarchy.spec.ts","name":"AEON-1360 cross-project children nest with their own work and survive their project filter once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents-hierarchy.spec.ts","name":"a stopped lead with a live grandchild stays visible and direct worker links open their ancestors","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -7748,6 +7784,8 @@
     ,
     {"kind":"browser","file":"tests/attachments.spec.ts","name":"![caption](attachment:<id>) in Markdown shows the image inline and opens the viewer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/attachments.spec.ts","name":"AEON-1416: pending attachment Undo stays in place and failed Undo shows plain copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/attachments.spec.ts","name":"Alt+arrows reorder with the attachment precondition","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/attachments.spec.ts","name":"a failed upload says why and can be retried or removed","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -7805,6 +7843,14 @@
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"read-only people see no selection","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"the bulk bar and its menus have no axe violations in light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: 200 cost units keep rate request concurrency at six","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: continuation on the last allowed page reports partial for every business directory","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: partial customer quote contact and project lists show retry beside retained results","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: rejected rates remain in the hours picker and retry keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"a partly set up overview shows status only, and its one link to Settings › Business stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9452,6 +9498,38 @@
     ,
     {"kind":"browser","file":"tests/from-classic.spec.ts","name":"sign-in returns to the classic resolver before opening its destination","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1024 dark: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1024 light: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 dark: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 dark: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 light: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 light: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 dark: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 dark: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 light: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 light: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"Link keeps its size and place while picking from 0 to 10 and back, on a desktop and a phone","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"Link stays put across search results and a refusal, on a desktop and a phone","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"Undo of a stale picker removes only the ids that call added","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"a Lands day reads as a day in the row, its label and its history; a goal without work says so at the same height","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"a created goal is shown through search, the Done filter and a one-goal page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"a person who may not create goals sees no New goal, and no goal offers Link work, Edit or Delete","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-epics.spec.ts","name":" › E6 390 dark: phones keep the epic rows and their essentials, 44 px Group targets, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-epics.spec.ts","name":" › E6 390 light: phones keep the epic rows and their essentials, 44 px Group targets, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -10266,6 +10344,10 @@
     ,
     {"kind":"browser","file":"tests/hide-states.spec.ts","name":"shared view membership › default and Reset Graph Hide honour kind categories at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/hours-edit.spec.ts","name":"AEON-1416: pending Hours Undo stays in its day and failed Undo shows plain copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hours-edit.spec.ts","name":"AEON-1416: the first Hours Undo cannot reverse a later deletion cycle","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/hours-edit.spec.ts","name":"Delete removes an entry with a six-second undo that reverses it on the server","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/hours-edit.spec.ts","name":"a conflict shows the newer entry and keeps the draft","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10331,6 +10413,10 @@
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"missing/unsafe preview keeps download and refuses app-origin iframe","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"new-tab response enforces sandbox without the iframe; residual self-navigation is explicit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/idle-requests.spec.ts","name":"AEON-1117 raw ticket readers and quote heartbeats stop while hidden and resume with current screen identity","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/idle-requests.spec.ts","name":"AEON-1117 shares mounted reads and event transport, fences stale answers and recovers missed events and access","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -11524,6 +11610,12 @@
     ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"three places in order of use; the active one is highlighted and the breadcrumb continues from it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"AEON-1639: attention search and singular turn-off copy keep controls still in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"AEON-1639: fallback truncation explains the ten-page scan with fewer than 500 groups","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"AEON-1639: preview loading has an honest reserved status slot before any write","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"Apply, Dismiss and Undo retain rows and control boxes on desktop and phone, in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a delayed action cannot resolve a different filtered record or offer stale Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -12473,6 +12565,8 @@
     {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1233: General edits, lifecycle and legacy links stay on the acted-on project and revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1233: approved P1 reference states and check.mjs audit against the build","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1639: project settings resolve literal hash IDs only inside their own root","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/project-sort.spec.ts","name":"Alt and the arrow keys move a card, announced; the card menu moves it too; the list moves with Alt up and down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14292,6 +14386,8 @@
     ,
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"tall up-opening popovers stay separated from their trigger through keyboard viewport changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"AEON-1366: a late Colours deep link scrolls, rings and holds without moving navigation","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"Agents links admins to the agent keys","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"Business shows the parts and the stored quote settings; a deep link rings its card","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -14446,6 +14542,22 @@
     ,
     {"kind":"browser","file":"tests/stability.spec.ts","name":"the approval queue never says nothing waits before it knows","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1508: lead queue replaces manual setup and keeps controls still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1509 inactive Claude login keeps its account pin and deliberate pause guidance","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"AEON-1510: Sonnet explains a single catalog level and keeps every granted level selectable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"New menu restores its trigger without moving header controls at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"New menu restores its trigger without moving header controls at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14491,6 +14603,8 @@
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"reports Account is draining and still pins that account","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"reports Sign-in probe is stale and still pins that account","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"same-name hosts distinguish offline pairings and queue only the chosen account","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"screenshot 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -15133,6 +15247,8 @@
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"known fixture responses and decorative labelled versions are filtered precisely","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"layout shift audit arms after navigation and resets startup movement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"layout shift audit filters delayed entries by start time without rounding away small shifts","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"overlap rule ignores a card action and modal background but keeps peer collisions","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -16114,6 +16230,8 @@
     ,
     {"kind":"node","file":"tests/agentState.test.ts","name":"the server’s risk wins over the local rule; runs use the server duration","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/agentState.test.ts","name":"verified cross-project lineage nests once and leaves an unavailable parent as a root","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/agentState.test.ts","name":"worker families sort working and starting by start time, then idle, then stopped; heartbeats never decide","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agents-cleanup.test.ts","name":"Deny is never disabled without a reason","tier":"GATED-FULL"}
@@ -16121,6 +16239,10 @@
     {"kind":"node","file":"tests/agents-cleanup.test.ts","name":"a paused account says why and how to resume","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agents-cleanup.test.ts","name":"a revoked or never-confirmed computer can be removed by a person who manages accounts","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/api.test.ts","name":"AEON-1117 a stream opening immediately replaces an invalidated initial read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/api.test.ts","name":"AEON-1117 native Node consumers share the browser event transport","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/api.test.ts","name":"API requests use same-origin credentials, no cache and a timeout signal","tier":"ESSENTIAL"}
     ,
@@ -17692,9 +17814,13 @@
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > defaults to the greatest remaining fraction and the routed profile, with a UUID tie","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > distinguishes stale, missing and failed host probes without mistaking account capacity for offline","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > does not invent a model when the role has no route or the grant is empty","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > fails closed when the catalog is missing, forbidden, or the wrong shape","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > keeps same-name pairings distinct and prefers the online daemon over stale allowance","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > labels the requested snapshot and reports a different or unknown session separately","tier":"GATED-FULL"}
     ,
@@ -18150,6 +18276,26 @@
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: Hours Undo is immediate, keeps its view and uses plain failures or silent DELETE 404","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: Hours ignores superseded Undo and locks optimistic rows until confirmation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: a superseded attachment Undo never paints or sends the old receipt","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: attachment Undo keeps its own receipt across two deletion cycles","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: attachment Undo restores immediately through reloads and rolls back failures","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: confirmed attachment Undo rejects an older list and trusts a subsequent read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: deletion receipts keep exact IDs and refuse missing or ambiguous receipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: pending attachment Undo blocks Delete, caption and reorder until confirmation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: upload cleanup revokes each preview once and rejects late completions","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"AEON-1639: turn-off copy uses a singular flag or plural flags in each catalog","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a finished fallback group scan shows the scanned project, count and facets","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a resolved fallback group scan cannot restore groups, counts or facets after a filter change","tier":"ESSENTIAL"}
@@ -18205,6 +18351,14 @@
     {"kind":"vitest","file":"tests/authz.unit.test.ts","name":"can() > review r2: a 401 latches until a later 200, and never refetches by itself","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/authz.unit.test.ts","name":"can() > unions project and workspace permissions only for that project","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: 200 units use at most six rate reads and a rejected unit remains visible until retry succeeds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: a cursor at every directory cap returns typed partial rows and the final complete page stays complete","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: a late rate response or failure cannot replace a newer confirmed rate update","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: changing the rate-cache owner retires pending reads and stops queued requests","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > accepts exactly 2,000 rows but rejects a continuation rather than returning a partial list","tier":"GATED-FULL"}
     ,
@@ -18831,6 +18985,24 @@
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets filtered to none","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets with blocked","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"Hide for me keeps a just-created goal away > a created goal past the first page stays hidden through pending and later reads; Undo brings it back","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a created goal is revealed through filters and the first page > clears search and the state filter, and keeps a goal the first page omits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a late goal write does not toast for the next person > drops a late unlink, rename and delete","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a late goal write does not toast for the next person > drops a link, its Undo, the picker and the menu when the person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a late goal write does not toast for the next person > offers no Undo when the link changes nothing, and undoes only the returned delta","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a picker confirmation and an Undo stay with their person > a recent ticket found after the person changed, or after the picker closed, links nothing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a picker confirmation and an Undo stay with their person > a submission from a picker that closed links nothing for the next person","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a picker confirmation and an Undo stay with their person > an Undo in flight when the person changes neither toasts its failure nor reads","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-create-link-fix2.unit.test.ts","name":"a picker confirmation and an Undo stay with their person > picks stop at the most one link may name, so \"Link {n}\" never outgrows its reserved label","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/goals-epics-fix2.unit.test.ts","name":"a group switch keeps the frame > keeps the status note and header while the rows are replaced, then shows an empty list","tier":"ESSENTIAL"}
     ,
@@ -19976,6 +20148,8 @@
     ,
     {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1226: saved repository failures take precedence over history and stale events","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1639: repository status icons render only their selected artwork","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1038: launch-off or unreadable policy refuses Start without a POST","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1040: a fresh external removal clears the card and outranks an older overlapping read","tier":"GATED-FULL"}
@@ -20518,6 +20692,10 @@
     ,
     {"kind":"vitest","file":"tests/run-kinds.unit.test.ts","name":"renders the registered host by default, an owner override, and an ellipsis-ready long label","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/scoped-global-selectors.unit.test.ts","name":"Vue keeps only the inside of :global(), so the guard flags anything beside it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/scoped-global-selectors.unit.test.ts","name":"no scoped style in web/src keeps a selector part outside its :global()","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a failed read is retried before a write; failures are reported, not hidden","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a new viewer starts from their own state; the old viewer’s queued write is dropped","tier":"GATED-FULL"}
@@ -20734,6 +20912,8 @@
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a section opened in the same frame also keeps its draft on expiry","tags":[],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a target rendered after the old deadline arrives once and releases its observer and timers","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"access retains the same child, draft and one-time link on expiry, with writes inert","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"an incoming owner clears frozen Access before fresh permissions arrive","tags":[],"tier":"GATED-FULL"}
@@ -20743,6 +20923,8 @@
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"legacy #estimates highlights its consolidated field until the arrival expires","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"legacy #silent-sessions highlights its consolidated field until the arrival expires","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"pending arrivals yield to input, route changes, unmount and the five-second bound","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"personal retains the same child, draft and one-time link on expiry, with writes inert","tags":[],"tier":"GATED-FULL"}
     ,
@@ -20837,6 +21019,16 @@
     {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"shortcut help preserves approved transition labels with SVG arrows and accessible words","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/signout-stale-lists.unit.test.ts","name":"AEON-1424: a reset drops an in-flight customers or quotes list and the next load sends a new request","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > AEON-1508: a delayed lead read cannot replace the next ticket or a reopened dialog","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > AEON-1508: configured work offers the lead queue before any catalog, pin or manual launch","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > AEON-1508: node-only entry points resolve their project with one bounded leaf read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > AEON-1508: queue failures stay visible and an access reset discards an in-flight result","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > AEON-1508: unreadable project settings keep manual launch disabled until a successful retry","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > queries canonical leaves on every page and excludes parents and unknown shapes from mixed results","tier":"ESSENTIAL"}
     ,

@@ -43,6 +43,7 @@ const verificationChoice = ref(false)
 const connectButton = ref<HTMLButtonElement | null>(null)
 const verifyInput = ref<HTMLInputElement | null>(null)
 const reviewTitle = ref<HTMLElement | null>(null)
+const pageRoot = ref<HTMLElement | null>(null)
 // AEON-1502: everything beyond the one sentence sits behind Details, closed by default.
 const detailsOpen = ref(false)
 const words = computed(() => pairingCopy(displayLanguage(), brand.value.short_name))
@@ -292,6 +293,12 @@ async function lookup() {
     allowAgents.value = true
     approvalPending.value = false
     follower.follow(found)
+    await nextTick()
+    if (started !== pairingReadGeneration() || current.value?.request_id !== found.request_id) return
+    // The code form can be far down the guide. Start its replacement at the top,
+    // even when the readable computer list below keeps the page scrollable.
+    pageRoot.value?.scrollIntoView({ block: 'start' })
+    reviewTitle.value?.focus({ preventScroll: true })
   } catch (error) {
     if (error instanceof PairingError && error.code === 'session_reset') return
     if (started !== pairingReadGeneration()) return
@@ -508,7 +515,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 </script>
 
 <template>
-  <article class="connect" data-aeon-pairing-guide="pairing-v1">
+  <article ref="pageRoot" class="connect" data-aeon-pairing-guide="pairing-v1">
     <header v-if="!asking && !ended" class="intro">
       <p class="eyebrow">Agents</p>
       <h1>Connect your machine</h1>

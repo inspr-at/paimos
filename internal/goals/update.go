@@ -58,6 +58,8 @@ type Update struct {
 	Steps            Field[[]Step]                `json:"steps,omitzero"`
 	ProgressOverride Field[ProgressOverrideInput] `json:"progress_override,omitzero"`
 	Items            Field[ItemsUpdate]           `json:"items,omitzero"`
+	// Title renames a goal (AEON-1618, the people's Edit goal).
+	Title Field[string] `json:"title,omitzero"`
 }
 
 type ItemsUpdate struct {
@@ -289,6 +291,9 @@ func (u Update) validate(now time.Time, checkETAClock bool) error {
 	}
 	if err := validateETA(u.ETA.Value, "eta", now, checkETAClock); err != nil {
 		return err
+	}
+	if u.Title.Set && (u.Title.Value == nil || strings.TrimSpace(*u.Title.Value) == "" || utf8.RuneCountInString(*u.Title.Value) > 300) {
+		return invalid("title", "must contain 1–300 characters")
 	}
 	if u.Steps.Value != nil {
 		if err := validateSteps(*u.Steps.Value); err != nil {

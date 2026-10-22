@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -115,6 +116,9 @@ func TestPTYUnixOwnershipResizeAndExit(t *testing.T) {
 }
 
 func openPTYFixture(t *testing.T, environment ...string) (nativecontract.PTYRuntime, nativecontract.PTYLaunchSpec, context.Context) {
+	return openPTYFixtureConfigured(t, nil, environment...)
+}
+func openPTYFixtureConfigured(t *testing.T, configure func(*nativecontract.PTYLaunchSpec, *CommandPlan), environment ...string) (nativecontract.PTYRuntime, nativecontract.PTYLaunchSpec, context.Context) {
 	t.Helper()
 	_, f, _, _, _ := takeoverFixture(t)
 	path, err := os.Executable()
@@ -148,7 +152,11 @@ func openPTYFixture(t *testing.T, environment ...string) (nativecontract.PTYRunt
 	lifetime, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	spec.Lifetime = lifetime
-	launcher := &ExecLauncher{Builder: fixtureBuilder{plan: CommandPlan{Args: []string{"-test.run=^" + t.Name() + "$"}, Environment: append([]string{"AEON_NATIVE_PTY_FIXTURE=1", "HOME=" + dir, "TERM=xterm-256color"}, environment...), Provider: "fixture", Require: func(context.Context, nativecontract.PTYLaunchSpec) error { return nil }}}}
+	plan := CommandPlan{Args: []string{"-test.run=^" + t.Name() + "$"}, Environment: append([]string{"AEON_NATIVE_PTY_FIXTURE=1", "HOME=" + dir, "TERM=xterm-256color"}, environment...), Provider: "fixture", Require: func(context.Context, nativecontract.PTYLaunchSpec) error { return nil }}
+	if configure != nil {
+		configure(&spec, &plan)
+	}
+	launcher := &ExecLauncher{Builder: fixtureBuilder{plan: plan}}
 	ctx, done := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(done)
 	r, err := launcher.OpenPTY(ctx, spec)
@@ -166,6 +174,80 @@ func openPTYFixture(t *testing.T, environment ...string) (nativecontract.PTYRunt
 		t.Fatal(err)
 	}
 	return r, spec, ctx
+}
+
+// Risk: an initial start invents a vendor resume ID or a fork is mistaken for
+// readiness. The unmodified compiled fixture supplies the actual identity via
+// bounded PTY output; the startup operation never owns the runtime lifetime.
+func TestPTYUnixInitialConversationReadinessAndCancellation(t *testing.T) {
+	if os.Getenv("AEON_NATIVE_PTY_FIXTURE") == "1" {
+		fmt.Println("ready observed-native-session")
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		os.Exit(0)
+	}
+	lifetime, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r, spec, ctx := openPTYFixtureConfigured(t, func(spec *nativecontract.PTYLaunchSpec, plan *CommandPlan) {
+		spec.ResumeRef = ""
+		spec.ConversationRef = "server-approved-conversation"
+		spec.Lifetime = lifetime
+		plan.ConversationRef = spec.ConversationRef
+		plan.Ready = func(frame nativecontract.TerminalFrame) (string, error) {
+			raw, err := base64.StdEncoding.DecodeString(frame.DataBase64)
+			if err != nil {
+				return "", err
+			}
+			if bytes.Contains(raw, []byte("ready observed-native-session")) {
+				return "observed-native-session", nil
+			}
+			return "", nil
+		}
+	})
+	if spec.ResumeRef != "" {
+		t.Fatal("invented initial resume ref")
+	}
+	id, err := nativecontract.ReadyPTY(ctx, r)
+	if err != nil || id.NativeSessionRef != "observed-native-session" {
+		t.Fatal("provider readiness", id, err)
+	}
+	// Initialization output stays in the bounded reader spool for its owner.
+	select {
+	case frame := <-r.Frames():
+		if frame.Sequence != "1" {
+			t.Fatal(frame.Sequence)
+		}
+	case <-ctx.Done():
+		t.Fatal("startup spool")
+	}
+	cancel()
+	x, err := r.Wait(ctx)
+	if err != nil || !x.RootExited || !x.GroupAbsent {
+		t.Fatal("cancelled lifetime did not clean owned PTY", x, err)
+	}
+	if again, err := r.Close(ctx); err != nil || again != x {
+		t.Fatal("cleanup ran twice", again, err)
+	}
+}
+
+func TestPTYUnixReadinessCancellationDoesNotReleaseWriter(t *testing.T) {
+	if os.Getenv("AEON_NATIVE_PTY_FIXTURE") == "1" {
+		fmt.Println("not ready")
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		os.Exit(0)
+	}
+	r, _, ctx := openPTYFixtureConfigured(t, func(_ *nativecontract.PTYLaunchSpec, plan *CommandPlan) {
+		plan.Ready = func(nativecontract.TerminalFrame) (string, error) { return "", nil }
+	})
+	cancelled, stop := context.WithCancel(ctx)
+	stop()
+	if _, err := nativecontract.ReadyPTY(cancelled, r); !errors.Is(err, context.Canceled) {
+		t.Fatal("cancelled readiness", err)
+	}
+	if r.Identity().PID < 1 {
+		t.Fatal("readiness cancellation lost the owned handle")
+	}
+	// The test's fixture cleanup cancels the separate owner lifetime and waits
+	// for root/group exit, even though no terminal consumer drains the spool.
 }
 
 // Risk: a full input buffer must not prevent draining the child's output.

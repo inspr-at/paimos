@@ -11,7 +11,9 @@
 // (the header's) sits on the icon in the Desk badge style and stays while the band is
 // hidden; it overlays the button, so a count that appears or changes moves nothing.
 // Like the band, it paints once the person's preferences are known (its slot is held).
-// Phones keep the ⋯ row, which carries the count.
+// Phones keep the ⋯ row, which carries the count. AEON-1618: New goal ends the
+// toolbar for people who may set one (absent otherwise); on phones it is the
+// first row behind ⋯.
 import { computed, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
@@ -40,6 +42,9 @@ const countLabel = (state: StateFilter) => `${label(state)}, ${counts.value[stat
 const moreAnchor = ref<HTMLElement | null>(null)
 function closeMore(restore: boolean) { const anchor = moreAnchor.value; moreAnchor.value = null; if (restore) anchor?.focus() }
 function pick(state: StateFilter) { props.page.filter.value = state; closeMore(true) }
+// Older callers and fixtures pass a page without people's writes.
+const canCreate = computed(() => props.page.canCreate?.value === true)
+function newGoal() { moreAnchor.value = null; props.page.openSheet?.() }
 </script>
 
 <template>
@@ -57,6 +62,7 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
       <AppIcon :name="allOpen ? 'collapse-all' : 'expand-all'" :size="14" />
       <span class="lbl"><span :class="{ off: allOpen }">Expand all</span><span :class="{ off: !allOpen }">Collapse all</span></span>
     </button>
+    <button v-if="canCreate" type="button" class="btn sm new-goal" @click="newGoal"><AppIcon name="plus" :size="14" /><span>New goal</span></button>
   </template>
   <button
     v-else-if="part === 'waiting'" v-show="person" type="button" class="icon-btn wait-toggle" :class="{ pending: page.prefsSettled.value === false }" :aria-pressed="page.showWaiting.value"
@@ -69,6 +75,10 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
     ><AppIcon name="more" :size="16" /></button>
     <FloatingPanel v-if="moreAnchor" :anchor="moreAnchor" :width="300" align="end" label="Goal display" @close="closeMore">
       <div class="more-menu" role="menu" aria-label="Goal display">
+        <template v-if="canCreate">
+          <button type="button" role="menuitem" class="menu-item" @click="newGoal"><AppIcon name="plus" :size="14" /><span>New goal</span></button>
+          <div class="menu-sep" />
+        </template>
         <p v-if="partial" class="partial-note" role="status">Counts omit oversized {{ noun }}.</p>
         <button v-for="state in STATE_FILTERS" :key="state" type="button" role="menuitemradio" class="menu-item" :aria-checked="page.filter.value === state" @click="pick(state)">
           <AppIcon v-if="state === 'all'" name="layers" :size="14" /><GoalStateIcon v-else :state="state" />
@@ -98,6 +108,7 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
 .state-seg [data-state="all"] .n { min-width: 3.3ch; text-align: left; }
 .state-seg .n { min-width: 2.2ch; }
 .btn.sm.expand-btn { flex: none; gap: 4px; padding: 0 9px; color: var(--ink-2); }
+.btn.sm.new-goal { flex: none; gap: 5px; padding: 0 10px 0 8px; white-space: nowrap; }
 /* Both labels share one box, so the button never changes width. */
 .lbl { display: inline-grid; }
 .lbl > span { grid-area: 1 / 1; }
@@ -113,7 +124,7 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
 .wait-count { position: absolute; top: -6px; right: -7px; display: inline-grid; place-items: center; min-width: 17px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--gold-2); color: var(--gold-on); font-size: 10px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface); pointer-events: none; }
 /* Phones: state chips, Display › Show, Waiting on you and Expand all live behind ⋯ (and the 44 px Expand all row). */
 @media (max-width: 760px) {
-  .chips-sep, .state-seg, .expand-btn, .wait-toggle { display: none; }
+  .chips-sep, .state-seg, .expand-btn, .wait-toggle, .new-goal { display: none; }
   .more-btn { display: inline-grid; place-items: center; }
 }
 .more-menu { display: grid; padding: 6px; }

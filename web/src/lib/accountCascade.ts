@@ -7,6 +7,8 @@
 import { api } from './api.ts'
 import { capacityWaitText, isCapacityWait, type CapacityWait } from './capacityWait.ts'
 import { duration, harnessLabel } from './agentState.ts'
+import { missingQuota } from './accountLimits.ts'
+import { absoluteTime } from './work.ts'
 
 export const WORK_ROLES = ['scout', 'mechanical', 'build', 'build-hard', 'review-gate'] as const
 export type WorkRole = typeof WORK_ROLES[number]
@@ -24,6 +26,7 @@ const EFFORT_LABEL: Record<string, string> = {
 const FAMILY_LABEL: Record<AuthorFamily, string> = { openai: 'OpenAI', anthropic: 'Anthropic', xai: 'xAI', cursor: 'Cursor', google: 'Google', local: 'Local' }
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
+const HOST_PROBE_FRESH_MS = 2 * 60_000
 const NAMED_SPANS = [
   { ms: 5 * HOUR, tol: 5 * 60_000, label: '5-hour' },
   { ms: DAY, tol: 20 * 60_000, label: 'Daily' },
@@ -67,6 +70,10 @@ export interface CascadeStatus { label: string; detail: string; tone: 'neutral' 
 export interface CascadePresentation {
   hosts: CascadeOption[]; harnesses: CascadeOption[]; accounts: CascadeOption[]
   models: CascadeOption[]; efforts: CascadeOption[]; notes: CascadeNotes
+  /** Reserve the host explanation across harness/account choices on every host. */
+  hostNotes: string[]
+  /** Reserve the account explanation's tallest candidate so later selectors stay put. */
+  accountNotes: string[]
   roleNote: string; profileId: string; agentId: string; status: CascadeStatus; requested: RequestedRun
 }
 export interface CascadeContext {
@@ -239,7 +246,8 @@ function preferredHost(catalog: AgentAccountCatalog) {
   let best: { host: string; fraction: number; id: string } | null = null
   let only = ''
   let runnable = 0
-  for (const host of catalog.hosts) {
+  const online = catalog.hosts.filter(host => hostConnection(host, catalog.as_of).state === 'online')
+  for (const host of online.length ? online : catalog.hosts) {
     const harness = harnessOf(host, preferredHarness(host))
     const account = defaultAccount(harness)
     if (!account) continue
@@ -304,14 +312,17 @@ function tightestWindow(account: CatalogAccount) {
   }
   return best?.window ?? null
 }
-function allowanceSentence(account: CatalogAccount) {
-  if (!allowanceKnown(account) || account.remaining_fraction == null) return 'Allowance is unknown.'
+// The launch catalog does not advertise how this account reports quota.
+const NO_QUOTA_READING = { short: 'No quota reading yet', detail: 'Agents can start now. The quota shows once this account reports it.' }
+const catalogMissingQuota = (harness: string) => harness === 'claude' || harness === 'codex' ? NO_QUOTA_READING : missingQuota(harness)
+function allowanceSentence(account: CatalogAccount, harness: string) {
+  if (!allowanceKnown(account) || account.remaining_fraction == null) return catalogMissingQuota(harness).detail
   const pct = Math.round(Math.min(1, Math.max(0, account.remaining_fraction)) * 100)
   const window = tightestWindow(account)
   return window ? `${pct}% of the ${allowanceWindowLabel(window)} window is left.` : `${pct}% is left.`
 }
-function allowancePhrase(account: CatalogAccount) {
-  if (!allowanceKnown(account) || account.remaining_fraction == null) return 'allowance unknown'
+function allowancePhrase(account: CatalogAccount, harness: string) {
+  if (!allowanceKnown(account) || account.remaining_fraction == null) return catalogMissingQuota(harness).short
   const pct = `${Math.round(Math.min(1, Math.max(0, account.remaining_fraction)) * 100)}%`
   const window = tightestWindow(account)
   return window ? `${pct} of ${allowanceWindowLabel(window)} left` : `${pct} left`
@@ -335,15 +346,61 @@ function reasonLabel(account: CatalogAccount) {
 function hostLabel(host: CatalogHost) {
   return displayText(host.label) ?? displayText(host.daemon_id) ?? 'Unlabeled host'
 }
+// Match the computer view's two-minute successful-probe signal, independently
+// of quota or capacity. A fresh failed sign-in still proves the daemon reported;
+// missing/invalid evidence cannot establish that a computer is offline.
+function hostConnection(host: CatalogHost, asOf: string) {
+  const now = Date.parse(asOf)
+  let checkedAt = -Infinity
+  let online = false
+  for (const harness of host.harnesses) for (const account of harness.accounts) {
+    const at = Date.parse(account.last_probe_at ?? '')
+    if (!Number.isFinite(at) || at > now || !Number.isFinite(now)) continue
+    checkedAt = Math.max(checkedAt, at)
+    if (account.last_probe_ok === true && at > now - HOST_PROBE_FRESH_MS) online = true
+  }
+  if (online) return { state: 'online', label: 'Online', rank: 0, checkedAt }
+  if (checkedAt > now - HOST_PROBE_FRESH_MS) return { state: 'sign-in', label: 'Sign-in unavailable', rank: 1, checkedAt }
+  if (Number.isFinite(checkedAt)) return { state: 'offline', label: 'Offline', rank: 3, checkedAt }
+  return { state: 'unknown', label: 'Status unknown', rank: 2, checkedAt }
+}
+function hostOptions(catalog: AgentAccountCatalog | null): CascadeOption[] {
+  if (!catalog) return []
+  const hosts = catalog.hosts.map(host => ({ host, name: hostLabel(host), connection: hostConnection(host, catalog.as_of) }))
+  const pairings = new Map<string, { count: number; onlineIds: string[] }>()
+  for (const { host, name, connection } of hosts) {
+    const group = pairings.get(name) ?? { count: 0, onlineIds: [] }
+    group.count++
+    if (connection.state === 'online') group.onlineIds.push(host.daemon_id)
+    pairings.set(name, group)
+  }
+  for (const { onlineIds } of pairings.values()) onlineIds.sort()
+  return hosts.sort((a, b) => a.connection.rank - b.connection.rank || b.connection.checkedAt - a.connection.checkedAt || a.host.daemon_id.localeCompare(b.host.daemon_id))
+    .map(({ host, name, connection }) => {
+      const { count, onlineIds } = pairings.get(name)!
+      // A name is not an identity: retain every enrollment, including two live
+      // machines with the same name. Only live duplicates need an ordinal;
+      // stale pairings are identified by their latest valid probe instead.
+      const suffix = connection.state === 'online' && onlineIds.length > 1 ? ` · pairing ${onlineIds.indexOf(host.daemon_id) + 1}` : ''
+      const status = count > 1 && connection.state === 'offline'
+        ? `${connection.label} · last seen ${absoluteTime(new Date(connection.checkedAt).toISOString())}`
+        : connection.label
+      return { value: host.daemon_id, label: `${name}${count > 1 || connection.state !== 'online' ? ` · ${status}` : ''}${suffix}` }
+    })
+}
 function modelLabel(model: CatalogModel, models: CatalogModel[]) {
   const name = publicModelId(model.model) ?? 'Unrecognized model'
   const family = displayText(model.family)
   const duplicate = models.filter(item => item.model === model.model).length > 1
   return duplicate && family ? `${name} · ${family}` : name
 }
-function accountOptionLabel(account: CatalogAccount) {
+function accountWaitText(account: CatalogAccount, harness: string, subject = 'Agents') {
+  if (harness === 'claude' && account.wait?.code === 'sign_in') return 'Inactive login · switch to it on the computer'
+  return account.wait ? capacityWaitText(account.wait, subject) : ''
+}
+function accountOptionLabel(account: CatalogAccount, harness: string) {
   const plan = accountPlan(account)
-  const extra = account.wait ? capacityWaitText(account.wait) : account.available ? allowancePhrase(account) : account.unavailable_reasons.map(reason => reasonText(account, reason).replace(/\.$/, '')).join('; ')
+  const extra = account.wait ? accountWaitText(account, harness) : account.available ? allowancePhrase(account, harness) : account.unavailable_reasons.map(reason => reasonText(account, reason).replace(/\.$/, '')).join('; ')
   return [accountName(account), plan, extra].filter(Boolean).join(' · ')
 }
 
@@ -361,7 +418,7 @@ export function presentCascade(input: CascadeContext, choice: CascadeChoice, tou
     return rank || a.effort.localeCompare(b.effort)
   })
   const selectedEffort = efforts.find(effort => effort.model_profile_id === choice.profileId)
-  const hosts = (catalog?.hosts ?? []).map(item => ({ value: item.daemon_id, label: hostLabel(item) }))
+  const hosts = hostOptions(catalog)
   const requestedAccount = account ? [accountName(account), accountPlan(account)].filter(Boolean).join(' · ') : 'Not selected'
   const defaultId = harness?.default_account_id
   const roleNote = input.role.source === 'default'
@@ -372,7 +429,7 @@ export function presentCascade(input: CascadeContext, choice: CascadeChoice, tou
   return {
     hosts,
     harnesses: (host?.harnesses ?? []).map(item => ({ value: item.harness, label: harnessLabel(item.harness) })),
-    accounts: accounts.map(item => ({ value: item.id, label: accountOptionLabel(item) })),
+    accounts: accounts.map(item => ({ value: item.id, label: accountOptionLabel(item, choice.harness) })),
     models: models.map(item => ({ value: modelKey(item), label: modelLabel(item, models) })),
     efforts: efforts.map(effort => ({ value: effort.model_profile_id, label: effortLabel(effort.effort) })),
     notes: {
@@ -382,6 +439,10 @@ export function presentCascade(input: CascadeContext, choice: CascadeChoice, tou
       model: modelNote(choice, touch, account, models, input.role.role),
       effort: effortNote(choice, model, efforts, selectedEffort, account),
     },
+    hostNotes: hosts.length > 1 ? [...new Set((catalog?.hosts ?? []).flatMap(item => item.harnesses.flatMap(h => h.accounts.map(a => hostAccountNote(a, h.harness)))))] : [],
+    accountNotes: [accountNote(choice, touch, accounts, undefined, defaultId), ...accounts.flatMap(item => [
+      accountNote(choice, { ...touch, account: false }, accounts, item, defaultId), accountNote(choice, { ...touch, account: true }, accounts, item, defaultId),
+    ])],
     roleNote,
     profileId: selectedEffort?.model_profile_id ?? '',
     agentId: account?.registered_by_principal_id ?? '',
@@ -402,10 +463,13 @@ function hostNote(catalog: AgentAccountCatalog | null, hosts: CascadeOption[], c
   if (hosts.length === 1) return 'Only one host has an enrolled account.'
   if (!touch.host && choice.hostId) {
     const account = accountOf(harnessOf(hostOf(catalog, choice.hostId), choice.harness), choice.accountId)
-    if (account && allowanceKnown(account)) return 'Chosen because it has the account with the most allowance left.'
-    return 'Allowance is unknown, so this host is not ranked by remaining allowance.'
+    return hostAccountNote(account, choice.harness)
   }
   return ''
+}
+function hostAccountNote(account: CatalogAccount | undefined, harness: string) {
+  if (account && allowanceKnown(account)) return 'Chosen because it has the account with the most allowance left.'
+  return catalogMissingQuota(harness).detail
 }
 function harnessNote(choice: CascadeChoice, host: CatalogHost | undefined) {
   if (!choice.hostId || !host) return ''
@@ -417,9 +481,9 @@ function accountNote(choice: CascadeChoice, touch: CascadeTouch, accounts: Catal
   if (!choice.harness) return ''
   if (!accounts.length) return 'No account is enrolled for this harness on this host.'
   if (!account) return 'Choose an account. An unavailable account stays listed with the reason it cannot be the default.'
-  if (account.wait) return capacityWaitText(account.wait)
+  if (account.wait) return accountWaitText(account, choice.harness)
   if (!account.available) return account.unavailable_reasons.map(reason => reasonText(account, reason)).join(' ')
-  const allowance = allowanceSentence(account)
+  const allowance = allowanceSentence(account, choice.harness)
   if (accounts.length === 1) return `Only one account is enrolled here. ${allowance}`
   if (!touch.account && account.id === defaultId && allowanceKnown(account)) return `Selected because it has the most allowance left. ${allowance}`
   return `Only this account will be used. ${allowance}`
@@ -435,15 +499,19 @@ function modelNote(choice: CascadeChoice, touch: CascadeTouch, account: CatalogA
 function effortNote(choice: CascadeChoice, model: CatalogModel | undefined, efforts: CatalogEffort[], selected: CatalogEffort | undefined, account: CatalogAccount | undefined) {
   if (!model) return ''
   if (!efforts.length) return 'No thinking level is granted for this model.'
+  if (efforts.length === 1) return `This account offers only ${effortLabel(efforts[0].effort)} thinking for this model.`
   if (!selected && !account?.default_model_profile_id) return 'Choose a thinking level this model allows.'
-  if (efforts.length === 1) return 'This model grants one thinking level.'
   if (selected && selected.model_profile_id === account?.default_model_profile_id && choice.profileId) return 'The thinking level is the one routed for this work.'
   return ''
 }
 function statusFor(account: CatalogAccount | undefined, accounts: CatalogAccount[], harness: string): CascadeStatus {
   if (!accounts.length) return { label: 'No enrolled account', detail: 'There is no account to pin for this host and harness.', tone: 'warn' }
   if (!account) return { label: 'Choose an account', detail: 'The run is pinned to the account you choose. It does not fall back to another one.', tone: 'warn' }
-  if (account.wait) return { label: capacityWaitText(account.wait, `${harnessLabel(harness)} agents`), detail: account.wait.run_now_allowed ? 'Queue it for then, or run this one now.' : 'The run can queue and starts when this account is ready.', tone: 'warn' }
+  if (account.wait) return {
+    label: accountWaitText(account, harness, `${harnessLabel(harness)} agents`),
+    detail: account.wait.code === 'sign_in' ? 'Runs start once this login is active on the computer.' : account.wait.run_now_allowed ? 'Queue it for then, or run this one now.' : 'The run can queue and starts when this account is ready.',
+    tone: 'warn',
+  }
   if (!account.available) {
     return { label: reasonLabel(account), detail: `${account.unavailable_reasons.map(reason => reasonText(account, reason)).join(' ')} The run can still queue. Routing rechecks this account and does not switch to another.`, tone: 'warn' }
   }

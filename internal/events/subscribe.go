@@ -233,7 +233,7 @@ func (m *module) subscribe(w http.ResponseWriter, r *http.Request) {
 			if wait == nil {
 				wait = waitSubscription
 			}
-			if err := wait(ctx, conn, heartbeat); err != nil {
+			if err := wait(ctx, conn, after, heartbeat); err != nil {
 				if !errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 					return
 				}
@@ -261,7 +261,7 @@ func (m *module) subscribe(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func waitSubscription(ctx context.Context, conn db.NotificationListener, deadline time.Time) error {
+func waitSubscription(ctx context.Context, conn db.NotificationListener, after int64, deadline time.Time) error {
 	for {
 		if !time.Now().Before(deadline) {
 			return context.DeadlineExceeded
@@ -275,9 +275,13 @@ func waitSubscription(ctx context.Context, conn db.NotificationListener, deadlin
 		// Other tenants neither trigger reads nor postpone the heartbeat.
 		var hint struct {
 			TenantID string `json:"tenant_id"`
+			ID       int64  `json:"id"`
 		}
 		p, _ := tenant.PrincipalFrom(ctx)
-		if json.Unmarshal([]byte(notification.Payload), &hint) == nil && hint.TenantID == p.TenantID {
+		// after is a database-read boundary, never a notification-supplied
+		// position. One replay covers every queued hint through that boundary;
+		// transient heartbeats have no durable subscription data to read.
+		if json.Unmarshal([]byte(notification.Payload), &hint) == nil && hint.TenantID == p.TenantID && (hint.ID > after || db.IsResync(notification)) {
 			return nil
 		}
 	}
@@ -305,6 +309,11 @@ type subscriptionHint struct {
 }
 
 func (m *module) subscriptionRead(ctx context.Context, p tenant.Principal, after, newest int64, topics map[string]bool) ([]subscriptionHint, int64, error) {
+	// Idle authority is still rechecked every heartbeat by subscribe. Without
+	// a new durable position there is no page to authorize or deliver.
+	if after == newest {
+		return nil, after, nil
+	}
 	ctx, stop := context.WithTimeout(ctx, 10*time.Second)
 	defer stop()
 	ctx = db.WithReadStatementTimeout(ctx, 10*time.Second)

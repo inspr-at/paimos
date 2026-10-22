@@ -10,6 +10,21 @@ import { mountView, settle, textOf } from './webcore-view-harness'
 import { displayLanguage } from '../src/lib/displayLanguage'
 import { projectRouteKey, ticketPath } from '../src/lib/work'
 
+it('AEON-1639: turn-off copy uses a singular flag or plural flags in each catalog', () => {
+ vi.stubGlobal('window', { innerWidth: 1440, addEventListener() {}, removeEventListener() {} })
+ try {
+  for (const [locale, editable, expected] of [
+   ['en', 1, 'Also dismiss the flag waiting in AEON'],
+   ['en', 2, 'Also dismiss the 2 flags waiting in AEON'],
+   ['de', 1, 'Auch die Markierung verwerfen, die in AEON wartet'],
+   ['de', 2, 'Auch die 2 Markierungen verwerfen, die in AEON warten'],
+  ] as const) {
+   const view = mountView('../src/components/work/AttentionGroupMenu.vue', {}, { anchor: {}, group: { id: 'p-aeon', editable }, name: 'AEON', mode: 'off', locale, loading: false, error: '' })
+   try { expect(textOf(view.root)).toContain(expected) } finally { view.app.unmount() }
+  }
+ } finally { vi.unstubAllGlobals() }
+})
+
 // AEON-1148: imported project node keys must never replace their route keys;
 // both table actions must use the same canonical address as the rendered link.
 it('builds canonical ticket links for imported, native and escaped project keys', () => {

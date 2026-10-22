@@ -13,17 +13,22 @@
     "ci-plan": {
       "kind": "not-static",
       "reason": "Combined hosted event classification, tier scheduling and evidence; routing and reuse stay independent.",
-      "runs_sha256": "b5e172ebb9c5de6b75d89c95e80cdc183954d8b6a4ad4bd831c87994f15d3f70"
+      "runs_sha256": "ede5de95b2a07409b54c01ffb7b8b839f56455bb341e0cd790503878448b7e63"
     },
     "runner-route": {
       "kind": "not-static",
       "reason": "Reusable hosted runner routing workflow.",
       "runs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
     },
+    "apt-bundle": {
+      "kind": "not-static",
+      "reason": "AEON-1652: one bounded hosted apt fetch and run artifact preparation; offline and fallback behaviour is covered by apt-step-bounds.",
+      "runs_sha256": "a9d0754eea8be36dab1492e598c587f0b4bf2b35eba1116bcea6a7100b4dbd15"
+    },
     "go-test": {
       "kind": "not-static",
       "reason": "Database-backed tier execution; property lint is a supplement.",
-      "runs_sha256": "af006cee28516c502267a87e50e3124920c265e7e91171111b3aa4569ddfaabb"
+      "runs_sha256": "c8d0850ece86c37cb3ae162c864f87e18267002566662cd3b16ea61812c926dd"
     },
     "go-timing": {
       "kind": "not-static",
@@ -50,7 +55,7 @@
     "web-shard": {
       "kind": "not-static",
       "reason": "Browser tier execution and infrastructure preparation.",
-      "runs_sha256": "601c133460c6b87d69d4087e12293d6eac12eb4cf373bc5ff6807fbaa5e593d8"
+      "runs_sha256": "ee9acf06f676c1ec1bd9d32b3e6b42363e3f2ead06a45b43f01f1ebac76d1a1a"
     },
     "web": {
       "kind": "not-static",
@@ -217,6 +222,13 @@
       "cwd": ".",
       "command": "bash scripts/migration-compat.sh \"$PREVIOUS_TAG\" \"$PREVIOUS_DIGEST\"",
       "reason": "Runtime compatibility probe requires Docker and published image."
+    },
+    {
+      "job": "web-unit",
+      "step": "Identify optional apt bundle for this runner image",
+      "cwd": ".",
+      "command": "if [ -n \"${ImageOS:-}\" ] && [ -n \"${ImageVersion:-}\" ]; then\n  echo \"artifact=apt-bundle-${ImageOS}-${ImageVersion}-${RUNNER_ARCH}\" >> \"$GITHUB_OUTPUT\"\nfi",
+      "reason": "AEON-1652: runner image identity for an optional package artifact; no static command or product test is executed here."
     }
   ],
   "checks": [
@@ -870,8 +882,8 @@
       "needs": [
         "node"
       ],
-      "timeout_seconds": 30,
-      "local_only": "AEON-933: every apt and Playwright install-deps step must carry a step timeout and a bounded retry. This guard only reads workflow files."
+      "timeout_seconds": 60,
+      "local_only": "AEON-933/1652: workflow bounds and root-timeout/offline-bundle fixture regressions; the expanded matrix has a 60-second hang guard."
     },
     {
       "id": "web-classification",

@@ -11,7 +11,8 @@ import FloatingPanel from '../work/FloatingPanel.vue'
 // beside the menu on hover and focus, the entry's description for screen
 // readers, and a line under the entry once it is tapped or pressed (always on
 // touch screens, which have no hover).
-const props = defineProps<{ anchor: RowMenuAnchor; items: RowAction[]; label: string }>()
+// phoneSheet: on a portrait phone the menu opens as the shared bottom sheet (AEON-1618).
+const props = defineProps<{ anchor: RowMenuAnchor; items: RowAction[]; label: string; phoneSheet?: boolean }>()
 const emit = defineEmits<{ select: [id: string]; close: [restoreFocus: boolean] }>()
 const id = useId()
 const menu = ref<HTMLElement>()
@@ -50,7 +51,7 @@ onMounted(async () => { await nextTick(); focusAt(0) })
 </script>
 
 <template>
-  <FloatingPanel :anchor="element" :width="280" :align="atPointer ? 'start' : 'end'" :label="label" @close="restore => emit('close', restore)">
+  <FloatingPanel :anchor="element" :width="280" :align="atPointer ? 'start' : 'end'" :label="label" :phone-sheet="phoneSheet" @close="restore => emit('close', restore)">
     <div ref="menu" role="menu" class="row-menu" :aria-label="label" @keydown="keys">
       <template v-for="(item, index) in items" :key="item.id">
         <div v-if="index > 0 && item.group !== items[index - 1]!.group" class="row-menu-sep" role="separator" />
@@ -99,8 +100,10 @@ onMounted(async () => { await nextTick(); focusAt(0) })
 .row-menu-item.off svg { color: var(--ink-3); opacity: .7; }
 .row-menu-keys { flex-shrink: 0; font: 500 11px/1 var(--mono); color: var(--ink-3); font-variant-ligatures: none; }
 .row-menu-item:focus-visible .row-menu-keys { color: var(--ink-2); }
-/* Touch screens have no keys to press. */
+/* Touch screens have no keys to press, and neither has the phone's bottom sheet (AEON-1618). */
 @media (pointer: coarse) { .row-menu-keys { display: none; } }
+/* The whole selector sits inside :global(): Vue drops anything after it, which hid every bottom sheet. */
+:global(.floating.bottom .row-menu-keys) { display: none; }
 @media (hover: hover) { .row-menu-item:hover .row-menu-keys { color: var(--ink-2); } }
 .row-menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
 .row-menu-spin { animation: row-menu-spin .8s linear infinite; }

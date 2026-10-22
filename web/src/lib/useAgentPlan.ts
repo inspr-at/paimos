@@ -6,14 +6,15 @@ import { api } from './api.ts'
 import { basePlan, planValue, type PlanSnapshot, type WaitingWork, type WorkingPreference } from './agentsWorking.ts'
 import { PlanChanged, putAgentsPlan, sameDaily, withDaily, type DailySettings } from './dailyLimits.ts'
 import { queueRequest, type QueueWireSnapshot } from './workQueue.ts'
-import { usePoller } from './usePolledData.ts'
+import { createSharedRequests } from './sharedRequests.ts'
+import { QUEUE_EVENTS } from './agentProjection.ts'
 /** After − or + is released, the final value is saved once this long passes without another press. */
 export const SETTLE_MS = 300
 export function useAgentPlan(viewer: () => string, harnessForProfile: (id: string) => string | undefined) {
   const snapshot = ref<PlanSnapshot | null>(null), plan = ref<WorkingPreference | null>(null)
   const readError = ref(''), saveError = ref(''), saving = ref(false), waiting = ref<WaitingWork[] | null>(null)
   const error = computed(() => saveError.value || readError.value)
-  let generation = 0, version = 0, readVersion = 0
+  let generation = 0, version = 0, readVersion = 0, waitingVersion = 0
   let confirmed: WorkingPreference | null = null
   let confirmedAt: string | null = null
   let pending: { value: WorkingPreference; version: number; daily: boolean } | undefined
@@ -43,14 +44,14 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
     }
   }
   async function refreshWaiting() {
-    const turn = generation, who = viewer()
+    const turn = generation, who = viewer(), read = ++waitingVersion
     if (!who) return
     try {
       const answer = await queueRequest<QueueWireSnapshot>('/queue')
-      if (!current(turn, who)) return
+      if (!current(turn, who) || read !== waitingVersion) return
       // This is the caller's visible queue, not a fabricated launcher queue.
       waiting.value = answer.items.map(item => ({ harness: harnessForProfile(item.queued.model_profile_id ?? '') || undefined, reason: item.queued.waiting ? item.queued.wait_reason : undefined }))
-    } catch { if (current(turn, who)) waiting.value = null }
+    } catch { if (current(turn, who) && read === waitingVersion) waiting.value = null }
   }
   async function drain(turn: number, who: string) {
     if (writer || !pending || !current(turn, who)) return
@@ -124,17 +125,20 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
     const turn = generation, who = viewer()
     settle = setTimeout(() => { settle = undefined; void drain(turn, who) }, SETTLE_MS)
   }
-  watch(viewer, who => {
+  const polling = createSharedRequests(async () => { await Promise.all([refresh(), refreshWaiting()]) }, {
+    events: ['agents_plan.changed', ...QUEUE_EVENTS, 'harness.registered', 'harness.stopped', 'harness.removed', 'harness.restored', 'run.created', 'run.claimed'],
+    enabled: () => !!viewer(), invalidate: () => { readVersion++; waitingVersion++ }, immediate: false,
+  })
+  watch(viewer, (who, _before, cleanup) => {
     // A held or settling edit belongs to the viewer who made it and is dropped, never written for the next one.
     clearTimeout(settle); settle = undefined; holds = 0; interrupted = false
     generation++
-    version = 0; readVersion++; writer = false; reconciling = false; pending = undefined; confirmed = null; confirmedAt = null
+    version = 0; readVersion++; waitingVersion++; writer = false; reconciling = false; pending = undefined; confirmed = null; confirmedAt = null
     snapshot.value = null; plan.value = null; waiting.value = null; readError.value = ''; saveError.value = ''; saving.value = false
     if (!who) return
-    void refresh(); void refreshWaiting()
+    if (typeof document === 'undefined' || document.visibilityState !== 'hidden') { void refresh(); void refreshWaiting() }
+    cleanup(polling.watch(who))
   }, { immediate: true, flush: 'sync' })
-  const poller = usePoller(async () => { await Promise.all([refresh(), refreshWaiting()]) }, 15_000, { enabled: () => !!viewer(), invalidate: () => { readVersion++ } })
-  poller.start(false)
   // Leaving the view or the page within the settle time still sends the released value.
   function flush() {
     if (!settle && !holds) return
@@ -147,7 +151,7 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
   onScopeDispose(() => {
     if (typeof window !== 'undefined') { window.removeEventListener('pagehide', pageHide); window.removeEventListener('pageshow', pageShow) }
     // The released value still follows a write in flight; only a changed viewer cancels it.
-    disposed = true; poller.stop()
+    disposed = true; polling.stop()
     flush()
   })
   return { snapshot, plan, daily, error, saving, waiting, interrupts, save, saveDaily, hold, refresh: () => refresh() }

@@ -27,7 +27,7 @@
     "path": ".github/workflows/ci.yml"
   },
   "jobs": {
-    "total_count": 47,
+    "total_count": 49,
     "jobs": [
       {
         "name": "tier-measurements / pr-tree-v1:123:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:cccccccccccccccccccccccccccccccccccccccc:dddddddddddddddddddddddddddddddddddddddd",
@@ -728,6 +728,42 @@
       },
       {
         "name": "web-shard (20)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (21)",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run selected UI cases without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-shard (22)",
         "run_attempt": 1,
         "status": "completed",
         "conclusion": "success",

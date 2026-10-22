@@ -39,6 +39,11 @@ func withCandidate(h History, head versionFile, opts Options, git func(...string
 			return History{}, fmt.Errorf("candidate is listed as an unpublished reservation")
 		}
 	}
+	for _, withdrawal := range head.WithdrawnReleases {
+		if withdrawal.Version == v {
+			return History{}, fmt.Errorf("candidate is listed as a withdrawn release")
+		}
+	}
 	// Once the tag exists the normal builder wins, byte for byte, including
 	// when newer tags have since been fetched. A later build fills evidence
 	// without rewriting the original image manifest.

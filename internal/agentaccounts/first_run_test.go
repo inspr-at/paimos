@@ -248,18 +248,31 @@ func TestAdmissionScheduleClockAndRunNowFences(t *testing.T) {
 		if w == nil || w.Code != "hold" || w.RunNowAllowed {
 			t.Fatalf("hold lost: %+v", w)
 		}
-		// A sign-in failure has an actionable reason rather than generic offline.
+		// Risk: an inactive login sends someone to Settings, or changing its
+		// label bypasses an actual pause. Advice never grants a start or run-now.
 		no := false
 		a.LastProbeOK = &no
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_failure='auth_failed' WHERE id=$1`, a.ID); err != nil {
-			return err
-		}
-		_, w, err = admission(t.Context(), tx, a, nil, now, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, false)
-		if err != nil {
-			return err
-		}
-		if w == nil || w.Code != "sign_in" || w.RunNowAllowed {
-			t.Fatalf("sign-in lost: %+v", w)
+		for _, tc := range []struct {
+			state, failure, want string
+		}{
+			{"available", "auth_failed", "sign_in"},
+			{"unavailable", "auth_failed", "sign_in"},
+			{"draining", "auth_failed", "state"},
+			{"unavailable", "unavailable", "state"},
+			{"available", "unavailable", "offline"},
+		} {
+			b := a
+			b.State = tc.state
+			if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_failure=$2 WHERE id=$1`, a.ID, tc.failure); err != nil {
+				return err
+			}
+			_, w, err = admission(t.Context(), tx, b, nil, now, 0, runRow{Purpose: "managed", CapacityOverride: "now"}, false)
+			if err != nil {
+				return err
+			}
+			if w == nil || w.Code != tc.want || w.RunNowAllowed {
+				t.Fatalf("%s/%s: want %s without run-now, got %+v", tc.state, tc.failure, tc.want, w)
+			}
 		}
 		return nil
 	}); err != nil {

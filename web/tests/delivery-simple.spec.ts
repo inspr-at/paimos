@@ -285,6 +285,16 @@ test('Simple explains each number in plain words, and its controls stay still th
   await expect(tip).toHaveCount(0)
   await expect(learn).toBeFocused()
   await expect(learn).toHaveAttribute('aria-expanded', 'false')
+  // AEON-1639: Escape also releases the shared pin; hovering a sibling must
+  // open its words while focus stays on the original Learn control.
+  const sibling = simpleTile(page, 'Checks green on the first try').getByRole('button', { name: /^Learn:/ })
+  const learnGuard = await controlStability(page, { learn, sibling })
+  await learnGuard.check(async () => {
+    await sibling.hover()
+    await expect(tip).toContainText('First-attempt green rate: 35% of 161 first attempts ended green.')
+    await expect(learn).toBeFocused()
+  })
+  learnGuard.done()
   // Tab to the next Learn: the first closes, the next opens; nothing on the page moved.
   await page.keyboard.press('Enter')
   await expect(tip).toBeVisible()

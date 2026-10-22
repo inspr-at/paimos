@@ -4,6 +4,7 @@ import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
+import { controlStability } from './control-stability'
 
 const lead = '5e000000-0000-4000-8000-000000000001'
 const child = '5e000000-0000-4000-8000-000000000002'
@@ -72,6 +73,51 @@ test('workers nest by session ID, display their label, harness and ticket, and e
   await expect(row(page, lead)).toHaveAttribute('aria-expanded', 'true')
   // A fresh list says nothing about its age; only a delay shows in the head (AEON-780 replaced the last-updated stamp).
   await expect(page.locator('.page-head .freshness')).toHaveCount(0)
+})
+
+// Risk: wrong project/ticket attribution, duplicate children under a project
+// filter, or a list inventing/fetching an ancestor outside the visible rows.
+test('AEON-1360 cross-project children nest with their own work and survive their project filter once', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1600 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const { data, calls } = await setup(page)
+  Object.assign(data.sessions[1]!, {
+    project_id: 'p-aeon', project: { id: 'p-aeon', key: 'AEON', title: 'Aeon' },
+    ticket_node_id: 'n-a1', ticket: { id: 'n-a1', key: 'AEON-42', title: 'Child project work' },
+    parent_harness_session_id: null, cross_project_parent_harness_session_id: lead,
+  })
+  await page.goto('/agents')
+  await expect(row(page, child)).toHaveAttribute('data-depth', '1')
+  await expect(row(page, child)).toHaveAttribute('data-parent', lead)
+  await expect(row(page, child).locator('.key-inline')).toHaveText('AEON-42 ·')
+  await expect(row(page, child)).toHaveCount(1)
+  const filter = page.locator('.sessions .tb-filter')
+  const guard = await controlStability(page, { filter })
+  await guard.check(async () => {
+    await filter.click()
+    await page.getByRole('menuitem', { name: 'Project', exact: true }).click()
+  })
+  const options = page.getByRole('dialog', { name: 'Filter by Project' })
+  const aeon = options.getByRole('checkbox', { name: /AEON/ })
+  const choices = await controlStability(page, { filter, options: options.getByRole('group', { name: 'Project' }), aeon })
+  await choices.check(async () => {
+    await aeon.check()
+    await expect(aeon).toBeChecked()
+  })
+  choices.done()
+  await page.keyboard.press('Escape')
+  await expect(row(page, child)).toHaveCount(1)
+  await expect(row(page, child)).not.toHaveClass(/filter-context/)
+  await expect(row(page, lead)).toHaveClass(/filter-context/)
+  await expect(row(page, child).locator('.key-inline')).toHaveText('AEON-42 ·')
+  guard.done()
+  // With the ancestor absent from the authorized page, its child stays a root.
+  data.sessions.splice(0, 1)
+  await signal(page, 'harness.registered')
+  await page.mouse.move(0, 0)
+  await expect(row(page, child)).toHaveAttribute('data-depth', '0')
+  await expect(row(page, child)).toHaveCount(1)
+  expect(calls.filter(call => call.method === 'GET' && call.path.includes(`/harness-sessions/${lead}`))).toHaveLength(0)
 })
 
 test('new workers update through the live channel; a stopped worker keeps its place for 10 minutes, then folds into recoverable history', async ({ page }) => {

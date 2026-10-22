@@ -8,7 +8,7 @@ export function attachCopy(product: string, locale = typeof navigator === 'undef
     computerPaired: 'Computer gekoppelt',
     sessionUnlinked: 'Diese Sitzung ist noch nicht verknüpft',
     sessionLinked: 'Diese Sitzung ist verknüpft',
-    pairingHelp: `Die Kopplung verbindet den Computer mit ${product}. Verknüpfe jede laufende Sitzung separat mit ihrem Ticket.`,
+    pairingHelp: `Die Kopplung verbindet den Computer mit ${product}. Jede laufende Sitzung wird separat mit ihrem Ticket verknüpft.`,
     linkHelp: 'Die Kopplung deines Computers verknüpft noch keine Sitzung. Prüfe diese Sitzung und erlaube ihre Verknüpfung mit dem Ticket.',
     codeHelp: 'Starte aeon-agentd attach auf deinem gekoppelten Computer. Nach der lokalen Prüfung öffnet sich die Freigabe im Browser. Gib den Code hier ein, falls sich kein Fenster öffnet.',
     attachSession: 'Sitzung verknüpfen',

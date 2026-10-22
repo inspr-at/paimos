@@ -147,8 +147,8 @@ func TestReuseAlwaysPrimesMatchingMainCacheKeys(t *testing.T) {
 	prime := treeMap(jobs["cache-prime"])
 	web := treeMap(jobs["web-setup"])
 	goTests := treeMap(jobs["go-test"])
-	if prime["if"] != "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.tree-reuse.outputs.reuse == 'merge_group'" || prime["needs"] != "tree-reuse" || prime["runs-on"] != "ubuntu-latest" || prime["strategy"] != nil {
-		t.Fatal("reuse must schedule one main-only hosted priming job")
+	if prime["if"] != "github.event_name == 'push' && github.ref == 'refs/heads/main'" || prime["needs"] != nil || prime["runs-on"] != "ubuntu-latest" || prime["strategy"] != nil {
+		t.Fatal("every main push must schedule one hosted priming job, including self-hosted tests and queue reuse")
 	}
 	for _, name := range []string{"Resolve lockfile and Playwright cache keys", "Cache installed web dependencies", "Cache Playwright browsers"} {
 		a := reuseStep(t, prime, name)
@@ -187,26 +187,123 @@ func TestReuseAlwaysPrimesMatchingMainCacheKeys(t *testing.T) {
 			t.Fatalf("%s cache key inputs differ", prefix)
 		}
 	}
-	cache := treeMap(reuseStep(t, goTests, "Persist Go build cache")["with"])
+	cache := treeMap(reuseStep(t, goTests, "Restore Go build cache")["with"])
 	for shard := 1; shard <= 7; shard++ {
 		saved := treeMap(reuseStep(t, prime, fmt.Sprintf("Save main Go build cache for hosted shard %d", shard))["with"])
 		key := cache["key"].(string)
 		key = strings.ReplaceAll(key, "${{ strategy.job-total }}", "7")
 		key = strings.ReplaceAll(key, "${{ matrix.shard }}", fmt.Sprint(shard))
-		key = strings.ReplaceAll(key, "${{ github.head_ref || github.ref_name }}", "main")
 		if saved["key"] != key || saved["path"] != cache["path"] {
 			t.Fatalf("Go shard %d priming key/path differs from full lane", shard)
 		}
-		prefix := strings.Split(cache["restore-keys"].(string), "\n")[1]
-		prefix = strings.ReplaceAll(prefix, "${{ strategy.job-total }}", "7")
-		prefix = strings.ReplaceAll(prefix, "${{ matrix.shard }}", fmt.Sprint(shard))
-		if !strings.HasPrefix(key, prefix) {
-			t.Fatalf("PR/queue shard %d cannot restore primed key", shard)
+		for _, count := range []int{2, 4, 7} {
+			if shard > count {
+				continue
+			}
+			matched := false
+			for _, prefix := range strings.Split(strings.TrimSpace(cache["restore-keys"].(string)), "\n") {
+				prefix = strings.ReplaceAll(prefix, "${{ strategy.job-total }}", fmt.Sprint(count))
+				prefix = strings.ReplaceAll(prefix, "${{ matrix.shard }}", fmt.Sprint(shard))
+				matched = matched || strings.HasPrefix(key, prefix)
+			}
+			if !matched {
+				t.Fatalf("PR/queue shard %d/%d cannot restore primed main key", shard, count)
+			}
 		}
 	}
 	restored := treeMap(reuseStep(t, treeMap(jobs["web-shard"]), "Restore Playwright browsers")["with"])
 	if restored["key"] != "${{ needs.web-setup.outputs.browser-cache-key }}" || treeMap(web["outputs"])["browser-cache-key"] != "${{ steps.web-cache-keys.outputs.browsers }}" {
 		t.Fatal("web shards must restore the primed browser key")
+	}
+}
+
+// Assert the cache-policy changes before projecting only those fields onto the
+// immutable accepted-CI fixture. Every unrelated job field stays pinned.
+func normalizeAEON1660Caches(t *testing.T, id string, j map[string]any) {
+	t.Helper()
+	const mainHosted = "github.event_name == 'push' && github.ref == 'refs/heads/main' && runner.environment == 'github-hosted'"
+	for _, value := range reuseSteps(j) {
+		s := treeMap(value)
+		if !strings.HasPrefix(fmt.Sprint(s["uses"]), "actions/setup-go@") {
+			continue
+		}
+		with := treeMap(s["with"])
+		if with["cache"] != "${{ "+mainHosted+" }}" {
+			t.Fatalf("%s: setup-go may save only on a hosted main push", id)
+		}
+		switch id {
+		case "go-test":
+			with["cache"] = "${{ runner.environment == 'github-hosted' }}"
+		case "go-static", "go-timing":
+			with["cache"] = "${{ needs.tree-reuse.outputs.reuse != 'pull_request' }}"
+		default:
+			with["cache"] = true
+		}
+	}
+	if id == "go-test" {
+		const prefix = "go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-"
+		const shard = "${{ strategy.job-total }}-${{ matrix.shard }}-"
+		const path = "${{ steps.go-cache-path.outputs.path }}"
+		restore := reuseStep(t, j, "Restore Go build cache")
+		want := map[string]any{
+			"name": "Restore Go build cache", "id": "go-cache", "if": "runner.environment == 'github-hosted'",
+			"uses": "actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25",
+			"with": map[string]any{
+				"path": path, "key": prefix + shard + "main-${{ github.sha }}",
+				"restore-keys": prefix + shard + "main-\n" + prefix + "7-${{ matrix.shard }}-main-\n",
+			},
+		}
+		if !reflect.DeepEqual(restore, want) {
+			t.Fatal("Go shards must restore main caches without an implicit save, including a seven-shard fallback")
+		}
+		restore["name"] = "Persist Go build cache"
+		restore["uses"] = "actions/cache@caa296126883cff596d87d8935842f9db880ef25"
+		with := treeMap(restore["with"])
+		with["key"] = prefix + shard + "${{ github.head_ref || github.ref_name }}-${{ github.sha }}"
+		with["restore-keys"] = prefix + shard + "${{ github.head_ref || github.ref_name }}-\n" + prefix + shard + "main-\n"
+		save := reuseStep(t, j, "Save main Go build cache")
+		want = map[string]any{
+			"name": "Save main Go build cache", "if": mainHosted + " && steps.go-cache.outputs.cache-hit != 'true'",
+			"uses": "actions/cache/save@caa296126883cff596d87d8935842f9db880ef25",
+			"with": map[string]any{"path": path, "key": "${{ steps.go-cache.outputs.cache-primary-key }}"},
+		}
+		if !reflect.DeepEqual(save, want) {
+			t.Fatal("only successful main shards may save their exact restored primary key/path")
+		}
+		steps := reuseSteps(j)
+		for i, value := range steps {
+			if treeMap(value)["name"] == "Save main Go build cache" {
+				if i+1 >= len(steps) || treeMap(steps[i+1])["name"] != "Record successful test evidence" {
+					t.Fatal("main cache save must follow successful tests and measurements")
+				}
+				j["steps"] = append(steps[:i], steps[i+1:]...)
+				break
+			}
+		}
+	}
+	if id == "web-shard" {
+		restore := reuseStep(t, j, "Restore Playwright browsers")
+		if restore["id"] != "web-browsers" || treeMap(restore["with"])["fail-on-cache-miss"] != nil {
+			t.Fatal("browser cache miss must reach the bounded install")
+		}
+		delete(restore, "id")
+		treeMap(restore["with"])["fail-on-cache-miss"] = true
+		steps := reuseSteps(j)
+		found := false
+		for i, value := range steps {
+			if treeMap(value)["name"] != "Install Playwright browsers after cache eviction" {
+				continue
+			}
+			if found || !reflect.DeepEqual(treeMap(value), browserCacheMissInstall()) || i == 0 || treeMap(steps[i-1])["name"] != "Restore Playwright browsers" {
+				t.Fatal("browser fallback must run immediately after a cache miss and remain bounded")
+			}
+			found = true
+			j["steps"] = append(steps[:i], steps[i+1:]...)
+			break
+		}
+		if !found {
+			t.Fatal("missing browser cache eviction fallback")
+		}
 	}
 }
 
@@ -330,6 +427,10 @@ func mergeGroupInventory(t *testing.T, w map[string]any) []string {
 	var names []string
 	for id, value := range treeMap(w["jobs"]) {
 		j := treeMap(value)
+		if id == "apt-bundle" {
+			checkOfflineAptWorkflow(t)
+			continue // Optional fetch acceleration, never execution evidence.
+		}
 		if id == "tree-reuse" || id == "cache-prime" {
 			if !strings.Contains(fmt.Sprint(j["if"]), "github.event_name == 'push'") {
 				t.Fatalf("%s must remain push-only", id)
@@ -371,7 +472,7 @@ func mergeGroupInventory(t *testing.T, w map[string]any) []string {
 		}
 		var shards []int
 		// Both matrices choose the final literal array for merge_group:
-		// hosted seven Go shards and the full twenty web shards.
+		// hosted seven Go shards and the full twenty-two web shards.
 		if expr, ok := matrix["shard"].(string); ok {
 			arrays := regexp.MustCompile(`'\[([0-9, ]+)\]'`).FindAllStringSubmatch(expr, -1)
 			if len(arrays) == 0 {
@@ -434,7 +535,7 @@ func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
 		t.Fatal("new workflow job escaped drift check")
 	}
 	delete(jobs, "new-required-job")
-	treeMap(treeMap(treeMap(jobs["web-shard"])["strategy"])["matrix"])["shard"] = []any{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
+	treeMap(treeMap(treeMap(jobs["web-shard"])["strategy"])["matrix"])["shard"] = []any{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23}
 	if reflect.DeepEqual(proof.RequiredJobs, mergeGroupInventory(t, w)) {
 		t.Fatal("new matrix row escaped drift check")
 	}
@@ -759,9 +860,9 @@ func normalizeEffectiveLane(t *testing.T, id string, value map[string]any) {
 					// that exact wiring and full-event fallback before projecting
 					// onto the immutable historical two-shard execution pin.
 					if id == "web-shard" {
-						const planned = `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]') }}`
+						const planned = `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]') }}`
 						if v != planned {
-							t.Fatal("PR web shards must consume the planned list and retain twenty full-event rows")
+							t.Fatal("PR web shards must consume the planned list and retain twenty-two full-event rows")
 						}
 						v = `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}`
 					}
@@ -823,6 +924,35 @@ func normalizeAEON933InstallBounds(t *testing.T, id string, job map[string]any) 
 	case "e2e-run":
 		restorePlaywrightDeps(t, reuseStep(t, job, "Install Playwright"), "npx playwright install --with-deps --only-shell chromium", "bash \"$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh\" playwright install --with-deps --only-shell chromium")
 	}
+}
+
+// AEON-1652 adds an optional package artifact, preserving the original install
+// and failure fallback. Prove its wiring before projecting historical jobs.
+func normalizeOfflineAptBundle(t *testing.T, id string, job map[string]any) {
+	t.Helper()
+	if id != "go-test" && id != "web-unit" && id != "web-shard" {
+		return
+	}
+	checkOfflineAptWorkflow(t)
+	var steps, needs []any
+	removed := 0
+	for _, value := range reuseSteps(job) {
+		switch treeMap(value)["name"] {
+		case "Identify optional apt bundle for this runner image", "Download optional apt bundle":
+			removed++
+		default:
+			steps = append(steps, value)
+		}
+	}
+	if removed != 2 || !containsNeed(job["needs"], "apt-bundle") {
+		t.Fatalf("%s lost its optional apt bundle prerequisites", id)
+	}
+	for _, need := range anySlice(job["needs"]) {
+		if need != "apt-bundle" {
+			needs = append(needs, need)
+		}
+	}
+	job["steps"], job["needs"] = steps, needs
 }
 
 // AEON-1605: mocked browser shards opt out of the backend wait, and e2e
@@ -890,7 +1020,7 @@ func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
 	normalizeParallelWebSetup(t, jobs)
 	unit, browser := treeMap(jobs["web-unit"]), treeMap(jobs["web-shard"])
 	for _, j := range []map[string]any{unit, browser} {
-		if !reflect.DeepEqual(j["needs"], []any{"ci-plan", "web-setup", "tree-reuse"}) {
+		if !reflect.DeepEqual(j["needs"], []any{"ci-plan", "web-setup", "tree-reuse", "apt-bundle"}) {
 			t.Fatal("Unit and browser shards must start together from setup, without depending on each other")
 		}
 		if treeMap(reuseStep(t, j, "Download shared web runtime")["with"])["name"] != "web-runtime" || reuseStep(t, j, "Restore web runtime")["run"] != `tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"` {
@@ -965,6 +1095,8 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				j = normalizeParallelWebSetup(t, jobs)
 			}
 			j = cloneStep(t, j)
+			normalizeOfflineAptBundle(t, id, j)
+			normalizeAEON1660Caches(t, id, j)
 			if id != "web-setup" { // The historical setup was already projected above.
 				normalizeAEON1642Toolchains(t, j)
 			}
