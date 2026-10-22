@@ -124,6 +124,17 @@ export function glimpseFramePaints(connected: boolean, width: number, height: nu
   return connected && width > 0 && height > 0
 }
 
+// A shrink updates the visual viewport before this host's measured box.
+// Gutters make the host narrower than the header's 1280px layout breakpoint,
+// so detect staleness against the viewport itself, allowing 1px of catch-up.
+// Painting the stale wide software-GL frame delays the layout read (AEON-1471).
+// Pinch-zoom changes visual width without leaving the wide layout, so a
+// scaled viewport must not freeze the orbit.
+export function glimpseStaleWideFrame(measuredWidth: number, visualWidth: number | null, scale = 1): boolean {
+  if (scale !== 1 || visualWidth == null || !Number.isFinite(visualWidth) || !Number.isFinite(measuredWidth)) return false
+  return measuredWidth > visualWidth + 1
+}
+
 // A link is drawn only when both complete orbs fit inside the padded view.
 export function glimpsePointInside(x: number, y: number, radius: number, width: number, height: number): boolean {
   return Number.isFinite(x) && Number.isFinite(y) && x - radius >= 8 && y - radius >= 8 && x + radius <= width - 8 && y + radius <= height - 8
@@ -828,6 +839,10 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     // Pin frames call renderFrame directly, so a pinned orbit still paints
     // while this clock waits for a measured box.
     if (glimpse && !glimpseFramePaints(host.isConnected, glimpseBoxWidth, glimpseBoxHeight)) return
+    // Do not read client rects here. That drops the visual-viewport and
+    // document-element deliveries AEON-1337 and AEON-1414 still need.
+    const visual = typeof window !== 'undefined' ? window.visualViewport : null
+    if (glimpse && glimpseStaleWideFrame(glimpseBoxWidth, visual?.width ?? null, visual?.scale ?? 1)) return
     renderFrame(now)
   }
   if (glimpse && typeof ResizeObserver === 'function') {

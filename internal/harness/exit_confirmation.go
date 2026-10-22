@@ -29,8 +29,10 @@ func (m *Module) confirmExit(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	}
 	ctx := r.Context()
 	// Endpoint holds the work-tree/access fence before this check and row lock.
-	if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: r.PathValue("projectId")}); err != nil {
-		return nil, err
+	if !safetyOnly(ctx) {
+		if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: r.PathValue("projectId")}); err != nil {
+			return nil, err
+		}
 	}
 	s, err := load(ctx, tx, r.PathValue("projectId"), r.PathValue("sessionId"), true)
 	if errors.Is(err, pgx.ErrNoRows) {

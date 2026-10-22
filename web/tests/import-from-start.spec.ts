@@ -4,7 +4,7 @@
 // list or a date moves a control; the expired answer reveals the draft; the
 // create sends other choices than those on screen, or the result is not the
 // project it made. Every state is drawn at 1440 and 390, light and dark, in
-// both languages where text length matters (screenshots for the visual hold).
+// English sheet copy, including a German draft (screenshots for the visual hold).
 import { test, expect, type Browser, type Page, type TestInfo } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { controlStability } from './control-stability'
@@ -175,9 +175,10 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     } finally { await ctx.close() }
   })
 
-  test(`AEON-1441: expired handoff and German at ${width} ${theme}`, async ({ browser }, testInfo) => {
+  test(`AEON-1441: expired handoff, and a German draft stays English, at ${width} ${theme}`, async ({ browser }, testInfo) => {
     test.setTimeout(90_000)
     const ctx = await context(browser, width, theme)
+    let deCtx: Awaited<ReturnType<Browser['newContext']>> | undefined
     try {
       const page = await ctx.newPage()
       const world = await setup(page, { gone: true, theme })
@@ -200,17 +201,19 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       await expect(sheet(denied).getByRole('heading', { name: 'You may not create projects here.' })).toBeVisible()
       await expect(sheet(denied).locator('form')).toHaveCount(0)
 
-      const de = await ctx.newPage()
+      deCtx = await browser.newContext({ viewport: { width, height: width < 600 ? 844 : 900 }, hasTouch: width < 600, colorScheme: theme, reducedMotion: 'reduce', timezoneId: 'Europe/Vienna', locale: 'de-AT' })
+      const de = await deCtx.newPage()
       const german = await setup(de, { language: 'de', theme })
+      await de.route('**/api/me/profile', route => route.fulfill({ json: { principal_id: me.id, email: 'markus@barta.com', first_name: 'Markus', last_name: 'Barta', preferred_name: '', short_name: 'mba', initials: 'MB', timezone: 'Europe/Vienna', locale: 'de', greeting_enabled: false, avatar_color: 'teal', avatar_hashes: {}, week_start: 1, revision: 1 } }))
       await de.goto(`/new-project#draft=${CAPABILITY}&lang=de`)
-      await expect(sheet(de).getByRole('heading', { name: 'Neues Projekt aus START' })).toBeVisible()
+      await expect(sheet(de).getByRole('heading', { name: 'New project from START' })).toBeVisible()
       await expect(de.locator('#np-key')).toHaveValue('VAFDB')
-      await expect(sheet(de).locator('.np-from')).toHaveText('Aus deinem Gespräch auf start.example.com · 16. Okt., 09:42')
-      for (const text of ['Was du anlegst', 'Kürzel', 'Verantwortlich', 'Für jeden offenen Punkt ein Ticket anlegen', '4 von 4']) await expect(sheet(de).getByText(text, { exact: true })).toBeVisible()
-      await expect(de.locator('#np-go')).toContainText('Projekt anlegen')
+      await expect(sheet(de).locator('.np-from')).toHaveText('From your conversation on start.example.com · 16 Oct, 09:42')
+      for (const text of ['What you’ll create', 'Key', 'Owner', 'Create a ticket for each open point', '4 of 4']) await expect(sheet(de).getByText(text, { exact: true })).toBeVisible()
+      await expect(de.locator('#np-go')).toContainText('Create project')
       await craft(de, width < 600)
-      await shoot(de, testInfo, 'de', width, theme)
+      await shoot(de, testInfo, 'de-draft-en', width, theme)
       expect([...world.errors, ...german.errors, ...refused.errors.filter(error => !/403/.test(error))]).toEqual([])
-    } finally { await ctx.close() }
+    } finally { await deCtx?.close(); await ctx.close() }
   })
 }

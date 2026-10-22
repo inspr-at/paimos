@@ -177,24 +177,28 @@ test('release notes use benefit text and do not fall back to the Git headline', 
   await expect(notes.getByRole('button', { name: 'Deutsch', exact: true })).toHaveCount(0)
 })
 
-test('a German language setting shows the German pill and sentence, and an empty German field falls back to English', async ({ page }) => {
+test('a German profile stays in English; an explicit DE choice shows German and falls back when German is empty', async ({ page }) => {
   const profile = { principal_id: '11111111-1111-4111-8111-111111111111', email: 'markus@barta.com', first_name: 'Markus', last_name: 'Barta', preferred_name: '', short_name: 'mba', initials: 'MB', timezone: 'Europe/Vienna', locale: 'de-AT', greeting_enabled: false, avatar_color: 'teal', avatar_hashes: {}, week_start: 1, revision: 1 }
-  const show = async (notes = benefitNotes()) => {
+  const show = async (notes = benefitNotes(), query = '') => {
     const opened = await prepareNotedRelease(page, notes)
     // Registered after the work mock so this route, not the mock's 404, answers.
     await page.route('**/api/me/profile', route => route.fulfill({ json: profile }))
-    await page.goto(`/releases/${opened.current.version}`)
+    await page.goto(`/releases/${opened.current.version}${query}`)
   }
   await show()
   const notes = page.getByRole('region', { name: 'Release notes' })
+  await expect(notes.locator('.pill-title')).toHaveText('Clear release notes')
+  await expect(notes.locator('.benefit')).toHaveText('Tickets explain what you gain.')
+  await expect(notes).toContainText('One ticket is hidden from release notes.')
+  await expect(notes.locator('.lang-badge')).toHaveCount(0)
+  await show(benefitNotes(), '?release_lang=de')
   await expect(notes.locator('.pill-title')).toHaveText('Verständliche Release Notes')
   await expect(notes.locator('.benefit')).toHaveText('Tickets erklären den Nutzen.')
   await expect(notes).toContainText('Ein Ticket ist in den Release Notes ausgeblendet.')
-  profile.locale = 'de-DE'
   const partial = benefitNotes()
   partial.items[0]!.pill_de = ''
   partial.items[0]!.benefit_de = ' '
-  await show(partial)
+  await show(partial, '?release_lang=de')
   // The English text carries one small badge on the title (AEON-323).
   await expect(notes.locator('.pill-title')).toHaveText('Clear release notesEN')
   await expect(notes.locator('.pill-title .lang-badge')).toHaveText('EN')

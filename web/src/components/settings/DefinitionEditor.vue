@@ -2,7 +2,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { DEFINITION_BLOCKS, DEFINITION_CATALOG, DEFINITION_CONDITION_OPTIONS, definitionBlocks, definitionChangeWords, definitionDecisionWords, definitionConditionWords, checkCount, cloneChecks, definitionDiff, fixedRuleCondition, manualRule, ruleCondition, ruleIcon, ruleLabel, ruleOwnerWords, ruleWords, sameRule, type DefinitionChange, type DefinitionChecks, type DefinitionCondition, type DefinitionRule, type DefinitionStatus } from '../../lib/definitions'
-import { useProfile } from '../../stores/profile'
 import { displayLanguage } from '../../lib/displayLanguage'
 import { statusName } from '../../lib/statusNames'
 import { claimSettingsPopover, settingsSubmitKey } from '../../lib/settingsOverlays'
@@ -16,8 +15,8 @@ import KeyCap from '../KeyCap.vue'
 
 const props = withDefaults(defineProps<{ checks: DefinitionChecks; workspace?: DefinitionChecks; base?: DefinitionChecks | null; projectKey: string; own?: boolean; editable: boolean; busy?: boolean; error?: string; people?: ProjectPerson[]; pending?: DefinitionChange[]; changedDate?: string; scope?: 'project' | 'workspace' }>(), { base: null, own: false, busy: false, error: '', people: () => [], pending: () => [], changedDate: '', scope: 'project' })
 const emit = defineEmits<{ change: [checks: DefinitionChecks, applied: () => void]; decide: [change: DefinitionChange, decision: 'accept' | 'keep', applied: () => void] }>()
-const panelBody = ref<HTMLElement>(), uid = useId(), root = ref<HTMLElement>(), profile = useProfile()
-const language = computed(() => displayLanguage(profile.profile?.locale, 'definitions'))
+const panelBody = ref<HTMLElement>(), uid = useId(), root = ref<HTMLElement>()
+const language = computed(() => displayLanguage())
 const t = (en: string, de: string) => language.value === 'de' ? de : en
 const blocks = computed(() => definitionBlocks(language.value))
 const blockName = (id: DefinitionStatus) => blocks.value.find(block => block.id === id)!.name

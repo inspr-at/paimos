@@ -133,6 +133,9 @@ async function mockGoals(page: Page, w: World, options: { failList?: boolean } =
     const id = new URL(route.request().url()).pathname.split('/').pop()!, g = w.goals.find(x => x.id === id)
     return g ? route.fulfill({ json: { id, key: g.key, kind_id: 'k-goal', title: g.title, body: '', fields: {}, state: 'open', parent_id: null, position: 1, created_at: iso(g.created), updated_at: iso(NOW) } }) : route.fulfill({ status: 404, json: { error: 'not found' } })
   })
+  // AEON-1495: an unanswered instances read is unknown coverage, which must not
+  // look like an empty desk. This Goals world is one known instance and no siblings.
+  await page.route(/\/api\/decision-desk\/instances$/, route => route.fulfill({ json: { here: 'ppm', siblings: [] } }))
   await page.route(/\/api\/decision-desk\/projection/, route => route.fulfill({ json: {
     items: w.desk.open ? [
       { id: 'q-gate', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'Which identity should agent reviews run as for the gatekeeper go-live?', created_at: iso(NOW - 3 * HOUR), held: true, href: '', source: '', ticket_key: 'AEON-1394', asked_by: { id: 'p-lead', name: 'AEON-LEAD' } },
@@ -190,9 +193,10 @@ test('Goals is the third segment; the filter and group chips stay put; chips cou
   expect(counts).toEqual([21, 3, 10, 1, 7])
   expect(counts[0]).toBe(counts.slice(1).reduce((a, b) => a + b, 0))
   await expect(page.locator('.goal-list .goal')).toHaveCount(4)
-  const hide = page.getByRole('button', { name: 'Hide done' }), expand = page.locator('.expand-btn')
-  await expect(hide).toHaveAttribute('aria-pressed', 'true')
-  const guard = await controlStability(page, { filter, hide, expand, all: chips.getByRole('radio', { name: /^All/ }), views: page.locator('.view-seg'), display: page.locator('.display-btn') })
+  // AEON-1614: Done goals moved from a toolbar button into Display › Show; H still toggles it.
+  const expand = page.locator('.expand-btn')
+  await expect(page.locator('.goals-chips .toggle-btn')).toHaveCount(0)
+  const guard = await controlStability(page, { filter, expand, all: chips.getByRole('radio', { name: /^All/ }), views: page.locator('.view-seg'), display: page.locator('.display-btn') })
   await guard.check(async () => { await page.keyboard.press('h'); await expect(page.locator('.goal-list .goal')).toHaveCount(5) })
   expect(await chips.getByRole('radio').evaluateAll(buttons => buttons.map(b => Number(b.querySelector('.n')?.textContent)))).toEqual(counts)
   expect(listCalls.at(-1)?.get('hide_done')).toBeNull()
@@ -532,7 +536,7 @@ test('September lands as Sep, a flat pace says no change, and hidden columns sor
       } else {
         await expect(headers).toHaveCount(3)
         await expect(headers.first()).toBeHidden()
-        const more = page.getByRole('button', { name: 'More: state filter, hide done, expand all' })
+        const more = page.getByRole('button', { name: 'More: state filter, show, expand all' })
         const neighbors = width <= 760 ? { search, views, more } : { search, views }
         // Phones hide every header, so Display names every sort there; wider, only the hidden counts.
         expect(await visibleWords(display)).toEqual([width <= 760 ? 'ETA' : 'Display'])
@@ -572,7 +576,7 @@ test('Display keeps one box through every sort at 1024, 820 and 390, shows only 
     const search = page.locator('.project-search')
     const views = page.locator('.view-seg')
     const phone = width <= 760
-    const neighbors = phone ? { search, views, more: page.getByRole('button', { name: 'More: state filter, hide done, expand all' }) } : { search, views }
+    const neighbors = phone ? { search, views, more: page.getByRole('button', { name: 'More: state filter, show, expand all' }) } : { search, views }
     await display.click()
     const menu = page.getByRole('dialog', { name: 'Display options' })
     await expect(menu).toBeVisible()
@@ -623,7 +627,7 @@ for (const [width, height] of [[1440, 900], [1024, 800], [390, 844]] as const) {
         const expandRow = page.locator('.head-expand')
         await expect(expandRow).toBeVisible()
         expect((await box(expandRow)).height).toBeGreaterThanOrEqual(44)
-        const more = page.getByRole('button', { name: 'More: state filter, hide done, expand all' })
+        const more = page.getByRole('button', { name: 'More: state filter, show, expand all' })
         expect((await box(more)).width).toBeGreaterThanOrEqual(44)
         await more.click()
         await expect(page.getByRole('menuitemradio', { name: /Moving/ })).toBeVisible()

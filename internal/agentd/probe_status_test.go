@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 )
 
@@ -27,7 +28,9 @@ func fakeStatus(t *testing.T, out string, code int) string {
 	}
 	path := filepath.Join(root, "vendor")
 	// Vendor CLIs answer --version before any sign-in check (AEON-341 launcher readiness).
-	script := "#!/bin/sh\n" + versionAnswer + "cat <<'EOF'\n" + out + "\nEOF\nexit " + string(rune('0'+code)) + "\n"
+	// The probe PATH is /usr/bin:/bin, which has no cat on NixOS.
+	cat := fixturebin.Quote(fixturebin.Require(t, "cat"))
+	script := "#!/bin/sh\n" + versionAnswer + cat + " <<'EOF'\n" + out + "\nEOF\nexit " + string(rune('0'+code)) + "\n"
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +99,8 @@ func TestClaudeRotatedLoginsKeepOnlyTheirOwnEnrollmentReady(t *testing.T) {
 	defer s.Close(context.Background())
 	home := privateHome(t)
 	identity := filepath.Join(home, "active-login")
-	path := fakeScript(t, `printf '{"loggedIn":true,"email":"%s","authMethod":"claude.ai"}\n' "$(cat "$CLAUDE_CONFIG_DIR/active-login")"`)
+	cat := fixturebin.Quote(fixturebin.Require(t, "cat"))
+	path := fakeScript(t, `printf '{"loggedIn":true,"email":"%s","authMethod":"claude.ai"}\n' "$(`+cat+` "$CLAUDE_CONFIG_DIR/active-login")"`)
 	node, sdk := claudeAdapterDependencies(t, path)
 	claude := &ClaudeAdapter{NodePath: node, SDKPath: sdk, ClaudePath: path,
 		Homes: map[string]string{"a": home, "b": home}, Emails: map[string]string{"a": "a@example.test", "b": "b@example.test"}}
@@ -321,7 +325,9 @@ func TestProbeStatusOutputCap(t *testing.T) {
 	if _, ok := any(&probeCapture{}).(io.ReaderFrom); ok {
 		t.Fatal("probeCapture must not offer ReadFrom, which would bypass the cap")
 	}
-	const flood = "head -c 1048576 /dev/zero | tr '\\0' ' '"
+	head := fixturebin.Quote(fixturebin.Require(t, "head"))
+	tr := fixturebin.Quote(fixturebin.Require(t, "tr"))
+	flood := head + " -c 1048576 /dev/zero | " + tr + " '\\0' ' '"
 	codex := func(body string) ProbeStatus {
 		a := &CodexAdapter{Path: fakeScript(t, body), Homes: map[string]string{"k": home}, Emails: map[string]string{"k": "a@example.com"}}
 		return a.ProbeStatus(ctx, "k")
@@ -361,8 +367,8 @@ func TestProbeStatusOutputCap(t *testing.T) {
 			{"stdout flood, exit 1", answer + "\n" + flood + "\nexit 1", unavailable},
 			{"stdout flood, exit 0", answer + "\n" + flood + "\nexit 0", unavailable},
 			{"stderr flood", "{ " + answer + "; " + flood + "; } >&2\nexit 1", unavailable},
-			{"one byte over", answer + "\nhead -c " + strconv.Itoa(4097-len(v.signOut)) + " /dev/zero | tr '\\0' ' '\nexit 1", unavailable},
-			{"exactly at cap", answer + "\nhead -c " + strconv.Itoa(4096-len(v.signOut)) + " /dev/zero | tr '\\0' ' '\nexit 1", signedOut},
+			{"one byte over", answer + "\n" + head + " -c " + strconv.Itoa(4097-len(v.signOut)) + " /dev/zero | " + tr + " '\\0' ' '\nexit 1", unavailable},
+			{"exactly at cap", answer + "\n" + head + " -c " + strconv.Itoa(4096-len(v.signOut)) + " /dev/zero | " + tr + " '\\0' ' '\nexit 1", signedOut},
 			{"small answer", answer + "\nexit 1", signedOut},
 		}
 		for _, c := range cases {
@@ -455,8 +461,9 @@ func TestClaudeSeparateHomesKeepBothLoginsReadyAndFenceOnlyTheChangedHome(t *tes
 			t.Fatal(err)
 		}
 	}
+	cat := fixturebin.Quote(fixturebin.Require(t, "cat"))
 	path := fakeScript(t, `[ "$HOME" = "$CLAUDE_CONFIG_DIR" ] || exit 9
-printf '{"loggedIn":true,"email":"%s","authMethod":"claude.ai"}\n' "$(cat "$CLAUDE_CONFIG_DIR/active-login")"`)
+printf '{"loggedIn":true,"email":"%s","authMethod":"claude.ai"}\n' "$(`+cat+` "$CLAUDE_CONFIG_DIR/active-login")"`)
 	node, sdk := claudeAdapterDependencies(t, path)
 	a := NewClaudeAdapter(node, sdk, path, map[string]string{"first": first, "second": second})
 	a.SetExpectedEmails(map[string]string{"first": "first@example.test", "second": "second@example.test"})

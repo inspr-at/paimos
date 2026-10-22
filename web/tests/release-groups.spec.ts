@@ -221,7 +221,7 @@ test('a search that matches only a commit subject opens that disclosure', async 
   await expect(requests.getByText('Harden session requests and preserve reporter payloads')).toBeHidden()
 })
 
-test('a German locale uses the German pill and benefit, and an empty German field falls back to English', async ({ page }) => {
+test('a German profile stays in English; an explicit DE choice uses the German pill and falls back when German is empty', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
   const profile = { principal_id: '11111111-1111-4111-8111-111111111111', email: 'markus@barta.com', first_name: 'Markus', last_name: 'Barta', preferred_name: '', short_name: 'mba', initials: 'MB', timezone: 'Europe/Vienna', locale: 'de-AT', greeting_enabled: false, avatar_color: 'teal', avatar_hashes: {}, week_start: 1, revision: 1 }
   const data = fixtures()
@@ -232,6 +232,9 @@ test('a German locale uses the German pill and benefit, and an empty German fiel
   await page.route('**/api/me/profile', route => route.fulfill({ json: profile }))
   await page.goto(`/releases/${history.current}`)
   const features = sheet(page).locator('.changes').getByRole('region', { name: 'Features, 3' })
+  await expect(features.getByRole('article', { name: 'Session chat on iPhone' })).toBeVisible()
+  await expect(features.getByText('The iPhone session chat keeps its tabs, unread messages and scroll position.')).toBeVisible()
+  await page.goto(`/releases/${history.current}?release_lang=de`)
   await expect(features.getByRole('article', { name: 'Sitzungschat auf dem iPhone' })).toBeVisible()
   await expect(features.getByText('Der Sitzungschat auf dem iPhone behält Tabs, ungelesene Nachrichten und die Scrollposition.')).toBeVisible()
   const partial = stable100(true)

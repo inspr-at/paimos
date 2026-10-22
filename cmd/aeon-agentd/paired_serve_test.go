@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentd"
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/agentdwire"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/attachwatch"
@@ -878,6 +880,10 @@ func TestColdRevokedDaemonReconcilesWithoutRuntimeAuthentication(t *testing.T) {
 // Risk: the daemon rechecks the default profile or trusts the CLI's stale
 // identity. Both request and recheck execute only temporary fake vendors.
 func TestRunningEnrollmentFencesTheCandidatesOwnHome(t *testing.T) {
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, harness := range []string{"claude", "codex"} {
 		t.Run(harness, func(t *testing.T) {
 			owner, err := filepath.EvalSymlinks(t.TempDir())
@@ -901,7 +907,7 @@ func TestRunningEnrollmentFencesTheCandidatesOwnHome(t *testing.T) {
 			body := `#!/bin/sh
 home="$CODEX_HOME"
 if [ "${0##*/}" = claude ]; then home="$CLAUDE_CONFIG_DIR"; [ "$HOME" = "$home" ] || exit 9; fi
-identity=$(/bin/cat "$home/active-login") || exit 10
+identity=$(@CAT@ "$home/active-login") || exit 10
 case "$1" in
 --version) echo 1.2.3; exit 0;;
 auth) printf '{"loggedIn":true,"email":"%s","authMethod":"claude.ai"}\n' "$identity"; exit 0;;
@@ -916,6 +922,9 @@ done;;
 *) exit 11;;
 esac
 `
+			// Keep the resolved reader when the CLI later restricts PATH to
+			// this isolated vendor fixture; NixOS has no /bin/cat.
+			body = strings.ReplaceAll(body, "@CAT@", fixturebin.Quote(cat))
 			if err := os.WriteFile(bin, []byte(body), 0700); err != nil {
 				t.Fatal(err)
 			}
@@ -953,6 +962,10 @@ esac
 // default profile, whose 0755 mode polling names and repairs later, or stops
 // demanding one for a second home. Both requests execute only a fake vendor.
 func TestRunningEnrollmentKeepsDefaultProfileRepair(t *testing.T) {
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, harness := range []string{"claude", "codex"} {
 		t.Run(harness, func(t *testing.T) {
 			owner, err := filepath.EvalSymlinks(t.TempDir())
@@ -964,7 +977,7 @@ func TestRunningEnrollmentKeepsDefaultProfileRepair(t *testing.T) {
 			body := `#!/bin/sh
 home="$CODEX_HOME"
 if [ "${0##*/}" = claude ]; then home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; fi
-identity=$(/bin/cat "$home/active-login") || exit 10
+identity=$(@CAT@ "$home/active-login") || exit 10
 case "$1" in
 --version) echo 1.2.3; exit 0;;
 auth) printf '{"loggedIn":true,"email":"%s","authMethod":"claude.ai"}\n' "$identity"; exit 0;;
@@ -979,6 +992,7 @@ done;;
 *) exit 11;;
 esac
 `
+			body = strings.ReplaceAll(body, "@CAT@", fixturebin.Quote(cat))
 			if err := os.WriteFile(bin, []byte(body), 0700); err != nil {
 				t.Fatal(err)
 			}

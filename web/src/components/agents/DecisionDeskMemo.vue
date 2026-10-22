@@ -1,8 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, ref, watch, watchEffect } from 'vue'
 import { answerFor, CUSTOM_ANSWER, deskProject, draftFor, fieldTarget, kindLabels, projectSwitch, runRef, type DeskClose, type DeskProject, type DeskTicket, type DeskWho, macPlatform, outcomeLabels, outcomeUnavailable, stampDescription, stampWhy, submitModifier, suggestedUnavailableNote, type DeskDraft, type DeskItem, type DeskOutcome } from '../../lib/decisionDesk'
-import { deliveryTime, lessonChangelogLabel, loadDeskContext, type DeskContext } from '../../lib/decisionDeskApi'
+import { deliveryTime, lessonChangelogLabel, loadDeskContext, readDeskTickets, type DeskContext } from '../../lib/decisionDeskApi'
+import { onAccessRevalidate } from '../../lib/authz'
+import { TICKET_PEEK } from '../../lib/ticketPeek'
+import { normalKey, showingTicketKeys, ticketRef as linkedTicket, wantTicketKey } from '../../lib/ticketLinks'
+import { ticketPath } from '../../lib/work'
+import { useProjects } from '../../stores/projects'
+import TicketPeekLink from '../TicketPeekLink.vue'
 import { RISK_LABEL, riskFor, scopeLabel } from '../../lib/agentState'
 import { contentUrl, fileKind, hasThumbnail } from '../../lib/attachments'
 import AttachmentLightbox from '../work/AttachmentLightbox.vue'
@@ -348,6 +354,99 @@ watch(item, async (current, previous) => {
     if (turn === contextGeneration && item.value?.id === current!.id) { context.value = result; contextLoading.value = false }
   }
 }, { immediate: true })
+
+// ---------- Tickets open as a peek over the memo (AEON-1632) ----------
+// Any change of address closes the memo, so the peek is the memo's own: a second modal over it,
+// never the app's ?peek= query. Closing it returns to the same item with its answer as it was.
+// Links carry the canonical /p/<project>/<KEY> for a new tab; a key this workspace cannot open stays plain.
+// Loaded on first use: the peek brings the whole ticket workspace.
+const TicketPeekHost = defineAsyncComponent(() => import('../TicketPeekHost.vue'))
+const projects = useProjects()
+void projects.load()
+const peekKey = ref<string | null>(null), peekDialog = ref<HTMLDialogElement>(), peekHost = ref<{ requestClose: () => void | Promise<void>; focus: () => void | Promise<void>; shortcut: (key: string) => boolean }>()
+let peekOpener: HTMLElement | null = null, peekClosing = false
+provide(TICKET_PEEK, { open: (key, from) => void openPeek(key, from), openKey: peekKey })
+async function openPeek(key: string, from?: HTMLElement | null) {
+  peekOpener = from ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+  peekKey.value = normalKey(key)
+  await nextTick()
+  if (peekDialog.value && !peekDialog.value.open) peekDialog.value.showModal()
+  void peekHost.value?.focus()
+}
+async function requestPeekClose() {
+  if (peekClosing) return
+  // Still loading: nothing typed yet, so it closes at once.
+  if (!peekHost.value) { closePeek(); return }
+  peekClosing = true
+  try { await peekHost.value.requestClose() } finally { peekClosing = false }
+}
+function closePeek() {
+  peekDialog.value?.close(); peekKey.value = null
+  const from = peekOpener; peekOpener = null
+  void nextTick(() => { if (from?.isConnected && from.getClientRects().length) from.focus({ preventScroll: true }); else memo.value?.focus({ preventScroll: true }) })
+}
+// A menu inside the peek is not a dialog, so the browser would cancel the peek.
+const peekMenuOpen = () => !!peekDialog.value?.querySelector('.floating')
+function cancelPeek() {
+  // The open menu consumes Escape. Native cancel must not close the ticket under it,
+  // and a confirmation above the peek keeps its own Escape (AEON-1632).
+  if (peekMenuOpen() || document.querySelector('dialog.confirm[open]')) return
+  void requestPeekClose()
+}
+// Esc leaves a field, then closes the peek. A menu inside the peek consumes the first Esc.
+// The panel's own keys (e, s, p, a, r, c) work inside it, as in the app's dock.
+function peekKeys(event: KeyboardEvent) {
+  if (event.defaultPrevented || event.isComposing) return
+  if (event.key === 'Escape') {
+    if (document.querySelector('dialog.confirm[open]')) return
+    if (peekMenuOpen()) { event.preventDefault(); event.stopPropagation(); return }
+    event.preventDefault(); event.stopPropagation()
+    if (fieldTarget(event.target)) { (event.target as HTMLElement).blur(); void peekHost.value?.focus() } else void requestPeekClose()
+    return
+  }
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || fieldTarget(event.target)) return
+  if (peekHost.value?.shortcut(event.key)) { event.preventDefault(); event.stopPropagation() }
+}
+function peekBackdrop(event: MouseEvent) { if (event.target === peekDialog.value) void requestPeekClose() }
+const peekHref = (key: string) => {
+  const found = linkedTicket(key), owner = found ? projects.byId(found.projectId) : undefined
+  return found && owner ? ticketPath(owner.routeKey, found.key) : ''
+}
+const peekWhy = (key: string) => linkedTicket(key) === null ? `${key} isn’t a ticket you can open in this workspace` : undefined
+// Outcome effects name tickets by id; the peek opens by key. One bounded read per unknown id.
+const idKeys = ref(new Map<string, string | null>())
+let idEpoch = 0
+const keyForId = (id: string): string | null | undefined =>
+  context.value.ticket?.id === id ? context.value.ticket.key : context.value.related.find(node => node.id === id)?.key ?? idKeys.value.get(id)
+// An id link's plain stand-in: its own words while it resolves, then the key (or "The ticket") with the quiet reason.
+const idPlain = (id: string, words: string) => { const key = keyForId(id); return key === undefined || (key && linkedTicket(key) === undefined) ? words : key || 'The ticket' }
+const idWhy = (id: string) => { const key = keyForId(id); return key === null ? 'This ticket isn’t one you can open in this workspace' : key ? peekWhy(key) : undefined }
+const effectIds = computed(() => [...new Set((item.value?.outcomeEffects ?? []).flatMap(effect => [
+  ...(effect.effect_data?.ticket_id ? [effect.effect_data.ticket_id] : []),
+  ...(effect.effect_data?.review_required ?? []).filter(review => review.kind === 'criterion' && review.ref).map(review => review.ref),
+]))].slice(0, 20))
+async function readIds(ids: string[]) {
+  const wanted = ids.filter(id => !idKeys.value.has(id))
+  if (!wanted.length) return
+  const asked = idEpoch
+  const found = await readDeskTickets(wanted.map(ticketId => ({ ticketId })), new Map()).catch(() => new Map<string, DeskTicket>())
+  if (!live || asked !== idEpoch) return
+  const next = new Map(idKeys.value)
+  for (const id of wanted) if (!next.has(id)) next.set(id, found.get(id)?.key ?? null)
+  idKeys.value = next
+}
+watch(effectIds, ids => void readIds(ids), { immediate: true })
+// Every key a link shows stays resolved while it is on screen, and is asked again after an access change dropped it.
+const linkKeys = computed(() => [...new Set([ticketRef.value?.key, context.value.ticket?.key, ...context.value.related.map(node => node.key),
+  ...effectIds.value.map(keyForId)].filter((key): key is string => !!key).map(normalKey))])
+let releaseKeys: (() => void)[] = []
+watch(linkKeys, keys => { const release = releaseKeys; releaseKeys = keys.map(showingTicketKeys); for (const stop of release) stop() }, { immediate: true, flush: 'sync' })
+watchEffect(() => { for (const key of linkKeys.value) if (linkedTicket(key) === undefined) wantTicketKey(key) })
+// Another person or workspace: the open peek closes and ids are read again as the new caller.
+const stopLinkAccess = onAccessRevalidate({ reset: () => {
+  idEpoch++; idKeys.value = new Map(); peekDialog.value?.close(); peekKey.value = null; peekOpener = null
+  void readIds(effectIds.value)
+} })
 function touch() { if (draft.value) draft.value.dirty = true; if (!busy.value) status.value = '' }
 function setStatus(text: string) {
   status.value = text; announcement.value = text
@@ -682,7 +781,7 @@ watch(dialog, element => {
   opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
   element.showModal(); void nextTick(() => { memo.value?.focus({ preventScroll: true }); if (props.change) changeDecision(props.change) })
 })
-onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = false; decision?.abort(); contextGeneration++; clearTimeout(expiryTimer); clearTimeout(closeTimer); clearTimeout(narrowToast); clearInterval(clock); cancelAnimationFrame(raf); observer?.disconnect(); dialog.value?.close(); if (opener?.isConnected) opener.focus({ preventScroll: true }) })
+onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = false; stopLinkAccess(); for (const stop of releaseKeys) stop(); releaseKeys = []; decision?.abort(); contextGeneration++; clearTimeout(expiryTimer); clearTimeout(closeTimer); clearTimeout(narrowToast); clearInterval(clock); cancelAnimationFrame(raf); observer?.disconnect(); dialog.value?.close(); if (opener?.isConnected) opener.focus({ preventScroll: true }) })
 </script>
 
 <template>
@@ -744,7 +843,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                 <dl class="memo-meta" data-testid="desk-project-line">
                   <div v-if="project"><dt><span class="mi" role="img" aria-label="Project"><AppIcon name="folder" :size="14" /></span><span class="mt">Project</span></dt><dd><a v-if="project.href" class="proj-link" :href="project.href" target="_blank" rel="noopener" :data-tip="`Open ${project.name} in a new tab · key P`" data-testid="desk-project-link" ><AppIcon name="folder" :size="14" /><span>{{ project.name }}</span><AppIcon class="pj-open" name="external" :size="12" /></a><span v-else class="proj-quiet" data-testid="desk-project-link"><AppIcon name="folder" :size="13" />{{ project.name }}</span></dd></div>
                   <div v-if="asker || item.askers?.length"><dt><span class="mi" role="img" aria-label="From"><AppIcon name="user" :size="14" /></span><span class="mt">From</span></dt><dd><span class="from-one" :data-tip="asker?.model ? `${asker.model}` : undefined" data-testid="desk-from"><HarnessMark v-if="asker?.harness" :harness="asker.harness" :size="14" />{{ askerName }}</span></dd></div>
-                  <div><dt><span class="mi" role="img" aria-label="About"><AppIcon name="link" :size="14" /></span><span class="mt">Re</span></dt><dd data-testid="desk-re"><template v-if="ticketRef"><RouterLink v-if="context.ticket" class="res-key" :to="`/work/${context.ticket.id}`">{{ ticketRef.key }}</RouterLink><span v-else class="res-key">{{ ticketRef.key }}</span><span v-if="ticketRef.title" class="re-title">{{ ticketRef.title }}</span></template><span v-else-if="item.ticketId || item.ticketKey" class="re-title faint">The ticket</span><span v-else-if="!item.runId" class="re-title">{{ item.kind === 'rule' ? item.rule?.heading || item.title : item.kind === 'stepup' || item.kind === 'key_trim' ? kindLabels[item.kind] : 'Across tickets' }}</span><template v-if="item.runId"><span class="run-ref" :data-tip="`Run ${item.runId}`" data-testid="desk-re-run">{{ runRef(item.runId) }}</span><span v-if="!ticketRef" class="re-title faint" data-testid="desk-re-run-ticket">{{ runPending?.(item) ? 'Reading its ticket…' : 'Ticket not resolved' }}</span></template></dd></div>
+                  <div><dt><span class="mi" role="img" aria-label="About"><AppIcon name="link" :size="14" /></span><span class="mt">Re</span></dt><dd data-testid="desk-re"><template v-if="ticketRef"><TicketPeekLink v-if="peekHref(ticketRef.key)" class="res-key" :ticket-key="ticketRef.key" :href="peekHref(ticketRef.key)" :tip="`Open ${ticketRef.key} over the memo`" data-testid="desk-re-link">{{ ticketRef.key }}</TicketPeekLink><span v-else class="res-key" :data-tip="peekWhy(ticketRef.key)" data-testid="desk-re-key">{{ ticketRef.key }}</span><span v-if="ticketRef.title" class="re-title">{{ ticketRef.title }}</span></template><span v-else-if="item.ticketId || item.ticketKey" class="re-title faint">The ticket</span><span v-else-if="!item.runId" class="re-title">{{ item.kind === 'rule' ? item.rule?.heading || item.title : item.kind === 'stepup' || item.kind === 'key_trim' ? kindLabels[item.kind] : 'Across tickets' }}</span><template v-if="item.runId"><span class="run-ref" :data-tip="`Run ${item.runId}`" data-testid="desk-re-run">{{ runRef(item.runId) }}</span><span v-if="!ticketRef" class="re-title faint" data-testid="desk-re-run-ticket">{{ runPending?.(item) ? 'Reading its ticket…' : 'Ticket not resolved' }}</span></template></dd></div>
                   <div v-if="item.createdAt"><dt><span class="mi" role="img" aria-label="Received"><AppIcon name="clock" :size="14" /></span><span class="mt">Received</span></dt><dd>{{ ago(item.createdAt) }}</dd></div>
                 </dl>
               </div>
@@ -837,13 +936,13 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                 <section v-if="item.ticketId || item.ticketKey" class="m-sec" data-testid="desk-ticket"><h3 class="eyebrow">From the ticket</h3>
                   <p v-if="contextLoading" role="status">Reading the ticket…</p>
                   <template v-if="context.ticket">
-                    <p class="tk-line"><RouterLink class="res-key" :to="`/work/${context.ticket.id}`">{{ context.ticket.key }}</RouterLink><span>{{ context.ticket.state }}</span><template v-if="plainText(context.ticket.fields.priority)"><span class="tk-dot">·</span><span>{{ plainText(context.ticket.fields.priority) }} priority</span></template><a class="tk-open" :href="`/work/${context.ticket.id}`" target="_blank" rel="noopener" :data-tip="`Open ${context.ticket.key} in a new tab`">Open <AppIcon name="external" :size="12" /></a></p>
+                    <p class="tk-line"><TicketPeekLink v-if="peekHref(context.ticket.key)" class="res-key" :ticket-key="context.ticket.key" :href="peekHref(context.ticket.key)" :tip="`Open ${context.ticket.key} over the memo`" data-testid="desk-ticket-key">{{ context.ticket.key }}</TicketPeekLink><span v-else class="res-key" :data-tip="peekWhy(context.ticket.key)" data-testid="desk-ticket-key">{{ context.ticket.key }}</span><span>{{ context.ticket.state }}</span><template v-if="plainText(context.ticket.fields.priority)"><span class="tk-dot">·</span><span>{{ plainText(context.ticket.fields.priority) }} priority</span></template><TicketPeekLink v-if="peekHref(context.ticket.key)" class="tk-open" :ticket-key="context.ticket.key" :href="peekHref(context.ticket.key)" :tip="`Open ${context.ticket.key} over the memo · ${mac ? 'Command' : 'Ctrl'}-click for a new tab`" data-testid="desk-ticket-open">Open <AppIcon name="eye" :size="12" /></TicketPeekLink></p>
                     <p v-if="plainText(context.ticket.fields.pr_url)" class="tk-pr">Pull request <a :href="plainText(context.ticket.fields.pr_url)" target="_blank" rel="noopener noreferrer">{{ plainText(context.ticket.fields.pr_url).replace(/^https?:\/\/github\.com\//, '') }}</a><template v-if="context.outcomes.some(outcome => outcome.kind === 'ci_result')"> · {{ context.outcomes.filter(outcome => outcome.kind === 'ci_result').length }} check{{ context.outcomes.filter(outcome => outcome.kind === 'ci_result').length === 1 ? '' : 's' }} recorded</template></p>
                     <template v-if="plainText(context.ticket.fields.acceptance_criteria)"><p class="tk-sub">Acceptance criteria</p><ul><li v-for="(line, at) in plainText(context.ticket.fields.acceptance_criteria).split('\n').map(line => line.replace(/^\s*[-*]\s+/, '').trim()).filter(Boolean).slice(0, 20)" :key="at">{{ line }}</li></ul></template>
                   </template>
                   <p v-for="warning in context.warnings" :key="warning" class="context-warning">{{ warning }}</p>
                 </section>
-                <section v-if="context.related.length" class="m-sec"><h3 class="eyebrow">Related</h3><ul class="rel"><li v-for="related in context.related" :key="related.id"><p class="rel-top"><RouterLink :to="`/work/${related.id}`"><b>{{ related.key }}</b> {{ related.title }}</RouterLink></p></li></ul></section>
+                <section v-if="context.related.length" class="m-sec"><h3 class="eyebrow">Related</h3><ul class="rel"><li v-for="related in context.related" :key="related.id"><p class="rel-top"><TicketPeekLink v-if="peekHref(related.key)" :ticket-key="related.key" :href="peekHref(related.key)" data-testid="desk-related-link"><b>{{ related.key }}</b> {{ related.title }}</TicketPeekLink><span v-else class="rel-plain" :data-tip="peekWhy(related.key)"><b>{{ related.key }}</b> {{ related.title }}</span></p></li></ul></section>
                 <section v-if="question" class="m-sec" data-phone-moved data-testid="desk-answer-goes"><h3 class="eyebrow">The answer goes</h3><p>To {{ askerName }}’s inbox<template v-if="(item.askers?.length ?? 0) > 1"> and {{ (item.askers?.length ?? 1) - 1 }} more agent{{ (item.askers?.length ?? 1) > 2 ? 's' : '' }} who asked the same</template><template v-if="ticketRef"><br>Also as a comment on {{ ticketRef.key }}</template></p></section>
                 <section v-if="item.kind === 'action'" class="m-sec"><h3 class="eyebrow">The reply goes</h3><p>To {{ askerName }}’s inbox, as a reply to its request.</p></section>
                 <section v-if="item.kind === 'approval'" class="m-sec"><h3 class="eyebrow">Afterwards</h3><p>Approvals land in Decided, where Revoke stays.</p></section>
@@ -853,10 +952,10 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                     <p>{{ effect.state === 'failed' ? `The ${outcomeLabels[item.outcome]} outcome failed; the answer stays recorded.` : effect.state === 'pending' ? `The ${outcomeLabels[item.outcome]} outcome applies ${deliveryTime(effect.deliver_after)}.` : effect.state === 'replaced' ? 'Replaced by a correction.' : `The ${outcomeLabels[item.outcome]} outcome is applied.` }}</p>
                     <p v-if="effect.state === 'failed' && (effect.error_message || effect.error_code)">{{ effect.error_message || 'The source did not supply a reason.' }}</p>
                     <p v-if="effect.state === 'failed'">{{ effect.effect_data?.retryable === false ? 'It won’t retry by itself. Change the answer to try again.' : effect.effect_data?.retryable === true ? 'It retries by itself.' : '' }}</p>
-                    <p v-if="effect.effect_data?.ticket_id"><RouterLink class="src-link" :to="`/work/${encodeURIComponent(effect.effect_data.ticket_id)}`">Open the ticket</RouterLink></p>
+                    <p v-if="effect.effect_data?.ticket_id"><TicketPeekLink v-if="peekHref(keyForId(effect.effect_data.ticket_id) ?? '')" class="src-link" :ticket-key="keyForId(effect.effect_data.ticket_id)!" :href="peekHref(keyForId(effect.effect_data.ticket_id)!)" data-testid="desk-effect-ticket">Open the ticket</TicketPeekLink><span v-else class="src-plain" :data-tip="idWhy(effect.effect_data.ticket_id)" data-testid="desk-effect-ticket">{{ idPlain(effect.effect_data.ticket_id, 'Open the ticket') }}</span></p>
                     <p v-if="effect.effect_data?.knowledge_id"><a class="src-link" :href="`/api/nodes/${encodeURIComponent(effect.effect_data.knowledge_id)}`" target="_blank" rel="noopener noreferrer">Open the decision in Knowledge</a></p>
                     <p v-if="effect.effect_data?.doctrine_id"><RouterLink class="src-link" :to="doctrineReviewPath(effect.effect_data.doctrine_id, effect.doctrine_state ?? 'pending')">Review the doctrine draft</RouterLink></p>
-                    <p v-for="review in effect.effect_data?.review_required" :key="`${review.kind}:${review.ref}`">{{ review.why }} <RouterLink class="src-link" :to="review.kind === 'criterion' ? `/work/${encodeURIComponent(review.ref)}` : doctrineReviewPath(review.ref, review.ref === effect.effect_data?.doctrine_id ? effect.doctrine_state : undefined)">{{ review.kind === 'criterion' ? 'Open the criterion to review' : 'Open the draft to review' }}</RouterLink></p>
+                    <p v-for="review in effect.effect_data?.review_required" :key="`${review.kind}:${review.ref}`">{{ review.why }} <template v-if="review.kind === 'criterion'"><TicketPeekLink v-if="peekHref(keyForId(review.ref) ?? '')" class="src-link" :ticket-key="keyForId(review.ref)!" :href="peekHref(keyForId(review.ref)!)" data-testid="desk-effect-criterion">Open the criterion to review</TicketPeekLink><span v-else class="src-plain" :data-tip="idWhy(review.ref)" data-testid="desk-effect-criterion">{{ idPlain(review.ref, 'Open the criterion to review') }}</span></template><RouterLink v-else class="src-link" :to="doctrineReviewPath(review.ref, review.ref === effect.effect_data?.doctrine_id ? effect.doctrine_state : undefined)">Open the draft to review</RouterLink></p>
                   </div>
                 </section>
                 <section v-if="context.attachments.length" class="m-sec"><h3 class="eyebrow">Attachments · {{ context.attachments.length }}</h3><div class="thumbs"><button v-for="(attachment, at) in context.attachments" :key="attachment.id" type="button" class="thumb" :aria-label="`Open ${attachment.caption || attachment.name}`" @click="showAttachment(at)"><span class="thumb-img"><img v-if="hasThumbnail(attachment) && !brokenThumbs.has(attachment.id)" :src="contentUrl(attachment.id, 'thumb')" alt="" @error="brokenThumbs.add(attachment.id)" /><span v-else class="thumb-kind">{{ fileKind(attachment) }}</span></span><span class="thumb-name" :data-tip="attachment.caption || attachment.name">{{ attachment.caption || attachment.name }}</span></button></div></section>
@@ -876,6 +975,12 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
       <div v-if="toastText" class="dlg-toast" :class="{ lifted: nativeSlot && !!nativeNow }" role="status"><AppIcon name="alert" :size="15" /><span>{{ toastText }}</span></div>
     </div>
     <AttachmentLightbox ref="lightbox" :items="context.attachments" :ticket-key="context.ticket?.key || ''" :can-write="false" :set-caption="async () => false" @close="viewing = false" />
+    <!-- Outside the memo's DOM, so the memo's own keys (J/K, P, the stamps) never fire from inside the peek. -->
+    <Teleport to="body">
+      <dialog v-if="peekKey" ref="peekDialog" class="desk-peek" :aria-label="`Ticket ${peekKey}`" data-testid="desk-peek" @cancel.prevent="cancelPeek" @keydown="peekKeys" @click="peekBackdrop">
+        <TicketPeekHost ref="peekHost" :ticket-key="peekKey" @close="closePeek" />
+      </dialog>
+    </Teleport>
   </dialog>
 </template>
 
@@ -883,6 +988,9 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
 /* ---------- The desk as a dialog: anchored at the top, it grows downward ---------- */
 .desk-dlg { width: min(1120px, calc(100vw - 48px)); max-width: none; max-height: none; margin: 7vh auto auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .desk-dlg::backdrop { background: var(--scrim); backdrop-filter: blur(3px); }
+/* The ticket peek over the memo: the app's dock panel, placed by its own fixed position; the memo stays visible beside it. */
+.desk-peek { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.desk-peek::backdrop { background: transparent; }
 /* A glass frame carries the controls on top; the memo below grows downward, so nothing the pointer uses ever moves. */
 .desk { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr) auto auto; grid-template-rows: minmax(70px, auto) minmax(0, 1fr) auto; grid-template-areas: "tab status acts x" "stack stack stack stack" "foot foot foot foot"; column-gap: 12px; min-width: 0; max-height: calc(100dvh - 7vh - 16px); padding: 0 16px 14px; border: 1px solid var(--glass-edge); border-radius: 20px; background: linear-gradient(165deg, color-mix(in srgb, var(--aqua-3) 55%, var(--surface-raised-2)), var(--glass) 60%); -webkit-backdrop-filter: blur(24px) saturate(1.2); backdrop-filter: blur(24px) saturate(1.2); color: var(--ink); box-shadow: var(--shadow-pop), var(--shadow); }
 .sheet-shape { position: absolute; left: 0; top: 0; z-index: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
@@ -1033,6 +1141,8 @@ a.res-key:hover { text-decoration: underline; }
 .rel b { font: 600 12px var(--mono); color: var(--teal-ink); }
 .context-warning { color: var(--warn-ink) !important; }
 .src-link { display: inline-flex; align-items: center; gap: 4px; color: var(--teal-ink); font-weight: 600; text-decoration: none; border-radius: 4px; }
+.src-plain { color: var(--ink-3); font-weight: 600; }
+.rel-plain { color: var(--ink-2); }
 .effect { display: grid; gap: 4px; }
 .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
 .thumb { display: grid; gap: 5px; min-width: 0; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--ink-2); text-align: left; cursor: zoom-in; }
