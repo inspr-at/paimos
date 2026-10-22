@@ -39,10 +39,7 @@ if [[ "\${AEON_AS_ROOT:-}" == 1 ]]; then
   rm -f "\$state/hung" "\$state/lock" "\$state/apt.pid"
 fi
 kill -KILL "\$child" 2>/dev/null || true
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  kill -0 "\$child" 2>/dev/null || break
-  sleep 0.05
-done
+wait "\$child" 2>/dev/null || true
 exit 124
 `)
   const hold = `#!/usr/bin/env bash
@@ -90,7 +87,7 @@ if [[ "\$mode" == hung && "\$deps" -ge 2 ]]; then exit 0; fi
 # timeout removes it. Ignore the removal and stay up until that timeout's
 # SIGKILL: exiting 0 would look like a successful install.
 echo \$\$ > "\$state/apt.pid"
-touch "\$state/hung" "\$state/lock"
+touch "\$state/lock"
 # exec retains the pid; parent death and a hard deadline bound this hang too.
 exec "\$AEON_FIXTURE_NODE" "\$AEON_FIXTURE_APT_HOLD" "\$PPID"
 `
