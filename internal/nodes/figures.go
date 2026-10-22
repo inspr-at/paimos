@@ -64,13 +64,28 @@ type figuresEntry struct {
 type figuresCache struct {
 	mu      sync.Mutex
 	entries map[string]figuresEntry
+	clock   func() time.Time
+}
+
+func (c *figuresCache) now() time.Time {
+	if c != nil && c.clock != nil {
+		return c.clock().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func (c *figuresCache) get(key string, revision int64, now time.Time) *projectFigures {
+	if c == nil {
+		return nil
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.entries[key]
-	if !ok || e.revision != revision || !now.Before(e.expires) {
+	// An older read snapshot cannot invalidate a newer published result.
+	if !ok || e.revision > revision {
+		return nil
+	}
+	if e.revision != revision || !now.Before(e.expires) {
 		delete(c.entries, key)
 		return nil
 	}
@@ -78,10 +93,17 @@ func (c *figuresCache) get(key string, revision int64, now time.Time) *projectFi
 }
 
 func (c *figuresCache) put(key string, revision int64, now time.Time, value *projectFigures) {
+	if c == nil {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.entries == nil {
 		c.entries = map[string]figuresEntry{}
+	}
+	// Reject older snapshots before they can evict any current entry.
+	if e, ok := c.entries[key]; ok && e.revision > revision {
+		return
 	}
 	// Remove expired entries first, then the oldest if the bounded cache is full.
 	oldest := ""
@@ -95,12 +117,8 @@ func (c *figuresCache) put(key string, revision int64, now time.Time, value *pro
 			oldest, oldestAt = k, e.expires
 		}
 	}
-	if len(c.entries) >= 256 {
+	if _, replacing := c.entries[key]; !replacing && len(c.entries) >= 256 {
 		delete(c.entries, oldest)
-	}
-	// An older concurrent snapshot must not overwrite a newer result.
-	if e, ok := c.entries[key]; ok && e.revision > revision {
-		return
 	}
 	c.entries[key] = figuresEntry{revision, now.Add(figuresMaxAge), value}
 }
@@ -182,7 +200,7 @@ func (m *Module) handleProjectFigures(w http.ResponseWriter, r *http.Request) {
 		// Include authority beyond nodes.read because column projections depend
 		// on harness.read and members.read. Re-resolve it before EVERY cache hit.
 		key := figuresHash([]any{p.TenantID, p.ID, p.KeyID, p.AuthKeyID, p.Scopes, p.FullAccess, all, projects, seen.harnessAll, seen.projects, seen.members, listFingerprint(q)})
-		now := time.Now().UTC()
+		now := m.figures.now()
 		if cached := m.figures.get(key, revision, now); cached != nil {
 			result = cached
 			return nil

@@ -4,7 +4,7 @@
 // addresses, amounts, a line diff for note proposals). A change replaces the
 // whole record and carries its revision; the server refuses a stale one with
 // 409. Undo goes through the event log. Free of Vue for unit tests.
-import { api, listNodes } from './api.ts'
+import { api, listNodePages, type ListResult } from './api.ts'
 import { captureToastOwner } from './toast.ts'
 import type { RowAction } from './rowActions.ts'
 
@@ -70,15 +70,18 @@ export const statusOf = (e: unknown) => e instanceof CRMError ? e.status : 0
 
 // Every customer, archived ones included, page by page (the list searches, sorts
 // and filters in the browser; pickers leave archived customers out).
-export async function listCustomers(): Promise<Customer[]> {
+export async function listCustomers(): Promise<ListResult<Customer[]>> {
   const all: Customer[] = []
+  const seen = new Set<number>()
   for (let offset = 0, page = 0; page < 50; page++) {
     const body = await send<{ items: Customer[]; next_offset: number | null }>(`/organisations?limit=100&offset=${offset}&archived=all`)
     all.push(...body.items)
-    if (body.next_offset == null) break
+    if (body.next_offset == null) return { items: all, partial: false }
+    if (body.next_offset <= offset || seen.has(body.next_offset)) return { items: all, partial: true }
+    seen.add(body.next_offset)
     offset = body.next_offset
   }
-  return all
+  return { items: all, partial: true }
 }
 const seg = encodeURIComponent
 export const getCustomer = (id: string) => send<Customer>(`/organisations/${seg(id)}`)
@@ -119,20 +122,15 @@ export const syncProvider = (id: string) => send<Customer>(`/organisations/${seg
 export const getProviderSyncStatus = (id: string) => send<ProviderSyncStatus>(`/organisations/${seg(id)}/sync-status`)
 
 // Primary contacts for the list: one read of the contact nodes (names, email,
-// role), not one request per customer. Missing on failure; the list still works.
-export async function contactDirectory(): Promise<Map<string, ContactCard>> {
+// role), not one request per customer. The caller exposes incomplete reads.
+export async function contactDirectory(): Promise<ListResult<Map<string, ContactCard>>> {
   const out = new Map<string, ContactCard>()
-  let cursor: string | undefined
-  for (let page = 0; page < 20; page++) {
-    const body = await listNodes({ kind: ['contact'], limit: 500, cursor })
-    for (const node of body.items) {
-      const f = node.fields ?? {}
-      out.set(node.id, { name: node.title, email: typeof f.email === 'string' ? f.email : '', role: typeof f.role === 'string' ? f.role : '' })
-    }
-    if (!body.next_cursor) break
-    cursor = body.next_cursor
+  const result = await listNodePages({ kind: ['contact'], limit: 500 })
+  for (const node of result.items) {
+    const f = node.fields ?? {}
+    out.set(node.id, { name: node.title, email: typeof f.email === 'string' ? f.email : '', role: typeof f.role === 'string' ? f.role : '' })
   }
-  return out
+  return { items: out, partial: result.partial }
 }
 
 // ---------- Undo through the exact accepted mutation ----------

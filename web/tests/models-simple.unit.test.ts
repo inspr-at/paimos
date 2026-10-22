@@ -106,9 +106,9 @@ describe('rows', () => {
   it('puts the column the server cannot run under its row with the server’s reason', () => {
     const doc = simpleDoc({ unavailable: [{ column: 'concept', line: 'anthropic:opus', runs_instead: 'anthropic:sonnet', effort: 'high', reason: 'default: the Claude account is tied to another profile', ticket: null }] })
     expect(buildRows({ doc, workspace: null, scope: 'me', canEdit: true, entries, labels: label }).find(row => row.key === 'concept')!.unavailable).toMatchObject({ runs_instead: 'anthropic:sonnet' })
-    expect(reasonText('default: The Claude account; role: No room')).toBe('the Claude account; No room')
+    expect(reasonText('default: The Claude account has no free slot; role: The daily cap is reached')).toBe('the Claude account has no free slot and the daily cap is reached')
     expect(reasonText('')).toBe('no qualified account has room right now')
-    expect(reasonText('column: allowance; default: allowance; role: daily_limit; daily_limit')).toBe('the account has no room left until its limit resets; the account is at its daily cap')
+    expect(reasonText('column: allowance; default: allowance; role: daily_limit; daily_limit')).toBe('the account has no room left until its limit resets and the account is at its daily cap')
     expect(reasonText('Claude account is at its daily cap until 04:00; role: Claude account is at its daily cap until 04:00')).toBe('claude account is at its daily cap until 04:00')
   })
 })

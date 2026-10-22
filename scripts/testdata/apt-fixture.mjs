@@ -45,6 +45,13 @@ limit=\$1
 shift
 printf '%s|%s|%s\\n' "\${AEON_AS_ROOT:-0}" "\$limit" "\$*" >> "\$state/timeouts"
 printf '%s\\n' "\$grace" >> "\$state/kill-graces"
+# Advance the budget regression by each requested timeout plus root cleanup,
+# without sleeps or elapsed-time assertions. Keep main's common journal format.
+if [[ "\$(cat "\$state/mode")" == apt-budget ]]; then
+  printf '%s\\n' "\$*" >> "\$state/calls"
+  echo \$((\$(cat "\$state/clock") + limit + grace)) > "\$state/clock"
+  exit 124
+fi
 if [[ \$1 == python3 && \${2:-} == - && \${3:-} == write && -f \$state/root-owned-bundle ]]; then
   echo 'fixture: bundle still owned by root at manifest write' >&2
   exit 1
@@ -343,6 +350,7 @@ Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
     sources['sources.list.d/vendor.sources'] += `\nTypes: deb\nURIs: ${vendor}\nSuites: stable\nComponents: main\nSigned-By: /usr/share/keyrings/other-vendor.gpg\n`
   }
   for (const [file, text] of Object.entries(sources)) writeFileSync(join(sourceRoot, file), text)
+  if (mode === 'apt-budget') writeFileSync(join(state, 'clock'), '1000\n')
   if (elapsed) {
     writeFileSync(join(state, 'clock'), '1000\n')
     writeFileSync(join(state, 'elapsed'), elapsed.join('\n') + '\n')

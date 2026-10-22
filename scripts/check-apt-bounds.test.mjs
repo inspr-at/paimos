@@ -92,6 +92,30 @@ test('non-fetch failures fail once and installed shells skip apt', async () => {
   assert.equal(recovered.status, 0, recovered.stderr)
 })
 
+test('shell installation uses cached indexes before refreshing apt', async () => {
+  // Risk: an unnecessary update consumes the shell-install budget. Stub package
+  // names also keep this independent of the real runner's installed shells.
+  const cached = await run(`bash "${script}" apt aeon-fixture-fish aeon-fixture-zsh`, { mode: 'ok' })
+  assert.equal(cached.status, 0, cached.stderr)
+  assert.equal(cached.calls.length, 1, cached.calls.join('\n'))
+  assert.match(cached.calls[0], /install .*aeon-fixture-fish aeon-fixture-zsh/)
+})
+
+test('root shell installation retries fit the four-minute workflow step', async () => {
+  // Risk: independent update/install deadlines and retries outlive the workflow
+  // deadline, which interrupts apt before the helper can reap its root group.
+  const exhausted = await run(`bash "${script}" apt aeon-fixture-fish aeon-fixture-zsh`, { mode: 'apt-budget' })
+  assert.notEqual(exhausted.status, 0, exhausted.stdout)
+  const deadlines = exhausted.timeouts.map(({ root, seconds }, index) => [Number(root), seconds, exhausted.killGraces[index]])
+  // Main reserves a fallback sooner and tightens the shared 220-second cap
+  // to 210 seconds. Exhaust both allowances, including each root kill grace.
+  assert.deepEqual(deadlines, [[1, 60, 20], [1, 110, 20]], 'root cleanup must finish within the tighter shared budget')
+  assert.equal(Number(readFileSync(join(exhausted.state, 'clock'), 'utf8')), 1210)
+  assert.match(exhausted.stderr, /apt retry budget exhausted/)
+  assert.match(exhausted.calls[0], /install /)
+  assert.match(exhausted.calls[1], /update /)
+})
+
 // AEON-1652 risk: a stalled Azure mirror wastes the whole browser shard;
 // retry only fetch failures, without changing host sources or apt security.
 test('fetch failures retry once through temporary Ubuntu mirrors for apt and Playwright', async () => {
@@ -240,7 +264,7 @@ test('slow package downloads time out into fallback with a usable retry budget',
     for (const command of ['apt aeon-apt-fixture-missing-tool', 'playwright install-deps chromium', 'playwright install --with-deps --only-shell chromium']) {
       const apt = command.startsWith('apt '), browser = command.includes('--with-deps')
       const firstLimit = apt ? 60 : 120, browserSeconds = browser ? 240 : 0
-      const elapsed = [...(browser ? [browserSeconds] : []), ...(apt ? [0] : []), firstLimit + 20, 20, 0]
+      const elapsed = [...(browser ? [browserSeconds] : []), firstLimit + 20, 20, 0]
       const result = await run(`bash "${script}" ${command}`, { mode: 'slow-fetch', mirrorList: 'hosted', timeoutStatus, elapsed })
       assert.equal(result.status, 0, `${timeoutStatus} ${command}: ${result.error}\n${result.stdout}\n${result.stderr}`)
       assert.match(result.stdout, /^Get:2 .*fonts-ipafont-gothic/m)
@@ -248,7 +272,7 @@ test('slow package downloads time out into fallback with a usable retry budget',
       assert.match(result.stdout, /retrying fetch once via archive\.ubuntu\.com/)
       assert.match(result.stdout, /dependencies installed via archive\.ubuntu\.com \/ security\.ubuntu\.com/)
       const dependencies = result.attempts.filter(attempt => attempt.config)
-      assert.equal(dependencies.length, apt ? 4 : 3, 'refresh fallback indexes and retry the install once')
+      assert.equal(dependencies.length, 3, 'refresh fallback indexes and retry the install once')
       assert.match(dependencies.at(-2).command, /update -qq$/)
       assert.match(dependencies.at(-1).command, apt ? /install -y -qq aeon-apt-fixture-missing-tool$/ : /playwright install-deps chromium$/)
       assert.doesNotMatch(dependencies.at(-1).sources['ubuntu.sources'], /mirror\+file:|azure\.archive\.ubuntu\.com/)
@@ -271,10 +295,10 @@ test('timeouts after any dpkg activity fail without retrying', async () => {
     for (const dpkgActivity of ['Preparing to unpack libtest.deb ...', 'Unpacking libtest (1.0) ...', 'Setting up libtest (1.0) ...', 'Selecting previously unselected package libtest.']) {
       for (const command of ['apt aeon-apt-fixture-missing-tool', 'playwright install-deps chromium']) {
         const apt = command.startsWith('apt ')
-        const result = await run(`bash "${script}" ${command}`, { mode: 'dpkg-timeout', timeoutStatus, dpkgActivity: `Ign:1 http://azure.archive.ubuntu.com/ubuntu noble InRelease\n${dpkgActivity}`, elapsed: [...(apt ? [0] : []), (apt ? 60 : 120) + 20] })
+        const result = await run(`bash "${script}" ${command}`, { mode: 'dpkg-timeout', timeoutStatus, dpkgActivity: `Ign:1 http://azure.archive.ubuntu.com/ubuntu noble InRelease\n${dpkgActivity}`, elapsed: [(apt ? 60 : 120) + 20] })
         assert.equal(result.status, timeoutStatus, `${dpkgActivity}: ${result.error}\n${result.stdout}\n${result.stderr}`)
         assert.ok(result.stdout.includes(dpkgActivity))
-        assert.equal(result.calls.length, apt ? 2 : 1)
+        assert.equal(result.calls.length, 1)
         assert.doesNotMatch(result.stdout, /retrying fetch|dependencies installed/)
         for (const config of result.configPaths) assert.equal(existsSync(config), false)
       }
@@ -286,8 +310,7 @@ test('both apt mirrors share the overall deadline', async () => {
   const result = await run(`bash "${script}" apt aeon-apt-fixture-missing-tool`, { mode: 'fetch-fail', elapsed: [80, 130] })
   assert.equal(result.status, 124, `${result.error}\n${result.stdout}\n${result.stderr}`)
   assert.deepEqual(result.timeouts.map(({ root, seconds }) => ({ root, seconds })), [{ root: '1', seconds: 60 }, { root: '1', seconds: 110 }])
-  assert.equal(result.calls.length, 2, 'the exhausted budget must prevent apt install')
-  assert.ok(result.calls.every(call => call.includes('update -qq')))
+  assert.deepEqual(result.calls, ['install -y -qq aeon-apt-fixture-missing-tool', 'update -qq'], 'the exhausted budget must prevent a second install after fallback refresh')
   assert.doesNotMatch(result.stdout, /dependencies installed/)
 })
 
@@ -577,7 +600,7 @@ test('bundle diagnostics identify unsafe or unreadable install inputs before dpk
     assert.equal(rejected.status, 0, rejected.stderr)
     assert.ok(rejected.stderr.includes(`${expectedPath}: ${reason}`), rejected.stderr)
     assert.match(rejected.stderr, /st_mode=\S+, owner=\S+/)
-    assert.deepEqual(rejected.calls, ['update -qq', 'install -y -qq libtest'])
+    assert.deepEqual(rejected.calls, ['install -y -qq libtest'], 'unsafe offline inputs fall back to the cached-index network path')
     assert.equal(existsSync(join(rejected.state, 'offline-dpkg-started')), false)
     if (fault === 'unreadable') chmodSync(file, 0o644)
   }

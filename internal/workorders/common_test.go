@@ -29,6 +29,117 @@ type bodyDeadlineRecorder struct {
 	deadlines []time.Time
 }
 
+// Risk: lesson lookups rely solely on RLS and cannot use tenant-leading indexes.
+// Read through the admin connection to prove the query's own tenant boundary,
+// including colliding comment ids and foreign revisions, independently of RLS.
+func TestEntryLessonTenantScope(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx := t.Context()
+	people := make([]tenant.Principal, 2)
+	for i := range people {
+		if err := d.Admin.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES($1,'Lesson scope') RETURNING id::text`, []string{"lesson-local", "lesson-foreign"}[i]).Scan(&people[i].TenantID); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Lesson author') RETURNING id::text`, people[i].TenantID).Scan(&people[i].ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx, err := d.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	var ticket EntryTicket
+	var project string
+	if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text,gen_random_uuid()::text`).Scan(&ticket.ID, &project); err != nil {
+		t.Fatal(err)
+	}
+	ticket.ProjectID = &project
+	appendComment := func(author tenant.Principal, kind, body, commentID string) string {
+		t.Helper()
+		after, err := json.Marshal(map[string]any{"body_markdown": body, "comment_id": commentID, "deleted": kind == "comment.deleted"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var id string
+		if err := tx.QueryRow(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after) VALUES($1,$2,$3,$4,$5) RETURNING id::text`, author.TenantID, author.ID, ticket.ID, kind, after).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	query := &lessonQueryTx{Tx: tx}
+	check := func(want bool) {
+		t.Helper()
+		got, err := entryLessonTx(ctx, query, people[0].TenantID, ticket)
+		if err != nil || got != want {
+			t.Fatalf("tenant-scoped lesson=%v, want %v, err=%v", got, want, err)
+		}
+	}
+	foreignComment := appendComment(people[1], "comment.created", "No lesson: Foreign evidence.", "")
+	check(false)
+	localComment := appendComment(people[0], "comment.created", "Investigation complete.", "")
+	if localComment != foreignComment {
+		t.Fatal("fixture needs colliding tenant-local comment ids")
+	}
+	appendComment(people[1], "comment.updated", "No lesson: Foreign revision.", foreignComment)
+	check(false)
+	appendComment(people[0], "comment.updated", "No lesson: Already covered locally.", localComment)
+	check(true)
+	appendComment(people[1], "comment.deleted", "", foreignComment)
+	check(true)
+	appendComment(people[0], "comment.deleted", "", localComment)
+	check(false)
+
+	if _, err := tx.Exec(ctx, `SET LOCAL enable_seqscan=off`); err != nil {
+		t.Fatal(err)
+	}
+	var raw []byte
+	if err := tx.QueryRow(ctx, `EXPLAIN (FORMAT JSON) `+query.sql, query.args...).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var plan []struct{ Plan map[string]any }
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		t.Fatal(err)
+	}
+	eventScans, decisionScans := 0, 0
+	var walk func(map[string]any)
+	walk = func(node map[string]any) {
+		if relation, _ := node["Relation Name"].(string); relation == "events" || relation == "method_learning_decisions" {
+			condition, _ := node["Index Cond"].(string)
+			if !strings.Contains(condition, "tenant_id") {
+				t.Fatalf("lesson read lacks a tenant index condition: %s", raw)
+			}
+			if relation == "events" {
+				eventScans++
+			} else {
+				decisionScans++
+			}
+		}
+		children, _ := node["Plans"].([]any)
+		for _, child := range children {
+			walk(child.(map[string]any))
+		}
+	}
+	if len(plan) != 1 {
+		t.Fatalf("missing lesson query plan: %s", raw)
+	}
+	walk(plan[0].Plan)
+	if eventScans < 3 || decisionScans != 1 {
+		t.Fatalf("missing lesson scans: events=%d decisions=%d: %s", eventScans, decisionScans, raw)
+	}
+}
+
+type lessonQueryTx struct {
+	pgx.Tx
+	sql  string
+	args []any
+}
+
+func (tx *lessonQueryTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	tx.sql, tx.args = sql, append([]any(nil), args...)
+	return tx.Tx.QueryRow(ctx, sql, args...)
+}
+
 // Risk: work-order creation silently drops the fix binding, or a direct store
 // caller bypasses exact branch/repository and active-builder exclusion.
 func TestBuildAdmissionContinuationStore(t *testing.T) {

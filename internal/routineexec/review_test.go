@@ -24,8 +24,8 @@ import (
 // fix pickup. A fix re-review must retain the original build range and reject
 // a completed artifact from a different checkout. Reuse the real consent,
 // dispatch, telemetry, parser, budget and Decision Desk services; fixture
-// process/usage receipts represent qualified
-// adapter observations, never elapsed-time or sleep-based proof.
+// process/usage receipts represent qualified adapter observations, never
+// elapsed-time or sleep-based proof.
 func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	d := setupDispatchOn(t, setup(t, "both", false))
 	f := d.fixture

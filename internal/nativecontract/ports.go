@@ -141,10 +141,13 @@ type LaunchSpec struct {
 	Profile                             LocalProfile
 	Policy                              Policy
 	Cwd, ResumeRef, Mode, OwnedWriterID string
-	Options                             LaunchConfig
-	InitialInput                        *Input
-	Tools                               ToolCapability
-	Lifetime                            context.Context
+	// ConversationRef is the exact server start/profile identity. It is not a
+	// vendor resume reference; an initial TUI must observe its native identity.
+	ConversationRef string
+	Options         LaunchConfig
+	InitialInput    *Input
+	Tools           ToolCapability
+	Lifetime        context.Context
 }
 type NativeIdentity struct {
 	Provider, NativeSessionRef, NativeThreadRef, NativeTurnRef, ResumeCursor string
@@ -202,6 +205,9 @@ type Services struct {
 type PTYLaunchSpec struct {
 	LaunchSpec
 	Rows, Cols int
+	// Revalidate belongs to the owning host and runs immediately before fork,
+	// after binary/settings qualification. It is never decoded from a request.
+	Revalidate func(context.Context) error
 }
 type PTYRuntime interface {
 	Identity() NativeIdentity
@@ -213,6 +219,18 @@ type PTYRuntime interface {
 }
 type PTYLauncher interface {
 	OpenPTY(context.Context, PTYLaunchSpec) (PTYRuntime, error)
+}
+
+// ReadyPTY requires independent provider readiness, not just a successful fork.
+// The handle remains owned even when readiness fails or times out.
+func ReadyPTY(ctx context.Context, runtime PTYRuntime) (NativeIdentity, error) {
+	ready, ok := runtime.(interface {
+		Ready(context.Context) (NativeIdentity, error)
+	})
+	if !ok {
+		return NativeIdentity{}, &ValidationError{Reason: ReasonQualificationMissing, Path: "$"}
+	}
+	return ready.Ready(ctx)
 }
 
 // This port holds the existing owned writer lock across the entire transition.

@@ -83,7 +83,7 @@ export async function recordRootGroup(child, append, { wait = ms => new Promise(
           await wait(10)
         }
       } catch (cause) {
-        throw Object.assign(new Error('Could not confirm spawned process group exit; host lock retained', { cause: new AggregateError([error, cause]) }), { unverifiedGroup: child.pid })
+        throw Object.assign(new Error('Could not confirm spawned process group exit; host lock retained', { cause: new AggregateError([error, cause]) }), { unverifiedGroup: child.pid, unconfirmedGroup: child.pid })
       }
     }
     throw error
