@@ -475,8 +475,8 @@ defineExpose({ open, openOnce })
           </div>
           <p v-if="oneOff" class="note restriction-note" role="status">{{ mayChangeFiles ? copy.writable : copy.readOnly }}</p>
           <div v-if="oneOff" class="run-settings-summary" :class="{ warn: settingsWarning.length }">
-            <div class="run-summary-line"><p>{{ settingsSummary }}</p><button type="button" class="btn ghost settings-toggle" :aria-expanded="settingsOpen" :aria-controls="`${uid}-settings`" @click="toggleSettings">{{ settingsOpen ? copy.hide : copy.change }}</button></div>
-            <p v-if="settingsWarning.length || lastSettingsWarning.length" class="note settings-status" :class="{ resolved: !settingsWarning.length }" :role="settingsWarning.length ? 'status' : undefined" :aria-hidden="!settingsWarning.length || undefined"><template v-for="(warning, index) in settingsWarning.length ? settingsWarning : lastSettingsWarning" :key="index">{{ index ? ' ' : '' }}<strong>{{ warning.label }}</strong><span> · {{ warning.detail }}</span></template></p>
+            <div class="run-summary-line"><p :title="settingsSummary">{{ settingsSummary }}</p><button type="button" class="btn ghost settings-toggle" :aria-expanded="settingsOpen" :aria-controls="`${uid}-settings`" @click="toggleSettings">{{ settingsOpen ? copy.hide : copy.change }}</button></div>
+            <p v-if="settingsWarning.length || lastSettingsWarning.length" class="note settings-status" :class="{ resolved: !settingsWarning.length, folded: !settingsOpen }" :role="settingsWarning.length ? 'status' : undefined" :aria-hidden="!settingsWarning.length || undefined"><span v-for="(warning, index) in settingsWarning.length ? settingsWarning : lastSettingsWarning" :key="index" class="settings-warning" :title="`${warning.label} · ${warning.detail}`"><strong>{{ warning.label }}</strong><span class="settings-warning-detail"> · {{ warning.detail }}</span></span></p>
             <button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button>
           </div>
           <template v-if="dispatchMode === 'manual'">
@@ -611,10 +611,14 @@ defineExpose({ open, openOnce })
 .run-settings-fields { display: grid; gap: 16px; min-width: 0; }
 .run-settings-summary { padding-block: 12px; border-block: 1px solid var(--line); }
 .run-summary-line { display: flex; align-items: center; gap: 12px; }
-.run-summary-line p { flex: 1; min-width: 0; margin: 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.run-summary-line p { flex: 1; min-width: 0; margin: 0; font-size: 13px; line-height: 1.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .settings-toggle { flex-shrink: 0; min-height: 44px; }
 .settings-status { min-block-size: 3em; margin: 4px 0 0; }
+.settings-warning { display: block; }
 .settings-status strong { font-weight: 600; }
+.settings-status.folded .settings-warning { display: flex; align-items: baseline; gap: 4px; }
+.settings-status.folded strong { flex-shrink: 0; white-space: nowrap; }
+.settings-status.folded .settings-warning-detail { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .settings-status.resolved { visibility: hidden; }
 .run-settings-summary.warn .settings-status { color: var(--ink-2); }
 .queue-label { display: grid; }

@@ -31,8 +31,26 @@ test('Run once is available without developer settings and recovers an exact rea
   await expect(form.getByRole('button', { name: /^Queue run/ })).toBeDisabled()
   const readOnlyWarning = form.locator('.settings-status')
   await expect(readOnlyWarning.locator('strong')).toHaveText('Read-only unavailable')
-  await expect(readOnlyWarning.locator('span')).toHaveText('· Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.')
-  await expect(readOnlyWarning.locator('span')).toBeVisible()
+  const readOnlyDetail = readOnlyWarning.locator('.settings-warning-detail')
+  await expect(readOnlyDetail).toHaveText('· Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.')
+  await expect(readOnlyDetail).toBeVisible()
+  await expect(readOnlyWarning.locator('.settings-warning')).toHaveAttribute('title', 'Read-only unavailable · Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.')
+  await expectStableControls({
+    controls: { summary: form.locator('.run-summary-line'), task: form.getByLabel('Task', { exact: true }), queue: form.getByRole('button', { name: /^Queue run/ }) },
+    interactions: [
+      { name: 'fold read-only warning', run: async () => {
+        await form.getByRole('button', { name: 'Hide', exact: true }).click()
+        await expect(readOnlyDetail).toHaveCSS('text-overflow', 'ellipsis')
+        await expect(readOnlyDetail).toHaveCSS('white-space', 'nowrap')
+        await expect(readOnlyWarning.locator('strong')).toHaveCSS('flex-shrink', '0')
+      } },
+      { name: 'expand read-only warning', run: async () => {
+        await form.getByRole('button', { name: 'Change', exact: true }).click()
+        await expect(readOnlyDetail).toHaveCSS('white-space', 'normal')
+      } },
+    ],
+    scrollAreas: { body: form.locator('.launch-body') },
+  })
   await form.getByLabel('Host', { exact: true }).selectOption('laptop')
   const text = '  Inspect exactly this context.\nReturn the observations.'
   await form.getByLabel('Instruction (optional)', { exact: true }).fill(text)
@@ -88,7 +106,12 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     const firstField = form.locator('.launch-fields input, .launch-fields select, .launch-fields textarea').first()
     await expect(firstField).toHaveAttribute('id', await task.getAttribute('id') as string)
     const summary = form.locator('.run-settings-summary')
+    const summaryLine = form.locator('.run-summary-line')
     await expect(summary).toContainText('Runs on Laptop · Claude Code · Laptop account · Max · other-model · Medium')
+    await expect(summaryLine).toHaveCSS('height', '44px')
+    await expect(summaryLine.locator('p')).toHaveAttribute('title', 'Runs on Laptop · Claude Code · Laptop account · Max · other-model · Medium')
+    await expect(summaryLine.locator('p')).toHaveCSS('white-space', 'nowrap')
+    await expect(summaryLine.locator('p')).toHaveCSS('text-overflow', 'ellipsis')
     await expect(summary.getByRole('status')).toHaveCount(0)
     await expect(form.getByLabel('Host', { exact: true })).toBeHidden()
     await task.fill('Ausführliche Bestandsaufnahme der bereitgestellten Projektinformationen')
@@ -102,7 +125,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     await form.screenshot({ path: info.outputPath(`AEON-1512-${width}-${theme}.png`) })
     // Explicit expansion can grow downward; existing controls stay anchored.
     await expectStableControls({
-      controls: { queue, cancel: form.getByRole('button', { name: 'Cancel', exact: true }), task, context: form.getByLabel('Context', { exact: true }), project: form.getByLabel('Project', { exact: true }), instruction: form.getByLabel('Instruction (optional)', { exact: true }), ...(width === 390 ? { phone: form } : {}) },
+      controls: { queue, cancel: form.getByRole('button', { name: 'Cancel', exact: true }), task, summary: summaryLine, context: form.getByLabel('Context', { exact: true }), project: form.getByLabel('Project', { exact: true }), instruction: form.getByLabel('Instruction (optional)', { exact: true }), ...(width === 390 ? { phone: form } : {}) },
       scrollAreas: { body: form.locator('.launch-body') },
       interactions: [{ name: 'expand run settings', run: async () => {
         await summary.getByRole('button', { name: 'Change', exact: true }).click()
@@ -135,7 +158,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     await expect(form.locator('.settings-toggle')).toHaveAttribute('aria-expanded', 'true')
     await expect(form.getByLabel('Host', { exact: true })).toBeVisible()
     const warning = form.locator('.settings-status')
-    const warningLabel = warning.locator('strong'), warningDetail = warning.locator('span')
+    const warningLabel = warning.locator('strong'), warningDetail = warning.locator('.settings-warning-detail')
     const label = width === 1024 ? 'Sign in again on the computer' : 'Waiting for capacity'
     const detail = 'The run queues and starts when this account is ready.'
     await expect(warning).toHaveText(`${label} · ${detail}`)
@@ -143,6 +166,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     await expect(warningLabel).toHaveCSS('font-weight', '600')
     await expect(warningDetail).toHaveText(`· ${detail}`)
     await expect(warningDetail).toHaveCSS('font-weight', '400')
+    await expect(warning.locator('.settings-warning')).toHaveAttribute('title', `${label} · ${detail}`)
+    await expect(summaryLine).toHaveCSS('height', '44px')
     for (const part of [warningLabel, warningDetail]) await expect(part).toHaveCSS('display', 'inline')
     // The label and sentence start on the same line, with natural phone wrapping.
     const labelLine = await warningLabel.evaluate(el => el.getClientRects()[0]!.y)
@@ -156,11 +181,26 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
           await form.getByRole('button', { name: 'Hide', exact: true }).click()
           await expect(form.getByLabel('Host', { exact: true })).toBeHidden()
           await expect(warning).toHaveText(`${label} · ${detail}`)
+          await expect(summaryLine).toHaveCSS('height', '44px')
+          await expect(warningDetail).toHaveCSS('white-space', 'nowrap')
+          await expect(warningDetail).toHaveCSS('overflow', 'hidden')
+          await expect(warningDetail).toHaveCSS('text-overflow', 'ellipsis')
+          await expect(warningLabel).toHaveCSS('white-space', 'nowrap')
+          await expect(warningLabel).toHaveCSS('flex-shrink', '0')
+          const labelBox = await warningLabel.boundingBox(), detailBox = await warningDetail.boundingBox()
+          expect(labelBox).not.toBeNull()
+          expect(detailBox).not.toBeNull()
+          expect(Math.abs(labelBox!.y - detailBox!.y)).toBeLessThanOrEqual(0.5)
+          expect(await warningLabel.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+          if (width === 390) expect(await warningDetail.evaluate(el => el.scrollWidth - el.clientWidth)).toBeGreaterThan(0)
+          await form.screenshot({ path: info.outputPath(`AEON-1512-${width}-${theme}-warning-folded.png`) })
         } },
         { name: 'expand warning settings', run: async () => {
           await form.getByRole('button', { name: 'Change', exact: true }).click()
           await expect(form.getByLabel('Host', { exact: true })).toBeVisible()
           await expect(warning).toHaveText(`${label} · ${detail}`)
+          await expect(summaryLine).toHaveCSS('height', '44px')
+          await expect(warningDetail).toHaveCSS('white-space', 'normal')
         } },
       ],
       scrollAreas: { body: form.locator('.launch-body') },
