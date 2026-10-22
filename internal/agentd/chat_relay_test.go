@@ -595,7 +595,7 @@ func TestChatRelayTimingRespectsActiveTurnAndInputEvidence(t *testing.T) {
 // Risk: a lost acknowledgement for native chat steering reinjects content,
 // or a public control borrows the relay's private managed-input authority.
 func TestChatSteerJournalRejectsLostAcknowledgementReplay(t *testing.T) {
-	s, _, entry, process := managedFixture(t)
+	s, _, entry, process := managedServiceFixture(t)
 	entry.inboxCapable, entry.chatTiming = true, true
 	req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: entry.record.RunID,
 		Generation: s.generation, CorrelationID: "chat:message", Operation: "steer", Text: chatInputText("message", "correction"), chatInputID: "message"}
