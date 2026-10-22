@@ -188,8 +188,11 @@ func exerciseLiveInbox(t *testing.T) {
 	if sequence != 7 {
 		t.Fatal("uncertain native input was replayed")
 	}
+	c.provider.turn("write_acknowledged", "", 8)
+	wait(acknowledged)
+	check(late.ID, true, false)
 	turn = guuid.NewString()
-	c.provider.turn("turn_started", turn, 8)
+	c.provider.turn("turn_started", turn, 9)
 	wait(c.turnStarted)
 	check(late.ID, true, true)
 	var delivered, seen bool
