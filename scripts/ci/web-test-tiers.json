@@ -7270,7 +7270,7 @@
     ,
     {"kind":"browser","file":"tests/agents-head.spec.ts","name":"one head line; a count filters Sessions, keeps ancestors as context and clears with × or Esc at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-hierarchy.spec.ts","name":"AEON-1360 cross-project children nest with their own work and survive their project filter once","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/agents-hierarchy.spec.ts","name":"AEON-1360 cross-project children nest with their own work and survive their project filter once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents-hierarchy.spec.ts","name":"a stopped lead with a live grandchild stays visible and direct worker links open their ancestors","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

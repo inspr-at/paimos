@@ -203,6 +203,45 @@ func TestCrossProjectChildrenKeepWorkAndPrivacy(t *testing.T) {
 		}
 		return nil
 	})
+	// A run's starting person is independent of both parent and key issuer.
+	// A missing run person is not repaired from either source, and success
+	// must leave its immutable binding untouched.
+	order, run := stateRun(t, f, other, "running", "LINEAGE-10")
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET heartbeat_at=clock_timestamp() WHERE id=$1`, parent)
+		return err
+	})
+	runBody := map[string]any{}
+	for k, v := range body {
+		runBody[k] = v
+	}
+	runBody["run_id"], runBody["work_order_id"], runBody["ticket_node_id"], runBody["work_shape"] = run, order, order, "ship"
+	runBody["harness_session_ref"], runBody["worker_lease"] = "run-lineage-reference-"+uid(), "run-lineage-lease-"+uid()
+	w = f.call(f.agent, "POST", base, runBody, "")
+	expect(t, w, 409)
+	if !strings.Contains(w.Body.String(), "verified canonical person") {
+		t.Fatal("unresolved run used a fallback person: " + w.Body.String())
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET acting_person_id=$2 WHERE id=$1`, run, f.person.ID)
+		return err
+	})
+	w = f.call(f.agent, "POST", base, runBody, "")
+	expect(t, w, 201)
+	runChild := decode(t, w)
+	if runChild["run_id"] != run || runChild["owner_principal_id"] != f.person.ID || runChild["cross_project_parent_harness_session_id"] != parent {
+		t.Fatal("cross-project registration changed run person or lineage")
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var person string
+		if err := tx.QueryRow(t.Context(), `SELECT acting_person_id::text FROM agent_runs WHERE id=$1`, run).Scan(&person); err != nil {
+			return err
+		}
+		if person != f.person.ID {
+			t.Fatal("registration rewrote the immutable run person")
+		}
+		return nil
+	})
 	// A mixed-project chain at the existing depth limit cannot grow again.
 	deep := parent
 	f.tx(t, f.person, func(tx pgx.Tx) error {

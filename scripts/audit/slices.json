@@ -125,7 +125,6 @@
         "internal/agentd/routine_budget_test.go",
         "internal/agentsetup/**",
         "internal/harness/**",
-        "internal/db/migrations/1421_harness_lineage.sql",
         "internal/harness/lead_remove_test.go",
         "internal/harness/lead_adopt.go",
         "internal/servicetier/**",

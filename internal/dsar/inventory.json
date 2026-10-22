@@ -980,9 +980,9 @@
     {
       "classification": "personal",
       "columns": {
-        "child_session_id": "metadata",
+        "child_session_id": "personal",
         "owner_person_id": "personal",
-        "parent_session_id": "metadata",
+        "parent_session_id": "personal",
         "tenant_id": "metadata"
       },
       "locator": {

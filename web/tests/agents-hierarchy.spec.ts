@@ -98,7 +98,15 @@ test('AEON-1360 cross-project children nest with their own work and survive thei
   const options = page.getByRole('dialog', { name: 'Filter by Project' })
   const aeon = options.getByRole('checkbox', { name: /AEON/ })
   const choices = await controlStability(page, { filter, options: options.getByRole('group', { name: 'Project' }), aeon })
-  await choices.check(() => aeon.check())
+  await choices.check(async () => {
+    await aeon.check()
+    // Applying the address-backed filter closes the floating menu. Reopen
+    // from the same toolbar anchor before comparing its controls and rows.
+    await expect(options).not.toBeVisible()
+    await filter.click()
+    await page.getByRole('menuitem', { name: 'Project', exact: true }).click()
+    await expect(aeon).toBeChecked()
+  })
   choices.done()
   await page.keyboard.press('Escape')
   await expect(row(page, child)).toHaveCount(1)
