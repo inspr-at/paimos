@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "ticket": "AEON-1676",
+  "package": "P04",
+  "status": "replacement-preparation-only",
+  "recordedAt": "2026-10-22T23:30:39.102805+00:00",
+  "cutBlocker": {
+    "path": "scripts/test-prune/visual-manifest.json",
+    "approval": "pending",
+    "baselineAuthority": "pending-review",
+    "required": "Tick-approved immutable available references from P02; no protected cut, demotion, historical rewrite or approval bypass."
+  },
+  "browserCases": {
+    "sourceOwners": 46,
+    "before": 696,
+    "after": 696,
+    "plannedCeiling": 32,
+    "removed": 0,
+    "demoted": 0
+  },
+  "runtime": {
+    "owner": "web/tests/p04-runtime.test.ts",
+    "tier": "ESSENTIAL",
+    "command": "node --experimental-strip-types --test web/tests/p04-runtime.test.ts",
+    "result": {
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "durationMs": 432.663166
+    },
+    "execution": "Single small-file local fallback after remote-spec refused for occupied remote slots. No browser launched locally.",
+    "logArtifact": "web/test-results/p04-runtime.log",
+    "nativeCollection": "node-collect-hook.mjs / node-collect.mjs --batch for this exact source; canonical classifyManifest/saveManifest writer"
+  },
+  "graphLifecycle": {
+    "destination": "runtime:p04-graph-lifecycle",
+    "proved": "GraphCanvas aborts pending setup when replaced or unmounted, disposes late and active renderer instances, ignores obsolete label callbacks, and forwards current data and FPS. This proves host ownership, not native canvas picking or GPU internals."
+  },
+  "headerContext": {
+    "destination": "runtime:p04-header-context",
+    "proved": "HeaderGlimpse rejects old project/filter results, keeps section searches out of Tickets, routes effective filters, preserves a person pause, and clears a delivered narrow viewport sample despite stale synchronous hints. Physical layout, native notifications and paint remain browser obligations."
+  },
+  "groupScope": {
+    "destination": "runtime:p04-group-scope",
+    "proved": "useGroupFigures clears changed filter/project/person counts before idle, aborts and ignores a held old answer, then publishes only the new scope; stopped loaders cannot publish late counts. Rendered groups and column movement remain browser obligations."
+  },
+  "negativeControls": {
+    "mechanism": "Compile an in-memory copy of production setup with one guard removed and require the corresponding behavioral assertion to reject it. Product files and Git trees are never mutated.",
+    "detected": [
+      "missing late-renderer disposal",
+      "accepting an aborted header context",
+      "ignoring a delivered narrow viewport sample",
+      "keeping old-scope figures until idle"
+    ]
+  },
+  "browserTiming": {
+    "measuredBeforeMs": null,
+    "measuredAfterMs": null,
+    "measuredDeltaMs": null,
+    "reason": "All 696 source browser cases are unchanged. No whole-package before/after run or saving is claimed. A targeted original-case sample ran remotely; earlier attempts were refused for occupied slots or the host guard.",
+    "baselineSample": {
+      "sourceCommit": "2c9707daf5cee89594a355333529c72751abf369",
+      "spec": "tests/header-glimpse.spec.ts",
+      "grep": "AEON-1414",
+      "host": "approved remote browser lane",
+      "passed": 2,
+      "failed": 0,
+      "reportedRunnerSeconds": 9.0,
+      "retainedCases": [
+        "AEON-1414: a visual viewport shrink clears the glimpse while frames and other resize notifications are held",
+        "AEON-1414: a shrink clears the glimpse while viewport notifications and animation frames are stalled"
+      ]
+    },
+    "invalidAttempt": {
+      "filter": "AEON-1337|AEON-1414",
+      "exitCode": 1,
+      "cause": "Remote helper interpolated the multi-pattern filter into its shell: AEON-1414: command not found; reporter EPIPE. Discarded as invalid evidence and rerun with the documented single-word filter."
+    }
+  },
+  "static": {
+    "command": "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh",
+    "exitCode": 3,
+    "result": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR’s hosted CI static job"
+  },
+  "remaining": [
+    "P02 visual/reference prerequisite",
+    "The 32 retained native browser cases and donor removals/demotions",
+    "Native browser negative controls and measured before/after runner time",
+    "Affected runtime/browser suites through approved remote/CI entry points and full static exit 0",
+    "AEON-1663 browser synchronization acceptance; known-flaky list remains coordinator-owned"
+  ],
+  "sourceSha256": {
+    "web/tests/p04-runtime.test.ts": "95f43bc28106db898258846fea9a5805d487a1be54b5cadf20bdcc6aab1ec673",
+    "web/src/components/graph/GraphCanvas.vue": "0083c735203c34db3b85875e845c6a7cc7e55c1b21314ac20d4ba2879728fbd2",
+    "web/src/components/work/HeaderGlimpse.vue": "7e722318d634c1f10d4230b4e9cde3e0a0e13d08abea689db3e26e04dab01836",
+    "web/src/lib/useGroupFigures.ts": "6a2435f5599e386bdfc80567045bb6ed466572329cd63da84685c64caf5b0132"
+  },
+  "mergedMain": "2c9707daf5cee89594a355333529c72751abf369",
+  "checks": {
+    "standingLedger": {
+      "command": "node scripts/test-prune/check.mjs",
+      "exitCode": 0,
+      "cuts": false,
+      "protectedRisks": 647
+    },
+    "canonicalManifests": {
+      "command": "node scripts/test-tiers/cli.mjs manifests --check",
+      "exitCode": 0
+    },
+    "historicalP01Snapshot": {
+      "command": "node scripts/test-prune/check.mjs --p01",
+      "exitCode": 1,
+      "error": "Frozen launch-policy changed: scripts/ci/go-test-tiers.json",
+      "reason": "The explicit one-time P01 freeze differs from origin/main; this package does not change the Go tier manifest. Standing mode passes.",
+      "baselineSha256": "ad40dbe81c4910a07773596ac52e062b3312b00d4b54017f06c5be5aa5aff0f1",
+      "mainSha256": "7d3b3d34218d72209fddbe77932958c9bda27117456cbdd25cceaf3c99adf88e"
+    }
+  }
+}

@@ -17076,6 +17076,32 @@
     ,
     {"kind":"node","file":"tests/outline.test.ts","name":"the outline flattens epics, their children with guides, then the No epic group","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 figures: a changed filter clears counts before idle and rejects a held old answer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 figures: a changed person clears counts before idle and rejects a held old answer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 figures: a changed project clears counts before idle and rejects a held old answer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 graph: changing dimension makes the pending engine obsolete and preserves the current engine","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 graph: leaving during setup aborts and disposes the late renderer without publishing readiness","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 header: a held old project or filter context cannot paint after the scope leaves","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 header: a held-delivery narrow root sample wins over stale media and geometry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 header: section searches stay out of Tickets and Open graph carries the effective filter identity","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 header: visibility and occlusion never resume a graph the person paused","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 negative control: accepting an aborted graph context is detected","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 negative control: ignoring a delivered viewport sample is detected","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 negative control: keeping old-scope counts until idle is detected","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 negative control: missing late-renderer disposal is detected","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/package-doc.test.ts","name":"documented stream intervals match the shared health watcher","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/package-doc.test.ts","name":"package docs describe the implemented conditional write","tags":["delete-candidate"],"tier":"GATED-FULL"}
