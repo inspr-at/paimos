@@ -2,16 +2,40 @@
 package questions
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"sync"
 	"testing"
 	"time"
 )
+
+type deliveryTruthTrace struct {
+	mu      sync.Mutex
+	failure string
+}
+
+func (*deliveryTruthTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+func (tr *deliveryTruthTrace) TraceQueryEnd(_ context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	var e *pgconn.PgError
+	if errors.As(data.Err, &e) {
+		tr.mu.Lock()
+		tr.failure = e.Code + ": " + e.Message
+		tr.mu.Unlock()
+	}
+}
 
 // Risk: a shared principal broadens fan-out, related notices leak ask context,
 // retries duplicate FYIs, or queued answers claim delivery/seen. Existing
 // successor and permission tests retain their assertions alongside this case.
 func exerciseRelatedDeliveryTruth(t *testing.T) {
 	f := deliveryFixtureFor(t)
+	trace := &deliveryTruthTrace{}
+	f.m.pool = deliveryTracedPool(t, f.d.App, trace)
 	var parent string
 	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT tenant_id,kind_id,'PARENT-1','Parent',$2 FROM nodes WHERE id=$1 RETURNING id::text`, f.ticket, f.project).Scan(&parent); err != nil {
 		t.Fatal(err)
@@ -61,7 +85,10 @@ func exerciseRelatedDeliveryTruth(t *testing.T) {
 	f.dispatch(t)
 	e := find(f.status(t, q.ID))
 	if e.Delivery == nil || e.Delivery.State != "inbox" || e.Delivery.SessionID != f.session || e.Delivery.DeliveredAt != nil || e.Delivery.SeenAt != nil {
-		t.Fatalf("offline fallback claimed input: %+v", e.Delivery)
+		trace.mu.Lock()
+		sqlFailure := trace.failure
+		trace.mu.Unlock()
+		t.Fatalf("offline fallback claimed input: %+v; SQL failure: %s", e.Delivery, sqlFailure)
 	}
 	for _, id := range []string{same, lead} {
 		if n := f.count(t, `SELECT count(*) FROM inbox_messages WHERE recipient_session_id=$1 AND idempotency_key=$2`, id, "desk-fyi/"+q.Answer.ID+"/"+id); n != 1 {
