@@ -5,6 +5,7 @@ import { APIError } from '../src/lib/api'
 import type { AgentRun } from '../src/lib/agents'
 import type { AgentRunRow } from '../src/lib/agentRows'
 import { createPinia, setActivePinia } from 'pinia'
+import { reactive } from 'vue'
 import { useAgents } from '../src/stores/agents'
 import { resetPositions } from '../src/lib/position'
 import { wired } from './wire-fixtures'
@@ -170,11 +171,13 @@ describe('Start Agent leaf selection', () => {
     const listNodes = vi.fn(async (_params: unknown) => ({ items: [ticket, { ...ticket, id: 'parent', is_leaf: false }, { ...ticket, id: 'unknown', is_leaf: undefined }], next_cursor: 'next-page' as string | null }))
     const launch = vi.fn(async () => { throw new Error('launch captured') })
     const putPin = vi.fn()
+    const session = reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } } })
     const choice = { hostId: 'host', harness: 'codex', accountId: 'account', modelKey: 'model', profileId: 'profile' }
     const made = setupSource('components/agents/StartAgentDialog.vue', {}, {
       '../../lib/api': { listNodes },
       '../../lib/authz': { can: () => true },
-      '../../stores/session': { useSession: () => ({ identity: { principal: { kind: 'person' } } }) },
+      '../../stores/session': { useSession: () => session },
+      '../../stores/projects': { useProjects: () => ({ projects: [], load: async () => {}, error: '' }) },
       '../../lib/agents': { listPins: async () => [], putPin, deletePin: vi.fn(), message: (e: Error) => e.message },
       '../../lib/agentRows': {},
       '../../lib/accountCascade': {
@@ -189,7 +192,7 @@ describe('Start Agent leaf selection', () => {
       '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
     })
     stops.push(made.stop)
-    return { state: made.state, listNodes, launch, putPin }
+    return { state: made.state, listNodes, launch, putPin, session }
   }
   it('queries canonical leaves on every page and excludes parents and unknown shapes from mixed results', async () => {
     const { state, listNodes } = dialogSetup()
@@ -239,6 +242,26 @@ describe('Start Agent leaf selection', () => {
     await state.submit()
     expect(putPin).not.toHaveBeenCalled()
     expect(launch).not.toHaveBeenCalled()
+  })
+  it('keeps failed one-off choices but resets them when context or person changes', async () => {
+    const { state, session, launch } = dialogSetup()
+    await state.openOnce(ticket); await flush()
+    state.instruction.value = 'Inspect this context'
+    state.mayChangeFiles.value = true
+    await state.submit()
+    expect(launch).toHaveBeenCalledTimes(1)
+    expect(state.instruction.value).toBe('Inspect this context')
+    expect(state.mayChangeFiles.value).toBe(true)
+    state.selectTicket({ ...ticket, id: 'other-ticket' }); await flush()
+    expect(state.instruction.value).toBe('')
+    expect(state.mayChangeFiles.value).toBe(false)
+    state.instruction.value = 'Owned by the first person'
+    state.mayChangeFiles.value = true
+    session.identity.principal.id = 'another-person'; await flush()
+    expect(state.visible.value).toBe(false)
+    expect(state.instruction.value).toBe('')
+    expect(state.mayChangeFiles.value).toBe(false)
+    expect(state.ticket.value).toBeNull()
   })
 })
 
