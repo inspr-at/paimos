@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process'
 const leader = spawn(process.execPath, ['--input-type=module', '-e', `
   import { spawn } from 'node:child_process'
   import { processStart } from ${JSON.stringify(new URL('../../playwright-processes.mjs', import.meta.url).href)}
-  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+  const child = spawn(process.execPath, [${JSON.stringify(new URL('./hang.mjs', import.meta.url).pathname)}], { stdio: 'ignore' })
   console.log(JSON.stringify({ pid: process.pid, started: processStart(process.pid), helper: child.pid }))
   process.exit(0)
 `], { detached: true, stdio: ['ignore', 'pipe', 'inherit'] })
