@@ -67,6 +67,18 @@ case "\$0 \$*" in
 esac
 if [[ "\$browser" -eq 1 ]]; then
   if [[ "\${AEON_AS_ROOT:-}" == 1 ]]; then echo root-browser >> "\$state/errors"; exit 1; fi
+  if [[ -n "\${APT_CONFIG:-}" ]]; then echo browser-apt-config >> "\$state/errors"; exit 1; fi
+  exit 0
+fi
+if [[ "\$mode" == slow-mirror ]]; then
+  if [[ "\${AEON_AS_ROOT:-}" != 1 || ! -f "\${APT_CONFIG:-}" ]]; then
+    echo "mirror fetch has no transport deadline" >&2; exit 100
+  fi
+  for setting in 'Acquire::Retries "0";' 'Acquire::http::Timeout "20";' 'Acquire::https::Timeout "20";'; do
+    grep -qxF "\$setting" "\$APT_CONFIG" || { echo "mirror fetch has no transport deadline" >&2; exit 100; }
+  done
+  printf '%s\\n' "\$APT_CONFIG" >> "\$state/apt-configs"
+  if [[ "\$deps" -eq 1 ]]; then echo "mirror fetch timed out" >&2; exit 100; fi
   exit 0
 fi
 if [[ "\$mode" == always-fail ]]; then echo "Error: Installation process exited with code: 100" >&2; exit 100; fi

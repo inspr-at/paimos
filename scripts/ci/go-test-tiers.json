@@ -11620,6 +11620,8 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestPinProposalFollowsVerificationWithoutWaitingForAssets","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestPlaywrightMirrorFetchesAreBounded","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestPreflightRoutingPermissionsAndResultBehavior","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestPublishedRuntimeMustMatchSmokedRuntime","tier":"GATED-FULL"}

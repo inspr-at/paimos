@@ -23,13 +23,29 @@ attempt_apt() {
     && run_root_timeout 150 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq "$@"
 }
 
+playwright_dependencies() (
+  # Playwright starts apt-get itself. Bound each transport wait as well as
+  # the root process: a stalled mirror otherwise consumes all three 240s
+  # attempts and leaves too little of the shard's budget to run its tests.
+  # The outer retry owns recovery; apt must not multiply those retries.
+  local apt_config
+  apt_config=$(mktemp) || exit 1
+  trap 'rm -f "$apt_config"' EXIT
+  cat > "$apt_config" <<'APT' || exit 1
+Acquire::Retries "0";
+Acquire::http::Timeout "20";
+Acquire::https::Timeout "20";
+APT
+  run_root_timeout 240 env "APT_CONFIG=$apt_config" npx playwright install-deps "$@"
+)
+
 attempt_playwright() {
   local arg with_deps=0 only_shell=0
   local -a targets=()
   if [[ ${1:-} == install-deps ]]; then
     shift
     [[ $# -gt 0 ]] || usage
-    run_root_timeout 240 npx playwright install-deps "$@"
+    playwright_dependencies "$@"
     return
   fi
   [[ ${1:-} == install ]] || usage
@@ -48,7 +64,7 @@ attempt_playwright() {
   install+=("${targets[@]}")
   # Same user as the runner: timeout can reap this download, and the cache stays theirs.
   timeout --kill-after=20s 240 npx playwright "${install[@]}" \
-    && run_root_timeout 240 npx playwright install-deps "${targets[@]}"
+    && playwright_dependencies "${targets[@]}"
 }
 
 [[ $# -ge 1 ]] || usage

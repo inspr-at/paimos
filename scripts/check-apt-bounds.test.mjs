@@ -58,6 +58,19 @@ test('browser downloads stay unprivileged while dependency installs run as root'
   assert.equal(existsSync(join(result.state, 'errors')), false)
 })
 
+test('AEON-1082: stalled mirror requests are bounded inside Playwright and the outer retry recovers', async () => {
+  for (const args of ['install-deps chromium', 'install --with-deps --only-shell chromium']) {
+    const result = await run(`bash "${script}" playwright ${args}`, { mode: 'slow-mirror' })
+    assert.equal(result.status, 0, `${result.error}\n${result.stdout}\n${result.stderr}`)
+    assert.match(result.stderr, /mirror fetch timed out/)
+    assert.equal(result.calls.filter(call => call.includes('install-deps')).length, 2)
+    assert.equal(existsSync(join(result.state, 'errors')), false, 'browser downloads keep their unprivileged environment')
+    const configs = readFileSync(join(result.state, 'apt-configs'), 'utf8').trim().split('\n')
+    assert.equal(configs.length, 2)
+    for (const config of configs) assert.equal(existsSync(config), false, 'attempt configuration is removed after use')
+  }
+})
+
 test('three failed attempts fail the step and installed shells skip apt', async () => {
   const exhausted = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'always-fail' })
   assert.notEqual(exhausted.status, 0)

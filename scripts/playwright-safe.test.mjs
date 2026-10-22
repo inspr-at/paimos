@@ -468,10 +468,16 @@ test('stale recovery skips a reused detached PID and releases the stale lock', a
   } finally { lock?.release(); sentinel.kill('SIGTERM'); await sentinelExit }
 })
 
-function detachedProbe() {
-  const child = fixtures.spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+function detachedProbe({ ready = false } = {}) {
+  const child = fixtures.spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000); process.send?.("ready")'], {
+    stdio: ready ? ['ignore', 'ignore', 'ignore', 'ipc'] : 'ignore',
+  })
   const completion = new Promise(resolve => child.once('exit', resolve))
-  return { child, completion }
+  const started = ready ? Promise.race([
+    new Promise(resolve => child.once('message', resolve)),
+    completion.then(() => 'exited before ready'),
+  ]) : undefined
+  return { child, completion, started }
 }
 
 test('stale recovery reaps verified siblings and ignores reused group PIDs', async () => {
@@ -614,10 +620,14 @@ test('root identity retries a first-ps miss and records only its verified start'
   } finally { probe.child.kill('SIGKILL'); await probe.completion }
 })
 
-test('unverifiable live roots terminate their group without an invalid journal entry', async () => {
-  const probe = detachedProbe(), entries = []
+test('unverifiable live roots terminate their group without an invalid journal entry', { timeout: 15000 }, async () => {
+  const probe = detachedProbe({ ready: true }), entries = []
   let calls = 0
   try {
+    // The ownership preload runs ps before user code. Killing during that
+    // synchronous child launch can orphan ps; the exit event only reaps Node.
+    // This test exercises a live root, so establish that state explicitly.
+    assert.equal(await probe.started, 'ready')
     await assert.rejects(recordRootGroup(probe.child, entry => entries.push(entry), {
       start: () => { calls++; return '' }, attempts: 3,
     }), /spawned group terminated/)
