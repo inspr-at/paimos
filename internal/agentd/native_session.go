@@ -1380,6 +1380,7 @@ func (e *nativeOwned) poll(ctx context.Context) error {
 		// durable local report-offset update and cannot serve as that fence.
 		e.eventMu.Lock()
 		_, err := e.journal.FlushReports(ctx, b, 100, e)
+		err = errors.Join(err, e.retirePTYReports(ctx, b))
 		e.eventMu.Unlock()
 		if err != nil {
 			errs = append(errs, e.fault(err))

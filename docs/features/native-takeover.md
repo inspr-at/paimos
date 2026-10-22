@@ -176,8 +176,11 @@ local person and resolve the viewer to its actual controller client. Its
 no database transaction spans I/O. The host also holds the same per-owner lock
 used by structured commands, stop, take and hand-back. The metadata journal
 records the possible-write boundary before I/O and rechecks expiry and daemon
-identity after that disk barrier. The existing nativepty controller enforces
-exact binding, current actor/client/controller epoch, monotonic sequence,
+identity after that disk barrier. Holder and retired-controller checks precede
+the possible-write marker; an input refused before this point is rejected and
+does not fault the runtime or consume its input sequence. The existing
+nativepty controller enforces exact binding, current actor/client/controller
+epoch, monotonic sequence,
 40×12–320×100 dimensions and changed-size-only resize. Reconnect reapplies the
 holder's dimensions. The existing 150 ms client debounce is unchanged. An
 uncertain write consumes its sequence and requires explicit recovery; it never
@@ -186,8 +189,12 @@ person authority. The released person bridge does not install this new port.
 
 Terminal output is drained even when no export relay is installed. A qualified
 relay uses its existing bounded RAM ring, per-viewer delivery authorization and
-explicit eviction gaps. Missing source frames produce an explicit gap. EOF,
-owner lifetime cancellation and deadlines use the same ownedprocess cleanup
+explicit eviction gaps. Missing source frames produce an explicit gap.
+Transient authorization/export outages keep the owned terminal alive and keep
+draining and counting its output. Only an omitted-frame count is retained during
+the outage; recovery publishes a gap before fresh output. Definitive refusals
+still cancel the owner lifetime and retain occupancy until confirmed settlement.
+EOF, owner lifetime cancellation and deadlines use the same ownedprocess cleanup
 owner as the launcher. Natural terminal exit is reported on the original start
 operation through the existing private receipt route. The server rechecks the
 paired lease, exact binding and root/group exit inside its access-change
@@ -202,7 +209,12 @@ events, with observed output byte/frame counts and a cumulative SHA-256 content
 hash in the existing event metadata column for the exact terminal epoch,
 including an exited predecessor on hand-back. Public `NativeAuditEvent`
 snapshots keep their strict existing schema.
-PTY command journals contain receipt metadata and payload hashes. Raw terminal
+PTY command journals contain receipt metadata and payload hashes. Once every
+report of a settled PTY input or resize is acknowledged by the server, only
+the latest 32 such local receipts and their native observations are retained.
+Unreported or uncertain effects stay durable; typing reserves the final journal
+slot for owner Stop even during a reporting outage. The server remains the
+authoritative source for retired operation receipts. Raw terminal
 bytes, reasoning, interim chat and tool bodies never enter these paths. Counts
 describe observed output, not a durable or complete transcript. Existing final
 delivery and its explicit retention authorization remain separate.
@@ -264,3 +276,22 @@ The new `internal/agentd/native_pty_unix_test.go` remains covered by the existin
 S2 `internal/agentd/**` audit slice. No migration, DSAR column inventory, public
 route, response schema, version, account enrollment or capability enablement is
 changed. The coordinator retains cross-family review, merge and release gates.
+
+### P1 second fix round
+
+The three blocking host regressions were reproduced against reviewed head
+`7b13d50a4` using a detached test-only snapshot `a7b0ab3d1` on the approved agm2
+runner. Typing hit `buffer_full` at resize 257; first input and expired-holder
+input were incorrectly marked uncertain; HTTP 503/408/429 stopped the output
+reader before its second publish. The test-only commit is outside the delivery
+branch. Regression tests also cover continued owner control after a refused
+input, output loss gaps on recovery, cancellation on definitive HTTP 403 and
+retention of unreported/uncertain metadata across journal reopen.
+
+Outside the write set: `internal/nativereceipts/journal.go`,
+`internal/nativereceipts/receipt.go` and
+`internal/nativereceipts/receipts_test.go` add the narrow acknowledged-PTY
+retirement and reserved Stop slot needed to fix the shared-journal exhaustion.
+`scripts/ci/go-test-tiers.json` adds only the four new ESSENTIAL rows through
+the canonical writer. Production qualification and package G/P2 enablement
+boundaries remain as described above.

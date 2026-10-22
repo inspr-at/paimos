@@ -75,24 +75,30 @@ func (w *nativePTYWrite) WithWrite(ctx context.Context, caller nativepty.Caller,
 		if !reflect.DeepEqual(profile, e.profile) {
 			return nativeRefusal(nativecontract.ReasonIdentityMismatch)
 		}
-		if _, err := e.journal.BeginWrite(ctx, binding, w.intent.Receipt.OperationID); err != nil {
-			return err
-		}
-		w.begun = true
-		// The access-change fence is still held after fsync. Recheck time and
-		// the daemon/runtime immediately before the controller touches the PTY.
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if binding.DaemonID != e.host.s.daemonID || binding.DaemonGeneration != e.host.s.generation || e.transport.Identity().ProcessIdentityDigest != w.intent.ProcessIdentityDigest {
-			return nativeRefusal(nativecontract.ReasonWrongGeneration)
-		}
-		now = e.host.s.capacityNow()
-		if !now.Before(access.Deadline) || !now.Before(w.intent.ExpiresAt) || !now.Before(e.grant.Policy.ExpiresAt) {
-			return nativeRefusal(nativecontract.ReasonControllerExpired)
-		}
 		return fn(access)
 	})
+}
+
+func (w *nativePTYWrite) BeforeWrite(ctx context.Context, access nativepty.Access) error {
+	e := w.owner
+	binding := *w.intent.Receipt.Binding
+	if _, err := e.journal.BeginWrite(ctx, binding, w.intent.Receipt.OperationID); err != nil {
+		return err
+	}
+	w.begun = true
+	// Holder and retired-epoch checks have passed. The access fence is still
+	// held after fsync; recheck time and runtime immediately before native I/O.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if binding.DaemonID != e.host.s.daemonID || binding.DaemonGeneration != e.host.s.generation || e.transport.Identity().ProcessIdentityDigest != w.intent.ProcessIdentityDigest {
+		return nativeRefusal(nativecontract.ReasonWrongGeneration)
+	}
+	now := e.host.s.capacityNow()
+	if !now.Before(access.Deadline) || !now.Before(w.intent.ExpiresAt) || !now.Before(e.grant.Policy.ExpiresAt) {
+		return nativeRefusal(nativecontract.ReasonControllerExpired)
+	}
+	return nil
 }
 
 func (h *NativeHost) ptyOperation(ctx context.Context, b nativecontract.Binding, request, kind string, value any, expires time.Time) (out nativecontract.OperationResult, err error) {
@@ -191,13 +197,40 @@ func (h *NativeHost) ptyOperation(ctx context.Context, b nativecontract.Binding,
 		return out, errors.Join(err, journalErr)
 	}
 	if err != nil {
-		return out, err
+		// No possible-write marker means the PTY was never invoked. Report a
+		// rejection without faulting this runtime or consuming its sequence.
+		reason := nativeRefusalReason(err)
+		cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer stop()
+		r, journalErr := e.journal.SetIntentState(cleanup, b, operation, "rejected", &reason)
+		out.Receipt = r
+		return out, errors.Join(err, journalErr, e.flushPTYReports(cleanup, b, operation))
 	}
 	out.Receipt = r
-	e.eventMu.Lock()
-	_, err = e.journal.FlushOperationReports(ctx, b, operation, 16, e)
-	e.eventMu.Unlock()
+	err = e.flushPTYReports(ctx, b, operation)
 	return out, err
+}
+
+func (e *nativeOwned) flushPTYReports(ctx context.Context, b nativecontract.Binding, operation string) error {
+	e.eventMu.Lock()
+	defer e.eventMu.Unlock()
+	_, err := e.journal.FlushOperationReports(ctx, b, operation, 16, e)
+	return errors.Join(err, e.retirePTYReports(ctx, b))
+}
+
+// The single report flusher holds eventMu. Evidence is retained until the
+// server has acknowledged every report, then retired with its local receipt.
+func (e *nativeOwned) retirePTYReports(ctx context.Context, b nativecontract.Binding) error {
+	retired, err := e.journal.RetirePTYReports(ctx, b)
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, r := range retired {
+		delete(e.observations, r.State+"/"+r.RequestID)
+	}
+	return nil
 }
 
 func (e *nativeOwned) openTerminal(ctx context.Context, spec nativecontract.LaunchSpec, cols, rows int) (nativecontract.NativeTransport, error) {
@@ -596,24 +629,27 @@ func (e *nativeOwned) startTerminalFrames(view nativecontract.SessionView, pty n
 		if export {
 			defer live.Remove(*view.CurrentBinding)
 		}
-		var sequence, source uint64
+		var sequence, source, omitted uint64
 		publish := func(kind string, payload any, dropped string) error {
 			if !export {
 				return nil
 			}
-			sequence++
 			raw, err := json.Marshal(payload)
 			if err != nil || len(raw) > nativecontract.ExportedFrameBytes {
 				return nativeRefusal(nativecontract.ReasonBufferFull)
 			}
-			position := strconv.FormatUint(sequence, 10)
+			position := strconv.FormatUint(sequence+1, 10)
 			event := nativecontract.StreamEvent{Binding: *view.CurrentBinding, Generation: view.Generation, Sequence: position, Seq: position, Source: "native", ObservedAt: e.host.s.capacityNow(), Kind: kind, Payload: raw, DroppedFrames: dropped}
-			return live.Publish(ctx, nativecontract.Publish{RequestID: uuid.NewString(), ExpectedBinding: *view.CurrentBinding, Events: []nativecontract.StreamEvent{event}}, func(ctx context.Context, deliver func(nativecontract.ValidationContext) error) error {
+			err = live.Publish(ctx, nativecontract.Publish{RequestID: uuid.NewString(), ExpectedBinding: *view.CurrentBinding, Events: []nativecontract.StreamEvent{event}}, func(ctx context.Context, deliver func(nativecontract.ValidationContext) error) error {
 				if err := e.require(ctx); err != nil {
 					return err
 				}
 				return deliver(nativecontract.ValidationContext{Binding: view.CurrentBinding, OwnedSessionID: view.OwnedSessionID, Generation: view.Generation, Private: true, PrincipalKind: "agent", Capabilities: &view.Capabilities, Mode: "terminal", State: "taken", View: "terminal"})
 			})
+			if err == nil {
+				sequence++
+			}
+			return err
 		}
 		fail := func(err error) {
 			e.mu.Lock()
@@ -622,6 +658,17 @@ func (e *nativeOwned) startTerminalFrames(view nativecontract.SessionView, pty n
 			// Only the owner cancels its lifetime. Occupancy is released solely
 			// after owned exit AND the existing server lifecycle write succeeds.
 			e.cancel()
+		}
+		exportFailed := func(err error) bool {
+			var refusal *nativecontract.ValidationError
+			var failure *nativestream.Failure
+			if nativeDefinitive(err) || errors.As(err, &refusal) || errors.As(err, &failure) && failure.Status >= 400 && failure.Status < 500 && failure.Status != http.StatusRequestTimeout && failure.Status != http.StatusTooManyRequests {
+				fail(err)
+				return true
+			}
+			// Outages stop export, never the person's process. Keep draining
+			// and counting, retaining only a loss count until access recovers.
+			return false
 		}
 		for {
 			select {
@@ -657,20 +704,27 @@ func (e *nativeOwned) startTerminalFrames(view nativecontract.SessionView, pty n
 				_, _ = terminal.digest.Write(data)
 				terminal.mu.Unlock()
 				clear(data)
-				if next != source+1 {
-					dropped := next - source - 1
-					if err := publish("gap", nativecontract.Gap{Reason: "frame_omitted", DroppedFrames: strconv.FormatUint(dropped, 10), ReloadSnapshot: true}, strconv.FormatUint(dropped, 10)); err != nil {
-						fail(err)
+				omitted += next - source - 1
+				source = next
+				if omitted > 0 {
+					dropped := strconv.FormatUint(omitted, 10)
+					if err := publish("gap", nativecontract.Gap{Reason: "frame_omitted", DroppedFrames: dropped, ReloadSnapshot: true}, dropped); err != nil {
+						if exportFailed(err) {
+							return
+						}
+						omitted++ // this frame also cannot be exported
+						continue
+					}
+					if export {
+						sequence += omitted - 1
+					}
+					omitted = 0
+				}
+				if err := publish("terminal", frame, "0"); err != nil {
+					if exportFailed(err) {
 						return
 					}
-					if export && dropped > 1 {
-						sequence += dropped - 1
-					}
-				}
-				source = next
-				if err := publish("terminal", frame, "0"); err != nil {
-					fail(err)
-					return
+					omitted++
 				}
 			}
 		}

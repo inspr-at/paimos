@@ -56,6 +56,21 @@ type Authority interface {
 	WithWrite(context.Context, Caller, nativecontract.Binding, string, func(Access) error) error
 }
 
+// WritePreparer records a possible native effect after all controller/holder
+// checks, while both the manager lock and Authority's access fence are held.
+// A refusal before this hook cannot have touched the PTY. Implementations must
+// recheck deadlines and runtime identity after any durable write barrier.
+type WritePreparer interface {
+	BeforeWrite(context.Context, Access) error
+}
+
+func (m *Manager) beforeWrite(ctx context.Context, access Access) error {
+	if p, ok := m.config.Authority.(WritePreparer); ok {
+		return p.BeforeWrite(ctx, access)
+	}
+	return nil
+}
+
 // Qualification must prove the exact binary/profile/tools/settings/OS fence
 // for the requested mode. An SDK-only approval callback cannot qualify a TUI.
 // Nil (the default) keeps takeover unavailable. This is operator configuration,
@@ -581,6 +596,9 @@ func (m *Manager) resizeOwned(ctx context.Context, caller Caller, in nativecontr
 				return err
 			}
 		}
+		if err := m.beforeWrite(ioCtx, access); err != nil {
+			return err
+		}
 		if regain || m.cols != int(in.Cols) || m.rows != int(in.Rows) {
 			var err error
 			evidence, err = m.pty.Resize(ioCtx, in)
@@ -626,6 +644,9 @@ func (m *Manager) Input(ctx context.Context, caller Caller, in nativecontract.PT
 		ioCtx, finish := context.WithDeadline(ctx, minDeadline(access.Deadline, in.ExpiresAt))
 		defer finish()
 		if err := m.requireHolder(access); err != nil {
+			return err
+		}
+		if err := m.beforeWrite(ioCtx, access); err != nil {
 			return err
 		}
 		// Mark BEFORE I/O: partial/uncertain writes are never resent.

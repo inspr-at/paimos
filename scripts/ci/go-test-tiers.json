@@ -1876,9 +1876,13 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYCurrentHolderInputAndResize","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYExportOutageKeepsRuntimeAndReportsGap","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYFailedSuccessorStillAcceptsExactOwnerStop","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYOutputEOFAndLifecycleMetadata","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYPreIORefusalDoesNotFaultSession","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYReadinessFailureRetainsHandleUntilExitReport","tier":"ESSENTIAL"}
     ,
@@ -1889,6 +1893,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYSourceGapsAndSlowViewerStayBounded","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYTransitionsWaitForBothOwnedExits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYTypingRetiresReportsAndPreservesStop","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYUncertainInputRequiresRecovery","tier":"ESSENTIAL"}
     ,
@@ -8823,6 +8829,8 @@
     {"kind":"go","package":"internal/nativereceipts","name":"TestCrashBeforeNativeAckHoldsInputAndReplaysOnlyMetadata","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativereceipts","name":"TestFinalOutboxSurvivesOutageExitAndLostAck","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativereceipts","name":"TestPTYReceiptRetirementPreservesPendingAndStopCapacity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativereceipts","name":"TestPrivateStoreBoundsAndRejectsSymlinkOrSharedState","tier":"ESSENTIAL"}
     ,

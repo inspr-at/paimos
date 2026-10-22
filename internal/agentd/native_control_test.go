@@ -12,12 +12,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativepty"
+	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativesessions/stream"
 	"github.com/inspr-at/paimos/internal/nativestream"
 )
@@ -318,6 +320,88 @@ func TestNativeHostPTYCurrentHolderInputAndResize(t *testing.T) {
 	}
 }
 
+// Risk: normal typing fills the shared journal/evidence map and prevents the
+// person's Stop. More than a journal's capacity must keep writing and stop once.
+func TestNativeHostPTYTypingRetiresReportsAndPreservesStop(t *testing.T) {
+	f, l, a := nativePTYHost(t)
+	a.access.Deadline = f.server.now.Add(10 * time.Minute)
+	a.access.Controller.ExpiresAt = a.access.Deadline
+	b := startNativePTY(t, f, a)
+	ctx := nativePTYContext(a)
+	for i := 1; i <= nativereceipts.MaxReceipts+8; i++ {
+		r := nativePTYResize(a)
+		r.Cols += int64(i % 2)
+		if _, err := f.h.Resize(ctx, r); err != nil {
+			t.Fatalf("resize %d: %v", i, err)
+		}
+		in := nativePTYInput(a)
+		in.Sequence = strconv.Itoa(i)
+		if out, err := f.h.PTYInput(ctx, in); err != nil || out.Receipt.State != "write_acknowledged" {
+			t.Fatalf("input %d: %+v %v", i, out, err)
+		}
+	}
+	f.h.mu.Lock()
+	var e *nativeOwned
+	for _, candidate := range f.h.entries {
+		e = candidate
+	}
+	f.h.mu.Unlock()
+	page, err := e.journal.Page(b, "", 100)
+	e.mu.Lock()
+	observations := len(e.observations)
+	e.mu.Unlock()
+	if err != nil || page.Truncated || len(page.Items) > 32 || observations > 32 {
+		t.Fatal("settled PTY metadata grew without bound", len(page.Items), observations, err)
+	}
+	stop := nativecontract.Stop{RequestID: uuid.NewString(), ExpectedBinding: b, Kind: "graceful", ExpectedProcessIdentityDigest: l.pty.identity.ProcessIdentityDigest, ExpiresAt: a.access.Deadline}
+	f.server.queue(b, "stop", stop.RequestID, stop)
+	if out, err := f.h.Stop(t.Context(), stop); err != nil || out.Receipt.State != "exit_confirmed" {
+		t.Fatal("typing prevented owner stop", out, err)
+	}
+	if writes, resizes, closes := l.pty.counts(); writes != nativereceipts.MaxReceipts+8 || resizes != nativereceipts.MaxReceipts+8 || closes != 1 || f.groups(t) != 0 {
+		t.Fatal("wrong PTY effects or retained occupancy", writes, resizes, closes)
+	}
+}
+
+// Risk: a holder check that refuses before native I/O is mislabeled uncertain
+// and permanently faults a healthy process. Reacquiring control must recover.
+func TestNativeHostPTYPreIORefusalDoesNotFaultSession(t *testing.T) {
+	for _, kind := range []string{"before first resize", "expired holder"} {
+		t.Run(kind, func(t *testing.T) {
+			f, l, a := nativePTYHost(t)
+			var clock atomic.Int64
+			clock.Store(f.server.now.UnixNano())
+			f.s.capacityNow = func() time.Time { return time.Unix(0, clock.Load()) }
+			startNativePTY(t, f, a)
+			ctx := nativePTYContext(a)
+			if kind == "expired holder" {
+				if _, err := f.h.Resize(ctx, nativePTYResize(a)); err != nil {
+					t.Fatal(err)
+				}
+				clock.Store(f.server.now.Add(90 * time.Second).UnixNano())
+				a.access.Deadline = f.server.now.Add(3 * time.Minute)
+				a.access.Controller.ExpiresAt = a.access.Deadline
+			}
+			in := nativePTYInput(a)
+			out, err := f.h.PTYInput(ctx, in)
+			requireNativeReason(t, err, nativecontract.ReasonControllerExpired)
+			if out.Receipt.State != "rejected" || out.Receipt.Reason == nil || *out.Receipt.Reason != nativecontract.ReasonControllerExpired {
+				t.Fatal("pre-I/O refusal reported a possible write", out)
+			}
+			if writes, _, _ := l.pty.counts(); writes != 0 {
+				t.Fatal("refused input reached the PTY")
+			}
+			if _, err := f.h.Resize(ctx, nativePTYResize(a)); err != nil {
+				t.Fatal("pre-I/O refusal faulted resize", err)
+			}
+			in.RequestID = uuid.NewString()
+			if out, err := f.h.PTYInput(ctx, in); err != nil || out.Receipt.State != "write_acknowledged" {
+				t.Fatal("pre-I/O refusal consumed the sequence or faulted input", out, err)
+			}
+		})
+	}
+}
+
 func TestNativeHostPTYRejectsUntrustedOrStaleWrites(t *testing.T) {
 	for _, kind := range []string{"missing proof", "agent key", "viewer", "stale binding", "stale epoch", "revoked grant", "revoked profile", "replaced daemon", "size bounds"} {
 		t.Run(kind, func(t *testing.T) {
@@ -509,6 +593,99 @@ func TestNativeHostPTYSourceGapsAndSlowViewerStayBounded(t *testing.T) {
 			var gap nativecontract.Gap
 			if event.Kind != "gap" || json.Unmarshal(event.Payload, &gap) != nil || gap.Reason != "buffer_evicted" || gap.DroppedFrames == "0" {
 				t.Fatal("slow viewer loss was hidden", event)
+			}
+		})
+	}
+}
+
+// Risk: transient per-frame authorization/export failure kills the person's
+// TUI. HTTP barriers prove output continues draining during the outage, then
+// resumes with an explicit loss gap; a definitive revocation must still stop.
+func TestNativeHostPTYExportOutageKeepsRuntimeAndReportsGap(t *testing.T) {
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusForbidden} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			f, l, a := nativePTYHost(t)
+			enableNativePTYRelay(t, f)
+			var outage atomic.Bool
+			attempts := make(chan struct{}, 4)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if outage.Load() && r.Method == http.MethodPost && r.URL.Path == "/api/agentd/native-sessions/receipts" {
+					nativeHostRefuse(w, status, nativecontract.ReasonPermissionRevoked)
+					select {
+					case attempts <- struct{}{}:
+					default:
+					}
+					return
+				}
+				f.server.ServeHTTP(w, r)
+			}))
+			t.Cleanup(server.Close)
+			f.h.remote = NewRemote(server.URL, "fixture-runtime")
+			b := startNativePTY(t, f, a)
+			sub := subscribeNativePTY(t, f, b)
+			readNativePTYEvent(t, sub)
+			f.h.mu.Lock()
+			var e *nativeOwned
+			for _, candidate := range f.h.entries {
+				e = candidate
+			}
+			f.h.mu.Unlock()
+			frame := func(sequence int) {
+				t.Helper()
+				defer func() {
+					if recovered := recover(); recovered != nil {
+						t.Fatal("export outage closed the owned PTY frame channel", recovered)
+					}
+				}()
+				l.pty.frames <- nativecontract.TerminalFrame{TerminalEpoch: b.RuntimeEpoch, Sequence: strconv.Itoa(sequence), DataBase64: base64.StdEncoding.EncodeToString([]byte("outage-output")), Cols: 120, Rows: 36}
+			}
+			awaitFailure := func() {
+				t.Helper()
+				select {
+				case <-attempts:
+				case <-time.After(10 * time.Second):
+					t.Fatal("frame publish did not reach outage barrier")
+				}
+			}
+			outage.Store(true)
+			frame(1)
+			awaitFailure()
+			if status == http.StatusForbidden {
+				select {
+				case <-l.pty.done:
+				case <-time.After(10 * time.Second):
+					t.Fatal("definitive revocation did not cancel the owner")
+				}
+				if e.faulted() == nil {
+					t.Fatal("definitive refusal was not retained")
+				}
+				return
+			}
+			frame(2)
+			awaitFailure() // processing the second frame proves the first failed
+			outage.Store(false)
+			frame(3)
+			event := readNativePTYEvent(t, sub)
+			var gap nativecontract.Gap
+			if event.Kind != "gap" || json.Unmarshal(event.Payload, &gap) != nil || gap.Reason != "frame_omitted" || gap.DroppedFrames != "2" {
+				t.Fatal("outage loss was hidden", event)
+			}
+			if event := readNativePTYEvent(t, sub); event.Kind != "terminal" || event.Seq != "3" {
+				t.Fatal("terminal export did not recover", event)
+			}
+			select {
+			case <-l.pty.done:
+				t.Fatal("transient export error canceled the person's PTY")
+			default:
+			}
+			if e.faulted() != nil || e.terminalEvidence().Frames != 3 || e.terminalEvidence().OutputBytes != 3*uint64(len("outage-output")) || f.groups(t) != 1 {
+				t.Fatal("outage faulted the owner or stopped counting/draining", e.faulted(), e.terminalEvidence())
+			}
+			if _, err := f.h.Resize(nativePTYContext(a), nativePTYResize(a)); err != nil {
+				t.Fatal("outage faulted control", err)
+			}
+			if _, err := f.h.PTYInput(nativePTYContext(a), nativePTYInput(a)); err != nil {
+				t.Fatal("outage faulted input", err)
 			}
 		})
 	}
