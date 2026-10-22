@@ -80,6 +80,9 @@ export interface HarnessSessionRow {
 }
 
 export interface AgentRunRow {
+  run_once?: boolean
+  instruction?: string
+  repository_mutation_allowed?: boolean
   capacity_override?: '' | 'now'
   wait?: CapacityWait
   id: string; work_order_id: string; agent_principal_id: string; model_profile_id?: string | null
@@ -93,6 +96,12 @@ export interface AgentRunRow {
   row_version?: number
   // Filled by this module from the daemon-wait endpoint. Not a column on the run.
   daemon_wait_reason?: string | null
+}
+
+export interface RunOnceRequest {
+  request_id: string; expected_updated_at: string; task?: string; instruction: string
+  repository_mutation_allowed: boolean; agent_principal_id: string; model_profile_id: string
+  requested_account_id?: string; capacity_override?: 'now'
 }
 
 export interface RemoveSessionResult { session: Wire<HarnessSessionRow>; message: string; processes_signalled: false; process_state: 'unknown'; event_id?: number; undoable?: boolean }
@@ -185,6 +194,11 @@ export const getRun = async (id: string) => {
       at.body = { ...at.body, daemon_wait_reason: wait.body.reason }
     } catch { /* The run stays readable when the checkout sentence is unavailable. */ }
   }
+  return rowOf(at.body, at)
+}
+
+export const createRunOnce = async (contextId: string, body: RunOnceRequest) => {
+  const at = await call<AgentRunRow>(`/nodes/${enc(contextId)}/run-once`, 'POST', body)
   return rowOf(at.body, at)
 }
 // The change requests (rename, model) a session's detail carries. Not a row: the session itself is not read here.

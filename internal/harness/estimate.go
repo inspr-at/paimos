@@ -181,12 +181,28 @@ func etaInterval(ctx context.Context, tx pgx.Tx) (time.Duration, error) {
 }
 
 func (m *Module) stampSessions(ctx context.Context, tx pgx.Tx, sessions []*Session) error {
+	if err := m.stampReporterSessions(ctx, tx, sessions); err != nil {
+		return err
+	}
+	return stampMoveRights(ctx, tx, sessions)
+}
+
+// Reporter responses omit caller-specific move rights. Keep ETA, pause,
+// lineage and batched child progress, but avoid deriving discarded fields.
+func (m *Module) stampReporterSessions(ctx context.Context, tx pgx.Tx, sessions []*Session) error {
 	if len(sessions) == 0 {
 		return nil
 	}
-	interval, err := etaInterval(ctx, tx)
-	if err != nil {
-		return err
+	var interval time.Duration
+	for _, s := range sessions {
+		if s.StoppedAt == nil && s.EtaReportedAt != nil {
+			var err error
+			interval, err = etaInterval(ctx, tx)
+			if err != nil {
+				return err
+			}
+			break
+		}
 	}
 	// eta_reported_at is clock_timestamp(). The same database clock decides
 	// staleness; the API host's time.Now() does not.
@@ -198,10 +214,7 @@ func (m *Module) stampSessions(ctx context.Context, tx pgx.Tx, sessions []*Sessi
 		stampSessionEta(s, interval, now)
 		*s = projectLineage(stampPause(*s, now))
 	}
-	if err := stampCoordinatorProgress(ctx, tx, sessions); err != nil {
-		return err
-	}
-	return stampMoveRights(ctx, tx, sessions)
+	return stampCoordinatorProgress(ctx, tx, sessions)
 }
 
 // heartbeatReceipt preserves authoritative write fields, including finished
