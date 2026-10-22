@@ -69,6 +69,59 @@ func TestCrossProjectChildrenKeepWorkAndPrivacy(t *testing.T) {
 	if legacyChild["parent_harness_session_id"] != parent || legacyChild["cross_project_parent_harness_session_id"] != nil || legacyChild["project_id"] != f.project {
 		t.Fatal("same-project UUID spelling changed legacy lineage")
 	}
+	// AEON-1649 risk: a folded parent counts a cross-project child while its
+	// progress ignores it, or a count reveals a project the reader cannot see.
+	// The parent-only page must count both children outside that page.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET ticket_node_id=$2,created_at=clock_timestamp() WHERE id=$1`, parent, f.ticket); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET progress_pct=CASE WHEN id=$1::uuid THEN 80 ELSE 20 END WHERE id=ANY($2::uuid[])`, id, []string{id, legacyChild["id"].(string)})
+		return err
+	})
+	assertCounts := func(viewer tenant.Principal, total, progress int, cross bool) {
+		t.Helper()
+		w := f.call(viewer, "GET", "/api/harness-sessions?project="+f.project+"&limit=1", nil, "")
+		expect(t, w, 200)
+		items := decode(t, w)["items"].([]any)
+		if len(items) != 1 || items[0].(map[string]any)["id"] != parent {
+			t.Fatal("count fixture did not return the parent-only page")
+		}
+		got := items[0].(map[string]any)
+		if got["progress_pct"] != float64(progress) {
+			t.Fatalf("parent progress ignores visible lineage: got %v, want %d", got["progress_pct"], progress)
+		}
+		counts, ok := got["child_counts"].(map[string]any)
+		if !ok {
+			t.Fatal("parent page omitted server child counts")
+		}
+		projects := counts["cross_project"].([]any)
+		if counts["current"] != float64(total) || counts["all"] != float64(total) || counts["omitted_projects"] != float64(0) {
+			t.Fatalf("parent count/progress disagrees with visible lineage: %#v", got)
+		}
+		if cross {
+			if len(projects) != 1 || projects[0].(map[string]any)["project_key"] != "OTHER-1" || projects[0].(map[string]any)["current"] != float64(1) || projects[0].(map[string]any)["all"] != float64(1) {
+				t.Fatalf("missing cross-project count: %#v", counts)
+			}
+		} else if len(projects) != 0 || strings.Contains(w.Body.String(), "OTHER-1") || strings.Contains(w.Body.String(), other) {
+			t.Fatal("parent counts exposed an inaccessible child project")
+		}
+		w = f.call(viewer, "GET", "/api/projects/"+f.project+"/harness-sessions/"+parent, nil, "")
+		expect(t, w, 200)
+		if got := decode(t, w); got["progress_pct"] != float64(progress) || got["child_counts"] != nil {
+			t.Fatal("reporter progress disagrees or gained hierarchy-only fields")
+		}
+	}
+	assertCounts(f.person, 2, 50, true)
+	parentReader := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Parent project reader')`, parentReader.TenantID, parentReader.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member' AND builtin`, parentReader.TenantID, parentReader.ID, f.project)
+		return err
+	})
+	assertCounts(parentReader, 1, 20, false)
 	path := base + "/" + id
 	w = f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}, body["worker_lease"].(string))
 	expect(t, w, 200)

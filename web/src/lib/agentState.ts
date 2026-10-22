@@ -46,6 +46,7 @@ export function mergeSessionEvidence(previous: DeepReadonly<HarnessSessionRow> |
   carry('ticket', incoming.ticket_node_id === previous.ticket_node_id)
   carry('agent', incoming.agent_principal_id === previous.agent_principal_id)
   carry('can_reparent')
+  carry('child_counts')
   carry('watch')
   carry('activity_note_id')
   // History is read with a detail only. It stays until the next detail read replaces it,

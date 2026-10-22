@@ -60,7 +60,7 @@ import LeadMenu from '../lead/LeadMenu.vue'
 import SessionFacetMenu from './SessionFacetMenu.vue'
 import type { AgentProjects } from './useAgentProjects'
 import {
-  DEFAULT_GROUP, emptyFacets, FACET_KEYS, FACET_TITLE, facetChoices, facetsActive, foldSummary, GROUP_BY, groupWord, isLeadRoot, keyedGroups, matchesFacets,
+  DEFAULT_GROUP, emptyFacets, FACET_KEYS, FACET_TITLE, facetChoices, facetsActive, foldSummary, crossProjectChildren, GROUP_BY, groupWord, isLeadRoot, keyedGroups, matchesFacets,
   NO_PROJECT, orderProjects, projectGroups, queueHeads, queuedWord, queueNote, type FacetKey, type Facets, type GroupBy, type LeadLine, type ProjectRef,
 } from './sessionGroups'
 const route = useRoute(), router = useRouter()
@@ -480,7 +480,7 @@ function endedLine(view: SessionView) {
 // A filter shows every kept child; otherwise the list hides stopped ones until asked.
 const offered = (branch: Branch) => filtering.value ? branch.children.filter(keeps) : candidates(branch)
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
-type Row = TreeRow<SessionView> & { view: SessionView; primary: string; exec: ReturnType<typeof sessionExecution>; family: boolean; familyEnd: boolean; lead: boolean; coordinates: boolean; leadRoot: boolean; queueChip: boolean; queued: number | null; line: string; sub: number; under: ReturnType<typeof below> }
+type Row = TreeRow<SessionView> & { view: SessionView; primary: string; exec: ReturnType<typeof sessionExecution>; family: boolean; familyEnd: boolean; lead: boolean; coordinates: boolean; leadRoot: boolean; queueChip: boolean; queued: number | null; line: string; sub: number; crossProject: string; under: ReturnType<typeof below> }
 // Sessions as a tree of any depth (AEON-784): the list decides which children a
 // parent offers and whether it is open; sessionTree lays out the rows.
 function rowsOf(section: Section): Row[] {
@@ -491,14 +491,18 @@ function rowsOf(section: Section): Row[] {
     const view = liveOf(row.branch.view)
     const primary = intendedResult(view)
     const leadRoot = !row.depth && prefRoots.value.has(view.session.id)
-    const sub = row.foldable ? shownBelow(row.branch, offered) : 0
+    const allChildren = showRemoved.value || !!history.value[view.session.id]
+    // New servers own the count, including descendants beyond this page. Keep
+    // the legacy fallback for responses predating the additive projection.
+    const sub = row.foldable ? view.session.child_counts?.[allChildren ? 'all' : 'current'] ?? shownBelow(row.branch, offered) : 0
+    const crossProject = crossProjectChildren(view.session.child_counts, allChildren)
     const under = below(row.branch, v => v.name, v => !!props.projects?.asks(v.session.id), liveOf)
     // Line 2 says what it does; a parent always has it, so a fold never changes the row's height.
     // Folded, it sums up what it holds (design AEON-1196: “· 5 workers · 1 problem · 1 question”).
     const doing = lineTwo(row.branch, view)
-    const line = row.foldable && !row.open ? [doing, foldSummary({ workers: sub, problems: under.problem, questions: under.ask })].filter(Boolean).join(' · ') : doing || (row.foldable ? plural(sub, 'worker') : '')
+    const line = row.foldable && !row.open ? [doing, foldSummary({ workers: sub, problems: under.problem, questions: under.ask }), crossProject].filter(Boolean).join(' · ') : doing || (row.foldable ? plural(sub, 'worker') : '')
     return {
-      ...row, view, primary, line, exec: sessionExecution(view, names.value),
+      ...row, view, primary, line, crossProject, exec: sessionExecution(view, names.value),
       family: row.depth > 0 || row.open, familyEnd: !rows[index + 1]?.depth,
       // Only the project's claimed lead says Lead (AEON-1285); a coordinator without the claim says nothing.
       lead: claimedLead(view), coordinates: view.session.role === 'coordinator' || row.branch.children.length > 0,
@@ -508,7 +512,7 @@ function rowsOf(section: Section): Row[] {
 }
 const sectionRows = computed(() => new Map(sections.value.map(section => [section.id, rowsOf(section)])))
 const rowById = computed(() => new Map([...sectionRows.value.values()].flat().map(row => [row.view.session.id, row])))
-const foldLabel = (row: Row) => `${row.open ? 'Fold' : 'Unfold'} ${row.view.name}’s workers: ${plural(row.sub, 'worker')}, ${workingChildren(row.branch)} working`
+const foldLabel = (row: Row) => `${row.open ? 'Fold' : 'Unfold'} ${row.view.name}’s workers: ${plural(row.sub, 'worker')}, ${workingChildren(row.branch)} working${row.crossProject ? ` · ${row.crossProject}` : ''}`
 const rollLabel = (row: Row) => row.under.problem ? `${row.under.problem} ${row.under.problem === 1 ? 'problem' : 'problems'} below` : `${row.under.ask} ${row.under.ask === 1 ? 'asks' : 'ask'} you below`
 
 // Tree keys (AEON-784): on a row or its fold button, ← folds an open parent or

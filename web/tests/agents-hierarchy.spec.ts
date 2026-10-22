@@ -2,6 +2,7 @@
 // Coordinator: PLAYWRIGHT_PORT=5825 npm test -- agents-hierarchy.spec.ts
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
+import { writeFile } from 'node:fs/promises'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { controlStability } from './control-stability'
@@ -77,13 +78,13 @@ test('workers nest by session ID, display their label, harness and ticket, and e
 
 // Risk: wrong project/ticket attribution, duplicate children under a project
 // filter, or a list inventing/fetching an ancestor outside the visible rows.
-test('AEON-1360 cross-project children nest with their own work and survive their project filter once', async ({ page }) => {
+test('AEON-1360 cross-project children nest with their own work and survive their project filter once', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1600 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   const { data, calls } = await setup(page)
   Object.assign(data.sessions[1]!, {
     project_id: 'p-aeon', project: { id: 'p-aeon', key: 'AEON', title: 'Aeon' },
-    ticket_node_id: 'n-a1', ticket: { id: 'n-a1', key: 'AEON-42', title: 'Child project work' },
+    ticket_node_id: 'n-a1', ticket: { id: 'n-a1', key: 'AEON-42', title: 'Projektübergreifende Fortschrittszählung für ausführlich beschriebene Hilfsagenten' },
     parent_harness_session_id: null, cross_project_parent_harness_session_id: lead,
   })
   await page.goto('/agents')
@@ -91,6 +92,44 @@ test('AEON-1360 cross-project children nest with their own work and survive thei
   await expect(row(page, child)).toHaveAttribute('data-parent', lead)
   await expect(row(page, child).locator('.key-inline')).toHaveText('AEON-42 ·')
   await expect(row(page, child)).toHaveCount(1)
+  // AEON-1649: the server knows a second worker outside this page. The client
+  // renders its count and project breakdown without resizing any row/control.
+  const counts = { current: 2, all: 2, cross_project: [] as { project_key: string; current: number; all: number }[], omitted_projects: 0 }
+  Object.assign(data.sessions[0]!, { child_counts: counts, progress_pct: 60 })
+  const checks = []
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    counts.cross_project = []
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    await page.goto('/agents')
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    const parent = row(page, lead), fold = parent.locator('[data-fold="family"]')
+    const controls = { parent, fold, actions: parent.locator('.c-actions'), filter: page.locator('.sessions .tb-filter') }
+    const stable = await controlStability(page, controls)
+    await stable.check(async () => {
+      await fold.click()
+      await expect(row(page, child)).toHaveCount(0)
+      await expect(parent.locator('.l2t')).toContainText('2 workers')
+    })
+    const before = await Promise.all(Object.values(controls).map(control => control.boundingBox()))
+    await stable.check(async () => {
+      counts.cross_project = [{ project_key: 'AEON', current: 1, all: 1 }]
+      await signal(page, 'harness.registered')
+      await expect(parent.locator('.l2t')).toContainText('2 workers · includes 1 from AEON')
+      await expect(fold).toHaveAccessibleName(/2 workers, 1 working · includes 1 from AEON/)
+    })
+    const after = await Promise.all(Object.values(controls).map(control => control.boundingBox()))
+    expect(after, `AEON-1649 ${width} ${theme}: 0 px count-label layout change`).toEqual(before)
+    await page.locator('.sessions').screenshot({ path: info.outputPath(`aeon-1649-${width}-${theme}.png`), animations: 'disabled' })
+    checks.push({ width, theme, label: await parent.locator('.l2t').textContent(), layout_change_px: 0, before, after })
+    await stable.check(async () => {
+      await fold.click()
+      await expect(row(page, child)).toBeVisible()
+    })
+    stable.done()
+  }
+  await writeFile(info.outputPath('aeon-1649-checks.json'), JSON.stringify(checks, null, 2))
+  await writeFile(info.outputPath('aeon-1649-checks.md'), '```json\n' + JSON.stringify(checks, null, 2) + '\n```\n')
   const filter = page.locator('.sessions .tb-filter')
   const guard = await controlStability(page, { filter })
   await guard.check(async () => {

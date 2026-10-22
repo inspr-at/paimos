@@ -201,6 +201,9 @@ func (m *Module) stampSessions(ctx context.Context, tx pgx.Tx, sessions []*Sessi
 	if err := stampCoordinatorProgress(ctx, tx, sessions); err != nil {
 		return err
 	}
+	if err := stampChildCounts(ctx, tx, sessions, now); err != nil {
+		return err
+	}
 	return stampMoveRights(ctx, tx, sessions)
 }
 
