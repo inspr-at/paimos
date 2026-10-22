@@ -97,3 +97,23 @@ missing zsh, `/bin/bash` and `/bin/true`. The final static pre-filter passed
 42 checks; `test-tiers` and `web-shard-spec-tests` timed out. An earlier snapshot
 passed all 44 checks. Final hosted validation remains pending; these failures
 were not skipped or reported as green.
+
+Fix round 4 restores paired attached-hook coverage through the real bearer
+middleware. The two restored recovery/delivery and ownership-audit regressions
+fail with `run_capability_upgrade_required` in the tests-only snapshot
+`84e0c6274`, whose production code is unchanged from `6edee174`. All four
+focused attached-hook regressions pass after the fix, including exact
+session/lease and S1-03 ownership, person revocation after HTTP admission, and
+content-free SSE closure after revocation. The full harness and authentication
+suites pass; authorization, database, runs and reporter contracts also passed
+in the affected run. The explicit pairing fence caller inventory, primitive
+order, auth lock inventory and negative controls also pass remotely.
+
+The final pairing suite reports only
+`TestPathProofCommandsRunInShells: shell_test.go:25: zsh is not installed` on
+the secondary Linux runner. The primary Mac test lane is RED. The required
+static runner was attempted three times and returned exit 3 each time:
+`remote static check paused at night (night protocol: mbp2606 is shared with
+the CI pool); rely on the PR's hosted CI static job`. Full pairing validation
+on a runner with its required shells and `node scripts/ci-static.mjs
+--merge-main` remain pending. No test or assertion was skipped or loosened.
