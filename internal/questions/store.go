@@ -313,8 +313,17 @@ func (m *Module) readWithCheck(ctx context.Context, tx pgx.Tx, p tenant.Principa
 		}
 		q.Answer = a
 	}
-	rows, err = tx.Query(ctx, `SELECT e.id::text,coalesce(e.asker_id::text,''),e.revision,e.kind,e.state,e.deliver_after,e.effect_ref,e.error_code,e.error_message,e.effect_data,coalesce(r.state,''),coalesce(r.failure_reason,''),coalesce(e.delivery_session_id::text,''),coalesce(proposal.data->>'state',''),im.fetched_at FROM desk_pending e LEFT JOIN inbox_receipts r ON r.tenant_id=e.tenant_id AND r.message_id=(CASE WHEN e.kind='inbox' THEN nullif(e.effect_ref,'')::uuid END)
+	now, err := m.now(ctx, tx)
+	if err != nil {
+		return q, err
+	}
+	rows, err = tx.Query(ctx, `SELECT e.id::text,coalesce(e.asker_id::text,''),e.revision,e.kind,e.state,e.deliver_after,e.effect_ref,e.error_code,e.error_message,e.effect_data,coalesce(r.state,''),coalesce(r.failure_reason,''),coalesce(e.delivery_session_id::text,''),coalesce(proposal.data->>'state',''),im.fetched_at,coalesce(h.display_label,h.harness,''),
+ CASE WHEN op.operation_id IS NOT NULL THEN im.fetched_at WHEN r.state='handed_off' THEN r.handed_off_at END,r.handed_off_at,coalesce(asker.session_id::text,'') FROM desk_pending e LEFT JOIN inbox_receipts r ON r.tenant_id=e.tenant_id AND r.message_id=(CASE WHEN e.kind='inbox' THEN nullif(e.effect_ref,'')::uuid END)
  LEFT JOIN inbox_messages im ON im.tenant_id=r.tenant_id AND im.id=r.message_id
+ LEFT JOIN desk_askers asker ON asker.tenant_id=e.tenant_id AND asker.id=e.asker_id
+ LEFT JOIN harness_sessions h ON h.tenant_id=e.tenant_id AND h.id=e.delivery_session_id
+ LEFT JOIN harness_deliveries hd ON hd.tenant_id=e.tenant_id AND hd.message_id=im.id AND hd.session_id=e.delivery_session_id AND hd.mode='managed'
+ LEFT JOIN native_session_operations op ON op.tenant_id=e.tenant_id AND op.operation_id=hd.id
  LEFT JOIN doctrine_proposals proposal ON proposal.tenant_id=e.tenant_id AND proposal.id=nullif(e.effect_data->>'doctrine_id','')::uuid
  WHERE e.tenant_id=$1 AND e.question_id=$2 AND e.revision=$3 AND ($4 OR e.kind='outcome' OR e.asker_id IN (SELECT id FROM desk_askers WHERE tenant_id=$1 AND principal_id=$5)) ORDER BY e.kind,e.id`, p.TenantID, id, q.Revision, p.Kind == tenant.Person, p.ID)
 	if err != nil {
@@ -322,10 +331,12 @@ func (m *Module) readWithCheck(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	}
 	for rows.Next() {
 		var e Pending
-		if err := rows.Scan(&e.ID, &e.AskerID, &e.Revision, &e.Kind, &e.State, &e.DeliverAfter, &e.EffectRef, &e.ErrorCode, &e.ErrorMessage, &e.EffectData, &e.ReceiptState, &e.ReceiptFailure, &e.DeliverySessionID, &e.DoctrineState, &e.PickedUpAt); err != nil {
+		var original string
+		if err := rows.Scan(&e.ID, &e.AskerID, &e.Revision, &e.Kind, &e.State, &e.DeliverAfter, &e.EffectRef, &e.ErrorCode, &e.ErrorMessage, &e.EffectData, &e.ReceiptState, &e.ReceiptFailure, &e.DeliverySessionID, &e.DoctrineState, &e.PickedUpAt, &e.deliveryLabel, &e.deliveredAt, &e.seenAt, &original); err != nil {
 			rows.Close()
 			return q, err
 		}
+		e.Delivery = deliveryTruth(e, original, now)
 		q.Pending = append(q.Pending, e)
 	}
 	rows.Close()

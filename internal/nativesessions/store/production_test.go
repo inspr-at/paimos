@@ -259,6 +259,8 @@ func (c *productionComposition) approve(t *testing.T, scope string) string {
 type compositionOptions struct {
 	disableRetention bool
 	configure        func(*startFixture, *consent.Authority, *agentd.NativeSessionConfig)
+	notifications    http.HandlerFunc
+	afterReceipt     func(nativecontract.Receipt)
 }
 
 func composeProduction(t *testing.T, options ...compositionOptions) *productionComposition {
@@ -306,6 +308,9 @@ func composeProduction(t *testing.T, options ...compositionOptions) *productionC
 	module.Mount(mux)
 	chatModule.Mount(mux)
 	approvals.New(f.d.App).Mount(mux)
+	if option.notifications != nil {
+		mux.HandleFunc("GET /api/projects/{projectId}/harness-sessions/{sessionId}/notifications", option.notifications)
+	}
 	finalDone, turnDone, turnStarted := make(chan struct{}, 2), make(chan struct{}, 2), make(chan struct{}, 4)
 	exitDone := make(chan struct{}, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -329,6 +334,9 @@ func composeProduction(t *testing.T, options ...compositionOptions) *productionC
 		if r.URL.Path == "/api/agentd/native-sessions/receipts" {
 			var v nativecontract.Receipt
 			_ = json.Unmarshal(raw, &v)
+			if option.afterReceipt != nil {
+				option.afterReceipt(v)
+			}
 			if v.State == "turn_started" {
 				turnStarted <- struct{}{}
 			}
@@ -379,6 +387,7 @@ func composeProduction(t *testing.T, options ...compositionOptions) *productionC
 // The real person approvals, issued pairing key and transaction authorities
 // surround a fake owned provider; channels establish each observation.
 func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
+	t.Run("live inbox priority, evidence and offline fallback", exerciseLiveInbox)
 	c := composeProduction(t)
 	f, config, provider, root := c.f, c.config, c.provider, c.root
 	finalDone, turnDone, turnStarted, denials := c.finalDone, c.turnDone, c.turnStarted, c.denials

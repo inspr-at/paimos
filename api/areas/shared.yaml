@@ -1826,7 +1826,20 @@ components:
         receipt_failure: {type: string}
         picked_up_at: {type: string, format: date-time, description: 'First inbox pickup of this answer. Receipt confirmation remains separate; retries retain the same message and answer identities.'}
         delivery_session_id: {type: string, format: uuid, description: Exact original generation or verified successor.}
+        delivery: {$ref: '#/components/schemas/QuestionDelivery'}
         doctrine_state: {type: string, description: Current referenced proposal state; delivered does not mean the draft is still pending.}
+    QuestionDelivery:
+      type: object
+      description: "Content-free delivery truth for the memo. Dispatch and daemon pickup alone never prove live input delivery. The inbox remains the durable record; related-session FYIs require no action."
+      required: [state, successor]
+      properties:
+        state: {type: string, enum: [decided-grace, sent, seen, inbox, successor, failed]}
+        session_id: {type: string, format: uuid}
+        session_label: {type: string}
+        delivered_at: {type: string, format: date-time, description: "Native write acknowledgement or confirmed managed input handoff; never queue acceptance."}
+        seen_at: {type: string, format: date-time, description: "Correlated native turn evidence or the managed receiver confirmation; not proof of comprehension or completed work."}
+        successor: {type: boolean, description: "True only when routed to a verified successor of the asking session."}
+        failure_reason: {type: string}
     QuestionReuse:
       type: object
       description: Immutable per-asker provenance retained when the answer is later corrected. The active source decision reuse_count increments once per new membership, never on replay or delivery retry.

@@ -35,7 +35,12 @@ func WithHeldReplyBridge(bridge HeldReplyBridge) func(*messaging) {
 type DeskReply struct {
 	ID, RootID, ReplyToID, ProjectID, RecipientID, RecipientSessionID string
 	Body, RootBody, RecipientName, RootSenderSessionID                string
+	FYIs                                                              []DeskFYI
 }
+
+// DeskFYI is a metadata-only notice to an already locked, authorized related
+// generation. Its identity is stable for the answer/session, across askers.
+type DeskFYI struct{ ID, SessionID, PrincipalID, Key, Body string }
 
 func RecordDeskReply(ctx context.Context, tx pgx.Tx, p tenant.Principal, in DeskReply) error {
 	if in.ReplyToID == "" {
@@ -94,6 +99,23 @@ func RecordDeskReply(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Desk
 	if err := recordAcceptanceReceiptWith(ctx, tx, p, in.ID, collect); err != nil {
 		return err
 	}
+	// Reserve every notice and receipt before the first event. No transport
+	// target, idle wake, action request or reply obligation is created for FYIs.
+	var notices []DeskFYI
+	for _, notice := range in.FYIs {
+		tag, err := tx.Exec(ctx, `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id,sender_label)
+ VALUES($1,$2,$3,$4,NULL,$5,$6,$7,$8) ON CONFLICT DO NOTHING`, p.TenantID, notice.ID, p.ID, notice.PrincipalID, notice.Body, notice.Key, notice.SessionID, p.Name)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			continue
+		}
+		if err := recordAcceptanceReceiptWith(ctx, tx, p, notice.ID, collect); err != nil {
+			return err
+		}
+		notices = append(notices, notice)
+	}
 	meta := map[string]string{"id": in.ID, "question_reply_root_id": in.RootID, "reply_to_id": in.ReplyToID, "sender_principal_id": p.ID, "recipient_principal_id": in.RecipientID}
 	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &in.ProjectID, Type: "inbox.compat_sent", After: meta})
 	if err != nil {
@@ -110,6 +132,15 @@ func RecordDeskReply(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Desk
 	}
 	if err := bindMessageEvent(ctx, tx, p.TenantID, in.ID, ev.ID, true); err != nil {
 		return err
+	}
+	for _, notice := range notices {
+		ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &in.ProjectID, Type: "inbox.sent", After: map[string]string{"id": notice.ID, "recipient_principal_id": notice.PrincipalID, "recipient_session_id": notice.SessionID, "source": "decision_desk_fyi"}})
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET sent_event_id=$3 WHERE tenant_id=$1 AND id=$2`, p.TenantID, notice.ID, ev.ID); err != nil {
+			return err
+		}
 	}
 	for _, change := range pending {
 		if _, err := events.Append(ctx, tx, p, change); err != nil {

@@ -147,6 +147,7 @@ type InboxReplyTarget struct {
 }
 
 type HarnessDelivery struct {
+	Priority          bool    `json:"priority,omitempty"`
 	Level             string  `json:"delivery_level,omitempty"`
 	ProjectID         string  `json:"project_id,omitempty"`
 	ReplyToID         string  `json:"reply_to_id,omitempty"`

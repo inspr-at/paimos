@@ -492,6 +492,7 @@ func TestDeliveryConcurrentEditAndReplicaClaims(t *testing.T) {
 	}
 }
 func TestDeliveryFanoutFailureAndReceiptVisibility(t *testing.T) {
+	t.Run("related scope and memo delivery truth", exerciseRelatedDeliveryTruth)
 	f := deliveryFixtureFor(t)
 	in := input()
 	in.SessionID = f.session

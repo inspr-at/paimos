@@ -27,13 +27,14 @@ import (
 // Only the bounded live queue holds command content. SQL retains immutable
 // metadata/digests. A restart cannot replay a possible native write from disk.
 type queuedCommand struct {
-	done           bool
-	intent         nativereceipts.Intent
-	command        nativecontract.DaemonCommand
-	drain          *nativecontract.FinalDrainGrant
-	actor          tenant.Principal
-	successor      *nativecontract.ClaimResult
-	successorProof daemon.Proof
+	inbox, inboxAcknowledged bool
+	done                     bool
+	intent                   nativereceipts.Intent
+	command                  nativecontract.DaemonCommand
+	drain                    *nativecontract.FinalDrainGrant
+	actor                    tenant.Principal
+	successor                *nativecontract.ClaimResult
+	successorProof           daemon.Proof
 }
 
 func commandValue(c nativecontract.Command) (nativecontract.Binding, string, string, time.Time, any, error) {
@@ -337,6 +338,16 @@ func (s *Store) Commands(ctx context.Context, d nativecontract.DaemonActor, q na
 	if q.Limit < 1 || q.Limit > 50 || q.After != "" && !workorders.UUID(q.After) {
 		return out, fail(400, nativecontract.ReasonInvalidInput)
 	}
+	if err := s.admitInbox(ctx, d); err != nil {
+		// Inbox admission never holds back a separately authorized owner stop
+		// after withdrawal of native consent or a provider qualification.
+		var refusal *nativecontract.ValidationError
+		var receiptRefusal *nativereceipts.Error
+		var failure *Failure
+		if !errors.As(err, &refusal) && !errors.As(err, &receiptRefusal) && !errors.As(err, &failure) {
+			return out, err
+		}
+	}
 	s.commandMu.Lock()
 	items := make([]queuedCommand, 0, len(s.commands))
 	for _, c := range s.commands {
@@ -347,7 +358,7 @@ func (s *Store) Commands(ctx context.Context, d nativecontract.DaemonActor, q na
 	private, _ := ctx.Value(proofKey{}).(daemon.Proof)
 	identity, _, _ := private.Runtime()
 	for _, c := range items {
-		if c.done || c.successor != nil || c.command.Kind == "resume" {
+		if c.done || c.inboxAcknowledged || c.successor != nil || c.command.Kind == "resume" {
 			continue
 		}
 		if identity.RuntimeEpoch != "" && c.intent.Receipt.Binding.RuntimeEpoch != identity.RuntimeEpoch {
@@ -412,6 +423,11 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 			return fail(409, nativecontract.ReasonIdentityMismatch)
 		}
 		actor := session.Original
+		if c.inbox {
+			if err := inboxCommandTx(ctx, tx, d, c); err != nil {
+				return err
+			}
+		}
 		if c.command.Kind == "take" || c.command.Kind == "return" {
 			command, err := queuedControl(c)
 			if err != nil {
@@ -463,6 +479,14 @@ func (s *Store) Report(ctx context.Context, d nativecontract.DaemonActor, in nat
 		return s.reportStarted(ctx, d, in)
 	}
 	out, err := s.production.receipts.Report(ctx, d, in)
+	if err == nil && (in.State == "write_acknowledged" || in.State == "turn_started" || in.State == "uncertain" || in.State == "rejected" || in.State == "expired") {
+		s.commandMu.Lock()
+		if c, ok := s.commands[in.OperationID]; ok && c.inbox {
+			c.inboxAcknowledged = true
+			s.commands[in.OperationID] = c
+		}
+		s.commandMu.Unlock()
+	}
 	if err == nil && (in.State == "turn_completed" || in.State == "applied" || in.State == "exit_confirmed") {
 		s.commandMu.Lock()
 		if c, ok := s.commands[in.OperationID]; ok {

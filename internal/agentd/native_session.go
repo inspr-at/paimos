@@ -644,6 +644,7 @@ type nativeDrain struct {
 	operation string
 }
 type nativeOwned struct {
+	inboxWake     chan struct{}
 	owner         nativecontract.CommandActor
 	pendingEvents []nativecontract.ProviderEvent
 	eventMu       sync.Mutex
@@ -1426,6 +1427,14 @@ func (e *nativeOwned) poll(ctx context.Context) error {
 		if stopOnly && item.Kind != "stop" {
 			continue
 		}
+		if item.Kind == "input" {
+			e.mu.Lock()
+			busy := len(e.operations) != 0
+			e.mu.Unlock()
+			if busy && e.transport.Capabilities().Steer != "native" {
+				continue // Keep priority input durable until this provider's safe boundary.
+			}
+		}
 		if _, err := e.journal.Get(item.ExpectedBinding, item.OperationID); err == nil {
 			continue
 		}
@@ -1617,7 +1626,12 @@ func nativeTerminal(state string) bool {
 func (e *nativeOwned) retireInput(id string) {
 	e.mu.Lock()
 	delete(e.operations, id)
+	wake := e.inboxWake
 	e.mu.Unlock()
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
 }
 
 func (e *nativeOwned) flushEvents(ctx context.Context) error {

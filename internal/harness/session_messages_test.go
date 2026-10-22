@@ -10,6 +10,35 @@ import (
 	"github.com/inspr-at/paimos/internal/inbox"
 )
 
+// A direct message has no explicit after-turn composer choice. It must be
+// leased even by a busy owner, while retaining one replayable delivery ID.
+func exerciseDirectPriorityInbox(t *testing.T) {
+	f := fixture(t)
+	lease := "live-inbox-priority-lease-000000000000001"
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test", "harness_session_ref": "priority-ref", "worker_lease": lease, "management_mode": "managed", "role": "worker", "advertised_capabilities": []string{"inbox"}}, "")
+	expect(t, w, 201)
+	id := decode(t, w)["id"].(string)
+	var message inbox.Message
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var err error
+		message, err = inbox.AcceptMessageTx(t.Context(), tx, f.person, inbox.Acceptance{RecipientPrincipalID: f.agent.ID, RecipientSessionID: &id, Body: "live priority", IdempotencyKey: uid()})
+		return err
+	})
+	path := base + "/" + id + "/drain"
+	w = f.call(f.agent, "POST", path, map[string]any{"delivery_level": "steer"}, lease)
+	expect(t, w, 200)
+	var items []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil || len(items) != 1 || items[0]["message_id"] != message.ID || items[0]["priority"] != true {
+		t.Fatalf("priority drain: %s", w.Body.String())
+	}
+	replay := f.call(f.agent, "POST", path, map[string]any{"delivery_level": "steer"}, lease)
+	expect(t, replay, 200)
+	if replay.Body.String() != w.Body.String() {
+		t.Fatal("priority replay changed delivery identity")
+	}
+}
+
 func TestHarnessSessionMessagesNeverMoveToAnotherGeneration(t *testing.T) {
 	f := fixture(t)
 	base := "/api/projects/" + f.project + "/harness-sessions"
