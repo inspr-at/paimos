@@ -497,7 +497,7 @@ func entryLessonTx(ctx context.Context, tx pgx.Tx, tenantID string, t EntryTicke
 	      AND d.decision='accepted' AND btrim(d.line)<>''
 	      AND strpos(E'\n'||k.body||E'\n', E'\n'||d.line||E'\n')>0
 	      AND (d.source_key='n-'||$1::uuid::text OR EXISTS (
-	          SELECT 1 FROM events c WHERE c.tenant_id=d.tenant_id AND c.node_id=$1::uuid AND c.type='comment.created'
+	          SELECT 1 FROM events c WHERE c.tenant_id=$3::uuid AND c.node_id=$1::uuid AND c.type='comment.created'
 	            AND d.source_key='c-'||$1::uuid::text||'-'||c.id::text
 	      ))
 	) OR EXISTS (
