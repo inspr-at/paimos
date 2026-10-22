@@ -32,16 +32,9 @@ func TestRoutineUnresolvedRunPersonManualAndSchedulerAudits(t *testing.T) {
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'UNRESOLVED-1','Routine output' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.person.TenantID).Scan(&project)
 	})
 	// A pre-definition routine has creator provenance but no authoritative owner.
-	// Start two UTC days before the database clock. An omitted start is today,
-	// and before 09:00 UTC that schedule has no past occurrence, so the
-	// scheduler reports the calendar miss instead of the unresolved person.
-	var start string
-	f.tx(t, f.person, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT to_char((clock_timestamp() AT TIME ZONE 'UTC')::date - 2, 'YYYY-MM-DD')`).Scan(&start)
-	})
 	in := recurrences.Input{ProjectID: project, ParentID: project, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one",
 		Template: recurrences.Template{Title: "Queued legacy work", Description: "Verify ownership", Type: "work", Priority: "high", EstimateHours: 1, Criteria: []string{"No invented actor"}},
-		Trigger:  recurrences.Trigger{Kind: "time", RRULE: "FREQ=DAILY", TimeOfDay: "09:00", Timezone: "UTC", StartDate: start}}
+		Trigger:  recurrences.Trigger{Kind: "time", RRULE: "FREQ=DAILY", TimeOfDay: "09:00", Timezone: "UTC"}}
 	var routine recurrences.Recurrence
 	f.call(t, f.person, "POST", "/api/recurrences", in, 201, &routine)
 	var failure map[string]any
