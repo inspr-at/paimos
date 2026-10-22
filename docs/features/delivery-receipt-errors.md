@@ -49,3 +49,10 @@ persisted. Best-effort token revocation cannot replace the failed read's hint.
 404, server and network failures retain bounded retries. At exhaustion, the
 receipt keeps the upstream class and the failed step's `gave_up` checkpoint;
 it does not report successful completion or restart reads on redelivery.
+
+`TestDeliveryWebhookStartupProjectionRace` uses an injected clock and a database
+barrier to reproduce a signed queue check three seconds after startup, before its
+queued-head history exists. It covers recovery during the request, a persistent
+miss, background replay and duplicate delivery. The remote-only
+`scripts/test-webhook-start-race-negative.py` overlay disables the immediate
+retry and verifies that the same ordering reproduces HTTP 502.
