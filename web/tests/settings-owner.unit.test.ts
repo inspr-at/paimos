@@ -218,27 +218,32 @@ it.each([
 // takes scrolling/focus back after input, navigation or an owner change.
 it('a target rendered after the old deadline arrives once and releases its observer and timers', async () => {
   vi.useFakeTimers()
-  const { classes, target } = arrivalTarget('colours', ['settings-card'], ['tabindex'])
-  const lookup = document.getElementById
-  Object.assign(document, { getElementById: () => null })
-  route.params.section = 'theme'; route.hash = '#colours'
-  mount(); await flush()
-  await vi.advanceTimersByTimeAsync(3500)
-  mutate()
-  expect(target.scrollIntoView).not.toHaveBeenCalled()
-  Object.assign(document, { getElementById: lookup })
-  mutate()
-  expect(target.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'start', behavior: 'auto' })
-  expect(target.focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true })
-  expect(classes.has('arrived')).toBe(true)
-  expect(observers).toHaveLength(1)
-  expect(observers[0]!.observe).toHaveBeenCalledExactlyOnceWith(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['id'] })
-  expect(observers[0]!.active).toBe(false)
-  mutate()
-  expect(target.scrollIntoView).toHaveBeenCalledTimes(1)
-  await vi.advanceTimersByTimeAsync(3000)
-  expect(classes.has('arrived')).toBe(false)
-  expect(vi.getTimerCount()).toBe(0)
+  for (const main of [{ id: 'main' }, null]) {
+    const { classes, target } = arrivalTarget('colours', ['settings-card'], ['tabindex'])
+    const lookup = document.getElementById
+    let rendered = false
+    Object.assign(document, { getElementById: (id: string) => id === 'main' ? main : rendered ? lookup(id) : null })
+    route.params.section = 'theme'; route.hash = '#colours'
+    mount(); await flush()
+    await vi.advanceTimersByTimeAsync(3500)
+    mutate()
+    expect(target.scrollIntoView).not.toHaveBeenCalled()
+    rendered = true
+    mutate()
+    expect(target.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'start', behavior: 'auto' })
+    expect(target.focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true })
+    expect(classes.has('arrived')).toBe(true)
+    expect(observers).toHaveLength(main ? 1 : 2)
+    const observer = observers.at(-1)!
+    expect(observer.observe, main ? 'observe the main landmark' : 'fall back to the body').toHaveBeenCalledExactlyOnceWith(main ?? document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['id'] })
+    expect(observer.active).toBe(false)
+    mutate()
+    expect(target.scrollIntoView).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(classes.has('arrived')).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
+    apps.pop()!.unmount()
+  }
 })
 
 it('pending arrivals yield to input, route changes, unmount and the five-second bound', async () => {

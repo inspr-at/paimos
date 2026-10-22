@@ -16,7 +16,7 @@ import { accountsNeeds, settingsFooter, settingsNeeds } from '../lib/footerProvi
 import { isAccountsPart, needsPart, PART_LABEL } from '../lib/accountsNeeds'
 import { useFooterSummary } from '../lib/footerSummary'
 import { preferenceSaves, retryFailedPreferences } from '../lib/preferences'
-import { arrivalPage, arrive } from '../lib/arrival'
+import { ARRIVAL_INPUT, arrivalPage, arrive } from '../lib/arrival'
 
 // Load only the selected section, so its bundle cannot hold up navigation.
 const BusinessSection = defineAsyncComponent(() => import('../components/settings/BusinessSection.vue'))
@@ -137,7 +137,6 @@ let disposed = false
 // it there while data that arrives later grows the content above (AEON-1365).
 // Slow sections get a bounded wait, surrendered as soon as the person acts.
 const ARRIVAL_WAIT_MS = 5000
-const ARRIVAL_INPUT = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
 watch(() => [current.value, route.hash, route.fullPath, mountedOwner.value] as const, async ([, hash], _, onCleanup) => {
   if (!hash) return
   let id: string
