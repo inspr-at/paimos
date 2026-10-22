@@ -9720,6 +9720,8 @@
     ,
     {"kind":"browser","file":"tests/groups.spec.ts","name":"shared login keeps both group pools 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/guest.spec.ts","name":"P08: a project guest opens work, posts an owned comment and has no edit or admin controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/guest.spec.ts","name":"a project guest opens the workspace without errors","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/guest.spec.ts","name":"a project guest reads the project and may comment, nothing more","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10405,6 +10407,10 @@
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"HTML content cannot move controls at 390, dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"HTML content cannot move controls at 390, light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"P08: separate-origin preview enforces CSP in the viewer and a detached tab","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"P08: unavailable, expired and departed previews keep download and discard late grants","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"expiry removes active scripts and switching away discards delayed grants","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
