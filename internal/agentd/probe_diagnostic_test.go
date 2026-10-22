@@ -143,7 +143,7 @@ func (a *isolationProbeAdapter) Start(ctx context.Context, r StartRequest, emit 
 }
 
 type isolationProbeAPI struct {
-	*fakeAPI
+	*packStartAPI
 	runs      []Run
 	profiles  []Profile
 	reportErr error
@@ -176,12 +176,13 @@ func TestProbeFailureMatrixKeepsSiblingDispatchAndRecovers(t *testing.T) {
 			for _, failure := range []string{"probe_failed", "login_required", "harness_failed", "vendor_timeout", "report_refused", "all_failed"} {
 				t.Run(failedHarness+"/"+readyHarness+"/"+failure, func(t *testing.T) {
 					synctest.Test(t, func(t *testing.T) {
-						s, base, process := testSupervisor(t)
+						s, pinned, process := testPinnedSupervisor(t)
+						base := pinned.fakeAPI
 						base.run.RequestedAccountID = "account"
 						base.profile.Harness = readyHarness
 						blockedRun := base.run
 						blockedRun.ID, blockedRun.RequestedAccountID, blockedRun.ModelProfileID = "blocked-run", "blocked", "blocked-profile"
-						api := &isolationProbeAPI{fakeAPI: base, runs: []Run{blockedRun, base.run}, profiles: []Profile{{ID: "blocked-profile", Harness: failedHarness, Model: "model"}, base.profile}, observed: map[string]bool{}}
+						api := &isolationProbeAPI{packStartAPI: pinned, runs: []Run{blockedRun, base.run}, profiles: []Profile{{ID: "blocked-profile", Harness: failedHarness, Model: "model"}, base.profile}, observed: map[string]bool{}}
 						s.api = api
 						s.accounts = []EnrolledAccount{{ID: "blocked", Key: "bad", Harness: failedHarness}, {ID: "account", Key: "local", Harness: readyHarness}}
 						adapter := &isolationProbeAdapter{fakeAdapter: &fakeAdapter{proc: process}, statuses: map[string]ProbeStatus{"bad": probeUnavailable, "local": probeOK}}

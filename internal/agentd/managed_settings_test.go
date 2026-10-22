@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 )
 
 func TestManagedSettingsFencedReceiptsAndHeartbeat(t *testing.T) {
@@ -96,7 +98,7 @@ func TestClaudeBridgeSettingsUseOfficialSetters(t *testing.T) {
 	if err = os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.CommandContext(t.Context(), node, bridgePath, sdkPath, "/bin/true", root)
+	cmd := exec.CommandContext(t.Context(), node, bridgePath, sdkPath, fixturebin.Require(t, "true"), root)
 	in, _ := cmd.StdinPipe()
 	out, _ := cmd.StdoutPipe()
 	if err = cmd.Start(); err != nil {
@@ -202,7 +204,7 @@ func TestClaudeTierConfirmsFreshVendorState(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, "/bin/true", root)
+	cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, fixturebin.Require(t, "true"), root)
 	in, _ := cmd.StdinPipe()
 	out, _ := cmd.StdoutPipe()
 	if err = cmd.Start(); err != nil {

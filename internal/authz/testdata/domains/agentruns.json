@@ -35,6 +35,7 @@
     "POST /api/queue/{nodeId}/undo": "nodes.read",
     "POST /api/runs/{runId}/cancel": "run.create",
     "POST /api/runs/{runId}/capacity-override": "run.create",
+    "POST /api/runs/{runId}/capability": "run.read",
     "POST /api/runs/{runId}/claim": "run.claim",
     "PUT /api/runs/{runId}/daemon-wait": "run.claim",
     "POST /api/runs/{runId}/telemetry": "run.telemetry"

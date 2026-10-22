@@ -294,9 +294,9 @@ func TestReleaseExistingDraftGuardFailsClosed(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(stub), 0700); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command("/bin/bash", "-c", guard)
+			cmd := exec.Command("bash", "-c", guard)
 			cmd.Dir = dir
-			cmd.Env = []string{"PATH=" + dir + ":/usr/bin:/bin", "VERSION=" + strings.TrimPrefix(tag, "v"), "GITHUB_REPOSITORY=inspr-at/paimos"}
+			cmd.Env = []string{"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"), "VERSION=" + strings.TrimPrefix(tag, "v"), "GITHUB_REPOSITORY=inspr-at/paimos"}
 			out, err := cmd.CombinedOutput()
 			if (err != nil) != tc.fail {
 				t.Fatalf("guard failure = %v, want %v: %s", err, tc.fail, out)

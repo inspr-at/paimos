@@ -30,13 +30,14 @@ paths:
   /runs/queued:
     get:
       operationId: listQueuedRuns
-      description: Agent daemon sees queued runs for its principal only. Polling is a fallback when webhook wakes are missed. The daemon poll omits per-run wait; people read it on the run.
+      description: "Paired daemon transport receives only allowlisted run metadata, without trace, recovery brief, labels or free-text outcome detail. Advertise run_content_v1 and acquire a capability during Prepare before reading content or claiming. Older daemons receive run_capability_upgrade_required and cannot claim. The poll omits per-run wait."
       security: [{agentKey: []}]
       parameters:
         - {$ref: '#/components/parameters/Limit'}
+        - {name: X-Aeon-Run-Capability-Policy, in: header, schema: {type: string, const: run_content_v1}}
         - {name: X-Aeon-Review-Policy, in: header, schema: {type: string, enum: [no_tools_v1]}, description: Advertise no_tools_v1 to receive review runs. Legacy daemons receive ordinary runs only.}
       responses:
-        '200': {description: Queued runs, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}}}}
+        '200': {description: "Queued metadata; Aeon-Run-Content-Policy advertises run_content_v1 and Aeon-Upgrade-Reason explains missing daemon support, including an empty queue", content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}}}}
         '403': {$ref: '#/components/responses/Error'}
   /runs/queued/notifications:
     get:
@@ -51,11 +52,49 @@ paths:
   /runs/{runId}:
     get:
       operationId: getAgentRun
+      description: "Paired transport receives metadata only. Run content requires the server-issued capability, checked against the exact run and current person/computer/generation on every transaction."
       security: *auth
-      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}, {$ref: '#/components/parameters/RunCapability'}]
       responses:
         '200': {description: Run, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
         '404': {$ref: '#/components/responses/Error'}
+  /runs/{runId}/capability:
+    post:
+      operationId: prepareRunCapability
+      description: "Issue a run content credential to its paired daemon during Prepare. The server binds the credential to the existing run person, computer, account and currently probed daemon generation. Only a digest is stored. Missing person authority or a stale generation refuses issuance. No caller-selected person is accepted."
+      security: [{agentKey: []}]
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-Aeon-Run-Capability-Policy, in: header, required: true, schema: {type: string, const: run_content_v1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [daemon_id, daemon_generation]
+              properties:
+                daemon_id: {type: string, maxLength: 128}
+                daemon_generation: {type: string, maxLength: 128}
+      responses:
+        '200':
+          description: "Ephemeral run credential; never persist or pass to a harness child"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [capability, run_id, acting_person_id, computer_id, daemon_id, daemon_generation, expires_at]
+                properties:
+                  capability: {type: string, minLength: 64, maxLength: 64, readOnly: true}
+                  run_id: {type: string, format: uuid}
+                  acting_person_id: {type: string, format: uuid}
+                  computer_id: {type: string, format: uuid}
+                  daemon_id: {type: string}
+                  daemon_generation: {type: string}
+                  expires_at: {type: string, format: date-time}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /runs/{runId}/cancel:
     post:
       operationId: cancelAgentRun
@@ -81,9 +120,10 @@ paths:
   /runs/{runId}/claim:
     post:
       operationId: claimAgentRun
-      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. A queued managed reservation with obsolete measured capacity is revalidated against current admission; a resource-scoped recovery permit is required only while a recoverable stop remains. Manual and pairing expiry still bind. Current person-confirmed sibling resources carry the same authority at reservation and claim. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold. For an authenticated owning daemon, a revoked pairing enrollment returns 410 enrollment_revoked before reservation checks, including when disconnect has already released the queued holds.
+      description: "Paired computers require their exact server-issued run content capability for an executable claim. A no-launch verification refusal remains metadata-only. Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. A queued managed reservation with obsolete measured capacity is revalidated against current admission; a resource-scoped recovery permit is required only while a recoverable stop remains. Manual and pairing expiry still bind. Current person-confirmed sibling resources carry the same authority at reservation and claim. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold. For an authenticated owning daemon, a revoked pairing enrollment returns 410 enrollment_revoked before reservation checks, including when disconnect has already released the queued holds."
       security: [{agentKey: []}]
       parameters:
+        - {$ref: '#/components/parameters/RunCapability'}
         - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: X-Aeon-Review-Policy, in: header, schema: {type: string, enum: [no_tools_v1]}, description: Required for review claims. Ordinary run claims are unchanged.}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunClaim'}}}}
@@ -206,6 +246,12 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
 components:
+  parameters:
+    RunCapability:
+      name: X-Aeon-Run-Capability
+      in: header
+      description: "Opaque server-issued run content credential. Required for content and launch through a paired computer; transport alone has metadata authority. Never log or persist. Stop/yield safety transport uses its exact worker proof without this credential."
+      schema: {type: string, minLength: 64, maxLength: 64}
   schemas:
     RunClaim:
       type: object

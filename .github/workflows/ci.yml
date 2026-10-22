@@ -68,7 +68,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Resolve lockfile and Playwright cache keys
@@ -101,7 +101,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         id: setup-go
         with:
-          go-version: "1.26"
+          go-version: "1.26.10"
           cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: go.sum
       - name: Locate Go build cache
@@ -175,7 +175,7 @@ jobs:
           fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - name: Classify local PR diff
         id: plan
         env:
@@ -352,13 +352,13 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         id: setup-go
         with:
-          go-version: "1.26"
+          go-version: "1.26.10"
           cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: go.sum
       - name: Node for test tier selection
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - name: Locate Go build cache
         id: go-cache-path
         run: echo "path=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
@@ -456,10 +456,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: "1.26"
+          go-version: "1.26.10"
           cache: ${{ needs.tree-reuse.outputs.reuse != 'pull_request' }}
           cache-dependency-path: go.sum
       - name: Timing budgets, alone
@@ -484,10 +484,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: "1.26"
+          go-version: "1.26.10"
           cache: ${{ needs.tree-reuse.outputs.reuse != 'pull_request' }}
           cache-dependency-path: go.sum
       - name: Forbid volatile CI identity reads in Go tests
@@ -606,7 +606,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         if: needs.tree-reuse.outputs.reuse == 'pull_request'
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - name: Revalidate PR execution proof
         id: pr-confirm
         if: needs.tree-reuse.outputs.reuse == 'pull_request'
@@ -667,7 +667,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Resolve lockfile and Playwright cache keys
@@ -710,7 +710,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Resolve lockfile and Playwright cache keys
@@ -794,7 +794,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - name: Download shared web runtime
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -858,7 +858,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - name: Download shared web runtime
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -982,7 +982,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         if: needs.tree-reuse.outputs.reuse == 'pull_request'
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - name: Revalidate PR execution proof
         id: pr-confirm
         if: needs.tree-reuse.outputs.reuse == 'pull_request'
@@ -1096,7 +1096,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         if: needs.tree-reuse.outputs.reuse == 'pull_request'
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - name: Revalidate PR execution proof
         id: pr-confirm
         if: needs.tree-reuse.outputs.reuse == 'pull_request'
@@ -1190,7 +1190,7 @@ jobs:
         run: bash scripts/check-nix-vendor-hash.sh
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - run: node scripts/verify-release.mjs
       - name: Release rehearsal and tag gate regressions
         run: node --test scripts/check-release-rehearsal.test.mjs scripts/release-rehearsal-gh.test.mjs scripts/create-release-tag.test.mjs
@@ -1214,7 +1214,7 @@ jobs:
         run: node --test scripts/full-ui-qa.test.mjs
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.26.10"
           cache: true
           cache-dependency-path: go.sum
       - name: Tier integration and workflow regressions
@@ -1241,7 +1241,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         if: needs.tree-reuse.outputs.reuse == 'pull_request'
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - name: Revalidate PR execution proof
         id: pr-confirm
         if: needs.tree-reuse.outputs.reuse == 'pull_request'
@@ -1346,12 +1346,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: "1.26"
+          go-version: "1.26.10"
           cache: true
           cache-dependency-path: go.sum
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Install web dependencies
@@ -1396,7 +1396,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - name: Resolve the latest published stable release
         id: previous
         env:
@@ -1420,7 +1420,7 @@ jobs:
           node scripts/check-migrations.mjs --base-ref "$PREVIOUS_TAG"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: "1.26"
+          go-version: "1.26.10"
           cache: true
           cache-dependency-path: go.sum
       - name: Checker and migration runner SQL splitter parity
@@ -1447,7 +1447,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: '*-tier-measurements'

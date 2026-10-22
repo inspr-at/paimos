@@ -156,7 +156,7 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 					}
 				}
 				var err error
-				out, err = route.fn(r, tx, p)
+				out, err = workqueue.PersonAdmissionTx(r.Context(), tx, p, route.pattern, func(step pgx.Tx) (any, error) { return route.fn(r, step, p) })
 				return err
 			})
 			if err != nil {
@@ -166,6 +166,10 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 					return
 				}
 				workorders.WriteError(w, err)
+				return
+			}
+			if refusal, ok := out.(error); ok {
+				workorders.WriteError(w, refusal)
 				return
 			}
 			httpapi.WriteJSON(w, 200, out)
@@ -432,6 +436,24 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 			return queuePrepared{}, workorders.Fail(409, "queue holder identity conflicts")
 		}
 	}
+	personRule, personSource := "personal", ""
+	// A configured project lead owns agent-submitted queue work. The caller
+	// has already passed the coordinator's project admission above.
+	if p.Kind == tenant.Agent && p.KeyPersonID == "" && t.ProjectID != nil {
+		// Only this project's bound lead may use its policy owner. A different
+		// coordinator cannot select that person's ceiling by naming the project.
+		var ownsLead bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_leads l JOIN harness_sessions s ON s.tenant_id=l.tenant_id AND s.id=l.session_id WHERE l.tenant_id=$1 AND l.project_id=$2 AND s.agent_principal_id=$3 AND s.archived_at IS NULL)`, p.TenantID, *t.ProjectID, p.ID).Scan(&ownsLead); err != nil {
+			return queuePrepared{}, err
+		}
+		if ownsLead {
+			personRule, personSource = "lead", *t.ProjectID
+		}
+	}
+	actingPerson, err := workqueue.ResolveRunPersonTx(ctx, tx, p, personRule, personSource)
+	if err != nil {
+		return queuePrepared{}, err
+	}
 	o, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{Title: t.Title, Body: t.Body, Parent: &t.ID, Criteria: workqueue.Criteria(t.Fields), BuildDelivery: binding})
 	if err != nil {
 		return queuePrepared{}, err
@@ -473,6 +495,9 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,queue_node_id,queue_by_principal_id,queue_at,queue_target_agent_id,queue_rank,queue_security_review_required,residency,prefs_person_id,trace)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp(),$9,$10,$11,$12,$13,$14) RETURNING `+columns, p.TenantID, o.NodeID, agent, optional(in.Profile), model, in.Account, t.ID, p.ID, optional(in.Agent), rank, ready.SecurityReviewRequired, modelprefs.Stamp(requirement), person, trace))
 	if err != nil {
+		return queuePrepared{}, err
+	}
+	if err = bindRunPerson(ctx, tx, p, &v, actingPerson, personRule, &changes); err != nil {
 		return queuePrepared{}, err
 	}
 	if workqueue.State(t.State) != "blocked" {
