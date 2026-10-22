@@ -1302,21 +1302,19 @@ test('AEON-1453 sixteen full web shards stay over the budget',()=>{
   assert.throws(()=>assertWebShardBudget(sixteen),{name:'Error',
     message:`Web shard ${worst.shard} predicts ${worst.seconds.toFixed(1)}s, over the ${sixteen.budgetSeconds}s budget`})
   const full=webShardPlan(gate,policy,{mode:'full'})
-  assert.equal(fullWebShardCount,20)
+  assert.equal(fullWebShardCount,22)
   assert.deepEqual(full.shards,fullWebShards)
   assertWebShardBudget(full)
   for(const bin of full.projections) assert.ok(bin.seconds<=full.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
   assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
 })
 
-test('AEON-1603 twenty shards keep main incl. AEON-1502 under 860s and eighteen over the 900s guard',()=>{
-  // AEON-1619: hosted shards 2, 13 and 14 are heavier than the nineteen-bin
-  // plan once their specs use run 39574698693 launch-wall shares. Nineteen
-  // fits the 900s budget and misses the 860s target. Eighteen overflows that
-  // budget. Twenty keeps the live catalogue, including AEON-1502's
-  // approve-harness spec and the extra account-use-matrix case, at or under
-  // 860s. The 900s budget and 120s overhead are unchanged. Do not pin the live
-  // projected seconds (AEON-1483).
+test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 800s and eighteen over the 900s guard',()=>{
+  // Risk: #871 adds nine chat cases and pushes twenty shards past 860s.
+  // Prove that neither twenty nor twenty-one can reach 800s even with
+  // perfect packing. The full gate must retain every case and measured
+  // timing, the original 860s target and the 900s guard. Live projected
+  // seconds remain unpinned (AEON-1483).
   const policy=loadWebPolicy()
   const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
   const matrix='tests/account-use-matrix.spec.ts'
@@ -1328,7 +1326,7 @@ test('AEON-1603 twenty shards keep main incl. AEON-1502 under 860s and eighteen 
   assert.equal(gate.find(row=>row.file===matrix&&row.name===matrixCase)?.tier,'ESSENTIAL')
   assert.ok(policy.groups.some(group=>group.specs?.some(spec=>spec.file===harness)),`${harness} has a shard weight`)
   const full=webShardPlan(gate,policy,{mode:'full'})
-  assert.equal(fullWebShardCount,20)
+  assert.equal(fullWebShardCount,22)
   assert.equal(full.timeoutSeconds,1200)
   assert.equal(full.budgetSeconds,900)
   assert.equal(full.overheadSeconds,120)
@@ -1336,12 +1334,19 @@ test('AEON-1603 twenty shards keep main incl. AEON-1502 under 860s and eighteen 
   assert.deepEqual(full.shards,fullWebShards)
   assertWebShardBudget(full)
   assert.ok(full.projectedMaxSeconds<=860,`main incl. AEON-1502 busiest shard ${full.projectedMaxSeconds.toFixed(3)}s`)
+  assert.ok(full.projectedMaxSeconds<=800,`full gate needs headroom: busiest shard ${full.projectedMaxSeconds.toFixed(3)}s`)
   for(const bin of full.projections) assert.ok(bin.seconds<=full.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
   assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
-  const nineteen=webShardPlan(gate,policy,{mode:'full',maximum:19})
-  assert.equal(nineteen.shards.length,19)
-  assert.equal(nineteen.fitsBudget,true)
-  assert.ok(nineteen.projectedMaxSeconds>860,`nineteen-shard main must miss 860s, got ${nineteen.projectedMaxSeconds.toFixed(3)}s`)
+  const weights=tierWeights(policy,gate)
+  const workSeconds=[...new Set(gate.map(row=>row.file))].reduce((sum,file)=>sum+weights[file],0)
+  for(const count of [20,21]) {
+    const lowerBound=full.overheadSeconds+workSeconds/count
+    assert.ok(lowerBound>800,`${count} shards could meet 800s; measured lower bound ${lowerBound.toFixed(3)}s`)
+  }
+  const previous=webShardPlan(gate,policy,{mode:'full',maximum:20})
+  assert.equal(previous.shards.length,20)
+  assert.equal(previous.fitsBudget,true)
+  assert.ok(previous.projectedMaxSeconds>800,`twenty-shard main must miss 800s, got ${previous.projectedMaxSeconds.toFixed(3)}s`)
   const narrow=webShardPlan(gate,policy,{mode:'full',maximum:18})
   assert.equal(narrow.shards.length,18)
   assert.equal(narrow.budgetSeconds,900)
@@ -1766,7 +1771,7 @@ test('offline replay CLI prints every real PR with selected counts, effective la
     assert.ok(['full','essential','static'].includes(row.new))
     assert.equal(row.newCases,Object.values(row.newKinds).reduce((sum,n)=>sum+n,0))
     assert.ok(row.new==='full'||row.newCases<=row.oldCases,`PR ${row.number} narrowed selection must not grow`)
-    assert.equal(row.newJobs,row.lane==='spec-only'?12:row.new==='static'?16:row.new==='essential'?24:45)
+    assert.equal(row.newJobs,row.lane==='spec-only'?12:row.new==='static'?16:row.new==='essential'?24:47)
   }
 })
 

@@ -472,7 +472,7 @@ func mergeGroupInventory(t *testing.T, w map[string]any) []string {
 		}
 		var shards []int
 		// Both matrices choose the final literal array for merge_group:
-		// hosted seven Go shards and the full twenty web shards.
+		// hosted seven Go shards and the full twenty-two web shards.
 		if expr, ok := matrix["shard"].(string); ok {
 			arrays := regexp.MustCompile(`'\[([0-9, ]+)\]'`).FindAllStringSubmatch(expr, -1)
 			if len(arrays) == 0 {
@@ -535,7 +535,7 @@ func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
 		t.Fatal("new workflow job escaped drift check")
 	}
 	delete(jobs, "new-required-job")
-	treeMap(treeMap(treeMap(jobs["web-shard"])["strategy"])["matrix"])["shard"] = []any{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
+	treeMap(treeMap(treeMap(jobs["web-shard"])["strategy"])["matrix"])["shard"] = []any{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23}
 	if reflect.DeepEqual(proof.RequiredJobs, mergeGroupInventory(t, w)) {
 		t.Fatal("new matrix row escaped drift check")
 	}
@@ -860,9 +860,9 @@ func normalizeEffectiveLane(t *testing.T, id string, value map[string]any) {
 					// that exact wiring and full-event fallback before projecting
 					// onto the immutable historical two-shard execution pin.
 					if id == "web-shard" {
-						const planned = `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]') }}`
+						const planned = `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]') }}`
 						if v != planned {
-							t.Fatal("PR web shards must consume the planned list and retain twenty full-event rows")
+							t.Fatal("PR web shards must consume the planned list and retain twenty-two full-event rows")
 						}
 						v = `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}`
 					}
