@@ -7965,16 +7965,16 @@
     "261022082852.0.0": {
       "release_channel": "stable",
       "release_sequence": 138,
-      "snapshot_sha256": "0a4ebfb86e37a52c3cf83df67ea345ba4d33ccfc5eeba6a6095c9fcee76072c8",
-      "captured_at": "2026-10-22T08:45:01Z",
+      "snapshot_sha256": "751f90259bf751e48ae8ae1f8a2c81a810ed1ae0a4bfa978c9a5ae7441766024",
+      "captured_at": "2026-10-22T09:00:56Z",
       "release_revision": 1,
       "items": [
         {
           "key": "AEON-1028",
-          "pill_en": "Display in compact header",
-          "pill_de": "Anzeige im kompakten Kopf",
-          "benefit_en": "In the collapsed header, sections, Hide closed and all display options stay one click away under Display.",
-          "benefit_de": "Im eingeklappten Kopf bleiben Bereiche, „Geschlossene ausblenden“ und alle Anzeigeoptionen mit einem Klick unter „Anzeige“ erreichbar.",
+          "pill_en": "Display in collapsed header",
+          "pill_de": "Anzeige im eingeklappten Kopf",
+          "benefit_en": "With the desktop project header collapsed, Display groups sections, Hide closed and display options; compact layouts keep sections in the project menu and Display and Hide done in More.",
+          "benefit_de": "Bei eingeklapptem Desktop-Projektkopf bündelt das Anzeigemenü Bereiche, ‚Geschlossene ausblenden‘ und Anzeigeoptionen; in kompakten Ansichten liegen Bereiche im Projektmenü, Anzeige und ‚Erledigte ausblenden‘ im Mehr-Menü.",
           "group": "features"
         },
         {
