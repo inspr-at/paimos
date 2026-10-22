@@ -461,7 +461,7 @@ function lineTwo(branch: Branch, view: SessionView) {
   const handedOver = view.session.stopped_at && view.session.handed_over_to_id ? `Handed over to ${lineageName(view.session.handed_over_to_id)}` : ''
   // A retried attempt names its retry while it keeps its place (AEON-1285), as a handover does.
   if (keepsPlace(branch.view)) return [lead, handedOver, view.retry ? `Retried as ${view.retry.name}` : '', endedLine(view)].filter(Boolean).join(' · ')
-  const step = handedOver || activityLine(branch, view) || currentStep(view, view.session.child_counts?.current ?? descendants(branch).filter(countedLive).length, props.now)
+  const step = handedOver || activityLine(branch, view) || currentStep(view, descendants(branch).filter(countedLive).length, props.now)
   // A word more precise than the badge's ("Stop requested", "Lost contact") opens the line.
   const precise = view.status.label !== STATE_LABEL[view.status.state] && view.status.label !== step ? view.status.label : ''
   return [lead, precise, step].filter(Boolean).join(' · ')
@@ -491,11 +491,12 @@ function rowsOf(section: Section): Row[] {
     const view = liveOf(row.branch.view)
     const primary = intendedResult(view)
     const leadRoot = !row.depth && prefRoots.value.has(view.session.id)
-    const allChildren = showRemoved.value || !!history.value[view.session.id]
-    // New servers own the count, including descendants beyond this page. Keep
-    // the legacy fallback for responses predating the additive projection.
-    const sub = row.foldable ? view.session.child_counts?.[allChildren ? 'all' : 'current'] ?? shownBelow(row.branch, offered) : 0
-    const crossProject = crossProjectChildren(view.session.child_counts, allChildren)
+    // The server projection describes the unfiltered current view, including
+    // descendants beyond this page. Filters and history count what they offer;
+    // the all-time projection includes sessions outside this list's window.
+    const counts = !filtering.value && !showRemoved.value && !history.value[view.session.id] ? view.session.child_counts : undefined
+    const sub = row.foldable ? counts?.current ?? shownBelow(row.branch, offered) : 0
+    const crossProject = crossProjectChildren(counts)
     const under = below(row.branch, v => v.name, v => !!props.projects?.asks(v.session.id), liveOf)
     // Line 2 says what it does; a parent always has it, so a fold never changes the row's height.
     // Folded, it sums up what it holds (design AEON-1196: “· 5 workers · 1 problem · 1 question”).

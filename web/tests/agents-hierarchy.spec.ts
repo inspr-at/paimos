@@ -165,7 +165,15 @@ test('AEON-1360 cross-project children nest with their own work and survive thei
   await expect(row(page, child)).not.toHaveClass(/filter-context/)
   await expect(row(page, lead)).toHaveClass(/filter-context/)
   await expect(row(page, child).locator('.key-inline')).toHaveText('AEON-42 ·')
+  // AEON-1649 M1: a facet counts only the offered children, even when the
+  // unfiltered server projection includes another worker outside this page.
+  await expect(row(page, lead).locator('[data-fold="family"]')).toHaveAccessibleName('Fold Release lead’s workers: 1 worker, 1 working')
   guard.done()
+  // Search has the same scope rule, without an active project facet.
+  await page.goto('/agents?q=hierarchy')
+  await expect(row(page, child)).toHaveCount(1)
+  await expect(row(page, lead)).toHaveClass(/filter-context/)
+  await expect(row(page, lead).locator('[data-fold="family"]')).toHaveAccessibleName('Fold Release lead’s workers: 1 worker, 1 working')
   // With the ancestor absent from the authorized page, its child stays a root.
   data.sessions.splice(0, 1)
   await signal(page, 'harness.registered')
@@ -176,12 +184,17 @@ test('AEON-1360 cross-project children nest with their own work and survive thei
 })
 
 test('new workers update through the live channel; a stopped worker keeps its place for 10 minutes, then folds into recoverable history', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
   const { data } = await setup(page)
   const worker = data.sessions.pop()!
+  const peer = { ...worker, id: '5e000000-0000-4000-8000-000000000003', display_label: 'Live peer' }
+  // The all-time projection also knows 238 old cross-project descendants that
+  // are outside the current list's 24-hour window.
+  Object.assign(data.sessions[0]!, { child_counts: { current: 2, all: 240, cross_project: [{ project_key: 'AEON', current: 0, all: 238 }], omitted_projects: 0 } })
   await page.clock.install()
   await page.goto('/agents')
   await expect(row(page, lead)).toBeVisible()
-  data.sessions.push(worker)
+  data.sessions.push(worker, peer)
   await signal(page, 'harness.registered')
   await page.clock.runFor(500)
   await expect(row(page, child)).toBeVisible({ timeout: 3000 })
@@ -191,12 +204,35 @@ test('new workers update through the live channel; a stopped worker keeps its pl
   // AEON-1211: it keeps its place and end state, and says when it moves; then, with the pointer away, it folds away.
   await expect(row(page, child)).toHaveClass(/stopped/)
   await expect(row(page, child).locator('.l2t')).toContainText('moves to Ended at')
+  // AEON-1649 M2: lingering stopped rows still belong to the folded current
+  // count, but the coordinator's activity names only its one live worker.
+  await expect(row(page, lead).locator('.l2t')).toHaveText('Coordinating 1 worker')
   await page.mouse.move(0, 0)
   await page.clock.runFor(10 * 60_000 + 2_000)
   await expect(row(page, child)).toHaveCount(0)
   await row(page, lead).getByRole('button', { name: 'Show stopped workers of Release lead' }).click()
   await expect(row(page, child)).toBeVisible()
   await expect(row(page, child)).toHaveClass(/stopped/)
+  // M1: Show stopped offers this list's history, never all-time/removed rows.
+  const parent = row(page, lead), fold = parent.locator('[data-fold="family"]')
+  await expect(fold).toHaveAccessibleName(/^Fold Release lead’s workers: 2 workers, \d+ working$/)
+  await fold.click()
+  await expect(parent.locator('.l2t')).toContainText('2 workers')
+  await expect(parent.locator('.l2t')).not.toContainText('from AEON')
+  await fold.click()
+  await expect(row(page, child)).toBeVisible()
+  await expect(row(page, peer.id)).toBeVisible()
+  // Removed history is a separate forest. Its two loaded descendants must
+  // not inherit the parent's all-time server count or project breakdown.
+  const stoppedAt = worker.stopped_at
+  Object.assign(data.sessions[0]!, { phase: 'stopped', stopped_at: stoppedAt, stop_reason: 'completed', revision: 3 })
+  Object.assign(peer, { phase: 'stopped', stopped_at: stoppedAt, stop_reason: 'completed', revision: 3 })
+  Object.assign(worker, { archived_at: stoppedAt, revision: 3 })
+  await page.getByRole('button', { name: 'Show history: every ended or removed session' }).click()
+  await expect(page.getByRole('treegrid', { name: 'Ended sessions' })).toBeVisible()
+  await expect(fold).toHaveAccessibleName(/^Fold Release lead’s workers: 2 workers, 0 working$/)
+  await expect(row(page, child)).toBeVisible()
+  await expect(row(page, peer.id)).toBeVisible()
 })
 
 test('returning to a visible tab refreshes immediately and failed reads keep the last success visible', async ({ page }) => {
