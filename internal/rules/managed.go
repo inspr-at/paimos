@@ -3,9 +3,11 @@ package rules
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -15,6 +17,16 @@ import (
 // Selectors come from that row, never from the agent's request. Paired keys keep
 // their existing ceiling and gain no route to other people's/project rules.
 func ForManagedSession(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, task, harness string, maximum int) (Merged, error) {
+	return forManagedSession(ctx, tx, p, project, task, harness, maximum, false)
+}
+
+// ForManagedFiles retains every database layer and adds the authorized pin
+// bytes separately, so agentd can put the repository delta before those layers.
+func ForManagedFiles(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, task, harness string, maximum int) (Merged, error) {
+	return forManagedSession(ctx, tx, p, project, task, harness, maximum, true)
+}
+
+func forManagedSession(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, task, harness string, maximum int, pinned bool) (Merged, error) {
 	if p.Kind != tenant.Agent {
 		return Merged{}, authz.ErrForbidden
 	}
@@ -56,11 +68,41 @@ func ForManagedSession(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 	if err != nil {
 		return Merged{}, err
 	}
-	cat, err := loadDoctrineCatalog(ctx, tx)
+	var cat doctrine.Catalog
+	if pinned {
+		cat, err = doctrine.LoadPinnedCatalog(ctx, tx)
+		if errors.Is(err, doctrine.ErrPinMissing) {
+			return Merged{}, fail(409, "rules_pin_missing", "rules_pin_missing")
+		}
+		if errors.Is(err, doctrine.ErrPackTooLarge) {
+			return Merged{}, fail(422, "rules_pack_too_large", "rules_pack_too_large")
+		}
+		if err != nil {
+			return Merged{}, fail(503, "doctrine_unavailable", "Doctrine catalog unavailable; check source credential grants and server configuration.")
+		}
+	} else {
+		cat, err = loadDoctrineCatalog(ctx, tx)
+	}
 	if err != nil {
 		return Merged{}, err
 	}
-	merged, err := MergeDeliveredForClient(c, snapshots, time.Now().UTC(), limits, maximum, cat)
+	var merged Merged
+	if pinned {
+		// Managed packs refuse overflow; they never use the legacy compatibility
+		// cut, which would silently omit database rules during this transition.
+		merged, err = MergeDeliveredWithin(c, snapshots, time.Now().UTC(), limits, cat)
+		if err == nil {
+			size := merged.ByteSize
+			for _, file := range merged.PinnedFiles {
+				size += len(file.Content) + len(file.Repository) + len(file.Path) + 128
+			}
+			if size > min(maximum, doctrine.ManagedPackMaxBytes) {
+				return Merged{}, fail(422, "rules_pack_too_large", "rules_pack_too_large")
+			}
+		}
+	} else {
+		merged, err = MergeDeliveredForClient(c, snapshots, time.Now().UTC(), limits, maximum, cat)
+	}
 	if err != nil {
 		return Merged{}, err
 	}

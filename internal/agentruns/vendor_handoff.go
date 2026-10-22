@@ -13,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -129,9 +130,16 @@ func retryVendorStops(ctx context.Context, tx pgx.Tx, p tenant.Principal, pendin
 		if len(advice.Accounts) == 0 {
 			continue
 		}
+		actingPerson, err := workqueue.ResolveRunPersonTx(ctx, tx, p, "vendor_handoff", id)
+		if err != nil {
+			return err
+		}
 		next := advice.Accounts[0]
 		retry, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,retry_account_id,residency,prefs_person_id,trace) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING `+columns, p.TenantID, o.NodeID, v.AgentID, v.ProfileID, v.RequestedModel, v.RequestedAccountID, id, next.AccountID, modelprefs.Stamp(policy.Residency), policy.PersonID, v.Trace))
 		if err != nil {
+			return err
+		}
+		if err = bindRunPerson(ctx, tx, p, &retry, actingPerson, "vendor_handoff", pending); err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO account_run_targets(tenant_id,run_id,group_id)

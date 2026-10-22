@@ -13,12 +13,24 @@
 // choose and changes nothing. Their first read waits for those preferences, so a
 // remembered group never shows the other list first. A switch replaces the rows;
 // the frame (status note, header) stays, and a read for the other group never lands.
-import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
+// AEON-1618: people create, edit and delete goals and link work to them; the page
+// holds the New goal / Edit goal sheet (the toolbar opens it, GoalsView draws it)
+// and who may do so, by the rule for creating a node in that project, and which
+// goal is being renamed in place (v1.1).
+// AEON-1614: Hide for me. A person hides a goal from their own view (the server keeps
+// it); Display › Show has Done goals (H), Hidden goals ({n}) and Waiting on you, all
+// saved with the Goals preferences; the toolbar's Waiting on you toggle is the same
+// setting. Hidden goals count in the state chips as hidden done goals do. A hide or
+// Undo is bound to the person and goal it was asked for.
+import { computed, nextTick, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { useSession } from '../../stores/session'
+import { useProjects } from '../../stores/projects'
+import { can } from '../../lib/authz'
 import { scopeOwner } from '../../lib/identityScope'
 import { usePreference } from '../../lib/preferences'
 import { usePoller } from '../../lib/usePolledData'
-import { goalCreatedAt, goalMatches, goalSeries, isGoalGroup, itemMatches, listGoals, SORT_DIR, type Goal, type GoalCounts, type GoalGroup, type GoalList, type GoalSeries, type GoalSort, type StateFilter } from '../../lib/goals'
+import { toast } from '../../lib/toast'
+import { goalCreatedAt, goalMatches, goalSeries, hideCopy, hideGoal, isGoalGroup, itemMatches, listGoals, readGoal, unhideGoal, SORT_DIR, type Goal, type GoalCounts, type GoalGroup, type GoalList, type GoalSeries, type GoalSort, type StateFilter } from '../../lib/goals'
 import { isGoalRange, type GoalRange } from '../../lib/goalRate'
 import { EPIC_STREAM_EVENTS, GOAL_STREAM_EVENTS, openGoalsLive, type GoalsLiveState } from '../../lib/goalsLive'
 
@@ -31,7 +43,7 @@ const SERIES_PARALLEL = 3
 // window, and never more than one in flight, so a busy stream cannot starve the list.
 const LIVE_SETTLE_MS = 400
 
-type GoalsPrefs = { range?: string; hideDone?: boolean; group?: string }
+type GoalsPrefs = { range?: string; hideDone?: boolean; group?: string; showHidden?: boolean; showWaiting?: boolean }
 export interface SeriesEntry { state: 'reading' | 'ready' | 'failed' | 'too_large'; series?: GoalSeries; createdAt: number | null; at: number; sign: string }
 
 // shown: the project groups the person hides take their goals with them.
@@ -46,7 +58,9 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     settledFor.value = ''
     if (who) void prefs.ready.then(() => { if (owner.value === who) settledFor.value = who })
   }, { immediate: true })
-  const settled = computed(() => !options.groups || (!!owner.value && settledFor.value === owner.value))
+  // The person's Goals preferences are known: the Waiting on you band is decided before it paints.
+  const prefsSettled = computed(() => !!owner.value && settledFor.value === owner.value)
+  const settled = computed(() => !options.groups || prefsSettled.value)
 
   // ---------- Group: Goals or Epics (AEON-1395) ----------
   const linkedGroup = computed<GoalGroup | null>(() => { const value = options.groups?.link?.(); return isGoalGroup(value) ? value : null })
@@ -66,6 +80,15 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   // Hide done is on until the person turns it off; the choice is theirs on every device.
   const hideDone = computed(() => prefs.value.value?.hideDone ?? true)
   function setHideDone(value: boolean) { void prefs.save({ ...(prefs.value.value ?? {}), hideDone: value }, 0) }
+  // Display › Show: goals the person hid stay out until they show them; Waiting on you is on until turned off.
+  const showHidden = computed(() => prefs.value.value?.showHidden ?? false)
+  function setShowHidden(value: boolean) { void prefs.save({ ...(prefs.value.value ?? {}), showHidden: value }, 0) }
+  const showWaiting = computed(() => prefs.value.value?.showWaiting ?? true)
+  function setShowWaiting(value: boolean) { void prefs.save({ ...(prefs.value.value ?? {}), showWaiting: value }, 0) }
+  // The toolbar's Waiting on you toggle and Display › Show flip this one setting (v1.2), so they never disagree.
+  function toggleWaiting() { setShowWaiting(!showWaiting.value) }
+  // Only a person hides goals for themselves; agents and keys cannot.
+  const canHide = computed(() => session.identity?.principal.kind === 'person')
   // One range for every chart, the one used last (the ViewSwitch rule).
   const range = computed<GoalRange>(() => isGoalRange(prefs.value.value?.range) ? prefs.value.value!.range as GoalRange : '24h')
   function setRange(value: GoalRange) { if (value !== range.value) void prefs.save({ ...(prefs.value.value ?? {}), range: value }, 0) }
@@ -89,7 +112,8 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   // leave "Show more" disabled, and must not append onto the list that replaced it.
   let pageToken = 0
   let controller: AbortController | undefined
-  const query = () => ({ group: group.value, q: options.term.value, state: filter.value === 'all' ? null : filter.value, hideDone: hideDone.value, sort: sort.value, dir: dir.value })
+  // Epics are never hidden (v1), so only the Goals list asks for hidden goals.
+  const query = () => ({ group: group.value, q: options.term.value, state: filter.value === 'all' ? null : filter.value, hideDone: hideDone.value, showHidden: group.value === 'goals' && showHidden.value, sort: sort.value, dir: dir.value })
   function retirePagination() { pageToken++; loadingMore.value = false }
   function read(): Promise<void> {
     if (!owner.value || !options.active() || !settled.value) { replacing.value = false; return Promise.resolve() }
@@ -100,13 +124,27 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     reading.value = true
     // The answer counts only for the person, query and turn it was asked for.
     const current = () => mine === turn && who === owner.value
-    return listGoals(query(), abort.signal, group.value).then(answer => {
+    return listGoals(query(), abort.signal, group.value).then(async answer => {
       if (!current()) return
       reading.value = false
       // The same question never goes back to an older snapshot than the one on screen.
       const shown = list.value
       if (shown && asked === shownQuery && (answer.read_through < shown.read_through || (answer.read_through === shown.read_through && answer.generation < shown.generation))) { replacing.value = false; return }
-      list.value = answer; shownQuery = asked; error.value = ''; updatedAt.value = Date.now(); replacing.value = false
+      let items = answer.items
+      const pin = pinned
+      // A goal just created may be past this page. Keep it on screen until the
+      // server page includes it, or the person changes the query.
+      if (pin && group.value === 'goals' && !items.some(goal => goal.id === pin)) {
+        try {
+          const one = await readGoal(pin, abort.signal)
+          if (!current()) return
+          if (pinned === pin && one.id === pin && !items.some(goal => goal.id === pin)) items = [one, ...items]
+        } catch {
+          if (!current() || abort.signal.aborted) return
+          pinned = null
+        }
+      } else if (pin && items.some(goal => goal.id === pin)) pinned = null
+      list.value = { ...answer, items }; shownQuery = asked; error.value = ''; updatedAt.value = Date.now(); replacing.value = false
     }, cause => {
       if (!current() || abort.signal.aborted) return
       error.value = cause instanceof Error ? cause.message : 'Goals could not be read.'
@@ -129,10 +167,16 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     }).finally(() => { if (token === pageToken) loadingMore.value = false })
   }
   let settle: ReturnType<typeof setTimeout> | undefined
-  watch(options.term, () => { clearTimeout(settle); settle = setTimeout(() => { void read() }, SEARCH_SETTLE_MS) })
-  watch([filter, sort, dir, hideDone], () => { clearTimeout(settle); void read() })
+  // The goal created just now, kept in front of a page that does not yet list it.
+  let pinned: string | null = null
+  // True while reveal itself clears search and the state filter, so that
+  // change does not drop the goal it is about to show.
+  let revealing = false
+  watch(options.term, () => { if (!revealing) pinned = null; clearTimeout(settle); settle = setTimeout(() => { void read() }, SEARCH_SETTLE_MS) })
+  watch([filter, sort, dir, hideDone, showHidden], () => { if (!revealing) pinned = null; clearTimeout(settle); void read() })
   // Another group is another list: the rows are replaced, the frame (status note, header) stays.
   watch(group, () => {
+    pinned = null
     turn++; controller?.abort(); retirePagination(); clearTimeout(settle)
     error.value = ''
     const shown = list.value
@@ -239,14 +283,104 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     }
   }
 
+  // ---------- Hide for me (AEON-1614) ----------
+  // {n} in Display › Show: the person's hidden goals in these projects, whatever the filters.
+  const hiddenCount = computed(() => list.value?.hidden_count ?? 0)
+  const hiding = reactive(new Set<string>())
+  const failure = (cause: unknown, fallback: string) => cause instanceof Error && cause.message ? cause.message : fallback
+  // Shows the server's answer at once: with hidden goals off the row leaves (its place is
+  // kept for Undo), with them on it stays and turns muted. A fresh read follows.
+  function placeHidden(id: string, hidden: boolean): number {
+    const shown = list.value
+    if (!shown) return -1
+    const index = shown.items.findIndex(goal => goal.id === id)
+    const count = Math.max(0, (shown.hidden_count ?? 0) + (hidden ? 1 : -1))
+    if (index !== -1 && (!hidden || showHidden.value)) {
+      list.value = { ...shown, hidden_count: count, items: shown.items.map(goal => goal.id === id ? { ...goal, hidden } : goal) }
+    } else if (index !== -1) {
+      list.value = { ...shown, hidden_count: count, items: shown.items.filter(goal => goal.id !== id) }
+    } else {
+      list.value = { ...shown, hidden_count: count }
+    }
+    return index
+  }
+  // A goal just created and kept on screen (pinned) stops being kept once it is hidden, so no
+  // read brings it back; Undo keeps it again while the query is the one it was hidden in.
+  async function setHidden(goal: Goal, hidden: boolean, at = -1, repin = '') {
+    const who = owner.value, id = goal.id
+    if (!who || !canHide.value || hiding.has(id)) return
+    hiding.add(id)
+    try {
+      await (hidden ? hideGoal(id) : unhideGoal(id))
+    } catch (cause) {
+      if (who === owner.value) toast(failure(cause, hidden ? 'The goal could not be hidden.' : 'The goal could not be shown again.'), { tone: 'error' })
+      return
+    } finally { hiding.delete(id) }
+    // An answer for another person never reaches this screen.
+    if (who !== owner.value) return
+    if (hidden) {
+      const kept = pinned === id ? JSON.stringify(query()) : ''
+      if (kept) pinned = null
+      const index = placeHidden(id, true)
+      toast(hideCopy.toast, { key: `goal-hidden:${id}`, action: { label: hideCopy.undo, run: () => { if (who === owner.value) void setHidden(goal, false, index, kept) } } })
+    } else {
+      if (repin && repin === JSON.stringify(query())) pinned = id
+      const shown = list.value
+      placeHidden(id, false)
+      // Undo puts the goal back where it was, before the fresh read confirms the order.
+      if (shown && at !== -1 && !shown.items.some(item => item.id === id) && list.value) {
+        const items = [...list.value.items]
+        items.splice(Math.min(at, items.length), 0, { ...goal, hidden: false })
+        list.value = { ...list.value, items }
+      }
+    }
+    void read()
+  }
+  const hide = (goal: Goal) => setHidden(goal, true)
+  const unhide = (goal: Goal) => setHidden(goal, false)
+
   // ---------- Counts ----------
   const totals = computed<GoalCounts>(() => list.value?.totals ?? { moving: 0, queued: 0, paused: 0, done: 0 })
   const totalsPartial = computed(() => list.value?.totals_partial === true)
   const counts = computed<Record<StateFilter, number>>(() => ({ all: totals.value.moving + totals.value.queued + totals.value.paused + totals.value.done, ...totals.value }))
   const loaded = computed(() => list.value !== null)
 
+  // ---------- People's writes (AEON-1618) ----------
+  const projects = useProjects()
+  const workspaceWrite = computed(() => can('nodes.write'))
+  // Where a person may create a goal: the projects they may write, and the workspace.
+  const writableProjects = computed(() => projects.projects.filter(project => !project.archived && (workspaceWrite.value || can('nodes.write', project.id))))
+  const canCreate = computed(() => group.value === 'goals' && (workspaceWrite.value || writableProjects.value.length > 0))
+  // Releases and epics are edited where they live; a goal by the rule for its project.
+  const canEdit = (goal: Goal) => goal.kind === 'goal' && can('nodes.write', goal.project_id ?? undefined)
+  const sheet = shallowRef<{ goal: Goal | null } | null>(null)
+  function openSheet(goal: Goal | null = null) { sheet.value = { goal } }
+  function closeSheet() { sheet.value = null }
+  // Show a goal the current search, state filter or first page would hide.
+  // Search and the state filter clear; Hide done stays, because a new goal is
+  // not done. The goal stays pinned across later first-page reads until the
+  // server includes it or the person changes the query.
+  async function reveal(id: string): Promise<boolean> {
+    if (group.value !== 'goals') return false
+    const who = owner.value
+    pinned = id
+    revealing = true
+    if (options.term.value) options.term.value = ''
+    if (filter.value !== 'all') filter.value = 'all'
+    await nextTick()
+    revealing = false
+    clearTimeout(settle)
+    await read()
+    clearTimeout(settle)
+    return who === owner.value && (list.value?.items.some(goal => goal.id === id) ?? false)
+  }
+  // Rename in place (Tick spec v1.1): the goal whose name is a text field now.
+  const renaming = ref<string | null>(null)
+
   // Another person or workspace starts from nothing: no list, no open goals, no series.
   watch(owner, () => {
+    pinned = null
+    sheet.value = null; renaming.value = null
     turn++; controller?.abort(); retireSeries(); retirePagination()
     list.value = null; error.value = ''; reading.value = false; replacing.value = false; updatedAt.value = null
     open.clear(); charts.clear(); folds.clear(); series.clear(); filter.value = 'all'; chosenGroup.value = null
@@ -258,9 +392,11 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
 
   return {
     group, setGroup,
-    filter, sort, dir, hideDone, setHideDone, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, replacing, loaded, loadingMore, loadMore, read,
+    filter, sort, dir, hideDone, setHideDone, showHidden, setShowHidden, showWaiting, setShowWaiting, toggleWaiting, prefsSettled,
+    canHide, hiddenCount, hiding, hide, unhide, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, replacing, loaded, loadingMore, loadMore, read,
     live, updatedAt, statusNote, etaLastSetAt,
     open, charts, folds, isOpen, allOpen, toggle, toggleAll, toggleFold, toggleChart, searchOpens, want, seriesFor, counts, totals, totalsPartial, stop,
+    workspaceWrite, writableProjects, canCreate, canEdit, sheet, openSheet, closeSheet, renaming, reveal,
   }
 }
 export type GoalsPage = ReturnType<typeof useGoalsPage>

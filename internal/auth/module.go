@@ -176,7 +176,22 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		case credAgent:
 			httpapi.MarkAuthentication(r)
-			if lease := workerlease.Read(r); lease != "" {
+			r, p, err = m.runContentBoundary(r, p)
+			if err != nil {
+				if errors.Is(err, authz.ErrForbidden) {
+					authz.WriteForbidden(w, err)
+				} else {
+					agentpairing.WriteError(w, err)
+				}
+				return
+			}
+			if p.TransportComputerID != "" && p.RunID == "" {
+				w.Header().Set("Aeon-Run-Content-Policy", db.RunCapabilityPolicy)
+				if r.Header.Get(db.RunCapabilityPolicyHeader) != db.RunCapabilityPolicy && !transportAttachedHookRoute(r) {
+					w.Header().Set("Aeon-Upgrade-Reason", "run_capability_upgrade_required")
+				}
+			}
+			if lease := workerlease.Read(r); lease != "" && !workerlease.SafetyRoute(r) {
 				ctx := tenant.WithPrincipal(r.Context(), p)
 				err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 					var err error
@@ -268,7 +283,16 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			// and the exact route permission are checked inside the tenant.
 			ctx := authz.BindPool(r.Context(), m.pool)
 			scope := projectScope(r)
+			if p.RunID != "" {
+				scope = authz.Scope{ProjectID: p.RunProjectID}
+			} // server-verified run target, never a caller header
 			permissionErr := authz.RequirePattern(ctx, r.Pattern, scope)
+			if kind == credAgent && workerlease.SafetyRoute(r) && workerlease.Read(r) != "" && hasScope(p.Scopes, "harness.worker") && errors.Is(permissionErr, authz.ErrForbidden) {
+				// Only these exact control handlers may recover metadata safety
+				// authority. They recheck the current key and exact target lease
+				// inside the final transaction; no content permission is granted.
+				permissionErr = nil
+			}
 			// The workspace binding decides first; it is the whole answer for
 			// every workspace member. A caller without it may still act through
 			// a project binding, in the project the route targets (ADR-003 P2).
@@ -293,6 +317,11 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 				}
 			}
 			if err := permissionErr; err != nil {
+				var pairingErr *agentpairing.Error
+				if errors.As(err, &pairingErr) {
+					agentpairing.WriteError(w, err)
+					return
+				}
 				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
 					if err := m.auditWorkstation(r, p, false, "permission_denied"); err != nil {
 						internalFailure(w, r, "audit_permission_denied", err)
@@ -754,6 +783,8 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		if len(parts) > 2 {
 			switch parts[2] {
+			case "capability":
+				return "run.read", true
 			case "claim":
 				return "run.claim", true
 			case "telemetry":
@@ -836,6 +867,13 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "goals.write", true
 		case (r.Method == http.MethodPatch || r.Method == http.MethodPut) && len(parts) == 2 && id != "":
 			return "goals.write", true
+		// AEON-1618 added these writes after the AEON-1613 ceiling. They use
+		// the same goals.write grant. POST on an existing goal, and DELETE of
+		// the epics and status-note paths, stay outside the allowlist.
+		case (r.Method == http.MethodPost || r.Method == http.MethodDelete) && len(parts) == 3 && id != "" && parts[2] == "work":
+			return "goals.write", true
+		case r.Method == http.MethodDelete && len(parts) == 2 && id != "" && id != "epics" && id != "status-note":
+			return "goals.write", true
 		}
 	case "outcomes":
 		if len(parts) == 2 && parts[1] == "measurement" && read {
@@ -874,7 +912,7 @@ func harnessScope(parts []string, read bool) string {
 	}
 	if len(parts) > 0 {
 		switch parts[len(parts)-1] {
-		case "model-reports", "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "confirm-exit", "rules-receipts", "managed-context":
+		case "model-reports", "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "confirm-exit", "rules-receipts", "managed-context", "rules-delivery-manifest", "rules-delivery-evidence":
 			return "harness.worker"
 		}
 	}

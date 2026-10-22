@@ -136,6 +136,7 @@ func (m *Module) runNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Occurrence
+	var admissionErr error
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := lock(r.Context(), tx, p.TenantID, false); err != nil {
 			return err
@@ -189,9 +190,22 @@ func (m *Module) runNow(w http.ResponseWriter, r *http.Request) {
 				return workorders.Fail(404, "published release not found")
 			}
 		}
-		out, err = occurSource(r.Context(), tx, actor, item, key, now, eventID, name, version, source, in.Force)
-		return err
+		result, err := workqueue.PersonAdmissionTx(r.Context(), tx, p, "routine", func(step pgx.Tx) (any, error) {
+			return occurSource(r.Context(), step, actor, item, key, now, eventID, name, version, source, in.Force)
+		})
+		if err != nil {
+			return err
+		}
+		if failure, ok := result.(error); ok {
+			admissionErr = failure
+		} else {
+			out = result.(Occurrence)
+		}
+		return nil
 	})
+	if err == nil {
+		err = admissionErr
+	}
 	reply(w, 200, out, err)
 }
 

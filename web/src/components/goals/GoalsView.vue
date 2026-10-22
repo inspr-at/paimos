@@ -13,11 +13,25 @@
 // their key and label at least 280 px; otherwise the label runs to the ETA.
 // AEON-1395: Group › Epics shows the open epics in the same grid and anatomy; the
 // GOAL/EPIC header label swaps inside one box, so a switch moves no header cell.
+// AEON-1618 (Tick spec v1): people create goals (New goal sheet), link work with
+// the ticket picker, unlink it from an item's ⋯, and edit or delete a goal from its
+// ⋯; each write offers Undo in its toast. The implicit outcome holding the links is
+// never named: linked work shows as the goal's own items.
+// Tick spec v1.1 (part a): the goal's ⋯ in groups (change the goal, work, for me,
+// state): Rename in place (F2), Link work… (L), Delete goal (Del) with Undo and no
+// confirm. People who may not edit a goal see only the "for me" group, and its
+// keys do nothing for them. On phones the ⋯ opens as the shared bottom sheet.
+// AEON-1614: a goal's ⋯ offers Hide for me (or Unhide), with an Undo toast; hidden goals,
+// when shown, are muted rows. Waiting on you follows Display › Show, decided with the
+// person's preferences before the grid paints. Empty states point to Display.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useIdentityScope } from '../../lib/useIdentityScope'
 import AppIcon from '../AppIcon.vue'
 import RowMenu from '../business/RowMenu.vue'
+import RelationPicker, { type PickMode } from '../work/RelationPicker.vue'
 import GoalRow from './GoalRow.vue'
+import GoalSheet from './GoalSheet.vue'
 import GoalWaiting from './GoalWaiting.vue'
 import GoalStatusNote from './GoalStatusNote.vue'
 import GoalFreshness from './GoalFreshness.vue'
@@ -27,13 +41,17 @@ import { useLiveAgents } from '../../stores/liveAgents'
 import { onAction } from '../../lib/shortcuts'
 import { toast } from '../../lib/toast'
 import { plural } from '../../lib/work'
-import { STATE_FILTERS, type Goal, type GoalSort } from '../../lib/goals'
+import { undoEvent } from '../../lib/api'
+import { deleteGoal, hideCopy, linkGoalWork, MAX_LINKED, STATE_FILTERS, unlinkGoalWork, updateGoal, type Goal, type GoalOutcome, type GoalSort } from '../../lib/goals'
 import type { LiveAgent } from '../../lib/liveAgents'
 import type { RowAction } from '../../lib/rowActions'
+import type { RelatedTicket } from '../../lib/useTicket'
+import { useProjects } from '../../stores/projects'
 
 const props = defineProps<{ page: GoalsPage; term: string; now: number; hiddenGroups: boolean }>()
-const emit = defineEmits<{ clear: [] }>()
+const emit = defineEmits<{ clear: []; display: [] }>()
 const session = useSession()
+const scope = useIdentityScope()
 const live = useLiveAgents()
 const route = useRoute()
 const root = ref<HTMLElement>()
@@ -43,6 +61,10 @@ const person = computed(() => session.identity?.principal.kind === 'person')
 const epics = computed(() => props.page.group?.value === 'epics')
 // A partial page (older callers, server-render fixtures) has no replacing flag.
 const replacing = computed(() => props.page.replacing?.value === true)
+// The grid paints once the person's Goals preferences are known, so Waiting on you is
+// there from the first frame or not at all (older callers without the flag paint at once).
+const framed = computed(() => props.page.prefsSettled?.value !== false)
+const showWaiting = computed(() => props.page.showWaiting?.value !== false)
 const noun = computed(() => epics.value ? 'epic' : 'goal')
 const goals = computed(() => props.page.goals.value)
 const loaded = computed(() => props.page.loaded.value)
@@ -92,30 +114,170 @@ const headLabel = (key: GoalSort) => key === 'name' && epics.value ? 'Epic' : he
 const allOpen = computed(() => props.page.allOpen.value)
 
 // ---------- Row menu ----------
-const menu = ref<{ goal: Goal; anchor: HTMLElement } | null>(null)
+// A goal's ⋯, or a linked item's ⋯ (item set): Unlink from goal.
+const menu = ref<{ goal: Goal; item?: GoalOutcome; anchor: HTMLElement } | null>(null)
+// Older callers and fixtures pass a page without people's writes.
+const canEdit = (goal: Goal) => props.page.canEdit?.(goal) === true
 const menuItems = computed<RowAction[]>(() => {
   const goal = menu.value?.goal
   if (!goal) return []
+  if (menu.value?.item) return [{ id: 'unlink', label: 'Unlink from goal', icon: 'close', group: 1 }]
   const open = props.page.isOpen(goal)
-  const fold: RowAction = { id: 'fold', label: open ? 'Collapse' : 'Expand', icon: open ? 'collapse' : 'expand', group: 1 }
-  const copy: RowAction = { id: 'copy', label: 'Copy link', icon: 'link', group: 2 }
+  const fold: RowAction = { id: 'fold', label: open ? 'Collapse' : 'Expand', icon: open ? 'collapse' : 'expand', group: 3 }
+  const copy: RowAction = { id: 'copy', label: 'Copy link', icon: 'link', group: 3 }
   // Epics have no recorded progress over time to chart.
   if (goal.kind === 'epic') return [fold, copy]
-  return [fold, { id: 'chart', label: props.page.charts.has(goal.id) ? 'Hide progress over time' : 'Show progress over time', icon: 'trending-up', group: 1, reason: goal.expansion !== 'full' ? 'This goal is too large to chart.' : undefined }, copy]
+  const chart: RowAction = { id: 'chart', label: props.page.charts.has(goal.id) ? 'Hide progress over time' : 'Show progress over time', icon: 'trending-up', group: 3, reason: goal.expansion !== 'full' ? 'This goal is too large to chart.' : undefined }
+  // Hide for me: only people, only goals and releases (AEON-1614); it joins the "for me" group.
+  const hide: RowAction[] = !props.page.canHide?.value ? [] : [goal.hidden
+    ? { id: 'unhide', label: hideCopy.unhide, icon: 'eye', group: 3, busy: props.page.hiding.has(goal.id) }
+    : { id: 'hide', label: hideCopy.hide, icon: 'eye-off', group: 3, busy: props.page.hiding.has(goal.id) }]
+  const forMe = [fold, chart, copy, ...hide] satisfies RowAction[]
+  if (!canEdit(goal)) return forMe
+  return [
+    { id: 'rename', label: 'Rename', icon: 'edit', group: 1, keys: 'F2' }, { id: 'edit', label: 'Edit goal', icon: 'sliders', group: 1 },
+    { id: 'link', label: 'Link work…', icon: 'plus', group: 2, keys: 'L' },
+    ...forMe,
+    { id: 'delete', label: 'Delete goal', icon: 'trash', group: 4, danger: true, keys: 'Delete' },
+  ]
 })
-function openMenu(goal: Goal, anchor: HTMLElement) { menu.value = menu.value?.goal.id === goal.id ? null : { goal, anchor } }
+function openMenu(goal: Goal, anchor: HTMLElement, item?: GoalOutcome) { menu.value = menu.value?.goal.id === goal.id && menu.value.item?.id === item?.id ? null : { goal, item, anchor } }
 function closeMenu(restore: boolean) { const at = menu.value; menu.value = null; if (restore) at?.anchor.focus() }
 async function menuAction(action: string) {
-  const goal = menu.value?.goal
+  const at = menu.value
+  const goal = at?.goal
   menu.value = null
-  if (!goal) return
-  if (action === 'fold') props.page.toggle(goal.id)
+  if (!goal || !at) return
+  if (action === 'unlink' && at.item) void unlink(goal, at.item)
+  else if (action === 'rename') startRename(goal)
+  else if (action === 'link') openPicker(goal, at.anchor)
+  else if (action === 'edit') props.page.openSheet(goal)
+  else if (action === 'delete') void remove(goal)
+  else if (action === 'hide') void props.page.hide(goal)
+  else if (action === 'unhide') void props.page.unhide(goal)
+  else if (action === 'fold') props.page.toggle(goal.id)
   else if (action === 'chart') props.page.toggleChart(goal.id)
   else if (action === 'copy') {
     try { await navigator.clipboard.writeText(new URL(`/?view=goals${goal.kind === 'epic' ? '&group=epics' : ''}&goal=${encodeURIComponent(goal.key)}`, location.origin).href); toast(`Copied the link to ${goal.title}`) }
     catch { toast('The link could not be copied.', { tone: 'error' }) }
   }
 }
+
+// ---------- People's writes (AEON-1618) ----------
+// Each write is bound to the goal and the person it acted for. A late answer
+// after a sign-in change never toasts, and its Undo never runs for the next person.
+// The toast epoch drops an Undo that was already shown when the person changes;
+// an Undo still in flight then is dropped too, its answer and its failure alike.
+const projects = useProjects()
+const failure = (cause: unknown, fallback: string) => toast(cause instanceof Error ? cause.message : fallback, { tone: 'error' })
+function undo(write: () => Promise<unknown>, fallback: string) {
+  void scope.run(({ after }) => after(write(), () => { void props.page.read() }), { failed: cause => failure(cause, fallback) })
+}
+const picker = ref<{ goal: Goal; anchor: HTMLElement } | null>(null)
+watch(scope.owner, () => { menu.value = null; picker.value = null }, { flush: 'sync' })
+function openPicker(goal: Goal, anchor: HTMLElement) { picker.value = { goal, anchor } }
+function closePicker(restore: boolean) { const at = picker.value; picker.value = null; if (restore && at?.anchor.isConnected) at.anchor.focus() }
+const pickMode = computed<PickMode | null>(() => {
+  const at = picker.value, goal = at?.goal
+  if (!goal) return null
+  const linked = (goal.items ?? []).filter(item => item.linked).flatMap(item => item.keys)
+  const home = goal.project_id ? projects.byId(goal.project_id)?.routeKey ?? goal.projects.find(badge => badge.id === goal.project_id)?.key ?? null : null
+  // Only the picker still open links: one that closed (a person change closes it) links nothing.
+  return { label: 'Link work', linked, onlyProject: home, within: goal.project_id, most: MAX_LINKED, submit: picked => picker.value === at ? link(goal, picked) : Promise.resolve(null) }
+})
+const changedIds = (ids: string[] | undefined) => ids ?? []
+async function link(goal: Goal, picked: RelatedTicket[]): Promise<string | null> {
+  const id = goal.id
+  try {
+    const outcome = await scope.run(({ after }) => after(linkGoalWork(id, picked.map(item => item.id)), result => {
+      const added = changedIds(result.delta)
+      void props.page.read()
+      if (!result.changed || added.length === 0) {
+        toast('Already linked')
+        return null
+      }
+      toast(`${added.length} linked`, { action: { label: 'Undo', run: () => undo(() => unlinkGoalWork(id, added), 'The link could not be undone.') } })
+      return null
+    }))
+    return outcome ?? null
+  } catch (cause) {
+    return cause instanceof Error ? cause.message : 'The work could not be linked.'
+  }
+}
+async function unlink(goal: Goal, item: GoalOutcome) {
+  const id = goal.id, node = item.id
+  try {
+    await scope.run(({ after }) => after(unlinkGoalWork(id, [node]), result => {
+      const removed = changedIds(result.delta)
+      void props.page.read()
+      if (!result.changed || removed.length === 0) return
+      toast(`${item.keys[0] ?? item.label} unlinked`, { action: { label: 'Undo', run: () => undo(() => linkGoalWork(id, removed), 'The link could not be restored.') } })
+    }))
+  } catch (cause) { failure(cause, 'The work could not be unlinked.') }
+}
+const toggleOf = (id: string) => root.value?.querySelector<HTMLElement>(`[data-goal-id="${CSS.escape(id)}"] .goal-toggle`) ?? null
+// No confirm: the toast's Undo restores the goal. Focus that was on its row moves to the next goal.
+// A held or repeated Del sends one delete per goal.
+const deleting = new Set<string>()
+async function remove(goal: Goal) {
+  if (deleting.has(goal.id)) return
+  const id = goal.id
+  deleting.add(id)
+  const list = goals.value, at = list.findIndex(item => item.id === id)
+  const next = list[at + 1] ?? list[at - 1] ?? null
+  const focused = !!root.value?.querySelector(`[data-goal-id="${CSS.escape(id)}"] .goal-row`)?.contains(document.activeElement)
+  try {
+    await scope.run(({ after }) => after(deleteGoal(id), result => {
+      const event = result.event_id
+      toast('Goal deleted', event ? { action: { label: 'Undo', run: () => undo(() => undoEvent(event), 'The goal could not be restored.') } } : {})
+      return after(props.page.read(), () => after(nextTick(), () => { if (focused && next) toggleOf(next.id)?.focus() }))
+    }))
+  } catch (cause) { failure(cause, 'The goal could not be deleted.') }
+  finally { deleting.delete(id) }
+}
+// Rename in place: the row's name becomes a field (GoalRow); the write is bound to the goal it renamed.
+const renameBusy = ref<string | null>(null)
+function startRename(goal: Goal) { if (canEdit(goal)) props.page.renaming.value = goal.id }
+async function rename(goal: Goal, title: string) {
+  if (renameBusy.value) return
+  const id = goal.id, before = goal.title
+  renameBusy.value = id
+  try {
+    await scope.run(({ after }) => after(updateGoal(id, { title }), () => after(props.page.read(), () => {
+      if (props.page.renaming.value === id) props.page.renaming.value = null
+      toast('Goal renamed', { action: { label: 'Undo', run: () => undo(() => updateGoal(id, { title: before }), 'The name could not be restored.') } })
+      return after(nextTick(), () => { if (props.page.renaming.value === null) toggleOf(id)?.focus() })
+    })))
+  } catch (cause) {
+    failure(cause, 'The goal could not be renamed.')
+    // A rename that left the field (blur) ends with the failure; one still in the field can be tried again.
+    if (props.page.renaming.value === id && !(document.activeElement as HTMLElement | null)?.classList.contains('name-field')) props.page.renaming.value = null
+  } finally { if (renameBusy.value === id) renameBusy.value = null }
+}
+// The goal whose row has focus (its toggle or its ⋯), never one of its items.
+function focusedGoal(): Goal | null {
+  const active = document.activeElement as HTMLElement | null
+  const row = active && root.value?.contains(active) ? active.closest('.goal-row') : null
+  const id = row?.closest<HTMLElement>('[data-goal-id]')?.dataset.goalId
+  const goal = id ? goals.value.find(item => item.id === id) ?? null : null
+  return goal && canEdit(goal) ? goal : null
+}
+// After New goal: clear a search or state filter that would hide it, bring a
+// goal past the first page onto the screen, then open it and focus Link work.
+async function created(id: string) {
+  props.page.closeSheet()
+  await scope.run(({ after }) => after(props.page.reveal(id), shown => {
+    toast('Goal created')
+    if (!shown) return
+    props.page.toggle(id, true)
+    return after(nextTick(), () => { root.value?.querySelector<HTMLElement>(`[data-goal-id="${CSS.escape(id)}"] .link-work`)?.focus() })
+  }))
+}
+function saved() { props.page.closeSheet(); void props.page.read() }
+const sheetPreferred = computed(() => {
+  const only = props.page.writableProjects?.value ?? []
+  return only.length === 1 ? only[0]!.id : null
+})
 
 // ---------- Arriving from a link ----------
 // ?goal=KEY opens that goal, brings it into view and marks it until the next press.
@@ -157,20 +319,30 @@ onMounted(() => {
   stopKeys.push(onAction('goals.toggle_all', () => props.page.toggleAll()))
   stopKeys.push(onAction('goals.next', () => step(1)))
   stopKeys.push(onAction('goals.prev', () => step(-1)))
+  stopKeys.push(onAction('goals.rename', () => { const goal = focusedGoal(); if (!goal) return false; startRename(goal) }))
+  stopKeys.push(onAction('goals.link', () => { const goal = focusedGoal(), anchor = goal && toggleOf(goal.id); if (!goal || !anchor) return false; openPicker(goal, anchor) }))
+  stopKeys.push(onAction('goals.delete', () => { const goal = focusedGoal(); if (!goal) return false; void remove(goal) }))
 })
 onBeforeUnmount(() => { window.removeEventListener('keydown', searchKey, true); stopKeys.forEach(stop => stop()); resized?.disconnect() })
 
 const quiet = computed(() => props.page.list.value?.quiet_projects ?? { count: 0, keys: [] })
 const more = computed(() => props.page.list.value?.next_cursor)
 const everyDone = computed(() => props.page.hideDone.value && props.page.counts.value.all > 0)
+// Everything left is a goal the person hid for themselves (AEON-1614).
+const allHidden = computed(() => !epics.value && !(props.page.showHidden?.value ?? true) && (props.page.hiddenCount?.value ?? 0) > 0)
 const emptyTitle = computed(() => props.term.trim() ? `No ${noun.value} matches “${props.term.trim()}”` : props.hiddenGroups ? `All ${noun.value}s are in hidden groups` : filtering.value ? 'Nothing here'
-  : everyDone.value && !props.page.totalsPartial.value ? `Every ${noun.value} is done` : epics.value ? 'No open epics in these projects.' : 'No goals yet')
+  : allHidden.value ? hideCopy.allHidden
+    : everyDone.value && !props.page.totalsPartial.value ? `Every ${noun.value} is done` : epics.value ? 'No open epics in these projects.' : 'No goals yet')
 // E4 (Tick's spec): no open epics says only that, without examples.
 const emptyText = computed(() => props.term.trim() ? 'Check the spelling, or search by project or ticket key.'
   : props.hiddenGroups ? 'Show a group from the chips above.'
     : filtering.value ? `No ${noun.value} has items in this state. Try another state.`
-      : everyDone.value ? `Done ${noun.value}s are hidden. Show them with Hide done (H).`
+      : allHidden.value || everyDone.value ? ''
         : epics.value ? '' : 'Goals appear here once agents or people set them up for a project or the workspace.')
+// The Show sentences end in a link that opens Display (Tick spec §4).
+const displayHint = computed(() => props.term.trim() || props.hiddenGroups || filtering.value ? null
+  : allHidden.value ? { lead: hideCopy.allHiddenHow, tail: '.' }
+    : everyDone.value ? { lead: `${epics.value ? 'Done epics are hidden.' : hideCopy.doneHidden} ${hideCopy.doneHiddenHow}`, tail: ' (H).' } : null)
 const canClear = computed(() => filtering.value)
 </script>
 
@@ -186,8 +358,9 @@ const canClear = computed(() => filtering.value)
       <p v-if="loaded && page.totalsPartial.value" class="partial-line" role="status">Counts omit oversized {{ noun }}s.</p>
       <div ref="grid" class="goal-grid" :data-items="wideItems ? 'wide' : 'stacked'">
         <GoalStatusNote v-if="loaded && page.statusNote.value" :note="page.statusNote.value" :now="now" />
-        <GoalWaiting v-if="person" :goals="goals" />
-        <template v-if="!loaded">
+        <GoalWaiting v-if="person && framed && showWaiting" :goals="goals" />
+        <template v-if="!loaded && !framed" />
+        <template v-else-if="!loaded">
           <ul class="sk-list" role="status" :aria-label="`Loading ${noun}s`">
             <li v-for="n in 6" :key="n" class="sk-row"><span class="skeleton" /><span class="ln"><span class="skeleton" /><span class="skeleton" /></span><span class="skeleton" /><span class="skeleton" /></li>
           </ul>
@@ -221,7 +394,8 @@ const canClear = computed(() => filtering.value)
           <ul v-else class="goal-list" :aria-busy="page.reading.value">
             <GoalRow
               v-for="goal in goals" :key="goal.id" :class="{ arrived: arrived === goal.id }" :goal="goal" :page="page" :now="now" :agents="agents" :term="term"
-              :menu-open="menu?.goal.id === goal.id" :wide-items="wideItems" @menu="anchor => openMenu(goal, anchor)"
+              :menu-open="menu?.goal.id === goal.id && !menu.item" :item-menu="menu?.goal.id === goal.id ? menu.item?.id ?? null : null" :wide-items="wideItems" :editable="canEdit(goal)" :rename-busy="renameBusy === goal.id"
+              @menu="anchor => openMenu(goal, anchor)" @item-menu="(item, anchor) => openMenu(goal, anchor, item)" @link="anchor => openPicker(goal, anchor)" @rename="title => rename(goal, title)"
             />
           </ul>
         </template>
@@ -230,6 +404,7 @@ const canClear = computed(() => filtering.value)
         <AppIcon :name="hiddenGroups ? 'folder' : epics ? 'epic' : 'target'" :size="20" />
         <h2>{{ emptyTitle }}</h2>
         <p v-if="emptyText">{{ emptyText }}</p>
+        <p v-if="displayHint" class="display-hint">{{ displayHint.lead }} <button type="button" class="link-btn" aria-haspopup="dialog" @click="emit('display')">{{ hideCopy.display }}</button>{{ displayHint.tail }}</p>
         <button v-if="canClear" class="btn" type="button" @click="emit('clear')">Clear filter</button>
       </div>
       <p v-if="loaded && more" class="more-line">
@@ -245,7 +420,15 @@ const canClear = computed(() => filtering.value)
         <GoalFreshness :live="page.live.value" :eta-set-at="page.etaLastSetAt.value" :updated-at="page.updatedAt.value" :now="now" />
       </div>
     </template>
-    <RowMenu v-if="menu" :anchor="menu.anchor" :items="menuItems" :label="`${menu.goal.kind === 'epic' ? 'Epic' : 'Goal'} ${menu.goal.title}`" @select="menuAction" @close="closeMenu" />
+    <RowMenu v-if="menu" phone-sheet :anchor="menu.anchor" :items="menuItems" :label="menu.item ? `${menu.item.keys[0] ?? menu.item.label} in ${menu.goal.title}` : `${menu.goal.kind === 'epic' ? 'Epic' : 'Goal'} ${menu.goal.title}`" @select="menuAction" @close="closeMenu" />
+    <RelationPicker
+      v-if="picker && pickMode" :anchor="picker.anchor" :subject="picker.goal.title" :self-id="picker.goal.id" :project-key="pickMode.onlyProject ?? ''"
+      :related="[]" :picking="pickMode" @close="closePicker"
+    />
+    <GoalSheet
+      v-if="page.sheet?.value" :goal="page.sheet.value.goal" :projects="page.writableProjects.value" :workspace="page.workspaceWrite.value" :preferred="sheetPreferred"
+      @close="page.closeSheet()" @created="created" @saved="saved"
+    />
   </div>
 </template>
 
@@ -286,6 +469,9 @@ const canClear = computed(() => filtering.value)
 .state h2 { color: var(--ink); font-size: 17px; }
 .state p { font-size: 13.5px; }
 .state .btn { margin-top: 10px; }
+.link-btn { display: inline; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.link-btn:focus-visible { outline: none; border-radius: 3px; box-shadow: var(--focus-ring); }
+@media (max-width: 760px), (pointer: coarse) { .link-btn { display: inline-flex; align-items: center; min-height: 44px; } }
 .sk-list { display: grid; grid-column: 1 / -1; margin: 0; padding: 8px 0 20px; list-style: none; }
 .sk-row { display: grid; grid-template-columns: 62px minmax(0, 1fr) 190px 110px; align-items: center; gap: 18px; min-height: 60px; }
 .sk-row .skeleton:first-child { height: 20px; border-radius: 6px; }

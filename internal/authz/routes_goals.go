@@ -12,6 +12,12 @@ func init() {
 		"POST /api/goals":                 "nodes.write",
 		"PATCH /api/goals/{goalId}":       "nodes.write",
 		"PATCH /api/goals/status-note":    "nodes.write",
+		"DELETE /api/goals/{goalId}":      "nodes.write",
+		"POST /api/goals/{goalId}/work":   "nodes.write",
+		"DELETE /api/goals/{goalId}/work": "nodes.write",
+		// AEON-1614: Hide for me. People only; the handler refuses agents and API keys.
+		"PUT /api/me/goals/{goalId}/hidden":    "nodes.read",
+		"DELETE /api/me/goals/{goalId}/hidden": "nodes.read",
 	})
 	registerDeclarations("goals", "project_filtered", ProjectFilteredRoutes, map[string]bool{
 		"GET /api/goals":                  true,
@@ -19,9 +25,15 @@ func init() {
 		"GET /api/goals/{goalId}":         true,
 		"GET /api/goals/{goalId}/history": true,
 		"GET /api/goals/{goalId}/series":  true,
+		// The caller's own preference; the handler requires nodes.read in the goal's project inside the write.
+		"PUT /api/me/goals/{goalId}/hidden":    true,
+		"DELETE /api/me/goals/{goalId}/hidden": true,
 	})
 	registerDeclarations("goals", "project_decided", ProjectDecidedRoutes, map[string]bool{
-		"POST /api/goals":           true,
-		"PATCH /api/goals/{goalId}": true,
+		"POST /api/goals":                 true,
+		"PATCH /api/goals/{goalId}":       true,
+		"DELETE /api/goals/{goalId}":      true,
+		"POST /api/goals/{goalId}/work":   true,
+		"DELETE /api/goals/{goalId}/work": true,
 	})
 }

@@ -160,7 +160,7 @@ paths:
     post:
       operationId: confirmHarnessExit
       security: *auth
-      description: Requires current harness.worker authority and the exact generation's agent and lease. The owned executor reports confirmed process exit after an uncertain stop, including lost ownership, heartbeat loss or administrative archive/removal. Active generations are rejected. Persists the confirmed reason and emits harness.stop_confirmed; exact replay is idempotent and divergent replay returns 409. Retains stopped_at, archived_at, recovery receipts and historical bindings; archived worker APIs still return 410. No process is signalled or generation revived. The original recovery_process_state remains the administrative action's observation, not this later executor report.
+      description: "Requires a live harness.worker transport key and the exact generation's agent and lease. The owned executor reports confirmed process exit after an uncertain stop, including lost ownership, heartbeat loss or administrative archive/removal. Active generations are rejected. Persists the confirmed reason and emits harness.stop_confirmed; exact replay is idempotent and divergent replay returns 409. Retains stopped_at, archived_at, recovery receipts and historical bindings; archived worker APIs still return 410. No process is signalled or generation revived. The original recovery_process_state remains the administrative action's observation, not this later executor report. After run-person revocation, only the metadata safety receipt is returned; handovers and planned pause content are refused. No start, input or export authority is granted."
       requestBody:
         required: true
         content:
@@ -172,9 +172,9 @@ paths:
               properties:
                 reason: {type: string, enum: [process_exited, process_failed, force_stopped]}
       responses:
-        '200': {description: Confirmed closed generation, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '200': {description: Confirmed closed generation, content: {application/json: {schema: {anyOf: [{$ref: '#/components/schemas/HarnessSession'}, {$ref: '#/components/schemas/HarnessSafetySession'}]}}}}
         '400': {description: Invalid exit reason}
-        '403': {description: Exact worker proof and current harness.worker authority required}
+        '403': {description: "Exact worker proof and live harness.worker transport key required"}
         '409': {description: Generation is active or exit confirmation conflicts}
   /projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop:
     parameters:
@@ -210,7 +210,7 @@ paths:
     post:
       operationId: completeHarnessControl
       security: *auth
-      description: Exact session agent and private generation lease required. Session requests may complete directly from pending or claimed; owned process controls still require claimed. Exact completion replay is idempotent. An expired request returns its terminal rejected outcome with request_expired reason and cannot be applied.
+      description: "Exact session agent and private generation lease required. Session requests may complete directly from pending or claimed; owned process controls still require claimed. Exact completion replay is idempotent. An expired request returns its terminal rejected outcome with request_expired reason and cannot be applied. After run-person revocation, only stop controls with bounded outcome codes can complete; the response and audit carry metadata only."
       requestBody:
         required: true
         content:
@@ -362,19 +362,28 @@ paths:
       - {$ref: '#/components/parameters/LegacyWorkerLease'}
     post:
       parameters:
-        - {name: X-Aeon-Max-Session-File-Bytes, in: header, schema: {type: integer, minimum: 2000, maximum: 512000}, description: "Omission means 12000. Delivery also respects the registered maximum; whole-rule compatibility cut with note, never dropping locked rules."}
+        - {name: X-Aeon-Max-Session-File-Bytes, in: header, schema: {type: integer, minimum: 2000, maximum: 512000}, description: "Legacy omission means 12000 and respects registration. Opt-in pinned_files delivery defaults to 128000 bytes and refuses overflow without a compatibility cut; each pinned file is at most 64000 bytes."}
       operationId: managedHarnessContext
       description: Bound managed worker only. ADR-004 rules merge for this exact tenant/project/key creator/agent/task; delivered in ephemeral context. No repository writes. A receipt proves received bytes, not model obedience. No caller-selectable context or broader rules access.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {type: object, additionalProperties: false}
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                pinned_files: {type: boolean, default: false, description: "Claude agentd opt-in: return tenant-authorized pin bytes alongside every database rule layer; missing pins refuse launch."}
       responses:
         "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        '200': {description: ADR-004 merged rules envelope}
+        '200':
+          description: "Merged database rules, with pinned_files for opt-in Claude assembly. Agentd prepends its floor and inserts AGENTS.md from the run commit (trusted BaseSHA for reviews) before the database block."
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ManagedRulesEnvelope'}
         '403': {description: Invalid worker lease or owner}
-        '409': {description: Managed run required}
+        '409': {description: "Managed run required or rules_pin_missing; no model starts.", content: {application/json: {schema: {$ref: '#/components/schemas/RuleError'}}}}
+        '422': {description: "rules_pack_too_large; no model starts.", content: {application/json: {schema: {$ref: '#/components/schemas/RuleError'}}}}
   /projects/{projectId}/harness-sessions/{sessionId}/managed-controls:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -451,7 +460,7 @@ paths:
       - {$ref: '#/components/parameters/LegacyWorkerLease'}
     get:
       operationId: watchHarnessNotifications
-      description: "Content-free SSE wake hints for this managed generation's controls and inbox, over the existing committed event notification channel. Requires current harness.worker authority and the exact worker lease. harness.wake on connection and relevant changes tells the daemon to claim controls and drain through their existing authorized routes; stream.ping is a keepalive. Hints grant no process authority, carry no message text, and acknowledge nothing. Reconnect triggers a fresh drain to cover missed hints. Authority is rechecked on wakes and every 15 seconds."
+      description: "Content-free SSE wake hints for this managed generation or verified paired attached hook's inbox, over the existing committed event notification channel. Requires current harness.worker authority and the exact worker lease. harness.wake on connection and relevant changes tells the daemon to claim controls and drain through their existing authorized routes; stream.ping is a keepalive. Attached hooks receive only exact-session inbox hints and require the live pairing, owned generation and person ceiling in every transaction. Hints grant no process authority, carry no message text, and acknowledge nothing. Reconnect triggers a fresh drain to cover missed hints. Authority is rechecked on wakes and every 15 seconds."
       responses:
         '200': {description: "SSE harness.wake and stream.ping events with empty JSON objects", content: {text/event-stream: {schema: {type: string}}}}
         '403': {description: "Worker proof or current permission rejected"}
@@ -685,6 +694,50 @@ paths:
         '400': {description: Invalid payload}
         '403': {description: 'Ownership, scope or worker proof rejected'}
         '409': {description: Session or pause transition conflicts}
+  /projects/{projectId}/harness-sessions/{sessionId}/rules-delivery-manifest:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {$ref: '#/components/parameters/WorkerLease'}
+    post:
+      operationId: prepareHarnessRulesDelivery
+      description: "Requires harness.worker, the exact active managed Claude generation lease and its paired run content capability. Independently assembles D1's unchanged full pack from the authorized pinned doctrine, all database layers and agentd's run-commit repository delta. The SHA-256 must match. Stores only metadata, hashes and pin identities. Issuance is not delivery evidence. Identical retries return the same five-minute manifest; divergent reuse conflicts."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRulesDeliveryPrepare'}}}}
+      responses:
+        '200': {description: "Issued full-pack manifest", content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRulesDeliveryManifest'}}}}
+        '400': {description: "Invalid or unbounded request"}
+        '403': {description: "Run, computer, generation or worker proof rejected"}
+        '409': {description: "Manifest hash mismatch, divergent replay, expiry or missing pin"}
+        '422': {description: "Pack exceeds its measured byte ceiling"}
+  /projects/{projectId}/harness-sessions/{sessionId}/rules-delivery-evidence:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: acknowledgeHarnessRulesDelivery
+      description: "Requires harness.worker, the paired run content capability and exact active worker lease. Agentd reports only after bridge startup confirms the SHA-256 of the received UTF-8 rules bytes. Both hashes must match the unexpired served manifest and its run, computer and daemon generation. This is transmitted-byte acknowledgement, never model load, obedience, execution or an authority grant. All live authorization checks precede identical replay."
+      parameters:
+        - {$ref: '#/components/parameters/WorkerLease'}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRulesDeliveryAck'}}}}
+      responses:
+        '200': {description: "Recorded or replayed byte acknowledgement", content: {application/json: {schema: {$ref: '#/components/schemas/HarnessRulesDeliveryEvidence'}}}}
+        '400': {description: "Invalid acknowledgement or unknown fields"}
+        '403': {description: "Foreign or rebound manifest or worker proof rejected"}
+        '409': {description: "Hash mismatch, expired manifest, invalid time or divergent acknowledgement"}
+    get:
+      operationId: getHarnessRulesDeliveryEvidence
+      description: "Requires harness.read and project visibility. Returns the one run-bound byte acknowledgement, or an explicit null evidence field before acknowledgement. Remains readable after stop or archive. Legacy worker-reported receipts remain on their separate history route."
+      responses:
+        '200':
+          description: "Acknowledgement or explicit absence"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/HarnessRulesDeliveryEvidence'}
+                  - {type: object, additionalProperties: false, required: [evidence], properties: {evidence: {type: 'null'}}}
+        '400': {description: "Query parameters are not accepted"}
+        '404': {description: "Session is not visible"}
   /projects/{projectId}/harness-sessions/{sessionId}/rules-receipts:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -738,7 +791,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: markHarnessStopped
-      description: Exact worker lease required. Reason paused requires a planned cooperative stop and a handover; persists the note on the session and bound ticket atomically, then closes the old generation. Exact paused-stop replays are idempotent. No process is signalled by this endpoint.
+      description: "Exact worker lease required. Reason paused requires a planned cooperative stop and a handover; persists the note on the session and bound ticket atomically, then closes the old generation. Exact paused-stop replays are idempotent. No process is signalled by this endpoint. After run-person revocation, only the metadata safety receipt is returned; handovers and planned pause content are refused. No start, input or export authority is granted."
       requestBody:
         required: true
         content:
@@ -751,7 +804,7 @@ paths:
                 reason: {type: string, enum: [stopped, process_exited, process_failed, ownership_lost, force_stopped, token_budget_exhausted, turn_budget_exhausted, paused]}
                 handover: {$ref: '#/components/schemas/HarnessHandover'}
       responses:
-        '200': {description: Closed generation, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '200': {description: Closed generation, content: {application/json: {schema: {anyOf: [{$ref: '#/components/schemas/HarnessSession'}, {$ref: '#/components/schemas/HarnessSafetySession'}]}}}}
         '400': {description: Invalid stop reason or handover}
         '403': {description: Exact worker proof required}
         '409': {description: Missing planned pause or divergent replay}
@@ -942,7 +995,7 @@ paths:
     post:
       security: *auth
       operationId: yieldHarnessSession
-      description: 'Managed worker claims pending owned controls in sequence. Cooperative stop controls with request_payload.pause=true are delivered by heartbeat and claimed only by pause-plan; they never authorize an immediate process signal. Expired controls are settled first and omitted. expires_in_ms is the remaining authorization on the database clock, rounded down and capped at 45000. Workers anchor that budget to the monotonic start of this request and fail closed when it is missing or zero.'
+      description: "Managed worker claims pending owned controls in sequence. Cooperative stop controls with request_payload.pause=true are delivered by heartbeat and claimed only by pause-plan; they never authorize an immediate process signal. Expired controls are settled first and omitted. expires_in_ms is the remaining authorization on the database clock, rounded down and capped at 45000. Workers anchor that budget to the monotonic start of this request and fail closed when it is missing or zero. After run-person revocation, exact worker proof and a live transport key retain metadata-only yield and stop delivery. This response excludes task/session content, steer, settings and handovers; it grants no start, input or export authority."
       requestBody:
         required: true
         content:
@@ -957,7 +1010,7 @@ paths:
                 type: object
                 required: [session, controls]
                 properties:
-                  session: {$ref: '#/components/schemas/HarnessSession'}
+                  session: {anyOf: [{$ref: '#/components/schemas/HarnessSession'}, {$ref: '#/components/schemas/HarnessSafetySession'}]}
                   controls: {type: array, items: {$ref: '#/components/schemas/HarnessYieldedControl'}}
         '400': {description: Invalid JSON}
         '403': {description: Worker proof rejected}
@@ -965,8 +1018,34 @@ paths:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
 components:
   headers:
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum. Version 3 adds projection_unavailable to the closed warning code enum for isolated heartbeat receipts. Version 3.1 adds an optional value-free inbox binding refusal code. Version 3.2 adds the public parallel reason and initiating principal. Version 3.3 adds delivery continuation admission metadata.", schema: {type: string, enum: ['harness-session/3.3']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum. Version 3 adds projection_unavailable to the closed warning code enum for isolated heartbeat receipts. Version 3.1 adds an optional value-free inbox binding refusal code. Version 3.2 adds the public parallel reason and initiating principal. Version 3.3 adds delivery continuation admission metadata. Version 3.4 adds optional display-only cross-project lineage.", schema: {type: string, enum: ['harness-session/3.4']}}
   schemas:
+    HarnessSafetySession:
+      type: object
+      additionalProperties: false
+      description: "Exact-worker safety receipt after run-person revocation; carries no task content or new authority."
+      required: [id, project_id, phase, stopped_at, stop_reason]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        phase: {type: string, enum: [starting, working, yielded, stopping, stopped]}
+        stopped_at: {type: [string, 'null'], format: date-time}
+        stop_reason: {type: [string, 'null']}
+    ManagedRulesEnvelope:
+      allOf:
+        - {$ref: '#/components/schemas/MergedRules'}
+      description: "Legacy MergedRules fields are unchanged; pinned_files is added only on explicit opt-in. The body hash and receipt describe the database block; full delivery evidence follows in D2."
+    ManagedPinnedRuleFile:
+      type: object
+      additionalProperties: false
+      required: [repository, commit, path, visibility, blob_sha, content]
+      properties:
+        repository: {type: string, maxLength: 141}
+        commit: {type: string, pattern: '^[0-9a-f]{40}$'}
+        path: {type: string, maxLength: 300}
+        visibility: {type: string, enum: [public, private]}
+        blob_sha: {type: string, pattern: '^[0-9a-f]{40}$'}
+        content: {type: string, maxLength: 64000, description: "Exact UTF-8 bytes from the pinned doctrine cache; bounded to 64000 bytes before reading."}
     InboxBindingError:
       type: [string, 'null']
       enum: [instance_mismatch, principal_mismatch, worker_proof_rejected, hook_cli_mismatch, hook_instance_mismatch, hook_unavailable, hook_index_mismatch, daemon_unavailable, process_unverified, harness_identity_mismatch, generation_mismatch, pairing_unavailable, daemon_refused, null]
@@ -1164,6 +1243,70 @@ components:
       properties:
         receipt: {$ref: '#/components/schemas/HarnessRulesReceipt'}
         replayed: {type: boolean}
+    HarnessRulesDeliveryPrepare:
+      type: object
+      additionalProperties: false
+      required: [run_id, daemon_generation, body_sha256, repository]
+      properties:
+        run_id: {type: string, format: uuid}
+        daemon_generation: {type: string, minLength: 1, maxLength: 128}
+        body_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        repository:
+          type: object
+          additionalProperties: false
+          description: "Agentd attests the exact AGENTS.md bytes read at this run's trusted commit; empty for a run without a repository. Transient input only, never stored."
+          properties:
+            commit: {type: string, pattern: '^[0-9a-f]{40}$'}
+            body: {type: string, maxLength: 64000}
+    HarnessRulesDeliveryManifest:
+      type: object
+      additionalProperties: false
+      required: [id, run_id, session_id, daemon_generation, computer_id, body_sha256, byte_size, harness, pins, issued_at, expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        daemon_generation: {type: string, minLength: 1, maxLength: 128}
+        computer_id: {type: string, format: uuid}
+        body_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        byte_size: {type: integer, minimum: 1, maximum: 128000}
+        harness: {type: string, enum: [claude]}
+        repository_commit: {type: string, pattern: '^[0-9a-f]{40}$'}
+        pins:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            type: object
+            additionalProperties: false
+            required: [repository, commit, path, blob_sha]
+            properties:
+              repository: {type: string, maxLength: 141}
+              commit: {type: string, pattern: '^[0-9a-f]{40}$'}
+              path: {type: string, maxLength: 300}
+              blob_sha: {type: string, pattern: '^[0-9a-f]{40}$'}
+        issued_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+    HarnessRulesDeliveryAck:
+      type: object
+      additionalProperties: false
+      required: [manifest_id, run_id, daemon_generation, body_sha256, bridge_sha256, acknowledged_at]
+      properties:
+        manifest_id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        daemon_generation: {type: string, minLength: 1, maxLength: 128}
+        body_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        bridge_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        acknowledged_at: {type: string, format: date-time}
+    HarnessRulesDeliveryEvidence:
+      type: object
+      additionalProperties: false
+      required: [manifest, evidence, acknowledged_at, recorded_at]
+      properties:
+        manifest: {$ref: '#/components/schemas/HarnessRulesDeliveryManifest'}
+        evidence: {type: string, enum: [agentd_transmitted_bytes_acknowledged]}
+        acknowledged_at: {type: string, format: date-time}
+        recorded_at: {type: string, format: date-time}
     HarnessRulesReceiptWrite:
       type: object
       additionalProperties: false
@@ -1210,6 +1353,7 @@ components:
       description: 'One control claimed by yield. expires_in_ms is the only authorization lifetime a worker may use. expires_at is audit metadata.'
       required: [id, session_id, kind, state, sequence, created_at, expires_in_ms]
       properties:
+        author_principal_id: {type: string, format: uuid, description: "Authenticated requester of a relayed steering message; agentd labels it as a message, never the task."}
         expected_generation: {type: string, format: uuid}
         request_payload:
           type: object

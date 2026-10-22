@@ -22,8 +22,14 @@ type IndexedFile struct {
 // Classifies reports whether IndexBytes would recognise path as a doctrine
 // file. Only the base name is judged; nothing is opened.
 func Classifies(path string) bool {
-	_, err := classify(path, SectionAll, 0)
+	_, err := Classify(path, 0)
 	return err == nil
+}
+
+// Classify returns the filename's layer, kind and delivery placement without
+// reading or parsing its content. size is the pinned blob's byte length.
+func Classify(path string, size int) (SourceFile, error) {
+	return classify(path, SectionAll, size)
 }
 
 // IndexBytes parses one doctrine file whose bytes came from a pinned git

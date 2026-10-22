@@ -3,11 +3,14 @@
 package reportercontract
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"sort"
@@ -18,6 +21,37 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+func TestPinGeneratorFailureDiagnostic(t *testing.T) {
+	// Risk: a failed contract generator hides the reason and leaves pinning opaque.
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	dir := t.TempDir()
+	tool := filepath.Join(dir, "reporter-contract")
+	build := exec.CommandContext(ctx, "go", "build", "-p", "2", "-o", tool, "../../scripts/reporter-contract.go")
+	build.Env = append(os.Environ(), "GOMAXPROCS=2")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build contract tool: %v\n%s", err, output)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "api"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "api/generate.mjs"), []byte("process.stderr.write('fixture generator diagnostic\\n'); process.exit(9);\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, tool, "pin")
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.Output()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 || len(stdout) != 0 || !strings.Contains(stderr.String(), "fixture generator diagnostic\ngenerate OpenAPI: exit status 9") {
+		t.Fatalf("generator failure lost its diagnostic: err=%v, stdout=%q, stderr=%q", err, stdout, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "internal/reportercontract/pins.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed generator wrote pins: %v", err)
+	}
+}
 
 func TestResponseSchemaPins(t *testing.T) {
 	openAPI, err := os.ReadFile("../../api/openapi.yaml")

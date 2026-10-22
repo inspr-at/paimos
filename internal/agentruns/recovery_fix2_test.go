@@ -15,6 +15,7 @@ func TestQueuedRecoveryClaimsKeepTheirExactReservation(t *testing.T) {
 			f := setup(t)
 			run := f.run(t, f.order(t, nil))
 			ids := f.reserve(t, run)
+			f.legacyAccount(t, run.ID)
 			sibling := f.run(t, f.order(t, nil))
 			siblingReservation := uuid()
 			var resource string

@@ -344,6 +344,15 @@ func verificationJob(ctx context.Context, tx pgx.Tx, p tenant.Principal, compute
 }
 
 func createVerificationJob(ctx context.Context, tx pgx.Tx, p tenant.Principal, computer, principal, account string, a Choice, expires time.Time) (verificationRetry, error) {
+	// This person explicitly requested this verification in the approval or
+	// Verify again action. The pairing approver is never a run-person fallback.
+	if p.Kind != tenant.Person {
+		return verificationRetry{}, fail(403, "run_person_required", "person-requested verification required")
+	}
+	var actingPerson string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE tenant_id=$1 AND id=$2 AND kind='person' AND status='active' AND linked_to IS NULL`, p.TenantID, p.ID).Scan(&actingPerson); err != nil {
+		return verificationRetry{}, fail(403, "run_person_required", "active canonical verification requester required")
+	}
 	var project *string
 	if err := tx.QueryRow(ctx, `SELECT verification_project_id::text FROM agent_pairing_computers WHERE id=$1`, computer).Scan(&project); err != nil {
 		return verificationRetry{}, err
@@ -369,7 +378,7 @@ func createVerificationJob(ctx context.Context, tx pgx.Tx, p tenant.Principal, c
 	if _, err = tx.Exec(ctx, `INSERT INTO work_criteria(tenant_id,work_order_id,position,description) VALUES($1,$2,0,'Return AEON_VERIFIED in enforced read-only mode without privileged actions')`, p.TenantID, order); err != nil {
 		return verificationRetry{}, err
 	}
-	if err = tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,purpose) SELECT $1,$2,$3,m.id,m.model,$4,'pairing_verification' FROM model_profiles m WHERE m.id=$5 RETURNING id::text`, p.TenantID, order, principal, account, a.ProfileID).Scan(&run); err != nil {
+	if err = tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,purpose,acting_person_id) SELECT $1,$2,$3,m.id,m.model,$4,'pairing_verification',$6 FROM model_profiles m WHERE m.id=$5 RETURNING id::text`, p.TenantID, order, principal, account, a.ProfileID, actingPerson).Scan(&run); err != nil {
 		return verificationRetry{}, err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE agent_pairing_enrollments SET verification_run_id=$2 WHERE account_id=$1`, account, run); err != nil {
@@ -378,7 +387,7 @@ func createVerificationJob(ctx context.Context, tx pgx.Tx, p tenant.Principal, c
 	if _, err = tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model,burst_ratio,pairing_verification) VALUES($1,$2,clock_timestamp(),$3,'requests',1,'unrestricted',0,true)`, p.TenantID, account, expires); err != nil {
 		return verificationRetry{}, err
 	}
-	return verificationRetry{AccountID: account, RunID: run, ExpiresAt: expires, WorkOrderID: order}, nil
+	return verificationRetry{AccountID: account, RunID: run, ExpiresAt: expires, WorkOrderID: order, actingPersonID: actingPerson}, nil
 }
 func audit(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind string, after any) error {
 	return appendEvent(ctx, tx, p, events.Change{Type: kind, After: after})
@@ -445,7 +454,7 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	}
 	v.VerificationCapabilities = verificationCapabilities(rec.Details.Platform, rec.Details.Arch)
 	v.VerificationHelperVersion = version.Version
-	v.ServerCapabilities = []string{LedgerCapability, InstallCapability, hostcapacity.UnattendedCapability}
+	v.ServerCapabilities = []string{LedgerCapability, InstallCapability, hostcapacity.UnattendedCapability, db.RunCapabilityPolicy}
 	var err error
 	v.LedgerMode, err = LedgerMode(ctx, tx)
 	if err != nil {

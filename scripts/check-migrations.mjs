@@ -329,6 +329,7 @@ export function checkMigrations(files, published = new Map(), previousVersion = 
 export function loadMigrationExceptions(directory = new URL('./migration-policy-exceptions/', import.meta.url)) {
   const exceptions = [], seen = new Set();
   for (const item of readdirSync(directory, {withFileTypes: true}).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+    if (item.isFile() && item.name.startsWith('.')) continue; // Finder/editor metadata is not an exception input.
     if (!item.isFile() || !/^\d{4}_[a-z0-9_]+\.json$/.test(item.name)) {
       throw new Error(`${item.name}: expected one migration exception file NNNN_name.json`);
     }

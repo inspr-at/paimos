@@ -164,6 +164,10 @@ test('AEON-1315 entry checklist preserves controls and refuses or audits status 
   await mockWork(page, data)
   let defined = true, agent = false, checked = false
   const entries: EntryRecord[] = [], moves: { state: string; override_reason?: string }[] = []
+  // Keep the audited move pending until the click completes. Its assertion
+  // must wait for the write response, regardless of request scheduling.
+  let releaseOverride!: () => void
+  const overrideGate = new Promise<void>(resolve => { releaseOverride = resolve })
   const check = (id: string, label: string, passed: boolean, extra: Partial<EntryCheck> = {}): EntryCheck => ({ id, label, applicable: true, passed, reason: passed ? '' : 'Required before this status', can_tick: false, ...extra })
   const block = (to_status: string, checks: EntryCheck[]): EntryBlock => ({ to_status, checks, total: checks.filter(c => c.applicable).length, passed: checks.filter(c => c.applicable && c.passed).length })
   const snapshot = (): EntryChecks => ({ node_id: node.id, revision: node.updated_at,
@@ -187,6 +191,7 @@ test('AEON-1315 entry checklist preserves controls and refuses or audits status 
       const body = request.postDataJSON() as { state?: string; override_reason?: string; fields?: Record<string, unknown> }
       const result = snapshot().blocks.find(b => b.to_status === body.state), missing = result?.checks.filter(c => c.applicable && !c.passed) ?? []
       if (missing.length && (!body.override_reason?.trim() || agent)) return json({ error: 'entry_checks_failed', code: 'entry_checks_failed', to_status: body.state, failed: missing, override_allowed: !agent }, 409)
+      if (body.override_reason) await overrideGate
       if (body.state) { moves.push({ state: body.state, override_reason: body.override_reason }); node.state = body.state; if (result) entries.push({ ...result, by: me, at: node.updated_at, override_reason: missing.length ? body.override_reason! : null, definition_id: 'definition', definition_revision: node.created_at }) }
       if (body.fields) node.fields = body.fields
       forward(); return json(wire())
@@ -216,7 +221,15 @@ test('AEON-1315 entry checklist preserves controls and refuses or audits status 
   await expect(refused.getByRole('textbox', { name: 'Why move it now?' })).toBeVisible()
   await expect(move).toBeDisabled()
   await refused.getByRole('textbox', { name: 'Why move it now?' }).fill('Time-sensitive review; evidence follows the approved work')
+  const overridden = page.waitForResponse(response => {
+    const request = response.request()
+    return new URL(response.url()).pathname === `/api/nodes/${node.id}` && request.method() === 'PATCH'
+      && request.postDataJSON().state === 'qa' && request.postDataJSON().override_reason === 'Time-sensitive review; evidence follows the approved work'
+  })
   await move.click()
+  expect(moves).toEqual([])
+  releaseOverride()
+  expect((await overridden).status()).toBe(200)
   expect(moves.at(-1)).toEqual({ state: 'qa', override_reason: 'Time-sensitive review; evidence follows the approved work' })
   await expect(workspace.getByRole('button', { name: 'Done 1/2 · waiting for you' })).toBeVisible()
   for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark']) {
@@ -247,6 +260,7 @@ test('AEON-1315 entry checklist preserves controls and refuses or audits status 
 // AEON-1396 risk: the checklist's "Move to … anyway…" link renders as a browser button with its
 // square default outline, while focused or while its reason form is open, instead of the app's
 // focus ring; or its open state moves the link. Fails on 29a066143 (no link styles in the panel).
+// AEON-1462 risk: the ring touches the text, or adding breathing room moves the text and nearby controls.
 
 // The computed look of the link, beside the app ring as the current theme computes it.
 function linkLook(link: Locator) {
@@ -260,9 +274,18 @@ function linkLook(link: Locator) {
   })
 }
 
+function linkGeometry(link: Locator) {
+  return link.evaluate(el => {
+    const text = document.createRange(); text.selectNodeContents(el)
+    const rect = (box: DOMRect) => ({ x: box.x, y: box.y, width: box.width, height: box.height })
+    return { button: rect(el.getBoundingClientRect()), text: rect(text.getBoundingClientRect()), radius: getComputedStyle(el).borderRadius }
+  })
+}
+
 test('AEON-1396 the Move anyway link shows the app ring on keyboard focus and no outline with its form open', async ({ page }, testInfo) => {
   const data = fixtures(), node = data.nodes.find(n => n.id === 'n-4')!
   node.state = 'open'; node.fields.acceptance_criteria = '- [ ] The work satisfies the approved criteria'
+  node.title = 'Freigaberegeln für lang beschriebene Arbeit vor Beginn, Qualitätsprüfung und Abschluss nachvollziehbar anzeigen'
   await mockWork(page, data)
   const snapshot = (): EntryChecks => ({ node_id: node.id, revision: node.updated_at,
     definition: { id: 'definition', revision: node.created_at, source: 'project', checks: {} },
@@ -276,7 +299,7 @@ test('AEON-1396 the Move anyway link shows the app ring on keyboard focus and no
     if (path === `/api/queue/${node.id}/readiness`) return route.fulfill({ json: { queueable: true, ready: false, missing: ['estimate'], suggested_estimate_hours: 3, security_review_required: false } })
     return route.fallback()
   })
-  for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+  for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 1000 }); data.preferences.theme = { choice: theme }
     await page.goto('/p/PHAROS?sort=key&closed=1')
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
@@ -289,18 +312,39 @@ test('AEON-1396 the Move anyway link shows the app ring on keyboard focus and no
     const closed = await linkLook(link)
     expect(closed, 'a link, not a browser button').toMatchObject({ border: 'none', background: 'rgba(0, 0, 0, 0)', weight: '600' })
 
+    // Compare against the old unpadded layout: only the ring's box grows;
+    // the text (including its ellipsis) and neighbouring controls stay put.
+    const controls = { close: panel.getByRole('button', { name: 'Close checklist' }), checks: panel.locator('.nr-list'), source: panel.locator('.nr-source'), actions: panel.locator('.nr-actions') }
+    await link.evaluate(el => { el.style.padding = '0'; el.style.margin = '0' })
+    const unpadded = await linkGeometry(link)
+    const spacing = await controlStability(page, controls)
+    await spacing.check(() => link.evaluate(el => { el.style.removeProperty('padding'); el.style.removeProperty('margin') }))
+    spacing.done()
+    const padded = await linkGeometry(link)
+    expect(padded.radius).toBe('4px')
+    expect(unpadded.text.width).toBeGreaterThan(0); expect(unpadded.text.height).toBeGreaterThan(0)
+    for (const dimension of ['x', 'y', 'width', 'height'] as const) {
+      expect(Math.abs(padded.text[dimension] - unpadded.text[dimension]), `text.${dimension}`).toBeLessThanOrEqual(.5)
+    }
+    for (const [dimension, delta] of [['x', -3], ['y', -1], ['width', 6], ['height', 2]] as const) {
+      expect(Math.abs(padded.button[dimension] - unpadded.button[dimension] - delta), `ring box.${dimension}`).toBeLessThanOrEqual(.5)
+    }
+
     // A mouse click opens the reason form: the pressed ink at the same weight, no outline, no ring.
-    const guard = await controlStability(page, { link })
+    const guard = await controlStability(page, { ...controls, link })
+    await guard.check(() => link.hover())
     await guard.check(async () => { await link.click(); await expect(reason).toBeFocused() })
-    guard.done()
     await expect(link).toHaveAttribute('aria-expanded', 'true')
     const open = await linkLook(link)
     expect(open).toMatchObject({ outline: 'none', shadow: 'none', border: 'none', color: open.inkColor, weight: '600' })
     await page.screenshot({ path: testInfo.outputPath(`form-open-${width}-${theme}.png`) })
 
     // Keyboard focus, with the form still open: exactly the app ring, never the square outline.
-    await reason.press('Escape')
-    for (let step = 0; step < 20 && !(await link.evaluate(el => document.activeElement === el)); step++) await page.keyboard.press('Shift+Tab')
+    await guard.check(async () => {
+      await reason.press('Escape')
+      for (let step = 0; step < 20 && !(await link.evaluate(el => document.activeElement === el)); step++) await page.keyboard.press('Shift+Tab')
+    })
+    guard.done()
     const focused = await linkLook(link)
     expect(focused).toMatchObject({ focused: true, visible: true, outline: 'none', shadow: focused.ring })
     expect(focused.ring).not.toBe('none')

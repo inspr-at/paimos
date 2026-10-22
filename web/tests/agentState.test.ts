@@ -48,6 +48,31 @@ test('session families cross status groups without losing any worker or orphan',
   assert.equal(views[1]!.status.label, 'Ended')
 })
 
+// Risk: verified lineage loses a child in another project's filter, or a
+// malformed legacy parent is treated as cross-project execution authority.
+test('verified cross-project lineage nests once and leaves an unavailable parent as a root', () => {
+  const sessions = [
+    session({ id: 'lead', role: 'coordinator' }),
+    session({ id: 'cross', project_id: 'p2', ticket_node_id: 'own-work', work_shape: 'scout', cross_project_parent_harness_session_id: 'lead' }),
+    session({ id: 'legacy-other', project_id: 'p2', parent_harness_session_id: 'lead' }),
+  ]
+  const views = sessions.map(s => ({ session: s, status: sessionStatus(s, now) }))
+  const all = sessionForest(views, now)
+  assert.deepEqual(all.map(b => b.view.session.id), ['lead', 'legacy-other'])
+  assert.deepEqual(all[0]!.children.map(b => b.view.session.id), ['cross'])
+  assert.equal(all[0]!.count, 2)
+  const own = sessionForest(views.filter(v => v.session.project_id === 'p2'), now)
+  assert.deepEqual(own.map(b => b.view.session.id), ['cross', 'legacy-other'])
+  assert.equal(own[0]!.view.session.ticket_node_id, 'own-work')
+  assert.equal(own[0]!.view.session.work_shape, 'scout')
+  assert.equal(own[0]!.view.session.parent_harness_session_id, null)
+  const cycle = sessionForest([
+    { session: session({ id: 'a', cross_project_parent_harness_session_id: 'b' }), status: views[0]!.status },
+    { session: session({ id: 'b', project_id: 'p2', cross_project_parent_harness_session_id: 'a' }), status: views[0]!.status },
+  ], now)
+  assert.deepEqual(cycle.map(b => b.view.session.id), ['a', 'b'])
+})
+
 test('worker families sort working and starting by start time, then idle, then stopped; heartbeats never decide', () => {
   const sessions = [
     session({ id: 'lead', role: 'coordinator' }),

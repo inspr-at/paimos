@@ -58,7 +58,7 @@ func (m *module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	if !cursor.At.IsZero() {
 		at = cursor.At
 	}
-	rows, err := tx.Query(r.Context(), `SELECT `+columns+` FROM agent_runs
+	rows, err := tx.Query(r.Context(), `SELECT `+readColumns(p)+` FROM agent_runs
  WHERE ($1::uuid IS NULL OR EXISTS(SELECT 1 FROM harness_sessions s WHERE s.id=$1 AND s.run_id=agent_runs.id))
  AND ($2::uuid IS NULL OR agent_principal_id=$2) AND ($3::uuid IS NULL OR work_order_id=$3)
  AND ($4::timestamptz IS NULL OR (created_at,id)<($4,$5::uuid))

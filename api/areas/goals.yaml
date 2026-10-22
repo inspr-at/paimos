@@ -5,7 +5,7 @@ paths:
     get:
       operationId: listGoals
       summary: List visible goals with current rollup
-      description: "Goal nodes are listed as stored. A release is listed only while journey_releases.released_at is unset and it has a live outcome child; that filter precedes totals, paging and project badges. Filters include home and visible contributing projects. Totals ignore search/state/hide-done and span pages. Computed sorts use the displayed ETA or progress. Up to 100 goals share one materialized expansion query; state and ETA reuse the same invoker work scope. Aggregate root/pair/history budgets shrink the returned page with truncated true and a continuation cursor; a singleton that exceeds its budget is counts-only with expansion too_large. Full-filter totals and computed sorts use bounded batches across at most 1000 matching goals; larger sets require narrower project/group filters. An agent key also needs goals.read as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. The handler still rechecks nodes.read."
+      description: "Goal nodes are listed as stored. A release is listed only while journey_releases.released_at is unset and it has a live outcome child; that filter precedes totals, paging and project badges. Filters include home and visible contributing projects. Totals ignore search/state/hide-done/hidden and span pages. Computed sorts use the displayed ETA or progress. Up to 100 goals share one materialized expansion query; state and ETA reuse the same invoker work scope. Aggregate root/pair/history budgets shrink the returned page with truncated true and a continuation cursor; a singleton that exceeds its budget is counts-only with expansion too_large. Full-filter totals and computed sorts use bounded batches across at most 1000 matching goals; larger sets require narrower project/group filters. An agent key also needs goals.read as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. The handler still rechecks nodes.read."
       security: *auth
       parameters:
         - {name: project, in: query, schema: {type: string, maxLength: 64}}
@@ -13,6 +13,7 @@ paths:
         - {name: q, in: query, schema: {type: string, maxLength: 200}}
         - {name: state, in: query, schema: {type: string, enum: [moving, queued, paused, done]}}
         - {name: hide_done, in: query, schema: {type: boolean, default: false}}
+        - {name: hidden, in: query, schema: {type: string, enum: [exclude, include], default: exclude}, description: "AEON-1614: goals the caller hid for themselves are left out by default; include returns them with hidden true"}
         - {name: sort, in: query, schema: {type: string, enum: [eta, name, progress, project, moving, queued, done], default: eta}}
         - {name: dir, in: query, schema: {type: string, enum: [asc, desc]}}
         - {name: cursor, in: query, schema: {type: string, maxLength: 4096}}
@@ -31,7 +32,7 @@ paths:
     post:
       operationId: createGoal
       summary: Create a project or workspace goal
-      description: "Creates a goal node and lazily restores the tenant goal/outcome kinds. Requires nodes.write in the destination. Replay rechecks the current created target. An agent key also needs goals.write as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. The handler still rechecks nodes.write."
+      description: "Creates a goal node and lazily restores the tenant goal/outcome kinds. Requires nodes.write in the destination. Replay rechecks the current created target. An optional eta sets the goal's Lands with the caller as its author (AEON-1618). An agent key also needs goals.write as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. The handler still rechecks nodes.write."
       security: *auth
       parameters:
         - {$ref: '#/components/parameters/GoalIdempotencyKey'}
@@ -162,6 +163,70 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteGoal
+      summary: Delete a goal with its outcomes
+      description: "AEON-1618. Soft-deletes a goal and every outcome under it in one write; linked work items are never changed. Requires nodes.write in the goal's project, rechecked in the write transaction, and sight of every outcome. An agent key also needs goals.write as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. Releases are refused with 400. Appends goal.deleted; POST /events/{eventId}/undo with the returned event_id restores the goal and the same outcomes while the goal is still deleted."
+      security: *auth
+      responses:
+        '200':
+          description: "The deleted goal and the event that Undo reverses"
+          headers:
+            Aeon-Contract: {$ref: '#/components/headers/GoalsContract'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GoalWorkResult'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /goals/{goalId}/work:
+    parameters:
+      - {name: goalId, in: path, required: true, schema: {type: string, maxLength: 64}, description: "Goal key or UUID"}
+    post:
+      operationId: linkGoalWork
+      summary: Link work items to a goal
+      description: "AEON-1618, people's Link work. Adds tickets or epics to the goal's one implicit outcome, created on the first link and never listed as an outcome: GET reads show each linked item as its own item with linked true. The implicit outcome stores no outcome_ref, so an explicit outcome may use any legal ref, including people-links. Outcomes that agents built stay unchanged. Idempotent: an item already linked changes nothing, and delta lists only the ids this call added. Requires nodes.write in the goal's project and nodes.read on every item, rechecked in the write transaction; an item the caller cannot read, or that does not exist, returns 403 and nothing changes. An agent key also needs goals.write as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. A project goal links only work of its own project. At most 20 linked items per goal (link an epic to bring its tickets along) and 200 items in all. Releases are refused with 400. Appends goal.work_linked with the linked set before and after."
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GoalWorkRequest'}
+      responses:
+        '200':
+          description: "The goal's linked work after the call; changed false and event_id null when nothing changed"
+          headers:
+            Aeon-Contract: {$ref: '#/components/headers/GoalsContract'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GoalWorkResult'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: unlinkGoalWork
+      summary: Unlink work items from a goal
+      description: "AEON-1618, people's Unlink from goal. Removes the named items from the goal's implicit outcome only; an agent outcome that serves the same item keeps it. Idempotent: an item that is not linked changes nothing, and delta lists only the ids this call removed. Requires nodes.write in the goal's project, rechecked in the write transaction. An agent key also needs goals.write as an outer ceiling. A person grants it on the audited key-scope path, and new keys do not receive it. Linking those delta ids again is the Undo. Appends goal.work_unlinked with the linked set before and after."
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GoalWorkRequest'}
+      responses:
+        '200':
+          description: "The goal's linked work after the call; changed false and event_id null when nothing changed"
+          headers:
+            Aeon-Contract: {$ref: '#/components/headers/GoalsContract'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GoalWorkResult'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
   /goals/{goalId}/history:
     get:
       operationId: goalHistory
@@ -181,6 +246,37 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/GoalHistory'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /me/goals/{goalId}/hidden:
+    parameters:
+      - {name: goalId, in: path, required: true, schema: {type: string, maxLength: 64}, description: "Goal key or UUID; release nodes are also goals"}
+    put:
+      operationId: hideGoalForMe
+      summary: Hide a goal in the caller's own Goals view
+      description: "AEON-1614, Hide for me. Only a signed-in person acting for themselves; agents and API keys get 403. The goal must be a goal or release the person can read (nodes.read in its project, rechecked in the write). Nobody else's view changes. Idempotent: hiding a hidden goal returns changed false. The goal stays hidden until the person unhides it, whatever its state."
+      security: *auth
+      responses:
+        '200':
+          description: "The goal is hidden for the caller"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GoalHiddenResult'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: unhideGoalForMe
+      summary: Show a hidden goal again in the caller's own Goals view
+      description: "AEON-1614. Only a signed-in person acting for themselves; agents and API keys get 403. Idempotent: unhiding a goal that is not hidden returns changed false."
+      security: *auth
+      responses:
+        '200':
+          description: "The goal is shown for the caller"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GoalHiddenResult'}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -215,7 +311,7 @@ components:
   headers:
     GoalsContract:
       description: "Goals API contract"
-      schema: {type: string, enum: [goals/1.5]}
+      schema: {type: string, enum: [goals/1.7]}
   schemas:
     GoalCreate:
       type: object
@@ -224,6 +320,7 @@ components:
       properties:
         title: {type: string, minLength: 1, maxLength: 300}
         project_id: {type: [string, 'null'], format: uuid, description: "Null or omitted creates a workspace goal"}
+        eta: {$ref: '#/components/schemas/GoalETAInput'}
     GoalWriteResult:
       type: object
       additionalProperties: false
@@ -234,6 +331,15 @@ components:
         changed: {type: boolean}
         read_through: {type: integer, format: int64, minimum: 0}
         generation: {type: integer, format: int64, minimum: 1}
+    GoalHiddenResult:
+      type: object
+      additionalProperties: false
+      required: [goal_id, key, hidden, changed]
+      properties:
+        goal_id: {type: string, format: uuid}
+        key: {type: string}
+        hidden: {type: boolean, description: "Whether the goal is now hidden for the caller"}
+        changed: {type: boolean, description: "False when the goal already was in that state"}
     GoalETAInput:
       type: [object, 'null']
       additionalProperties: false
@@ -273,6 +379,7 @@ components:
       additionalProperties: false
       properties:
         if_read_through: {type: integer, format: int64, minimum: 0}
+        title: {type: string, minLength: 1, maxLength: 300, description: "Renames a goal; releases are refused (AEON-1618). Appends goal.renamed"}
         eta: {$ref: '#/components/schemas/GoalETAInput'}
         steps: {type: [array, 'null'], maxItems: 20, items: {$ref: '#/components/schemas/GoalStep'}}
         progress_override:
@@ -304,9 +411,9 @@ components:
     GoalProjectBadge: {"type":"object","required":["id","key","name","group_ids"],"properties":{"id":{"type":"string","format":"uuid"},"key":{"type":"string"},"name":{"type":"string"},"group_ids":{"type":"array","items":{"type":"string","format":"uuid"},"maxItems":1}}}
     GoalWaits: {"type":"object","required":["count","question_ids"],"properties":{"count":{"type":"integer","minimum":0},"question_ids":{"type":"array","items":{"type":"string","format":"uuid"},"maxItems":3}}}
     GoalProgress: {"type":"object","required":["pct","computed_pct","source","basis","total","done","items_without_estimate","items_partially_estimated","remaining_hours","remaining_unestimated"],"properties":{"pct":{"type":"integer","minimum":0,"maximum":100},"computed_pct":{"type":"integer","minimum":0,"maximum":100},"source":{"type":"string","enum":["computed","override"]},"basis":{"type":"string","enum":["count","estimate","mixed"]},"total":{"type":"integer","minimum":0},"done":{"type":"integer","minimum":0},"items_without_estimate":{"type":"integer","minimum":0},"items_partially_estimated":{"type":"integer","minimum":0},"override_by":{"type":"string","format":"uuid"},"override_at":{"type":"string","format":"date-time"},"override_note":{"type":"string","maxLength":200},"remaining_hours":{"type":"number","minimum":0,"description":"Estimate hours of the unfinished visible work leaves of unfinished items, each leaf once"},"remaining_unestimated":{"type":"integer","minimum":0,"description":"Unfinished work leaves counted in remaining_hours that carry no estimate"}}}
-    GoalOutcome: {"type":"object","required":["id","ref","label","note","position","keys","state","session_ids","eta","passed","coverage","weight","handed_over"],"properties":{"id":{"type":"string","format":"uuid"},"ref":{"type":"string"},"label":{"type":"string"},"note":{"type":"string"},"position":{"type":"number"},"keys":{"type":"array","maxItems":20,"items":{"type":"string"}},"state":{"type":"string","enum":["moving","queued","paused","done"]},"reason":{"type":"string"},"session_ids":{"type":"array","maxItems":200,"items":{"type":"string","format":"uuid"}},"eta":{"$ref":"#/components/schemas/GoalEffectiveETA"},"passed":{"type":"boolean"},"coverage":{"$ref":"#/components/schemas/GoalCoverage"},"weight":{"type":"number","minimum":0},"handed_over":{"type":"boolean"},"note_by":{"type":"string","format":"uuid","description":"Principal who last changed the note"},"note_by_name":{"type":"string"},"note_at":{"type":"string","format":"date-time"},"merged_at":{"type":"string","format":"date-time","description":"A done item's latest merge, as recorded on its work leaves"}}}
-    GoalDetail: {"type":"object","required":["id","key","title","kind","project_id","workspace","expansion","counts","steps","next_step","projects","waits","read_through","generation"],"properties":{"id":{"type":"string","format":"uuid"},"key":{"type":"string"},"title":{"type":"string"},"kind":{"type":"string","enum":["goal","release"]},"project_id":{"type":["string","null"],"format":"uuid"},"workspace":{"type":"boolean"},"expansion":{"type":"string","enum":["full","too_large"]},"counts":{"$ref":"#/components/schemas/GoalCounts"},"items":{"type":"array","maxItems":200,"items":{"$ref":"#/components/schemas/GoalOutcome"}},"steps":{"type":"array","maxItems":20,"items":{"$ref":"#/components/schemas/GoalStep"}},"next_step":{"anyOf":[{"$ref":"#/components/schemas/GoalStep"},{"type":"null"}]},"projects":{"type":"array","maxItems":4001,"items":{"$ref":"#/components/schemas/GoalProjectBadge"}},"waits":{"$ref":"#/components/schemas/GoalWaits"},"progress":{"$ref":"#/components/schemas/GoalProgress"},"eta":{"$ref":"#/components/schemas/GoalEffectiveETA"},"passed":{"type":"boolean"},"states":{"$ref":"#/components/schemas/GoalStateCounts"},"done":{"type":"boolean"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"},"stall":{"$ref":"#/components/schemas/GoalStall"},"handed_over":{"$ref":"#/components/schemas/GoalHandedOver"}}}
-    GoalList: {"type":"object","required":["items","totals","totals_partial","quiet_projects","truncated","read_through","generation"],"properties":{"items":{"type":"array","maxItems":100,"items":{"$ref":"#/components/schemas/GoalDetail"}},"totals":{"$ref":"#/components/schemas/GoalStateCounts"},"totals_partial":{"type":"boolean"},"quiet_projects":{"type":"object","required":["count","keys"],"properties":{"count":{"type":"integer","minimum":0},"keys":{"type":"array","maxItems":2000,"items":{"type":"string"}}}},"next_cursor":{"type":"string"},"truncated":{"type":"boolean"},"status_note":{"$ref":"#/components/schemas/GoalStatusNote"},"eta_last_set_at":{"type":"string","format":"date-time","description":"Latest authored ETA change over every goal and item the project/group filters match"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}
+    GoalOutcome: {"type":"object","required":["id","ref","label","note","position","keys","state","session_ids","eta","passed","coverage","weight","handed_over"],"properties":{"id":{"type":"string","format":"uuid"},"ref":{"type":"string"},"label":{"type":"string"},"note":{"type":"string"},"position":{"type":"number"},"keys":{"type":"array","maxItems":20,"items":{"type":"string"}},"state":{"type":"string","enum":["moving","queued","paused","done"]},"reason":{"type":"string"},"session_ids":{"type":"array","maxItems":200,"items":{"type":"string","format":"uuid"}},"eta":{"$ref":"#/components/schemas/GoalEffectiveETA"},"passed":{"type":"boolean"},"coverage":{"$ref":"#/components/schemas/GoalCoverage"},"weight":{"type":"number","minimum":0},"handed_over":{"type":"boolean"},"note_by":{"type":"string","format":"uuid","description":"Principal who last changed the note"},"note_by_name":{"type":"string"},"note_at":{"type":"string","format":"date-time"},"merged_at":{"type":"string","format":"date-time","description":"A done item's latest merge, as recorded on its work leaves"},"linked":{"type":"boolean","description":"A work item a person linked to the goal (AEON-1618): id is the work item's id, keys holds its key and label its title; unlink it with DELETE /goals/{goalId}/work"}}}
+    GoalDetail: {"type":"object","required":["id","key","title","kind","project_id","workspace","expansion","counts","steps","next_step","projects","waits","read_through","generation"],"properties":{"id":{"type":"string","format":"uuid"},"key":{"type":"string"},"title":{"type":"string"},"kind":{"type":"string","enum":["goal","release"]},"project_id":{"type":["string","null"],"format":"uuid"},"workspace":{"type":"boolean"},"expansion":{"type":"string","enum":["full","too_large"]},"counts":{"$ref":"#/components/schemas/GoalCounts"},"items":{"type":"array","maxItems":200,"items":{"$ref":"#/components/schemas/GoalOutcome"}},"steps":{"type":"array","maxItems":20,"items":{"$ref":"#/components/schemas/GoalStep"}},"next_step":{"anyOf":[{"$ref":"#/components/schemas/GoalStep"},{"type":"null"}]},"projects":{"type":"array","maxItems":4001,"items":{"$ref":"#/components/schemas/GoalProjectBadge"}},"waits":{"$ref":"#/components/schemas/GoalWaits"},"progress":{"$ref":"#/components/schemas/GoalProgress"},"eta":{"$ref":"#/components/schemas/GoalEffectiveETA"},"passed":{"type":"boolean"},"states":{"$ref":"#/components/schemas/GoalStateCounts"},"done":{"type":"boolean"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"},"stall":{"$ref":"#/components/schemas/GoalStall"},"handed_over":{"$ref":"#/components/schemas/GoalHandedOver"},"hidden":{"type":"boolean","description":"AEON-1614: the caller hid this goal for themselves; set only on Goals list rows read with hidden=include"}}}
+    GoalList: {"type":"object","required":["items","totals","totals_partial","quiet_projects","truncated","read_through","generation"],"properties":{"items":{"type":"array","maxItems":100,"items":{"$ref":"#/components/schemas/GoalDetail"}},"totals":{"$ref":"#/components/schemas/GoalStateCounts"},"totals_partial":{"type":"boolean"},"quiet_projects":{"type":"object","required":["count","keys"],"properties":{"count":{"type":"integer","minimum":0},"keys":{"type":"array","maxItems":2000,"items":{"type":"string"}}}},"next_cursor":{"type":"string"},"truncated":{"type":"boolean"},"status_note":{"$ref":"#/components/schemas/GoalStatusNote"},"eta_last_set_at":{"type":"string","format":"date-time","description":"Latest authored ETA change over every goal and item the project/group filters match"},"hidden_count":{"type":"integer","minimum":0,"description":"AEON-1614: goals the caller hid for themselves among those the project/group filters match and the caller can read, whatever the search, state, hide-done or hidden filter"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}
     GoalHistory: {"type":"object","required":["items","read_through","generation"],"properties":{"items":{"type":"array","maxItems":50,"items":{"$ref":"#/components/schemas/Event"}},"next_cursor":{"type":"string"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}
     GoalStall: {"type":"object","required":["stalled","since"],"properties":{"stalled":{"type":"boolean"},"since":{"type":"string","format":"date-time","description":"Last visibility-filtered displayed percentage change, or goal creation; moving outcomes and age at least four hours make stalled true"}}}
     GoalSeriesPoint: {"type":"object","required":["t","pct","basis","delta","keys","keys_truncated"],"properties":{"t":{"type":"string","format":"date-time"},"pct":{"type":"integer","minimum":0,"maximum":100},"basis":{"type":"string","enum":["count","mixed","estimate"]},"delta":{"type":"integer","minimum":-100,"maximum":100},"keys":{"type":"array","maxItems":200,"items":{"type":"string"}},"changed_keys":{"type":"array","maxItems":200,"items":{"type":"string"},"description":"Visible outcome and ticket keys whose state changed during the bucket; keys is a compatibility alias"},"keys_truncated":{"type":"boolean"}}}
@@ -320,6 +427,25 @@ components:
     EpicItem: {"type":"object","required":["id","ref","label","note","position","keys","state","session_ids","eta","passed","coverage","weight","handed_over"],"properties":{"id":{"type":"string","format":"uuid"},"ref":{"type":"string"},"label":{"type":"string"},"note":{"type":"string","description":"The working agent's activity note"},"position":{"type":"number"},"keys":{"type":"array","maxItems":20,"items":{"type":"string"}},"keys_total":{"type":"integer","minimum":21,"description":"All keys when keys holds only the first 20"},"state":{"type":"string","enum":["moving","queued","paused","done"]},"reason":{"type":"string"},"session_ids":{"type":"array","maxItems":200,"items":{"type":"string","format":"uuid"}},"eta":{"$ref":"#/components/schemas/EpicETA"},"passed":{"type":"boolean"},"coverage":{"$ref":"#/components/schemas/GoalCoverage"},"weight":{"type":"number","minimum":0},"handed_over":{"type":"boolean"},"note_by":{"type":"string","format":"uuid"},"note_by_name":{"type":"string"},"note_at":{"type":"string","format":"date-time"},"merged_at":{"type":"string","format":"date-time"},"delivery":{"$ref":"#/components/schemas/EpicDelivery"}}}
     EpicDetail: {"type":"object","required":["id","key","title","kind","project_id","workspace","expansion","counts","steps","next_step","projects","waits","read_through","generation"],"properties":{"id":{"type":"string","format":"uuid"},"key":{"type":"string"},"title":{"type":"string"},"kind":{"type":"string","enum":["epic"]},"project_id":{"type":"string","format":"uuid"},"workspace":{"type":"boolean"},"expansion":{"type":"string","enum":["full","too_large"]},"counts":{"$ref":"#/components/schemas/GoalCounts"},"items":{"type":"array","maxItems":200,"items":{"$ref":"#/components/schemas/EpicItem"}},"steps":{"type":"array","maxItems":20,"items":{"$ref":"#/components/schemas/GoalStep"}},"next_step":{"anyOf":[{"$ref":"#/components/schemas/GoalStep"},{"type":"null"}]},"projects":{"type":"array","maxItems":1,"items":{"$ref":"#/components/schemas/GoalProjectBadge"}},"waits":{"$ref":"#/components/schemas/GoalWaits"},"progress":{"$ref":"#/components/schemas/GoalProgress"},"eta":{"$ref":"#/components/schemas/EpicETA"},"passed":{"type":"boolean"},"states":{"$ref":"#/components/schemas/GoalStateCounts"},"done":{"type":"boolean"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}
     EpicList: {"type":"object","required":["items","totals","totals_partial","quiet_projects","truncated","read_through","generation"],"properties":{"items":{"type":"array","maxItems":100,"items":{"$ref":"#/components/schemas/EpicDetail"}},"totals":{"$ref":"#/components/schemas/GoalStateCounts"},"totals_partial":{"type":"boolean"},"quiet_projects":{"type":"object","required":["count","keys"],"properties":{"count":{"type":"integer","minimum":0},"keys":{"type":"array","maxItems":2000,"items":{"type":"string"}}}},"next_cursor":{"type":"string"},"truncated":{"type":"boolean"},"status_note":{"$ref":"#/components/schemas/GoalStatusNote"},"eta_last_set_at":{"type":"string","format":"date-time","description":"Latest worker ETA report over every epic the project/group filters match"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}
+    GoalWorkRequest:
+      type: object
+      additionalProperties: false
+      required: [node_ids]
+      properties:
+        node_ids: {type: array, minItems: 1, maxItems: 20, items: {type: string, maxLength: 64}, description: "Work item keys or UUIDs; duplicates count once"}
+    GoalWorkResult:
+      type: object
+      additionalProperties: false
+      required: [id, key, changed, node_ids, event_id, read_through, generation]
+      properties:
+        id: {type: string, format: uuid}
+        key: {type: string}
+        changed: {type: boolean}
+        node_ids: {type: array, maxItems: 20, items: {type: string, format: uuid}, description: "The goal's people-linked work after the call; empty after a delete"}
+        delta: {type: array, maxItems: 20, items: {type: string, format: uuid}, description: "Ids this call added on link or removed on unlink; empty when nothing changed, and empty after a delete. Undo this set, not node_ids."}
+        event_id: {type: [integer, 'null'], format: int64, minimum: 1, description: "The event this call appended last (goal.work_linked, goal.work_unlinked or goal.deleted); null when nothing changed"}
+        read_through: {type: integer, format: int64, minimum: 0}
+        generation: {type: integer, format: int64, minimum: 1}
     GoalStatusNoteUpdate:
       type: object
       additionalProperties: false

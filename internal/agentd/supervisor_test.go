@@ -144,17 +144,23 @@ type fakeAdapter struct{ proc *fakeProcess }
 
 func (*fakeAdapter) Name() string                       { return Codex }
 func (*fakeAdapter) Probe(context.Context, string) bool { return true }
-func (a *fakeAdapter) Start(_ context.Context, _ StartRequest, _ func(AdapterEvent)) (Process, error) {
+func (a *fakeAdapter) Start(_ context.Context, request StartRequest, _ func(AdapterEvent)) (Process, error) {
+	if a.proc != nil {
+		a.proc.mu.Lock()
+		a.proc.rulesHash = rulesDeliveryHash(request.Rules)
+		a.proc.mu.Unlock()
+	}
 	return a.proc, nil
 }
 
 type fakeProcess struct {
-	mu      sync.Mutex
-	calls   int
-	texts   []string
-	stopped chan struct{}
-	once    sync.Once
-	onExit  func()
+	rulesHash string
+	mu        sync.Mutex
+	calls     int
+	texts     []string
+	stopped   chan struct{}
+	once      sync.Once
+	onExit    func()
 }
 
 func (*fakeProcess) PID() int { return 3456 }

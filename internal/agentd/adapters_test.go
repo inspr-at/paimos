@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/rules"
@@ -41,16 +42,21 @@ func TestFakeVendorProcess(t *testing.T) {
 			os.Exit(2)
 		}
 		id := strings.Trim(string(frame.ID), "\"")
-		if vendor == "claude" {
+		if strings.HasPrefix(vendor, "claude") {
 			var command struct {
 				Op            string `json:"op"`
+				Rules         string `json:"rules"`
 				CorrelationID string `json:"correlation_id"`
 			}
 			if json.Unmarshal(read.Bytes(), &command) != nil {
 				os.Exit(2)
 			}
 			if command.Op == "start" {
-				_ = write.Encode(map[string]string{"kind": "session_started", "harness_session_id": "claude-session", "effective_model": "test-model", "model_evidence_status": "vendor_reported"})
+				hash := rulesDeliveryHash(command.Rules)
+				if vendor == "claude_rules_mismatch" {
+					hash = strings.Repeat("0", 64)
+				}
+				_ = write.Encode(map[string]string{"rules_sha256": hash, "kind": "session_started", "harness_session_id": "claude-session", "effective_model": "test-model", "model_evidence_status": "vendor_reported"})
 				_ = write.Encode(map[string]any{"kind": "turn_started"})
 				_ = write.Encode(map[string]any{"kind": "usage", "input_tokens_total": 12, "output_tokens_total": 3, "cost_usd_total": json.Number("0.0000125")})
 				_ = write.Encode(map[string]any{"kind": "usage", "input_tokens_total": 12, "output_tokens_total": 3, "cost_usd_total": json.Number("0.0000125")})
@@ -758,7 +764,7 @@ func TestClaudeBridgeMapsSDKResultUsage(t *testing.T) {
 	if err := os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", root)
+	cmd := exec.Command(node, bridgePath, sdkPath, fixturebin.Require(t, "true"), root)
 	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"hello","model":"test-model","effort":"high"}` + "\n")
 	output, _ := cmd.Output() // The fake Query closes without a normal stop receipt.
 	var turn, usage, models bool
@@ -846,7 +852,7 @@ func TestClaudeBridgeDeniesNativeEdits(t *testing.T) {
 	if err := os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", workspace)
+	cmd := exec.Command(node, bridgePath, sdkPath, fixturebin.Require(t, "true"), workspace)
 	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"hello"}` + "\n")
 	output, _ := cmd.Output() // The fake Query closes without a normal stop receipt.
 	if !strings.Contains(string(output), `"kind":"session_started"`) ||

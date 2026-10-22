@@ -148,6 +148,10 @@ test('missing release is planned read-only; opt-in creates a draft and all nine 
   assert.equal(complete(release, f.dir, { write: true, runtimeAMD64: digest, runtimeARM64: digest }, f.run).status, 'complete');
   assert.equal(f.state.release.body.split('\n').filter(line => line.startsWith('Digest: ')).length, 1);
   for (const arch of ['amd64', 'arm64']) assert.ok(f.state.release.body.includes(`Runtime closure linux/${arch}: ${digest}`));
+  assert.ok(f.state.release.body.endsWith(`Source commit: ${source}`), 'absent pin evidence leaves no blank notes field');
+  const withPin = fixture();
+  complete(release, withPin.dir, { write: true, pinEvidence: 'Pin proposal: fixture review URL' }, withPin.run);
+  assert.ok(withPin.state.release.body.endsWith(`Source commit: ${source}\n\nPin proposal: fixture review URL`));
   const create = writes(f)[0];
   for (const flag of ['--draft', '--verify-tag', '--target', source, '--notes-file']) assert.ok(create.includes(flag));
   assert.equal(writes(f).filter(call => call[2] === 'upload').length, 9);

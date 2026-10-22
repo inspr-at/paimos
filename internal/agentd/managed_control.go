@@ -11,6 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/servicetier"
 )
@@ -30,14 +31,24 @@ type ManagedControlAdapter interface{ ManagedControlSupported() bool }
 
 func (*ClaudeAdapter) ManagedControlSupported() bool { return runtime.GOOS == "darwin" }
 
+// Legacy receipts remain readable as worker reports. New managed runs use
+// the separate rulesDeliveryAPI after harness readiness.
 type managedContextAPI interface {
 	ManagedContext(context.Context, HarnessSession) (rules.Merged, error)
-	RecordManagedRules(context.Context, HarnessSession, rules.Merged) error
 }
 
 func (r *Remote) ManagedContext(ctx context.Context, s HarnessSession) (rules.Merged, error) {
 	var out rules.Merged
-	err := r.harnessWorker(ctx, s, "/managed-context", struct{}{}, &out)
+	err := r.harnessWorker(ctx, s, "/managed-context", map[string]bool{"pinned_files": true}, &out)
+	var status *client.StatusError
+	if errors.As(err, &status) {
+		switch status.Message {
+		case "rules_pin_missing":
+			return out, ErrRulesPinMissing
+		case "rules_pack_too_large":
+			return out, ErrRulesPackTooLarge
+		}
+	}
 	return out, err
 }
 func (r *Remote) RecordManagedRules(ctx context.Context, s HarnessSession, m rules.Merged) error {
@@ -49,6 +60,10 @@ func (r *Remote) RecordManagedRules(ctx context.Context, s HarnessSession, m rul
 	return r.harnessWorker(ctx, s, "/rules-receipts", map[string]any{"request_id": id, "expected_revision": 0, "context": m.Context, "body_sha256": m.SHA256, "version": m.Version, "byte_size": m.ByteSize, "source": "online"}, nil)
 }
 func (s *Supervisor) managedRules(ctx context.Context, entry *owned, run Run, profile Profile) (string, error) {
+	return s.managedRulesPack(ctx, entry, run, profile, repositoryRules{})
+}
+
+func (s *Supervisor) managedRulesPack(ctx context.Context, entry *owned, run Run, profile Profile, repository repositoryRules) (string, error) {
 	api, ok := s.api.(managedContextAPI)
 	if !ok {
 		return "", errors.New("managed rules API unavailable")
@@ -56,6 +71,9 @@ func (s *Supervisor) managedRules(ctx context.Context, entry *owned, run Run, pr
 	m, err := api.ManagedContext(ctx, entry.harness)
 	if err != nil {
 		return "", err
+	}
+	if len(m.PinnedFiles) == 0 {
+		return "", ErrRulesPinMissing
 	}
 	c := m.Context
 	h := profile.Harness
@@ -65,13 +83,17 @@ func (s *Supervisor) managedRules(ctx context.Context, entry *owned, run Run, pr
 	if c.TenantID != s.tenantID || c.ProjectID != entry.harness.ProjectID || c.AgentID != s.principalID || c.TaskID != run.WorkOrderID || c.Role != "builder" || c.Harness != h {
 		return "", errors.New("managed rules scope mismatch")
 	}
-	if err = rules.ValidateMerged(m, c, time.Now()); err != nil {
+	if err = rules.ValidateManagedFiles(m, c, time.Now()); err != nil {
 		return "", err
 	}
-	if err = api.RecordManagedRules(ctx, entry.harness, m); err != nil {
+	body, err := assembleRulesPack(m, repository)
+	if err != nil {
 		return "", err
 	}
-	return m.Body, nil
+	if err = s.prepareRulesDelivery(ctx, entry, run, body, repository); err != nil {
+		return "", err
+	}
+	return body, nil
 }
 
 // Local counters update before telemetry I/O, including before Start returns.

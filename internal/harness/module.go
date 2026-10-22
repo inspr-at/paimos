@@ -444,6 +444,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/lead-decisions", "nodes.read", false, 200, m.listLeadDecisions},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/lead-decisions", "harness.worker", true, 200, m.recordLeadDecision},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.read", false, 200, m.readRulesReceipts},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-delivery-manifest", "harness.worker", true, 200, m.prepareRulesDelivery},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-delivery-evidence", "harness.worker", true, 200, m.acknowledgeRulesDelivery},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-delivery-evidence", "harness.read", false, 200, m.readRulesDelivery},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.worker", true, 200, m.recordRulesReceipt},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/pause", "harness.control", false, 200, m.requestPause},
@@ -479,7 +482,12 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/archive", "harness.recover", false, 200, m.archive},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop", "harness.force_stop", false, 201, m.forceStop},
 	} {
-		handler := workorders.Endpoint(m.pool, route.scope, route.agent, route.status, route.fn)
+		handler := workorders.Endpoint(m.pool, route.scope, route.agent, route.status, func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+			return workqueue.PersonAdmissionTx(r.Context(), tx, p, route.pattern, func(step pgx.Tx) (any, error) { return route.fn(r, step, p) })
+		})
+		if workerlease.SafetyRoute(&http.Request{Pattern: route.pattern}) {
+			handler = workorders.WorkerSafetyEndpoint(m.pool, route.status, safetyHandler(route.fn))
+		}
 		if route.pattern == "GET /api/projects/{projectId}/harness-sessions/{sessionId}" || route.pattern == "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat" {
 			handler = reportercontract.WithHeader(reportercontract.HarnessSession, handler)
 		} else if route.pattern == "GET /api/projects/{projectId}/lead" {
@@ -490,6 +498,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type Session struct {
+	// Cross-project lineage is display attribution; it never grants parent controls.
+	CrossProjectParentID    *string `json:"cross_project_parent_harness_session_id,omitempty"`
+	lineageParentID         *string
+	lineageParentVisible    bool
 	DeskAnswers             []deskdelivery.Answer    `json:"desk_answers,omitempty"`
 	ServiceTier             *string                  `json:"service_tier,omitempty"`
 	ServiceTierRevision     int64                    `json:"service_tier_revision,omitempty"`
@@ -712,13 +724,13 @@ func normalizeActivityNote(raw string) (string, bool) {
 // row_version is the row's own revision (AEON-449): a trigger bumps it inside every
 // statement that changes the row, so of two copies the larger is the newer one.
 // revision, by contrast, is an optimistic-lock token only some writers advance.
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),generator,command,model_raw,model_profile_id::text,pause_record,continuation_handover,doing,doing_at,tool_activity,tool_activity_at,coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary'),clock_timestamp(),pause_progress,desk_answers,service_tier,service_tier_revision,service_tier_reports,(SELECT q.tier FROM harness_tier_requests q WHERE q.session_id=harness_sessions.id AND q.state='pending' ORDER BY q.created_at DESC,q.id DESC LIMIT 1),parallel_reason,started_by_principal_id::text,inbox_binding_error`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),generator,command,model_raw,model_profile_id::text,pause_record,continuation_handover,doing,doing_at,tool_activity,tool_activity_at,coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary'),clock_timestamp(),pause_progress,desk_answers,service_tier,service_tier_revision,service_tier_reports,(SELECT q.tier FROM harness_tier_requests q WHERE q.session_id=harness_sessions.id AND q.state='pending' ORDER BY q.created_at DESC,q.id DESC LIMIT 1),parallel_reason,started_by_principal_id::text,inbox_binding_error,(SELECT l.parent_session_id::text FROM harness_session_lineage l WHERE l.tenant_id=harness_sessions.tenant_id AND l.child_session_id=harness_sessions.id),EXISTS(SELECT 1 FROM harness_session_lineage l JOIN harness_sessions parent ON parent.tenant_id=l.tenant_id AND parent.id=l.parent_session_id WHERE l.tenant_id=harness_sessions.tenant_id AND l.child_session_id=harness_sessions.id)`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
 	var activityNow time.Time
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.OwnerPrincipalID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.Pause, &s.Continuation, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow, &s.PauseProgress, &s.DeskAnswers, &s.ServiceTier, &s.ServiceTierRevision, &s.ServiceTierReports, &s.ServiceTierRequest, &s.ParallelReason, &s.StartedByPrincipalID, &s.inboxBindingCode)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.OwnerPrincipalID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.Pause, &s.Continuation, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow, &s.PauseProgress, &s.DeskAnswers, &s.ServiceTier, &s.ServiceTierRevision, &s.ServiceTierReports, &s.ServiceTierRequest, &s.ParallelReason, &s.StartedByPrincipalID, &s.inboxBindingCode, &s.lineageParentID, &s.lineageParentVisible)
 	if err != nil {
 		return s, err
 	}
@@ -870,6 +882,9 @@ func worker(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal)
 	return s, proof(s, r, p)
 }
 func record(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, kind string, before, after any) error {
+	if workorders.WorkerSafetyOnly(ctx) {
+		before, after = safetyMetadata(before), safetyMetadata(after)
+	}
 	if batch, ok := ctx.Value(controlEventKey{}).(*controlEventBatch); ok {
 		return batch.add(p, s, kind, before, after)
 	}
@@ -954,6 +969,9 @@ func validateParent(ctx context.Context, tx pgx.Tx, projectID, parentID, childID
 	if err != nil {
 		return err
 	}
+	if err := validateLineageGraph(ctx, tx, parentID, childID); err != nil {
+		return err
+	}
 	var depth int
 	err = tx.QueryRow(ctx, `WITH RECURSIVE ancestors(id,parent_id,depth) AS (SELECT id,parent_id,1 FROM harness_sessions WHERE id=$1 UNION ALL SELECT p.id,p.parent_id,a.depth+1 FROM harness_sessions p JOIN ancestors a ON p.id=a.parent_id WHERE a.depth<17) SELECT coalesce(max(depth),0) FROM ancestors`, parentID).Scan(&depth)
 	if err != nil {
@@ -1014,7 +1032,7 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	r, flush := deferControlEvents(r, tx)
 	defer flush(&err)
 	ctx := r.Context()
-	projectID := r.PathValue("projectId")
+	projectID := strings.ToLower(r.PathValue("projectId"))
 	var in registration
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -1041,7 +1059,7 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		if !workorders.UUID(*in.SucceedsID) {
 			return nil, workorders.Fail(400, "valid predecessor required")
 		}
-		if err := lockHierarchy(ctx, tx, projectID); err != nil {
+		if _, err := lockRegistrationHierarchy(ctx, tx, projectID, in.ParentID); err != nil {
 			return nil, err
 		}
 		if err := inheritPauseRegistration(ctx, tx, projectID, &in); err != nil {
@@ -1137,6 +1155,9 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if agentKind != "agent" {
 		return nil, workorders.Fail(400, "agent principal required")
 	}
+	if p.RunID != "" && (in.RunID == nil || *in.RunID != p.RunID) {
+		return nil, workorders.Fail(403, "run capability target mismatch")
+	}
 	if in.RunID != nil {
 		var agentID, orderID string
 		err = tx.QueryRow(ctx, `SELECT agent_principal_id::text,work_order_id::text FROM agent_runs WHERE id=$1`, *in.RunID).Scan(&agentID, &orderID)
@@ -1161,9 +1182,11 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if err != nil {
 		return nil, err
 	}
-	if err = lockHierarchy(ctx, tx, projectID); err != nil {
+	parentProject, err := lockRegistrationHierarchy(ctx, tx, projectID, in.ParentID)
+	if err != nil {
 		return nil, err
 	}
+	crossProject := in.ParentID != nil && parentProject != projectID
 	ref, lease := digest("ref", in.SessionRef), digest("lease", in.WorkerLease)
 	if err = fenceLeadRegistration(ctx, tx, projectID, in, ref, lease); err != nil {
 		return nil, err
@@ -1173,12 +1196,38 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		return nil, err
 	}
 	var owner *string
-	ownerID := p.KeyCreatorID
+	ownerID := ""
+	if in.RunID == nil && in.ParentID == nil {
+		ownerID = p.KeyCreatorID
+	}
 	if p.Kind == tenant.Person {
 		ownerID = p.ID
 	}
 	if ownerID != "" {
 		if err = tx.QueryRow(ctx, `SELECT coalesce(linked_to,id)::text FROM principals WHERE id=$1 AND kind='person'`, ownerID).Scan(&owner); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+	if in.RunID != nil {
+		if err := tx.QueryRow(ctx, `SELECT acting_person_id::text FROM agent_runs WHERE tenant_id=$1 AND id=$2`, p.TenantID, *in.RunID).Scan(&owner); err != nil {
+			return nil, err
+		}
+	}
+	if in.ParentID != nil && !crossProject {
+		var parentPerson *string
+		if err := tx.QueryRow(ctx, `SELECT r.acting_person_id::text FROM harness_sessions s LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id WHERE s.tenant_id=$1 AND s.id=$2 AND s.project_id=$3`, p.TenantID, *in.ParentID, projectID).Scan(&parentPerson); err != nil {
+			return nil, err
+		}
+		if parentPerson != nil {
+			if owner != nil && *owner != *parentPerson {
+				return nil, workorders.Fail(409, "run_person_conflict")
+			}
+			owner = parentPerson
+		}
+	}
+	if crossProject {
+		owner, err = validateCrossProjectParent(ctx, tx, p, projectID, parentProject, in, owner, "")
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -1216,8 +1265,13 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		if subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 {
 			return nil, workorders.Fail(409, RegistrationLeaseConflict)
 		}
-		if existing.AgentPrincipalID != in.AgentPrincipalID || existing.Harness != in.Harness || !same(existing.Generator, in.Generator) || !same(existing.Command, in.Command) || existing.Host != in.Host || existing.Management != in.Management || existing.Role != in.Role || existing.WorkShape != in.WorkShape || !same(existing.DisplayLabel, in.DisplayLabel) || !same(existing.ParallelReason, in.ParallelReason) || !sameRegistrationMetadata(existing, in.sessionText, metaDigest) || !same(existing.ParentID, in.ParentID) || !same(existing.TicketNodeID, in.TicketNodeID) || !same(existing.RunID, in.RunID) || !same(existing.WorkOrderID, in.WorkOrderID) || !sameCaps(existing.Capabilities, caps) {
+		if existing.AgentPrincipalID != in.AgentPrincipalID || existing.Harness != in.Harness || !same(existing.Generator, in.Generator) || !same(existing.Command, in.Command) || existing.Host != in.Host || existing.Management != in.Management || existing.Role != in.Role || existing.WorkShape != in.WorkShape || !same(existing.DisplayLabel, in.DisplayLabel) || !same(existing.ParallelReason, in.ParallelReason) || !sameRegistrationMetadata(existing, in.sessionText, metaDigest) || !same(registrationParent(existing), in.ParentID) || !same(existing.TicketNodeID, in.TicketNodeID) || !same(existing.RunID, in.RunID) || !same(existing.WorkOrderID, in.WorkOrderID) || !sameCaps(existing.Capabilities, caps) {
 			return nil, workorders.Fail(409, "active generation conflicts with registration: harness_session_ref is already active with different registration metadata")
+		}
+		if crossProject {
+			if err = validateLineageGraph(ctx, tx, *in.ParentID, existing.ID); err != nil {
+				return nil, err
+			}
 		}
 		if err = fillVendorRef(ctx, tx, &existing, vendor); err != nil {
 			return nil, err
@@ -1233,7 +1287,7 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 				return nil, err
 			}
 		}
-		return existing, nil
+		return projectLineage(existing), nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -1264,7 +1318,7 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if revoked {
 		return nil, workorders.Fail(409, "archived generation revoked; use a new session reference and worker lease")
 	}
-	if in.ParentID != nil {
+	if in.ParentID != nil && !crossProject {
 		if runkind.Process(in.Harness) {
 			var coordinator bool
 			if err = tx.QueryRow(ctx, `SELECT role='coordinator' FROM harness_sessions WHERE project_id=$1 AND id=$2`, projectID, *in.ParentID).Scan(&coordinator); err != nil || !coordinator {
@@ -1311,9 +1365,19 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 			}
 		}
 	}
-	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command,owner_principal_id,work_placement,parallel_reason,started_by_principal_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command, owner, placement, in.ParallelReason, p.ID))
+	legacyParent := in.ParentID
+	if crossProject {
+		legacyParent = nil
+	}
+	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command,owner_principal_id,work_placement,parallel_reason,started_by_principal_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, legacyParent, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command, owner, placement, in.ParallelReason, p.ID))
 	if err != nil {
 		return nil, registrationConflict(err, vendor)
+	}
+	if crossProject {
+		if _, err = tx.Exec(ctx, `INSERT INTO harness_session_lineage(tenant_id,child_session_id,parent_session_id,owner_person_id) VALUES($1,$2,$3,$4)`, p.TenantID, s.ID, in.ParentID, owner); err != nil {
+			return nil, err
+		}
+		s.lineageParentID, s.lineageParentVisible = in.ParentID, true
 	}
 	s.BuildContinuation = admission.Continuation
 	if err = rules.RecordClientReport(ctx, tx, s.ID, in.ClientReport); err != nil {
@@ -1360,7 +1424,7 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		return nil, err
 	}
 	s.BuildContinuation = admission.Continuation
-	return s, nil
+	return projectLineage(s), nil
 }
 func same(a, b *string) bool {
 	if a == nil || b == nil {
@@ -1633,6 +1697,9 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 			return nil, err
 		}
 	}
+	if s.lineageParentID != nil && in.ParentID != nil {
+		return nil, workorders.Fail(409, "cross-project lineage cannot be reparented")
+	}
 	if in.ParentID != nil {
 		if err = validateParent(ctx, tx, s.ProjectID, *in.ParentID, s.ID); err != nil {
 			return nil, err
@@ -1741,6 +1808,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	}
 	if !validPhase(in.Phase) || in.ActivitySequence < 0 {
 		return nil, workorders.Fail(400, "invalid heartbeat")
+	}
+	if p.TransportComputerID != "" && p.RunID == "" && !in.AttachedHook {
+		return nil, workorders.Fail(403, "exact attached hook identity required")
 	}
 	ctx := r.Context()
 	if in.AttachedHook {
@@ -1998,6 +2068,9 @@ func (m *Module) markStopped(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	case "stopped", "process_exited", "process_failed", "ownership_lost", "force_stopped", "token_budget_exhausted", "turn_budget_exhausted", "paused":
 	default:
 		return nil, workorders.Fail(400, "invalid stop reason")
+	}
+	if safetyOnly(r.Context()) && (in.Handover != nil || in.Reason == "paused") {
+		return nil, workorders.Fail(403, "safety stop cannot carry a handover")
 	}
 	ctx := r.Context()
 	s, err := worker(ctx, tx, r, p)

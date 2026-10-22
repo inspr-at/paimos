@@ -280,9 +280,8 @@ export function useAccountsSettings(part: AccountsPart) {
     void readFacts()
     const planned = readPlan()
     try {
-      await agents.refreshAccounts(); await capacity.load()
-      const result = await capacity.refreshComputers()
-      if (!result.ok && capacity.computersLoaded) toast('Computer status could not refresh. The previous report stays visible.', { tone: 'error' })
+      await Promise.all([agents.refreshAccounts(), capacity.load()])
+      if (capacity.computersStatus.failures > 0 && capacity.computersLoaded) toast('Computer status could not refresh. The previous report stays visible.', { tone: 'error' })
     } finally {
       // The clock moves with every read, even when reads fail, so an old plan goes stale on time.
       await planned; agents.tick()

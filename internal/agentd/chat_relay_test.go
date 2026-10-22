@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/client"
 )
 
@@ -81,6 +82,7 @@ func TestClaudeBridgeEmitsFinalFromResultRecordOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	truePath := fixturebin.Require(t, "true")
 	for _, tc := range []struct {
 		name, result string
 		final        bool
@@ -109,7 +111,7 @@ func TestClaudeBridgeEmitsFinalFromResultRecordOnly(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, "/bin/true", root)
+			cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, truePath, root)
 			cmd.Stdin = strings.NewReader(`{"op":"start","purpose":"managed","prompt":"Fixture","capabilities":[]}` + "\n")
 			out, _ := cmd.Output() // The fixture SDK ends without a stop request.
 			if ctx.Err() != nil {
@@ -965,7 +967,7 @@ func TestSupervisorDeliversMaximumEscapedChatInput(t *testing.T) {
 		MessageID string `json:"message_id"`
 		Body      string `json:"body"`
 	}
-	if !ok || !strings.HasPrefix(header, "Aeon chat:") || len(text) <= 64<<10 || json.Unmarshal([]byte(frame), &got) != nil || got.MessageID != "m1" || got.Body != in.Message.Body {
+	if !ok || !strings.HasPrefix(header, "Aeon relayed message") || len(text) <= 64<<10 || json.Unmarshal([]byte(frame), &got) != nil || got.MessageID != "m1" || got.Body != in.Message.Body {
 		t.Fatalf("input changed in transport (%d bytes)", len(text))
 	}
 	running := chatState("running")

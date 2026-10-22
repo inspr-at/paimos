@@ -129,13 +129,13 @@ test('a told ticket without commits keeps its block, without a disclosure', asyn
   await expect(block.locator('details')).toHaveCount(0)
 })
 
-test('a German profile reads the backfilled pills and benefits in German', async ({ page }) => {
+test('a German profile reads the backfilled pills and benefits in English', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 })
   await open(page, V102, historicHistory(), 'de-AT')
   const fixes = detail(page).getByRole('region', { name: 'Fixes, 1' })
-  await expect(fixes.getByRole('article', { name: 'Lesbarer Risiko-Chip' }).locator('.benefit')).toHaveText('Der Hochrisiko-Chip in der Deploy-Journey ist im hellen Modus gut lesbar.')
-  await expect(fixes.locator('.pill-title')).toHaveAttribute('lang', 'de')
-  await expect(detail(page).getByText('Ein Ticket ist in den Release Notes ausgeblendet.')).toBeVisible()
+  await expect(fixes.getByRole('article', { name: 'Readable risk chip' }).locator('.benefit')).toHaveText('The high-risk chip on the deploy journey is easy to read in light mode.')
+  await expect(fixes.locator('.pill-title')).toHaveAttribute('lang', 'en')
+  await expect(detail(page).getByText('One ticket is hidden from release notes.')).toBeVisible()
 })
 
 test('screenshots of releases 102 and 105', async ({ page }) => {

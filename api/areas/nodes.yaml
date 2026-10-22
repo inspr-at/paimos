@@ -240,6 +240,8 @@ paths:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     get:
       operationId: getNode
+      description: "A paired computer reads its bound work-order node only with the server-issued run capability. Bare transport cannot read task bodies."
+      parameters: [{$ref: '#/components/parameters/RunCapability'}]
       security: *auth
       responses:
         '200':
@@ -258,6 +260,9 @@ paths:
         updated_at value while holding the node row lock in the write transaction.
         A stale value returns 412 without changing the node or appending an event.
         Omission preserves unconditional patch behavior.
+        Optional expected_states requires state and compares the current state under
+        the same lock, before the timestamp precondition. A mismatch returns 409
+        with code status_mismatch and current_state; no fields or events change.
         The tenant tree lock is acquired before the node row lock. A database deadlock
         rolls back the update and returns 409 with code retryable_conflict; retry the request.
         Any change to a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
@@ -282,6 +287,7 @@ paths:
           description: |
             A different kind, type, or kind_id was named. The node is unchanged. code is kind_change_not_allowed.
             A database deadlock leaves the node unchanged and returns code retryable_conflict; retry the request.
+            An expected_states mismatch returns code status_mismatch and current_state without changing the node.
           content:
             application/json:
               schema:
@@ -890,7 +896,10 @@ components:
           type: string
         code:
           type: string
-          description: benefit_required when a work item or legacy ticket enters a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch or convert names a different kind that this route will not apply. kind_conversion_blocked when convert is refused because of the parent, children, or fields. Omitted for other errors.
+          description: 'status_mismatch when expected_states does not include the current state; current_state is included. benefit_required when a work item or legacy ticket enters a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch or convert names a different kind that this route will not apply. kind_conversion_blocked when convert is refused because of the parent, children, or fields. Omitted for other errors.'
+        current_state:
+          type: string
+          description: 'Present for status_mismatch. Current canonical state under the node row lock; the conditional patch made no changes.'
         children:
           type: array
           description: Direct children that cannot stay under the target kind. Present for kind_conversion_blocked.
@@ -983,7 +992,15 @@ components:
     NodePatch:
       type: object
       minProperties: 1
+      dependentRequired:
+        expected_states: [state]
       properties:
+        expected_states:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items: {type: string, minLength: 1, maxLength: 128}
+          description: 'Optional current-state precondition. Requires state in the same patch. At least one value must exactly match the current canonical state under the write lock, otherwise 409 status_mismatch includes current_state. Blank values and null are rejected. Omission keeps unconditional behavior. Checked before If-Unmodified-Since; either failure changes no fields and appends no event.'
         override_reason: {type: string, minLength: 1, maxLength: 500, description: 'People may override failing entry checks with a nonblank reason. Agents cannot override. The reason, missing checks and status change are recorded together.'}
         human_check: {type: [string, 'null'], maxLength: 500, description: 'Set a pending human check. Null marks it checked; only its current person owner or a project admin with nodes.write can clear a pending check. Server authors completion provenance; only a person can set a new pending check when it clears stored completion provenance. Writers, including agents, may set or edit a pending check without stored completion provenance. Existing revision preconditions apply.'}
         estimate_hours:

@@ -15,7 +15,7 @@ import (
 // lineage and caller-specific move rights from lists and hierarchy mutations.
 func reporterSession(s Session) Session {
 	s.CanReparent, s.HandedOverToID, s.AdoptedFromID = nil, nil, nil
-	return s
+	return projectLineage(s)
 }
 
 // Every hierarchy writer takes this before row locks, including registrations

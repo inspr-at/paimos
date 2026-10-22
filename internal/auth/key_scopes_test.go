@@ -155,9 +155,14 @@ func TestGoalAgentKeyCeiling(t *testing.T) {
 		{http.MethodPatch, "/api/goals/status-note", "goals.write", true},
 		{http.MethodPut, "/api/goals/GOAL-1", "goals.write", true},
 		{http.MethodPut, "/api/goals/status-note", "goals.write", true},
-		{http.MethodDelete, "/api/goals/GOAL-1", "", false},
+		{http.MethodDelete, "/api/goals/GOAL-1", "goals.write", true},
+		{http.MethodPost, "/api/goals/GOAL-1/work", "goals.write", true},
+		{http.MethodDelete, "/api/goals/GOAL-1/work", "goals.write", true},
 		{http.MethodPost, "/api/goals/GOAL-1", "", false},
 		{http.MethodPost, "/api/goals/GOAL-1/history", "", false},
+		{http.MethodDelete, "/api/goals/epics", "", false},
+		{http.MethodDelete, "/api/goals/status-note", "", false},
+		{http.MethodPost, "/api/goals/GOAL-1/work/extra", "", false},
 		{http.MethodPatch, "/api/goals", "", false},
 		{http.MethodPut, "/api/goals", "", false},
 		{http.MethodGet, "/api/goals/", "", false},
@@ -240,9 +245,20 @@ func TestGoalAgentKeyCeiling(t *testing.T) {
 		return w.Code, reason, w.Body.Bytes()
 	}
 	createBody := `{"title":"Ship the ceiling","project_id":"` + projectID + `"}`
+	workBody := `{"node_ids":["TKT-1"]}`
+	denied := func(method, path, idem, why string) {
+		t.Helper()
+		code, reason, _ := call(method, path, workBody, idem)
+		if code != 403 || reason != why || entered != 0 {
+			t.Fatalf("%s %s: status=%d reason=%s entered=%d, want 403 %s", method, path, code, reason, entered, why)
+		}
+	}
 	if code, reason, _ := call(http.MethodPost, "/api/goals", createBody, "goal-create-1"); code != 403 || reason != "missing_key_scope:goals.write" || entered != 0 || goalRows() != 0 {
 		t.Fatalf("create without scope: status=%d reason=%s entered=%d goals=%d", code, reason, entered, goalRows())
 	}
+	denied(http.MethodPost, "/api/goals/GOAL-1/work", "goal-link-1", "missing_key_scope:goals.write")
+	denied(http.MethodDelete, "/api/goals/GOAL-1/work", "goal-unlink-1", "missing_key_scope:goals.write")
+	denied(http.MethodDelete, "/api/goals/GOAL-1", "goal-delete-1", "missing_key_scope:goals.write")
 	if code, reason, _ := call(http.MethodGet, "/api/goals", "", ""); code != 403 || reason != "missing_key_scope:goals.read" || entered != 0 {
 		t.Fatalf("list without scope: status=%d reason=%s entered=%d", code, reason, entered)
 	}
@@ -277,6 +293,9 @@ func TestGoalAgentKeyCeiling(t *testing.T) {
 	if code, reason, _ := call(http.MethodGet, "/api/goals", "", ""); code != 403 || reason != "missing_role_permission" || entered != 0 {
 		t.Fatalf("list without project permission: status=%d reason=%s entered=%d", code, reason, entered)
 	}
+	denied(http.MethodPost, "/api/goals/GOAL-1/work", "goal-link-2", "missing_role_permission")
+	denied(http.MethodDelete, "/api/goals/GOAL-1/work", "goal-unlink-2", "missing_role_permission")
+	denied(http.MethodDelete, "/api/goals/GOAL-1", "goal-delete-2", "missing_role_permission")
 	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE role_bindings b SET role_id=r.id FROM roles r WHERE b.tenant_id=r.tenant_id AND b.principal_id=$1 AND r.key='admin'`, agentID)
 		return err
@@ -313,6 +332,29 @@ func TestGoalAgentKeyCeiling(t *testing.T) {
 	code, reason, raw = call(http.MethodGet, "/api/goals", "", "")
 	if code != 200 || reason != "" || entered != 1 || !bytes.Contains(raw, []byte(created.Key)) || !bytes.Contains(raw, []byte("Ship the ceiling")) {
 		t.Fatalf("granted list: status=%d reason=%s entered=%d", code, reason, entered)
+	}
+	var work struct {
+		Changed bool     `json:"changed"`
+		Delta   []string `json:"delta"`
+		NodeIDs []string `json:"node_ids"`
+	}
+	code, reason, raw = call(http.MethodPost, "/api/goals/"+created.Key+"/work", workBody, "goal-link-3")
+	if code != 200 || reason != "" || entered != 1 || json.Unmarshal(raw, &work) != nil || !work.Changed || len(work.Delta) != 1 || len(work.NodeIDs) != 1 || work.Delta[0] != work.NodeIDs[0] {
+		t.Fatalf("granted link: status=%d reason=%s entered=%d body=%s", code, reason, entered, raw)
+	}
+	code, reason, raw = call(http.MethodPost, "/api/goals/"+created.Key+"/work", workBody, "goal-link-4")
+	if code != 200 || reason != "" || entered != 1 || json.Unmarshal(raw, &work) != nil || work.Changed || len(work.Delta) != 0 || len(work.NodeIDs) != 1 {
+		t.Fatalf("repeat link: status=%d reason=%s entered=%d body=%s", code, reason, entered, raw)
+	}
+	code, reason, raw = call(http.MethodDelete, "/api/goals/"+created.Key+"/work", workBody, "goal-unlink-3")
+	if code != 200 || reason != "" || entered != 1 || json.Unmarshal(raw, &work) != nil || !work.Changed || len(work.Delta) != 1 || len(work.NodeIDs) != 0 {
+		t.Fatalf("granted unlink: status=%d reason=%s entered=%d body=%s", code, reason, entered, raw)
+	}
+	if code, reason, _ := call(http.MethodDelete, "/api/goals/"+created.Key, "", "goal-delete-3"); code != 200 || reason != "" || entered != 1 || goalRows() != 0 {
+		t.Fatalf("granted delete: status=%d reason=%s entered=%d goals=%d", code, reason, entered, goalRows())
+	}
+	if code, reason, body := call(http.MethodPost, "/api/goals/"+created.Key, createBody, "goal-post-existing"); code != 403 || reason != "" || entered != 0 || !bytes.Contains(body, []byte("agent key scope required")) {
+		t.Fatalf("post on an existing goal: status=%d reason=%s entered=%d", code, reason, entered)
 	}
 }
 

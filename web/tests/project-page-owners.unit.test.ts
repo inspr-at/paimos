@@ -48,7 +48,7 @@ function fixture() {
     collapsed: ref(new Set<string>()), creating: ref(false), me: ref({ id: 'person', name: 'Person' }),
     table: ref({ focusGrid: vi.fn(), scrollToRow: vi.fn() }), panel: ref(null), statusMenu: ref(null), assigneeMenu: ref(null),
     scrollRoot: ref(null), toolbarWrap: ref(null), vocabulary: { leaf: { name: 'Ticket' }, value: {}, load: vi.fn() },
-    queueSnapshot: ref(null), queue: { snapshots: {}, errors: {}, load: vi.fn() },
+    queueSnapshot: ref(null), queue: { snapshots: {}, errors: {}, load: vi.fn(), watch: () => () => {} },
     sectionPath: (section = 'tickets') => `/p/AEON/${section}`, ticketPath: (key: string) => `/p/AEON/${key}`, ticketSectionQuery: () => ({}),
     recovery: ref(null), recovering: ref(false), authorizedProject: ref(undefined),
     // AEON-1453: the page's view switches; their memory is lib/viewSwitch's, tested on its own.
@@ -224,7 +224,9 @@ it('keyboard keeps browser shortcuts native and submits selection through its ow
   vi.stubGlobal('HTMLElement', class {}); vi.stubGlobal('HTMLInputElement', class {})
   vi.stubGlobal('document', { querySelector: () => null, activeElement: null })
   const { state, data } = fixture(), selectAll = vi.fn()
-  const create = owner('useProjectKeyboard')
+  const create = owner('useProjectKeyboard', {
+    ensurePermissions: async () => 'known', permissionsKnown: () => true, scopeOwner: () => '',
+  })
   const keys = run(() => create(state, data, { panelItem: ref(null), trail: ref([]) }, { selectable: ref(true), selectAll }, {}, {}))
   const event = { key: 's', metaKey: true, preventDefault: vi.fn(), target: null }
   keys.keydown(event)

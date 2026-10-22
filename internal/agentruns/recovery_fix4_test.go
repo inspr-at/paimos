@@ -26,6 +26,7 @@ func measuredClaimQueue(t *testing.T, age string) (*fixture, []agentruns.Run, []
 	}).Mount(f.mux)
 	runs := []agentruns.Run{f.run(t, f.order(t, nil)), f.run(t, f.order(t, nil))}
 	ids := append(f.reserve(t, runs[0]), uuid())
+	f.legacyAccount(t, runs[0].ID)
 	var resource string
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `SELECT m.resource_id::text FROM account_readiness_memberships m JOIN agent_runs r ON r.account_id=m.account_id WHERE r.id=$1 ORDER BY m.resource_id LIMIT 1`, runs[0].ID).Scan(&resource); err != nil {

@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -54,6 +55,9 @@ func updateTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, identity, key 
 		goals[id] = n
 	}
 	target = goals[target.ID]
+	if in.Title.Set && target.Slug != GoalKind {
+		return out, invalid("title", "rename a release in its release settings")
+	}
 	hash, err := in.Digest()
 	if err != nil {
 		return out, err
@@ -87,6 +91,9 @@ func updateTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, identity, key 
 	}
 	pending := kindEvents(kindChanges)
 	before := cloneNode(target)
+	if in.Title.Value != nil {
+		target.Title = strings.TrimSpace(*in.Title.Value)
+	}
 	setETA(&target, in.ETA, p, now)
 	setField(target.Fields, "steps", in.Steps)
 	if in.ProgressOverride.Set {
@@ -120,7 +127,7 @@ func updateTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, identity, key 
 				return out, err
 			}
 		}
-		if !reflect.DeepEqual(original.Fields, n.Fields) {
+		if !reflect.DeepEqual(original.Fields, n.Fields) || original.Title != n.Title {
 			if err := saveNode(ctx, tx, n); err != nil {
 				return out, err
 			}
@@ -129,6 +136,9 @@ func updateTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, identity, key 
 	target = goals[target.ID]
 	if !reflect.DeepEqual(ownGoalFields(before), ownGoalFields(target)) {
 		pending = append(pending, events.Change{NodeID: &target.ID, Type: "goal.updated", Before: ownGoalFields(before), After: ownGoalFields(target)})
+	}
+	if before.Title != target.Title {
+		pending = append(pending, events.Change{NodeID: &target.ID, Type: "goal.renamed", Before: map[string]any{"title": before.Title}, After: map[string]any{"title": target.Title}})
 	}
 	if !reflect.DeepEqual(etaSnapshot(before), etaSnapshot(target)) {
 		pending = append(pending, events.Change{NodeID: &target.ID, Type: "goal.eta_changed", Before: etaSnapshot(before), After: etaSnapshot(target)})
@@ -235,6 +245,10 @@ func mutateItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, target stri
 		}
 		children[id] = map[string]storedNode{}
 		for _, n := range rows {
+			// People's links (AEON-1618) are out of reach of agent item edits.
+			if isLinked(n) {
+				continue
+			}
 			children[id][fieldString(n, "outcome_ref")] = n
 		}
 	}

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 )
 
@@ -146,7 +147,7 @@ func TestAttachLinuxIdentitySkipsAncestorPaths(t *testing.T) {
 }
 
 func TestAttachLinuxExitedProcessIsKernelConfirmed(t *testing.T) {
-	cmd := exec.Command("/bin/true")
+	cmd := exec.Command(fixturebin.Require(t, "true"))
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
