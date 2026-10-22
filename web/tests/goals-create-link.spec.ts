@@ -482,7 +482,13 @@ test('a Lands day reads as a day in the row, its label and its history; a goal w
     const progress = row.locator('.goal-progress')
     await expect(progress.locator('.of')).toHaveText('No work linked yet')
     await expect(progress.locator('.pct')).toHaveText('')
-    await expect(progress).not.toContainText('%')
+    // Nothing shown or announced carries a percent: the signal slot is empty, and its
+    // sizer (the longest signal, reserving the width, r5 rule 4) is invisible and aria-hidden.
+    await expect(progress.locator('.signal .sg-t')).toHaveText('')
+    await expect(progress.locator('.signal .sizer')).toBeHidden()
+    await expect(progress.locator('.signal .sizer')).toHaveAttribute('aria-hidden', 'true')
+    expect(await progress.innerText()).not.toContain('%')
+    expect(await progress.ariaSnapshot()).not.toContain('%')
     await expect(progress.locator('.bar > i')).toHaveCount(0)
     await shot(page, info, `no-work-${width}`)
     const before = (await row.boundingBox())!.height
