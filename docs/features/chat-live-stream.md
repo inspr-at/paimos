@@ -55,9 +55,10 @@ visible-message read-marker union supplies person read evidence. Final-message,
 receipt and read-marker notifications contain no message body; clients fetch
 the durable outbox/history to reconcile them.
 
-These routes preserve the disabled-by-default chat gate. They do not launch,
-resume, steer, stop or automatically resend an agent's work. No schema
-migration or release version change is required for this server slice.
+These routes preserve the disabled-by-default chat gate. Selected input timing
+applies only inside an already-owned session; it never launches, resumes,
+stops or automatically resends an agent's work. No schema migration or release
+version change is required for this server slice.
 
 ## Daemon relay (AEON-1074)
 

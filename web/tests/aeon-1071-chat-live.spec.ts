@@ -536,7 +536,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       await expect(panel.locator('.replying')).toContainText('Final: the release checks pass.')
       await expect(steer).toHaveText('Send now')
       await expect(steer).toBeEnabled()
-      await expect(send).toHaveText('After this turn')
+      await expect(send).toHaveAccessibleName('After this turn')
     }
     await reply('Bitte die vollständige Freigabeprüfung nach dieser Antwortrunde berücksichtigen.')
     const guard = await controlStability(page, { composer, send, steer, stop })

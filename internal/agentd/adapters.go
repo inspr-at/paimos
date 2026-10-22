@@ -1150,9 +1150,11 @@ func (a *ClaudeAdapter) startBridge(ctx context.Context, r StartRequest, observe
 				p.chatDropped.Add(1)
 			}
 			for _, update := range updates {
-				if update.valid() {
-					observe(AdapterEvent{Chat: &update, InputID: frame.CorrelationID})
+				if !update.valid() {
+					p.chatDropped.Add(1)
+					continue
 				}
+				observe(AdapterEvent{Chat: &update, InputID: frame.CorrelationID})
 			}
 		}
 		switch frame.Kind {

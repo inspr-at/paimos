@@ -948,6 +948,38 @@ func TestSupervisorRelaysOwnedChatThroughJournaledInput(t *testing.T) {
 // switched off, disables only the relay without a second line.
 func TestNewAgentdAgainstServerWithoutRelayKeepsRunsAndLogsOnce(t *testing.T) {
 	logs := captureLogs(t)
+	// A pre-timing server may already implement chat with strict request DTOs.
+	// Its omitted negotiation marker must prevent include_timing on the wire.
+	strict := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/chat-deliveries/binding/current" {
+			_, _ = w.Write([]byte(`{"contract":"chat-live-v1","conversation_id":"conversation","binding_epoch":"1"}`))
+			return
+		}
+		var legacy struct {
+			ConversationID string `json:"conversation_id"`
+			SessionID      string `json:"session_id"`
+			BindingEpoch   string `json:"binding_epoch"`
+			After          string `json:"after,omitempty"`
+		}
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&legacy); err != nil {
+			t.Error("new daemon sent an unknown field to a strict older server", err)
+			http.Error(w, "unknown field", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"contract":"chat-live-v1","items":[],"next_cursor":null}`))
+	}))
+	t.Cleanup(strict.Close)
+	compat := NewRemote(strict.URL, "aeon_fixture_secret")
+	bound, err := compat.CurrentChatBinding(t.Context(), HarnessSession{ID: "session"})
+	if err != nil || bound.InputTiming != "" {
+		t.Fatalf("older binding negotiation: %+v %v", bound, err)
+	}
+	if _, err := compat.ChatInputs(t.Context(), HarnessSession{ID: "session"}, bound, "cursor"); err != nil {
+		t.Fatal("older chat stopped accepting input", err)
+	}
 	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -1191,6 +1223,9 @@ func TestExactTurnHarnessRelaysAndSettles(t *testing.T) {
 	entry := s.runs["run"]
 	if entry.relay == nil {
 		t.Fatal("Codex run without relay")
+	}
+	if entry.chatTiming {
+		t.Fatal("custom adapter inherited native chat timing from the Codex family name")
 	}
 	waitCall(t, relay.calls, "lookup")
 	state := func(st string) {
