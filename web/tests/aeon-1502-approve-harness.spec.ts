@@ -276,6 +276,20 @@ test("AEON-1502 first pairing 1280x800 en and de: Pair or Deny with the harness 
     expect(fit.bottom).toBeLessThanOrEqual(fit.viewport)
     expect(await sentences(review)).toEqual([copy.factsOff, copy.role])
     expect(await overflowing(review)).toEqual([])
+    const boxes = review.locator('.checklist input[type=checkbox]')
+    for (const box of await boxes.all()) await expect(box).toBeInViewport({ ratio: 1 })
+    const checklistGuard = await controlStability(page, {
+      checklist: review.locator('.checklist'),
+      cursor: boxes.first(), codex: boxes.last(),
+      pair: review.getByRole('button', { name: copy.pairButton, exact: true }),
+      deny: review.getByRole('button', { name: copy.deny, exact: true }),
+      details: review.locator('details.more > summary'),
+    })
+    await checklistGuard.check(() => boxes.last().uncheck())
+    await expect(boxes.last()).not.toBeChecked()
+    await checklistGuard.check(() => boxes.last().check())
+    await expect(boxes.last()).toBeChecked()
+    checklistGuard.done()
     await shot(page, testInfo, `first-pairing-${language}`)
     await detailsHold(page, review, copy.pairButton)
     record(`first pairing ${language}`, { viewport: '1280x800', fit, sentences: 2, detailsMovementPx: 0 })
