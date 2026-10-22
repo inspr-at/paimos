@@ -259,6 +259,7 @@ defineExpose({ open })
       </header>
 
       <template v-if="!run">
+        <div class="launch-body">
         <fieldset :disabled="busy" class="launch-fields">
           <legend class="sr-only">Run setup</legend>
           <div class="ticket-field">
@@ -344,10 +345,12 @@ defineExpose({ open })
         <div v-if="catalogGap === 'failed' || catalogGap === 'forbidden'" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
         <div v-if="error" class="error" role="alert"><p>{{ error }}</p><button v-if="grantStale" type="button" class="btn sm" @click="loadCatalog">Refresh catalog</button></div>
         <p v-if="!permitted" class="note">Starting an agent requires work-order write and run-create permission.</p>
+        </div>
         <footer><button type="button" class="btn" :disabled="busy" @click="close">Cancel</button><button v-if="mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">Run now once</button><button type="submit" class="btn primary" :disabled="!canSubmit"><AppIcon :name="busy ? 'clock' : 'arrow'" :size="15" />{{ busy ? 'Queueing…' : 'Queue run' }}</button></footer>
       </template>
 
       <template v-else>
+        <div class="launch-body">
         <div class="run-result" data-result tabindex="-1" role="status">
           <span class="result-icon"><AppIcon :name="managed ? 'check' : 'clock'" :size="24" /></span>
           <p class="eyebrow">{{ reused ? 'Existing run' : 'Run created' }}</p>
@@ -378,6 +381,7 @@ defineExpose({ open })
         </div>
         <button v-if="mayRunNow && run.status === 'queued' && run.wait?.run_now_allowed" type="button" class="btn" :disabled="busy" @click="overrideQueued">Run now once</button>
         <p v-if="checkError" class="error" role="alert">{{ checkError }}</p>
+        </div>
         <footer class="result-footer"><button type="button" class="btn ghost" :disabled="checking" @click="refresh"><AppIcon name="refresh" :size="14" />Refresh status</button><button type="button" class="btn" :disabled="busy" @click="close">Close</button><RouterLink class="btn primary" :to="managed ? `/agents/${managed.id}` : '/agents'" @click="close">{{ managed ? 'Open session' : 'Go to Agents' }}<AppIcon name="arrow" :size="15" /></RouterLink></footer>
       </template>
     </form>
@@ -442,13 +446,14 @@ footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
 .pair.pi-bound { grid-template-columns: minmax(0, 1fr) 130px; }
 .field.pinned-model { font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; }
 @media (max-width: 600px) {
-  .launch-dialog { max-height: calc(100dvh - 16px); width: calc(100vw - 16px); border-radius: 18px; }
-  .launch-card { padding: 20px 16px; }
+  .launch-dialog { width: 100%; max-width: none; height: 100dvh; max-height: none; margin: 0; border: 0; border-radius: 0; overflow: hidden; scrollbar-gutter: auto; }
+  .launch-card { height: 100%; display: flex; flex-direction: column; overflow: hidden; padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  .launch-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
   .pair, .pair.pi-bound { grid-template-columns: minmax(0, 1fr); gap: 14px; }
-  .launch-head { margin-bottom: 14px; }
+  .launch-head { flex-shrink: 0; margin-bottom: 14px; }
   .launch-fields { gap: 14px; }
   .dispatch-status { margin-top: 16px; }
-  footer { margin-top: 18px; padding-top: 16px; }
+  footer { flex-shrink: 0; margin-top: 18px; padding-top: 16px; }
   .launch-head .icon-btn { width: 44px; height: 44px; }
   .chosen-ticket { flex-wrap: wrap; }
   .chosen-ticket .btn { min-height: 44px; }
