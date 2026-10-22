@@ -17052,6 +17052,8 @@
     ,
     {"kind":"node","file":"tests/header-menus.test.ts","name":"P02 rendered app menus react to current authority, person kind and workspace membership","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/header-menus.test.ts","name":"P02 rendered help waits for its recipient and reuses a refused feedback identity until confirmed","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/header-menus.test.ts","name":"feedback says where it was written, then the words","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/header-menus.test.ts","name":"inbox hooks: one user-scope command per harness and the guide section in this repository","tier":"GATED-FULL"}
