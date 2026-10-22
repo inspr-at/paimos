@@ -16,11 +16,11 @@ beforeEach(() => {
   router = sourceModule<{ router: Router }>('router.ts', {
     './lib/projectSettings': sourceModule('lib/projectSettings.ts', {}),
     'vue-router': { createWebHistory: createMemoryHistory, createRouter: (options: Parameters<typeof createRouter>[0]) => createRouter({ ...options, routes: views(options.routes) }) },
-    './lib/brand': { setPageTitle() {} }, './stores/projects': {}, './stores/session': { useSession: () => session }, './stores/workVocabulary': { useWorkVocabulary: () => ({ load: loadVocabulary }) },
+    './lib/brand': { setPageTitle() {} }, './stores/projects': { useProjects: () => ({ load: async () => {}, byId: (id: string) => id === 'p-pharos' ? { routeKey: 'PHAROS' } : null }) }, './stores/session': { useSession: () => session }, './stores/workVocabulary': { useWorkVocabulary: () => ({ load: loadVocabulary }) },
     './stores/statusNames': { useStatusNames: () => ({ load: async () => {} }) },
     './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': {}, './lib/confirm': { settleConfirm },
     './lib/attachLink': { hasAttachFragment: () => false, announceAttachCode() {} }, './lib/importDraft': { carriesDraft: () => false }, './lib/identityScope': {}, './lib/signInReturn': {},
-    './lib/knowledge': {}, './components/work/projectNavigation': {}, './lib/ticketPeek': {},
+    './lib/knowledge': {}, './components/work/projectNavigation': sourceModule('components/work/projectNavigation.ts', {}), './lib/ticketPeek': {},
     './views/ProjectsView.vue': { default: empty }, './views/SignInView.vue': { default: empty }, './views/NotFoundView.vue': { default: empty },
   }).router
 })
@@ -102,4 +102,21 @@ it('Kinds of work resolves directly to the Settings route and retains definition
   expect(router.currentRoute.value.params.section).toBe('kinds')
   expect(router.currentRoute.value.meta.title).toBe('Settings')
   expect(router.currentRoute.value.hash).toBe('#kind-security')
+})
+
+it('retired Flow routes resolve to tickets even when an old preference opted in', async () => {
+  vi.stubGlobal('localStorage', { getItem: () => JSON.stringify({ show_flow_controls: true }) })
+  for (const url of [
+    '/p/PHAROS/journey?stage=plan&walk=PHAROS-11',
+    '/p/PHAROS?view=journey&stage=build',
+    '/p/PHAROS/PHAROS-11?section=journey',
+    '/projects/p-pharos/journey/plan',
+  ]) {
+    await router.push(url)
+    expect(router.currentRoute.value.path, url).not.toContain('/journey')
+    expect(router.currentRoute.value.query, url).not.toHaveProperty('stage')
+    expect(router.currentRoute.value.query, url).not.toHaveProperty('walk')
+    expect(router.currentRoute.value.query, url).not.toHaveProperty('view', 'journey')
+    expect(router.currentRoute.value.query, url).not.toHaveProperty('section', 'journey')
+  }
 })

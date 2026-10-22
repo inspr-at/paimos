@@ -18352,6 +18352,8 @@
     ,
     {"kind":"vitest","file":"tests/authz.unit.test.ts","name":"can() > drops revoked access after an access change or failed refresh","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/authz.unit.test.ts","name":"can() > effective grants decide actions independently of admin, viewer and guest role labels","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/authz.unit.test.ts","name":"can() > fails closed until the server returns effective grants","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/authz.unit.test.ts","name":"can() > ignores an answer started before sign-out","tier":"ESSENTIAL"}
@@ -19764,6 +19766,14 @@
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"routes and families > mirrors the server's family rule, so an unknown OpenRouter family is allowed for pi only through \"unknown\"","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"routes and families > mirrors the server's family rule, so an unknown OpenRouter family is allowed for pi only through \\\"unknown\\\"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"saved in-app provider configuration > a held provider save cannot acknowledge settings for a different person","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"saved in-app provider configuration > refused connection tests and conflicting writes never claim success or discard the draft","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"saved in-app provider configuration > tests only saved settings and preserves explicit feature choices, revision and key intent","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > calls a model by one name in the picker, the registry row, the tray and the sheet","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > folds Cursor's per-level ids into one route: Grok 4.7 runs through Grok and Cursor, its fast variant is its own line","tier":"GATED-FULL"}
@@ -19781,6 +19791,8 @@
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > says token budgets once and names a level as the sheet does","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > says where each fact came from, and \"unknown\" (null) when nobody reported it; only hand-added routes are editable","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > says where each fact came from, and \\\"unknown\\\" (null) when nobody reported it; only hand-added routes are editable","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > shows about 35 routes as at most 20 rows, providers in order, with the count above the list","tier":"GATED-FULL"}
     ,
@@ -20910,9 +20922,17 @@
     ,
     {"kind":"vitest","file":"tests/sessionRow.unit.test.ts","name":"search reads the model as the row names it, and keeps the raw ids","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"%s retains the same child, draft and one-time link on expiry, with writes inert","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state (%j)","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-a\"},\"principal\":{\"id\":\"person-b\"}})","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-b\"},\"principal\":{\"id\":\"person-a\"}})","tags":[],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a failed numeric Undo retains the confirmed value and draft, and retry uses that field’s revision","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from $from rings and takes focus: $focused","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from a control rings and takes focus: false","tier":"GATED-FULL"}
     ,
@@ -20930,7 +20950,11 @@
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"access retains the same child, draft and one-time link on expiry, with writes inert","tags":[],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"agent fields keep independent revisions when one held save conflicts and another succeeds","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"an incoming owner clears frozen Access before fresh permissions arrive","tags":[],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"legacy #%s highlights its consolidated field until the arrival expires","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"legacy #agent-activity highlights its consolidated field until the arrival expires","tier":"GATED-FULL"}
     ,
@@ -20953,6 +20977,8 @@
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"a trailing slash on a legacy Workspace bookmark still redirects","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"current cards and unknown bookmarks keep their section","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #%s entry keeps the query and opens %s","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #agent-activity entry keeps the query and opens agents","tier":"GATED-FULL"}
     ,
@@ -20984,11 +21010,17 @@
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #work-vocabulary entry keeps the query and opens vocabulary","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Agents #%s bookmark opens catalog freshness and keeps its context","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Agents #model-refresh bookmark opens catalog freshness and keeps its context","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Agents #models bookmark opens catalog freshness and keeps its context","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Flow routes resolve to tickets even when an old preference opted in","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired briefing bookmarks open Agents and keep request links","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #%s opens %s","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #agent-activity opens agents","tier":"GATED-FULL"}
     ,
