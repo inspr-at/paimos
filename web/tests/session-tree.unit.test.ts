@@ -56,6 +56,9 @@ describe('session tree rows', () => {
     const views = [view('lead', 'working', null), view('a', 'working', 'lead'), view('a1x', 'problem', 'a'), view('solo', 'working', null)]
     expect(jumpTarget(views, 'problem')).toEqual({ id: 'a1x', ancestors: ['lead', 'a'] })
     expect(jumpTarget([view('lost', 'unresponsive', 'lead'), view('lead', 'working', null)], 'problem')).toEqual({ id: 'lost', ancestors: ['lead'] })
+    const cross = { session: { id: 'cross-project', parent_harness_session_id: null, cross_project_parent_harness_session_id: 'a' }, status: { state: 'problem' } }
+    expect(jumpTarget([views[0]!, views[1]!, cross], 'problem')).toEqual({ id: 'cross-project', ancestors: ['lead', 'a'] })
+    expect(jumpTarget([cross], 'problem')).toEqual({ id: 'cross-project', ancestors: [] })
     expect(jumpTarget(views, 'paused')).toBeNull()
     // A fold drops the problem from the rendered rows, which is why searching the page misses it.
     const folded = treeRows(tree(), { children: all, isOpen: branch => branch.view.session.id !== 'a' })

@@ -4,7 +4,7 @@
 // fold state) and what a folded parent says about the sessions under it. Free of
 // Vue so it can be unit tested; the list decides which children a parent offers
 // and which parents are open.
-import type { SessionBranch, SessionStatus } from '../../lib/agentState'
+import { sessionParent, type SessionBranch, type SessionStatus } from '../../lib/agentState.ts'
 
 type Viewish = { session: { id: string }; status: SessionStatus }
 
@@ -98,14 +98,14 @@ export function countedLive<T extends { session: { stopped_at?: string | null; p
 // that have to open before its row exists. A problem includes a lost heartbeat
 // and is chosen from the footer's live population, so an earlier ended failure
 // is not the target. Ancestors are the parents that are in this list, root first.
-export function jumpTarget<T extends { session: { id: string; parent_harness_session_id?: string | null; stopped_at?: string | null; phase?: string }; status: { state: string } }>(views: readonly T[], state: string): { id: string; ancestors: string[] } | null {
+export function jumpTarget<T extends { session: { id: string; parent_harness_session_id?: string | null; cross_project_parent_harness_session_id?: string | null; stopped_at?: string | null; phase?: string }; status: { state: string } }>(views: readonly T[], state: string): { id: string; ancestors: string[] } | null {
   const states = state === 'problem' ? ['problem', 'unresponsive'] : [state]
   const counts = (view: T) => state !== 'problem' || countedLive(view)
   const byId = new Map(views.map(view => [view.session.id, view]))
   const children = new Map<string, T[]>()
   const roots: T[] = []
   for (const view of views) {
-    const parent = view.session.parent_harness_session_id
+    const parent = sessionParent(view.session)
     if (parent && parent !== view.session.id && byId.has(parent)) {
       const list = children.get(parent)
       if (list) list.push(view)
@@ -115,11 +115,11 @@ export function jumpTarget<T extends { session: { id: string; parent_harness_ses
   const ancestorsOf = (view: T) => {
     const chain: string[] = []
     const seen = new Set([view.session.id])
-    let parent = view.session.parent_harness_session_id
+    let parent = sessionParent(view.session)
     while (parent && byId.has(parent) && !seen.has(parent)) {
       chain.push(parent)
       seen.add(parent)
-      parent = byId.get(parent)?.session.parent_harness_session_id
+      parent = sessionParent(byId.get(parent)!.session)
     }
     return chain.reverse()
   }

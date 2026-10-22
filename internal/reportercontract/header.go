@@ -25,7 +25,7 @@ const (
 	Me              = "me/1.4"
 	BaselineBatches = "baseline-batches/1.0"
 	Approvals       = "approvals/1.1"
-	HarnessSession  = "harness-session/3.3"
+	HarnessSession  = "harness-session/3.4"
 	ProjectLead     = "project-lead/1.1"
 )
 

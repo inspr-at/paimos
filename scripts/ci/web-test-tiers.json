@@ -7270,6 +7270,8 @@
     ,
     {"kind":"browser","file":"tests/agents-head.spec.ts","name":"one head line; a count filters Sessions, keeps ancestors as context and clears with × or Esc at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents-hierarchy.spec.ts","name":"AEON-1360 cross-project children nest with their own work and survive their project filter once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agents-hierarchy.spec.ts","name":"a stopped lead with a live grandchild stays visible and direct worker links open their ancestors","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-hierarchy.spec.ts","name":"nested workers pass axe and fit a narrow viewport in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -16169,6 +16171,8 @@
     {"kind":"node","file":"tests/agentState.test.ts","name":"session states share words and shapes with project indicators","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agentState.test.ts","name":"the server’s risk wins over the local rule; runs use the server duration","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/agentState.test.ts","name":"verified cross-project lineage nests once and leaves an unavailable parent as a root","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/agentState.test.ts","name":"worker families sort working and starting by start time, then idle, then stopped; heartbeats never decide","tier":"GATED-FULL"}
     ,
