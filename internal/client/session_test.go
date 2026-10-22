@@ -52,7 +52,7 @@ func TestAgentAuthenticationRemainsBearerOnly(t *testing.T) {
 // Go would copy Authorization automatically.
 func TestWorkerProofHeadersRefuseRedirects(t *testing.T) {
 	const lease = "synthetic-only-proof-padding-000000"
-	for _, name := range []string{"scheme", "legacy"} {
+	for _, name := range []string{"scheme", "legacy", "capability"} {
 		t.Run(name, func(t *testing.T) {
 			redirected := false
 			source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +64,10 @@ func TestWorkerProofHeadersRefuseRedirects(t *testing.T) {
 				case "scheme":
 					if r.Header.Get("Authorization") != workerlease.Value("synthetic-agent", lease) || r.Header.Get("Proxy-Authorization") != "" || r.Header.Get(workerlease.LegacyHeader) != "" {
 						t.Error("worker proof left Authorization")
+					}
+				case "capability":
+					if r.Header.Get(workerlease.RunCapabilityHeader) != lease || r.Header.Get("Authorization") != "Bearer synthetic-agent" {
+						t.Error("run proof was lost")
 					}
 				default:
 					if r.Header.Get("Authorization") != "Bearer synthetic-agent" || r.Header.Get(workerlease.LegacyHeader) != lease {
@@ -80,6 +84,9 @@ func TestWorkerProofHeadersRefuseRedirects(t *testing.T) {
 			if name == "scheme" {
 				headers = map[string]string{"Authorization": workerlease.Value("synthetic-agent", lease)}
 			}
+			if name == "capability" {
+				headers = map[string]string{workerlease.RunCapabilityHeader: lease}
+			}
 			if err := c.DoWithHeaders(t.Context(), http.MethodPost, "/worker", nil, nil, headers); err == nil {
 				t.Fatal("redirect reported success")
 			}
@@ -93,7 +100,7 @@ func TestWorkerProofHeadersRefuseRedirects(t *testing.T) {
 // Risk: a reverse proxy reflects private proof into an error that agentd logs.
 func TestWorkerProofHeadersRedactReflectedFailures(t *testing.T) {
 	lease := strings.Repeat("synthetic-7b", 4)
-	for _, name := range []string{"scheme", "legacy"} {
+	for _, name := range []string{"scheme", "legacy", "capability"} {
 		for _, escaped := range []bool{false, true} {
 			t.Run(name+map[bool]string{false: "/plain", true: "/escaped"}[escaped], func(t *testing.T) {
 				headers := map[string]string{workerlease.LegacyHeader: lease}
@@ -101,6 +108,10 @@ func TestWorkerProofHeadersRedactReflectedFailures(t *testing.T) {
 				if name == "scheme" {
 					headers = map[string]string{"Authorization": workerlease.Value("synthetic-agent", lease)}
 					reflected = headers["Authorization"]
+				}
+				if name == "capability" {
+					headers = map[string]string{workerlease.RunCapabilityHeader: lease}
+					reflected = lease
 				}
 				source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.WriteHeader(http.StatusForbidden)

@@ -82,6 +82,9 @@ func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 }
 
 func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal, runID, daemonID string, accountIDs []string, estimates map[string]int64) (RouteResult, error) {
+	if p.RunID != "" && (p.RunID != runID || p.RunDaemonID != daemonID) {
+		return RouteResult{}, fail(403, "run capability target mismatch")
+	}
 	if err := agentpairing.Lock(ctx, tx); err != nil {
 		return RouteResult{}, err
 	}

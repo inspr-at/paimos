@@ -647,6 +647,9 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   assert.ok(gated.some(spec => spec.file === projectDefinitions.file), 'Project Definitions must remain gated')
   // AEON-1317 adds workspace-default decisions after the same historical baseline.
   // AEON-1528 adds the resize, locale and post-decision remeasurement flow.
+  // AEON-1609 keeps the sixth flow and requires English for a de-AT profile.
+  // The German P3 copy title is gone because that surface no longer switches
+  // language. Singular notices stay inside the English flow. The set stays exact.
   // Retain the original budget and charge only this complete-file scheduling cost.
   const definitionDecisions = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/definitions-p3.spec.ts')
   assert.ok(definitionDecisions && definitionDecisions.listedTests === 6, 'All six workspace definition decision and remeasurement flows must remain declared')
@@ -654,7 +657,7 @@ test('ungated groups stay declared and checked but only run with --all', () => {
     '-c', 'playwright.ui.config.ts', definitionDecisions.file, '--list', '--reporter=json'], { cwd: webRoot })), 'playwright.ui.config.ts')
   assert.deepEqual(definitionCases.map(row => row.name).sort(), [
     'AEON-1317 Desk opens waiting definitions and resolves only after the last admin decision',
-    'AEON-1317 German definitions copy covers every P3 string and singular notices',
+    'AEON-1609 a de-AT browser and German profile keep Definitions in English',
     'AEON-1317 default decisions preserve every row notice copy and focus in all viewports',
     'AEON-1317 failed stale and identity-bound decisions never claim success',
     'AEON-1317 workspace defaults differences empty inherited and viewer match the approved states',

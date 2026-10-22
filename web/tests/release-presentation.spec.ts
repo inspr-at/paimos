@@ -99,17 +99,17 @@ test('without a presentation: the blocks lead, and a release without them is ver
   await expect(d.getByRole('region', { name: 'Other, 1' })).toContainText('Retry a busy BEGIN in release acceptance transactions')
 })
 
-test('a German profile reads the German presentation and pills, with English where German is empty', async ({ page }) => {
+test('a German profile reads the presentation and pills in English', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 })
   await open(page, 0, 'de-AT')
   const d = detail(page)
-  await expect(d.locator('.kicker')).toHaveText('Releases mit Namen')
-  await expect(d.locator('.kicker')).toHaveAttribute('lang', 'de')
-  await expect(d.locator('.summary .headline')).toHaveText('Jedes Release sagt, worum es geht.')
+  await expect(d.locator('.kicker')).toHaveText('Releases with a name')
+  await expect(d.locator('.kicker')).toHaveAttribute('lang', 'en')
+  await expect(d.locator('.summary .headline')).toHaveText('Every release says what it is about.')
   const features = d.getByRole('region', { name: 'Features, 3' })
-  await expect(features.locator('.pill-title').first()).toHaveText('Benannte Releases')
-  await expect(features.locator('.benefit').first()).toHaveAttribute('lang', 'de')
-  await expect(rows(page).first().locator('.headline')).toHaveText('Releases mit Namen')
+  await expect(features.locator('.pill-title').first()).toHaveText('Named releases')
+  await expect(features.locator('.benefit').first()).toHaveAttribute('lang', 'en')
+  await expect(rows(page).first().locator('.headline')).toHaveText('Releases with a name')
 })
 
 test('search finds a release by its theme and marks it', async ({ page }) => {

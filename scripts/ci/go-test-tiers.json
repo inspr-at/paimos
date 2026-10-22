@@ -1948,6 +1948,22 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPiVerificationBlocksBeforeAnyVendorProcess","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesBuilderUsesOnlyCommittedHEADWithoutOrigin","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesLaunchRefusesBeforeAdapter","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesPackGoldenFloorAndDatabaseLayers","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesPackMeasuredSizeAndRefusalCodes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesReviewAndVerificationUseTrustedBase","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesTaskAndMessageAuthorLabels","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesVerificationProbeKeepsImmutableTask","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesWithoutCheckoutRequirePin","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestPollContextErrorCausesDoNotConsumePendingProbe","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPollDiagnosticRemindersEveryFifteenMinutes","tier":"GATED-FULL"}
@@ -1959,6 +1975,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestPollDiagnosticsSuppressUnchangedPolls","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPostClaimPreparationFailureSettlesWithoutLaunch","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPrepareRunContentUsesOnlyItsServerCapability","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestProbeDiagnosticReachesLifecycleJSONAndClearsOnRecovery","tier":"GATED-FULL"}
     ,
@@ -2086,6 +2104,14 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineWorkspacesSeparateAndRetainWriters","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRulesDeliveryHashMatchesFakeBridgeBytes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRulesDeliveryStartRunAcknowledgesAfterHarnessStart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunChildLaunchDropsTransportCredentials","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunChildrenScrubTransportEnvironment","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRunCommitsEarlierReproductions","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRunCommitsFastForwardOntoUpstream","tier":"GATED-FULL"}
@@ -2163,6 +2189,10 @@
     {"kind":"go","package":"internal/agentd","name":"TestSlowManagedControlCannotRestartBudgetAfterLock","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStartRunBudgetExits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunCleanupProcessOwnership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunCleanupRetainsSingleSettlementOnDeliveryFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStartRunContinuationExits","tier":"ESSENTIAL"}
     ,
@@ -2784,6 +2814,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestRemoveRevokedComputerArchivesItAndItsAccounts","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestRunCapabilitySeparatesTransportAndBindsContent","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestSharedFenceCallerInventory","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestSharedFencePrimitiveOrder","tier":"GATED-FULL"}
@@ -2998,6 +3030,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRoutinePreparationPreservesAuthorityCriteriaAndPickup","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRoutineUnresolvedRunPersonManualAndSchedulerAudits","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunActingPersonIsExplicitAndWriteOnce","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunAndQueueAccountContextChecks","tier":"ESSENTIAL"}
@@ -3009,6 +3043,12 @@
     {"kind":"go","package":"internal/agentruns","name":"TestRunHistoryPagingFiltersAndTelemetry","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunNowIsPersonOnlyAuditedAndRunScoped","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunPersonFinalClaimCeiling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunPersonRecoveryAndChildInheritServerRun","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunPersonStartPathSourcesAndUnresolvedRefusal","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunRowVersionGrowsInTheTransactionThatChangesTheRow","tier":"GATED-FULL"}
     ,
@@ -3806,6 +3846,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestAuthenticationCanaryUsesAuthAdmissionWithoutRenewal","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestBareTransportPersonControlKeepsPairingCeiling","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestBootstrapAdminRequiresASCIIMailboxMatch","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestBootstrapCallbackRequiresVerifiedEmail","tier":"GATED-FULL"}
@@ -4057,6 +4099,8 @@
     {"kind":"go","package":"internal/auth","name":"TestRotationWithoutWorkspaceBindingNeverCreatesRole","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestRulesAgentRouteCeiling","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestRulesDeliveryAgentRouteCeiling","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestRulesReceiptAgentRouteCeiling","tier":"GATED-FULL"}
     ,
@@ -5886,6 +5930,8 @@
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestReviewStoresLoosenedResidencyLockTrace","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/crossreview","name":"TestReviewUnresolvedRunPersonCommitsOnlyRefusal","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/crossreview","name":"TestStaleBindingPostsErrorAndRetriesUntilRecorded","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestStatusStateRequiresAnOpenGate","tier":"GATED-FULL"}
@@ -6828,6 +6874,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalHandedOverReadAndConflict","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalHideForMePerPersonTenantAndKeys","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalHistoryCancellationReturnsTooLarge","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalHistoryIgnoresUnrelatedEvents","tier":"ESSENTIAL"}
@@ -7170,6 +7218,10 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestManagedForceStopHumanConfirmationAndGenerationFences","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestManagedPinnedContextDefaultDoctrineSelectsKernels","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestManagedPinnedContextRefusesMissingAndOversizedPins","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestManagedRegistrationCopiesDispatchPlacementAfterPreferencesChange","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestManagedRulesRespectRequestAndRegisteredCeilings","tier":"GATED-FULL"}
@@ -7193,6 +7245,10 @@
     {"kind":"go","package":"internal/harness","name":"TestOrdinaryEndpointPreservesNarrowedCallerAndOwner","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestOwnedStopCapabilityKeepsUnmanagedControlFence","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestPairedAttachedHookNotificationsCeiling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestPairedAttachedHookTransportCeiling","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestPauseAllAcrossProjectsAndLongPausedHistory","tier":"GATED-FULL"}
     ,
@@ -7336,6 +7392,16 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestRulesClientReportsAreOptionalLeaseBoundAndDowngradeSafe","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestRulesDeliveryAcknowledgementTypeAndLegacyReceipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestRulesDeliveryRejectsExpiredEvidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestRulesDeliveryRejectsForeignEvidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestRulesDeliveryRejectsReboundEvidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestRulesDeliveryRejectsTamperedEvidence","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestRulesReceiptAppendCASPreservesInstructionProvenance","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestRulesReceiptBoundedHistoryAndOldReplay","tier":"GATED-FULL"}
@@ -7353,6 +7419,8 @@
     {"kind":"go","package":"internal/harness","name":"TestRulesReceiptRejectsUnboundedOrAuthorityClaims","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestRunKindsRegisterBeatAndAggregate","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestRunPersonRevocationKeepsOnlyOwnedSafetyControls","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestRunningWrapUpUsesItsRemainingLevelBudget","tier":"GATED-FULL"}
     ,
@@ -10364,6 +10432,8 @@
     ,
     {"kind":"go","package":"internal/rules","name":"TestLostAcknowledgementOfOtherWritesIsUnknown","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/rules","name":"TestManagedPinnedFilesKeepDatabaseLayers","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/rules","name":"TestMarkStaleKeepsBundleAndRejectsTamper","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rules","name":"TestMergeAmbiguityIsolationAndSelectors","tier":"GATED-FULL"}
@@ -11569,6 +11639,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestRehearsedBuilderPins","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReleaseBinariesRefuseWarmOrUnverifiedGo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestReleaseToolchainsRequireExactSecurityPatches","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReuseAggregatesIgnoreAmbientImpactKillSwitch","tier":"ESSENTIAL"}
     ,

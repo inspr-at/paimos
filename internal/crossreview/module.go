@@ -25,6 +25,7 @@ import (
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 type Module struct {
@@ -188,6 +189,12 @@ func authorizeReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 }
 
 func (m *Module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	return workqueue.PersonAdmissionTx(r.Context(), tx, p, "review", func(step pgx.Tx) (any, error) {
+		return m.createPersonBound(r, step, p)
+	})
+}
+
+func (m *Module) createPersonBound(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	in, ok := r.Context().Value(createContextKey{}).(CreateInput)
 	if !ok {
 		return nil, errors.New("review intent was not decoded")

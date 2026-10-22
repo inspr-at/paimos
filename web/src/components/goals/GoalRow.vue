@@ -12,6 +12,9 @@
 // AEON-1395: an epic uses the same anatomy with the epic icon; its progress is the
 // computed leaf-hours bar (no chart, no pen), "what's missing" lists its failing
 // entry checks, and its counts and folds keep their words together (NBSP).
+// AEON-1614: a goal the person hid, when shown, is a muted row with an eye-off icon
+// and the word Hidden (text, never a pill). Phones have no row ⋯, so the opened goal
+// ends with Hide for me or Unhide.
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -21,7 +24,7 @@ import GoalProgress from './GoalProgress.vue'
 import GoalItem from './GoalItem.vue'
 import type { GoalsPage } from './goalsPage'
 import { vClipTip } from '../../lib/clipTip'
-import { doneToday, hoursLeftLine, hoursLeftText, itemGroups, itemMatches, nbsp, QUEUE_SHOWN, STATE_LABEL, type Goal, type GoalOutcome } from '../../lib/goals'
+import { doneToday, hideCopy, hoursLeftLine, hoursLeftText, itemGroups, itemMatches, nbsp, QUEUE_SHOWN, STATE_LABEL, type Goal, type GoalOutcome } from '../../lib/goals'
 import { averageRate, projectionText } from '../../lib/goalRate'
 import type { LiveAgent } from '../../lib/liveAgents'
 
@@ -81,11 +84,13 @@ function rowClick(event: MouseEvent) {
 }
 const statLabel = (n: number | undefined, state: keyof typeof STATE_LABEL) => n === undefined ? `${STATE_LABEL[state]} unknown` : `${n} ${STATE_LABEL[state].toLowerCase()}`
 const waitsLabel = computed(() => `${props.goal.waits.count} open Desk ${props.goal.waits.count === 1 ? 'question waits' : 'questions wait'} on you`)
+const hidden = computed(() => !!props.goal.hidden)
+const canHide = computed(() => !epic.value && props.page.canHide?.value === true)
 const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/decision-desk', query: { item: `q:${props.goal.waits.question_ids[0]}` } } : '/decision-desk')
 </script>
 
 <template>
-  <li class="goal" :data-goal-id="goal.id" :data-open="open ? 1 : 0">
+  <li class="goal" :data-goal-id="goal.id" :data-open="open ? 1 : 0" :data-hidden="hidden ? 1 : undefined">
     <div class="goal-row" @click="rowClick">
       <button type="button" class="goal-toggle" :aria-expanded="open" :aria-controls="`body-${goal.id}`" :aria-labelledby="`gn-${goal.id}`" data-nav @click="page.toggle(goal.id)"><AppIcon name="chevron-right" :size="14" /></button>
       <span class="goal-keys"><span v-for="badge in keys" :key="badge.id" class="key-badge" :data-tip="badge.name">{{ badge.key }}</span></span>
@@ -93,6 +98,7 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
         <div class="goal-title">
           <span class="kind" role="img" :aria-label="kindName" :data-tip="kindName"><AppIcon :name="kindIcon" :size="14" /></span>
           <span :id="`gn-${goal.id}`" v-clip-tip class="goal-name">{{ goal.title }}</span>
+          <span v-if="hidden" class="hidden-mark" :data-tip="hideCopy.hiddenTip"><AppIcon name="eye-off" :size="13" />{{ hideCopy.hidden }}</span>
         </div>
         <span v-if="!done && nextText" class="goal-next"><span class="lbl">Next</span><span v-clip-tip class="txt">{{ nextText }}</span></span>
       </div>
@@ -138,6 +144,11 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
           <GoalItem v-for="item in doneShown" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" :wide="wideItems" :epic="epic" />
           <GoalItem v-for="item in groups.handed" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" :wide="wideItems" :detail="handedDetail(item)" />
         </ul>
+        <p v-if="canHide" class="phone-hide">
+          <button type="button" class="fold-btn hide-btn" :disabled="page.hiding.has(goal.id)" @click="hidden ? page.unhide(goal) : page.hide(goal)">
+            <span class="f-ic"><AppIcon :name="hidden ? 'eye' : 'eye-off'" :size="13" /></span>{{ hidden ? hideCopy.unhide : hideCopy.hide }}
+          </button>
+        </p>
       </template>
     </div>
   </li>
@@ -179,6 +190,11 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 .waits:hover { background: var(--row-hover); }
 .waits:focus-visible, .fold-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .goal-eta { justify-self: end; }
+/* A goal the person hid, shown on request: muted ink, the eye-off and the word Hidden. */
+.hidden-mark { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 1.3em; font-size: 12px; font-weight: 500; color: var(--ink-3); white-space: nowrap; }
+.goal[data-hidden="1"] .goal-name, .goal[data-hidden="1"] .goal-next, .goal[data-hidden="1"] .stat { color: var(--ink-3); }
+.goal[data-hidden="1"] .goal-keys, .goal[data-hidden="1"] :deep(.goal-progress), .goal[data-hidden="1"] .goal-eta { opacity: .6; }
+.phone-hide { display: none; }
 .row-more { opacity: 0; justify-self: end; }
 .goal-row:hover .row-more, .goal-row:focus-within .row-more, .row-more[aria-expanded="true"] { opacity: 1; }
 @media (hover: none) { .row-more { opacity: 1; } }
@@ -243,6 +259,8 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
   .phone-next { display: block; margin: 0; padding: 0 0 6px; font-size: 13.5px; line-height: 1.4; color: var(--ink-2); }
   .phone-next .lbl { color: var(--ink-3); }
   .fold-btn { grid-column: 2 / -1; height: 44px; margin-left: -4px; font-size: 13px; }
+  .phone-hide { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; margin: 0; }
+  .hide-btn { color: var(--ink-2); }
   .fold-btn .f-ic { width: auto; margin-right: 0; }
 }
 /* Touch: the agent chips keep their look and get a 44 px hit area. */

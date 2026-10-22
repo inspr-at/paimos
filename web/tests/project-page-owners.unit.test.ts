@@ -224,7 +224,9 @@ it('keyboard keeps browser shortcuts native and submits selection through its ow
   vi.stubGlobal('HTMLElement', class {}); vi.stubGlobal('HTMLInputElement', class {})
   vi.stubGlobal('document', { querySelector: () => null, activeElement: null })
   const { state, data } = fixture(), selectAll = vi.fn()
-  const create = owner('useProjectKeyboard')
+  const create = owner('useProjectKeyboard', {
+    ensurePermissions: async () => 'known', permissionsKnown: () => true, scopeOwner: () => '',
+  })
   const keys = run(() => create(state, data, { panelItem: ref(null), trail: ref([]) }, { selectable: ref(true), selectAll }, {}, {}))
   const event = { key: 's', metaKey: true, preventDefault: vi.fn(), target: null }
   keys.keydown(event)

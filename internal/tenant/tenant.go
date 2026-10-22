@@ -18,6 +18,13 @@ const (
 
 // Principal is who acts, always inside exactly one tenant.
 type Principal struct {
+	TransportComputerID   string `json:"-"` // paired transport identity; never person authority
+	RunID                 string `json:"-"` // server-verified content capability binding
+	RunWorkOrderID        string `json:"-"`
+	RunProjectID          string `json:"-"`
+	RunComputerID         string `json:"-"`
+	RunDaemonID           string `json:"-"`
+	RunGeneration         string `json:"-"`
 	MessagingOnly         bool   // persistent principal restriction, independent of key/role grants
 	BrowserSession        bool   // authenticated interactive cookie only
 	ID                    string // principals.id (uuid)

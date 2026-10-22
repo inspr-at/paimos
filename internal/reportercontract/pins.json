@@ -699,8 +699,8 @@
     }
   },
   "goals": {
-    "version": "goals/1.5",
-    "sha256": "1b974b40ca014f65a19b35a07fc2fd4d69eed7e42ecb5eb6197395f0534fdeb3",
+    "version": "goals/1.6",
+    "sha256": "537e504191949a7ad382efe2f78dfb22c95ae31260c1ec4d74d5cd15d8164988",
     "shape": {
       "GET /goals 200": {
         "properties": {
@@ -711,6 +711,10 @@
           "generation": {
             "format": "int64",
             "minimum": 1,
+            "type": "integer"
+          },
+          "hidden_count": {
+            "minimum": 0,
             "type": "integer"
           },
           "items": {
@@ -811,6 +815,9 @@
                     "by"
                   ],
                   "type": "object"
+                },
+                "hidden": {
+                  "type": "boolean"
                 },
                 "id": {
                   "format": "uuid",
@@ -1500,6 +1507,9 @@
               "by"
             ],
             "type": "object"
+          },
+          "hidden": {
+            "type": "boolean"
           },
           "id": {
             "format": "uuid",

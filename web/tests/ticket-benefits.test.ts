@@ -36,16 +36,20 @@ test('benefit drafts warn without inventing translations, including hidden ticke
 test('snapshot notes displace Git headlines and ticket guesses while archives stay readable', () => {
   const r = { version: '260928120000.0.0', headline: 'Invented headline', tickets: ['TEST-999'], changes: [], notes: { source: 'snapshot', snapshot_sha256: '', captured_at: null, release_revision: 1, hidden: 1, gaps: [], items: [{ id: 'one', key: 'TEST-7', ...fields }] } } as unknown as Release
   assert.equal(hasUsableNotes(r), true)
-  assert.equal(noteLocale('de-AT'), 'de')
+  assert.equal(noteLocale('de-AT'), 'en')
   assert.equal(noteLocale('en-GB'), 'en')
   assert.equal(noteLocale(null), 'en')
+  assert.equal(noteLocale('de'), 'de')
+  assert.equal(noteLocale(' DE '), 'de')
   assert.equal(displayHeadline(r), fields.pill_en)
-  assert.equal(displayHeadline(r, 'de-AT'), fields.pill_de)
-  const german = localizedNote({ ...fields, pill_de: '  ', benefit_de: '' }, 'de-DE')
+  assert.equal(displayHeadline(r, 'de-AT'), fields.pill_en)
+  assert.equal(displayHeadline(r, 'de'), fields.pill_de)
+  const german = localizedNote({ ...fields, pill_de: '  ', benefit_de: '' }, 'de')
   assert.equal(german.pill, fields.pill_en)
   assert.equal(german.benefit, fields.benefit_en)
   assert.equal(german.pillLang, 'en')
-  assert.equal(localizedNote(fields, 'de-CH').benefitLang, 'de')
+  assert.equal(localizedNote(fields, 'de-CH').benefitLang, 'en')
+  assert.equal(localizedNote(fields, 'de').benefitLang, 'de')
 
   assert.deepEqual(ticketsOf(r), ['TEST-7'])
   assert.equal(matches(r, { q: 'erklären', features: false, fixes: false, tickets: false }, 'de'), true)
@@ -57,7 +61,8 @@ test('snapshot notes displace Git headlines and ticket guesses while archives st
   r.notes!.gaps = []
   assert.equal(displayHeadline(r), 'Invented headline')
   assert.equal(emptyNotesLine(), 'Internal changes only.')
-  assert.equal(emptyNotesLine('de-AT'), 'Nur interne Änderungen.')
+  assert.equal(emptyNotesLine('de-AT'), 'Internal changes only.')
+  assert.equal(emptyNotesLine('de'), 'Nur interne Änderungen.')
    // A known internal release does not claim its snapshot is missing.
   assert.deepEqual(ticketsOf(r), []) // Hidden-only/empty membership stays authoritative.
   r.notes = { source: 'unavailable', fallback: 'historical-tag-headline', snapshot_sha256: '', captured_at: null, release_revision: 0, hidden: 0, items: [], gaps: ['missing'] }

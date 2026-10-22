@@ -55,7 +55,7 @@ func merge(c Context, snapshots []Snapshot, now time.Time, validated bool, stop 
 	if err = b.enforce(r.Merged, r.usage); err != nil {
 		return r.Merged, err
 	}
-	if r.Floor == "" {
+	if r.Floor == "" && !cat.ManagedFiles {
 		return r.Merged, fail(409, "floor_missing", "publish an applicable locked company safety floor before using session rules")
 	}
 	return r.Merged, nil
@@ -75,6 +75,9 @@ type rendered struct {
 // doctrine catalog delivers on the harness channel are omitted (AEON-320).
 func render(c Context, snapshots []Snapshot, now time.Time, validated bool, stop func() bool, cat doctrine.Catalog) (rendered, error) {
 	out := rendered{Merged: Merged{Context: c, Versions: []VersionRef{}, Rules: []Rule{}, Version: "floor-only"}, from: map[string]Snapshot{}}
+	if cat.ManagedFiles {
+		out.PinnedFiles = cat.Files
+	}
 	if err := ValidateContext(c); err != nil {
 		return out, err
 	}
@@ -151,7 +154,9 @@ func render(c Context, snapshots []Snapshot, now time.Time, validated bool, stop
 	var body, floor strings.Builder
 	body.WriteString(SessionHeader)
 	// The pointer is session-channel bytes. Doctrine text is not.
-	body.WriteString(cat.Pointer())
+	if !cat.ManagedFiles {
+		body.WriteString(cat.Pointer())
+	}
 	for _, k := range keys {
 		r := chosen[k]
 		if !r.Enabled {
@@ -160,7 +165,7 @@ func render(c Context, snapshots []Snapshot, now time.Time, validated bool, stop
 		// Resolve precedence, selectors and expiry before choosing a delivery
 		// channel. An omitted doctrine copy must still suppress lower layers.
 		if hit, copied := cat.Match(r.Text, r.Source.Identity, r.Source.Reference); copied {
-			if _, locked := companyFloor[k]; locked {
+			if _, locked := companyFloor[k]; locked && !cat.ManagedFiles {
 				if pin := cat.FloorPointer(r.Identity, hit); pin != "" {
 					body.WriteString(pin)
 					floor.WriteString(pin)
