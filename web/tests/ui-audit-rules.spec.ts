@@ -45,6 +45,10 @@ test('overlap rule ignores a card action and modal background but keeps peer col
   const covered = (await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')
   expect(covered).toHaveLength(1)
   expect(covered[0]?.selector).toBe('#row-link'); expect(covered[0]?.detail).toContain('#row-action')
+  await page.setContent(`<style>body { margin: 0; } .app-header { position: fixed; inset: 0 0 auto; height: 50px; z-index: 2; background: white; } .app-header button { position: absolute; top: 0; left: 50px; width: 60px; height: 40px; } #header-second { left: 95px; } #under-header { position: absolute; left: 50px; top: 20px; width: 200px; height: 80px; }</style><button id="under-header">Scrolling content</button><header class="app-header"><button id="header-first">First</button><button id="header-second">Second</button></header>`)
+  const fixed = (await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')
+  expect(fixed).toHaveLength(1)
+  expect(fixed[0]?.selector).toBe('#header-first'); expect(fixed[0]?.detail).toContain('#header-second')
 })
 
 test('touch rule lets an open menu cover controls and exempts dates in the paper’s text', async ({ page }) => {

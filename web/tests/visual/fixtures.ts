@@ -42,13 +42,12 @@ async function work(page: Page, theme: Theme) {
 export const projects: VisualSetup = async (page, _profile, theme) => {
   const data = fixtures()
   data.preferences.theme = { choice: theme }
-  data.preferences['projects-mode'] = { mode: 'cards' }
   data.projects[0]!.title = LONG
   data.live.push(...[1, 2, 3].map(index => liveAgent({ project_id: 'p-pharos', session_id: `live-${index}`,
     principal_id: `33333333-3333-4333-8333-33333333333${index}`, name: `Worker ${index}`, ticket: null }, index)))
   await mockWork(page, data, { liveTruncated: true })
   await visualChrome(page, data, NOW)
-  await page.goto('/')
+  await page.goto('/?view=cards')
   await expect(page.locator('.live-chip').first()).toBeVisible()
   await expect(page.getByText('Studio infrastructure', { exact: true }).first()).toBeVisible()
 }
@@ -214,9 +213,15 @@ export const capacity: VisualSetup = async (page, _profile, theme) => {
 }
 
 export const startAgent: VisualSetup = async (page, _profile, theme) => {
-  await mockStartAgent(page, { theme, now: NOW, expertStart: false, catalog: 'claude',
-    wait: { code: 'allowance', until: new Date(NOW + 1_800_000).toISOString(), run_now_allowed: false } })
-  await visualChrome(page, fixtures(), NOW, { agents: false, models: false })
+  await page.clock.setFixedTime(CAPACITY_NOW)
+  await mockStartAgent(page, { theme, now: CAPACITY_NOW, expertStart: false, catalog: 'claude',
+    wait: { code: 'allowance', until: new Date(CAPACITY_NOW + 1_800_000).toISOString(), run_now_allowed: false } })
+  await visualChrome(page, fixtures(), CAPACITY_NOW, { agents: false, models: false })
+  await mockDailyPlan(page, { example: 'pace' })
+  await page.route('**/api/decision-desk/projection*', route => route.fulfill({ json: { items: [], counts: { open: 0, held: 0, chores: 0 }, has_more: false, as_of: new Date(CAPACITY_NOW).toISOString() } }))
+  await page.route('**/api/agent-accounts/quota-outlook*', route => route.fulfill({ json: {
+    generated_at: new Date(CAPACITY_NOW).toISOString(), anchor_hour: new Date(Math.floor(CAPACITY_NOW / 3_600_000) * 3_600_000).toISOString(), history_hours: 168, horizon_hours: 168, truncated: false, groups: [],
+  } }))
   await page.goto('/agents')
   await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
   await page.getByRole('menuitem', { name: /^Run once/ }).click()

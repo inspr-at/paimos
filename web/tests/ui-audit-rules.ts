@@ -178,7 +178,7 @@ export function domAudit(): Raw[] {
       if (chipInSlot(a, b) || chipInSlot(b, a)) continue
       if (actionInSlot(a, b) || actionInSlot(b, a)) continue
       // A scrim and a fixed app edge intentionally cover scrolling content.
-      if (a.matches('.sheet-scrim') || b.matches('.sheet-scrim') || a.closest('.app-footer, .app-header') !== b.closest('.app-footer, .app-header') && (a.closest('.app-footer') || b.closest('.app-footer'))) continue
+      if (a.matches('.sheet-scrim') || b.matches('.sheet-scrim') || a.closest('.app-footer, .app-header') !== b.closest('.app-footer, .app-header') && (a.closest('.app-footer, .app-header') || b.closest('.app-footer, .app-header'))) continue
       // Open menus cover the page below; their background controls are not peers.
       const overlay = (el: Element) => el.closest('.floating.pop, .hm-panel')
       if (overlay(a) !== overlay(b) && (overlay(a) || overlay(b))) continue

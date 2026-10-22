@@ -28,6 +28,11 @@ export async function visualChrome(page: Page, data: Fixtures, now: number, opti
     if (path === '/api/models/outdated') return json({ versions: [], revision: 'a'.repeat(64), incomplete: false, next_cursor: '' })
     if (path === '/api/recurrences') return json({ items: [], next_cursor: null })
     if (path === '/api/queue') return json({ items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 0, work_hours: null, warning: false } })
+    if (path === '/api/account-use') return json({
+      rules: { new_accounts: 'ask', new_contexts: 'ask', new_projects: 'default', new_models: 'allow', revision: 1,
+        enforced_at: null, confirmation_required: false, confirmed_at: null }, accounts: [], contexts: [], cells: [],
+      next_account: null, next_context: null, running_outside: [], running_outside_truncated: false, holding_projects: { count: 0, first: [] },
+    })
     if (/^\/api\/queue\/[^/]+\/readiness$/.test(path)) return json({ queueable: false, ready: false, missing: ['status'], suggested_estimate_hours: 1, security_review_required: false })
     const lead = /^\/api\/projects\/([^/]+)\/lead$/.exec(path)
     if (lead) return json({ project_id: lead[1], revision: 0, generation: 0, session_id: null, state: 'none', reason: '', process_active: false, automatic_launch_enabled: false })
