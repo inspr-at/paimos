@@ -2998,6 +2998,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRoutinePreparationPreservesAuthorityCriteriaAndPickup","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRoutineUnresolvedRunPersonManualAndSchedulerAudits","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunActingPersonIsExplicitAndWriteOnce","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunAndQueueAccountContextChecks","tier":"ESSENTIAL"}
@@ -3009,6 +3011,12 @@
     {"kind":"go","package":"internal/agentruns","name":"TestRunHistoryPagingFiltersAndTelemetry","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunNowIsPersonOnlyAuditedAndRunScoped","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunPersonFinalClaimCeiling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunPersonRecoveryAndChildInheritServerRun","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunPersonStartPathSourcesAndUnresolvedRefusal","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunRowVersionGrowsInTheTransactionThatChangesTheRow","tier":"GATED-FULL"}
     ,
@@ -5886,6 +5894,8 @@
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestReviewStoresLoosenedResidencyLockTrace","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/crossreview","name":"TestReviewUnresolvedRunPersonCommitsOnlyRefusal","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/crossreview","name":"TestStaleBindingPostsErrorAndRetriesUntilRecorded","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestStatusStateRequiresAnOpenGate","tier":"GATED-FULL"}
@@ -6828,6 +6838,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalHandedOverReadAndConflict","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalHideForMePerPersonTenantAndKeys","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalHistoryCancellationReturnsTooLarge","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalHistoryIgnoresUnrelatedEvents","tier":"ESSENTIAL"}
@@ -7353,6 +7365,8 @@
     {"kind":"go","package":"internal/harness","name":"TestRulesReceiptRejectsUnboundedOrAuthorityClaims","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestRunKindsRegisterBeatAndAggregate","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestRunPersonRevocationKeepsOnlyOwnedSafetyControls","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestRunningWrapUpUsesItsRemainingLevelBudget","tier":"GATED-FULL"}
     ,

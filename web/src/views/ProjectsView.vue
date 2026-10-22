@@ -32,6 +32,7 @@ import ProjectList, { type ProjectSection } from '../components/projects/Project
 import NewProjectSheet from '../components/projects/NewProjectSheet.vue'
 import GoalsView from '../components/goals/GoalsView.vue'
 import GoalsToolbar from '../components/goals/GoalsToolbar.vue'
+import GoalShowSwitches from '../components/goals/GoalShowSwitches.vue'
 import { useGoalsPage } from '../components/goals/goalsPage'
 import { GOAL_GROUPS, GROUP_LABEL, SORT_DIR, type Goal, type GoalSort } from '../lib/goals'
 import { heldDraft, type HeldDraft } from '../lib/importDraft'
@@ -211,7 +212,10 @@ const pickerColumns = computed(() => ({
 function saveColumns(order: PickerColumn[], visible: PickerColumn[]) { savePage({ columns: { order: own(order), visible: own(visible) } }) }
 function resetColumns() { savePage({ columns: undefined }) }
 const displayAnchor = ref<HTMLElement | null>(null)
+const displayButton = ref<HTMLElement | null>(null)
 function closeDisplay(restore: boolean) { const anchor = displayAnchor.value; displayAnchor.value = null; if (restore) anchor?.focus() }
+// The Goals empty states link to Display (AEON-1614): it opens at its own button.
+function openDisplay() { if (displayButton.value) displayAnchor.value = displayButton.value }
 function setView(next: string) { if (next !== view.value) viewSwitch.choose(next) }
 
 // ---------- Selection ----------
@@ -950,9 +954,10 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
         <GroupChips v-else-if="ready" class="chips" :chips="chips" :drop-on="dropOn" :creating="!!createAnchor" @toggle="groups.toggleVisible" @create="openCreate" />
         <span v-else class="chips chips-skeleton"><span class="skeleton" /></span>
         <span class="tools">
+          <GoalsToolbar v-if="view === 'goals'" :page="goals" part="waiting" />
           <ViewSwitch class="view-seg" look="seg" label="View" :options="viewOptions" :selected="view" :default-id="viewSwitch.defaultId.value" @select="setView" @set-default="viewSwitch.setDefault" />
           <button
-            type="button" class="btn sm display-btn" :class="{ on: display.on }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="displayAria"
+            ref="displayButton" type="button" class="btn sm display-btn" :class="{ on: display.on }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="displayAria"
             :data-tip="display.tip" :data-sort="view === 'goals' ? goals.sort.value : sort" :data-sort-dir="goalSortHidden ? goals.dir.value : undefined" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)"
           ><AppIcon :name="display.icon" :size="14" class="sort-icon" /><span class="display-words" :class="{ showing: goalSortHidden }"><span class="display-label">Display</span><span
             v-for="option in GOAL_SORTS" :key="option.value" class="sort-state sizer" :class="{ count: STAT_SORTS.has(option.value) }" :data-label="option.label" aria-hidden="true"
@@ -976,6 +981,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
               ><AppIcon :name="option.icon" :size="14" /><span>{{ option.label }}</span></button>
             </div>
             <p class="fine sort-hint">The column headers sort too; a second click turns the order around.</p>
+            <GoalShowSwitches :page="goals" class="section show-section" />
           </div>
           <div v-else class="display-panel">
             <p class="eyebrow">Sort by</p>
@@ -996,7 +1002,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
         </FloatingPanel>
       </div>
 
-      <GoalsView v-if="view === 'goals'" :page="goals" :term="term" :now="now" :hidden-groups="goals.hiddenByGroups.value" @clear="clearGoalFilters" />
+      <GoalsView v-if="view === 'goals'" :page="goals" :term="term" :now="now" :hidden-groups="goals.hiddenByGroups.value" @clear="clearGoalFilters" @display="openDisplay" />
       <div v-else-if="store.error && !store.loaded" class="state" role="alert">
         <AppIcon name="alert" :size="20" />
         <h2>Projects could not be loaded</h2>
