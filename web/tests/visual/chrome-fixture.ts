@@ -9,10 +9,10 @@ import { groupsWorld, mockProjectGroups } from '../project-groups-fixtures'
 
 // Successful, explicit empty reads for unrelated chrome. A missing mock must
 // not make a reference depict an accidental outage; unknown paths still fail.
-export async function visualChrome(page: Page, data: Fixtures, now: number, options: { agents?: boolean } = {}) {
+export async function visualChrome(page: Page, data: Fixtures, now: number, options: { agents?: boolean; models?: boolean } = {}) {
   await mockSettings(page, settingsData())
   await mockBusiness(page, businessData({ enabled: ['business_costs', 'business_crm', 'business_quotes', 'business_hours'] }), {
-    grant: ['account.read', 'account.manage', 'account.use.manage', 'questions.read', 'questions.decide', 'approvals.read', 'approvals.revoke'],
+    grant: ['account.read', 'account.manage', 'account.use.manage', 'questions.read', 'questions.decide', 'approvals.read', 'approvals.revoke', 'run.create', 'run.read', 'work_orders.read'],
   })
   await mockReleases(page, releaseHistory(now))
   await mockProjectGroups(page, data, groupsWorld())
@@ -23,7 +23,7 @@ export async function visualChrome(page: Page, data: Fixtures, now: number, opti
     const request = route.request(), path = new URL(request.url()).pathname
     if (request.method() !== 'GET') return route.fallback()
     const json = (body: unknown) => route.fulfill({ json: body })
-    if (path === '/api/models' || path === '/api/me/host-labels') return json([])
+    if (path === '/api/models' && options.models !== false || path === '/api/me/host-labels') return json([])
     if (path === '/api/quote-profiles') return json([])
     if (path === '/api/models/outdated') return json({ versions: [], revision: 'a'.repeat(64), incomplete: false, next_cursor: '' })
     if (path === '/api/recurrences') return json({ items: [], next_cursor: null })

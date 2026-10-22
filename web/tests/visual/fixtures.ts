@@ -216,7 +216,7 @@ export const capacity: VisualSetup = async (page, _profile, theme) => {
 export const startAgent: VisualSetup = async (page, _profile, theme) => {
   await mockStartAgent(page, { theme, now: NOW, expertStart: false, catalog: 'claude',
     wait: { code: 'allowance', until: new Date(NOW + 1_800_000).toISOString(), run_now_allowed: false } })
-  await visualChrome(page, fixtures(), NOW, { agents: false })
+  await visualChrome(page, fixtures(), NOW, { agents: false, models: false })
   await page.goto('/agents')
   await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
   await page.getByRole('menuitem', { name: /^Run once/ }).click()
