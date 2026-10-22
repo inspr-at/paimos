@@ -291,7 +291,7 @@ p { margin: 0; }
 @media (pointer: coarse) {
   .ub-sb { width: 44px; height: 44px; }
   .ub-pop .ub-step { min-height: 44px; }
-  .ub-hd .link-btn, .ub-retry { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; }
+  .err .link-btn, .ub-retry { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; }
   /* The refresh target reaches into adjacent text rows, without moving the
      range controls or clipping its hit area to the 20 px status line. */
   .ub-l2 { overflow: visible; }
