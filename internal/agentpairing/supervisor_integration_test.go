@@ -4,6 +4,8 @@ package agentpairing_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -77,6 +79,16 @@ func TestPairingSupervisorHTTPVerificationRoutesUnboundQueue(t *testing.T) {
 			}
 			if family == agentd.Claude && (adapter.request.Prompt != agentd.VerificationTask || !strings.Contains(adapter.request.Rules, "never relax them") || !strings.Contains(adapter.request.Rules, "Company rules.")) {
 				t.Fatal("claude verification changed the probe or dropped the pinned floor")
+			}
+			if family == agentd.Claude {
+				var evidenceHash, evidenceRun string
+				if err := f.db.Admin.QueryRow(t.Context(), `SELECT manifest->>'body_sha256',run_id::text FROM harness_rules_deliveries WHERE run_id=$1 AND acknowledgement IS NOT NULL`, queued[0].ID).Scan(&evidenceHash, &evidenceRun); err != nil {
+					t.Fatal(err)
+				}
+				expectedHash := sha256.Sum256([]byte(adapter.request.Rules))
+				if evidenceHash != hex.EncodeToString(expectedHash[:]) || evidenceRun != queued[0].ID {
+					t.Fatal("real HTTP delivery evidence lost the run or transmitted bytes")
+				}
 			}
 			var window string
 			if err := f.db.Admin.QueryRow(t.Context(), `SELECT id::text FROM account_allowance_windows WHERE account_id=$1 AND pairing_verification`, e.AccountID).Scan(&window); err != nil {
@@ -170,6 +182,7 @@ func (a *pairingVerificationAdapter) Start(_ context.Context, r agentd.StartRequ
 	}
 	a.starts++
 	a.request = r
+	a.process.rulesHash = sha256.Sum256([]byte(r.Rules))
 	a.observe = observe
 	return a.process, nil
 }
@@ -192,8 +205,13 @@ func seedVerificationPin(t *testing.T, f *fixture) {
 }
 
 type pairingVerificationProcess struct {
-	done chan struct{}
-	once sync.Once
+	rulesHash [32]byte
+	done      chan struct{}
+	once      sync.Once
+}
+
+func (p *pairingVerificationProcess) RulesDeliveryHash() string {
+	return hex.EncodeToString(p.rulesHash[:])
 }
 
 func (*pairingVerificationProcess) PID() int      { return 0 } // No operating system process exists.

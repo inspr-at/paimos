@@ -369,8 +369,9 @@ func TestClaudeNotRunningBecomesNothingRunning(t *testing.T) {
 
 type managedRulesFixture struct {
 	*fakeAPI
-	bundle   rules.Merged
-	receipts int
+	bundle       rules.Merged
+	receipts     int
+	acknowledged []rules.RulesDeliveryAck
 }
 
 func (a *managedRulesFixture) ManagedContext(context.Context, HarnessSession) (rules.Merged, error) {
@@ -396,7 +397,7 @@ func TestManagedRulesValidateExactEphemeralContext(t *testing.T) {
 	run := Run{WorkOrderID: c.TaskID}
 	profile := Profile{Harness: Claude}
 	body, err := s.managedRules(t.Context(), e, run, profile)
-	if err != nil || !strings.Contains(body, merged.Body) || api.receipts != 1 {
+	if err != nil || !strings.Contains(body, merged.Body) || api.receipts != 0 {
 		t.Fatalf("rules handoff: %v", err)
 	}
 	api.bundle.Context.ProjectID = id("8")
@@ -408,8 +409,8 @@ func TestManagedRulesValidateExactEphemeralContext(t *testing.T) {
 	if _, err = s.managedRules(t.Context(), e, run, profile); err == nil {
 		t.Fatal("changed rules accepted")
 	}
-	if api.receipts != 1 {
-		t.Fatal("invalid rules receipted")
+	if api.receipts != 0 {
+		t.Fatal("new managed run wrote a legacy pre-launch receipt")
 	}
 }
 
@@ -466,6 +467,9 @@ func TestClaudeBridgeEphemeralRulesBudgetAndNativeClose(t *testing.T) {
 			out, err := cmd.Output()
 			if err != nil {
 				t.Fatalf("bridge: %v (%s)", err, out)
+			}
+			if strings.Contains(string(out), `"kind":"session_started"`) && !strings.Contains(string(out), `"rules_sha256":"`+rulesDeliveryHash("Ephemeral safety fixture")+`"`) {
+				t.Fatal("bridge did not acknowledge its received rules bytes")
 			}
 			if strings.Contains(string(out), "Ephemeral safety fixture") {
 				t.Fatal("leaked rules")

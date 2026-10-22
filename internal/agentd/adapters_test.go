@@ -42,16 +42,21 @@ func TestFakeVendorProcess(t *testing.T) {
 			os.Exit(2)
 		}
 		id := strings.Trim(string(frame.ID), "\"")
-		if vendor == "claude" {
+		if strings.HasPrefix(vendor, "claude") {
 			var command struct {
 				Op            string `json:"op"`
+				Rules         string `json:"rules"`
 				CorrelationID string `json:"correlation_id"`
 			}
 			if json.Unmarshal(read.Bytes(), &command) != nil {
 				os.Exit(2)
 			}
 			if command.Op == "start" {
-				_ = write.Encode(map[string]string{"kind": "session_started", "harness_session_id": "claude-session", "effective_model": "test-model", "model_evidence_status": "vendor_reported"})
+				hash := rulesDeliveryHash(command.Rules)
+				if vendor == "claude_rules_mismatch" {
+					hash = strings.Repeat("0", 64)
+				}
+				_ = write.Encode(map[string]string{"rules_sha256": hash, "kind": "session_started", "harness_session_id": "claude-session", "effective_model": "test-model", "model_evidence_status": "vendor_reported"})
 				_ = write.Encode(map[string]any{"kind": "turn_started"})
 				_ = write.Encode(map[string]any{"kind": "usage", "input_tokens_total": 12, "output_tokens_total": 3, "cost_usd_total": json.Number("0.0000125")})
 				_ = write.Encode(map[string]any{"kind": "usage", "input_tokens_total": 12, "output_tokens_total": 3, "cost_usd_total": json.Number("0.0000125")})

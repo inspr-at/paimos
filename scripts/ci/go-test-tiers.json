@@ -2104,6 +2104,10 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineWorkspacesSeparateAndRetainWriters","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRulesDeliveryHashMatchesFakeBridgeBytes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRulesDeliveryStartRunAcknowledgesAfterHarnessStart","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRunChildLaunchDropsTransportCredentials","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRunChildrenScrubTransportEnvironment","tier":"ESSENTIAL"}
@@ -4095,6 +4099,8 @@
     {"kind":"go","package":"internal/auth","name":"TestRotationWithoutWorkspaceBindingNeverCreatesRole","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestRulesAgentRouteCeiling","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestRulesDeliveryAgentRouteCeiling","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestRulesReceiptAgentRouteCeiling","tier":"GATED-FULL"}
     ,
@@ -7385,6 +7391,16 @@
     {"kind":"go","package":"internal/harness","name":"TestRoutineExecutionSettingsRequirePersonAndExactQualification","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestRulesClientReportsAreOptionalLeaseBoundAndDowngradeSafe","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestRulesDeliveryAcknowledgementTypeAndLegacyReceipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestRulesDeliveryRejectsExpiredEvidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestRulesDeliveryRejectsForeignEvidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestRulesDeliveryRejectsReboundEvidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestRulesDeliveryRejectsTamperedEvidence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestRulesReceiptAppendCASPreservesInstructionProvenance","tier":"GATED-FULL"}
     ,

@@ -20,6 +20,7 @@ import (
 type launchedRun struct {
 	process   Process
 	startedAt time.Time
+	rules     string
 }
 
 func (s *Supervisor) launchRun(ctx context.Context, claimed claimedRun, cleanup *startRunCleanup) (launchedRun, error) {
@@ -150,7 +151,7 @@ func (s *Supervisor) launchRun(ctx context.Context, claimed claimedRun, cleanup 
 	if err != nil {
 		return launchedRun{}, err
 	}
-	return launchedRun{process: proc, startedAt: launchedAt}, nil
+	return launchedRun{process: proc, startedAt: launchedAt, rules: ephemeralRules}, nil
 }
 
 // runHarness carries only successfully registered capabilities into launch.
@@ -380,6 +381,7 @@ func (s *Supervisor) handoffRun(ctx context.Context, claimed claimedRun, launche
 	entry.budgetMu.Unlock()
 	s.observeBudget(entry, AdapterEvent{})
 	go s.runDeadline(entry, proc, done, time.Until(launched.startedAt.Add(duration)))
+	saveErr = errors.Join(saveErr, s.acknowledgeRulesDelivery(ctx, entry, proc, launched.rules))
 	var startedErr error
 	if saveErr == nil {
 		startedErr = s.update(ctx, entry, Telemetry{Kind: "started", Status: "running"})

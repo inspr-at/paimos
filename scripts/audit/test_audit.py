@@ -119,6 +119,11 @@ class CoverageTests(unittest.TestCase):
         for path in ('internal/servicetier/tier.go', 'internal/servicetier/tier_test.go'):
             self.assertEqual(owners(path, config), ['S2'])
 
+    def test_rules_delivery_evidence_migration_belongs_to_agent_runtime(self):
+        # S1 owns internal/db/**. This migration stays on S2 only when S1 excludes it.
+        config = load(HERE / 'slices.json')
+        self.assertEqual(owners('internal/db/migrations/1408_rules_delivery_evidence.sql', config), ['S2'])
+
     def test_field_schema_belongs_to_domain_a(self):
         config = load(HERE / 'slices.json')
         for path in ('internal/fieldschema/schema.go', 'internal/fieldschema/schema_test.go'):

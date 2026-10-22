@@ -31,9 +31,10 @@ type ManagedControlAdapter interface{ ManagedControlSupported() bool }
 
 func (*ClaudeAdapter) ManagedControlSupported() bool { return runtime.GOOS == "darwin" }
 
+// Legacy receipts remain readable as worker reports. New managed runs use
+// the separate rulesDeliveryAPI after harness readiness.
 type managedContextAPI interface {
 	ManagedContext(context.Context, HarnessSession) (rules.Merged, error)
-	RecordManagedRules(context.Context, HarnessSession, rules.Merged) error
 }
 
 func (r *Remote) ManagedContext(ctx context.Context, s HarnessSession) (rules.Merged, error) {
@@ -89,10 +90,8 @@ func (s *Supervisor) managedRulesPack(ctx context.Context, entry *owned, run Run
 	if err != nil {
 		return "", err
 	}
-	if len(m.Versions) > 0 {
-		if err = api.RecordManagedRules(ctx, entry.harness, m); err != nil {
-			return "", err
-		}
+	if err = s.prepareRulesDelivery(ctx, entry, run, body, repository); err != nil {
+		return "", err
 	}
 	return body, nil
 }
