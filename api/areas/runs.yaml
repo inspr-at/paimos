@@ -35,6 +35,7 @@ paths:
       parameters:
         - {$ref: '#/components/parameters/Limit'}
         - {name: X-Aeon-Run-Capability-Policy, in: header, schema: {type: string, const: run_content_v1}}
+        - {name: X-Aeon-Run-Once-Policy, in: header, schema: {type: string, const: run_once_v1}, description: 'Advertise the ordinary one-off instruction and execution ceiling policy to receive these runs. Older daemons cannot pick up one-off work.'}
         - {name: X-Aeon-Review-Policy, in: header, schema: {type: string, enum: [no_tools_v1]}, description: Advertise no_tools_v1 to receive review runs. Legacy daemons receive ordinary runs only.}
       responses:
         '200': {description: "Queued metadata; Aeon-Run-Content-Policy advertises run_content_v1 and Aeon-Upgrade-Reason explains missing daemon support, including an empty queue", content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}}}}
@@ -126,6 +127,7 @@ paths:
         - {$ref: '#/components/parameters/RunCapability'}
         - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: X-Aeon-Review-Policy, in: header, schema: {type: string, enum: [no_tools_v1]}, description: Required for review claims. Ordinary run claims are unchanged.}
+        - {name: X-Aeon-Run-Once-Policy, in: header, schema: {type: string, const: run_once_v1}, description: 'Required for a one-off claim. Current acting-person start and work-order permissions are rechecked in the claim transaction.'}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunClaim'}}}}
       responses:
         '200': {description: Claimed run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}

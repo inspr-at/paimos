@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { listNodes, type ListItem, type ListProject, type WorkNode } from '../../lib/api'
 import { can, onAccessRevalidate } from '../../lib/authz'
 import { useSession } from '../../stores/session'
+import { useProjects } from '../../stores/projects'
 import { deletePin, listPins, putPin, message, type AgentRun, type HarnessSession } from '../../lib/agents'
 import { getRun, listAllSessions, runNowOnce } from '../../lib/agentRows'
 import {
@@ -11,7 +12,7 @@ import {
   type AgentAccountCatalog, type AuthorFamily, type CascadeChoice, type CascadeStep, type CascadeTouch, type CatalogGap, type RequestedRun,
 } from '../../lib/accountCascade'
 import { wroteSince, writeMark } from '../../lib/position'
-import { launchState, staleGrantRejection, startAgent } from '../../lib/startAgent'
+import { launchState, staleGrantRejection, startAgent, startAgentCopy } from '../../lib/startAgent'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
 import { canLaunchLead, leadLaunchReason, LEAD_WORDS, readLead, type ProjectLead } from '../../lib/lead'
@@ -24,11 +25,26 @@ import KeyCap from '../KeyCap.vue'
 const agents = useAgents()
 const queue = useWorkQueue()
 const session = useSession()
+const projects = useProjects()
+const copy = startAgentCopy()
+const person = computed(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '')
+const oneOff = ref(false)
+const newTicket = ref(true)
+const projectId = ref('')
+const task = ref('')
+const instruction = ref('')
+const mayChangeFiles = ref(false)
+let requestId = '', requestKey = ''
+const projectOptions = computed(() => projects.projects.filter(project => !project.archived && !project.frozen))
+const selectedProject = computed(() => projectOptions.value.find(project => project.id === projectId.value))
 const w = LEAD_WORDS
 const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const uid = useId()
 const dialog = ref<HTMLDialogElement>()
 const searchInput = ref<HTMLInputElement>()
+const taskInput = ref<HTMLInputElement>()
+const settingsOpen = ref(false)
+const lastSettingsWarning = ref<{ label: string; detail: string }[]>([])
 const hostSelect = ref<HTMLSelectElement>()
 const tickets = ref<WorkNode[]>([])
 type StartTicket = WorkNode & Partial<Pick<ListItem, 'project'>>
@@ -74,7 +90,7 @@ let catalogGeneration = 0
 let dispatchGeneration = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 const poll = usePoller(() => { now.value = Date.now(); if (run.value) return refresh() }, 3000, { enabled: () => visible.value && !!run.value })
-const role = computed(() => workRoleFor(ticket.value))
+const role = computed(() => workRoleFor(oneOff.value && newTicket.value ? null : ticket.value))
 const view = computed(() => presentCascade({ catalog: catalog.value, role: role.value, authorFamily: authorFamily.value }, choice.value, touch.value))
 const piModelBound = computed(() => choice.value.harness === 'pi' && view.value.models.length === 1)
 const cascadeLocked = computed(() => dispatchMode.value !== 'manual' || loading.value || catalogGap.value === 'failed' || catalogGap.value === 'forbidden' || catalogGap.value === 'family')
@@ -96,8 +112,41 @@ const onNarrow = (event: MediaQueryListEvent) => { narrow.value = event.matches 
 narrowQuery?.addEventListener('change', onNarrow)
 const accountLabel = (label: string) => narrow.value ? label.split(' · ').slice(0, 2).join(' · ') : label
 const selectedWait = computed(() => catalog.value?.hosts.find(h => h.daemon_id === choice.value.hostId)?.harnesses.find(h => h.harness === choice.value.harness)?.accounts.find(a => a.id === choice.value.accountId)?.wait)
+const readOnlyCapability = computed(() => catalog.value?.hosts.find(h => h.daemon_id === choice.value.hostId)?.harnesses.find(h => h.harness === choice.value.harness)?.read_only_run)
+const readOnlyReason = computed(() => !oneOff.value || mayChangeFiles.value || !choice.value.harness ? '' : readOnlyCapability.value?.supported && readOnlyCapability.value.policy === 'no_tools' ? '' : readOnlyCapability.value?.reason || 'This account catalog has no qualified read-only one-off adapter. Refresh it or choose another harness.')
 const mayRunNow = computed(() => permitted.value && session.identity?.principal.kind === 'person')
-const canSubmit = computed(() => dispatchMode.value === 'manual' && permitted.value && !loading.value && !busy.value && !run.value && ticket.value?.is_leaf === true && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
+const contextReady = computed(() => oneOff.value && newTicket.value ? can('nodes.write') && !projects.loading && !projects.error && !!selectedProject.value?.nodeUpdatedAt && !!task.value.trim() : ticket.value?.is_leaf === true)
+const canSubmit = computed(() => dispatchMode.value === 'manual' && permitted.value && !loading.value && !busy.value && !run.value && contextReady.value && !readOnlyReason.value && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
+const settingsSummary = computed(() => loading.value ? copy.loading : copy.runsOn(Object.values(view.value.requested).join(' · ')))
+const settingsWarning = computed(() => {
+  const warnings: { label: string; detail: string }[] = []
+  if (loading.value) return warnings
+  if (catalogGap.value) warnings.push({ label: copy.accountsWarning, detail: catalogMessage.value })
+  if (readOnlyReason.value) warnings.push({ label: copy.readOnlyWarning, detail: readOnlyReason.value })
+  if (catalog.value && view.value.status.tone === 'warn') warnings.push(view.value.status)
+  return warnings
+})
+watch(() => settingsWarning.value.map(warning => `${warning.label} ${warning.detail}`).join(' '), warning => {
+  if (oneOff.value && visible.value && warning) { lastSettingsWarning.value = settingsWarning.value; settingsOpen.value = true }
+})
+function toggleSettings() {
+  settingsOpen.value = !settingsOpen.value
+  if (!settingsOpen.value && !settingsWarning.value.length) lastSettingsWarning.value = []
+}
+
+function resetTask() {
+  generation++; instruction.value = ''; mayChangeFiles.value = false; error.value = ''
+  remember.value = false; remembered.value = ''
+  requestId = ''; requestKey = ''
+}
+watch([() => ticket.value?.id, projectId, newTicket], resetTask, { flush: 'sync' })
+watch(person, () => {
+  resetTask(); task.value = ''; searchGeneration++; catalogGeneration++; pinGeneration++; dispatchGeneration++
+  visible.value = false; busy.value = false; checking.value = false
+  ticket.value = null; projectId.value = ''; runId.value = ''; managedId.value = ''; requested.value = null
+  dispatchProject.value = null; projectLead.value = null; dispatchMode.value = 'manual'; queuedForLead.value = false
+  catalog.value = null; tickets.value = []; poll.stop(); clearTimeout(searchTimer); dialog.value?.close()
+}, { flush: 'sync' })
 const mayQueueForLead = computed(() => session.identity?.principal.kind === 'person' && !!dispatchProject.value && can('run.create', dispatchProject.value.id))
 const canQueueForLead = computed(() => dispatchMode.value === 'lead' && mayQueueForLead.value && !busy.value && !queue.busy && !queuedForLead.value && ticket.value?.is_leaf === true)
 const dismissLabel = computed(() => queuedForLead.value ? 'Close' : 'Cancel')
@@ -110,6 +159,7 @@ async function checkDispatch() {
   dispatchMode.value = selected ? 'checking' : 'manual'
   dispatchProject.value = null; projectLead.value = null; dispatchError.value = ''; queuedForLead.value = false; error.value = ''; grantStale.value = false
   catalogGeneration++; catalog.value = null; loading.value = false
+  if (oneOff.value) { dispatchMode.value = 'manual'; void loadCatalog(); return }
   if (!selected) return
   const { id, updated_at: revision } = selected
   const current = () => turn === dispatchGeneration && visible.value && ticket.value?.id === id && ticket.value?.updated_at === revision
@@ -216,14 +266,14 @@ function selectTicket(item: StartTicket) {
   void checkDispatch()
 }
 let pinGeneration = 0
-watch([() => ticket.value?.id, () => choice.value.harness, catalog], async () => {
-  const id = ticket.value?.id
+watch([() => oneOff.value && newTicket.value ? undefined : ticket.value?.id, () => choice.value.harness, catalog], async () => {
+  const id = oneOff.value && newTicket.value ? undefined : ticket.value?.id
   const harness = choice.value.harness
   const turn = ++pinGeneration
   if (!visible.value || !id || !harness) return
   try {
     const pins = await listPins(id)
-    if (turn !== pinGeneration || !visible.value || ticket.value?.id !== id || choice.value.harness !== harness) return
+    if (turn !== pinGeneration || !visible.value || oneOff.value && newTicket.value || ticket.value?.id !== id || choice.value.harness !== harness) return
     const pin = pins.find(item => item.harness === harness && item.account_id)
     if (!pin?.account_id || touch.value.account || !view.value.accounts.some(account => account.value === pin.account_id)) return
     remembered.value = pin.account_id
@@ -231,25 +281,41 @@ watch([() => ticket.value?.id, () => choice.value.harness, catalog], async () =>
     remember.value = true
   } catch { /* A missing pin leaves the checkbox clear. */ }
 })
-async function open(initial?: StartTicket) {
+async function open(initial?: StartTicket, mode: 'expert' | 'once' = 'expert') {
   if (busy.value) return
   opener = document.activeElement as HTMLElement
   generation++; visible.value = true
+  oneOff.value = mode === 'once'; newTicket.value = !initial; projectId.value = ''; resetTask(); task.value = ''; settingsOpen.value = false; lastSettingsWarning.value = []
   ticket.value = initial?.is_leaf === true ? initial : null; query.value = ''; tickets.value = []; nextCursor.value = null
   authorFamily.value = authorFamilyFor(ticket.value)
   catalog.value = null; catalogGap.value = null; catalogMessage.value = ''
   choice.value = emptyChoice(); touch.value = emptyTouch()
   remember.value = false; remembered.value = ''
   runId.value = ''; requested.value = null; managedId.value = ''; reused.value = false
-  error.value = ''; checkError.value = ''; searchError.value = ''; grantStale.value = false
+  error.value = ''; checkError.value = ''; searchError.value = ''; grantStale.value = false; checking.value = false
   dialog.value?.showModal()
   void checkDispatch()
-  if (!ticket.value) void loadCatalog()
+  if (!oneOff.value && !ticket.value) void loadCatalog()
+  if (oneOff.value) void projects.load(true)
   if (!ticket.value) void search()
   poll.start()
   await nextTick()
-  if (ticket.value) hostSelect.value?.focus()
+  if (oneOff.value) taskInput.value?.focus()
+  else if (ticket.value) hostSelect.value?.focus()
   else searchInput.value?.focus()
+}
+function openOnce(initial?: StartTicket) { return open(initial, 'once') }
+function escape() {
+  const active = document.activeElement
+  if (active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement || active instanceof HTMLInputElement && ['text', 'search'].includes(active.type)) { active.blur(); return }
+  close()
+}
+function formKey(event: KeyboardEvent) {
+  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); escape(); return }
+  if (event.key !== 'Enter') return
+  if (!event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) {
+    event.preventDefault(); event.stopPropagation(); void submit()
+  } else if (event.target instanceof HTMLInputElement && ['text', 'search'].includes(event.target.type) && !event.ctrlKey && !event.metaKey) event.preventDefault()
 }
 function close() {
   if (busy.value) return
@@ -265,25 +331,39 @@ function changeTicket() {
   remember.value = false
   remembered.value = ''
   void checkDispatch()
-  void loadCatalog()
+  if (!oneOff.value) void loadCatalog()
   void search()
   void nextTick(() => searchInput.value?.focus())
 }
 async function submit(runNow = false) {
   if (dispatchMode.value === 'lead') { if (!runNow) await queueForLead(); return }
-  if (!canSubmit.value || !ticket.value) return
+  if (!canSubmit.value) return
+  const context = oneOff.value && newTicket.value && selectedProject.value
+    ? { id: selectedProject.value.id, updated_at: selectedProject.value.nodeUpdatedAt! } as WorkNode
+    : ticket.value
+  if (!context) return
   busy.value = true; error.value = ''
+  const turn = generation, owner = person.value
+  const chosen = { ticket: { ...context }, agentId: view.value.agentId, profileId: view.value.profileId, accountId: choice.value.accountId, runNow }
+  const options = { instruction: (instruction.value.trim() || newTicket.value) ? instruction.value : task.value, repositoryMutationAllowed: mayChangeFiles.value, ...(newTicket.value ? { task: task.value } : {}) }
+  const signature = JSON.stringify([owner, chosen, options])
+  if (signature !== requestKey) { requestKey = signature; requestId = crypto.randomUUID() }
+  const isCurrent = () => turn === generation && visible.value && owner === person.value
   const pinned = { ...view.value.requested }
+  const pin = { ticket: oneOff.value && newTicket.value ? undefined : ticket.value?.id, harness: choice.value.harness, account: choice.value.accountId, remember: remember.value, remembered: remembered.value }
   const mark = writeMark()
   try {
-    if (choice.value.accountId && remember.value) await putPin({ ticket_id: ticket.value.id, harness: choice.value.harness, account_id: choice.value.accountId })
-    else if (remembered.value && !remember.value) await deletePin(ticket.value.id, choice.value.harness)
-    const result = await startAgent({ ticket: ticket.value, agentId: view.value.agentId, profileId: view.value.profileId, accountId: choice.value.accountId, runNow }, { run: agents.admitRun, runs: agents.admitRuns })
+    if (pin.ticket && pin.account && pin.remember) await putPin({ ticket_id: pin.ticket, harness: pin.harness, account_id: pin.account })
+    else if (pin.ticket && pin.remembered && !pin.remember) await deletePin(pin.ticket, pin.harness)
+    if (!isCurrent()) return
+    const result = await startAgent({ ...chosen, ...(oneOff.value ? { runOnce: { ...options, requestId } } : {}), isCurrent }, { run: agents.admitRun, runs: agents.admitRuns })
+    if (!isCurrent()) return
     runId.value = result.run.id; reused.value = result.reused; requested.value = pinned
     void agents.afterWrite()
     await refresh()
-    await nextTick(); dialog.value?.querySelector<HTMLElement>('[data-result]')?.focus()
+    await nextTick(); if (isCurrent()) dialog.value?.querySelector<HTMLElement>('[data-result]')?.focus()
   } catch (e) {
+    if (!isCurrent()) return
     // A pin or a work order may already be written when a later step fails: the lists re-read either way.
     if (wroteSince(mark)) void agents.afterWrite()
     if (staleGrantRejection(e)) {
@@ -295,22 +375,25 @@ async function submit(runNow = false) {
       error.value = 'This account no longer allows that model. Nothing was queued, and another account was not used. Refresh the catalog, then choose a model it offers.'
     } else error.value = `${message(e)} Your selections are kept. Retrying checks for an existing work order and run first.`
   }
-  finally { busy.value = false }
+  finally { if (isCurrent()) busy.value = false }
 }
 async function overrideQueued() {
   if (!run.value || busy.value) return
+  const turn = generation, owner = person.value, id = run.value.id
+  const current = () => turn === generation && owner === person.value && visible.value && runId.value === id
   busy.value = true; checkError.value = ''
-  try { agents.admitRun(await runNowOnce(run.value.id)); void agents.afterWrite() }
-  catch (e) { checkError.value = message(e) }
-  finally { busy.value = false }
+  try { const wire = await runNowOnce(id); if (current()) { agents.admitRun(wire); void agents.afterWrite() } }
+  catch (e) { if (current()) checkError.value = message(e) }
+  finally { if (current()) busy.value = false }
 }
 async function refresh() {
   if (!run.value || checking.value) return
   const turn = generation, id = run.value.id
   checking.value = true
   try {
-    agents.admitRun(await getRun(id))
+    const wire = await getRun(id)
     if (turn !== generation || !visible.value) return
+    agents.admitRun(wire)
     checkError.value = ''
     const agentId = agents.runs[id]?.agent_principal_id
     if (!agentId) return
@@ -319,34 +402,49 @@ async function refresh() {
     managedId.value = agents.admitSessions(page.items).find(s => s.run_id === id && s.management_mode === 'managed')?.id ?? ''
     if (managedId.value) void agents.refreshSessions()
   } catch { if (turn === generation) checkError.value = 'Status could not be refreshed. The last reported state is shown.' }
-  finally { checking.value = false }
-}
-function keydown(event: KeyboardEvent) {
-  const field = (event.target as HTMLElement).matches('input,textarea,select,[contenteditable="true"]')
-  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (field) (event.target as HTMLElement).blur(); else close() }
-  else if (event.key === 'Enter' && (mac ? event.metaKey : event.ctrlKey) && !event.altKey && !event.shiftKey) { event.preventDefault(); event.stopPropagation(); void submit() }
+  finally { if (turn === generation) checking.value = false }
 }
 const stopAccess = onAccessRevalidate({ reset: () => {
   busy.value = false; close()
   ticket.value = null; dispatchProject.value = null; projectLead.value = null; dispatchMode.value = 'manual'; queuedForLead.value = false
 } })
 onBeforeUnmount(() => { stopAccess(); narrowQuery?.removeEventListener('change', onNarrow); generation++; searchGeneration++; catalogGeneration++; dispatchGeneration++; poll.stop(); clearTimeout(searchTimer) })
-defineExpose({ open })
+defineExpose({ open, openOnce })
 </script>
 
 <template>
-  <dialog ref="dialog" class="launch-dialog" :aria-labelledby="`${uid}-title`" @cancel.prevent="close" @keydown="keydown">
-    <form class="launch-card" @submit.prevent="submit()">
+  <dialog ref="dialog" class="launch-dialog" :class="{ 'run-once': oneOff }" :aria-labelledby="`${uid}-title`" @cancel.prevent="escape">
+    <form class="launch-card" @submit.prevent="submit()" @keydown="formKey">
       <header class="launch-head">
-        <h2 :id="`${uid}-title`">Start agent</h2>
+        <h2 :id="`${uid}-title`">{{ oneOff ? copy.once : 'Start agent' }}</h2>
         <button type="button" class="icon-btn flat" aria-label="Close start agent" :disabled="busy" @click="close"><AppIcon name="close" /></button>
       </header>
 
       <template v-if="!run">
         <div class="launch-body">
-        <fieldset :disabled="busy" class="launch-fields">
+        <fieldset :disabled="busy" class="launch-fields" :class="{ 'one-off': oneOff }">
           <legend class="sr-only">Run setup</legend>
-          <div class="ticket-field">
+          <div v-if="oneOff" class="select-field">
+            <label :for="`${uid}-task`">{{ copy.task }}</label>
+            <input :id="`${uid}-task`" ref="taskInput" v-model="task" class="field" maxlength="160" />
+          </div>
+          <div v-if="oneOff" class="context-choice select-field">
+            <label :for="`${uid}-context`">{{ copy.context }}</label>
+            <select :id="`${uid}-context`" v-model="newTicket" class="field">
+              <option :value="true">{{ copy.createTicket }}</option>
+              <option :value="false">{{ copy.existingTicket }}</option>
+            </select>
+          </div>
+          <div v-if="oneOff && newTicket" class="new-ticket">
+            <div class="select-field">
+              <label :for="`${uid}-project`">{{ copy.project }}</label>
+              <select :id="`${uid}-project`" v-model="projectId" class="field"><option value="">{{ copy.chooseProject }}</option><option v-for="project in projectOptions" :key="project.id" :value="project.id">{{ project.routeKey }} · {{ project.title }}</option></select>
+            </div>
+            <p class="note">A visible Run once ticket is created in this project and excluded from release notes.</p>
+            <p v-if="!can('nodes.write')" class="note">Creating a ticket requires node-write permission. An existing ticket can be selected instead.</p>
+            <p v-if="projects.error" class="note bad" role="alert">{{ projects.error }} <button type="button" class="btn sm" @click="projects.load(true)">Retry projects</button></p>
+          </div>
+          <div v-if="!oneOff || !newTicket" class="ticket-field">
             <label :for="`${uid}-search`">Ticket</label>
             <div v-if="ticket" class="chosen-ticket">
               <AppIcon name="ticket" :size="18" />
@@ -367,7 +465,22 @@ defineExpose({ open })
               </div>
             </template>
           </div>
+          <div v-if="oneOff" class="instruction-field select-field">
+            <label :for="`${uid}-instruction`">{{ copy.instruction }}</label>
+            <textarea :id="`${uid}-instruction`" v-model="instruction" class="field instruction" maxlength="2000" rows="3" />
+            <p class="note">{{ copy.instructionHelp }}</p>
+          </div>
+          <div v-if="oneOff" class="restriction-field">
+            <label class="remember"><input v-model="mayChangeFiles" type="checkbox"> {{ copy.files }}</label>
+          </div>
+          <p v-if="oneOff" class="note restriction-note" role="status">{{ mayChangeFiles ? copy.writable : copy.readOnly }}</p>
+          <div v-if="oneOff" class="run-settings-summary" :class="{ warn: settingsWarning.length }">
+            <div class="run-summary-line"><p :title="settingsSummary">{{ settingsSummary }}</p><button type="button" class="btn ghost settings-toggle" :aria-expanded="settingsOpen" :aria-controls="`${uid}-settings`" @click="toggleSettings">{{ settingsOpen ? copy.hide : copy.change }}</button></div>
+            <p v-if="settingsWarning.length || lastSettingsWarning.length" class="note settings-status" :class="{ resolved: !settingsWarning.length, folded: !settingsOpen }" :role="settingsWarning.length ? 'status' : undefined" :aria-hidden="!settingsWarning.length || undefined"><span v-for="(warning, index) in settingsWarning.length ? settingsWarning : lastSettingsWarning" :key="index" class="settings-warning" :title="`${warning.label} · ${warning.detail}`"><strong>{{ warning.label }}</strong><span class="settings-warning-detail"> · {{ warning.detail }}</span></span></p>
+            <button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button>
+          </div>
           <template v-if="dispatchMode === 'manual'">
+          <div v-show="!oneOff || settingsOpen" :id="`${uid}-settings`" class="run-settings-fields" :aria-label="oneOff ? copy.settings : undefined">
           <p v-if="view.roleNote && role.source !== 'default'" class="note role-note">{{ view.roleNote }}</p>
           <div v-if="role.role === 'review-gate'" class="select-field">
             <label :for="`${uid}-family`">Author family</label>
@@ -408,7 +521,7 @@ defineExpose({ open })
               <p v-if="notes.account" :id="`${uid}-account-note`" class="note">{{ notes.account }}</p>
               <p v-for="(text, i) in view.accountNotes" :key="i" class="note sizer" :data-text="text" aria-hidden="true" />
             </div>
-            <label v-if="choice.accountId" class="remember"><input v-model="remember" type="checkbox"> Remember for this ticket</label>
+            <label v-if="choice.accountId && !oneOff" class="remember"><input v-model="remember" type="checkbox"> Remember for this ticket</label>
           </div>
           <div class="pair" :class="{ 'pi-bound': piModelBound }">
           <div class="select-field">
@@ -430,6 +543,7 @@ defineExpose({ open })
             <p :id="`${uid}-effort-note`" class="note effort-note">{{ notes.effort }}</p>
           </div>
           </div>
+          </div>
           </template>
         </fieldset>
 
@@ -442,12 +556,12 @@ defineExpose({ open })
         </div>
         <p v-else-if="dispatchMode === 'checking'" class="note" role="status">Checking how this project starts work…</p>
         <div v-else-if="dispatchMode === 'failed'" class="error" role="alert"><p>{{ dispatchError }}</p><button type="button" class="btn sm" @click="checkDispatch">Retry start settings</button></div>
-        <div v-if="dispatchMode === 'manual' && !loading && !catalogGap && catalog" class="dispatch-status" :class="{ warn: view.status.tone === 'warn' }" role="status"><AppIcon :name="view.status.tone === 'warn' ? 'clock' : 'info'" :size="17" /><div><strong>{{ view.status.label }}</strong><p>{{ view.status.detail }}</p></div></div>
-        <div v-if="dispatchMode === 'manual' && (catalogGap === 'failed' || catalogGap === 'forbidden')" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
+        <div v-if="!oneOff && dispatchMode === 'manual' && !loading && !catalogGap && catalog" class="dispatch-status" :class="{ warn: view.status.tone === 'warn' }" role="status"><AppIcon :name="view.status.tone === 'warn' ? 'clock' : 'info'" :size="17" /><div><strong>{{ view.status.label }}</strong><p>{{ view.status.detail }}</p></div></div>
+        <div v-if="!oneOff && dispatchMode === 'manual' && (catalogGap === 'failed' || catalogGap === 'forbidden')" class="error" role="alert"><p>{{ catalogMessage }}</p><button v-if="catalogGap === 'failed'" type="button" class="btn sm" @click="loadCatalog">Retry catalog</button></div>
         <div v-if="error" class="error" role="alert"><p>{{ error }}</p><button v-if="grantStale" type="button" class="btn sm" @click="loadCatalog">Refresh catalog</button></div>
         <p v-if="dispatchMode === 'manual' && !permitted" class="note">Starting an agent requires work-order write and run-create permission.</p>
         </div>
-        <footer><button type="button" class="btn" :disabled="busy" @click="close"><span class="queue-label"><span>{{ dismissLabel }}</span><span aria-hidden="true">Cancel</span><span aria-hidden="true">Close</span></span><KeyCap k="Esc" class="hint" aria-hidden="true" /></button><button v-if="dispatchMode === 'manual' && mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">Run now once</button><button type="submit" class="btn primary" :disabled="dispatchMode === 'lead' ? !canQueueForLead : !canSubmit"><AppIcon :name="submitIcon" :size="15" /><span class="queue-label"><span>{{ dispatchMode === 'lead' ? queuedForLead ? 'Queued' : busy ? 'Queueing…' : `Queue for ${w.l}` : busy ? 'Queueing…' : 'Queue run' }}</span><span aria-hidden="true">Queue for {{ w.l }}</span><span aria-hidden="true">Queue run</span><span aria-hidden="true">Queueing…</span></span><KeyCap k="mod" class="hint" aria-hidden="true" /><KeyCap k="enter" class="hint" aria-hidden="true" /></button></footer>
+        <footer><button type="button" class="btn" :disabled="busy" @click="close"><span class="queue-label"><span>{{ dismissLabel }}</span><span aria-hidden="true">Cancel</span><span aria-hidden="true">Close</span></span><KeyCap k="Esc" class="hint" aria-hidden="true" /></button><button v-if="dispatchMode === 'manual' && mayRunNow && selectedWait?.run_now_allowed" type="button" class="btn" :disabled="!canSubmit" @click="submit(true)">{{ copy.skipWait }}</button><button type="submit" class="btn primary" :disabled="dispatchMode === 'lead' ? !canQueueForLead : !canSubmit" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'"><AppIcon :name="submitIcon" :size="15" /><span class="queue-label"><span>{{ dispatchMode === 'lead' ? queuedForLead ? 'Queued' : busy ? 'Queueing…' : `Queue for ${w.l}` : busy ? copy.queueing : copy.queue }}</span><span aria-hidden="true">Queue for {{ w.l }}</span><span aria-hidden="true">{{ copy.queue }}</span><span aria-hidden="true">{{ copy.queueing }}</span></span><KeyCap k="mod" class="hint" aria-hidden="true" /><KeyCap k="enter" class="hint" aria-hidden="true" /></button></footer>
       </template>
 
       <template v-else>
@@ -479,8 +593,9 @@ defineExpose({ open })
             <p v-else-if="!reported.modelKnown || !reported.accountKnown || !reported.thinkingKnown" class="note">The session has not reported every field.</p>
           </div>
           <p class="note mono">Run {{ run.id.slice(0, 8) }}</p>
+          <p v-if="run.run_once" class="note">{{ run.repository_mutation_allowed ? 'May change files' : 'Read-only · no tools or repository access' }}</p>
         </div>
-        <button v-if="mayRunNow && run.status === 'queued' && run.wait?.run_now_allowed" type="button" class="btn" :disabled="busy" @click="overrideQueued">Run now once</button>
+        <button v-if="mayRunNow && run.status === 'queued' && run.wait?.run_now_allowed" type="button" class="btn" :disabled="busy" @click="overrideQueued">{{ copy.skipWait }}</button>
         <p v-if="checkError" class="error" role="alert">{{ checkError }}</p>
         </div>
         <footer class="result-footer"><button type="button" class="btn ghost" :disabled="checking" @click="refresh"><AppIcon name="refresh" :size="14" />Refresh status</button><button type="button" class="btn" :disabled="busy" @click="close">Close</button><RouterLink class="btn primary" :to="managed ? `/agents/${managed.id}` : '/agents'" @click="close">{{ managed ? 'Open session' : 'Go to Agents' }}<AppIcon name="arrow" :size="15" /></RouterLink></footer>
@@ -490,15 +605,34 @@ defineExpose({ open })
 </template>
 
 <style scoped>
-.launch-dialog { width: min(var(--dialog-l), calc(100vw - 24px)); max-height: calc(100dvh - 64px); margin: 32px auto 0; padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: hidden; }
+.launch-dialog { position: fixed; inset: 16px auto auto 50%; transform: translateX(-50%); margin: 0; width: min(var(--dialog-l), calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: hidden; }
 .launch-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(5px); }
-.launch-card { display: flex; flex-direction: column; max-height: inherit; padding: 22px 24px 20px; }
-.launch-head { display: flex; flex: none; gap: 12px; align-items: center; margin-bottom: 18px; }
-.launch-body { order: 2; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
+.launch-card { padding: 22px 24px 20px; display: flex; flex-direction: column; max-height: calc(100dvh - 34px); min-height: 0; }
+.launch-head { order: 0; flex-shrink: 0; }
+.launch-body { order: 2; overflow-y: auto; scrollbar-gutter: stable; min-height: 0; }
+.launch-card > footer { order: 1; flex-shrink: 0; margin: 0 0 16px; padding: 0 0 16px; border-top: 0; border-bottom: 1px solid var(--line); }
+.new-ticket { display: grid; gap: 14px; }
+.instruction.field { height: auto; resize: none; }
+.one-off .restriction-note { min-block-size: 3em; }
+.run-settings-fields { display: grid; gap: 16px; min-width: 0; }
+.run-settings-summary { min-width: 0; max-width: 100%; padding-block: 12px; border-block: 1px solid var(--line); }
+.run-summary-line { min-width: 0; display: flex; align-items: center; gap: 12px; }
+.run-summary-line p { flex: 1; min-width: 0; margin: 0; font-size: 13px; line-height: 1.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.settings-toggle { flex-shrink: 0; min-height: 44px; }
+.settings-status { min-width: 0; min-block-size: 3em; margin: 4px 0 0; }
+.settings-warning { display: block; min-width: 0; max-width: 100%; }
+.settings-status strong { font-weight: 600; }
+.settings-status.folded .settings-warning { display: flex; align-items: baseline; gap: 4px; }
+.settings-status.folded strong { flex-shrink: 0; white-space: nowrap; }
+.settings-status.folded .settings-warning-detail { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.settings-status.resolved { visibility: hidden; }
+.run-settings-summary.warn .settings-status { color: var(--ink-2); }
+.queue-label { display: grid; }
+.queue-label > span { grid-area: 1 / 1; }
+.queue-label .inactive { visibility: hidden; }
+.launch-head { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }
 .lead-notice { margin-top: 18px; font-size: 14px; line-height: 1.6; }
 .lead-notice p { margin-top: 8px; color: var(--ink-2); }
-.queue-label { display: inline-grid; }
-.queue-label > span { grid-area: 1 / 1; }
 .queue-label > [aria-hidden] { visibility: hidden; }
 .launch-head h2 { font-size: 21px; letter-spacing: -.4px; }
 .launch-head .icon-btn { margin-left: auto; flex-shrink: 0; }
@@ -540,7 +674,7 @@ label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; c
 .bad { color: var(--danger); }
 footer { order: 1; display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
 footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
-@media (pointer: coarse), (max-width: 600px) { footer .btn { min-height: 44px; } }
+@media (pointer: coarse), (max-width: 600px) { footer .btn, .remember { min-height: 44px; } }
 .run-result { display: grid; justify-items: center; text-align: center; padding: 14px 0; gap: 12px; outline: none; }
 .run-result h3 { font-size: 25px; letter-spacing: -.5px; }
 .run-result > p:not(.eyebrow) { color: var(--ink-2); font-size: 14px; line-height: 1.6; max-width: 410px; }
@@ -558,12 +692,14 @@ footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
 .pair.pi-bound { grid-template-columns: minmax(0, 1fr) 130px; }
 .field.pinned-model { font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; }
 @media (max-width: 600px) {
-  .launch-dialog { width: 100%; max-width: none; height: 100dvh; max-height: none; margin: 0; border: 0; border-radius: 0; overflow: hidden; scrollbar-gutter: auto; }
-  .launch-card { height: 100%; display: flex; flex-direction: column; overflow: hidden; padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  .launch-dialog { inset: 0; transform: none; width: 100%; max-width: none; height: 100dvh; max-height: none; margin: 0; border: 0; border-radius: 0; overflow: hidden; scrollbar-gutter: auto; }
+  .launch-dialog.run-once { max-width: none; }
+  .launch-card { height: 100%; max-height: 100dvh; display: flex; flex-direction: column; overflow: hidden; padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
   .launch-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+  .launch-card > footer { order: 3; flex-shrink: 0; margin: 18px 0 0; padding: 16px 0 0; border-bottom: 0; border-top: 1px solid var(--line); }
   .pair, .pair.pi-bound { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .launch-head { flex-shrink: 0; margin-bottom: 14px; }
-  .launch-fields { gap: 14px; }
+  .launch-fields, .run-settings-fields { gap: 14px; }
   .dispatch-status { margin-top: 16px; }
   footer { order: 3; flex-shrink: 0; margin: 18px 0 0; padding: 16px 0 0; border-bottom: 0; border-top: 1px solid var(--line); }
   .launch-head .icon-btn { width: 44px; height: 44px; }
