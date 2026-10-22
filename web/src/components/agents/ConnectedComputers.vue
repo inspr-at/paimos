@@ -292,12 +292,11 @@ function assign(error: unknown, fallback: string) {
         <div class="identity">
           <span class="glyph"><AppIcon name="monitor" :size="16" /></span>
           <div class="identity-text">
-            <p v-clip-tip class="name">{{ computer.computer_name }}</p>
+            <p v-clip-tip class="name" :title="computer.computer_name"><template v-for="(part, index) in computer.computer_name.split(/(\s+)/)" :key="index"><span v-if="part.trim()" v-clip-tip="computer.computer_name" class="name-word">{{ part }}</span><template v-else>{{ part }}</template></template></p>
             <p class="meta location">
               <span class="where">{{ platformCaption(computer.platform, computer.arch) }}</span>
               <template v-if="computer.workspace_path">
-                <span class="sep" aria-hidden="true">·</span>
-                <span class="path" :title="computer.workspace_path" :data-tip="computer.workspace_path"><template v-for="(part, index) in pathParts(computer.workspace_path)" :key="index">{{ part }}<wbr /></template></span>
+                <span class="path" :title="computer.workspace_path" :data-tip="computer.workspace_path"><bdi dir="ltr"><template v-for="(part, index) in pathParts(computer.workspace_path)" :key="index">{{ part }}<wbr /></template></bdi></span>
               </template>
             </p>
             <p class="meta confirmation">{{ touchIDConfirmation(computer) }}</p>
@@ -318,7 +317,7 @@ function assign(error: unknown, fallback: string) {
           <HarnessMark v-for="enrollment in harnesses(computer)" :key="enrollment.account_id" :harness="enrollment.harness" :size="14" />
           <span>{{ harnesses(computer).length }} {{ harnesses(computer).length === 1 ? 'harness' : 'harnesses' }}</span>
         </p>
-        <p class="status"><span class="dot" :data-state="statusOf(computer).stateLabel" />{{ statusOf(computer).stateLabel }}</p>
+        <p class="status"><span class="dot" :data-state="statusOf(computer).stateLabel" /><span class="status-label">{{ statusOf(computer).stateLabel }}</span></p>
         <p class="meta last-active">{{ lastActive(computer) }}</p>
         <div class="actions">
           <button v-if="canChange(computer)" type="button" class="btn sm ghost" @click="openDialog(computer, 'computer')">Disconnect</button>
@@ -400,26 +399,32 @@ function assign(error: unknown, fallback: string) {
 .meta { color: var(--ink-2); font-size: 13px; }
 .problem { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 10px; color: var(--danger); }
 .next-step { padding: 0 10px 8px; color: var(--ink-2); font-size: 13px; }
-.sheet, .computer { display: grid; grid-template-columns: minmax(160px, 1.8fr) minmax(110px, 1fr) minmax(96px, .8fr) minmax(72px, .6fr) auto; gap: 6px 14px; align-items: center; }
+.list { display: grid; grid-template-columns: minmax(14rem, 1fr) auto auto auto auto; column-gap: 14px; }
+.sheet, .computer { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; gap: 6px 14px; align-items: center; }
 .sheet span:nth-child(4), .last-active { min-width: 0; }
 @container computers (max-width: 760px) {
-  .sheet, .computer { grid-template-columns: minmax(140px, 1.6fr) auto minmax(96px, .8fr) auto; }
+  .list { grid-template-columns: minmax(14rem, 1fr) auto auto auto; }
   .sheet span:nth-child(4), .last-active { display: none; }
 }
 .sheet { padding: 0 10px 6px; color: var(--ink-3); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; font-variant-ligatures: none; }
 .computer { padding: 8px 10px; border-top: 1px solid var(--line); }
-.identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.identity { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
 .identity-text { flex: 1; min-width: 0; }
 .agent-update { margin-top: 4px; color: var(--ink-2); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .glyph { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-sunken); color: var(--ink-2); }
-.name { color: var(--ink); font-weight: 650; overflow-wrap: break-word; }
+.name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 650; overflow-wrap: normal; }
+.name-word { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
 .identity .meta { min-width: 0; max-width: 100%; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
-.location { display: flex; align-items: baseline; overflow: hidden; white-space: nowrap; }
-.where, .sep { flex: none; }
-.sep { padding: 0 .35em; }
-.path { display: block; min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: break-word; }
+.location { display: flex; flex-wrap: wrap; align-items: baseline; overflow: hidden; white-space: nowrap; }
+.where { flex: none; }
+.path { display: block; min-width: 0; flex: 1 1 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: break-word; direction: rtl; text-align: left; }
 .path wbr { display: none; }
 .harness-line, .status { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink); font-size: 13px; white-space: nowrap; }
+.status { display: grid; grid-template-columns: 7px max-content; }
+.status .dot { grid-area: 1 / 1; }
+/* Keep the longest status's space through live connectivity and setup changes. */
+.status-label, .status::after { grid-area: 1 / 2; }
+.status::after { content: 'Setup unconfirmed'; visibility: hidden; }
 .harness-line.reported { display: grid; gap: 10px; }
 .harness-report { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
 .harness-report-text { display: grid; gap: 3px; min-width: 0; white-space: normal; }
@@ -475,10 +480,12 @@ function assign(error: unknown, fallback: string) {
   .computers { padding: 4px 4px 6px; }
   .revoked-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; line-height: 18px; }
   .sheet { display: none; }
+  .list { display: block; }
   .computer { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id actions" "harness harness" "status status"; align-items: start; row-gap: 4px; }
   .identity { grid-area: id; }
+  .name { display: block; overflow: visible; overflow-wrap: break-word; }
+  .name-word { display: inline; white-space: normal; }
   .location { flex-wrap: wrap; overflow: visible; white-space: normal; }
-  .location .sep { display: none; }
   .path { display: block; flex-basis: 100%; }
   .harness-line { grid-area: harness; padding-left: 42px; }
   .status { grid-area: status; padding-left: 42px; }
@@ -489,7 +496,7 @@ function assign(error: unknown, fallback: string) {
 @media (max-width: 520px) {
   .computer { grid-template-areas: "id id" "harness harness" "status status" "actions actions"; }
   .identity { align-items: flex-start; }
-  .path { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
+  .path { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; direction: ltr; }
   .path wbr { display: inline; }
   .actions > button { min-width: 44px; min-height: 44px; }
 }
