@@ -366,3 +366,13 @@ measurements reported missing `web-shard-16` evidence and incomplete browser
 case reports. These hosted jobs need fresh CI evidence after the coordinator
 pushes. The non-required policy preview still requires the coordinator's fresh
 trusted verdict. This worker does not run, replace or bypass that gate.
+
+FIX3 validation: the required full affected Go set passed remotely with
+`-count=1` on implementation commit `2285a0716`: `nativepty`, `nativeattach`,
+`agentd`, `nativesessions/...`, `reportercontract`, plus `nativereceipts`,
+`nativeintegration/...` and `nativecontract`. Guarded remote
+`ci-static --merge-main` passed on `2629bcf3c`: all 44 checks, zero optional
+skips, including the full no-browser safety suite and both positive regressions.
+The existing live-root ESRCH assertion is unchanged. No UI spec is affected;
+no browser was launched by the worker. No origin push, deployment, model CLI
+or review gate was run.
