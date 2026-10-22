@@ -23,7 +23,7 @@ func TestRootAptTimeoutReapsBeforeRetry(t *testing.T) {
 // fixture-only regression uses Node helpers and never launches a browser.
 func TestInterruptedFixturesLeaveNoProcesses(t *testing.T) {
 	program := "node"
-	args := []string{"--test", "--test-concurrency=1", "--test-name-pattern=AEON-1064|stale|recovery|owned descendants|reused journal|detached", "scripts/fixture-lifecycle.test.mjs", "scripts/playwright-safe.test.mjs"}
+	args := []string{"--test", "--test-concurrency=1", "--test-name-pattern=AEON-1064|stale|recovery|owned descendants|reused journal|detached|unverifiable live roots", "scripts/fixture-lifecycle.test.mjs", "scripts/playwright-safe.test.mjs"}
 	if runtime.GOOS == "linux" {
 		args = append([]string{"scripts/testdata/fixture-reaper.py", program}, args...)
 		program = "python3"

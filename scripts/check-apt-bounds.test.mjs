@@ -152,6 +152,37 @@ test('dependency errors never retry even after an ignored fetch', async () => {
   }
 })
 
+// AEON-1652 fix2: hosted runners hide Azure behind mirror+file URIs. A
+// timeout with only Ign lines must still reach a different Ubuntu mirror.
+test('hosted Ubuntu mirror lists recover after fetch errors and stalls without changing vendor lists', async () => {
+  for (const format of ['list', 'sources']) {
+    for (const mode of ['fetch-fail', 'mirror-stall']) {
+      for (const command of ['apt aeon-apt-fixture-missing-tool', 'playwright install-deps chromium']) {
+        const result = await run(`bash "${script}" ${command}`, { mode, format, mirrorList: true })
+        assert.equal(result.status, 0, `${format} ${mode} ${command}: ${result.error}\n${result.stdout}\n${result.stderr}`)
+        assert.equal(result.calls.length, command.startsWith('apt ') ? 3 : 2)
+        const initial = result.attempts[0].sources[format === 'list' ? 'sources.list' : 'ubuntu.sources']
+        assert.match(initial, /mirror\+file:.*\/apt-mirrors\.txt/)
+        const served = result.attempts.at(-1).sources
+        const ubuntu = served[format === 'list' ? 'sources.list' : 'ubuntu.sources']
+        assert.doesNotMatch(ubuntu, /mirror\+file:|azure\.archive\.ubuntu\.com/)
+        assert.match(ubuntu, /https:\/\/archive\.ubuntu\.com\/ubuntu\//)
+        assert.match(ubuntu, /https:\/\/security\.ubuntu\.com\/ubuntu\//)
+        assert.match(ubuntu, /signed-by=\/usr\/share\/keyrings\/ubuntu-archive-keyring\.gpg|Signed-By: \/usr\/share\/keyrings\/ubuntu-archive-keyring\.gpg/)
+        for (const attempt of result.attempts) {
+          assert.equal(attempt.root, '1')
+          assert.equal(attempt.sources['vendor.list'], result.sources['sources.list.d/vendor.list'])
+          assert.equal(attempt.sources['vendor.sources'], result.sources['sources.list.d/vendor.sources'])
+        }
+        for (const [file, original] of Object.entries(result.sources)) assert.equal(readFileSync(join(result.sourceRoot, file), 'utf8'), original)
+        for (const config of result.configPaths) assert.equal(existsSync(config), false)
+        assert.match(result.stdout, /bounded-apt: using .*mirror\+file:/)
+        assert.match(result.stdout, /dependencies installed via archive\.ubuntu\.com \/ security\.ubuntu\.com/)
+      }
+    }
+  }
+})
+
 test('a failed fallback fetch fails with its status after exactly two attempts', async () => {
   const result = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'fetch-always-fail' })
   assert.equal(result.status, 100, result.stderr)

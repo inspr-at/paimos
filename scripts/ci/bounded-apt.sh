@@ -94,6 +94,7 @@ fallback_sources() {
 from pathlib import Path
 import re
 import sys
+from urllib.parse import unquote, urlsplit
 
 source, target = map(Path, sys.argv[1:])
 parts = target / 'sources.list.d'
@@ -103,7 +104,25 @@ host = re.compile(r'(?<=://)(?:(?:[a-zA-Z0-9-]+\.)?archive|security)\.ubuntu\.co
 changed = False
 
 def mirror(text, security):
+    # GitHub-hosted Ubuntu runners use a local apt mirror list, rather than
+    # naming Azure directly in their sources. Only replace lists containing
+    # Ubuntu archive hosts; vendor mirror lists remain byte-for-byte intact.
+    if text.startswith('mirror+file:'):
+        location = urlsplit(text[len('mirror+'):])
+        if location.netloc not in ('', 'localhost'):
+            return text
+        try:
+            with Path(unquote(location.path)).open() as listing:
+                contents = listing.read(65537)
+        except OSError:
+            return text
+        if len(contents) <= 65536 and any(host.search(line.split('#', 1)[0]) for line in contents.splitlines()):
+            return 'https://' + ('security.ubuntu.com' if security else 'archive.ubuntu.com') + '/ubuntu/'
+        return text
     return host.sub('security.ubuntu.com' if security else 'archive.ubuntu.com', text)
+
+def mirror_uris(text, security):
+    return re.sub(r'\S+', lambda match: mirror(match[0], security), text)
 
 def field(block, name):
     return re.search(rf'^{name}:[^\n]*(?:\n[ \t]+[^\n]*)*', block, re.M | re.I)
@@ -124,7 +143,7 @@ for path in files:
         blocks = []
         for block in re.split(r'\n[ \t]*\n', original):
             uris, suites = field(block, 'URIs'), field(block, 'Suites')
-            if not uris or not suites or not host.search(uris[0]):
+            if not uris or not suites or not any(mirror_uris(uris[0], security) != uris[0] for security in (False, True)):
                 blocks.append(block)
                 continue
             names = suites[0].split(':', 1)[1].split()
@@ -133,7 +152,7 @@ for path in files:
                 if selected:
                     copy = block[:suites.start()] + 'Suites: ' + ' '.join(selected) + block[suites.end():]
                     uri = field(copy, 'URIs')
-                    blocks.append(copy[:uri.start()] + mirror(uri[0], security) + copy[uri.end():])
+                    blocks.append(copy[:uri.start()] + mirror_uris(uri[0], security) + copy[uri.end():])
         rewritten = '\n\n'.join(blocks)
     else:
         rewritten = ''.join(legacy(line) for line in original.splitlines(keepends=True))
@@ -199,7 +218,7 @@ for file in "$source_root/sources.list" "$source_root/sources.list.d/"*.list "$s
 done
 mirrors='configured apt sources'
 if [[ ${#source_files[@]} -gt 0 ]]; then
-  mirrors=$(grep -hEo 'https?://(([[:alnum:]-]+\.)?archive|security)\.ubuntu\.com' "${source_files[@]}" | sed -E 's#https?://##' | sort -u | paste -sd, -) || true
+  mirrors=$(grep -hEo 'https?://(([[:alnum:]-]+\.)?archive|security)\.ubuntu\.com|mirror\+file:[^[:space:]]+' "${source_files[@]}" | sed -E 's#https?://##' | sort -u | paste -sd, -) || true
 fi
 echo "bounded-apt: using ${mirrors:-configured apt sources}"
 if capture_attempt; then

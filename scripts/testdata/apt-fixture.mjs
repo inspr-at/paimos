@@ -104,8 +104,12 @@ if [[ "\$mode" == dependency-fail ]]; then
   echo 'E: Unable to correct problems, you have held broken packages.' >&2
   exit 100
 fi
-if [[ "\$mode" == fetch-fail || "\$mode" == fetch-always-fail ]]; then
-  if [[ "\$mode" == fetch-always-fail ]] || grep -q '://azure.archive.ubuntu.com/' "\$snapshot/"*.sources "\$snapshot/"*.list 2>/dev/null; then
+if [[ "\$mode" == fetch-fail || "\$mode" == fetch-always-fail || "\$mode" == mirror-stall ]]; then
+  if [[ "\$mode" == fetch-always-fail ]] || grep -Eq '://azure.archive.ubuntu.com/|mirror[+]file:[^[:space:]]*/apt-mirrors(-security)?[.]txt' "\$snapshot/"*.sources "\$snapshot/"*.list 2>/dev/null; then
+    if [[ "\$mode" == mirror-stall ]]; then
+      echo 'Ign:2 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libtest' >&2
+      exit 124
+    fi
     echo 'E: Failed to fetch http://azure.archive.ubuntu.com/ubuntu/pool/main/libtest.deb Connection timed out' >&2
     echo 'E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?' >&2
     exit 100
@@ -131,7 +135,7 @@ exec "\$AEON_FIXTURE_NODE" "\$AEON_FIXTURE_APT_HOLD" "\$PPID"
   return bin
 }
 
-export function aptFixture({ mode, shells = false, format = 'sources', elapsed }) {
+export function aptFixture({ mode, shells = false, format = 'sources', elapsed, mirrorList = false }) {
   const state = mkdtempSync(join(tmpdir(), 'aeon-apt-'))
   writeFileSync(join(state, 'mode'), mode)
   writeFileSync(join(state, 'calls'), '')
@@ -154,6 +158,19 @@ Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
   }
   sources['sources.list.d/vendor.list'] = 'deb [signed-by=/usr/share/keyrings/vendor.gpg] https://packages.example.test/ubuntu stable main\n'
   sources['sources.list.d/vendor.sources'] = 'Types: deb\nURIs: https://repo.example.test/linux\nSuites: stable\nComponents: main\nSigned-By: /usr/share/keyrings/other-vendor.gpg\n'
+  if (mirrorList) {
+    const mirror = `mirror+file:${join(sourceRoot, 'apt-mirrors.txt')}`
+    const security = `mirror+file:${join(sourceRoot, 'apt-mirrors-security.txt')}`
+    const ubuntu = format === 'list' ? 'sources.list' : 'sources.list.d/ubuntu.sources'
+    sources[ubuntu] = sources[ubuntu].replaceAll('http://azure.archive.ubuntu.com/ubuntu/', mirror)
+    if (format === 'list') sources[ubuntu] = sources[ubuntu].replace(`deb-src ${mirror}`, `deb-src ${security}`)
+    sources['apt-mirrors.txt'] = 'http://azure.archive.ubuntu.com/ubuntu/\nhttps://archive.ubuntu.com/ubuntu/\n'
+    sources['apt-mirrors-security.txt'] = 'http://azure.archive.ubuntu.com/ubuntu/\nhttps://security.ubuntu.com/ubuntu/\n'
+    const vendor = `mirror+file:${join(sourceRoot, 'vendor-mirrors.txt')}`
+    sources['vendor-mirrors.txt'] = 'https://packages.example.test/ubuntu/\n'
+    sources['sources.list.d/vendor.list'] += `deb ${vendor} stable main\n`
+    sources['sources.list.d/vendor.sources'] += `\nTypes: deb\nURIs: ${vendor}\nSuites: stable\nComponents: main\nSigned-By: /usr/share/keyrings/other-vendor.gpg\n`
+  }
   for (const [file, text] of Object.entries(sources)) writeFileSync(join(sourceRoot, file), text)
   if (elapsed) {
     writeFileSync(join(state, 'clock'), '1000\n')
