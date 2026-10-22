@@ -4,7 +4,7 @@
 // commit because its workflow commands are the historical ones below.
 import { afterEach, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, cpSync, mkdirSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, cpSync, mkdirSync, statSync, symlinkSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { aptFixture } from './testdata/apt-fixture.mjs'
@@ -318,7 +318,8 @@ test('one complete image bundle installs offline and invalid bundles retain netw
   })
   assert.equal(readFileSync(join(producer.state, 'ownership-handoff'), 'utf8'), `${process.getuid()}:${process.getgid()}\n${bundleDir}\n`)
   assert.equal(existsSync(join(producer.state, 'root-owned-bundle')), false)
-  for (const [file, mode] of [['lists/auxfiles', 0o755], ['lists/noble_Packages', 0o644], ['archives/fish_1_amd64.deb', 0o644]]) {
+  assert.equal(existsSync(join(bundleDir, 'lists/auxfiles')), false, 'exclude auxiliary metadata from the artifact')
+  for (const [file, mode] of [['lists/noble_Packages', 0o644], ['archives/fish_1_amd64.deb', 0o644]]) {
     assert.equal(statSync(join(bundleDir, file)).mode & 0o777, mode, `${file} must be readable by the runner and artifact uploader`)
   }
   const manifestTimeout = producer.timeouts.find(timeout => timeout.command === `python3 - write ${bundleDir}`)
@@ -433,6 +434,8 @@ test('one complete image bundle installs offline and invalid bundles retain netw
     const incomplete = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'ok', bundleDir })
     assert.equal(incomplete.status, 0, incomplete.stderr)
     assert.deepEqual(incomplete.calls, ['playwright install-deps chromium'], 'reject missing bundle files before package mutation')
+    assert.ok(incomplete.stderr.includes(`${join(bundleDir, filename)}: not a regular file (missing)`), incomplete.stderr)
+    assert.match(incomplete.stderr, /st_mode=unavailable, owner=unavailable/)
     assert.doesNotMatch(incomplete.stdout, /dependencies installed offline/)
     writeFileSync(file, original)
   }
@@ -440,9 +443,93 @@ test('one complete image bundle installs offline and invalid bundles retain netw
   const corrupt = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'ok', bundleDir })
   assert.equal(corrupt.status, 0, corrupt.stderr)
   assert.deepEqual(corrupt.calls, ['playwright install-deps chromium'])
+  assert.ok(corrupt.stderr.includes(`${join(bundleDir, 'archives/fish_1_amd64.deb')}: bundle checksum mismatch`), corrupt.stderr)
+  assert.match(corrupt.stderr, /st_mode=0o100644, owner=\d+:\d+/)
 
   const exhausted = await run(state => `bash "${script}" bundle "${join(state, 'bundle')}"`, { mode: 'bundle-fetch-fail' })
   assert.equal(exhausted.status, 100, exhausted.stdout)
   assert.equal(exhausted.calls.filter(call => call.includes('--download-only')).length, 4)
   assert.equal(existsSync(join(exhausted.state, 'bundle/manifest.json')), false, 'never publish a completion marker for partial downloads')
+  assert.match(exhausted.stderr, /failed bundle tree \(at most 200 entries, depth 4\)/)
+})
+
+// AEON-1652 fix8 risk: a timed-out mirror+file attempt leaves symlinks and
+// auxiliary metadata that are legitimate apt cache entries, not install inputs.
+test('an interrupted first bundle fetch and a fallback fetch export only offline inputs', async () => {
+  for (const timeoutStatus of [124, 137]) {
+    const options = { mode: 'bundle-interrupted', mirrorList: 'hosted', rootOnly: true, timeoutStatus }
+    const producer = await run(state => `bash "${script}" bundle "${join(state, 'bundle')}"`, options)
+    assert.equal(producer.status, 0, `${producer.error}\n${producer.stdout}\n${producer.stderr}`)
+    assert.match(readFileSync(join(producer.state, 'interrupted-tree'), 'utf8'), /killed first fetch/)
+    const bundleDir = join(producer.state, 'bundle')
+    const manifest = JSON.parse(readFileSync(join(bundleDir, 'manifest.json'), 'utf8'))
+    const fetches = producer.attempts.filter(attempt => attempt.command.includes('--download-only'))
+    assert.equal(fetches.length, 2, 'the interrupted fetch must reach a successful second attempt')
+    assert.match(fetches[0].sources['ubuntu.sources'], /mirror\+file:/)
+    assert.match(fetches[1].sources['ubuntu.sources'], /http:\/\/archive\.ubuntu\.com/)
+    assert.equal(readFileSync(join(bundleDir, 'etc/sources.list.d/ubuntu.sources'), 'utf8'), fetches[1].sources['ubuntu.sources'])
+    assert.equal(manifest.version, 2)
+    assert.equal(Object.keys(manifest.debs).length, 4)
+    for (const [name, digest] of Object.entries(manifest.debs)) {
+      assert.match(name, /^archives\/[^/]+\.deb$/)
+      assert.match(digest, /^[a-f0-9]{64}$/)
+    }
+    assert.ok(manifest.lists.includes('lists/mirror+file_old_binary-amd64_Packages'), 'retain usable indexes from the killed attempt')
+    assert.ok(manifest.lists.includes('lists/archive.ubuntu.com_ubuntu_dists_noble_main_binary-amd64_Packages.lz4'))
+    assert.ok(manifest.lists.includes('lists/archive.ubuntu.com_ubuntu_dists_noble_InRelease'))
+    for (const excluded of ['lists/_etc_apt_apt-mirrors.txt', 'lists/auxfiles', 'lists/partial', 'archives/partial']) {
+      assert.equal(existsSync(join(bundleDir, excluded)), false, `${excluded} must not reach the uploader`)
+    }
+    const offline = await run(`bash "${script}" apt libtest`, { mode: 'always-fail', bundleDir })
+    assert.equal(offline.status, 0, offline.stderr)
+    assert.match(offline.stdout, /dependencies installed offline/)
+
+    // Negative control: the former all-files selection rejects apt's local
+    // mirror-list link even after the ownership and permission handoff.
+    const allFiles = await run(state => {
+      const copy = join(state, 'all-list-files.sh')
+      writeFileSync(copy, readFileSync(script, 'utf8').replace('if index_name(p.name)', "if p.name != 'auxfiles'"))
+      return `bash "${copy}" bundle "${join(state, 'bundle')}"`
+    }, options)
+    assert.equal(allFiles.status, 1, allFiles.stdout)
+    assert.match(allFiles.stderr, /lists\/_etc_apt_apt-mirrors\.txt: symlink \(st_mode=0o120[0-7]+, owner=\d+:\d+\)/)
+    assert.match(allFiles.stderr, /failed bundle tree/)
+    assert.match(allFiles.stderr, /[-dlrwx]{10} \d+:\d+ \d+ .*archives\/fish_1_amd64\.deb/)
+    assert.equal(existsSync(join(allFiles.state, 'bundle/manifest.json')), false)
+  }
+})
+
+test('bundle diagnostics identify unsafe or unreadable install inputs before dpkg', async () => {
+  const producer = await run(state => `bash "${script}" bundle "${join(state, 'bundle')}"`, { mode: 'bundle-ok' })
+  assert.equal(producer.status, 0, producer.stderr)
+  for (const fault of ['symlink', 'directory', 'unreadable', 'outside']) {
+    const bundleDir = join(producer.state, fault)
+    cpSync(join(producer.state, 'bundle'), bundleDir, { recursive: true })
+    const file = join(bundleDir, 'archives/fish_1_amd64.deb')
+    let expectedPath = file, reason = fault
+    if (fault === 'symlink') {
+      rmSync(file)
+      symlinkSync(join(bundleDir, 'archives/zsh_1_amd64.deb'), file)
+    } else if (fault === 'directory') {
+      rmSync(file)
+      mkdirSync(file)
+      reason = 'not a regular file'
+    } else if (fault === 'unreadable') {
+      chmodSync(file, 0o000)
+    } else {
+      const manifestFile = join(bundleDir, 'manifest.json')
+      const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'))
+      manifest.debs['../outside.deb'] = manifest.debs['archives/fish_1_amd64.deb']
+      writeFileSync(manifestFile, JSON.stringify(manifest))
+      expectedPath = `${bundleDir}/../outside.deb`
+      reason = 'outside root'
+    }
+    const rejected = await run(`bash "${script}" apt libtest`, { mode: 'ok', bundleDir })
+    assert.equal(rejected.status, 0, rejected.stderr)
+    assert.ok(rejected.stderr.includes(`${expectedPath}: ${reason}`), rejected.stderr)
+    assert.match(rejected.stderr, /st_mode=\S+, owner=\S+/)
+    assert.deepEqual(rejected.calls, ['update -qq', 'install -y -qq libtest'])
+    assert.equal(existsSync(join(rejected.state, 'offline-dpkg-started')), false)
+    if (fault === 'unreadable') chmodSync(file, 0o644)
+  }
 })

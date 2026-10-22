@@ -55,11 +55,11 @@ func checkOfflineAptWorkflow(t *testing.T) {
 		t.Fatal("bundle artifact must identify the producer's exact image and architecture")
 	}
 	fetch := reuseStep(t, bundle, "Download Chromium and shell system packages once")
-	if fetch["timeout-minutes"] != 22 || !strings.Contains(fmt.Sprint(fetch["run"]), `require('./web/package-lock.json').packages['node_modules/@playwright/test'].version`) || !strings.Contains(fmt.Sprint(fetch["run"]), `bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" bundle "$RUNNER_TEMP/apt-bundle"`) {
+	if fetch["id"] != "apt-fetch" || fetch["continue-on-error"] != true || fetch["timeout-minutes"] != 22 || !strings.Contains(fmt.Sprint(fetch["run"]), `require('./web/package-lock.json').packages['node_modules/@playwright/test'].version`) || !strings.Contains(fmt.Sprint(fetch["run"]), `bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" bundle "$RUNNER_TEMP/apt-bundle"`) {
 		t.Fatal("bundle fetch must use lockfile Playwright and the bounded bundle helper")
 	}
 	upload := reuseStep(t, bundle, "Share apt bundle for this run")
-	if !strings.HasPrefix(fmt.Sprint(upload["uses"]), "actions/upload-artifact@") || treeMap(upload["with"])["name"] != "${{ steps.apt-image.outputs.artifact }}" || treeMap(upload["with"])["path"] != "${{ runner.temp }}/apt-bundle" || treeMap(upload["with"])["if-no-files-found"] != "error" {
+	if upload["id"] != "apt-upload" || upload["continue-on-error"] != true || upload["if"] != "steps.apt-fetch.outcome == 'success'" || !strings.HasPrefix(fmt.Sprint(upload["uses"]), "actions/upload-artifact@") || treeMap(upload["with"])["name"] != "${{ steps.apt-image.outputs.artifact }}" || treeMap(upload["with"])["path"] != "${{ runner.temp }}/apt-bundle" || treeMap(upload["with"])["if-no-files-found"] != "error" {
 		t.Fatal("packages and their indexes must be shared as this run's image-keyed artifact")
 	}
 	for _, value := range reuseSteps(bundle) {
@@ -68,7 +68,7 @@ func checkOfflineAptWorkflow(t *testing.T) {
 		}
 	}
 	warning := reuseStep(t, bundle, "Warn when optional apt bundle is unavailable")
-	if warning["if"] != "failure()" || warning["timeout-minutes"] != 1 || !strings.Contains(fmt.Sprint(warning["run"]), "::warning title=Optional apt bundle unavailable::") || !strings.Contains(fmt.Sprint(warning["run"]), "GITHUB_STEP_SUMMARY") {
+	if warning["if"] != "always() && (failure() || steps.apt-fetch.outcome == 'failure' || steps.apt-upload.outcome == 'failure')" || warning["timeout-minutes"] != 1 || !strings.Contains(fmt.Sprint(warning["run"]), "::warning title=Optional apt bundle unavailable::") || !strings.Contains(fmt.Sprint(warning["run"]), "GITHUB_STEP_SUMMARY") {
 		t.Fatal("optional bundle failures must retain a visible warning and network fallback summary")
 	}
 	for _, id := range []string{"go", "web", "release-check", "e2e", "tier-measurements"} {

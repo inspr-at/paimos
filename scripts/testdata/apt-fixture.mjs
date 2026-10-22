@@ -168,10 +168,37 @@ if [[ "\$mode" == bundle-* ]]; then
     echo 'fixture package indexes' > "\$lists/noble_Packages"
     touch "\$lists/lock" "\$archives/lock"
     echo 'partial index' > "\$lists/partial/unneeded"
+    if [[ "\$mode" == bundle-interrupted ]]; then
+      python3 - "\$state" "\$lists" "\$AEON_APT_SOURCES_DIR" <<'PY'
+from pathlib import Path
+import sys
+
+state, lists, sources = map(Path, sys.argv[1:])
+if not (state / 'interrupted-tree').exists():
+    # The file acquisition method can link a local mirror list into lists/.
+    # A killed fetch leaves that link and auxiliary metadata for the retry.
+    (lists / '_etc_apt_apt-mirrors.txt').symlink_to(sources / 'apt-mirrors.txt')
+    (lists / 'auxfiles').mkdir()
+    (lists / 'auxfiles/mirror-list').symlink_to(sources / 'apt-mirrors.txt')
+    (lists / 'auxfiles/stale').write_text('interrupted metadata')
+    (lists / 'auxfiles/stale').chmod(0o000)
+    (lists / 'mirror+file_old_binary-amd64_Packages').write_text('first attempt index')
+else:
+    (lists / 'archive.ubuntu.com_ubuntu_dists_noble_main_binary-amd64_Packages.lz4').write_text('fallback index')
+    (lists / 'archive.ubuntu.com_ubuntu_dists_noble_InRelease').write_text('fallback release')
+PY
+    fi
     exit 0
   fi
   [[ "\$*" == *--download-only* ]] || { echo unexpected-package-mutation >&2; exit 1; }
   printf '%s\\n' "\$*" >> "\$state/downloads"
+  if [[ "\$mode" == bundle-interrupted && ! -f "\$state/interrupted-tree" ]]; then
+    echo fish > "\$archives/fish_1_amd64.deb"
+    echo 'unfinished archive' > "\$archives/partial/libtest.deb"
+    echo 'killed first fetch with cached archive, indexes, mirror links and partial files' > "\$state/interrupted-tree"
+    echo 'Get:2 mirror+file:apt-mirrors.txt noble/main libtest [123 kB]' >&2
+    exit "\$(cat "\$state/timeout-status")"
+  fi
   if [[ "\$mode" == bundle-fetch-fail || "\$mode" == bundle-fetch-retry && \$(wc -l < "\$state/downloads") -le 2 ]]; then
     echo 'E: Failed to fetch http://azure.archive.ubuntu.com/ubuntu/pool/libtest.deb Connection timed out' >&2
     echo 'E: Some files failed to download' >&2
@@ -186,7 +213,7 @@ from pathlib import Path
 import sys
 
 state, lists, archives = map(Path, sys.argv[1:])
-(lists / 'auxfiles').mkdir()
+(lists / 'auxfiles').mkdir(exist_ok=True)
 (lists / 'auxfiles' / 'metadata').write_text('root-only index metadata')
 restricted = [lists / 'partial', archives / 'partial', lists / 'auxfiles', lists / 'noble_Packages', archives / 'fish_1_amd64.deb']
 for path in restricted:

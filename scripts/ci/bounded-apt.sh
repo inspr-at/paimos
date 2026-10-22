@@ -129,63 +129,193 @@ import os
 from pathlib import Path
 import platform
 import re
+import shutil
+import stat
 import sys
 
 mode, directory = sys.argv[1:]
 root = Path(directory)
 manifest = root / 'manifest.json'
 image = [os.environ.get('ImageOS'), os.environ.get('ImageVersion'), os.environ.get('RUNNER_ARCH', platform.machine())]
+
+def unavailable(path, reason):
+    try:
+        info = path.lstat()
+        details = f'st_mode={oct(info.st_mode)}, owner={info.st_uid}:{info.st_gid}'
+    except OSError as error:
+        details = f'st_mode=unavailable, owner=unavailable, stat={error}'
+    raise ValueError(f'{path}: {reason} ({details})')
+
+def regular(path):
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        unavailable(path, 'outside root')
+    if '..' in relative.parts:
+        unavailable(path, 'outside root (parent traversal)')
+    for part in [root, *list(path.parents)[:len(relative.parts) - 1], path]:
+        if part.is_symlink():
+            unavailable(part, 'symlink')
+    if not path.resolve().is_relative_to(root.resolve()):
+        unavailable(path, 'outside root')
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        unavailable(path, 'not a regular file (missing)')
+    if not stat.S_ISREG(info.st_mode):
+        unavailable(path, 'not a regular file')
+    if not info.st_mode & 0o444:
+        unavailable(path, 'unreadable (no read permission bits)')
+    return info
+
+def read_text(path, limit):
+    if regular(path).st_size > limit:
+        unavailable(path, f'oversize file (limit {limit} bytes)')
+    return path.read_text()
+
+def index_name(name):
+    # Apt's local mirror lists, translations, auxfiles and interrupted
+    # downloads are not package indexes used by --no-download.
+    return re.fullmatch(r'[A-Za-z0-9_%:+.~-]+_(?:InRelease|Release(?:\.gpg)?|Packages(?:\.(?:lz4|xz|gz|bz2|zst))?)', name)
+
+def source_name(name):
+    return re.fullmatch(r'etc/(?:sources\.list|sources\.list\.d/[A-Za-z0-9_.-]+\.(?:list|sources))', name)
+
+def entries(folder):
+    for count, entry in enumerate(folder.iterdir()):
+        if count >= 10000:
+            unavailable(folder, 'too many directory entries (limit 10000)')
+        yield entry
+
+path = manifest
 try:
     if not all(image):
         raise ValueError('runner image identity unavailable')
     if mode == 'write':
-        packages = (root / 'packages.txt').read_text().splitlines()
-        files = [p for folder in ('archives', 'lists', 'etc') for p in (root / folder).rglob('*')
-                 if p.is_file() and p.name != 'lock' and 'partial' not in p.parts]
-        files.append(root / 'packages.txt')
-        data = {'version': 1, 'image': image, 'packages': packages, 'files': {str(p.relative_to(root)): '' for p in files}}
+        for name in ('archives', 'lists', 'etc', 'etc/sources.list.d'):
+            path = root / name
+            if path.is_symlink():
+                unavailable(path, 'symlink')
+            if not path.is_dir():
+                unavailable(path, 'not a directory')
+        path = root / 'packages.txt'
+        packages = read_text(path, 65536).splitlines()
+        debs = {str(p.relative_to(root)): '' for p in entries(root / 'archives') if p.name.endswith('.deb')}
+        lists = [str(p.relative_to(root)) for p in entries(root / 'lists') if index_name(p.name)]
+        sources = [str(p.relative_to(root)) for p in (root / 'etc').glob('sources.list')]
+        sources += [str(p.relative_to(root)) for p in entries(root / 'etc/sources.list.d') if source_name(str(p.relative_to(root)))]
+        data = {'version': 2, 'image': image, 'packages': packages, 'debs': debs, 'lists': lists, 'sources': sources}
     else:
-        if manifest.stat().st_size > 1024 * 1024:
-            raise ValueError('oversize manifest')
-        data = json.loads(manifest.read_text())
+        data = json.loads(read_text(manifest, 1024 * 1024))
         producer = data['image']
-        if data['version'] != 1 or not isinstance(producer, list) or len(producer) != 3 or not all(isinstance(p, str) and p for p in producer):
+        if data['version'] != 2 or not isinstance(producer, list) or len(producer) != 3 or not all(isinstance(p, str) and p for p in producer):
             raise ValueError('invalid runner image')
         if producer[0] != image[0] or producer[2] != image[2]:
             raise ValueError('runner OS or architecture differs')
         packages = data['packages']
-    if not 2 <= len(packages) <= 258 or not {'fish', 'zsh'} <= set(packages) or not all(
-            re.fullmatch(r'[a-z0-9][a-z0-9+.-]*(?<!-)', p) for p in packages):
+    path = manifest
+    if not isinstance(packages, list) or not 2 <= len(packages) <= 258 or not all(
+            isinstance(p, str) and re.fullmatch(r'[a-z0-9][a-z0-9+.-]*(?<!-)', p) for p in packages) or not {'fish', 'zsh'} <= set(packages):
         raise ValueError('invalid package set')
-    files = data['files']
-    if not 3 <= len(files) <= 10000 or not any(p.startswith('archives/') and p.endswith('.deb') for p in files) or not any(p.startswith('lists/') for p in files):
-        raise ValueError('empty package bundle')
+    debs, lists, sources = data['debs'], data['lists'], data['sources']
+    if not isinstance(debs, dict) or not isinstance(lists, list) or not isinstance(sources, list) or not debs or not lists or not sources or not 3 <= len(debs) + len(lists) + len(sources) <= 10000:
+        raise ValueError('empty or oversize package bundle')
+    files = [*debs, *lists, *sources, 'packages.txt']
+    if not all(isinstance(name, str) for name in files):
+        raise ValueError('invalid bundle path')
     total = 0
-    for name, expected in files.items():
+    for name in files:
         path = root / name
-        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()) or not path.is_file():
-            raise ValueError('missing or invalid bundle file')
-        total += path.stat().st_size
+        total += regular(path).st_size
+        if name in debs and not re.fullmatch(r'archives/[A-Za-z0-9_%:+.~-]+\.deb', name):
+            unavailable(path, 'invalid archive name')
+        if name in lists and (not name.startswith('lists/') or not index_name(name.removeprefix('lists/'))):
+            unavailable(path, 'invalid package index name')
+        if name in sources and not source_name(name):
+            unavailable(path, 'invalid source name')
         if total > 2 * 1024**3:
             raise ValueError('oversize bundle')
-        digest = hashlib.sha256()
         with path.open('rb') as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b''):
-                digest.update(chunk)
-        if mode == 'write':
-            files[name] = digest.hexdigest()
-        elif digest.hexdigest() != expected:
-            raise ValueError('bundle checksum mismatch')
-    if (root / 'packages.txt').read_text().splitlines() != packages:
+            # GitHub verifies artifact integrity. Hash only the archives apt
+            # will install; the other inputs need existence/readability checks.
+            if name in debs:
+                digest = hashlib.sha256()
+                for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                    digest.update(chunk)
+                if mode == 'write':
+                    debs[name] = digest.hexdigest()
+                elif digest.hexdigest() != debs[name]:
+                    raise ValueError('bundle checksum mismatch')
+            else:
+                stream.read(1)
+    path = root / 'packages.txt'
+    if read_text(path, 65536).splitlines() != packages:
         raise ValueError('package set differs')
     if mode == 'write':
+        # Exclude auxiliary files from the artifact itself as well. In
+        # particular, never let the uploader follow mirror-list symlinks.
+        for folder in ('archives', 'lists'):
+            for path in entries(root / folder):
+                if str(path.relative_to(root)) in files:
+                    continue
+                if path.is_symlink() or not path.is_dir():
+                    path.unlink()
+                else:
+                    shutil.rmtree(path)
+        path = manifest
         manifest.write_text(json.dumps(data) + '\n')
     else:
         print('exact' if producer == image else 'cross-image')
         print('\n'.join(packages))
 except (OSError, ValueError, KeyError, TypeError) as error:
+    if isinstance(error, OSError):
+        try:
+            unavailable(Path(error.filename) if error.filename else path, f'unreadable: {error}')
+        except ValueError as diagnostic:
+            error = diagnostic
+    elif 'st_mode=' not in str(error):
+        try:
+            unavailable(path, str(error))
+        except ValueError as diagnostic:
+            error = diagnostic
     sys.exit(f'bounded-apt: bundle unavailable: {error}')
 PY
+}
+
+finish() {
+  local status=$?
+  local attempt_deadline=$deadline
+  if [[ $mode == bundle && $status -ne 0 && -d $bundle ]]; then
+    echo "bounded-apt: failed bundle tree (at most 200 entries, depth 4): $bundle" >&2
+    # The root timeout also bounds listings of _apt-owned working directories.
+    run_root_timeout 10 python3 - "$bundle" >&2 <<'PY' || true
+import os
+from pathlib import Path
+import stat
+import sys
+
+remaining = 200
+def listing(path, depth):
+    global remaining
+    if remaining <= 0:
+        return
+    remaining -= 1
+    try:
+        info = path.lstat()
+        print(f'{stat.filemode(info.st_mode)} {info.st_uid}:{info.st_gid} {info.st_size} {path}', flush=True)
+        if depth < 4 and stat.S_ISDIR(info.st_mode):
+            with os.scandir(path) as entries:
+                for entry in entries:
+                    listing(Path(entry.path), depth + 1)
+                    if remaining <= 0:
+                        break
+    except OSError as error:
+        print(f'{path}: {error}', flush=True)
+listing(Path(sys.argv[1]), 0)
+PY
+  fi
+  rm -rf "$temporary"
+  return "$status"
 }
 
 try_offline() {
@@ -410,7 +540,7 @@ deadline=$(($(date +%s) + budget))
 attempt_deadline=$deadline
 retry=0
 temporary=$(mktemp -d)
-trap 'rm -rf "$temporary"' EXIT
+trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 chmod 755 "$temporary"
