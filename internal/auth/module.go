@@ -473,7 +473,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 	case "recurrences":
 		// This is an explicit agent allowlist. Every recurrence handler also
-		// checks the custom role and recurrences.manage key scope in its tenant.
+		// checks live role grants and the recurrences.manage key ceiling.
 		if len(parts) >= 2 && parts[1] == "templates" {
 			if len(parts) == 2 && read || len(parts) == 5 && parts[2] != "" && parts[3] != "" && r.Method == http.MethodPost && (parts[4] == "preview" || parts[4] == "apply") {
 				return "recurrences.manage", true

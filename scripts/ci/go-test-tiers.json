@@ -3946,6 +3946,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestFullAccessModelsV2SimpleRead","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestFullAccessRecurrencesFollowProjectWriteGrants","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestGoalAgentKeyCeiling","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestHarnessProbeRoutesThroughPairedRuntimeMiddleware","tier":"ESSENTIAL"}
@@ -9907,6 +9909,8 @@
     {"kind":"go","package":"internal/recurrences","name":"TestEventCandidatesExcludeUnrelatedProjectEdits","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestEventMorningFollowsLocalDateAcrossDST","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestEventRecurrenceAgentsNeedLiveExplicitManagementGrants","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestEventRecurrenceBacklogDoesNotStarveRelease","tier":"ESSENTIAL"}
     ,
