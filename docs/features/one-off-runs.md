@@ -11,9 +11,10 @@ requires `nodes.write`. The dialog does not grant permissions or change an
 account's permissions.
 
 The separate instruction is optional and limited to 2,000 characters. A supplied
-instruction is retained exactly. An empty instruction uses the work-order body,
-or its title if the body is empty. Newly created orders copy the ticket text,
-falling back to the ticket title. The selected context and its revision, person,
+instruction is retained exactly. An empty instruction uses the selected ticket's
+current body, or its title if the body is empty. The direct work-order run API
+uses that work order's body/title as its fallback. Newly created orders copy the
+ticket text, falling back to the ticket title. The selected context and its revision, person,
 account, profile, instruction and file permission are captured on submission.
 Failures retain the choices. Changing context or person resets the task choices;
 a late response cannot start or populate another person's dialog.
