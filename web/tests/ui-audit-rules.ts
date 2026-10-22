@@ -135,6 +135,8 @@ export function domAudit(): Raw[] {
     return [...link.querySelectorAll('svg, img, [role="img"], progress, .bar')].some(el => visible(el) && hit(shownPart(el.getBoundingClientRect(), el.parentElement)))
   }
   const chipInSlot = (chip: Element, link: Element) => link.matches('.item-link') && chip.matches('.live-chip') && chip.closest('.live')?.parentElement === link.parentElement && !coversContent(link, chip.getBoundingClientRect())
+  const actionInSlot = (action: Element, link: Element) => link.matches('.item-link') && action.matches('button.row-more')
+    && action.parentElement === link.parentElement && !coversContent(link, action.getBoundingClientRect())
   for (let i = 0; i < controls.length; i++) {
     const a = controls[i], ar = a.getBoundingClientRect()
     const label = a.closest('label') ?? (a instanceof HTMLInputElement ? a.labels?.item(0) : null)
@@ -174,6 +176,7 @@ export function domAudit(): Raw[] {
       // A card's or row's live agents chip (AEON-184) may share its own link's box,
       // in the slot the link leaves empty for it; covering anything the link shows is an overlap.
       if (chipInSlot(a, b) || chipInSlot(b, a)) continue
+      if (actionInSlot(a, b) || actionInSlot(b, a)) continue
       // A scrim and a fixed app edge intentionally cover scrolling content.
       if (a.matches('.sheet-scrim') || b.matches('.sheet-scrim') || a.closest('.app-footer, .app-header') !== b.closest('.app-footer, .app-header') && (a.closest('.app-footer') || b.closest('.app-footer'))) continue
       // Open menus cover the page below; their background controls are not peers.

@@ -104,11 +104,16 @@ export const decisionDesk: VisualSetup = async (page, _profile, theme) => {
   world.projectionTime = NOW
   world.approval.expires_at = new Date(NOW + 3_600_000).toISOString()
   world.approval.proposed_at = new Date(NOW - 600_000).toISOString()
+  world.questions[0]!.input.context = `${LONG}.\n\n${LONG}.`
   for (const question of world.questions) { question.created_at = new Date(NOW - 120_000).toISOString(); question.updated_at = question.created_at }
   await page.goto('/decision-desk')
   await page.getByTestId('desk-row-q:question-1').click()
   await expect(page.getByTestId('stamp-doctrine')).toBeDisabled()
   await expect(page.getByTestId('desk-choices')).toBeVisible()
+  await page.getByTestId('stamp-doctrine').scrollIntoViewIfNeeded()
+  await page.getByTestId('stamp-doctrine').press('Tab')
+  await page.keyboard.press('Shift+Tab')
+  await expect(page.locator('.tooltip')).toContainText('Doctrine needs an authorized source')
 }
 
 export const access: VisualSetup = async (page, _profile, theme) => {
@@ -209,19 +214,23 @@ export const capacity: VisualSetup = async (page, _profile, theme) => {
 }
 
 export const startAgent: VisualSetup = async (page, _profile, theme) => {
-  await mockStartAgent(page, { theme })
+  await mockStartAgent(page, { theme, now: NOW, expertStart: false, catalog: 'claude',
+    wait: { code: 'allowance', until: new Date(NOW + 1_800_000).toISOString(), run_now_allowed: false } })
+  await visualChrome(page, fixtures(), NOW, { agents: false })
   await page.goto('/agents')
   await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
-  await page.getByRole('menuitem', { name: /^Start agent manually/ }).click()
-  // The Tick-approved state must exist in production. Do not manufacture its
-  // controls or silently substitute the old manual Queue run dialog.
-  const dialog = page.getByRole('dialog', { name: 'Start agent', exact: true })
-  await expect(dialog.getByRole('radio', { name: 'Run once', exact: true }), 'Tick fixture prerequisite: Start agent Run once mode').toBeVisible()
-  await dialog.getByRole('radio', { name: 'Run once', exact: true }).click()
+  await page.getByRole('menuitem', { name: /^Run once/ }).click()
+  const dialog = page.getByRole('dialog', { name: 'Run once', exact: true })
   await dialog.getByRole('textbox', { name: 'Task', exact: true }).fill(LONG)
-  await dialog.getByRole('radio', { name: 'Create a ticket in a project', exact: true }).click()
-  await dialog.getByRole('checkbox', { name: 'Read-only', exact: true }).check()
-  await expect(dialog.getByRole('button', { name: /^Runs on/ })).toHaveAttribute('aria-expanded', 'false')
+  await dialog.getByLabel('Context', { exact: true }).selectOption({ label: 'Create a ticket in a project' })
+  await dialog.getByLabel('Project', { exact: true }).selectOption('p-pharos')
+  await expect(dialog.getByRole('checkbox', { name: 'May change files', exact: true })).not.toBeChecked()
+  await expect(dialog.getByText('Read-only: no tools, no repository access, no external actions.', { exact: true })).toBeVisible()
+  await expect(dialog.locator('.settings-status')).toBeVisible()
+  const fold = dialog.locator('.settings-toggle')
+  if (await fold.getAttribute('aria-expanded') === 'true') await fold.click()
+  await expect(fold).toHaveAttribute('aria-expanded', 'false')
+  await expect(dialog.locator('.run-summary-line')).toContainText('Runs on')
 }
 
 export const ticketWorkspace: VisualSetup = async (page, _profile, theme) => {

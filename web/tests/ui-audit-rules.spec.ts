@@ -39,6 +39,12 @@ test('overlap rule ignores a card action and modal background but keeps peer col
   expect((await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap' && f.detail.includes('#menu'))).toEqual([])
   await page.evaluate(() => { const dialog = document.createElement('dialog'); dialog.innerHTML = '<button id="inside">Inside</button>'; document.body.append(dialog); dialog.showModal() })
   expect((await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')).toEqual([])
+  await page.setContent(`<style>body { margin: 0; padding: 50px; } .row { position: relative; width: 200px; height: 70px; } .item-link { display: block; width: 200px; height: 70px; } .row-more { position: absolute; right: 0; top: 10px; width: 44px; height: 44px; } #name { display: inline-block; width: 120px; }</style><div class="row"><a id="row-link" class="item-link" href="#"><span id="name">Project</span></a><button id="row-action" class="row-more">Menu</button></div>`)
+  expect((await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')).toEqual([])
+  await page.locator('#name').evaluate(el => { Object.assign((el as HTMLElement).style, { position: 'absolute', left: '158px', top: '12px' }) })
+  const covered = (await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')
+  expect(covered).toHaveLength(1)
+  expect(covered[0]?.selector).toBe('#row-link'); expect(covered[0]?.detail).toContain('#row-action')
 })
 
 test('touch rule lets an open menu cover controls and exempts dates in the paper’s text', async ({ page }) => {
