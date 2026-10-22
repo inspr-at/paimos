@@ -451,7 +451,7 @@ paths:
       - {$ref: '#/components/parameters/LegacyWorkerLease'}
     get:
       operationId: watchHarnessNotifications
-      description: "Content-free SSE wake hints for this managed generation's controls and inbox, over the existing committed event notification channel. Requires current harness.worker authority and the exact worker lease. harness.wake on connection and relevant changes tells the daemon to claim controls and drain through their existing authorized routes; stream.ping is a keepalive. Hints grant no process authority, carry no message text, and acknowledge nothing. Reconnect triggers a fresh drain to cover missed hints. Authority is rechecked on wakes and every 15 seconds."
+      description: "Content-free SSE wake hints for this managed generation or verified paired attached hook's inbox, over the existing committed event notification channel. Requires current harness.worker authority and the exact worker lease. harness.wake on connection and relevant changes tells the daemon to claim controls and drain through their existing authorized routes; stream.ping is a keepalive. Attached hooks receive only exact-session inbox hints and require the live pairing, owned generation and person ceiling in every transaction. Hints grant no process authority, carry no message text, and acknowledge nothing. Reconnect triggers a fresh drain to cover missed hints. Authority is rechecked on wakes and every 15 seconds."
       responses:
         '200': {description: "SSE harness.wake and stream.ping events with empty JSON objects", content: {text/event-stream: {schema: {type: string}}}}
         '403': {description: "Worker proof or current permission rejected"}

@@ -87,6 +87,9 @@ func TestPairingVerificationAndOngoingBudgetsAreIsolated(t *testing.T) {
 	f.probe(v, e, key, 200)
 	var verification, managed agentruns.Run
 	decodeResult(t, f.call("GET", "/api/runs/"+*e.VerificationRunID, nil, false, key, 200), &verification)
+	if verification.ActingPersonID == nil || *verification.ActingPersonID != f.person {
+		t.Fatal("person-requested verification has no run person")
+	}
 	decodeResult(t, f.call("POST", "/api/work-orders/"+verification.OrderID+"/runs", map[string]string{"agent_principal_id": *v.PrincipalID, "model_profile_id": e.ProfileID, "requested_account_id": e.AccountID}, true, "", 201), &managed)
 	// Ordinary caps remain additive: missing the active token estimate refuses.
 	routeWithUnits(t, f, v, e, key, managed.ID, map[string]int{"requests": 2}, 409)

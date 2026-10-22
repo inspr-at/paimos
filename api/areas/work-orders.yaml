@@ -19,8 +19,9 @@ paths:
   /work-orders/{workOrderId}:
     get:
       operationId: getWorkOrder
+      description: "Paired computers require the server-issued capability of the exact bound run to read the work-order body and criteria."
       security: *auth
-      parameters: [{name: workOrderId, in: path, required: true, schema: {type: string, format: uuid}}]
+      parameters: [{name: workOrderId, in: path, required: true, schema: {type: string, format: uuid}}, {$ref: '#/components/parameters/RunCapability'}]
       responses:
         '200': {description: Work order, content: {application/json: {schema: {$ref: '#/components/schemas/WorkOrder'}}}}
         '404': {$ref: '#/components/responses/Error'}

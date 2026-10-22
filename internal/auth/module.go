@@ -176,6 +176,21 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		case credAgent:
 			httpapi.MarkAuthentication(r)
+			r, p, err = m.runContentBoundary(r, p)
+			if err != nil {
+				if errors.Is(err, authz.ErrForbidden) {
+					authz.WriteForbidden(w, err)
+				} else {
+					agentpairing.WriteError(w, err)
+				}
+				return
+			}
+			if p.TransportComputerID != "" && p.RunID == "" {
+				w.Header().Set("Aeon-Run-Content-Policy", db.RunCapabilityPolicy)
+				if r.Header.Get(db.RunCapabilityPolicyHeader) != db.RunCapabilityPolicy && !transportAttachedHookRoute(r) {
+					w.Header().Set("Aeon-Upgrade-Reason", "run_capability_upgrade_required")
+				}
+			}
 			if lease := workerlease.Read(r); lease != "" && !workerlease.SafetyRoute(r) {
 				ctx := tenant.WithPrincipal(r.Context(), p)
 				err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
@@ -268,6 +283,9 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			// and the exact route permission are checked inside the tenant.
 			ctx := authz.BindPool(r.Context(), m.pool)
 			scope := projectScope(r)
+			if p.RunID != "" {
+				scope = authz.Scope{ProjectID: p.RunProjectID}
+			} // server-verified run target, never a caller header
 			permissionErr := authz.RequirePattern(ctx, r.Pattern, scope)
 			if kind == credAgent && workerlease.SafetyRoute(r) && workerlease.Read(r) != "" && hasScope(p.Scopes, "harness.worker") && errors.Is(permissionErr, authz.ErrForbidden) {
 				// Only these exact control handlers may recover metadata safety
@@ -299,6 +317,11 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 				}
 			}
 			if err := permissionErr; err != nil {
+				var pairingErr *agentpairing.Error
+				if errors.As(err, &pairingErr) {
+					agentpairing.WriteError(w, err)
+					return
+				}
 				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
 					if err := m.auditWorkstation(r, p, false, "permission_denied"); err != nil {
 						internalFailure(w, r, "audit_permission_denied", err)
@@ -760,6 +783,8 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		if len(parts) > 2 {
 			switch parts[2] {
+			case "capability":
+				return "run.read", true
 			case "claim":
 				return "run.claim", true
 			case "telemetry":
