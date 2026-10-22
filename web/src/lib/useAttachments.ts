@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { computed, onScopeDispose, ref, watch, type Ref } from 'vue'
+import { computed, onScopeDispose, reactive, ref, watch, type Ref } from 'vue'
 import { APIError } from './api'
 import { byPosition, deleteAttachment, listAttachments, patchAttachment, positionBetween, positionOf, undoEvent, uploadAttachment, type Attachment } from './attachments'
 import { captureToastOwner, dismiss, toast } from './toast'
@@ -18,7 +18,9 @@ export function useAttachments(nodeId: Ref<string | null>) {
   const error = ref('')
   // Deletes still on their way, so an early Undo waits for them.
   const deleting = new Map<string, Promise<{ eventId: string | null } | null>>()
-  const restoring = new Map<string, { item: Attachment; here: () => boolean }>()
+  const restoring = new Map<string, { item: Attachment; here: () => boolean; confirmedAt: number | null }>()
+  const pending = reactive(new Set<string>())
+  const removals = new Map<string, number>()
   let generation = 0
   let recordEpoch = 0
   let active = true
@@ -36,6 +38,10 @@ export function useAttachments(nodeId: Ref<string | null>) {
     try {
       const list = await listAttachments(id)
       if (current === generation && here()) {
+        // Only a read started after confirmation may replace a restored row.
+        for (const [id, undo] of restoring) {
+          if (undo.confirmedAt !== null && current > undo.confirmedAt) restoring.delete(id)
+        }
         const pending = [...restoring.values()].filter(undo => undo.here()).map(undo => undo.item)
         const ids = new Set(pending.map(item => item.id))
         items.value = [...list.filter(item => !deleting.has(item.id) && !ids.has(item.id)), ...pending].sort(byPosition)
@@ -92,6 +98,7 @@ export function useAttachments(nodeId: Ref<string | null>) {
   async function add(files: File[]) { return Promise.all(files.map(upload)) }
 
   async function setCaption(item: Attachment, caption: string) {
+    if (pending.has(item.id)) return false
     if (caption === item.caption) return true
     const before = item.caption
     items.value = items.value.map(x => x.id === item.id ? { ...x, caption } : x)
@@ -108,6 +115,7 @@ export function useAttachments(nodeId: Ref<string | null>) {
   }
   // Move `id` to index `to` among the current items.
   async function reorder(id: string, to: number) {
+    if (pending.has(id)) return
     const from = items.value.findIndex(x => x.id === id)
     if (from === -1 || from === to) return
     const list = items.value.filter(x => x.id !== id)
@@ -127,9 +135,15 @@ export function useAttachments(nodeId: Ref<string | null>) {
   }
 
   function remove(item: Attachment) {
+    if (pending.has(item.id) || deleting.has(item.id)) return
     const node = nodeId.value
-    const here = captureRecord(), owner = captureToastOwner()
-    const restoration = { item, here }
+    const removal = (removals.get(item.id) ?? 0) + 1
+    removals.set(item.id, removal)
+    const current = () => removals.get(item.id) === removal
+    const record = captureRecord(), toastOwner = captureToastOwner()
+    const here = () => current() && record(), owner = () => current() && toastOwner()
+    const restoration = { item, here, confirmedAt: null as number | null }
+    restoring.delete(item.id)
     function rollback() {
       if (restoring.get(item.id) !== restoration) return
       restoring.delete(item.id)
@@ -155,6 +169,8 @@ export function useAttachments(nodeId: Ref<string | null>) {
     } } })
     async function undo() {
       dismiss(toastId)
+      if (!owner()) return
+      pending.add(item.id)
       if (here()) {
         restoring.set(item.id, restoration)
         items.value = [...items.value.filter(x => x.id !== item.id), item].sort(byPosition)
@@ -166,7 +182,12 @@ export function useAttachments(nodeId: Ref<string | null>) {
         const restored = await undoEvent(deletion.eventId)
         if (!owner()) return
         if (!restored || restored.id !== item.id || restored.node_id !== node) throw new Error('The restored attachment could not be confirmed.')
-        if (here()) items.value = [...items.value.filter(x => x.id !== item.id), restored].sort(byPosition)
+        if (here()) {
+          restoration.item = restored
+          restoration.confirmedAt = ++generation
+          loading.value = false
+          items.value = [...items.value.filter(x => x.id !== item.id), restored].sort(byPosition)
+        }
       } catch (e) {
         if (!owner()) return
         console.error('Attachment Undo failed', e)
@@ -174,7 +195,8 @@ export function useAttachments(nodeId: Ref<string | null>) {
         toast(`${item.name} could not be restored.`, { tone: 'error' })
         if (here()) void load()
       } finally {
-        if (restoring.get(item.id) === restoration) restoring.delete(item.id)
+        if (current()) pending.delete(item.id)
+        if (restoring.get(item.id) === restoration && restoration.confirmedAt === null) restoring.delete(item.id)
       }
     }
   }
@@ -182,5 +204,5 @@ export function useAttachments(nodeId: Ref<string | null>) {
 
   const count = computed(() => items.value.length + uploads.value.length)
   const images = computed(() => items.value.filter(item => item.content_type.startsWith('image/')))
-  return { items, uploads, loading, error, count, images, load, add, upload, retry, cancel, setCaption, reorder, remove }
+  return { items, uploads, loading, error, count, images, pending, load, add, upload, retry, cancel, setCaption, reorder, remove }
 }

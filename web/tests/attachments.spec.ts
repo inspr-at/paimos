@@ -110,7 +110,7 @@ test('delete reaches the server at once; Undo in the toast undoes it on the serv
 test('AEON-1416: pending attachment Undo stays in place and failed Undo shows plain copy', async ({ page }, testInfo) => {
   test.setTimeout(120_000)
   for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
-    const { data } = await open(page, width)
+    const { data, calls } = await open(page, width)
     await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, theme)
     let release!: () => void
     const pending = new Promise<void>(resolve => { release = resolve })
@@ -132,6 +132,15 @@ test('AEON-1416: pending attachment Undo stays in place and failed Undo shows pl
         await page.getByRole('button', { name: 'Undo', exact: true }).click()
         await request
         await expect(target).toBeVisible()
+        await expect(target.locator('..')).toHaveAttribute('aria-busy', 'true')
+        await expect(target.locator('..')).not.toHaveAttribute('draggable', 'true')
+        await expect(strip(page).getByRole('button', { name: 'Delete fleet-list-before.png', exact: true })).toBeDisabled()
+        await target.focus()
+        await page.keyboard.press('Delete')
+        await page.keyboard.press('Alt+ArrowRight')
+        await expect(target).toBeVisible()
+        expect(writes(calls, 'DELETE', '/api/attachments/')).toHaveLength(1)
+        expect(writes(calls, 'PATCH', '/api/attachments/')).toHaveLength(0)
         expect(data.attachments['n-1'].some(item => item.id === 'att-1')).toBe(false)
         await page.screenshot({ path: testInfo.outputPath(`attachment-${width}-${theme}-pending.png`) })
       } }],

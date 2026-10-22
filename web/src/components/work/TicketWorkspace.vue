@@ -778,7 +778,7 @@ defineExpose({
           </p>
           <AttachmentStrip
             v-if="!contextColumn && (attachments.count.value || attachable)" class="ws-attachments" layout="strip" :items="attachments.items.value" :uploads="attachments.uploads.value"
-            :can-write="attachable" :loading="attachments.loading.value" :error="attachments.error.value"
+            :can-write="attachable" :loading="attachments.loading.value" :error="attachments.error.value" :pending="attachments.pending"
             @open="openAttachment" @add="files => attachments.add(files)" @remove="attachments.remove" @reorder="attachments.reorder" @caption="attachments.setCaption"
             @retry="attachments.retry" @cancel="attachments.cancel" @reload="attachments.load"
           />
@@ -821,7 +821,7 @@ defineExpose({
         <aside v-if="contextColumn" class="ws-context" aria-label="Attachments, relations and activity">
           <AttachmentStrip
             v-if="attachments.count.value || attachable" layout="gallery" :items="attachments.items.value" :uploads="attachments.uploads.value"
-            :can-write="attachable" :loading="attachments.loading.value" :error="attachments.error.value"
+            :can-write="attachable" :loading="attachments.loading.value" :error="attachments.error.value" :pending="attachments.pending"
             @open="openAttachment" @add="files => attachments.add(files)" @remove="attachments.remove" @reorder="attachments.reorder" @caption="attachments.setCaption"
             @retry="attachments.retry" @cancel="attachments.cancel" @reload="attachments.load"
           />
@@ -857,7 +857,7 @@ defineExpose({
     <div v-if="dropping" class="drop-overlay" aria-hidden="true">
       <div class="drop-card"><AppIcon name="upload" :size="22" /><strong>Drop to attach to {{ item?.key ?? ticketKey }}</strong><span>Images show as thumbnails; other files as cards.</span></div>
     </div>
-    <AttachmentLightbox ref="lightbox" :items="attachments.items.value" :ticket-key="item?.key ?? ticketKey" :can-write="attachable" :set-caption="attachments.setCaption" :names="names" />
+    <AttachmentLightbox ref="lightbox" :items="attachments.items.value" :ticket-key="item?.key ?? ticketKey" :can-write="attachable" :set-caption="attachments.setCaption" :names="names" :pending="attachments.pending" />
 
     <OptionMenu v-if="menu?.kind === 'priority' && item" :anchor="menu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="item.priority ?? ''" @choose="choosePriority" @close="closeMenu" />
     <AssigneeMenu v-if="menu?.kind === 'assignee' && item" :row="item" :project-id="project.id" :anchor="menu.anchor" :people="assigneeOptions" :can-assign="editable" @choose="chooseAssignee" @changed="emit('assigned')" @close="closeMenu" />

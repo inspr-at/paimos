@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { APIError, getNode, listNodes } from '../../lib/api'
 import { conflictEntry, createEntry, createPeriod, deleteEntry, listEntries, listPeriods, PERIOD_HISTORY_START, undoEntryEvent, updateEntry, type EntryPatch, type TimeEntry, type TimePeriod } from '../../lib/business'
@@ -158,6 +158,8 @@ async function log(request: LogRequest) {
 // in place (only what changed is sent, against the revision it was read at) or
 // deletes it with a short server-side undo. Approved periods stay as approved.
 const UNDO_MS = 6000
+const pendingRestores = reactive(new Set<string>())
+const removals = new Map<string, number>()
 const editing = ref<string | null>(null)
 // The version the draft corrects; after a conflict, the newer entry.
 const editBase = ref<TimeEntry | null>(null)
@@ -222,6 +224,7 @@ function correctionProblem(e: unknown): string {
 }
 const approvedMeanwhile = (e: unknown) => e instanceof APIError && e.status === 409 && /approved|immutable/.test(e.message)
 function startEdit(e: TimeEntry) {
+  if (pendingRestores.has(e.id)) return
   const reason = lockReason(e)
   if (reason) { toast(reason); return }
   editing.value = e.id; editBase.value = e; conflict.value = null; cursor.value = e.id
@@ -259,6 +262,7 @@ let deletionView = 0
 watch([person, me, weekStart, view], () => { deletionView++ }, { flush: 'sync' })
 onBeforeUnmount(() => { deletionView++ })
 function remove(listed: TimeEntry) {
+  if (pendingRestores.has(listed.id)) return
   const base = editing.value === listed.id && editBase.value ? editBase.value : listed
   const reason = lockReason(base)
   if (reason) { toast(reason); return }
@@ -267,7 +271,11 @@ function remove(listed: TimeEntry) {
   if (editing.value === base.id) { editing.value = null; editBase.value = null; conflict.value = null }
   dropEntry(base)
   const key = keyOf(base)
-  const owner = captureToastOwner(), started = deletionView
+  const removal = (removals.get(base.id) ?? 0) + 1
+  removals.set(base.id, removal)
+  const current = () => removals.get(base.id) === removal
+  const toastOwner = captureToastOwner(), started = deletionView
+  const owner = () => current() && toastOwner()
   const here = () => owner() && started === deletionView
   let toastId = 0
   const done: Promise<Deletion> = deleteEntry(base).then(eventId => {
@@ -288,13 +296,15 @@ function remove(listed: TimeEntry) {
   toastId = toast(`Deleted ${formatSpan(base.duration_seconds)} on ${key}.`, { timeout: UNDO_MS, action: { label: 'Undo', run: () => {
     if (undoStarted) return
     undoStarted = true
-    void undoRemove(base, done, toastId, { owner, here, key })
+    void undoRemove(base, done, toastId, { owner, here, current, key })
   } } })
   void focusEntry(after)
 }
 // Only the confirmed deletion's receipt can bring this entry back.
-async function undoRemove(e: TimeEntry, done: Promise<Deletion>, toastId: number, context: { owner: () => boolean; here: () => boolean; key: string }) {
+async function undoRemove(e: TimeEntry, done: Promise<Deletion>, toastId: number, context: { owner: () => boolean; here: () => boolean; current: () => boolean; key: string }) {
   dismiss(toastId)
+  if (!context.owner()) return
+  pendingRestores.add(e.id)
   if (context.here()) { putEntry(e); void focusEntry(e.id) }
   try {
     const outcome = await done
@@ -311,6 +321,8 @@ async function undoRemove(e: TimeEntry, done: Promise<Deletion>, toastId: number
     console.error('Hours Undo failed', err)
     toast(err instanceof APIError && err.status === 409 ? 'The entry could not be restored: its period was approved or it changed meanwhile.' : 'The entry could not be restored.', { tone: 'error' })
     if (context.here()) { dropEntry(e); void loadWeek() }
+  } finally {
+    if (context.current()) pendingRestores.delete(e.id)
   }
 }
 function rowKey(event: KeyboardEvent, e: TimeEntry) {
@@ -540,6 +552,7 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
           <ul class="entries" :aria-label="`${WEEKDAYS[group.i]} ${group.day.getDate()}`">
             <li
               v-for="e in group.list" :key="e.id" class="entry" :class="{ editing: editing === e.id, locked: !!lockReason(e) }" :data-entry="e.id"
+              :aria-busy="pendingRestores.has(e.id) || undefined"
               :tabindex="editing !== e.id && tabStop === e.id ? 0 : -1" :aria-describedby="editing === e.id ? undefined : `entry-help-${e.id}`"
               @keydown="rowKey($event, e)" @click="rowClick($event, e)" @focus="cursor = e.id"
             >
@@ -566,11 +579,11 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
                 <span class="e-act">
                   <span v-if="lockReason(e)" class="lock" :data-tip="lockReason(e)"><AppIcon name="lock" :size="13" /></span>
                   <template v-else>
-                    <button type="button" class="icon-btn sm flat" tabindex="-1" :aria-label="`Edit ${timeOfDay(e.started_at)} on ${keyOf(e)}`" data-tip="Edit · e" @click="startEdit(e)"><AppIcon name="edit" :size="13" /></button>
-                    <button type="button" class="icon-btn sm flat del" tabindex="-1" :aria-label="`Delete ${timeOfDay(e.started_at)} on ${keyOf(e)}`" data-tip="Delete · Del" @click="remove(e)"><AppIcon name="trash" :size="13" /></button>
+                    <button type="button" class="icon-btn sm flat" tabindex="-1" :disabled="pendingRestores.has(e.id)" :aria-label="`Edit ${timeOfDay(e.started_at)} on ${keyOf(e)}`" data-tip="Edit · e" @click="startEdit(e)"><AppIcon name="edit" :size="13" /></button>
+                    <button type="button" class="icon-btn sm flat del" tabindex="-1" :disabled="pendingRestores.has(e.id)" :aria-label="`Delete ${timeOfDay(e.started_at)} on ${keyOf(e)}`" data-tip="Delete · Del" @click="remove(e)"><AppIcon name="trash" :size="13" /></button>
                   </template>
                 </span>
-                <span :id="`entry-help-${e.id}`" class="sr-only">{{ lockReason(e) || 'Press e to edit, Delete to delete.' }}</span>
+                <span :id="`entry-help-${e.id}`" class="sr-only">{{ pendingRestores.has(e.id) ? 'Restoring entry…' : lockReason(e) || 'Press e to edit, Delete to delete.' }}</span>
               </template>
             </li>
           </ul>

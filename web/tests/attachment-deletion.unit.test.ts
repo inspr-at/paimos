@@ -52,12 +52,102 @@ it('AEON-1416: attachment Undo keeps its own receipt across two deletion cycles'
   model.remove(model.items.value[0]); await flush()
   const secondUndo = Toast.toasts.at(-1)!.actions[0]
   firstUndo.run(); await flush()
-  expect(calls.filter(call => call.includes('/undo'))).toEqual(['POST /api/events/10/undo'])
+  expect(calls.filter(call => call.includes('/undo'))).toEqual([])
   expect(model.items.value).toEqual([])
   secondUndo.run(); secondUndo.run(); await flush()
-  expect(calls.filter(call => call.includes('/undo'))).toEqual(['POST /api/events/10/undo', 'POST /api/events/12/undo'])
+  expect(calls.filter(call => call.includes('/undo'))).toEqual(['POST /api/events/12/undo'])
   expect(calls.filter(call => call.includes('/events?'))).toEqual([])
   expect(model.items.value.map(item => item.id)).toEqual(['image'])
+})
+
+// Risk: an old deletion's deferred Undo revives a newer deletion of the same id.
+it('AEON-1416: a superseded attachment Undo never paints or sends the old receipt', async () => {
+  const newerDelete = deferred<Response>(), olderUndo = deferred<Response>()
+  let listed = [attachment()], deletions = 0
+  const undoCalls: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
+    const path = String(input)
+    if (init?.method === 'DELETE') {
+      listed = []
+      if (++deletions === 2) return newerDelete.promise
+      return new Response(null, { status: 204, headers: { 'X-Aeon-Event-Ids': '10' } })
+    }
+    if (path.endsWith('/undo')) { undoCalls.push(path); return olderUndo.promise }
+    return Response.json({ items: listed })
+  }))
+  const { model } = setup()
+  await model.load()
+  model.remove(model.items.value[0]); await flush()
+  const oldAction = Toast.toasts.at(-1)!.actions[0]
+  listed = [attachment()]; await model.load() // Another actor restored the row.
+  model.remove(model.items.value[0])
+  oldAction.run(); await flush()
+  expect(model.items.value).toEqual([])
+  expect(undoCalls).toEqual([])
+  olderUndo.resolve(Response.json({ after: attachment() }))
+  newerDelete.resolve(new Response(null, { status: 204, headers: { 'X-Aeon-Event-Ids': '12' } }))
+  await flush()
+  expect(model.items.value).toEqual([])
+  expect(deletions).toBe(2)
+})
+
+// Risk: an optimistic restored row starts a second mutation before it exists.
+it('AEON-1416: pending attachment Undo blocks Delete, caption and reorder until confirmation', async () => {
+  const undo = deferred<Response>()
+  const after = { ...attachment(), id: 'after', position: '2' }
+  const writes: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
+    const path = String(input)
+    if (init?.method && init.method !== 'GET') writes.push(`${init.method} ${path}`)
+    if (init?.method === 'DELETE') return new Response(null, { status: 204, headers: { 'X-Aeon-Event-Ids': '10' } })
+    if (path.endsWith('/undo')) return undo.promise
+    if (init?.method === 'PATCH') return Response.json(attachment())
+    return Response.json({ items: [attachment(), after] })
+  }))
+  const { model } = setup()
+  await model.load()
+  model.remove(model.items.value[0]); await flush()
+  Toast.toasts.at(-1)!.actions[0].run(); await flush()
+  const optimistic = model.items.value[0]
+  model.remove(optimistic)
+  expect(await model.setCaption(optimistic, 'too early')).toBe(false)
+  await model.reorder(optimistic.id, 1)
+  expect(model.items.value.map(item => item.id)).toEqual(['image', 'after'])
+  expect(writes).toEqual(['DELETE /api/attachments/image', 'POST /api/events/10/undo'])
+  undo.resolve(Response.json({ after: { ...attachment(), caption: 'confirmed', updated_at: '2026-10-01T01:00:00Z' } }))
+  await flush()
+  expect(model.items.value[0].caption).toBe('confirmed')
+  model.remove(model.items.value[0]); await flush()
+  expect(model.items.value.map(item => item.id)).toEqual(['after'])
+  expect(writes).toEqual(['DELETE /api/attachments/image', 'POST /api/events/10/undo', 'DELETE /api/attachments/image'])
+})
+
+// Risk: a pre-Undo list arrives after confirmation and silently erases the row.
+it('AEON-1416: confirmed attachment Undo rejects an older list and trusts a subsequent read', async () => {
+  const undo = deferred<Response>(), staleList = deferred<Response>()
+  let held = false, listed = [attachment()]
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
+    if (init?.method === 'DELETE') { listed = []; return new Response(null, { status: 204, headers: { 'X-Aeon-Event-Ids': '10' } }) }
+    if (String(input).endsWith('/undo')) return undo.promise
+    if (held) return staleList.promise
+    return Response.json({ items: listed })
+  }))
+  const { model } = setup()
+  await model.load()
+  model.remove(model.items.value[0]); await flush()
+  Toast.toasts.at(-1)!.actions[0].run(); await flush()
+  held = true
+  const readBeforeConfirmation = model.load()
+  const confirmed = { ...attachment(), caption: 'server restored', updated_at: '2026-10-01T01:00:00Z' }
+  undo.resolve(Response.json({ after: confirmed })); await flush()
+  expect(model.items.value).toEqual([confirmed])
+  staleList.resolve(Response.json({ items: [] })); await readBeforeConfirmation
+  expect(model.items.value).toEqual([confirmed])
+  expect(model.loading.value).toBe(false)
+  // A later read is authoritative, even if another actor has removed the row.
+  held = false
+  await model.load()
+  expect(model.items.value).toEqual([])
 })
 
 it('AEON-1416: deletion receipts keep exact IDs and refuse missing or ambiguous receipts', async () => {
@@ -184,6 +274,57 @@ it('AEON-1416: Hours Undo is immediate, keeps its view and uses plain failures o
     reload.resolve([]); await flush()
     stop(); Toast.resetToasts()
   }
+})
+
+it('AEON-1416: Hours ignores superseded Undo and locks optimistic rows until confirmation', async () => {
+  vi.stubGlobal('window', { matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), removeEventListener() {} })
+  const firstDelete = deferred<string | null>(), newerDelete = deferred<string | null>(), undo = deferred<TimeEntry | null>()
+  const deleteEntry = vi.fn().mockImplementationOnce(() => firstDelete.promise).mockImplementation(() => newerDelete.promise)
+  const undoEntryEvent = vi.fn(() => undo.promise)
+  const route = reactive({ query: { week: '2026-09-21', person: 'person' } })
+  const { state, stop } = setupSource('views/business/HoursView.vue', {}, {
+    'vue-router': { useRoute: () => route, useRouter: () => ({ replace() {} }) },
+    '../../lib/api': API,
+    '../../lib/business': { ...Business, deleteEntry, undoEntryEvent },
+    '../../lib/commands': { command: ref(null), consume() {} }, '../../lib/toast': Toast,
+    '../../lib/work': {}, '../../lib/week': Week,
+    '../../components/business/duration': Duration, '../../components/business/money': {},
+    '../../stores/business': { useBusiness: () => ({ staff: true, admin: true, principals: [], open: { hours: false } }) },
+    '../../stores/projects': { useProjects: () => ({}) },
+    '../../stores/session': { useSession: () => ({ identity: { principal: { id: 'person' } } }) },
+  })
+  try {
+    const entry = { id: 'entry', period_id: 'period', principal_id: 'person', node_id: 'A', started_at: '2026-09-22T10:00:00Z', duration_seconds: 3600, amount: '25', currency: 'EUR' } as TimeEntry
+    state.entries.value = [entry]
+    state.periodEntries.value = new Map([['period', [entry]]])
+    state.remove(entry); firstDelete.resolve('10'); await flush()
+    const oldAction = Toast.toasts.at(-1)!.actions[0]
+    state.entries.value = [entry] // Another actor restored it before the second removal.
+    state.remove(entry)
+    const currentAction = Toast.toasts.at(-1)!.actions[0]
+    oldAction.run(); await flush()
+    expect(state.entries.value).toEqual([])
+    expect(state.periodEntries.value.get('period')).toEqual([])
+    expect(undoEntryEvent).not.toHaveBeenCalled()
+    newerDelete.resolve('12'); await flush()
+    currentAction.run(); await flush()
+    expect(undoEntryEvent).toHaveBeenCalledExactlyOnceWith('12')
+    expect(state.entries.value).toEqual([entry])
+    state.remove(entry)
+    state.startEdit(entry)
+    expect(deleteEntry).toHaveBeenCalledTimes(2)
+    expect(state.editing.value).toBeNull()
+    expect(state.entries.value).toEqual([entry])
+    expect(state.periodEntries.value.get('period')).toEqual([entry])
+    undo.resolve({ ...entry, note: 'confirmed', amount: '50', duration_seconds: 7200 }); await flush()
+    expect(state.entries.value[0].note).toBe('confirmed')
+    expect(state.periodEntries.value.get('period')[0].amount).toBe('50')
+    expect(state.total.value).toBe(7200)
+    state.remove(state.entries.value[0]); await flush()
+    expect(deleteEntry).toHaveBeenCalledTimes(3)
+    expect(state.entries.value).toEqual([])
+    expect(state.periodEntries.value.get('period')).toEqual([])
+  } finally { stop() }
 })
 
 it('AEON-1416: upload cleanup revokes each preview once and rejects late completions', async () => {

@@ -154,7 +154,7 @@ test('AEON-1416: pending Hours Undo stays in its day and failed Undo shows plain
   test.setTimeout(120_000)
   for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await page.setViewportSize({ width, height: 900 })
-    const { data } = await setup(page)
+    const { data, calls } = await setup(page)
     await openWeek(page)
     await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, theme)
     let release!: () => void
@@ -182,6 +182,15 @@ test('AEON-1416: pending Hours Undo stays in its day and failed Undo shows plain
         await page.getByRole('button', { name: 'Undo', exact: true }).click()
         await request
         await expect(row(page, 'e-4')).toBeVisible()
+        await expect(row(page, 'e-4')).toHaveAttribute('aria-busy', 'true')
+        await expect(row(page, 'e-4').getByRole('button', { name: /^Edit / })).toBeDisabled()
+        await expect(row(page, 'e-4').getByRole('button', { name: /^Delete / })).toBeDisabled()
+        await row(page, 'e-4').focus()
+        await page.keyboard.press('Delete')
+        await page.keyboard.press('e')
+        await expect(row(page, 'e-4')).toBeVisible()
+        await expect(editor(page)).toHaveCount(0)
+        expect(calls.filter(call => call.method === 'DELETE' && call.path.startsWith('/api/time-entries/'))).toHaveLength(1)
         await expect(entries(page).locator('.day-group').filter({ hasText: 'Thu 24' }).locator('[data-entry="e-4"]')).toBeVisible()
         expect(data.entries.some(e => e.id === 'e-4')).toBe(false)
         await page.screenshot({ path: testInfo.outputPath(`hours-${width}-${theme}-pending.png`) })
