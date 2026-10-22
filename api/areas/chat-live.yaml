@@ -240,6 +240,7 @@ paths:
             minimum: 1
             maximum: 50
             default: 25
+        - {name: include_timing, in: query, required: false, schema: {type: boolean}, description: "Opt in to delivery_level in message projections; omitted for strict older clients."}
 components:
   schemas:
     ChatLiveAdmission:

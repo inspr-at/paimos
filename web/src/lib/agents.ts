@@ -146,7 +146,7 @@ export const cancelSessionMessage = (projectId: string, messageId: string) => re
 // session. 404 means no live stream for it (unbound, or chat is disabled).
 export type ChatInputTiming = 'native' | 'next-step' | 'queue'
 export async function chatThreadForSession(sessionId: string): Promise<{ status: number; thread?: string; timing?: ChatInputTiming }> {
-  const response = await api(`/chat-sessions/${enc(sessionId)}/thread?include_timing=true`)
+  const response = await api(`/chat-sessions/${enc(sessionId)}/thread`, { headers: { 'Aeon-Chat-Timing': '1' } })
   if (!response.ok) return { status: response.status }
   const body = await response.json().catch(() => null) as { conversation_id?: unknown; input_timing?: unknown } | null
   const timing = body?.input_timing === 'native' || body?.input_timing === 'next-step' || body?.input_timing === 'queue' ? body.input_timing : undefined

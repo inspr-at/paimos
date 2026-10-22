@@ -650,7 +650,7 @@ watch(() => agents.deliveryPulse, () => refreshReceipts())
 async function refresh() {
   await agents.refreshThread(s.value.project_id, s.value.id)
 }
-watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
+watch([() => me.value, () => s.value.id, () => identity.identity?.tenant.id], async ([viewer, id], before) => {
   const generation = ++readGeneration
   if (flushTimer !== undefined) { clearTimeout(flushTimer); flushTimer = undefined }
   const leftover = pending
@@ -797,7 +797,7 @@ function startLive() {
     attached: () => {},
   }, { lookup: chatThreadForSession, open: openLive })
 }
-watch([() => me.value, () => s.value.id, () => props.active, ended], startLive)
+watch([() => me.value, () => s.value.id, () => identity.identity?.tenant.id, () => props.active, ended], startLive)
 // A session without a live thread so far may get one when a turn starts.
 watch(() => s.value.activity, activity => { if (activity === 'busy') follower?.retry() })
 // Streaming grows only at the bottom; keep a pinned reader on the latest line.
@@ -821,8 +821,8 @@ const hookReceipt = computed(() => hookReceipts(boundHookIds.value, statuses.val
 const showHookNotice = computed(() => unmanaged.value && hookNoticeVisible(awaitsInboxHook(s.value), hookReceipt.value))
 async function deliver(local: ProjectMessage) {
   if (local.recipient_session_id !== s.value.id || local.sender_principal_id !== me.value) return
-  const session = s.value, viewer = me.value, generation = readGeneration
-  const stillHere = () => generation === readGeneration && session.id === s.value.id && viewer === me.value
+  const session = s.value, viewer = me.value, tenant = identity.identity?.tenant.id, generation = readGeneration
+  const stillHere = () => generation === readGeneration && session.id === s.value.id && viewer === me.value && tenant === identity.identity?.tenant.id
   local.send_failed = false
   try {
     if (local.chat_thread) {

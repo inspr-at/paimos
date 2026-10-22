@@ -334,7 +334,7 @@ components:
         revision: {$ref: '#/components/schemas/ChatPosition'}
         binding_epoch: {$ref: '#/components/schemas/ChatPosition'}
         readiness: {$ref: '#/components/schemas/ChatReadiness'}
-        input_timing: {type: string, enum: [native, next-step, queue], description: "Included by the session lookup only with include_timing=true. Negotiated timing for the exact bound session; queue is After this turn. Missing means an older server: omit timing request fields."}
+        input_timing: {type: string, enum: [native, next-step, queue], description: "Included by the session lookup only with the Aeon-Chat-Timing: 1 header. Negotiated timing for the exact bound session; queue is After this turn. Missing means an older server: omit timing request fields."}
     CurrentAgentActivity:
       type: object
       required: [text, source, at]

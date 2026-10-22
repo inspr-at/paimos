@@ -3,6 +3,7 @@
 package agentd
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -133,6 +134,150 @@ func TestClaudeBridgeEmitsFinalFromResultRecordOnly(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Risk (AEON-1082): Claude's old result lends its completion to the new
+// input, or Send now restarts the Query. The fake SDK holds its active turn
+// at an HTTP barrier and reacts to native stream input by its unique UUID.
+func TestClaudeChatSteerKeepsOneQueryAndExactCompletion(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal("Node required for Claude bridge fixture")
+	}
+	end := make(chan struct{})
+	barrier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-end:
+		case <-r.Context().Done():
+		}
+	}))
+	defer barrier.Close()
+	var once sync.Once
+	release := func() { once.Do(func() { close(end) }) }
+	defer release()
+	root := t.TempDir()
+	bridge, err := claudeAssets.ReadFile("claudeassets/bridge.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, _ := json.Marshal(barrier.URL)
+	sdk := `let queries=0;
+export function query({prompt}) {
+ if (++queries!==1) throw Error('Query restarted');
+ const queue=[];let wake;let closed=false;let pending;
+ const push=value=>{queue.push(value);wake?.();wake=null};
+ return {
+  async streamInput(input){for await(const message of input) pending=message},
+  async interrupt(){
+   if(!pending) throw Error('missing input');
+   push({type:'assistant',user_message_uuid:pending.uuid,message:{content:[]}});
+   process.stdout.write(JSON.stringify({kind:'fixture_interrupt'})+'\n');
+   return {still_queued:[]};
+  },
+  close(){closed=true;wake?.()},
+  async *[Symbol.asyncIterator](){
+   const {value:initial}=await prompt[Symbol.asyncIterator]().next();
+   fetch(` + string(endpoint) + `).then(()=>{
+    push({type:'result',subtype:'success',user_message_uuid:initial.uuid,result:'earlier final'});
+    push({type:'result',subtype:'success',user_message_uuid:pending.uuid,result:'corrected final'});
+   });
+   yield {type:'system',subtype:'init',session_id:'same-sdk-session',model:'fixture-model',capabilities:['interrupt_receipt_v1']};
+   while(!closed){if(queue.length)yield queue.shift();else await new Promise(r=>wake=r)}
+  }
+ }
+}`
+	bridgePath, sdkPath := filepath.Join(root, "bridge.mjs"), filepath.Join(root, "sdk.mjs")
+	if err := os.WriteFile(bridgePath, bridge, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, fixturebin.Require(t, "true"), root)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { stdin.Close(); cancel(); _ = cmd.Wait() }()
+	frames := make(chan map[string]any, 32)
+	go func() {
+		defer close(frames)
+		scan := bufio.NewScanner(stdout)
+		for scan.Scan() {
+			var frame map[string]any
+			if json.Unmarshal(scan.Bytes(), &frame) == nil {
+				frames <- frame
+			}
+		}
+	}()
+	write := json.NewEncoder(stdin)
+	sessions, interrupts := 0, 0
+	seen := map[string]bool{}
+	lastFinal := ""
+	wait := func(kind, correlation string) {
+		t.Helper()
+		if seen[kind+"/"+correlation] {
+			return
+		}
+		for {
+			select {
+			case frame, ok := <-frames:
+				if !ok {
+					t.Fatal("bridge ended before the barrier settled")
+				}
+				switch frame["kind"] {
+				case "session_started":
+					sessions++
+				case "fixture_interrupt":
+					interrupts++
+				case "control_failed":
+					t.Fatal("bridge rejected native input", frame)
+				case "chat_final":
+					lastFinal, _ = frame["text"].(string)
+				case "turn_completed":
+					select {
+					case <-end:
+					default:
+						t.Fatal("completion before the explicit turn-end barrier")
+					}
+					if frame["correlation_id"] == "chat-input" && lastFinal != "corrected final" {
+						t.Fatal("steering borrowed the earlier result's completion")
+					}
+				}
+				cid, _ := frame["correlation_id"].(string)
+				name, _ := frame["kind"].(string)
+				seen[name+"/"+cid], seen[name+"/"] = true, true
+				if frame["kind"] == kind && (correlation == "" || frame["correlation_id"] == correlation) {
+					return
+				}
+			case <-ctx.Done():
+				t.Fatal("bridge fixture did not cross its barrier")
+			}
+		}
+	}
+	if err := write.Encode(map[string]any{"op": "start", "prompt": "initial work", "capabilities": []string{"steer"}}); err != nil {
+		t.Fatal(err)
+	}
+	wait("turn_started", "")
+	if err := write.Encode(map[string]any{"op": "steer", "correlation_id": "chat-input", "text": chatInputText("chat-input", "correction"), "chat_input": true}); err != nil {
+		t.Fatal(err)
+	}
+	wait("turn_started", "chat-input")
+	wait("control_applied", "chat-input")
+	if sessions != 1 || interrupts != 1 {
+		t.Fatalf("native input restarted the Query: sessions=%d native-steers=%d", sessions, interrupts)
+	}
+	release()
+	wait("turn_completed", "chat-input")
 }
 
 type fakeRelayAPI struct {
@@ -268,6 +413,152 @@ func chatInput(id, state string) ChatInput {
 	var in ChatInput
 	in.Message.ID, in.Message.Body, in.Receipt.State = id, "PRIVATE_SENTINEL person input", state
 	return in
+}
+
+// Risk (AEON-1082): timing is dropped or a native write borrows an earlier
+// turn's receipt. The active turn and the adapter's next-step boundary are
+// explicit barriers; returning from deliverNext proves each no-write claim.
+func TestChatRelayTimingRespectsActiveTurnAndInputEvidence(t *testing.T) {
+	for _, mode := range []string{"native", "next-step", "queue"} {
+		t.Run(mode, func(t *testing.T) {
+			api := newFakeRelayAPI()
+			api.binding.InputTiming = mode
+			after, steer := chatInput("after", "sent"), chatInput("steer", "sent")
+			after.Message.Level, steer.Message.Level = "simple", "steer"
+			api.inputs = []ChatInput{after, steer}
+			turnEnd, step := make(chan struct{}), make(chan struct{})
+			entered, writes := make(chan string, 4), make(chan string, 4)
+			r := NewChatRelay(api, HarnessSession{ID: "session"}, ChatRelayOptions{
+				Steer: mode, RequireInputCorrelation: true,
+				DeliverTimed: func(ctx context.Context, id, _ string, level string, writing func()) error {
+					entered <- id
+					if level == "steer" && mode == "next-step" {
+						select {
+						case <-step:
+						case <-ctx.Done():
+							return ctx.Err()
+						}
+					}
+					if level == "simple" {
+						select {
+						case <-turnEnd:
+						default:
+							t.Error("After this turn written before the turn-end barrier")
+						}
+					}
+					writing()
+					writes <- id
+					return nil
+				},
+			})
+			var seq uint64
+			state := func(id, value string) {
+				seq++
+				u := chatState(value)
+				r.Observe(ChatSessionEvent{Sequence: seq, InputID: id, Update: &u})
+			}
+			state("earlier", "running")
+			if mode == "queue" {
+				if err := r.deliverNext(t.Context(), api.binding); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case id := <-writes:
+					t.Fatalf("queue-only adapter wrote %s during the active turn", id)
+				default:
+				}
+			} else {
+				result := make(chan error, 1)
+				go func() { result <- r.deliverNext(t.Context(), api.binding) }()
+				if id := receive(t, entered); id != "steer" {
+					t.Fatalf("selected %s before the queued simple input", id)
+				}
+				if mode == "next-step" {
+					select {
+					case id := <-writes:
+						t.Fatalf("next-step input %s written before its adapter boundary", id)
+					default:
+					}
+					close(step)
+				}
+				if id := receive(t, writes); id != "steer" {
+					t.Fatalf("wrote %s", id)
+				}
+				if err := <-result; err != nil {
+					t.Fatal(err)
+				}
+				if len(r.receipts) != 0 {
+					t.Fatal("successful native write alone invented delivery")
+				}
+				state("earlier", "running")
+				if len(r.receipts) != 0 {
+					t.Fatal("earlier turn supplied steering evidence")
+				}
+				state("steer", "running")
+				if len(r.receipts) != 1 || r.receipts[0].message != "steer" || r.receipts[0].state != "delivered" {
+					t.Fatalf("exact reaction receipts %+v", r.receipts)
+				}
+				// Replay/reconnect/lost receipt acknowledgement cannot write again.
+				if err := r.deliverNext(t.Context(), api.binding); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case id := <-writes:
+					t.Fatalf("duplicate or early write %s", id)
+				default:
+				}
+			}
+			close(turnEnd)
+			state("earlier", "idle")
+			if mode != "queue" {
+				if len(r.receipts) != 1 {
+					t.Fatal("earlier completion supplied a read receipt")
+				}
+				if err := r.deliverNext(t.Context(), api.binding); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case id := <-writes:
+					t.Fatalf("earlier completion released %s ahead of steering completion", id)
+				default:
+				}
+				state("steer", "idle")
+				if len(r.receipts) != 2 || r.receipts[1].state != "read" || r.receipts[1].message != "steer" {
+					t.Fatalf("exact completion receipts %+v", r.receipts)
+				}
+			}
+			if err := r.deliverNext(t.Context(), api.binding); err != nil {
+				t.Fatal(err)
+			}
+			if id := receive(t, writes); id != "after" {
+				t.Fatalf("after-turn wrote %s", id)
+			}
+		})
+	}
+}
+
+// Risk: a lost acknowledgement for native chat steering reinjects content,
+// or a public control borrows the relay's private managed-input authority.
+func TestChatSteerJournalRejectsLostAcknowledgementReplay(t *testing.T) {
+	s, _, entry, process := managedFixture(t)
+	entry.inboxCapable, entry.chatTiming = true, true
+	req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: entry.record.RunID,
+		Generation: s.generation, CorrelationID: "chat:message", Operation: "steer", Text: chatInputText("message", "correction"), chatInputID: "message"}
+	if _, err := s.Control(t.Context(), req); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("public control acquired relay authority: %v", err)
+	}
+	process.fail = true
+	for range 2 {
+		if _, err := s.controlInbox(t.Context(), req, false, true); !errors.Is(err, ErrControlUnconfirmed) {
+			t.Fatalf("uncertain steering result: %v", err)
+		}
+	}
+	process.mu2.Lock()
+	writes := len(process.texts)
+	process.mu2.Unlock()
+	if writes != 1 || !entry.record.Controls[req.CorrelationID].Rejected {
+		t.Fatalf("lost acknowledgement replay wrote %d times", writes)
+	}
 }
 
 // captureLogs proves the content-free logging claim for everything the relay

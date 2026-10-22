@@ -306,7 +306,7 @@ func (m *Module) sessionThread(r *http.Request, tx pgx.Tx, p tenant.Principal, _
 		return nil, err
 	}
 	out, err := loadThread(r.Context(), tx, id)
-	if err == nil && r.URL.Query().Get("include_timing") == "true" {
+	if err == nil && r.Header.Get("Aeon-Chat-Timing") == "1" {
 		out.InputTiming, err = inputTimingTx(r.Context(), tx, session)
 	}
 	return out, err

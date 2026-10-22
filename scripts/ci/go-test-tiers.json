@@ -1438,6 +1438,12 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestChatRelayReceiptsNeedAConfirmedWrite","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestChatRelayTimingRespectsActiveTurnAndInputEvidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestChatSteerJournalRejectsLostAcknowledgementReplay","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestChatSteerReceiptsUseExactCodexInputReactions","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestChatSubscriberBoundAndCancellation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCheckoutHandoverProof","tier":"ESSENTIAL"}
@@ -1483,6 +1489,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestClaudeBridgeSettingsUseOfficialSetters","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeCachedTotal","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestClaudeChatSteerKeepsOneQueryAndExactCompletion","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeControlRechecksDeadlineAtWriteLock","tier":"GATED-FULL"}
     ,
@@ -4613,6 +4621,8 @@
     {"kind":"go","package":"internal/chat","name":"TestChatLiveTenantCapacityAndIdleEviction","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/chat","name":"TestChatLiveViewersReplayFinalOnlyAndReceipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/chat","name":"TestChatOutboxTimingIsDurableNegotiatedAndSessionBound","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/chat","name":"TestChatWithoutRelayIsUnavailableNotAnError","tier":"GATED-FULL"}
     ,

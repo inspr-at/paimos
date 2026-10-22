@@ -16,7 +16,7 @@ paths:
       description: "chat-v1. The caller's own conversation whose current binding is this harness session, so the session panel can open the live stream. Person participant only, with current chat.read project authority. Past bindings, other people's threads and unbound sessions return 404."
       parameters:
         - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
-        - {name: include_timing, in: query, required: false, schema: {type: boolean}, description: "Opt in to exact-session input_timing negotiation. Older servers omit the marker; omit timing fields from sends to them."}
+        - {name: Aeon-Chat-Timing, in: header, required: false, schema: {type: string, const: '1'}, description: "Opt in to exact-session input_timing negotiation. Older servers omit the marker; omit timing fields from sends to them."}
       responses:
         '200': {description: Participant conversation, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
         '404': {description: "Disabled, unbound or unauthorized session"}

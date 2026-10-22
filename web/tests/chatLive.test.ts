@@ -221,7 +221,7 @@ test('only an applied interrupt may say the person stopped the turn', () => {
 // every joined message keeps its thread.
 test('saved chat messages between agent and viewer join the thread and settle the live turn', () => {
   const page = [
-    { message: { message_id: 'in-1', sent_event_position: '40', body: 'input', sender_principal_id: 'person-1', created_at: '2026-10-10T08:00:00Z' } },
+    { message: { message_id: 'in-1', sent_event_position: '40', body: 'input', delivery_level: 'steer' as const, sender_principal_id: 'person-1', created_at: '2026-10-10T08:00:00Z' } },
     { message: { message_id: 'final-2', sent_event_position: '41', body: 'Final answer', reply_to: 'in-1', sender_principal_id: 'agent-1', created_at: '2026-10-10T08:00:05Z' } },
     { message: { message_id: 'other', sent_event_position: '42', body: 'not ours', sender_principal_id: 'agent-2' } },
     { message: { message_id: 'broken', sent_event_position: 'x', body: 'bad', sender_principal_id: 'agent-1' } },
@@ -229,6 +229,8 @@ test('saved chat messages between agent and viewer join the thread and settle th
   const finals = chatFinals(page, 'agent-1', 'session-1', 'person-1', 'release-lead', 'thread-1')
   assert.deepEqual(finals.map(message => [message.id, message.sent_event_id, message.body, message.reply_to, message.sender_session_id, message.sender_label, message.recipient_principal_id, message.recipient_session_id, message.chat_thread]),
     [['in-1', 40, 'input', null, undefined, undefined, 'agent-1', 'session-1', 'thread-1'], ['final-2', 41, 'Final answer', 'in-1', 'session-1', 'release-lead', 'person-1', undefined, 'thread-1']])
+  assert.equal(finals[0]!.delivery_level, 'steer')
+  assert.equal(finals[1]!.delivery_level, 'simple')
   assert.equal(chatFinals(page, '', 'session-1', 'person-1', 'x', 'thread-1').length, 0)
   const { turn } = run([state('running'), chunk('live'), state('idle')], null, 'final-1')
   assert.equal(settled(turn, finals.at(-1)!.id), true)
@@ -327,11 +329,15 @@ test('every visible row and every folded post is chat read evidence', () => {
 test('the offered sends match the transport of the next message', () => {
   const session = (harness: string, capabilities: string[]) => ({ harness, management_mode: 'managed', advertised_capabilities: capabilities })
   const claude = session('claude', ['inbox', 'steer', 'interrupt']), pi = session('pi', ['inbox', 'steer', 'interrupt']), codex = session('codex', ['inbox', 'interrupt'])
-  const offered = (s: typeof claude, transport: 'managed' | 'chat') => offeredSteer(chatCapability(s), s.advertised_capabilities.includes('steer'), transport)
+  const offered = (s: typeof claude, transport: 'managed' | 'chat', timing?: 'native' | 'next-step' | 'queue') => offeredSteer(chatCapability(s), s.advertised_capabilities.includes('steer'), transport, timing)
   assert.equal(offered(claude, 'managed'), 'now')
   assert.equal(offered(pi, 'managed'), 'next')
   assert.equal(offered(codex, 'managed'), null)
   assert.equal(offered(claude, 'chat'), null)
   assert.equal(offered(pi, 'chat'), null)
+  assert.equal(offered(claude, 'chat', 'native'), 'now')
+  assert.equal(offered(claude, 'chat', 'next-step'), 'next')
+  assert.equal(offered(claude, 'chat', 'queue'), null)
+  assert.equal(offered(codex, 'chat', 'native'), null)
   assert.equal(offered({ ...claude, management_mode: 'unmanaged' }, 'managed'), null)
 })

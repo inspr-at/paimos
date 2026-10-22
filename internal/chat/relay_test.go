@@ -113,6 +113,79 @@ func TestManagedChatSessionUsesLeaseBoundCurrentBinding(t *testing.T) {
 	expect(t, publish(second, secondLease, "2"), 404)
 }
 
+// Risk (AEON-1082): timing disappears on restart/readback, a changed timing
+// replays as the same payload, or generic flags on an older daemon falsely
+// offer native steering. Strict legacy DTOs must retain their original shape.
+func TestChatOutboxTimingIsDurableNegotiatedAndSessionBound(t *testing.T) {
+	f := newFixture(t)
+	f.grantSend(t)
+	thread := f.thread(t, f.alice, f.role(t, f.alice, f.project, "worker", "input-timing"))
+	session, lease := f.sessionWith(t, f.agent.ID, f.alice, f.project, "worker", "managed", "chat", "inbox", "steer")
+	f.bind(t, f.alice, thread, session, "0")
+	path := "/api/chat-threads/" + thread.ID + "/outbox"
+	steer := outboxSend{ClientID: "native-input", Body: "correction", Level: "steer", Session: session}
+	expect(t, f.call(f.alice, "POST", path, steer, ""), 409)
+	if got := decode[CurrentBinding](t, f.current(session, lease)); got.InputTiming != "" {
+		t.Fatal("older daemon received an unknown binding field")
+	}
+	legacy := f.call(f.alice, "POST", path, outboxSend{ClientID: "legacy-input", Body: "after this turn"}, "")
+	decode[outboxResult](t, legacy)
+	if strings.Contains(legacy.Body.String(), "delivery_level") {
+		t.Fatal("legacy sender received an unknown message field")
+	}
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET capabilities=array_append(capabilities,'chat_timing_v1') WHERE id=$1`, session); err != nil {
+		t.Fatal(err)
+	}
+	if got := decode[CurrentBinding](t, f.current(session, lease)); got.InputTiming != "native" {
+		t.Fatalf("qualified timing %+v", got)
+	}
+	r := httptest.NewRequest("GET", "/api/chat-sessions/"+session+"/thread", nil).WithContext(tenant.WithPrincipal(t.Context(), f.alice))
+	r.Header.Set("Aeon-Chat-Timing", "1")
+	w := httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	if got := decode[Thread](t, w); got.InputTiming != "native" {
+		t.Fatalf("composer timing %+v", got)
+	}
+	if got := decode[Thread](t, f.call(f.alice, "GET", "/api/chat-sessions/"+session+"/thread", nil, "")); got.InputTiming != "" {
+		t.Fatal("older viewer received an unknown timing field")
+	}
+	sent := decode[outboxResult](t, f.call(f.alice, "POST", path, steer, ""))
+	if sent.Message.Level != "steer" || sent.Receipt.State != "sent" {
+		t.Fatalf("acceptance overclaimed or lost timing: %+v", sent)
+	}
+	if replay := decode[outboxResult](t, f.call(f.alice, "POST", path, steer, "")); replay.Message.ID != sent.Message.ID {
+		t.Fatal("retry changed message identity")
+	}
+	changed := steer
+	changed.Level = "simple"
+	expect(t, f.call(f.alice, "POST", path, changed, ""), 409)
+	changed.ClientID, changed.Level = "invalid-timing", "immediate-stop"
+	expect(t, f.call(f.alice, "POST", path, changed, ""), 400)
+	proof := WorkerBindingRequest{thread.ID, session, "1"}
+	oldPage := f.call(f.agent, "POST", "/api/chat-deliveries/outbox", workerPageRequest{WorkerBindingRequest: proof}, lease)
+	decode[outboxPage](t, oldPage)
+	if strings.Contains(oldPage.Body.String(), "delivery_level") {
+		t.Fatal("older strict worker received an unknown message field")
+	}
+	page := decode[outboxPage](t, f.call(f.agent, "POST", "/api/chat-deliveries/outbox", workerPageRequest{WorkerBindingRequest: proof, IncludeTiming: true}, lease))
+	if len(page.Items) != 2 || page.Items[0].Message.Level != "simple" || page.Items[1].Message.Level != "steer" {
+		t.Fatalf("worker timing did not survive readback: %+v", page.Items)
+	}
+	history := decode[historyPage](t, f.call(f.alice, "GET", "/api/chat-threads/"+thread.ID+"/messages?include_timing=true", nil, ""))
+	if len(history.Items) != 2 || history.Items[0].Message.Level != "simple" || history.Items[1].Message.Level != "steer" {
+		t.Fatalf("history lost timing: %+v", history.Items)
+	}
+	other, otherLease := f.sessionWith(t, f.agent.ID, f.alice, f.project, "worker", "managed", "chat", "inbox", "steer", "chat_timing_v1")
+	f.bind(t, f.alice, thread, other, "1")
+	steer.ClientID = "late-input"
+	expect(t, f.call(f.alice, "POST", path, steer, ""), 409)
+	expect(t, f.call(f.bob, "POST", path, steer, ""), 404)
+	next := decode[outboxPage](t, f.call(f.agent, "POST", "/api/chat-deliveries/outbox", workerPageRequest{WorkerBindingRequest: WorkerBindingRequest{thread.ID, other, "2"}, IncludeTiming: true}, otherLease))
+	if len(next.Items) != 0 {
+		t.Fatal("successor received the previous session's input")
+	}
+}
+
 // Risk: an older daemon that never relays makes the chat look broken. The
 // thread stays a successful response with "unavailable" readiness, the live
 // view opens without an error, and final delivery is unaffected.

@@ -200,6 +200,15 @@ func (r *ChatRelay) Observe(ev ChatSessionEvent) {
 				}
 			}
 		}
+		// A completion from older work cannot make a reacted mid-turn input
+		// idle, or release queued After this turn input ahead of its own end.
+		if u.State == "idle" {
+			for _, in := range append(r.consumed[:len(r.consumed):len(r.consumed)], r.input) {
+				if in != nil && in.started != 0 && !in.read {
+					r.state = "running"
+				}
+			}
+		}
 	}
 	if u.SessionUpdate == "final" {
 		if r.finals >= chatRelayFinalLimit {
@@ -418,7 +427,7 @@ func (r *ChatRelay) Run(ctx context.Context) {
 	var binding ChatRelayBinding
 	bound, flushing, poll := false, false, true
 	failures := 0
-	nextPoll := r.opts.After(chatRelayPoll)
+	var nextPoll <-chan time.Time
 	for {
 		select {
 		case <-nextPoll:
@@ -467,6 +476,9 @@ func (r *ChatRelay) Run(ctx context.Context) {
 			continue
 		}
 		ready := r.readyForInput()
+		if nextPoll == nil && (ready || r.awaiting()) {
+			nextPoll = r.opts.After(chatRelayPoll)
+		}
 		if poll && ready {
 			poll = false
 			if err := classifyChatRelayError(r.deliverNext(ctx, binding)); err != nil {
@@ -576,8 +588,8 @@ func (r *ChatRelay) unsupported(err error) {
 	r.opts.Unsupported(reason)
 }
 
-// readyForInput: deliver a person input only to an idle harness with no other
-// input awaiting evidence, so the next turn start is attributable to it.
+// Poll while idle, and during active turns only for a qualified timing adapter.
+// An unreacted input retains the bounded single-flight evidence slot.
 func (r *ChatRelay) readyForInput() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -645,12 +657,15 @@ func (r *ChatRelay) deliverNext(ctx context.Context, b ChatRelayBinding) error {
 	}
 	// Do not inject a fetched input after a handover or a lost binding. The
 	// exact owned process/generation is checked again by the journalled write.
-	current, err := r.api.CurrentChatBinding(ctx, r.session)
-	if err != nil {
-		return err
-	}
-	if current != b {
-		return ErrChatUnbound
+	var err error
+	if b.InputTiming != "" {
+		current, lookupErr := r.api.CurrentChatBinding(ctx, r.session)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		if current != b {
+			return ErrChatUnbound
+		}
 	}
 	r.mu.Lock()
 	if !r.canDeliver(next.Message.Level) {
