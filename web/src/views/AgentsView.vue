@@ -693,7 +693,7 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
               <button role="menuitem" type="button" class="menu-item" data-autofocus @click="windDownFromMenu"><AppIcon name="pause" /><span>Wind down…<small>Finish what runs, start nothing new</small></span></button>
               <div class="menu-sep" role="separator" />
             </template>
-            <button role="menuitem" type="button" class="menu-item" aria-label="Model preferences" @click="menuAction(() => openModelPrefs())"><AppIcon name="gear" /><span>Model preferences<small>Which models do which work.</small></span></button>
+            <button role="menuitem" type="button" class="menu-item" aria-label="Model preferences" @click="menuAction(() => openModelPrefs(href => router.push(href)))"><AppIcon name="gear" /><span>Model preferences<small>Which models do which work.</small></span></button>
             <RouterLink role="menuitem" class="menu-item" to="/agents/usage" @click="headerMenu = null"><AppIcon name="pulse" /><span>Usage<small>Tokens and cost per agent, account and day.</small></span></RouterLink>
             <RouterLink role="menuitem" class="menu-item" to="/agents/routines" @click="headerMenu = null"><AppIcon name="repeat" /><span>Routines<small>Recurring work agents do by themselves.</small></span></RouterLink>
             <RouterLink v-if="can('keys.manage')" role="menuitem" class="menu-item" to="/settings/access/agents" @click="headerMenu = null"><AppIcon name="key" /><span>Agent keys<small>Scoped API keys for agents.</small></span></RouterLink>

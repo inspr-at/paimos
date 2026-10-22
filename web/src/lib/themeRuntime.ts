@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ActiveTheme, ThemeValues } from './themes.ts'
-import { installAgentTheme } from './agentTheme.ts'
+import { installAgentTheme } from './agentThemeState.ts'
 import { indicatorRing } from './indicatorVariants.ts'
 import { themeCss } from './themeEngine.ts'
 

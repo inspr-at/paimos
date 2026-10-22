@@ -14,36 +14,14 @@ async function agents(page: Page) {
 const sessions = '**/api/harness-sessions?*'
 const sessionRows = (page: Page) => page.locator('.sessions [data-row^="s:"]')
 
-// The page counts every session-list read whose request has settled. Seeing a
-// refresh's third attempt on the network is not enough: the next 'online'
-// restarts polling and drops a read whose failure has not landed yet, so that
-// failure would never count towards the three.
-async function countSettledReads(page: Page) {
-  await page.addInitScript(() => {
-    const list = /\/api\/harness-sessions\?[^/]*$/
-    const counter = window as unknown as { settledSessionReads: number }
-    counter.settledSessionReads = 0
-    const original = window.fetch.bind(window)
-    window.fetch = (input, init) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-      const answer = original(input, init)
-      return list.test(url) ? answer.finally(() => { counter.settledSessionReads++ }) : answer
-    }
-  })
-}
-// Every read the route has seen so far has settled in the page. The app handles
-// a settled read in microtasks; a later task runs only after they are done.
-async function settledReads(page: Page, count: number) {
-  await page.waitForFunction(n => (window as unknown as { settledSessionReads: number }).settledSessionReads >= n, count)
-  await page.evaluate(() => new Promise(resolve => setTimeout(resolve)))
-}
-
 test('Agents retries a stalled session read and keeps the loaded table through three failed refreshes', async ({ page }) => {
-  await countSettledReads(page)
   await agents(page)
   let attempts = 0
   let fail = false
   await page.route(sessions, async route => {
+    const query = new URL(route.request().url()).searchParams
+    // Project-tree reads share this endpoint but do not refresh the table.
+    if (query.get('view') !== 'current' || query.has('project') || query.has('ticket') || query.has('agent')) return route.fallback()
     attempts++
     if (attempts === 1) return route.abort('timedout')
     if (fail) return route.abort('failed')
@@ -52,12 +30,32 @@ test('Agents retries a stalled session read and keeps the loaded table through t
   await page.goto('/agents')
   await expect(sessionRows(page).first()).toBeVisible()
   expect(attempts).toBeGreaterThanOrEqual(2)
+  await expect.poll(() => page.evaluate(async () => {
+    const agents = (await import('/src/stores/agents.ts')).useAgents()
+    return agents.loaded && !agents.loading
+  })).toBe(true)
   fail = true
   for (let n = 1; n <= 3; n++) {
     const before = attempts
-    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+    // Join the table's complete refresh, including its status update. Counting
+    // transport settlements can include a different reader or finish before
+    // the last retry; another online event would then invalidate that failure.
+    // Observe its action without starting a read, so a missing online handler fails.
+    const error = await page.evaluate(async () => {
+      const agents = (await import('/src/stores/agents.ts')).useAgents()
+      await new Promise<void>((resolve, reject) => {
+        const stop = agents.$onAction(({ name, after, onError }) => {
+          if (name !== 'loadAll') return
+          stop()
+          after(() => resolve())
+          onError(reject)
+        })
+        window.dispatchEvent(new Event('online'))
+      })
+      return agents.sessionsError
+    })
+    expect(error).toBe('No connection')
     await expect.poll(() => attempts).toBeGreaterThanOrEqual(before + 3)
-    await settledReads(page, attempts)
     await expect(page.getByRole('region', { name: 'Agents', exact: true }).getByRole('status').filter({ hasText: 'Update delayed' })).toBeVisible()
     await expect(sessionRows(page).first()).toBeVisible()
     if (n < 3) await expect(page.getByText('Sessions could not be refreshed:')).toHaveCount(0)
