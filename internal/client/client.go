@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/stepup"
 	"github.com/inspr-at/paimos/internal/workerlease"
@@ -64,6 +65,8 @@ type StatusError struct {
 	RetryAfter    time.Duration
 	// EntryChecksFailure retains only the bounded public entry-refusal body.
 	EntryChecksFailure json.RawMessage
+	// CurrentState is present only for a bounded status_mismatch response.
+	CurrentState *string
 }
 
 func (e *StatusError) Error() string {
@@ -364,9 +367,11 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 				payload = bytes.ReplaceAll(payload, encoded[1:len(encoded)-1], []byte("[redacted]"))
 			}
 			var detail struct {
-				Error         string `json:"error"`
-				AttachRefusal string `json:"attach_refusal"`
-				ReasonCode    string `json:"reason_code"`
+				Error         string  `json:"error"`
+				AttachRefusal string  `json:"attach_refusal"`
+				ReasonCode    string  `json:"reason_code"`
+				Code          string  `json:"code"`
+				CurrentState  *string `json:"current_state"`
 			}
 			_ = json.Unmarshal(payload, &detail)
 			// Decode before the final pass too: a JSON escape must not bring
@@ -380,6 +385,11 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 			status := &StatusError{Status: res.StatusCode, Message: redact(errorMessage(payload)), AttachRefusal: redact(detail.AttachRefusal), ReasonCode: redact(detail.ReasonCode), RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
 			if res.StatusCode == http.StatusConflict && detail.Error == "entry_checks_failed" && len(payload) <= maxEntryChecksFailureBytes && json.Valid(payload) {
 				status.EntryChecksFailure = payload
+			}
+			if res.StatusCode == http.StatusConflict && detail.Code == "status_mismatch" && detail.CurrentState != nil &&
+				len(*detail.CurrentState) <= 128*4 && utf8.RuneCountInString(*detail.CurrentState) <= 128 {
+				state := redact(*detail.CurrentState)
+				status.CurrentState = &state
 			}
 			enabled, _ := ctx.Value(workReadRetryKey{}).(bool)
 			if attempt == 0 && enabled && method == http.MethodGet && body == nil &&

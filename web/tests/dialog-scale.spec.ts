@@ -150,13 +150,13 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     const person = dialog(page, 'Markus Barta, access')
     await check({ name: 'person', frame: person, actions: person.locator('.sheet-body'), size: 'm', phoneSheet: false })
 
-    // Start agent: L; on phones a near-full card whose footer ends the form.
+    // Start agent: L; on phones a full-height sheet with pinned actions.
     await mockStartAgent(page)
     await page.goto('/agents')
     await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
     await page.getByRole('menuitem', { name: /^Start agent/ }).click()
     const start = dialog(page, 'Start agent')
-    await check({ name: 'start-agent', frame: start, actions: start.locator('footer'), size: 'l', phoneSheet: false })
+    await check({ name: 'start-agent', frame: start, actions: start.locator('footer'), size: 'l', body: start.locator('.launch-body') })
     await start.getByRole('button', { name: 'Cancel', exact: true }).click()
 
     expect(errors).toEqual([])

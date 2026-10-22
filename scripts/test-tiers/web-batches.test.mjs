@@ -184,3 +184,39 @@ test('AEON-1023 combined retries stay exact and timing separates collection/nati
   assert.equal(browserCaseSeconds(native(rows)), 2)
   assert.equal(browserCaseSeconds({ suites: [{ specs: [{ tests: [{ results: [{ status: 'passed' }] }] }] }] }), null)
 })
+
+test('AEON-1640 missing attempts and overlapping durations leave non-case time unknown', async () => {
+  // Risk: incomplete or overlapping native evidence reports zero overhead as a measured fact.
+  const rows = [row('a', 'a')]
+  for (const [results, expectedCase, expectedLaunch, expectedShard] of [
+    [[], null, null, null],
+    [undefined, null, null, null],
+    [[{ status: 'passed', duration: -1 }], null, null, null],
+    [[{ status: 'passed', duration: 4000 }], 4, null, null],
+    [[{ status: 'passed', duration: 0 }], 0, 1, 2],
+  ]) {
+    let clock = 0, report
+    const measured = native(rows)
+    measured.suites[0].specs[0].tests[0].results = results
+    assert.equal(browserCaseSeconds(measured), expectedCase)
+    await run('web', { tests: rows, all: rows, timing: { collectSeconds: 0, planSeconds: 0 } }, {
+      job: 'aeon1640-timing', env: { RUNNER_ENVIRONMENT: 'github-hosted' },
+    }, {
+      knownFlaky: noFlaky, loadBrowserPolicy: () => ({ groups: [group('a')] }),
+      now: () => clock, log: () => {}, saveJSON: (_path, value) => { report = value },
+      command: () => { clock += 1000; return JSON.stringify(native(rows)) },
+      runPlaywright: async (_args, { env }) => {
+        clock += 1000
+        writeFileSync(env.PLAYWRIGHT_JSON_OUTPUT_FILE, JSON.stringify(measured))
+        return { code: 0 }
+      },
+    })
+    assert.equal(report.webShardTiming.launches[0].caseSeconds, expectedCase)
+    assert.equal(report.webShardTiming.launches[0].nonCaseSeconds, expectedLaunch)
+    assert.equal(report.webShardTiming.nonCaseSeconds, expectedShard)
+  }
+  assert.equal(browserCaseSeconds({ suites: [] }), null)
+  assert.equal(browserCaseSeconds({ suites: [{ specs: [{ tests: [
+    { results: [{ duration: 0 }] }, { results: [] },
+  ] }] }] }), null, 'one complete test cannot hide an unfinished neighbour')
+})

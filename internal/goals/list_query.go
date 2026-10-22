@@ -39,7 +39,7 @@ func listPageQuery() string {
  ), children AS MATERIALIZED (
  SELECT o.* FROM outcomes o JOIN counts c ON c.id=o.parent_id WHERE c.outcomes<=200
  ), relation_targets AS MATERIALIZED (
- SELECT n.id,n.key,n.project_id,k.slug,n.deleted_at IS NOT NULL AS deleted FROM nodes n
+ SELECT n.id,n.key,n.title,n.project_id,k.slug,n.deleted_at IS NOT NULL AS deleted FROM nodes n
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
  WHERE n.id=ANY(ARRAY(SELECT target_node_id FROM relations))
  ), serves AS MATERIALIZED (
@@ -115,7 +115,7 @@ func listPageQuery() string {
  UNION ALL SELECT 'child',o.parent_id::text,jsonb_build_object('outcome_node_id',o.id,'key',o.key,'label',o.title,
  'goal_node_id',o.parent_id,'position',o.position::text,'fields',o.fields,
  'ticket_node_ids',ARRAY(SELECT s.id::text FROM serves s WHERE s.outcome=o.id ORDER BY s.id)) FROM children o
- UNION ALL SELECT 'target',s.goal::text,jsonb_build_object('id',s.id,'key',s.key,'project',coalesce(s.project_id::text,''),'work',NOT s.deleted AND s.slug IN ('work','ticket','task','epic'),'deleted',s.deleted) FROM serves s
+ UNION ALL SELECT 'target',s.goal::text,jsonb_build_object('id',s.id,'key',s.key,'title',s.title,'project',coalesce(s.project_id::text,''),'work',NOT s.deleted AND s.slug IN ('work','ticket','task','epic'),'deleted',s.deleted) FROM serves s
  UNION ALL SELECT 'fact',f.id::text,to_jsonb(f)-'root' FROM (SELECT DISTINCT ON (id) * FROM facts ORDER BY id,root) f
  UNION ALL SELECT 'fact_roots',f.id::text,to_jsonb(array_agg(f.root ORDER BY f.root)) FROM facts f GROUP BY f.id
  UNION ALL SELECT 'root',s.root::text,to_jsonb(count(*)) FROM page_scope s GROUP BY s.root
@@ -186,6 +186,7 @@ type listPageData struct {
 	leaves    map[string]leafFact
 	leafRoots map[string][]string
 	keys      map[string]string
+	titles    map[string]string
 	projects  map[string]string
 	work      map[string]bool
 	rootPairs map[string]int
@@ -198,7 +199,7 @@ type listPageData struct {
 }
 
 func loadListPage(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []string, now time.Time, w Watermark) ([]GoalView, error) {
-	d := listPageData{goals: map[string]GoalView{}, children: map[string][]storedNode{}, facts: map[string][]leafFact{}, leaves: map[string]leafFact{}, leafRoots: map[string][]string{}, keys: map[string]string{}, projects: map[string]string{}, work: map[string]bool{}, rootPairs: map[string]int{}, etas: map[string]EffectiveETA{}, badges: map[string]ProjectBadge{}, histories: map[string]*reconstruction{}, kinds: map[string]bool{}, waits: map[string]Waits{}, budgets: map[string]listBudget{}}
+	d := listPageData{goals: map[string]GoalView{}, children: map[string][]storedNode{}, facts: map[string][]leafFact{}, leaves: map[string]leafFact{}, leafRoots: map[string][]string{}, keys: map[string]string{}, titles: map[string]string{}, projects: map[string]string{}, work: map[string]bool{}, rootPairs: map[string]int{}, etas: map[string]EffectiveETA{}, badges: map[string]ProjectBadge{}, histories: map[string]*reconstruction{}, kinds: map[string]bool{}, waits: map[string]Waits{}, budgets: map[string]listBudget{}}
 	for _, id := range ids {
 		d.budgets[id] = newListBudget()
 		d.histories[id] = &reconstruction{goal: id, metadata: map[string]historicalNode{}}
@@ -271,9 +272,14 @@ func loadListPage(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []stri
 			out = append(out, g)
 			continue
 		}
+		children := splitLinked(d.children[id])
+		if len(children) > MaxOutcomes {
+			g.Expansion = "too_large"
+			out = append(out, g)
+			continue
+		}
 		g.Waits = d.waits[id]
 		g.budget = d.budgets[id]
-		children := d.children[id]
 		etas := map[string]EffectiveETA{}
 		for _, n := range children {
 			if len(n.Targets) > MaxTargets {
@@ -290,7 +296,7 @@ func loadListPage(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []stri
 			etas[n.ID] = value
 		}
 		var moving []string
-		g, moving = deriveGoal(g, children, d.facts, etas, d.keys, now)
+		g, moving = deriveGoal(g, children, d.facts, etas, d.keys, d.titles, now)
 		projectSet := map[string]bool{g.node.Project: true}
 		movingSet := map[string]bool{}
 		if g.States.Moving > 0 {
@@ -381,14 +387,14 @@ func (d *listPageData) read(section, id string, raw []byte, w Watermark) error {
 		d.children[id] = append(d.children[id], n)
 	case "target":
 		var t struct {
-			ID, Key, Project string
-			Work, Deleted    bool
+			ID, Key, Title, Project string
+			Work, Deleted           bool
 		}
 		if err := json.Unmarshal(raw, &t); err != nil {
 			return err
 		}
 		if !t.Deleted {
-			d.keys[t.ID] = t.Key
+			d.keys[t.ID], d.titles[t.ID] = t.Key, t.Title
 		}
 		d.projects[t.ID], d.work[t.ID] = t.Project, t.Work
 	case "fact":

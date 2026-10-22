@@ -30,7 +30,7 @@ const renderer = Vue.createRenderer<Node, Node>({
 const person = (principal = 'person-a', tenant = 'tenant-a'): Owner => ({ tenant: { id: tenant }, principal: { id: principal } })
 const session = Vue.reactive<{ identity: Owner | null }>({ identity: person() })
 const grants = Vue.reactive({ revoked: false, access: true, admin: true })
-const route = Vue.reactive({ params: { section: 'access' }, query: {}, hash: '' })
+const route = Vue.reactive({ params: { section: 'access' }, query: {}, hash: '', fullPath: '/settings/access' })
 const mounted = vi.fn(), unmounted = vi.fn()
 const drafts: Vue.Ref<string>[] = [], links: Vue.Ref<string>[] = [], apps: Vue.App[] = []
 const section = Vue.defineComponent({
@@ -75,11 +75,19 @@ function mount() {
 }
 const all = (root: Node): Node[] => [root, ...root.children.flatMap(all)]
 const input = (root: Node) => all(root).find(el => el.tag === 'input')
+const observers: { notify: () => void; observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn>; active: boolean }[] = []
+function mutate() { for (const observer of observers) if (observer.active) observer.notify() }
 beforeEach(() => {
-  session.identity = person(); grants.revoked = false; grants.access = true; grants.admin = true; route.params.section = 'access'; route.hash = ''
-  drafts.length = 0; links.length = 0; mounted.mockClear(); unmounted.mockClear()
-  vi.stubGlobal('document', { documentElement: { lang: 'en' }, addEventListener() {}, removeEventListener() {} })
-  vi.stubGlobal('window', { addEventListener() {}, removeEventListener() {} })
+  session.identity = person(); grants.revoked = false; grants.access = true; grants.admin = true; route.params.section = 'access'; route.hash = ''; route.fullPath = '/settings/access'
+  drafts.length = 0; links.length = 0; observers.length = 0; mounted.mockClear(); unmounted.mockClear()
+  vi.stubGlobal('document', { body: {}, documentElement: { lang: 'en' }, addEventListener() {}, removeEventListener() {} })
+  vi.stubGlobal('window', new EventTarget())
+  vi.stubGlobal('MutationObserver', class {
+    active = false
+    observe = vi.fn(() => { this.active = true })
+    disconnect = vi.fn(() => { this.active = false })
+    constructor(public notify: () => void) { observers.push(this) }
+  })
 })
 afterEach(() => { for (const app of apps.splice(0)) app.unmount(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
@@ -204,4 +212,69 @@ it.each([
   if (focused) expect(target.focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true })
   else expect(target.focus, 'a person already in a control keeps their focus').not.toHaveBeenCalled()
   expect(classes.has('arrived'), 'the linked card has a visible arrival ring').toBe(true)
+})
+
+// Risk: a slow section loses its bookmarked destination, or a stale arrival
+// takes scrolling/focus back after input, navigation or an owner change.
+it('a target rendered after the old deadline arrives once and releases its observer and timers', async () => {
+  vi.useFakeTimers()
+  for (const main of [{ id: 'main' }, null]) {
+    const { classes, target } = arrivalTarget('colours', ['settings-card'], ['tabindex'])
+    const lookup = document.getElementById
+    let rendered = false
+    Object.assign(document, { getElementById: (id: string) => id === 'main' ? main : rendered ? lookup(id) : null })
+    route.params.section = 'theme'; route.hash = '#colours'
+    mount(); await flush()
+    await vi.advanceTimersByTimeAsync(3500)
+    mutate()
+    expect(target.scrollIntoView).not.toHaveBeenCalled()
+    rendered = true
+    mutate()
+    expect(target.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'start', behavior: 'auto' })
+    expect(target.focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true })
+    expect(classes.has('arrived')).toBe(true)
+    expect(observers).toHaveLength(main ? 1 : 2)
+    const observer = observers.at(-1)!
+    expect(observer.observe, main ? 'observe the main landmark' : 'fall back to the body').toHaveBeenCalledExactlyOnceWith(main ?? document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['id'] })
+    expect(observer.active).toBe(false)
+    mutate()
+    expect(target.scrollIntoView).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(classes.has('arrived')).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
+    apps.pop()!.unmount()
+  }
+})
+
+it('pending arrivals yield to input, route changes, unmount and the five-second bound', async () => {
+  vi.useFakeTimers()
+  const cancellations: [string, () => unknown][] = [
+    ...['wheel', 'touchstart', 'pointerdown', 'keydown'].map(type => [type, () => window.dispatchEvent(new Event(type))] as [string, () => unknown]),
+    ['hash', () => { route.hash = '' }],
+    ['section', () => { route.params.section = 'developer' }],
+    ['query', () => { route.fullPath = '/settings/theme?from=bookmark#colours' }],
+    ['owner', () => { session.identity = person('person-b') }],
+    ['unmount', () => { apps.pop()!.unmount() }],
+    ['deadline', () => vi.advanceTimersByTimeAsync(5000)],
+  ]
+  for (const [name, cancel] of cancellations) {
+    route.params.section = 'theme'; route.hash = '#colours'; route.fullPath = '/settings/theme#colours'; session.identity = person()
+    const { classes, target } = arrivalTarget('colours', ['settings-card'], ['tabindex'])
+    const lookup = document.getElementById
+    Object.assign(document, { getElementById: () => null })
+    mount(); await flush()
+    const pending = observers.at(-1)!
+    expect(pending.active, `${name}: wait started`).toBe(true)
+    // A replacement owner or route may start its own wait. Only deliver the
+    // old observer, as if its mutation had already been queued before cleanup.
+    await cancel(); await flush()
+    expect(pending.active, `${name}: observer released`).toBe(false)
+    Object.assign(document, { getElementById: lookup })
+    pending.notify()
+    expect(target.scrollIntoView, `${name}: no stale scroll`).not.toHaveBeenCalled()
+    expect(target.focus, `${name}: no stale focus`).not.toHaveBeenCalled()
+    expect(classes.has('arrived'), `${name}: no stale highlight`).toBe(false)
+    if (name !== 'unmount') apps.pop()!.unmount()
+    expect(vi.getTimerCount(), `${name}: timers released`).toBe(0)
+  }
 })

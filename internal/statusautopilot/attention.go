@@ -196,6 +196,12 @@ func (m *Module) attention(w http.ResponseWriter, r *http.Request) {
 				// legacy cursor's time and kind without exposing another node's position.
 				err = tx.QueryRow(ctx, `SELECT CASE WHEN type='status_autopilot.proposed' THEN 0 WHEN metadata->>'flag'='triage_list' THEN 1 WHEN metadata->>'flag'='cancel_suggested' THEN 2 WHEN metadata->>'flag'='blocked_reminder' THEN 3 ELSE 4 END,at FROM events WHERE id=$1 AND node_id=$2::uuid`, position.EventID, position.NodeID).Scan(&position.Kind, &position.At)
 			}
+			if errors.Is(err, pgx.ErrNoRows) {
+				// A hidden or removed legacy anchor cannot supply a safe position.
+				// Restart the visible list instead of reporting a missing project.
+				position = attentionPosition{}
+				err = nil
+			}
 			if err != nil {
 				return err
 			}
@@ -270,24 +276,15 @@ func (m *Module) attention(w http.ResponseWriter, r *http.Request) {
 func (m *Module) prepareAttention(ctx context.Context, tx pgx.Tx, p tenant.Principal, item *attentionItem) error {
 	scope := authz.Scope{ProjectID: item.ProjectID}
 	item.Editable = authz.RequireTx(ctx, tx, p, "nodes.write", scope) == nil
-	item.Applicable = item.Editable && !item.stale
-	if item.stale {
-		item.Unavailable = "Ticket changed since the proposal. Dismiss it and review the ticket."
-	}
 	var parent bool
 	var err error
 	parent, err = db.WorkStatusParentTx(ctx, tx, item.NodeID)
 	if err != nil {
 		return err
 	}
-	if parent {
-		item.Applicable = false
-		item.Unavailable = "Parent statuses follow their children."
-	}
+	mergeRefused := item.To == "merge_refused"
+	releaseUnavailable := ""
 	switch item.To {
-	case "merge_refused":
-		item.Applicable = false
-		item.Unavailable = "Fix the named gate on the ticket, then retry the merge observation."
 	case "triage_list":
 		item.To = "backlog"
 	case "cancel_suggested":
@@ -307,8 +304,7 @@ func (m *Module) prepareAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 				return err
 			}
 			if planning {
-				item.Applicable = false
-				item.Unavailable = "Choose a planning release in the ticket’s project first."
+				releaseUnavailable = attentionPlanningReason
 			} else {
 				item.To = "no_release_needed"
 			}
@@ -316,21 +312,34 @@ func (m *Module) prepareAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			return err
 		}
 		if p.Kind != tenant.Person || item.To == "release" && authz.RequireTx(ctx, tx, p, "releases.write", scope) != nil {
-			item.Applicable = false
-			item.Unavailable = "Adding to a release needs permission to manage releases."
+			releaseUnavailable = attentionReleasePermissionReason
 		}
 	}
+	paused := false
 	if item.Kind == "proposed" {
 		s, err := Load(ctx, tx)
 		if err != nil {
 			return err
 		}
-		if s.ServerMode == "off" {
-			item.Applicable = false
-			item.Unavailable = "The server operator has paused status autopilot."
-		}
+		paused = s.ServerMode == "off"
 		// Exact eligibility is checked again under the mutation fence.
 	}
+	// Keep the first applicable reason, in attentionPreparedCTE's order.
+	switch {
+	case parent:
+		item.Unavailable = attentionParentReason
+	case item.stale:
+		item.Unavailable = attentionStaleReason
+	case mergeRefused:
+		item.Unavailable = attentionMergeReason
+	case releaseUnavailable != "":
+		item.Unavailable = releaseUnavailable
+	case paused:
+		item.Unavailable = attentionPausedReason
+	default:
+		item.Unavailable = ""
+	}
+	item.Applicable = item.Editable && item.Unavailable == ""
 	return nil
 }
 
@@ -751,7 +760,11 @@ func (m *Module) undoAttention(ctx context.Context, tx pgx.Tx, p tenant.Principa
 			return err
 		}
 	}
-	raw, _ := json.Marshal(map[string]any{"job": Job, "reason": "Undo Needs attention resolution", "original": in.EventID})
+	metadataOut := map[string]any{"job": Job, "reason": "Undo Needs attention resolution", "original": in.EventID}
+	if in.BatchID != "" {
+		metadataOut["batch_id"] = in.BatchID
+	}
+	raw, _ := json.Marshal(metadataOut)
 	_, err = events.Append(ctx, tx, p, events.Change{NodeID: &in.NodeID, Type: "status_autopilot.attention_undone", Before: json.RawMessage(current), After: json.RawMessage(restored), Metadata: raw, UndoOf: &e.ID})
 	if err != nil {
 		return err

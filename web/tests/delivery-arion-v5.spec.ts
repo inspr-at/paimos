@@ -150,22 +150,26 @@ test('missing, partial and unwatched facts are said as that, never as zero', asy
 
 for (const width of [400, 1440]) for (const theme of ['light', 'dark'] as const) for (const level of ['expert', 'simple'] as const) {
   test(`Delivery v5 readings at ${width} ${theme} ${level}`, async ({ page }, info) => {
-    await page.setViewportSize({ width, height: width === 400 ? 860 : 1000 })
-    await setup(page, { theme, prefs: { level, window: 30 } })
-    await page.goto('/p/AEON/delivery')
-    const area = page.getByTestId(level === 'expert' ? 'delivery-tiles' : 'delivery-simple')
-    await expect(area.locator('[aria-busy="true"]')).toHaveCount(0)
-    await expect(page.getByTestId(level === 'expert' ? 'delivery-charts' : 'delivery-simple')).toBeVisible()
-    // Phones: every control is at least 44 px, and the page never scrolls sideways.
-    if (width === 400) {
-      expect((await page.getByRole('radiogroup', { name: 'Chart window' }).getByRole('radio').first().boundingBox())!.height).toBeGreaterThanOrEqual(44)
-      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+    // AEON-998 keeps the app in English; German-profile screenshots have no translated UI.
+    // Extend the existing artifact scenarios without adding another screenshot matrix.
+    for (const viewportWidth of [width === 400 ? 390 : 1024, width]) {
+      await page.setViewportSize({ width: viewportWidth, height: viewportWidth <= 400 ? 860 : 1000 })
+      await setup(page, { theme, prefs: { level, window: 30 } })
+      await page.goto('/p/AEON/delivery')
+      const area = page.getByTestId(level === 'expert' ? 'delivery-tiles' : 'delivery-simple')
+      await expect(area.locator('[aria-busy="true"]')).toHaveCount(0)
+      await expect(page.getByTestId(level === 'expert' ? 'delivery-charts' : 'delivery-simple')).toBeVisible()
+      // Phones: every control is at least 44 px, and the page never scrolls sideways.
+      if (viewportWidth <= 400) {
+        expect((await page.getByRole('radiogroup', { name: 'Chart window' }).getByRole('radio').first().boundingBox())!.height).toBeGreaterThanOrEqual(44)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+      }
+      await page.mouse.move(0, 0)
+      await page.locator('.dl').evaluate(el => { for (let p = el.parentElement; p; p = p.parentElement) p.scrollTop = 0; window.scrollTo(0, 0) })
+      const bottom = await page.locator('.dl').evaluate(el => { let top = el.getBoundingClientRect().bottom; for (let p = el.parentElement; p; p = p.parentElement) top += p.scrollTop; return top + window.scrollY })
+      await page.setViewportSize({ width: viewportWidth, height: Math.ceil(Math.min(9000, bottom + 80)) })
+      await page.locator('.dl').evaluate(el => { for (let p = el.parentElement; p; p = p.parentElement) p.scrollTop = 0; window.scrollTo(0, 0) })
+      await page.screenshot({ path: info.outputPath(`aeon-1016-deliveryfit/delivery-${level}-${viewportWidth}-${theme}.png`) })
     }
-    await page.mouse.move(0, 0)
-    await page.locator('.dl').evaluate(el => { for (let p = el.parentElement; p; p = p.parentElement) p.scrollTop = 0; window.scrollTo(0, 0) })
-    const bottom = await page.locator('.dl').evaluate(el => { let top = el.getBoundingClientRect().bottom; for (let p = el.parentElement; p; p = p.parentElement) top += p.scrollTop; return top + window.scrollY })
-    await page.setViewportSize({ width, height: Math.ceil(Math.min(9000, bottom + 80)) })
-    await page.locator('.dl').evaluate(el => { for (let p = el.parentElement; p; p = p.parentElement) p.scrollTop = 0; window.scrollTo(0, 0) })
-    await page.screenshot({ path: info.outputPath(`aeon-1016-deliveryfit/delivery-${level}-${width}-${theme}.png`) })
   })
 }

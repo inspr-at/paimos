@@ -30,9 +30,8 @@ const pause = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0,
 
 // Only call for the process just spawned, or for this preload's own root.
 // Root and detached launches must establish identity before starting work.
-function* identityAttempts(child, append, { start = processStart, attempts = 20 } = {}) {
+function* identityAttempts(child, append, { start = processStart, attempts = 20, terminate = () => signalGroup(child.pid, 'SIGKILL') } = {}) {
   if (!child.pid) return child
-  const terminate = () => signalGroup(child.pid, 'SIGKILL')
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (child.exitCode != null || child.signalCode != null) return child
     const started = start(child.pid)
@@ -58,10 +57,37 @@ export function recordSpawnedGroup(child, append, { wait = pause, ...options } =
 // Yield in the parent so Node can reap fast roots and update their exit code
 // during retries. The preload and spawn hooks stay synchronous before work.
 export async function recordRootGroup(child, append, { wait = ms => new Promise(resolve => setTimeout(resolve, ms)), ...options } = {}) {
-  const attempts = identityAttempts(child, append, options)
-  let step = attempts.next()
-  while (!step.done) { await wait(step.value); step = attempts.next() }
-  return step.value
+  let terminated = false
+  const attempts = identityAttempts(child, append, { ...options, terminate() {
+    terminated = true
+    signalGroup(child.pid, 'SIGKILL')
+  } })
+  try {
+    let step = attempts.next()
+    while (!step.done) { await wait(step.value); step = attempts.next() }
+    return step.value
+  } catch (error) {
+    if (terminated) {
+      // Sending KILL does not prove that the group has exited. Yield so Node
+      // can reap the root and the OS can retire its remaining group members.
+      // Probe only: the unverified PID must never authorise another signal.
+      try {
+        for (let attempt = 0; ; attempt++) {
+          try { process.kill(-child.pid, 0) }
+          catch (error) {
+            if (error.code === 'ESRCH') break
+            // macOS can report EPERM while a killed group awaits reaping.
+            if (error.code !== 'EPERM') throw error
+          }
+          if (attempt === 199) throw new Error('Spawned process group is still present')
+          await wait(10)
+        }
+      } catch (cause) {
+        throw Object.assign(new Error('Could not confirm spawned process group exit; host lock retained', { cause: new AggregateError([error, cause]) }), { unverifiedGroup: child.pid })
+      }
+    }
+    throw error
+  }
 }
 
 // Read the full journal each time. A failed ps, malformed record or signal

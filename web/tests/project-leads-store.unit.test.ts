@@ -24,7 +24,7 @@ vi.mock('../src/lib/agentRows', async importOriginal => ({ ...await importOrigin
 vi.mock('../src/stores/agents', () => ({ useAgents: () => ({ admitSessions: (rows: unknown[]) => { http.admitted.push(...rows); return rows } }) }))
 vi.mock('../src/lib/authz', () => ({ onAccessRevalidate: () => () => {}, can: () => true }))
 vi.mock('../src/stores/liveAgents', () => ({ useLiveAgents: () => ({ items: [], watch: () => () => {} }) }))
-vi.mock('../src/stores/workQueue', () => ({ useWorkQueue: () => ({ snapshots: {} }) }))
+vi.mock('../src/stores/workQueue', () => ({ useWorkQueue: () => ({ snapshots: {}, watch: () => () => {} }) }))
 // The shared Agents projection (AEON-1210) binds questions by the exact asking session; its own reads are tested in agent-projection.unit.test.ts.
 type Fake = { asks: Map<string, { id: string; project_id: string }[]>; state: string; partial: boolean }
 const holder = vi.hoisted(() => ({ live: null as unknown as Fake }))
@@ -67,8 +67,8 @@ function summary() {
   const result = scope.run(() => useLeadSummary(ref(P), ref('PHAROS')))!
   return { ...result, stop: () => scope.stop() }
 }
-beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW)); setActivePinia(createPinia()); http.paths.length = 0; http.admitted.length = 0; http.handler = routes(); vi.spyOn(console, 'warn').mockImplementation(() => {}) })
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
+beforeEach(() => { vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' })); vi.stubGlobal('window', new EventTarget()); vi.stubGlobal('navigator', { onLine: true }); vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW)); setActivePinia(createPinia()); http.paths.length = 0; http.admitted.length = 0; http.handler = routes(); vi.spyOn(console, 'warn').mockImplementation(() => {}) })
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 it('AEON-1038: launch-off or unreadable policy refuses Start without a POST', async () => {
   const leads = useProjectLeads()

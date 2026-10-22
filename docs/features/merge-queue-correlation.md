@@ -76,7 +76,9 @@ The collector bounds windows (30 days), lookback (one day), runs (5,000),
 pages (20 per resource), queue ancestry (100), timeline PRs (2,000), commits
 (10,000), input/output files (64 MiB), each API response (8 MiB / 60 seconds)
 and total collection (20 minutes). Pagination exhaustion, GraphQL partial
-errors, inconsistent identities and the Actions search cap fail publication.
+errors, conflicting identity evidence and the Actions search cap fail publication.
+Incomplete group identities remain in the report with warnings; their causes stay
+unknown rather than failing publication.
 A requested offline window must lie within the snapshot's coverage.
 `--required-checks` overrides the recorded five-check baseline deliberately;
 it does not modify the repository's required checks.

@@ -2,7 +2,7 @@
 // The Quotes list: rows as GET /api/quotes returns them (BusinessQuoteListItem),
 // every page of them, and the pure search, filter, sort and column rules the
 // list view uses. Nothing here touches the DOM, so it is tested on its own.
-import { api, APIError } from '../api'
+import { api, APIError, type ListResult } from '../api'
 import { minorMoney, parseMoney } from '../crm'
 
 export type QuoteState = 'draft' | 'issued' | 'accepted' | 'void'
@@ -45,8 +45,9 @@ function normalise(raw: QuoteRow): QuoteRow {
   }
 }
 // Every quote, archived ones included (the list hides them until asked), 200 at a time.
-export async function fetchQuotes(filter: { customer?: string } = {}): Promise<QuoteRow[]> {
+export async function fetchQuotes(filter: { customer?: string } = {}): Promise<ListResult<QuoteRow[]>> {
   const out: QuoteRow[] = []
+  const seen = new Set<string>()
   let cursor = ''
   for (let page = 0; page < 50; page++) {
     const params = new URLSearchParams({ limit: '200', archived: 'all' })
@@ -60,9 +61,11 @@ export async function fetchQuotes(filter: { customer?: string } = {}): Promise<Q
     const rows = await response.json() as QuoteRow[]
     out.push(...rows.map(normalise))
     cursor = response.headers.get('X-Next-Cursor') ?? ''
-    if (!cursor) break
+    if (!cursor) return { items: out, partial: false }
+    if (seen.has(cursor)) return { items: out, partial: true }
+    seen.add(cursor)
   }
-  return out
+  return { items: out, partial: true }
 }
 export { APIError }
 

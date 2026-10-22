@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Goals view's reads (AEON-1457) on the Goals API (AEON-1456, api/areas/goals.yaml):
 // the visible goals with their outcomes, a goal's ETA history and its progress
-// series, plus the words the view uses for them. Writes belong to agents.
+// series, plus the words the view uses for them. Agents write outcomes; people
+// create, rename and delete goals and link work to them (AEON-1618).
 // AEON-1395: Group › Epics reads /goals/epics, the open epics in the same shape.
 import { api, APIError, getNode } from './api'
 import { ticketPath } from './work'
 import { statusName } from './statusNames'
 import type { DeliveryState } from './delivery'
-import { listDayMonth, listWeekday, type GoalRange, type RatePoint } from './goalRate'
+import { listDate, listDayMonth, listWeekday, type GoalRange, type RatePoint } from './goalRate'
 
 export type GoalState = 'moving' | 'queued' | 'paused' | 'done'
 export const GOAL_STATES: readonly GoalState[] = ['moving', 'queued', 'paused', 'done']
@@ -27,6 +28,8 @@ export interface GoalOutcome {
   note_by?: string; note_by_name?: string; note_at?: string; merged_at?: string
   // AEON-1395 (epic items): all keys when keys holds the first 20, and the latest unmerged pull request.
   keys_total?: number; delivery?: { state: DeliveryState; pull_request?: number }
+  // AEON-1618: work a person linked; id is the work item's id.
+  linked?: boolean
 }
 export interface GoalProgress {
   pct: number; computed_pct: number; source: 'computed' | 'override'; basis: 'count' | 'estimate' | 'mixed'
@@ -94,6 +97,53 @@ export const GOAL_GROUPS: readonly GoalGroup[] = ['goals', 'epics']
 export const GROUP_LABEL: Record<GoalGroup, string> = { goals: 'Goals', epics: 'Epics' }
 export const isGoalGroup = (value: unknown): value is GoalGroup => value === 'goals' || value === 'epics'
 export const listGoals = (query: GoalQuery, signal?: AbortSignal, group: GoalGroup = 'goals') => read<GoalList>(`${group === 'epics' ? '/goals/epics' : '/goals'}?${goalQuery(query)}`, signal)
+export const readGoal = (id: string, signal?: AbortSignal) => read<Goal>(`/goals/${encodeURIComponent(id)}`, signal)
+// ---------- People's writes (AEON-1618) ----------
+export interface GoalWriteResult { id: string; key: string; changed: boolean; read_through: number; generation: number }
+export interface GoalWorkResult extends GoalWriteResult { node_ids: string[]; delta?: string[]; event_id: number | null }
+async function write<T>(path: string, method: string, body?: unknown, key?: string): Promise<T> {
+  const headers: Record<string, string> = {}
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  if (key) headers['Idempotency-Key'] = key
+  const response = await api(path, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
+  if (!response.ok) {
+    const answer = await response.json().catch(() => ({})) as { error?: string; message?: string }
+    throw new APIError(response.status, answer.error ?? answer.message ?? `The goal could not be saved (${response.status}).`, answer)
+  }
+  return response.json() as Promise<T>
+}
+const writeKey = () => `goal-${crypto.randomUUID()}`
+// Lands is a day: the goal lands by its end, in the person's time zone.
+export function landsAt(day: string): string | null {
+  const [y, m, d] = day.split('-').map(Number)
+  if (!y || !m || !d) return null
+  return new Date(y, m - 1, d, 23, 59, 0).toISOString()
+}
+export function landsDay(at: string | undefined): string {
+  if (!at) return ''
+  const when = new Date(at)
+  if (Number.isNaN(when.getTime())) return ''
+  return `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}-${String(when.getDate()).padStart(2, '0')}`
+}
+// A day stays a day (Tick round 1): its text, "Fri 30 Oct", is what the row, its label and
+// the ETA history show, never the 23:59 it is stored at.
+export function landsEta(day: string): { at: string; text: string } | null {
+  const at = landsAt(day)
+  return at ? { at, text: listDate(Date.parse(at)) } : null
+}
+export const createGoal = (title: string, projectId: string | null, lands: string) =>
+  write<GoalWriteResult>('/goals', 'POST', { title, project_id: projectId, ...(landsEta(lands) ? { eta: landsEta(lands) } : {}) }, writeKey())
+export const updateGoal = (id: string, change: { title?: string; lands?: string }) =>
+  write<GoalWriteResult>(`/goals/${encodeURIComponent(id)}`, 'PATCH', {
+    ...(change.title !== undefined ? { title: change.title } : {}),
+    ...(change.lands !== undefined ? { eta: landsEta(change.lands) } : {}),
+  }, writeKey())
+// A goal holds at most this many linked items, and one call names at most this many (node_ids maxItems).
+export const MAX_LINKED = 20
+export const linkGoalWork = (id: string, nodeIds: string[]) => write<GoalWorkResult>(`/goals/${encodeURIComponent(id)}/work`, 'POST', { node_ids: nodeIds })
+export const unlinkGoalWork = (id: string, nodeIds: string[]) => write<GoalWorkResult>(`/goals/${encodeURIComponent(id)}/work`, 'DELETE', { node_ids: nodeIds })
+export const deleteGoal = (id: string) => write<GoalWorkResult>(`/goals/${encodeURIComponent(id)}`, 'DELETE')
+
 export const goalSeries = (id: string, range: GoalRange, signal?: AbortSignal) => read<GoalSeries>(`/goals/${encodeURIComponent(id)}/series?range=${range}`, signal)
 export const goalHistory = (id: string, outcome?: string, signal?: AbortSignal) =>
   read<{ items: GoalEvent[]; next_cursor?: string }>(`/goals/${encodeURIComponent(id)}/history?limit=20${outcome ? `&outcome=${encodeURIComponent(outcome)}` : ''}`, signal)

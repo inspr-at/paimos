@@ -498,7 +498,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         if (method === 'DELETE') {
           const [gone] = list.splice(index, 1)
           data.events.push({ id: data.events.length + 1, node_id: gone.node_id, type: 'attachment.removed', before: gone, after: { ...gone, deleted_at: new Date(now).toISOString() }, undo_of: null })
-          return route.fulfill({ status: 204 })
+          return route.fulfill({ status: 204, headers: { 'X-Aeon-Event-Ids': String(data.events[data.events.length - 1].id) } })
         }
         if (method === 'PATCH') {
           const expected = request.headers()['if-unmodified-since']

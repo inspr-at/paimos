@@ -9,6 +9,7 @@ const oid = /^[a-f0-9]{40}$/;
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const positive = value => Number.isSafeInteger(value) && value > 0;
 const ensure = (value, message) => { if (!value) throw new Error(message); };
+const optionalJobs = ['cache-prime', 'tree-reuse', 'apt-bundle'];
 const mainPushBackoff = [15000, 30000, 45000, 60000];
 const mainPushBudget = 180000;
 const lookupTimeout = 10000;
@@ -84,10 +85,11 @@ export async function verifyRun(repository, runID, api, sha) {
 // Shared execution obligations: never substitute green aggregate conclusions.
 export function verifyJobs(jobs, attempt) {
   ensure(positive(jobs.total_count) && jobs.total_count <= 100 && jobs.jobs?.length === jobs.total_count, 'incomplete job list');
-  ensure(jobs.jobs.every(job => job.run_attempt === attempt && job.status === 'completed' && (job.conclusion === 'success' || (['cache-prime', 'tree-reuse'].includes(job.name) && job.conclusion === 'skipped'))), 'incomplete suite');
-  // The only optional/skipped jobs are reuse lookup and main cache priming. Unknown or
-  // duplicate jobs cannot silently change the suite this proof recognizes.
-  ensure(jobs.jobs.every(job => requiredJobs.includes(job.name) || ['cache-prime', 'tree-reuse'].includes(job.name)), 'unknown suite job');
+  ensure(jobs.jobs.every(job => job.run_attempt === attempt && job.status === 'completed' && (job.conclusion === 'success' || (optionalJobs.includes(job.name) && job.conclusion === 'skipped') || (job.name === 'apt-bundle' && job.conclusion === 'failure'))), 'incomplete suite');
+  // The apt artifact is optional: failed fetches retain network installs, and
+  // every test execution below must still have passed. Unknown or duplicate
+  // jobs cannot silently change the suite this proof recognizes.
+  ensure(jobs.jobs.every(job => requiredJobs.includes(job.name) || optionalJobs.includes(job.name)), 'unknown suite job');
   ensure(new Set(jobs.jobs.map(job => job.name)).size === jobs.jobs.length, 'duplicate suite job');
   for (const name of requiredJobs) {
     const job = jobs.jobs.find(job => job.name === name);

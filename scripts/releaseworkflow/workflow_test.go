@@ -2,6 +2,7 @@
 package releaseworkflow
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,6 +87,147 @@ func named(t *testing.T, j job, name string) (int, step) {
 	}
 	t.Fatalf("missing step %q", name)
 	return -1, step{}
+}
+
+// Risk: one-off PR and queue cache writes evict reusable main caches and the
+// browsers needed by running shards. Unknown write guards fail closed.
+func TestCICachesRemainReadOnlyForPullRequestsAndMergeGroups(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join(root(t), ".github/workflows/*.yml"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("workflow inventory: %v", err)
+	}
+	for _, file := range files {
+		w := treeWorkflow(t, filepath.Base(file))
+		if failures := workflowCacheWriteViolations(w); len(failures) != 0 {
+			t.Errorf("%s: %v", filepath.Base(file), failures)
+		}
+	}
+	// Exercise the guard with the original regression and plausible ways to
+	// reintroduce it, including setup-go's implicit default save.
+	setup := func(j map[string]any) map[string]any {
+		for _, value := range reuseSteps(j) {
+			s := treeMap(value)
+			if strings.HasPrefix(fmt.Sprint(s["uses"]), "actions/setup-go@") {
+				return treeMap(s["with"])
+			}
+		}
+		t.Fatal("missing setup-go")
+		return nil
+	}
+	for _, mutation := range []struct {
+		name string
+		edit func(map[string]any)
+	}{
+		{"combined shard cache", func(j map[string]any) {
+			s := reuseStep(t, j, "Restore Go build cache")
+			s["uses"] = "actions/cache@sha"
+		}},
+		{"unguarded explicit save", func(j map[string]any) {
+			delete(reuseStep(t, j, "Save main Go build cache"), "if")
+		}},
+		{"queue save via PR exclusion", func(j map[string]any) {
+			reuseStep(t, j, "Save main Go build cache")["if"] = "github.event_name != 'pull_request'"
+		}},
+		{"save guard bypass", func(j map[string]any) {
+			s := reuseStep(t, j, "Save main Go build cache")
+			s["if"] = fmt.Sprint(s["if"]) + " || github.event_name == 'merge_group'"
+		}},
+		{"setup-go enabled", func(j map[string]any) { setup(j)["cache"] = true }},
+		{"setup-go default", func(j map[string]any) { delete(setup(j), "cache") }},
+		{"setup-go queue save", func(j map[string]any) {
+			setup(j)["cache"] = "${{ github.event_name != 'pull_request' }}"
+		}},
+		{"new per-ref cache", func(j map[string]any) {
+			j["steps"] = append(reuseSteps(j), map[string]any{
+				"uses": "actions/cache@sha", "with": map[string]any{"key": "build-${{ github.ref }}-${{ matrix.shard }}"},
+			})
+		}},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			w := treeWorkflow(t, "ci.yml")
+			mutation.edit(treeMap(treeMap(w["jobs"])["go-test"]))
+			failures := workflowCacheWriteViolations(w)
+			if len(failures) != 1 || !strings.HasPrefix(failures[0], "go-test:") {
+				t.Fatalf("must reject this cache write, got %v", failures)
+			}
+		})
+	}
+}
+
+func workflowCacheWriteViolations(w map[string]any) []string {
+	on := treeMap(w["on"])
+	_, pr := on["pull_request"]
+	_, queue := on["merge_group"]
+	if !pr && !queue {
+		return nil
+	}
+	mainGuard := regexp.MustCompile(`^(?:always\(\) && )?github.event_name == 'push' && github.ref == 'refs/heads/main'(?: && runner.environment == 'github-hosted')?(?: && steps.go-cache.outputs.cache-hit != 'true')?$`)
+	mainOnly := func(value any) bool {
+		expression := strings.TrimSpace(fmt.Sprint(value))
+		expression = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(expression, "${{"), "}}"))
+		return mainGuard.MatchString(expression)
+	}
+	perRefOrShard := regexp.MustCompile(`github\.(?:head_ref|ref|sha|run_id|run_attempt)|matrix\.|strategy\.job-total`)
+	var failures []string
+	for id, value := range treeMap(w["jobs"]) {
+		j := treeMap(value)
+		for _, value := range reuseSteps(j) {
+			s := treeMap(value)
+			if mainOnly(j["if"]) || mainOnly(s["if"]) {
+				continue
+			}
+			uses, _ := s["uses"].(string)
+			with := treeMap(s["with"])
+			switch {
+			case strings.HasPrefix(uses, "actions/setup-go@"):
+				if fmt.Sprint(with["cache"]) != "false" && !mainOnly(with["cache"]) {
+					failures = append(failures, id+": setup-go may save a PR/queue cache")
+				}
+			case strings.HasPrefix(uses, "actions/cache/save@"):
+				failures = append(failures, id+": explicit cache save needs a main-push guard")
+			case strings.HasPrefix(uses, "actions/cache@"):
+				key := fmt.Sprint(with["key"])
+				if strings.HasPrefix(key, "go-test-") || perRefOrShard.MatchString(key) {
+					failures = append(failures, id+": per-ref/shard cache must be restore-only")
+				}
+			}
+		}
+	}
+	return failures
+}
+
+// Risk: deleting a browser cache between setup and a failed-jobs rerun must
+// trigger a bounded download of the lockfile's browser instead of a hard miss.
+func TestBrowserShardRecoversAfterCacheEviction(t *testing.T) {
+	j := treeMap(treeMap(treeWorkflow(t, "ci.yml")["jobs"])["web-shard"])
+	steps := reuseSteps(j)
+	for i, value := range steps {
+		s := treeMap(value)
+		if s["name"] != "Restore Playwright browsers" {
+			continue
+		}
+		want := map[string]any{
+			"name": "Restore Playwright browsers", "id": "web-browsers",
+			"uses": "actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25",
+			"with": map[string]any{"path": "~/.cache/ms-playwright", "key": "${{ needs.web-setup.outputs.browser-cache-key }}"},
+		}
+		if !reflect.DeepEqual(s, want) {
+			t.Fatal("browser restore must expose cache-hit and allow a miss")
+		}
+		if i+2 >= len(steps) || !reflect.DeepEqual(treeMap(steps[i+1]), browserCacheMissInstall()) || treeMap(steps[i+2])["name"] != "Install Chromium system dependencies" {
+			t.Fatal("a miss must install the pinned Chromium within four minutes before dependency setup and tests")
+		}
+		return
+	}
+	t.Fatal("missing browser restore")
+}
+
+func browserCacheMissInstall() map[string]any {
+	return map[string]any{
+		"name": "Install Playwright browsers after cache eviction",
+		"if":   "steps.web-browsers.outputs.cache-hit != 'true'", "timeout-minutes": 4,
+		"working-directory": "web", "run": "npx --no-install playwright install chromium",
+	}
 }
 
 // Risk: setup actions can select vulnerable cached toolchains. Every workflow
