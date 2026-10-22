@@ -21,22 +21,13 @@ func TestPathProofCommandsRunInShells(t *testing.T) {
 		{"homebrew-add-harness", homebrewAddHarnessCommand(), []string{"add-harness"}},
 		{"nix-add-harness", nixAddHarnessCommand(), []string{"add-harness"}},
 	}
-	shells := []struct{ name, path string }{
-		{"zsh", requireShell(t, "zsh")},
-		{"bash", requireShell(t, "bash")},
-	}
-	if fish, ok := findFish(); ok {
-		shells = append([]struct{ name, path string }{{"fish", fish}}, shells...)
-	} else {
-		t.Log("fish is not installed; skipping fish")
-	}
 	for _, command := range commands {
 		if !strings.Contains(command.line, "env ") {
 			t.Fatalf("%s is not prefixed with env: %s", command.name, command.line)
 		}
-		for _, shell := range shells {
-			t.Run(command.name+"/"+shell.name, func(t *testing.T) {
-				got := runPathProof(t, shell.path, command.line)
+		for _, shell := range []string{"fish", "zsh", "bash"} {
+			t.Run(command.name+"/"+shell, func(t *testing.T) {
+				got := runPathProof(t, requireShell(t, shell), command.line)
 				want := strings.Join(command.want, "\n") + "\n"
 				if string(got) != want {
 					t.Fatalf("stub args %q, want %q", got, want)
@@ -51,23 +42,17 @@ func requireShell(t *testing.T, name string) string {
 	if path, err := exec.LookPath(name); err == nil {
 		return path
 	}
-	fallback := "/bin/" + name
-	if info, err := os.Stat(fallback); err == nil && info.Mode()&0o111 != 0 {
-		return fallback
+	fallbacks := []string{"/bin/" + name}
+	if name == "fish" {
+		fallbacks = append(fallbacks, "/Users/markus/.nix-profile/bin/fish")
 	}
-	t.Fatalf("%s is not installed", name)
+	for _, fallback := range fallbacks {
+		if info, err := os.Stat(fallback); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			return fallback
+		}
+	}
+	t.Skipf("%s is not installed: not found on PATH or at %s", name, strings.Join(fallbacks, ", "))
 	return ""
-}
-
-func findFish() (string, bool) {
-	if path, err := exec.LookPath("fish"); err == nil {
-		return path, true
-	}
-	const known = "/Users/markus/.nix-profile/bin/fish"
-	if info, err := os.Stat(known); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-		return known, true
-	}
-	return "", false
 }
 
 func runPathProof(t *testing.T, shell, line string) []byte {
