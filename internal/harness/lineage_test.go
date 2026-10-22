@@ -73,7 +73,7 @@ func TestCrossProjectChildrenKeepWorkAndPrivacy(t *testing.T) {
 	// progress ignores it, or a count reveals a project the reader cannot see.
 	// The parent-only page must count both children outside that page.
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET ticket_node_id=$2,created_at=clock_timestamp() WHERE id=$1`, parent, f.ticket); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET ticket_node_id=$2,work_shape='ship',created_at=clock_timestamp() WHERE id=$1`, parent, f.ticket); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET progress_pct=CASE WHEN id=$1::uuid THEN 80 ELSE 20 END WHERE id=ANY($2::uuid[])`, id, []string{id, legacyChild["id"].(string)})
