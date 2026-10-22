@@ -470,3 +470,31 @@ therefore remains at 95% pending coordinator CI evidence for the full static
 release-workflow check and the browser spec. No test was removed or newly skipped,
 no timeout was extended, and no product behavior outside conflict reconciliation
 was changed. No origin push, deployment, review gate or model CLI was run.
+
+### P1 supervisor merge-main round
+
+Normal merge `3a3912dac` incorporates main `52814e65e` into reviewed head
+`6f1f277bc`. The three supervisor conflicts reconcile independently added
+root-group cleanup safeguards. Both `unverifiedGroup` and `unconfirmedGroup`
+remain available, main's aggregate error cause is retained, and cleanup still
+uses at most 200 observations without signalling an unverified group again.
+An uncertain group keeps the host lock and its empty ownership journal.
+All four regressions from the two parents remain present; the branch assertion
+uses the converged diagnostic without weakening its ownership checks.
+
+Before this validation note, all 174 main-only files and 27 branch-only files
+matched their respective parent byte-for-byte. The automatically merged Go
+tier manifest retains every row from both parents, and all 53 supervisor cases
+remain present. The PTY implementation is unchanged. No migration is introduced
+or renumbered, and no migration number collides.
+
+Validation on `3a3912dac` passed through the approved remote entry points.
+The interrupted-fixture regression passed through `remote-test.sh`, followed
+by the complete nativepty, nativeattach, agentd, nativesessions, nativecontract,
+nativereceipts, nativeintegration and reportercontract package set with
+`-count=1`. The full guarded `ci-static --merge-main` exited 0: all 44 checks
+passed with zero optional skips. That run includes the complete supervisor
+safety suite, migration policy tests and checker, OpenAPI checks, audit and
+tier/shard inventories, and the release-workflow package that exceeded its
+harness limit in the prior round. No test was removed or skipped and no timeout
+was extended. No origin push, deployment, review gate or model CLI was run.
