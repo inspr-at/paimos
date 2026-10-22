@@ -97,7 +97,7 @@ export function validateVisual(visual, { cuts = false } = {}) {
   return checkpoints.size
 }
 
-export function validateLedger({ baseline, ledger, visual, currentWeb, currentGo, sourceHash }) {
+export function validateLedger({ baseline, ledger, visual, currentWeb, currentGo, sourceHash, p01 = false }) {
   need(baseline.version === 1 && ledger.version === 1 && /^P(?:0[1-9]|1[0-2])$/.test(ledger.phase), 'Invalid prune ledger version/phase')
   const approval = ledger.approval
   need(approval?.id === 'AEON-1670-2026-10-22' && approval.ticket === 'AEON-1670' && approval.person === 'Markus' &&
@@ -165,7 +165,8 @@ export function validateLedger({ baseline, ledger, visual, currentWeb, currentGo
   }
   const cuts = [...original.keys()].some(changed) || required.some(row => currentAnchors(row.source, baseline).some(changed))
   const visualCases = validateVisual(visual, { cuts })
-  if (ledger.phase === 'P01') {
+  if (p01) {
+    need(ledger.phase === 'P01', 'The P01 snapshot check only applies to P01')
     need(!cuts, 'P01 cannot remove or demote any existing test execution')
     need(same(Object.fromEntries(Object.entries(currentWeb).filter(([key]) => key !== 'tests')), baseline.cataloguePolicy),
       'P01 changed catalogue selection/tagging/timing policy')
@@ -175,7 +176,7 @@ export function validateLedger({ baseline, ledger, visual, currentWeb, currentGo
     }
   }
   for (const pin of baseline.sourcePins) if (pin.category === 'historical-evidence' ||
-    ledger.phase === 'P01' && ['launch-policy', 'launch-record', 'selector-policy', 'browser-source'].includes(pin.category))
+    p01 && ['launch-policy', 'launch-record', 'selector-policy', 'browser-source', 'current-obligations'].includes(pin.category))
     need(sourceHash(pin.path) === pin.sha256, `Frozen ${pin.category} changed: ${pin.path}`)
   return { browserCases: browser.length, specs: specs.size, core: ledger.core.length, protectedRisks: risks.size,
     driftCases: baseline.driftObligations.cases.length, candidateGroups: baseline.deleteCandidateGroups.length,
@@ -191,7 +192,7 @@ function boundedRead(base, path) {
   return readFileSync(full)
 }
 
-export function checkRepository(base = root) {
+export function checkRepository(base = root, { p01 = false } = {}) {
   const read = path => boundedRead(base, path)
   const parse = path => JSON.parse(read(path))
   const baselineBytes = read('scripts/test-prune/baseline.json')
@@ -199,12 +200,12 @@ export function checkRepository(base = root) {
   need(sha256(baselineBytes) === ledger.baselineSha256, 'Frozen baseline SHA-256 mismatch')
   return validateLedger({ baseline: JSON.parse(baselineBytes), ledger, visual: parse('scripts/test-prune/visual-manifest.json'),
     currentWeb: parse('scripts/ci/web-test-tiers.json'), currentGo: parse('scripts/ci/go-test-tiers.json'),
-    sourceHash: path => sha256(read(path)) })
+    sourceHash: path => sha256(read(path)), p01 })
 }
 
 export function main(args = process.argv.slice(2)) {
-  need(args.length === 0, 'Usage: node scripts/test-prune/check.mjs')
-  console.log(JSON.stringify(checkRepository()))
+  need(args.length === 0 || same(args, ['--p01']), 'Usage: node scripts/test-prune/check.mjs [--p01]')
+  console.log(JSON.stringify(checkRepository(root, { p01: args.length === 1 })))
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

@@ -438,7 +438,7 @@
     {"path":"web/scripts/ci-web-shard-specs/tests/work-surfaces-fix4.spec.ts.json","category":"launch-record","sha256":"1715810ecddc717b6a59b9f715ecda2f57b0e67e0bffe0278d6e66872a0fd5b8"},
     {"path":"web/scripts/ci-web-shard-specs/tests/work-vocabulary.spec.ts.json","category":"launch-record","sha256":"b46d95a631984a6bf926d288724317f9a9c73dc1dc5d08c653cd13129ade1171"},
     {"path":"web/scripts/ci-web-shard-specs/tests/workspace-activity.spec.ts.json","category":"launch-record","sha256":"6859e6fb248f65681d6aed36f85a34be3732a79302d14671870e4c5436c55747"},
-    {"path":"scripts/test-tiers/drift-obligations.json","category":"historical-evidence","sha256":"2754a24bf613403103fd5bc61e97ff6c6a1af34f689fc07cf0a98775720d35e1"},
+    {"path":"scripts/test-tiers/drift-obligations.json","category":"current-obligations","sha256":"2754a24bf613403103fd5bc61e97ff6c6a1af34f689fc07cf0a98775720d35e1"},
     {"path":"scripts/test-tiers/affected-replay.json","category":"historical-evidence","sha256":"d960c3419d4522a04f90c4b61ffa12eb96fc09d3b44413826c44410e57c51d59"},
     {"path":"scripts/test-tiers/selector-evidence.json","category":"historical-evidence","sha256":"2bda03e884c11f49c080df7c12e5ca8cca63a3a4e10be5190ce79dd020931fdc"},
     {"path":"scripts/test-tiers/browser-candidate-measurement.json","category":"historical-evidence","sha256":"ce5631de095198344233292b63fae9fc244083d5e54809a6be27705e16e1228e"},
