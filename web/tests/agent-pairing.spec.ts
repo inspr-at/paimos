@@ -542,7 +542,7 @@ test.describe('AEON-1611 connected computer readability', () => {
         expect(await path.evaluate(element => element.clientHeight <= 2 * parseFloat(getComputedStyle(element).lineHeight))).toBe(true)
       } else {
         await expect(path).toHaveCSS('white-space', 'nowrap')
-        expect(await path.evaluate(element => element.clientHeight <= parseFloat(getComputedStyle(element).lineHeight) + 1)), 'desktop path must occupy one line').toBe(true)
+        expect(await path.evaluate(element => element.clientHeight <= parseFloat(getComputedStyle(element).lineHeight) + 1), 'desktop path must occupy one line').toBe(true)
         if (width === 1440) expect(await path.evaluate(element => element.scrollWidth > element.clientWidth), 'desktop path must visibly truncate with an end ellipsis').toBe(true)
       }
       await expect(row.locator('.confirmation')).toHaveText('Touch ID confirmation: pairing readiness unknown — run aeon-agentd status on this computer.')
