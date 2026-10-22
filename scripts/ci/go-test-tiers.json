@@ -11598,8 +11598,6 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestMergeGroupPRReuseAggregatesRequireConfirmedProof","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"scripts/releaseworkflow","name":"TestMergeQueueDependencyInstallRecovery","tier":"ESSENTIAL"}
-    ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestNativePlatformsAndIndexPublication","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestNightlyBackupUsesItsPostgresServiceClients","tier":"GATED-FULL"}

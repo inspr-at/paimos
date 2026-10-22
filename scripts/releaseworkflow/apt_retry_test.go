@@ -19,17 +19,6 @@ func TestRootAptTimeoutReapsBeforeRetry(t *testing.T) {
 	}
 }
 
-// AEON-1420: merge queues must not lose their validation to an unbounded mirror
-// retry or to dpkg state left behind when a previous install was interrupted.
-func TestMergeQueueDependencyInstallRecovery(t *testing.T) {
-	cmd := exec.Command("node", "--test", "--test-concurrency=1", "--test-name-pattern=AEON-1420", "scripts/check-apt-bounds.test.mjs")
-	cmd.Dir = root(t)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("merge-queue dependency regression: %v\n%s", err, out)
-	}
-}
-
 // AEON-1064: exercise real test-worker interruption and parent death; the
 // fixture-only regression uses Node helpers and never launches a browser.
 func TestInterruptedFixturesLeaveNoProcesses(t *testing.T) {

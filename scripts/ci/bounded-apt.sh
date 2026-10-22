@@ -12,38 +12,15 @@ usage() {
   exit 2
 }
 
-timeout_seconds() {
-  local seconds=$1 remaining
-  # Reserve the kill grace inside the workflow's deadline, across all retries.
-  remaining=$((deadline - $(date +%s) - 20))
-  if [[ $remaining -le 0 ]]; then
-    echo 'dependency installation exhausted its total time budget' >&2
-    return 124
-  fi
-  [[ $seconds -le $remaining ]] || seconds=$remaining
-  printf '%s\n' "$seconds"
-}
-
 run_root_timeout() {
-  local seconds
-  seconds=$(timeout_seconds "$1") || return $?
+  local seconds=$1
   shift
-  # Playwright invokes apt itself. Explicitly pass the same acquisition limits
-  # through sudo, without changing the runner's global apt configuration.
-  sudo -- env "PATH=$PATH" "APT_CONFIG=$apt_config" DEBIAN_FRONTEND=noninteractive \
-    timeout --kill-after=20s "$seconds" "$@"
-}
-
-run_user_timeout() {
-  local seconds
-  seconds=$(timeout_seconds "$1") || return $?
-  shift
-  timeout --kill-after=20s "$seconds" "$@"
+  sudo -- env "PATH=$PATH" timeout --kill-after=20s "$seconds" "$@"
 }
 
 attempt_apt() {
-  run_root_timeout 150 apt-get update -qq \
-    && run_root_timeout 150 apt-get install -y -qq "$@"
+  run_root_timeout 150 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq \
+    && run_root_timeout 150 apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq "$@"
 }
 
 attempt_playwright() {
@@ -70,7 +47,7 @@ attempt_playwright() {
   [[ $only_shell -eq 1 ]] && install+=(--only-shell)
   install+=("${targets[@]}")
   # Same user as the runner: timeout can reap this download, and the cache stays theirs.
-  run_user_timeout 240 npx playwright "${install[@]}" \
+  timeout --kill-after=20s 240 npx playwright "${install[@]}" \
     && run_root_timeout 240 npx playwright install-deps "${targets[@]}"
 }
 
@@ -86,38 +63,16 @@ case "$mode" in
       command -v "$tool" >/dev/null 2>&1 || missing=1
     done
     [[ $missing -eq 0 ]] && exit 0
-    # Leave 30 seconds for workflow overhead before its four-minute timeout.
-    budget=210
+    for _ in 1 2 3; do
+      if attempt_apt "$@"; then ok=1; break; fi
+    done
     ;;
   playwright)
     [[ $# -gt 0 ]] || usage
-    budget=720
+    for _ in 1 2 3; do
+      if attempt_playwright "$@"; then ok=1; break; fi
+    done
     ;;
   *) usage ;;
 esac
-
-deadline=$(($(date +%s) + budget))
-apt_config=$(mktemp)
-trap 'unlink "$apt_config"' EXIT
-# APT_CONFIG is read before the runner's fragments. Re-read our limits as the
-# main config afterwards, retaining any original main config via its include.
-if [[ -f /etc/apt/apt.conf ]]; then
-  printf '#include "/etc/apt/apt.conf";\n' >> "$apt_config"
-fi
-printf 'Dir::Etc::main "%s";\n' "$apt_config" >> "$apt_config"
-cat >> "$apt_config" <<'APT'
-Acquire::Retries "1";
-Acquire::http::Timeout "10";
-Acquire::https::Timeout "10";
-DPkg::Lock::Timeout "10";
-APT::Update::Error-Mode "any";
-APT
-
-for attempt in 1 2 3; do
-  if "attempt_$mode" "$@"; then ok=1; break; fi
-  [[ $attempt -lt 3 ]] || break
-  # A killed install can leave dpkg half configured. Retrying apt alone then
-  # fails permanently with exit 100, even after the mirror has recovered.
-  run_root_timeout 60 dpkg --configure -a || break
-done
 test "$ok" = 1
