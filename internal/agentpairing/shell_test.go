@@ -79,7 +79,12 @@ func runPathProof(t *testing.T, shell, line string) []byte {
 		t.Fatal(err)
 	}
 	argv := filepath.Join(root, "argv")
-	cmd := exec.Command(shell, "-c", line)
+	shellArgs := []string{"-c", line}
+	if filepath.Base(shell) == "fish" {
+		// Keep fish startup config from replacing the fixture's PATH on NixOS.
+		shellArgs = append([]string{"--no-config"}, shellArgs...)
+	}
+	cmd := exec.Command(shell, shellArgs...)
 	cmd.Env = []string{
 		"PATH=" + pathBin + ":/usr/bin:/bin",
 		"HOME=" + home,
