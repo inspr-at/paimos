@@ -36,11 +36,16 @@ func heartbeatEstimateWarnings(ctx context.Context, tx pgx.Tx, s Session, progre
 		return nil, err
 	}
 	missing := working && s.Role == "worker" && (!reported || string(progress) == "null")
-	var beats int
-	if err := tx.QueryRow(ctx, `UPDATE harness_sessions SET missing_progress_beats=
-		CASE WHEN $2 THEN least(missing_progress_beats+1,3) ELSE 0 END
-		WHERE id=$1 RETURNING missing_progress_beats`, s.ID, missing).Scan(&beats); err != nil {
-		return nil, err
+	beats := 0
+	if missing {
+		beats = min(s.missingProgressBeats+1, 3)
+	}
+	// The generation is already locked by worker(). Reuse the counter from
+	// that row instead of writing zero or the saturated grace period again.
+	if beats != s.missingProgressBeats {
+		if _, err := tx.Exec(ctx, `UPDATE harness_sessions SET missing_progress_beats=$2 WHERE id=$1`, s.ID, beats); err != nil {
+			return nil, err
+		}
 	}
 	warnings := make([]EstimateWarning, 0, 3)
 	if missing && beats >= 3 {
