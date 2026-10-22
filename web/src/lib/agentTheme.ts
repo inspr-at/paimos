@@ -1,22 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { ref } from 'vue'
-import type { ThemeAccent } from './themes.ts'
-import type { AgentIndicatorStyle, IndicatorRing } from './indicatorVariants.ts'
-import type { AgentColourState, AgentPalette } from './agentPalettes.ts'
+import { agentTheme, agentThemeBound } from './agentThemeState.ts'
 import { resetTheme } from './themeRuntime.ts'
 
-export interface AgentThemeAppearance {
-  avatar: AgentIndicatorStyle; ring: IndicatorRing | null; hover: boolean; size: number | null; palette: AgentPalette
-  custom_states?: Record<AgentColourState, ThemeAccent> | null
-  dim_inactive?: boolean; inactive_opacity?: number
-}
-export const defaultAgentTheme: Readonly<AgentThemeAppearance> = {
-  avatar: 'robot-1', ring: null, hover: false, size: null, palette: 'standard', custom_states: null,
-}
-export const agentTheme = ref<AgentThemeAppearance | null>(null)
-// Legacy preference consumers remain compatible in isolated previews. Once a
-// session is bound, a missing/failed theme never resurrects another person's cache.
-export const agentThemeBound = ref(false)
+export { agentTheme, agentThemeBound, defaultAgentTheme, installAgentTheme } from './agentThemeState.ts'
+export type { AgentThemeAppearance } from './agentThemeState.ts'
 let person = '', epoch = 0
 let restoreEditor: ((identity: string) => Promise<void>) | null = null
 /** The editor registers its shared restoration path without a session import cycle. */
@@ -26,9 +13,6 @@ export function registerAgentThemeRestoration(restore: (identity: string) => Pro
 export function resetAgentTheme(identity = '') {
   epoch++; person = identity; agentTheme.value = null; agentThemeBound.value = true
   resetTheme(identity)
-}
-export function installAgentTheme(value: AgentThemeAppearance) {
-  agentTheme.value = { ...value }
 }
 export async function restoreAgentTheme(identity: string) {
   if (person !== identity) resetAgentTheme(identity)

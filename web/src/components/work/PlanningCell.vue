@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, useId } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useProjects } from '../../stores/projects'
 import { openModelPrefs } from '../../lib/modelPrefsCommand'
 import { listCostCell, modelCell, tokensCell, type PlanningColumn, type PlanningRow } from '../../lib/planning'
@@ -14,7 +14,7 @@ import MeasuredMark from './MeasuredMark.vue'
 // Measured values stand alone; running values retain a quiet estimate.
 const { modelDisplay } = useModelDisplay()
 const autoId = useId()
-const route = useRoute(), projects = useProjects()
+const route = useRoute(), router = useRouter(), projects = useProjects()
 const props = defineProps<{ column: PlanningColumn; row: PlanningRow; rowId?: string }>()
 const descriptionId = computed(() => props.rowId ? `plan-${props.rowId}-${props.column}` : autoId)
 const model = computed(() => props.column === 'model' ? modelCell(props.row, modelDisplay.value) : null)
@@ -24,7 +24,7 @@ function why() {
   const key = String(route.params.projectKey ?? route.params.key ?? '')
   const row = props.row as PlanningRow & { project?: { id: string; title: string } | null; key?: string }
   const project = row.project ?? projects.byRouteKey(key)
-  openModelPrefs({ project: project ? { id: project.id, title: project.title } : undefined, kind: typeof props.row.fields.area === 'string' ? props.row.fields.area : 'other', why: true, ticket: row.key || props.rowId, preview: model.value?.label })
+  openModelPrefs(href => router.push(href), { project: project ? { id: project.id, title: project.title } : undefined, kind: typeof props.row.fields.area === 'string' ? props.row.fields.area : 'other', why: true, ticket: row.key || props.rowId, preview: model.value?.label })
 }
 const EMPTY_LABEL = { model: 'No model', tokens: 'No tokens', list_cost: 'No cost', paid: 'No cost' }
 </script>
