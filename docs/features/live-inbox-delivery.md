@@ -4,7 +4,7 @@ AEON-1340 connects exact-session durable inbox messages to the session that
 agentd already owns. Desk answers take priority over ordinary inbox work.
 Committed, content-free harness notification hints trigger reconciliation;
 the existing bounded polling path recovers missed hints. A hint grants no
-process authority. It never starts, resumes or adopts an idle/offline writer.
+process authority. Messages create no start, resume, adoption or idle-wake request.
 The inbox retains the original message and remains the durable record.
 
 Managed harness drains expose additive `priority` metadata for direct inbox,
@@ -54,3 +54,33 @@ the AEON-1339 design. This change adds no web UI, migration, permission,
 production enablement flag or deployment. New files are covered by the existing
 agent runtime, inbox and questions audit slices. Coverage extends existing
 registered behavior tests; tier manifests and web specs are unchanged.
+
+Remote verification used the approved entry points, without vendor/model calls:
+the full inbox, questions, native store and P3a receipt packages passed with
+`-race -count=1` on `8d6be5d8af` (mbp2606). The final trusted-Desk ordering
+checks passed on `fd76159032` (native composition and harness drain, agm2).
+The busy-owner case, including control-shaped self-sent content and a lost
+completion acknowledgement, passed on `481fdc3bf6`. Native composition also
+proved uncertain-write holds and late acknowledgement followed by separate
+correlated seen evidence. Existing successor tests assert the additive memo
+projection as well as exact-generation routing.
+
+The priority negative control used an unreferenced stash snapshot
+`c0e536b062`, outside the delivery branch's history. Removing only the busy
+priority condition made the registered behavior test fail with
+`busy priority input reached the owned process 0 times; want 1`. The delivery
+branch was restored before further work; no negative-control commit remains
+on it. The broader affected race run also passed the other native-session,
+integration, harness and API-contract packages, including reportercontract.
+
+Full validation remains open. The full agentd race run reproduced the exact
+fixture failures assigned to AEON-1685: the three pause heartbeat/wake tests,
+`TestUncertainDeliveryDoesNotMaskHeartbeatFailure`,
+`TestInboxUnconfirmedDoesNotReinject`, and
+`TestSupervisorQueueHintsUnavailableBackoff/401`. Those fixtures are unchanged
+here apart from the minimal priority-case extension in harness notifications.
+AEON-1685 was still open when the latest main was merged. The static wrapper
+returned exit 3 twice with `remote static check paused at night (night protocol:
+mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job`.
+Handoff therefore stays at 95 percent, pending that shared race fix and hosted
+static checks. No origin push, deployment or model review gate was run.
