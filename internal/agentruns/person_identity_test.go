@@ -27,14 +27,19 @@ func TestRoutineUnresolvedRunPersonManualAndSchedulerAudits(t *testing.T) {
 	f := setup(t)
 	m := recurrences.New(f.d.App)
 	m.Mount(f.mux)
-	var project string
+	var project, startDate string
 	f.tx(t, f.person, func(tx pgx.Tx) error {
+		// Keep the schedule and its due cursor on the same database clock,
+		// including runs before today's 09:00 UTC occurrence.
+		if err := tx.QueryRow(t.Context(), `SELECT (clock_timestamp() AT TIME ZONE 'UTC' - interval '2 days')::date::text`).Scan(&startDate); err != nil {
+			return err
+		}
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'UNRESOLVED-1','Routine output' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.person.TenantID).Scan(&project)
 	})
 	// A pre-definition routine has creator provenance but no authoritative owner.
 	in := recurrences.Input{ProjectID: project, ParentID: project, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one",
 		Template: recurrences.Template{Title: "Queued legacy work", Description: "Verify ownership", Type: "work", Priority: "high", EstimateHours: 1, Criteria: []string{"No invented actor"}},
-		Trigger:  recurrences.Trigger{Kind: "time", RRULE: "FREQ=DAILY", TimeOfDay: "09:00", Timezone: "UTC"}}
+		Trigger:  recurrences.Trigger{Kind: "time", RRULE: "FREQ=DAILY", TimeOfDay: "09:00", Timezone: "UTC", StartDate: startDate}}
 	var routine recurrences.Recurrence
 	f.call(t, f.person, "POST", "/api/recurrences", in, 201, &routine)
 	var failure map[string]any
@@ -43,7 +48,7 @@ func TestRoutineUnresolvedRunPersonManualAndSchedulerAudits(t *testing.T) {
 		t.Fatalf("manual refused for wrong reason: %v", failure)
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE recurrences SET next_at=clock_timestamp()-interval '2 days' WHERE id=$1`, routine.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE recurrences SET next_at=($2::date + time '09:00') AT TIME ZONE 'UTC' WHERE id=$1`, routine.ID, startDate)
 		return err
 	})
 	err := m.RunTenant(t.Context(), f.person.TenantID)
