@@ -72,7 +72,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/nodes/{nodeId}/attachments", m.list)
 	mux.HandleFunc("GET /api/attachments/{id}", m.get)
 	mux.HandleFunc("PATCH /api/attachments/{id}", m.patch)
-	mux.HandleFunc("DELETE /api/attachments/{id}", m.remove)
+	mux.HandleFunc("DELETE /api/attachments/{id}", events.WithMutationReceipt(m.remove))
 	mux.HandleFunc("GET /api/attachments/{id}/content", m.content)
 	mux.HandleFunc("POST /api/attachments/{id}/preview", m.preview)
 }
@@ -507,7 +507,10 @@ func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		_, err = events.Append(r.Context(), tx, p, events.Change{NodeID: &before.NodeID, Type: "attachment.removed", Before: before, After: after})
+		event, err := events.Append(r.Context(), tx, p, events.Change{NodeID: &before.NodeID, Type: "attachment.removed", Before: before, After: after})
+		if err == nil {
+			events.RecordMutation(r.Context(), event.ID)
+		}
 		return err
 	})
 	if err != nil {

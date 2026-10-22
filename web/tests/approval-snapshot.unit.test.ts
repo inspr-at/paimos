@@ -3,9 +3,10 @@ import { expect, it, vi } from 'vitest'
 import type { TimeEntry, TimePeriod } from '../src/lib/business'
 import * as API from '../src/lib/api'
 import * as Avatar from '../src/lib/avatar'
+import * as Receipts from '../src/lib/crm'
 import * as Money from '../src/components/business/money'
 import { sourceModule } from './record-source'
-const { getPeriodSnapshot } = sourceModule<typeof import('../src/lib/business')>('lib/business.ts', { './api': API, './avatar': Avatar, '../components/business/money': Money })
+const { getPeriodSnapshot } = sourceModule<typeof import('../src/lib/business')>('lib/business.ts', { './api': API, './avatar': Avatar, './crm': Receipts, '../components/business/money': Money })
 
 it('S8-005: a mutation between rows and digest retries the entire snapshot', async () => {
   const period = { id: 'p', revision: 1 } as TimePeriod
