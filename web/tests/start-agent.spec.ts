@@ -31,6 +31,7 @@ test('Run once is available without developer settings and recovers an exact rea
   const readOnlyWarning = form.locator('.settings-status')
   await expect(readOnlyWarning.locator('strong')).toHaveText('Read-only unavailable')
   await expect(readOnlyWarning.locator('span')).toHaveText('· Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.')
+  await expect(readOnlyWarning.locator('span')).toBeVisible()
   await form.getByLabel('Host', { exact: true }).selectOption('laptop')
   const text = '  Inspect exactly this context.\nReturn the observations.'
   await form.getByLabel('Instruction (optional)', { exact: true }).fill(text)
