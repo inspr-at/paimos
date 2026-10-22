@@ -60,6 +60,7 @@ type metricRun struct {
 	JobsComplete bool
 	Required     map[string]string
 	WorstWaitMS  *int
+	JobWaits     map[string]*int
 }
 
 type metricPull struct {

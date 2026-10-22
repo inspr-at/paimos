@@ -171,6 +171,7 @@ const (
 )
 
 type githubJob struct {
+	ID         int64      `json:"id"`
 	Name       string     `json:"name"`
 	Conclusion *string    `json:"conclusion"`
 	Created    time.Time  `json:"created_at"`
@@ -186,6 +187,7 @@ type jobFacts struct {
 	Conclusions map[string]string
 	WorstWaitMS *int
 	Complete    bool
+	Waits       map[string]*int
 }
 
 // storedJobFacts is the required_jobs JSON written for a complete read.
@@ -193,6 +195,7 @@ type jobFacts struct {
 type storedJobFacts struct {
 	Complete    bool              `json:"complete"`
 	Conclusions map[string]string `json:"conclusions"`
+	Waits       map[string]*int   `json:"waits,omitempty"`
 }
 
 func conclusionRank(conclusion string) int {
@@ -225,7 +228,7 @@ func encodeStoredJobs(facts jobFacts) ([]byte, error) {
 	if conclusions == nil {
 		conclusions = map[string]string{}
 	}
-	return json.Marshal(storedJobFacts{Complete: true, Conclusions: conclusions})
+	return json.Marshal(storedJobFacts{Complete: true, Conclusions: conclusions, Waits: facts.Waits})
 }
 
 func decodeJobFacts(raw []byte) (map[string]string, bool, error) {
@@ -274,15 +277,18 @@ func readJobFacts(get func(string, any) error, runID int64, attempt int) (jobFac
 			return jobFacts{}, errRead
 		}
 		jobs = append(jobs, response.Jobs...)
-		if len(jobs) >= response.Total {
+		if len(jobs) > response.Total {
+			return jobFacts{}, errRead
+		}
+		if len(jobs) == response.Total {
 			break
 		}
 		if page >= jobPageLimit || len(response.Jobs) == 0 {
 			return jobFacts{}, errRead
 		}
 	}
-	facts := jobFacts{Conclusions: map[string]string{}, Complete: true}
-	for _, job := range jobs {
+	facts := jobFacts{Conclusions: map[string]string{}, Complete: true, Waits: map[string]*int{}}
+	for i, job := range jobs {
 		if job.Name == "" || len(job.Name) > jobNameLimit {
 			return jobFacts{}, errRead
 		}
@@ -297,15 +303,36 @@ func readJobFacts(get func(string, any) error, runID int64, attempt int) (jobFac
 			conclusion = worseConclusion(old, conclusion)
 		}
 		facts.Conclusions[job.Name] = conclusion
-		if job.Started == nil || job.Started.IsZero() || job.Created.IsZero() || conclusion == "skipped" {
+		if conclusion == "skipped" {
+			continue
+		}
+		key := strconv.FormatInt(job.ID, 10)
+		if job.ID <= 0 {
+			key = "unidentified:" + strconv.Itoa(i)
+		}
+		facts.Waits[key] = nil
+		if job.Started == nil || job.Started.IsZero() || job.Created.IsZero() || job.Started.Before(job.Created) || job.Started.Sub(job.Created) > 24*24*time.Hour {
 			continue
 		}
 		wait := int(max(0, job.Started.Sub(job.Created).Milliseconds()))
-		if facts.WorstWaitMS == nil || wait > *facts.WorstWaitMS {
-			facts.WorstWaitMS = &wait
+		facts.Waits[key] = &wait
+	}
+	facts.WorstWaitMS = worstJobWait(facts.Waits)
+	return facts, nil
+}
+
+func worstJobWait(waits map[string]*int) *int {
+	var worst *int
+	for _, wait := range waits {
+		if wait == nil {
+			return nil
+		}
+		if worst == nil || *wait > *worst {
+			value := *wait
+			worst = &value
 		}
 	}
-	return facts, nil
+	return worst
 }
 
 // attachJobFacts reads the jobs of each eligible attempt-1 run into the run. A
@@ -323,6 +350,7 @@ func attachJobFacts(get func(string, any) error, runs []metricRun, eligible func
 			continue
 		}
 		run.JobsRead, run.JobsComplete, run.Required, run.WorstWaitMS = true, facts.Complete, facts.Conclusions, facts.WorstWaitMS
+		run.JobWaits = facts.Waits
 	}
 }
 

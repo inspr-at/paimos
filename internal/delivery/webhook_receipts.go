@@ -180,6 +180,10 @@ func webhookSubject(name string, e envelope) error {
 		if !reviewgate.ValidSHA(e.CheckSuite.Head) || len(e.CheckSuite.Pulls) > 100 {
 			return webhookClass("invalid_check_subjects")
 		}
+	case "workflow_job":
+		if e.Job.ID <= 0 || e.Job.Run <= 0 || e.Job.Attempt < 1 || e.Job.Attempt > 1000 || !reviewgate.ValidSHA(e.Job.Head) {
+			return webhookClass("invalid_job")
+		}
 	case "status":
 		if !reviewgate.ValidSHA(e.SHA) {
 			return webhookClass("invalid_check_subjects")
