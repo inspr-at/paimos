@@ -177,6 +177,13 @@ func TestChatOutboxTimingIsDurableNegotiatedAndSessionBound(t *testing.T) {
 	}
 	other, otherLease := f.sessionWith(t, f.agent.ID, f.alice, f.project, "worker", "managed", "chat", "inbox", "steer", "chat_timing_v1")
 	f.bind(t, f.alice, thread, other, "1")
+	rebound := steer
+	rebound.Session = other
+	conflict := f.call(f.alice, "POST", path, rebound, "")
+	expect(t, conflict, 409)
+	if !strings.Contains(conflict.Body.String(), "chat client message ID conflicts") {
+		t.Fatal("target replay rejected for the wrong reason", conflict.Body.String())
+	}
 	steer.ClientID = "late-input"
 	expect(t, f.call(f.alice, "POST", path, steer, ""), 409)
 	expect(t, f.call(f.bob, "POST", path, steer, ""), 404)

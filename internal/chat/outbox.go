@@ -149,6 +149,15 @@ func storeFinal(ctx context.Context, tx pgx.Tx, p tenant.Principal, thread, proj
 		if existing.Body != in.Body || existing.Level != inputLevel(in.Level) || (existing.ReplyTo == nil) != (in.ReplyTo == nil) || existing.ReplyTo != nil && *existing.ReplyTo != *in.ReplyTo {
 			return o, workorders.Fail(409, "chat client message ID conflicts")
 		}
+		if in.Session != "" {
+			var sameSession bool
+			if err = tx.QueryRow(ctx, `SELECT coalesce(recipient_session_id=$2::uuid,false) FROM inbox_messages WHERE id=$1`, existing.ID, in.Session).Scan(&sameSession); err != nil {
+				return o, err
+			}
+			if !sameSession {
+				return o, workorders.Fail(409, "chat client message ID conflicts")
+			}
+		}
 		o.Message = existing
 		o.Receipt, err = receiptTx(ctx, tx, thread, existing)
 		return o, err
