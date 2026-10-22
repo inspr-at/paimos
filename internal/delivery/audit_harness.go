@@ -16,10 +16,16 @@ import (
 // It is observe-only; current admission continues to use AuthenticatedOKTx.
 func auditHarnessCandidate(ctx context.Context, tx pgx.Tx, o Observation) (auditReviewBinding, error) {
 	var b auditReviewBinding
-	err := tx.QueryRow(ctx, `SELECT id::text,base_sha,head_sha FROM review_runs
- WHERE ticket_node_id=$1 AND project_id=$2 AND repository=$3 AND pull_request=$4
- AND kind='review' AND created_at<=$5
- ORDER BY created_at DESC,id DESC LIMIT 1`, o.Ticket, o.Project, o.Repository, o.PR, o.At).Scan(&b.Run, &b.Base, &b.Head)
+	// Admission consumes submission events in event order. A newly created
+	// pending run must not hide a verdict, and an older run can submit last.
+	err := tx.QueryRow(ctx, `SELECT r.id::text,r.base_sha,r.head_sha
+ FROM events e JOIN review_runs r ON r.tenant_id=e.tenant_id
+ AND r.id::text=e.after->>'run_id' AND r.ticket_node_id=e.node_id
+ AND r.reviewer_principal_id=e.actor_principal_id
+ WHERE e.node_id=$1 AND e.type='coordinator_review.recorded'
+ AND r.project_id=$2 AND r.repository=$3 AND r.pull_request=$4
+ AND r.kind='review' AND r.submitted_at IS NOT NULL AND r.submitted_at<=$5
+ ORDER BY e.id DESC LIMIT 1`, o.Ticket, o.Project, o.Repository, o.PR, o.At).Scan(&b.Run, &b.Base, &b.Head)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return auditReviewBinding{}, nil
 	}

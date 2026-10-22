@@ -90,6 +90,10 @@ well as existing work-order reviews. It verifies the immutable range, PR,
 repository, project, independent model families, reviewer event and submitted
 capability before the merge. A changed head still requires the existing clean
 Git proof; a reported review metric cannot satisfy provenance or admission.
+Historical selection follows the latest authenticated submission event, as
+admission does, and excludes verdicts submitted after the merge. A newer pending
+run cannot hide an approval; an earlier-created run submitting `changes` last
+supersedes that approval.
 Current admission continues to enforce its existing live binding checks.
 
 When queue provenance is missing, a fixed, read-only GitHub GraphQL query reads

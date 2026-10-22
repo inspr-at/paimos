@@ -6616,6 +6616,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeAuditHarnessAndQueueProvenanceRepair","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeAuditHarnessUsesLatestSubmittedReview","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeAuditLateQueueProvenanceRetriesUnreadChecks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestMergeAuditObservationChecksOnPullHead","tier":"ESSENTIAL"}

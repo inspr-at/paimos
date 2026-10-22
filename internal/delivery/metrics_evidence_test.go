@@ -20,6 +20,12 @@ import (
 // Exercise the authenticated store, rather than inventing a coordinator OK.
 func submitEvidenceReview(t *testing.T, f *fixture, p Pull, verdict string, start, end time.Time) reviewgate.Run {
 	t.Helper()
+	_, submit := createEvidenceReview(t, f, p, start)
+	return submit(verdict, end)
+}
+
+func createEvidenceReview(t *testing.T, f *fixture, p Pull, start time.Time) (reviewgate.Run, func(string, time.Time) reviewgate.Run) {
+	t.Helper()
 	ctx := t.Context()
 	reviewer := tenant.Principal{TenantID: f.person.TenantID, Kind: tenant.Agent, Scopes: []string{"nodes.read"}, KeyCreatorID: f.person.ID}
 	var authorSession, reviewerSession string
@@ -27,7 +33,7 @@ func submitEvidenceReview(t *testing.T, f *fixture, p Pull, verdict string, star
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Evidence reviewer') RETURNING id::text`, reviewer.TenantID).Scan(&reviewer.ID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'fixture','fixture',decode(repeat('00',32),'hex'),$3,$4) RETURNING id::text`, reviewer.TenantID, reviewer.ID, reviewer.Scopes, f.person.ID).Scan(&reviewer.KeyID); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'fixture',$2::text,decode(repeat('00',32),'hex'),$3,$4) RETURNING id::text`, reviewer.TenantID, reviewer.ID, reviewer.Scopes, f.person.ID).Scan(&reviewer.KeyID); err != nil {
 			return err
 		}
 		reviewer.AuthKeyID = reviewer.KeyID
@@ -44,6 +50,7 @@ func submitEvidenceReview(t *testing.T, f *fixture, p Pull, verdict string, star
 	})
 	dbtest.BindRole(t, f.d, reviewer.TenantID, reviewer.ID, "viewer")
 	var run reviewgate.Run
+	var credential string
 	f.tx(t, func(tx pgx.Tx) error {
 		var err error
 		run, err = reviewgate.CreateRunTx(ctx, tx, f.person, f.ticket, reviewgate.RunCreate{Repository: f.m.config.Repository, PR: p.Number, Target: p.Target,
@@ -51,20 +58,24 @@ func submitEvidenceReview(t *testing.T, f *fixture, p Pull, verdict string, star
 		if err != nil {
 			return err
 		}
-		credential, _, err := reviewgate.ClaimRunTx(ctx, tx, reviewer, run.ID, start)
-		if err != nil {
-			return err
-		}
-		run, err = reviewgate.SubmitRunTx(ctx, tx, reviewer, run.ID, credential,
-			reviewgate.RunSubmit{Binding: run.RunBinding, Verdict: verdict, VisualImpact: "no", Reason: "Fixture exact range"}, end)
-		if err != nil {
-			return err
-		}
-		_, err = events.Append(ctx, tx, reviewer, events.Change{NodeID: &f.ticket, Type: "coordinator_review.recorded", At: &end,
-			After: map[string]any{"run_id": run.ID, "ok": verdict == "ok"}})
+		credential, _, err = reviewgate.ClaimRunTx(ctx, tx, reviewer, run.ID, start)
 		return err
 	})
-	return run
+	return run, func(verdict string, end time.Time) reviewgate.Run {
+		t.Helper()
+		f.tx(t, func(tx pgx.Tx) error {
+			var err error
+			run, err = reviewgate.SubmitRunTx(ctx, tx, reviewer, run.ID, credential,
+				reviewgate.RunSubmit{Binding: run.RunBinding, Verdict: verdict, VisualImpact: "no", Reason: "Fixture exact range"}, end)
+			if err != nil {
+				return err
+			}
+			_, err = events.Append(ctx, tx, reviewer, events.Change{NodeID: &f.ticket, Type: "coordinator_review.recorded", At: &end,
+				After: map[string]any{"run_id": run.ID, "ok": verdict == "ok"}})
+			return err
+		})
+		return run
+	}
 }
 
 func evidenceCount(t *testing.T, f *fixture) int {
@@ -222,6 +233,65 @@ func TestDeliveryMergeCompletionEmitsExplicitResolution(t *testing.T) {
 		if evidenceCount(t, f) != i+1 {
 			t.Fatal("progress replay duplicated measurement")
 		}
+	}
+}
+
+func TestMergeAuditHarnessUsesLatestSubmittedReview(t *testing.T) {
+	// Risk: creation order hides a submitted approval or a later rejection,
+	// while a verdict submitted after the merge rewrites historical provenance.
+	for _, tc := range []struct {
+		name   string
+		wantOK bool
+	}{
+		{name: "newer_unsubmitted_run", wantOK: true},
+		{name: "earlier_run_submits_changes_last", wantOK: false},
+		{name: "submission_after_merge", wantOK: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, _ := newMetricsFixture(t)
+			f.tx(t, func(tx pgx.Tx) error { return tx.QueryRow(t.Context(), `SELECT now()`).Scan(&f.at) })
+			p := f.pull()
+			p.Target = "main"
+			f.gh.pulls[p.Number] = p
+			if err := f.m.Reconcile(t.Context(), f.person.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			_, submit := createEvidenceReview(t, f, p, f.at.Add(-20*time.Minute))
+			switch tc.name {
+			case "newer_unsubmitted_run":
+				submit("ok", f.at.Add(-12*time.Minute))
+				createEvidenceReview(t, f, p, f.at.Add(-10*time.Minute))
+			case "earlier_run_submits_changes_last":
+				submitEvidenceReview(t, f, p, "ok", f.at.Add(-15*time.Minute), f.at.Add(-10*time.Minute))
+				submit("changes", f.at.Add(-5*time.Minute))
+			case "submission_after_merge":
+				submit("ok", f.at.Add(-12*time.Minute))
+				submitEvidenceReview(t, f, p, "changes", f.at.Add(-10*time.Minute), f.at)
+			}
+			if tc.name != "submission_after_merge" {
+				f.tx(t, func(tx pgx.Tx) error {
+					ok, err := reviewgate.AuthenticatedOKTx(t.Context(), tx, f.ticket, "review")
+					if err == nil && ok != tc.wantOK {
+						t.Fatalf("admission review_ok=%t, want %t", ok, tc.wantOK)
+					}
+					return err
+				})
+			}
+			fact := MergeFact{SHA: strings.Repeat("c", 40), Head: p.Head, Base: p.Base, PR: &p.Number,
+				At: f.at.Add(-time.Minute), Title: p.Title, Branch: p.Branch, MergedBy: "github-merge-queue[bot]"}
+			g := &auditFake{fakeGitHub: f.gh, checks: map[string][]Check{fact.SHA: auditGreen()}}
+			f.m.github = g
+			if err := f.m.auditMerge(t.Context(), f.person.TenantID, fact, g); err != nil {
+				t.Fatal(err)
+			}
+			a := auditRead(t, f, fact.SHA)
+			if a.ReviewOK != tc.wantOK || !a.ViaQueue || !a.ChecksPassed || a.Ticket == nil || *a.Ticket != f.ticket {
+				t.Fatalf("historical review_ok=%t, want %t: %+v", a.ReviewOK, tc.wantOK, a)
+			}
+			if tc.wantOK && len(a.Flags) != 0 || !tc.wantOK && (len(a.Flags) != 1 || a.Flags[0] != "no_review") {
+				t.Fatalf("unexpected review provenance flags: %v", a.Flags)
+			}
+		})
 	}
 }
 
