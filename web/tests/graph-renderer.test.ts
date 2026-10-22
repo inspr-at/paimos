@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { graphLayout, glimpseCore, cloudStride, glimpseFramePaints, glimpseOrbDelta, glimpseOrbFinish, glimpsePointInside, glimpseRadius, glimpseShotRadius, GLIMPSE_SHOT_DELTA, holdsIndexColour, labelPosition, onCanvas, type GraphData } from '../src/lib/graphRenderer.ts'
+import { graphLayout, glimpseCore, cloudStride, glimpseFramePaints, glimpseStaleWideFrame, glimpseOrbDelta, glimpseOrbFinish, glimpsePointInside, glimpseRadius, glimpseShotRadius, GLIMPSE_SHOT_DELTA, holdsIndexColour, labelPosition, onCanvas, type GraphData } from '../src/lib/graphRenderer.ts'
 
 test('glimpse orbs stay 4–8px across every node weight', () => {
   for (const weight of [-1, 0, 1, 10, 1000, NaN, Infinity]) {
@@ -43,6 +43,21 @@ test('a glimpse frame paints only while its measured box is connected and non-em
   assert.equal(glimpseFramePaints(true, -1, 180), false)
   assert.equal(glimpseFramePaints(false, 1280, 180), false)
   assert.equal(glimpseFramePaints(false, 0, 0), false)
+})
+
+test('a stale wide glimpse box does not paint once the visual viewport has left 1280', () => {
+  // The host measurement lags 1280 → 390. That frame used to draw the wide
+  // software-GL scene and block the layout read (AEON-1471).
+  assert.equal(glimpseStaleWideFrame(1280, 390, 1), true)
+  assert.equal(glimpseStaleWideFrame(1600, 1278, 1), true)
+  assert.equal(glimpseStaleWideFrame(1280, 1279, 1), false)
+  assert.equal(glimpseStaleWideFrame(1280, 1280, 1), false)
+  assert.equal(glimpseStaleWideFrame(390, 390, 1), false)
+  assert.equal(glimpseStaleWideFrame(1279, 390, 1), false)
+  // Pinch-zoom reports a narrower visual width while the layout stays wide.
+  assert.equal(glimpseStaleWideFrame(1280, 390, 1.5), false)
+  assert.equal(glimpseStaleWideFrame(1280, null, 1), false)
+  assert.equal(glimpseStaleWideFrame(Number.NaN, 390, 1), false)
 })
 
 test('glimpse links reject off-view endpoints including partial orbs and invalid coordinates', () => {
