@@ -141,3 +141,10 @@ func TestRulesDeliveryStartRunAcknowledgesAfterHarnessStart(t *testing.T) {
 		t.Fatal("launch acknowledgement missing or wrong")
 	}
 }
+
+// The shared synthetic adapter acknowledges exactly the rules passed to Start.
+func (p *fakeProcess) RulesDeliveryHash() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.rulesHash
+}
