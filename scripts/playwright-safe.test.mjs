@@ -468,16 +468,20 @@ test('stale recovery skips a reused detached PID and releases the stale lock', a
   } finally { lock?.release(); sentinel.kill('SIGTERM'); await sentinelExit }
 })
 
-function detachedProbe() {
+async function detachedProbe() {
   const child = fixtures.spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000); process.stdout.write("ready")'], { stdio: ['ignore', 'pipe', 'ignore'] })
   const completion = new Promise(resolve => child.once('exit', resolve))
   const ready = Promise.race([new Promise(resolve => child.stdout.once('data', data => resolve(data.toString()))), completion.then(() => 'exited')])
-  return { child, completion, ready }
+  // The fixture preload starts ps while establishing its own journal. Join
+  // startup before any test kills the root so Linux cannot orphan that helper
+  // as a zombie group member after the root's exit event has already arrived.
+  assert.equal(await ready, 'ready')
+  return { child, completion }
 }
 
 test('stale recovery reaps verified siblings and ignores reused group PIDs', async () => {
   const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-mixed-reused-')), 'suite.lock'), owner = expiredOwner()
-  const sibling = detachedProbe(), sentinel = detachedProbe(), log = `${path}.${owner.token}.groups`
+  const sibling = await detachedProbe(), sentinel = await detachedProbe(), log = `${path}.${owner.token}.groups`
   let lock
   try {
     writeFileSync(path, JSON.stringify(owner))
@@ -504,7 +508,7 @@ test('stale recovery reaps verified siblings and ignores reused group PIDs', asy
 test('stale recovery reaps verified siblings before retaining unverified or malformed rows', async () => {
   for (const mode of ['unverified', 'invalid', 'torn']) {
     const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-mixed-recovery-'))
-    const path = join(directory, 'suite.lock'), owner = expiredOwner(), sibling = detachedProbe()
+    const path = join(directory, 'suite.lock'), owner = expiredOwner(), sibling = await detachedProbe()
     let orphan
     const log = `${path}.${owner.token}.groups`
     try {
@@ -533,7 +537,7 @@ test('stale recovery reaps verified siblings before retaining unverified or malf
 
 test('partial stale-recovery signalling reaps siblings and leaves failed identities retryable', async t => {
   const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-recovery-signal-')), 'suite.lock'), owner = expiredOwner()
-  const first = detachedProbe(), second = detachedProbe(), kill = process.kill.bind(process)
+  const first = await detachedProbe(), second = await detachedProbe(), kill = process.kill.bind(process)
   const log = `${path}.${owner.token}.groups`
   writeFileSync(path, JSON.stringify(owner))
   writeFileSync(log, [first, second].map(probe => JSON.stringify({ pid: probe.child.pid, started: processStart(probe.child.pid) })).join('\n') + '\n')
@@ -562,7 +566,7 @@ test('partial stale-recovery signalling reaps siblings and leaves failed identit
 })
 
 test('a transient ps miss retries and records the verified detached child', async () => {
-  const probe = detachedProbe(), entries = []
+  const probe = await detachedProbe(), entries = []
   let calls = 0
   try {
     assert.equal(recordDetachedChild(probe.child, { detached: true }, entry => entries.push(entry), {
@@ -574,7 +578,7 @@ test('a transient ps miss retries and records the verified detached child', asyn
 })
 
 test('persistent ps misses kill the spawned detached child without journalling an invalid start', async () => {
-  const probe = detachedProbe(), entries = []
+  const probe = await detachedProbe(), entries = []
   let calls = 0
   try {
     assert.throws(() => recordDetachedChild(probe.child, { detached: true }, entry => entries.push(entry), {
@@ -588,14 +592,14 @@ test('persistent ps misses kill the spawned detached child without journalling a
 })
 
 test('an already-exited detached child creates no journal entry after a ps miss', async () => {
-  const probe = detachedProbe(), entries = []
+  const probe = await detachedProbe(), entries = []
   probe.child.kill('SIGKILL'); await probe.completion
   assert.equal(recordDetachedChild(probe.child, { detached: true }, entry => entries.push(entry), { start: () => '' }), probe.child)
   assert.deepEqual(entries, [])
 })
 
 test('journal write failure kills the newly spawned detached child', async () => {
-  const probe = detachedProbe()
+  const probe = await detachedProbe()
   try {
     assert.throws(() => recordDetachedChild(probe.child, { detached: true }, () => { throw new Error('journal unavailable') }), /journal unavailable/)
     await probe.completion
@@ -604,7 +608,7 @@ test('journal write failure kills the newly spawned detached child', async () =>
 })
 
 test('root identity retries a first-ps miss and records only its verified start', async () => {
-  const probe = detachedProbe(), entries = []
+  const probe = await detachedProbe(), entries = []
   let calls = 0
   try {
     assert.equal(await recordRootGroup(probe.child, entry => entries.push(entry), {
@@ -616,13 +620,9 @@ test('root identity retries a first-ps miss and records only its verified start'
 })
 
 test('unverifiable live roots terminate their group without an invalid journal entry', { timeout: 15000 }, async () => {
-  const probe = detachedProbe(), entries = []
+  const probe = await detachedProbe(), entries = []
   let calls = 0
   try {
-    // The fixture preload starts ps while establishing its own journal. Join
-    // startup before killing the root so Linux cannot orphan that helper as a
-    // zombie group member after the root's exit event has already arrived.
-    assert.equal(await probe.ready, 'ready')
     await assert.rejects(recordRootGroup(probe.child, entry => entries.push(entry), {
       start: () => { calls++; return '' }, attempts: 3,
     }), /spawned group terminated/)
@@ -901,7 +901,7 @@ test('live matching and malformed recovery guards stay held with their exact pat
 })
 
 test('a failed ps cannot turn a live recovery guard into stale ownership', async t => {
-  const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-guard-ps-')), 'suite.lock'), sentinel = detachedProbe()
+  const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-guard-ps-')), 'suite.lock'), sentinel = await detachedProbe()
   const owner = { pid: sentinel.child.pid, token: randomUUID(), started: processStart(sentinel.child.pid) }
   seedGuard(path, owner)
   const original = childProcess.spawnSync
