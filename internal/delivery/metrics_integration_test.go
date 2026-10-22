@@ -458,6 +458,7 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 	if step.State != "running" || step.Phase != "jobs" {
 		t.Fatalf("resumed step: %+v", step)
 	}
+	step = BackfillResult{} // decode the new response without a stale optional retry_at
 	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
 	// Both eligible first attempts fit in this step. Nothing is deferred, so
 	// the same call finishes. The call above rejects done before they are read.
@@ -480,6 +481,7 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 		if step.RetryAt != nil {
 			f.at = *step.RetryAt
 		}
+		step = BackfillResult{}
 		f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
 	}
 	if r, p, _ := metricCounts(t, f); r != runs || p != pulls {

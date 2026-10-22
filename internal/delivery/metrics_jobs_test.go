@@ -239,8 +239,9 @@ func TestDeliverySevenDayJobBackfillIsIdempotentAndBounded(t *testing.T) {
 		t.Fatal("backfill ignored the persisted retry deadline")
 	}
 	f.at, limited = *source.RetryAt, false
+	step = BackfillResult{}
 	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
-	if step.State != "done" || step.Jobs != 1 || step.Calls > jobFillBudget {
+	if step.State != "done" || step.Jobs != 1 || step.Calls > jobFillBudget || step.RetryAt != nil {
 		t.Fatalf("jobs did not finish the window: %+v", step)
 	}
 	calls = len(g.calls)
