@@ -515,7 +515,6 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 	want := cloneStep(t, before)
 	want["steps"] = wantSteps
 	setup = cloneStep(t, setup)
-	normalizeAEON1642Toolchains(t, setup)
 	normalizeWebReproducibility(t, setup)
 	normalizeWebCatalogueOverlap(t, jobs, setup)
 	if condition, _ := setup["if"].(string); !strings.Contains(condition, " && needs.tree-reuse.outputs.reuse != 'pull_request'") {
@@ -525,6 +524,7 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 	}
 	normalizeEffectiveLane(t, "web-setup", setup)
 	normalizeAEON1018Classification(t, "web-setup", setup)
+	normalizeAEON1642Toolchains(t, setup)
 	if !reflect.DeepEqual(setup, want) {
 		t.Fatal("Parallel setup changed beyond moving units and their prerequisites/proofs")
 	}

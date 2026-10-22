@@ -97,7 +97,16 @@ func TestReleaseToolchainsRequireExactSecurityPatches(t *testing.T) {
 	}
 	assertions := 0
 	for _, file := range files {
-		w := readWorkflow(t, filepath.Base(file))
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var w struct {
+			Jobs map[string]struct{ Steps []step }
+		}
+		if err := yaml.Unmarshal(body, &w); err != nil {
+			t.Fatalf("%s: %v", filepath.Base(file), err)
+		}
 		for id, j := range w.Jobs {
 			for i, setup := range j.Steps {
 				for _, tool := range []struct {
