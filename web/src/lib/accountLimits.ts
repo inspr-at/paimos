@@ -37,12 +37,14 @@ export const listReadings = (id: string) => request<CapacityReading[]>(`${base(i
 export const BLIND = new Set(['grok', 'cursor', 'pi'])
 /** Missing measurements do not mean a missing account. Only an advertised reader
  * can promise idle reads; Claude/Codex otherwise need a run (AEON-1511). */
-export function missingQuota(harness: string, support?: AgentAccount['reading_support']): { short: string; detail: string } {
+export function missingQuota(harness: string, support?: AgentAccount['reading_support'], running = 0): { short: string; detail: string } {
   const name = HARNESS_NAME[harness] ?? harness
-  if (harness === 'cursor') return { short: 'Quota unavailable for Cursor', detail: 'Cursor has no supported headless quota source. Starting a run does not unlock quota readings.' }
+  if (harness === 'cursor') return { short: 'Quota not available', detail: "Cursor doesn't report its quota, so agents can't pace it. The agent count on the dial still caps it." }
   if (support === 'statusline') return { short: 'Waiting for the status line', detail: `${name} quota appears when its status line reports it during a run.` }
   if (support === 'every_5_min') return { short: 'Waiting for a quota reading', detail: 'This account reports quota every five minutes. No reading has arrived yet.' }
-  if (harness === 'claude' || harness === 'codex') return { short: 'Reads after the first run', detail: `${name} quota readings start with a run on this account. Idle quota reading is not available for this helper.` }
+  if (harness === 'claude' || harness === 'codex') return running > 0
+    ? { short: 'Waiting for a quota reading', detail: 'Runs are going, but no quota reading has arrived yet.' }
+    : { short: 'Reads after the first run', detail: `${name} reports its quota during a run, so readings start with the first run on each account.` }
   return { short: 'Quota reading unavailable', detail: `${name} has not supplied a usable quota reading for this account.` }
 }
 export function readingSupport(harness: string, support?: AgentAccount['reading_support']): string {

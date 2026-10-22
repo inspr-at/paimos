@@ -289,9 +289,9 @@ test('AEON-1036: the detail reads the usage first, then today, the pace state an
   // Billed by use: nothing to pace, and the words never call it "No limit" (the agent-count control already does).
   await row(page, 'cursor').locator('.nm').click()
   const cursor = detail(page, 'cursor')
-  await expect(cursor.locator('.ub-hd')).toHaveText('Quota unavailable for Cursor· 2 accounts')
+  await expect(cursor.locator('.ub-hd')).toHaveText('Quota not available· 2 accounts')
   await expect(cursor).toContainText('the 12 at once and the account still cap it')
-  await expect(row(page, 'cursor').locator('.sub')).toHaveText('Quota unavailable for Cursor · 2 accounts')
+  await expect(row(page, 'cursor').locator('.sub')).toHaveText('Quota not available · 2 accounts')
   await expect(row(page, 'cursor').locator('.cap-stl')).toHaveCount(0)
 })
 
@@ -307,7 +307,7 @@ test('AEON-1036: each row shows its running count, its usage line and only a pac
   await page.setViewportSize({ width: 1440, height: 1000 })
   await setup(page, { example: 'limit' })
   await page.goto('/agents')
-  for (const [key, running, usage, pace] of [['codex', '6 running', 'enough until refill', null], ['claude', '2 running', 'lasts until Mon 20:20 · refill 22:59', 'At today’s limit · Codex next'], ['cursor', '3 running', 'Quota unavailable for Cursor · 2 accounts', null]] as const) {
+  for (const [key, running, usage, pace] of [['codex', '6 running', 'enough until refill', null], ['claude', '2 running', 'lasts until Mon 20:20 · refill 22:59', 'At today’s limit · Codex next'], ['cursor', '3 running', 'Quota not available · 2 accounts', null]] as const) {
     await expect(row(page, key).locator('.nm-run')).toHaveText(running)
     await expect(row(page, key).locator('.sub')).toHaveText(usage)
     if (pace) await expect(row(page, key).locator('.cap-stl')).toHaveText(pace)

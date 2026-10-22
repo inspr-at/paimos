@@ -307,14 +307,17 @@ function tightestWindow(account: CatalogAccount) {
   }
   return best?.window ?? null
 }
+// The launch catalog does not advertise how this account reports quota.
+const NO_QUOTA_READING = { short: 'No quota reading yet', detail: 'Agents can start now. The quota shows once this account reports it.' }
+const catalogMissingQuota = (harness: string) => harness === 'claude' || harness === 'codex' ? NO_QUOTA_READING : missingQuota(harness)
 function allowanceSentence(account: CatalogAccount, harness: string) {
-  if (!allowanceKnown(account) || account.remaining_fraction == null) return missingQuota(harness).detail
+  if (!allowanceKnown(account) || account.remaining_fraction == null) return catalogMissingQuota(harness).detail
   const pct = Math.round(Math.min(1, Math.max(0, account.remaining_fraction)) * 100)
   const window = tightestWindow(account)
   return window ? `${pct}% of the ${allowanceWindowLabel(window)} window is left.` : `${pct}% is left.`
 }
 function allowancePhrase(account: CatalogAccount, harness: string) {
-  if (!allowanceKnown(account) || account.remaining_fraction == null) return missingQuota(harness).short
+  if (!allowanceKnown(account) || account.remaining_fraction == null) return catalogMissingQuota(harness).short
   const pct = `${Math.round(Math.min(1, Math.max(0, account.remaining_fraction)) * 100)}%`
   const window = tightestWindow(account)
   return window ? `${pct} of ${allowanceWindowLabel(window)} left` : `${pct} left`
@@ -409,7 +412,7 @@ function hostNote(catalog: AgentAccountCatalog | null, hosts: CascadeOption[], c
   if (!touch.host && choice.hostId) {
     const account = accountOf(harnessOf(hostOf(catalog, choice.hostId), choice.harness), choice.accountId)
     if (account && allowanceKnown(account)) return 'Chosen because it has the account with the most allowance left.'
-    return 'Allowance is unknown, so this host is not ranked by remaining allowance.'
+    return account?.available ? catalogMissingQuota(choice.harness).detail : 'Allowance is unknown, so this host is not ranked by remaining allowance.'
   }
   return ''
 }

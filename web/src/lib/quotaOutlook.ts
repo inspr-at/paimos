@@ -107,6 +107,8 @@ export const QUOTA_HARNESSES = new Set(['claude', 'codex'])
 export interface KnownAccount { account_id: string; label: string; reading_support?: AgentAccount['reading_support'] }
 export interface UsageView {
   harness: string; name: string; kind: UsageKind; group: OutlookGroup | null
+  /** Without per-account run history, active runs rule out a first-run promise. */
+  running: number
   /** The plan's accounts of this harness: rows to reserve while the outlook is read. */
   known: KnownAccount[]
   /** The headline sentence of the detail. */
@@ -132,10 +134,10 @@ export const VERDICT_ICON: Record<UsageKind, string> = { fast: 'alert', slow: 'h
  * no account; a harness that never reports quota says so at once; otherwise the read is pending.
  * sinceMs: the client's milliseconds since the snapshot arrived; it ages a kept snapshot.
  */
-export function usageView(harness: string, group: OutlookGroup | undefined, anchorHour: string | undefined, tz?: string, known: KnownAccount[] = [], read: 'loading' | 'ready' | 'error' = 'ready', truncated = false, sinceMs?: number): UsageView {
+export function usageView(harness: string, group: OutlookGroup | undefined, anchorHour: string | undefined, tz?: string, known: KnownAccount[] = [], read: 'loading' | 'ready' | 'error' = 'ready', truncated = false, sinceMs?: number, running = 0): UsageView {
   const name = HARNESS_NAME[harness] ?? harness
-  const base: UsageView = { harness, name, kind: 'none', group: group ?? null, known, head: 'No accounts yet', short: 'No accounts yet', tip: '', muted: '', stale: false, verdict: '', paceLine: '', focus: null }
-  const missingReading = missingQuota(harness, known[0]?.reading_support)
+  const base: UsageView = { harness, name, kind: 'none', group: group ?? null, known, running, head: 'No accounts yet', short: 'No accounts yet', tip: '', muted: '', stale: false, verdict: '', paceLine: '', focus: null }
+  const missingReading = missingQuota(harness, known[0]?.reading_support, running)
   const unreported = (accounts: string): UsageView => ({ ...base, kind: 'not_reported', head: missingReading.short, short: `${missingReading.short} · ${accounts}`, tip: missingReading.detail, muted: accounts })
   if (!group || !group.accounts.length) {
     if (!known.length) return read === 'ready' ? base : { ...base, kind: 'pending', head: '', short: '' }

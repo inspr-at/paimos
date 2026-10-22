@@ -29,7 +29,7 @@ describe('the answer in words', () => {
     expect(view('fast', 'codex')).toMatchObject({ kind: 'pace', head: 'Enough until the next refill (Tue\u00a009:12).', short: 'enough until refill', tip: 'Codex has enough until the refill Tue\u00a009:12' })
   })
   it('says what is missing instead of inventing it', () => {
-    expect(view('fast', 'cursor')).toMatchObject({ kind: 'not_reported', head: 'Quota unavailable for Cursor', short: 'Quota unavailable for Cursor · 2 accounts', tip: 'Cursor has no supported headless quota source. Starting a run does not unlock quota readings.' })
+    expect(view('fast', 'cursor')).toMatchObject({ kind: 'not_reported', head: 'Quota not available', short: 'Quota not available · 2 accounts', tip: 'Cursor doesn\'t report its quota, so agents can\'t pace it. The agent count on the dial still caps it.' })
     expect(usageView('grok', undefined, outlooks.fast.anchor_hour, 'UTC')).toMatchObject({ kind: 'none', head: 'No accounts yet', tip: '' })
     const old = structuredClone(group('fast', 'claude'))
     old.pool!.sampled_age_seconds = 3 * 3600
@@ -52,9 +52,18 @@ describe('the answer in words', () => {
     const known = [{ account_id: 'a', label: 'one@' }, { account_id: 'b', label: 'two@' }]
     expect(usageView('claude', undefined, undefined, 'UTC', known, 'loading')).toMatchObject({ kind: 'pending', known })
     expect(usageView('claude', undefined, undefined, 'UTC', known, 'error')).toMatchObject({ kind: 'pending' })
-    expect(usageView('cursor', undefined, undefined, 'UTC', known, 'loading')).toMatchObject({ kind: 'not_reported', short: 'Quota unavailable for Cursor · 2 accounts' })
+    expect(usageView('cursor', undefined, undefined, 'UTC', known, 'loading')).toMatchObject({ kind: 'not_reported', short: 'Quota not available · 2 accounts' })
     // Read, and still no group: the accounts have no readings, which is not "no accounts".
-    expect(usageView('codex', undefined, undefined, 'UTC', known, 'ready')).toMatchObject({ kind: 'not_reported', head: 'Reads after the first run', tip: 'Codex quota readings start with a run on this account. Idle quota reading is not available for this helper.' })
+    expect(usageView('codex', undefined, undefined, 'UTC', known, 'ready')).toMatchObject({ kind: 'not_reported', head: 'Reads after the first run', tip: 'Codex reports its quota during a run, so readings start with the first run on each account.' })
+    for (const harness of ['claude', 'codex']) {
+      for (const missing of [undefined, { ...group('fast', 'cursor'), harness }]) {
+        expect(usageView(harness, missing, undefined, 'UTC', known, 'ready', false, 0, 0)).toMatchObject({ head: 'Reads after the first run' })
+        expect(usageView(harness, missing, undefined, 'UTC', known, 'ready', false, 0, 6)).toMatchObject({
+          kind: 'not_reported', head: 'Waiting for a quota reading', short: 'Waiting for a quota reading · 2 accounts',
+          tip: 'Runs are going, but no quota reading has arrived yet.',
+        })
+      }
+    }
     expect(usageView('codex', undefined, undefined, 'UTC', [], 'loading')).toMatchObject({ kind: 'pending' })
     expect(usageView('codex', undefined, undefined, 'UTC', [], 'error')).toMatchObject({ kind: 'pending' })
     expect(usageView('codex', undefined, undefined, 'UTC', [], 'ready')).toMatchObject({ kind: 'none' })

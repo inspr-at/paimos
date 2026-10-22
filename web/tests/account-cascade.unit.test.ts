@@ -234,7 +234,7 @@ describe('account catalog contract', () => {
       remaining_fraction: null,
       windows: [measured, unmeasured],
     })
-    expect(presented(catalog([mixed])).view.notes.account).toContain('Idle quota reading is not available for this helper.')
+    expect(presented(catalog([mixed])).view.notes.account).toContain('Agents can start now. The quota shows once this account reports it.')
     expect(presented(catalog([mixed])).view.notes.account).not.toMatch(/100%|30%/)
     const inflated = structuredClone(nested)
     inflated.hosts[0].harnesses[0].default_account_id = null
@@ -245,7 +245,11 @@ describe('account catalog contract', () => {
     expect(unranked.view.accounts.find(item => item.value === freshId)?.label).toContain('Quota reading unavailable')
     expect(unranked.view.accounts.find(item => item.value === freshId)?.label).not.toContain('100%')
     const onlyFresh = presented(catalog([account({ remaining_fraction: 1, windows: [unmeasured] })]))
-    expect(onlyFresh.view.notes.account).toContain('Idle quota reading is not available for this helper.')
+    expect(onlyFresh.view.notes.account).toContain('Agents can start now. The quota shows once this account reports it.')
+    expect(onlyFresh.view.accounts[0].label).toContain('No quota reading yet')
+    expect(onlyFresh.view.notes.account).not.toContain('first run')
+    const multiHost = catalog([account({ remaining_fraction: null, windows: [unmeasured] })], [{ daemon_id: 'other', label: 'Other host', harnesses: [] }])
+    expect(presented(multiHost).view.notes.host).toBe('Agents can start now. The quota shows once this account reports it.')
     expect(onlyFresh.view.notes.account).not.toContain('most allowance left')
     expect(onlyFresh.view.notes.account).not.toContain('100%')
     const unread = account({ id: accountA, label: 'Unread', remaining_fraction: null, windows: [{ ...window(5), provisional: true }] })

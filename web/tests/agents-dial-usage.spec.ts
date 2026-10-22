@@ -78,9 +78,12 @@ function withPrivate(outlook: QuotaOutlook): QuotaOutlook {
 // R10/R2: an enrolled account without daily/quota rows is still an account;
 // failed inventory reads and someone else's enrollment must not stand in for it.
 test('AEON-1511: enrolled accounts without readings stay visible, with a reason and stable controls', async ({ page }, info) => {
+  test.setTimeout(120_000)
   await page.setViewportSize({ width: 1440, height: 1100 })
   const { data, plan } = await setup(page, { outlook: { ...scenarios.fast, groups: [] } })
   plan.daily_state = {}
+  plan.running.claude = 0
+  plan.running_total -= 2
   const own = data.accounts.find(a => a.harness === 'claude')!
   let failed = true
   await page.route('**/api/agent-accounts', route => route.fulfill(failed
@@ -97,7 +100,7 @@ test('AEON-1511: enrolled accounts without readings stay visible, with a reason 
   await expect(claude.locator('.ub-acc')).toHaveCount(1)
   await expect(claude.locator('.ub-name')).toHaveText(own.label)
   await expect(claude.locator('.ub-nr')).toHaveText('Reads after the first run')
-  await expect(claude.locator('.ub-empty')).toHaveText('Claude quota readings start with a run on this account. Idle quota reading is not available for this helper.')
+  await expect(claude.locator('.ub-empty')).toHaveText('Claude reports its quota during a run, so readings start with the first run on each account.')
   await expect(claude).not.toContainText('Another person’s account')
   await expect(row(page, 'claude').locator('.f-sel')).not.toHaveAttribute('data-tip', /no account to read/)
   await expectStableControls({
@@ -107,14 +110,46 @@ test('AEON-1511: enrolled accounts without readings stay visible, with a reason 
       await row(page, 'cursor').locator('.nm').click()
       const cursor = detail(page, 'cursor')
       await expect(cursor.getByRole('heading')).toHaveText('Cursor · quota')
-      await expect(cursor.locator('.ub-nr')).toHaveText('Quota unavailable for Cursor')
-      await expect(cursor.locator('.ub-empty')).toContainText('no supported headless quota source')
+      await expect(cursor.locator('.ub-nr')).toHaveText('Quota not available')
+      await expect(cursor.locator('.ub-empty')).toContainText('doesn\'t report its quota')
     } }, { name: 'return to the enrolled Claude account', run: async () => {
       await row(page, 'claude').locator('.nm').click()
       await expect(claude.locator('.ub-nr')).toHaveText('Reads after the first run')
+    } }, { name: 'runs start before the quota reading arrives', run: async () => {
+      plan.running.claude = 2
+      plan.running_total += 2
+      await goOnline(page)
+      await expect(row(page, 'claude').locator('.nm-run')).toHaveText('2 running')
+      await expect(claude.locator('.ub-hd')).toHaveText('Waiting for a quota reading· 1 account')
+      await expect(claude.locator('.ub-nr')).toHaveText('Waiting for a quota reading')
+      await expect(claude.locator('.ub-empty')).toHaveText('Runs are going, but no quota reading has arrived yet.')
+      await expect(row(page, 'claude').locator('.sub')).toHaveText('Waiting for a quota reading · 1 account')
     } }],
   })
   await body(page).screenshot({ path: info.outputPath('aeon-1511-enrolled-no-readings.png'), animations: 'disabled' })
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1100 })
+    await page.emulateMedia({ colorScheme: theme })
+    await page.goto('/agents')
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    await showCapacityRow(page)
+    if (width < 720) await control(page).locator('.fs-tog').click()
+    if (width < 720) await claude.locator('.ub-acc-t').click()
+    await expect(claude.locator('.ub-nr')).toHaveText('Waiting for a quota reading')
+    await body(page).screenshot({ path: info.outputPath(`aeon-1511-${width}-${theme}-waiting.png`), animations: 'disabled' })
+    await expectStableControls({
+      controls: { claude: row(page, 'claude').locator('.f-sel'), cursor: row(page, 'cursor').locator('.f-sel'), limits: row(page, 'claude').locator('.limit') },
+      scrollAreas: { dial: body(page) },
+      interactions: [{ name: 'show Cursor quota explanation', run: async () => {
+        await row(page, 'cursor').locator('.nm').click()
+        await expect(detail(page, 'cursor').locator('.ub-empty')).toHaveText("Cursor doesn't report its quota, so agents can't pace it. The agent count on the dial still caps it.")
+        await body(page).screenshot({ path: info.outputPath(`aeon-1511-${width}-${theme}-cursor.png`), animations: 'disabled' })
+      } }, { name: 'return to a quota reading that is waiting', run: async () => {
+        await row(page, 'claude').locator('.nm').click()
+        await expect(claude.locator('.ub-hd')).toHaveText('Waiting for a quota reading· 1 account')
+      } }],
+    })
+  }
 })
 
 test.describe('touch quota retries', () => {
@@ -215,7 +250,7 @@ for (const width of [1440, 1024, 390]) {
     await expect(row(page, 'claude').locator('.sub')).toHaveText(SHORT)
     await expect(row(page, 'claude').locator('.sub .vw')).toHaveAccessibleName('Too fast')
     await expect(row(page, 'codex').locator('.sub')).toHaveText('enough until refill')
-    await expect(row(page, 'cursor').locator('.sub')).toHaveText('Quota unavailable for Cursor · 2 accounts')
+    await expect(row(page, 'cursor').locator('.sub')).toHaveText('Quota not available · 2 accounts')
     // The headline, the pool in muted ink, the verdict with the safe pace.
     await expect(claude.locator('.ub-hd')).toHaveText(HEAD)
     await expect(claude.locator('.ub-l2')).toHaveText('77 % of the pool used · 3 accounts · sampled 13:10')
@@ -360,11 +395,11 @@ for (const width of [1440, 1024, 390]) {
     // Cursor reports no quota: a quiet chart sentence and dashed rings, never a curve.
     await row(page, 'cursor').locator('.nm').click()
     const cursor = detail(page, 'cursor')
-    await expect(cursor.locator('.ub-hd')).toHaveText('Quota unavailable for Cursor· 2 accounts')
-    await expect(cursor.locator('.ub-empty')).toHaveText('Cursor has no supported headless quota source. Starting a run does not unlock quota readings.')
+    await expect(cursor.locator('.ub-hd')).toHaveText('Quota not available· 2 accounts')
+    await expect(cursor.locator('.ub-empty')).toHaveText('Cursor doesn\'t report its quota, so agents can\'t pace it. The agent count on the dial still caps it.')
     await expect(cursor.locator('.ub-plot svg')).toHaveCount(0)
     if (phone) await cursor.locator('.ub-acc-t').click()
-    await expect(cursor.locator('.ub-nr')).toHaveText(['Quota unavailable for Cursor', 'Quota unavailable for Cursor'])
+    await expect(cursor.locator('.ub-nr')).toHaveText(['Quota not available', 'Quota not available'])
     await body(page).screenshot({ path: info.outputPath(`${width}-light-cursor.png`), animations: 'disabled' })
     if (phone) {
       // Every new target a finger uses reaches 44 px.

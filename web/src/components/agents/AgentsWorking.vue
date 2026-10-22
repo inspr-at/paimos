@@ -147,7 +147,7 @@ const knownAccounts = (key: string) => {
   return daily.length ? daily.map(a => ({ ...a, reading_support: own.find(r => r.id === a.account_id)?.reading_support }))
     : own.map(a => ({ account_id: a.id, label: a.label, reading_support: a.reading_support }))
 }
-const usage = computed<Record<string, UsageView>>(() => Object.fromEntries(rows.value.map(r => [r.key, usageView(r.key, outlook.groups.get(r.key), outlook.data?.anchor_hour, tz.value, knownAccounts(r.key), usageState.value, !!outlook.data?.truncated, outlook.since)])))
+const usage = computed<Record<string, UsageView>>(() => Object.fromEntries(rows.value.map(r => [r.key, usageView(r.key, outlook.groups.get(r.key), outlook.data?.anchor_hour, tz.value, knownAccounts(r.key), usageState.value, !!outlook.data?.truncated, outlook.since, r.running)])))
 const retryUsage = () => Promise.all([agents.refreshAccounts(), outlook.refresh()])
 /** The words a quota-reporting harness adds to its folded unit; nothing while loading or failed. */
 const usageTip = (key: string) => usageState.value === 'ready' && ['fast', 'slow', 'pace', 'unknown'].includes(usage.value[key]!.kind) ? usage.value[key]!.tip : ''

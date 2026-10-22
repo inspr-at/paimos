@@ -82,7 +82,7 @@ test('no reading: a dashed track and “Quota not reported”, never a guess', (
   assert.deepEqual(quotaCaption(bar, { now: NOW }), { text: 'Quota not reported', tone: '', icon: '' })
   assert.equal(quotaLabel(bar, 'Cursor · markus'), 'Cursor · markus: quota not reported')
   assert.match(said(quotaSentence(bar, { vendor: 'Cursor' })), /doesn’t report its quota/)
-  const unreported = 'Cursor has no supported headless quota source.'
+  const unreported = 'Cursor doesn\'t report its quota, so agents can\'t pace it. The agent count on the dial still caps it.'
   assert.equal(quotaCaption(bar, { now: NOW, unreported }).text, unreported)
   assert.equal(quotaLabel(bar, 'Cursor', '', unreported), `Cursor: ${unreported}`)
   assert.equal(said(quotaSentence(bar, { vendor: 'Cursor', unreported })), unreported)

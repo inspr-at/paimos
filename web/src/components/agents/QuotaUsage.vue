@@ -68,7 +68,7 @@ const offShown = computed(() => !!model.value && [...model.value.past.values()].
 const accountsWord = computed(() => `${rows.value.length} ${rows.value.length === 1 ? 'account' : 'accounts'}`)
 const publicRows = computed(() => rows.value.filter(r => r.state !== 'private'))
 const hasPrivate = computed(() => rows.value.some(r => r.state === 'private'))
-const missingRow = (id: string) => missingQuota(props.view.harness, props.view.known.find(a => a.account_id === id)?.reading_support).short
+const missingRow = (id: string) => missingQuota(props.view.harness, props.view.known.find(a => a.account_id === id)?.reading_support, props.view.running).short
 </script>
 
 <template>
