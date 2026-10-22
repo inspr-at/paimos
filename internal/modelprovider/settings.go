@@ -227,10 +227,22 @@ func (s *Service) Save(ctx context.Context, p tenant.Principal, in Write) (Confi
 	return out, err
 }
 
-// embeddingConfig avoids idle rereads, including an unconfigured tenant. Saves
-// invalidate locally; other replicas and direct database changes are observed
-// within 30 seconds. Expired entries are never served after a refresh error.
+// embeddingConfig avoids background idle rereads, including an unconfigured
+// tenant. Requests retain their transaction guards and fresh configuration;
+// uncommitted configuration must never enter the shared cache. Saves invalidate
+// locally; other replicas and direct database changes are observed within 30
+// seconds. Expired entries are never served after a refresh error.
 func (s *Service) embeddingConfig(ctx context.Context, tenantID string) (Config, []byte, error) {
+	if _, request := tenant.PrincipalFrom(ctx); request || db.HasTransaction(ctx) {
+		var c Config
+		var sealed []byte
+		err := db.InTenant(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
+			var err error
+			c, sealed, err = load(ctx, tx)
+			return err
+		})
+		return c, sealed, err
+	}
 	s.configMu.Lock()
 	defer s.configMu.Unlock()
 	if err := ctx.Err(); err != nil {

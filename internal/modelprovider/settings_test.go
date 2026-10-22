@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -291,6 +292,13 @@ func TestWorkspaceEmbeddingsUseSameEndpointAndKey(t *testing.T) {
 		}
 		if _, err := initial.Embed(t.Context(), []string{"fixture"}); err != nil {
 			t.Fatal(err)
+		}
+		// R1/R3: a warm worker cache must not bypass a request's fresh
+		// authorization guard before a search can send data to the provider.
+		denied := errors.New("fixture request authority revoked")
+		request := db.WithTenantGuard(tenant.WithPrincipal(t.Context(), f.admin), func(context.Context, pgx.Tx, string) error { return denied })
+		if p, err := s.Embeddings(request, f.admin.TenantID); !errors.Is(err, denied) || p != nil {
+			t.Fatal("cached request bypassed current authority", err)
 		}
 		// A second replica misses the local invalidation, so its independently
 		// injected clock must force revision refresh at the exact TTL boundary.
