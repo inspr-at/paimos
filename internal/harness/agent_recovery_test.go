@@ -198,8 +198,8 @@ func TestPairedAttachedHookTransportCeiling(t *testing.T) {
 		{"person registration", `UPDATE harness_sessions SET started_by_principal_id=$2 WHERE id=$1`},
 		{"other principal", `UPDATE harness_sessions SET agent_principal_id=$2 WHERE id=$1`},
 		{"no inbox", `UPDATE harness_sessions SET capabilities=ARRAY['status'] WHERE id=$1`},
-		{"stopped", `UPDATE harness_sessions SET stopped_at=clock_timestamp() WHERE id=$1`},
-		{"archived", `UPDATE harness_sessions SET archived_at=clock_timestamp(),stopped_at=clock_timestamp(),recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest=decode(repeat('a',64),'hex'),recovery_actor_id=started_by_principal_id,recovery_reason='fixture archive' WHERE id=$1`},
+		{"stopped", `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp() WHERE id=$1`},
+		{"archived", `UPDATE harness_sessions SET phase='stopped',archived_at=clock_timestamp(),stopped_at=clock_timestamp(),recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest=decode(repeat('a',64),'hex'),recovery_actor_id=started_by_principal_id,recovery_reason='fixture archive' WHERE id=$1`},
 		{"revoked pairing", `UPDATE agent_pairing_computers SET state='revoked' WHERE principal_id=(SELECT agent_principal_id FROM harness_sessions WHERE id=$1)`},
 		{"no person ceiling", `UPDATE agent_keys SET created_by_principal_id=NULL,person_id=NULL WHERE principal_id=(SELECT agent_principal_id FROM harness_sessions WHERE id=$1)`},
 	} {
@@ -209,20 +209,40 @@ func TestPairedAttachedHookTransportCeiling(t *testing.T) {
 			if tc.name == "other principal" {
 				v.f.addAgent(t, other, "Other attached computer")
 			}
-			v.f.tx(t, v.f.person, func(tx pgx.Tx) error {
-				args := []any{v.session}
-				switch tc.name {
-				case "managed run":
-					args = append(args, v.run)
-				case "person registration":
-					args = append(args, v.f.person.ID)
-				case "other principal":
-					args = append(args, other)
-				}
-				_, err := tx.Exec(t.Context(), tc.change, args...)
-				return err
-			})
-			denied := v.runtimeCall(t, v.path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 2, "attached_hook": true, "process_ownership": v.identity}, v.lease)
+			mutate := func() {
+				v.f.tx(t, v.f.person, func(tx pgx.Tx) error {
+					args := []any{v.session}
+					switch tc.name {
+					case "managed run":
+						args = append(args, v.run)
+					case "person registration":
+						args = append(args, v.f.person.ID)
+					case "other principal":
+						args = append(args, other)
+					}
+					_, err := tx.Exec(t.Context(), tc.change, args...)
+					return err
+				})
+			}
+			beat := map[string]any{"phase": "working", "activity_sequence": 2, "attached_hook": true, "process_ownership": v.identity}
+			var denied *httptest.ResponseRecorder
+			if tc.name == "revoked pairing" {
+				// Before authentication, revocation rejects the bearer with 401.
+				// Revoke after admission to prove the final transaction's fence.
+				next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					mutate()
+					v.f.mux.ServeHTTP(w, r)
+				})
+				raw, _ := json.Marshal(beat)
+				r := httptest.NewRequest("POST", v.path+"/heartbeat", bytes.NewReader(raw))
+				r.Header.Set("Authorization", "Bearer "+v.f.key)
+				r.Header.Set("X-Aeon-Worker-Lease", v.lease)
+				denied = httptest.NewRecorder()
+				v.runtimeHandler(t, next).ServeHTTP(denied, r)
+			} else {
+				mutate()
+				denied = v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease)
+			}
 			expect(t, denied, 403)
 			if strings.Contains(denied.Body.String(), "run_capability_upgrade_required") {
 				t.Fatal("attached authority refusal falsely demands an upgrade")
