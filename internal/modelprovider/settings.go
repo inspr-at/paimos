@@ -96,6 +96,16 @@ func New(pool *pgxpool.Pool, master []byte) *Service {
 	return s
 }
 
+// NewWithConfigClock uses an injected clock for configuration expiry. Database
+// writes and provider requests retain their normal clocks and deadlines.
+func NewWithConfigClock(pool *pgxpool.Pool, master []byte, now func() time.Time) *Service {
+	s := New(pool, master)
+	if now != nil {
+		s.now = now
+	}
+	return s
+}
+
 func Load(ctx context.Context, tx pgx.Tx) (Config, error) {
 	c, _, err := load(ctx, tx)
 	return c, err

@@ -247,7 +247,8 @@ func measureIdleMinute(t *testing.T) {
 			break
 		}
 	}
-	provider := modelprovider.New(pool, bytes.Repeat([]byte{9}, 32))
+	now := time.Now()
+	provider := modelprovider.NewWithConfigClock(pool, bytes.Repeat([]byte{9}, 32), func() time.Time { return now })
 	if _, err := provider.Save(f.ctx(), f.p, modelprovider.Write{Settings: modelprovider.Settings{
 		Enabled: true, BaseURL: f.service.URL, ChatModel: "fixture-chat", EmbeddingModel: "fixture-embed", Features: modelprovider.Features{Embeddings: true},
 	}}); err != nil {
@@ -294,6 +295,7 @@ func measureIdleMinute(t *testing.T) {
 		if second%15 == 0 {
 			beat()
 		}
+		now = now.Add(time.Second)
 	}
 	all, _ := counts.Count(func(string) bool { return true })
 	application, _ := counts.Count(func(sql string) bool {
@@ -307,15 +309,24 @@ func measureIdleMinute(t *testing.T) {
 		return strings.Contains(sql, "UPDATE harness_sessions SET missing_progress_beats=")
 	})
 	outboxClaims, _ := counts.Count(func(sql string) bool { return strings.HasPrefix(sql, "UPDATE aithema_callbacks SET attempts=") })
-	t.Logf("IDLE-MINUTE: one tenant, one idle host, one idle worker; 60 host passes + 6 reconciliations + 30 embedding passes + 4 heartbeats; SQL=%d, SQL excluding transaction controls=%d, cursor statements/rows=%d/%d, provider reads=%d, warning statements/rows=%d/%d, due outbox claims=%d", all, application, cursorCalls, cursorRows, providerReads, warningCalls, warningRows, outboxClaims)
+	embeddingClaims, _ := counts.Count(func(sql string) bool {
+		return strings.Contains(sql, "UPDATE node_embedding_jobs j") && strings.Contains(sql, "FOR UPDATE SKIP LOCKED")
+	})
+	t.Logf("IDLE-MINUTE: one tenant, one idle host, one idle worker; 60 host passes + 6 reconciliations + 30 embedding passes + 4 heartbeats; SQL=%d, SQL excluding transaction controls=%d, cursor statements/rows=%d/%d, provider reads=%d, warning statements/rows=%d/%d, due outbox claims=%d, embedding claims=%d", all, application, cursorCalls, cursorRows, providerReads, warningCalls, warningRows, outboxClaims, embeddingClaims)
 	if cursorCalls != 0 || cursorRows != 0 {
 		t.Errorf("unchanged high water wrote cursor: calls=%d rows=%d", cursorCalls, cursorRows)
 	}
 	if warningCalls != 0 || warningRows != 0 {
 		t.Errorf("saturated warning counter rewritten: calls=%d rows=%d", warningCalls, warningRows)
 	}
+	if providerReads != 2 {
+		t.Errorf("provider reads=%d, want one load and one version refresh", providerReads)
+	}
 	if outboxClaims != 60 {
 		t.Errorf("due outbox claims=%d, want 60", outboxClaims)
+	}
+	if embeddingClaims != 30 {
+		t.Errorf("due embedding claims=%d, want 30", embeddingClaims)
 	}
 }
 
