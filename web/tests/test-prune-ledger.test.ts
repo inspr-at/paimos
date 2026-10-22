@@ -43,6 +43,17 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
     visual: json('scripts/test-prune/visual-manifest.json'),
     currentWeb: json('scripts/ci/web-test-tiers.json'), currentGo: json('scripts/ci/go-test-tiers.json'),
   }
+  const staged = json('scripts/test-prune/p02-execution.json')
+  assert.equal(staged.cuts, false)
+  const p02Owners = new Set(original.ledger.specs.filter((row: { package: string }) => row.package === 'P02').map((row: { file: string }) => row.file))
+  const p02Originals = original.baseline.catalogue.filter((row: { kind: string; file: string }) => row.kind === 'browser' && p02Owners.has(row.file))
+  assert.deepEqual(staged.originalCaseDestinations.flatMap((row: { oldNativeKeys: string[] }) => row.oldNativeKeys).sort(),
+    p02Originals.map((row: { key: string }) => row.key).sort(), 'Staged P02 mapping cannot drop an original identity')
+  const currentKeys = new Set(original.currentWeb.tests.map(key))
+  assert.ok(staged.candidateNativeKeys.every((id: string) => currentKeys.has(id)), 'Every staged destination has a real native registration')
+  for (const core of original.ledger.core.filter((row: { package: string }) => row.package === 'P02')) {
+    assert.ok(currentKeys.has(core.nativeBinding.key), `P02 core registration missing: ${core.id}`)
+  }
   const sourceHash = (path: string) => createHash('sha256').update(read(path)).digest('hex')
   // Risk: pruning the old tours before Tick's replacement fixtures are encoded
   // would lose the central workspace/start surfaces and Goals profile coverage.

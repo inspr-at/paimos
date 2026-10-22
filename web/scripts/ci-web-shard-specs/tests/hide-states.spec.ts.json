@@ -6,6 +6,7 @@
   },
   "spec": {
     "file": "tests/hide-states.spec.ts",
+    "listedTests": 47,
     "tierTiming": {
       "caseSeconds": {
         "max": 18.584,

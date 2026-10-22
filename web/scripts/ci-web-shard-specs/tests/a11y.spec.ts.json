@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/a11y.spec.ts",
-    "listedTests": 80,
+    "listedTests": 82,
     "tierTiming": {
       "caseSeconds": {
         "max": 9.948,

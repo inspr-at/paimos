@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/footer-summary.spec.ts",
-    "listedTests": 13,
+    "listedTests": 16,
     "tierTiming": {
       "caseSeconds": {
         "max": 2.484,
