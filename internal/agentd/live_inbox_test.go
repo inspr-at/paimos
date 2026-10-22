@@ -28,7 +28,14 @@ func exercisePriorityInboxReplay(t *testing.T) {
 	s.runs["run"] = e
 	a := &priorityInboxAPI{levelHintAPI: &levelHintAPI{hintAPI: &hintAPI{fakeAPI: api, queued: []HarnessDelivery{{ID: "priority", MessageID: "message", Priority: true, Level: "simple", Body: "a recorded decision"}}}}, loseCompletion: true}
 	s.api = a
-	if err := s.serviceHarnessCycle(t.Context(), e, false); !errors.Is(err, ErrControlUnconfirmed) {
+	err := s.serviceHarnessCycle(t.Context(), e, false)
+	p.mu.Lock()
+	firstWrites := p.calls
+	p.mu.Unlock()
+	if firstWrites != 1 {
+		t.Fatalf("busy priority input reached the owned process %d times; want 1", firstWrites)
+	}
+	if !errors.Is(err, ErrControlUnconfirmed) {
 		t.Fatal("lost completion was hidden", err)
 	}
 	if err := s.serviceHarnessCycle(t.Context(), e, false); err != nil {
