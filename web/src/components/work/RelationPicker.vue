@@ -9,22 +9,34 @@ import { choiceById, RELATION_CHOICES, type RelationChoice } from '../../lib/rel
 import { searchWork, workKindMap, WORK_KINDS } from '../../lib/ticketSearch'
 import type { RelatedNode, RelatedTicket } from '../../lib/useTicket'
 import { highlight } from '../../lib/work'
+import { useIdentityScope } from '../../lib/useIdentityScope'
 import { useProjects } from '../../stores/projects'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 import ReadName from '../ReadName.vue'
 import StatusIcon from './StatusIcon.vue'
+import KeyCap from '../KeyCap.vue'
+import { settingsSubmitKey } from '../../lib/settingsOverlays'
 
 // Link the open ticket to another: choose how they relate, then find the other
 // by key or title with the command palette's search. Keyboard first: typing
 // searches, arrows move, Enter links; Shift Tab reaches the relation, whose
 // arrows change it. A refusal (a loop, an existing link) stays here in words.
+// AEON-1618, `picking`: the same search picks several tickets or epics for a goal's
+// Link work, without a relation: Enter or a click marks a row, ⌘↵ (Ctrl+↵) or the
+// "Link {n}" button links them all. projectKey limits the rows to one project.
+// within: the project node the search stays in (a project goal); onlyProject its route key, for recents.
+// most: how many one link may name; "Link {n}" reserves the width of "Link {most}", so picking never moves it.
+// The lookups and the link run for the person who confirmed: a person change or closing the picker drops them.
+export interface PickMode { label: string; linked: readonly string[]; onlyProject: string | null; within: string | null; most: number; submit: (picked: RelatedTicket[]) => Promise<string | null> }
 const props = defineProps<{
   anchor: HTMLElement | null; subject: string; selfId: string; projectKey: string
-  related: RelatedNode[]; link: (choice: RelationChoice, other: RelatedTicket) => Promise<string | null>
+  related: RelatedNode[]; link?: (choice: RelationChoice, other: RelatedTicket) => Promise<string | null>
+  picking?: PickMode
 }>()
 const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const projects = useProjects()
+const scope = useIdentityScope()
 
 // The relation last used in this session comes first again.
 const choice = ref<RelationChoice>(choiceById(lastChoice))
@@ -48,16 +60,24 @@ const input = ref<HTMLInputElement>()
 const types = ref<HTMLElement>()
 
 const projectFor = (key: string) => projects.byRouteKey(keyPrefixOf(key))?.routeKey ?? null
+const multi = computed(() => !!props.picking)
+const picked = ref<TicketResult[]>([])
+const pickedKeys = computed(() => new Set(picked.value.map(result => result.key)))
 // Recently opened tickets when nothing is typed; search results otherwise. The
 // open ticket itself is never offered.
 const results = computed<TicketResult[]>(() => {
   const found = query.value
     ? ticketResults(searched, listed.value, hits.value, workKinds.value, projectFor, null, 9)
     : recents.filter(recent => recent.type === 'ticket').map(recent => ({ type: 'ticket' as const, id: `recent-${recent.key}`, key: recent.key, title: recent.title, state: recent.state, kind: recent.kind, projectKey: recent.projectKey }))
-  return found.filter(result => result.key !== props.subject).slice(0, 8)
+  const only = props.picking?.onlyProject
+  return found.filter(result => result.key !== props.subject && (!only || result.projectKey === only)).slice(0, 8)
 })
 // Tickets already linked this way are shown, marked, and not linked twice.
-const linkedKeys = computed(() => new Set(props.related.filter(entry => entry.label === choice.value.label && entry.node).map(entry => entry.node!.key)))
+// A one-to-one link disables its row; Enter still states the refusal.
+// Pick mode leaves the row enabled: choosing it states the same refusal and
+// does not mark it again. aria-disabled would make that click unreachable.
+const linkedKeys = computed(() => props.picking ? new Set(props.picking.linked) : new Set(props.related.filter(entry => entry.label === choice.value.label && entry.node).map(entry => entry.node!.key)))
+const linkedQuiet = (key: string) => !multi.value && linkedKeys.value.has(key)
 watch(results, () => { if (active.value >= results.value.length) active.value = 0 })
 
 async function search() {
@@ -69,7 +89,7 @@ async function search() {
   loading.value = true; failed.value = ''
   try {
     if (!workKinds.value.size) workKinds.value = await workKindMap()
-    const found = await searchWork(q, { signal })
+    const found = await searchWork(q, { signal, within: props.picking?.within ?? undefined })
     if (signal.aborted) return
     listed.value = found.listed; hits.value = found.hits; searched = q; active.value = 0
     if (enterPending) { enterPending = false; await nextTick(); void choose(results.value[0]) }
@@ -94,8 +114,38 @@ async function resolve(result: TicketResult): Promise<RelatedTicket | null> {
   const item = page.items.find(candidate => candidate.key === result.key)
   return item ? { id: item.id, key: item.key, title: item.title, state: item.state } : null
 }
+// Pick mode marks and unmarks; nothing is linked until the person confirms.
+function toggle(result: TicketResult) {
+  if (linkedKeys.value.has(result.key)) { refusal.value = `${result.key} is already linked to this goal.`; return }
+  const most = props.picking?.most ?? Infinity
+  if (!pickedKeys.value.has(result.key) && picked.value.length >= most) { refusal.value = `Link at most ${most} at once; link an epic to bring in its tickets.`; return }
+  refusal.value = ''
+  picked.value = pickedKeys.value.has(result.key) ? picked.value.filter(entry => entry.key !== result.key) : [...picked.value, result]
+}
+const widestPick = computed(() => `Link ${props.picking?.most ?? 0}`)
+async function confirmPicked() {
+  const picking = props.picking
+  if (!picking || busy.value || !picked.value.length) return
+  const chosen = [...picked.value]
+  busy.value = true; refusal.value = ''
+  try {
+    await scope.run(({ after }) => after(Promise.all(chosen.map(resolve)), found => {
+      const missing = chosen.find((_, index) => !found[index])
+      if (missing) { refusal.value = `${missing.key} is no longer available.`; return }
+      return after(picking.submit(found as RelatedTicket[]), problem => {
+        if (!problem) { emit('close', true); return }
+        refusal.value = problem
+        return after(nextTick(), () => { input.value?.focus() })
+      })
+    }), { failed: e => { refusal.value = e instanceof Error ? e.message : 'The work could not be linked' } })
+  } finally {
+    busy.value = false
+  }
+}
 async function choose(result: TicketResult | undefined) {
   if (!result || busy.value) return
+  if (multi.value) { toggle(result); return }
+  if (!props.link) return
   if (linkedKeys.value.has(result.key)) { refusal.value = `${props.subject} is already linked to ${result.key} as “${choice.value.label}”.`; return }
   busy.value = true; refusal.value = ''
   try {
@@ -117,6 +167,9 @@ function keydown(event: KeyboardEvent) {
     event.preventDefault()
     if (count) active.value = (active.value + (event.key === 'ArrowDown' ? 1 : -1) + count) % count
     document.getElementById(`relation-option-${active.value}`)?.scrollIntoView({ block: 'nearest' })
+  } else if (multi.value && settingsSubmitKey(event)) {
+    event.preventDefault()
+    void confirmPicked()
   } else if (event.key === 'Enter') {
     event.preventDefault()
     if (query.value && searched !== query.value) enterPending = true
@@ -146,10 +199,11 @@ let lastChoice = 'relates'
 </script>
 
 <template>
-  <FloatingPanel :anchor="anchor" :width="420" :tallest="520" :label="`Link ${subject} to another ticket`" cycle @close="restore => emit('close', restore)">
-    <div class="picker" :aria-busy="busy">
-      <p class="head"><span class="eyebrow">Link {{ subject }}</span><span class="hint">{{ choice.hint }}</span></p>
-      <div ref="types" class="types" role="radiogroup" :aria-label="`How ${subject} relates to the other ticket`" @keydown="typeKeydown">
+  <FloatingPanel :anchor="anchor" :width="picking ? 480 : 420" :tallest="520" :phone-sheet="!!picking" :fill-phone="!!picking" :label="picking ? `${picking.label}: ${subject}` : `Link ${subject} to another ticket`" cycle @close="restore => emit('close', restore)">
+    <div class="picker" :class="{ multi }" :aria-busy="busy">
+      <p v-if="picking" class="head"><span class="eyebrow">{{ picking.label }}</span><span v-clip-tip="subject" class="hint">{{ subject }}</span></p>
+      <p v-else class="head"><span class="eyebrow">Link {{ subject }}</span><span class="hint">{{ choice.hint }}</span></p>
+      <div v-if="!picking" ref="types" class="types" role="radiogroup" :aria-label="`How ${subject} relates to the other ticket`" @keydown="typeKeydown">
         <button
           v-for="option in RELATION_CHOICES" :key="option.id" type="button" role="radio" class="type"
           :aria-checked="option.id === choice.id" :tabindex="option.id === choice.id ? 0 : -1" @click="pick(option)"
@@ -159,19 +213,25 @@ let lastChoice = 'relates'
         <AppIcon name="search" :size="14" class="lead" />
         <input
           ref="input" v-model="term" class="field" type="text" role="combobox" aria-controls="relation-results" aria-autocomplete="list" :aria-expanded="true"
-          :aria-activedescendant="results.length ? `relation-option-${active}` : undefined" :aria-label="`Find the ticket ${subject} ${choice.label.toLowerCase()}`"
-          placeholder="Find a ticket by key or title" autocomplete="off" spellcheck="false" data-autofocus @keydown="keydown"
+          :aria-activedescendant="results.length ? `relation-option-${active}` : undefined" :aria-label="picking ? 'Find tickets or epics by key or title' : `Find the ticket ${subject} ${choice.label.toLowerCase()}`"
+          :placeholder="picking ? 'Find tickets or epics by key or title' : 'Find a ticket by key or title'" autocomplete="off" spellcheck="false" data-autofocus @keydown="keydown"
         />
         <span v-if="loading || busy" class="spinner" aria-hidden="true" />
       </label>
+      <div v-if="multi" class="confirm-row">
+        <button type="button" class="btn primary link-picked" :disabled="!picked.length || busy" :aria-busy="busy" @click="confirmPicked">
+          <span class="btn-label"><span>Link {{ picked.length }}</span><span aria-hidden="true">{{ widestPick }}</span></span><KeyCap k="mod" /><KeyCap k="enter" />
+        </button>
+      </div>
+      <div class="picker-body" :class="{ contents: !multi }">
       <p v-if="refusal" class="refusal" role="alert"><AppIcon name="alert" :size="14" /><span>{{ refusal }}</span></p>
       <div id="relation-options" class="options" :class="{ stale: loading && !!results.length }">
         <p v-if="!query && results.length" class="group-label eyebrow" aria-hidden="true">Recent</p>
-        <div id="relation-results" class="option-list" role="listbox" :aria-label="query ? 'Tickets found' : 'Recent tickets'">
+        <div id="relation-results" class="option-list" role="listbox" :aria-multiselectable="multi || undefined" :aria-label="query ? 'Tickets found' : 'Recent tickets'">
           <div v-for="(result, index) in results" :key="result.id" class="option-row" role="presentation">
             <div
-              :id="`relation-option-${index}`" role="option" class="option"
-              :aria-selected="index === active" :aria-disabled="linkedKeys.has(result.key) || undefined"
+              :id="`relation-option-${index}`" role="option" class="option" :data-active="index === active || undefined"
+              :aria-selected="multi ? pickedKeys.has(result.key) : index === active" :aria-disabled="linkedQuiet(result.key) || undefined"
               :tabindex="index === active ? 0 : -1" @keydown.enter.prevent="choose(result)"
               @pointermove="active = index" @click="choose(result)"
             >
@@ -180,7 +240,8 @@ let lastChoice = 'relates'
               <span v-clip-tip="result.title" class="title"><template v-for="(part, i) in highlight(result.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
               <span v-if="linkedKeys.has(result.key)" class="tag">Linked</span>
               <span v-else-if="result.projectKey && result.projectKey !== projectKey" class="tag project">{{ result.projectKey }}</span>
-              <AppIcon v-if="index === active && !linkedKeys.has(result.key)" name="enter" :size="13" class="enter" />
+              <span v-if="multi" class="pick-box" aria-hidden="true"><AppIcon v-if="pickedKeys.has(result.key) || linkedKeys.has(result.key)" name="check" :size="12" /></span>
+              <AppIcon v-else-if="index === active && !linkedKeys.has(result.key)" name="enter" :size="13" class="enter" />
             </div>
           </div>
         </div>
@@ -191,17 +252,25 @@ let lastChoice = 'relates'
         <p v-else-if="query && !loading && !results.length && searched === query" class="note">Nothing matches “{{ query }}”. Try a key like {{ projectKey }}-12 or words from a title.</p>
         <p v-else-if="!query && !results.length" class="note">Type a key like {{ projectKey }}-12, or words from a title.</p>
       </div>
-      <p class="foot" aria-hidden="true">
+      <p v-if="multi" class="foot" aria-hidden="true">
+        <span><kbd class="keycap"><AppIcon name="arrow-up" /></kbd><kbd class="keycap"><AppIcon name="arrow-down" /></kbd> move</span>
+        <span><kbd class="keycap"><AppIcon name="enter" /></kbd> pick</span>
+      </p>
+      <p v-else class="foot" aria-hidden="true">
         <span><kbd class="keycap"><AppIcon name="arrow-up" /></kbd><kbd class="keycap"><AppIcon name="arrow-down" /></kbd> move</span>
         <span><kbd class="keycap"><AppIcon name="enter" /></kbd> link</span>
         <span><kbd class="keycap"><AppIcon name="shift" /></kbd><kbd class="keycap">tab</kbd> relation</span>
       </p>
+      </div>
     </div>
   </FloatingPanel>
 </template>
 
 <style scoped>
 .picker { display: grid; gap: 8px; padding: 4px 4px 2px; }
+.picker-body { display: grid; gap: 8px; min-width: 0; }
+/* Non-picking links keep refusal, results and the hint as rows of the picker. */
+.picker-body.contents { display: contents; }
 .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 2px 4px 0; }
 .head .hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-2); }
 .types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; border-radius: 14px; background: var(--seg-bg); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent); }
@@ -235,6 +304,23 @@ let lastChoice = 'relates'
 .tag { flex-shrink: 0; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: 500 10.5px/20px var(--mono); letter-spacing: .04em; font-variant-ligatures: none; }
 .tag.project { color: var(--ink-3); }
 .enter { flex-shrink: 0; color: var(--ink-3); }
+/* Pick mode (AEON-1618): the active row carries the tint; a picked row shows its tick in a
+   fixed box, so marking a row never changes its size. */
+.picker.multi .option[aria-selected="true"] { background: transparent; }
+.picker.multi .option[data-active] { background: var(--row-selected); }
+.pick-box { flex-shrink: 0; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--teal-ink); }
+.option[aria-selected="true"] .pick-box { box-shadow: inset 0 0 0 1px var(--chip-teal-line); background: var(--seg-on); }
+/* Desktop: "Link {n}" sits on the search row, right of the field and as tall as it, so the
+   results start right under the search (Tick round 1). */
+.picker.multi { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "head head" "search link" "body body"; }
+.picker.multi > .head { grid-area: head; }
+.picker.multi > .search { grid-area: search; }
+.picker.multi > .confirm-row { grid-area: link; }
+.picker.multi > .picker-body { grid-area: body; }
+.confirm-row { display: flex; align-items: stretch; justify-content: flex-end; }
+.confirm-row .link-picked { height: auto; }
+/* Digits of one width: "Link 1" to "Link 20" all fit the reserved "Link 20". */
+.link-picked { gap: 6px; font-variant-numeric: tabular-nums; }
 .note { padding: 8px 10px; font-size: 12.5px; color: var(--ink-3); }
 .note.error { color: var(--danger); }
 .foot { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 6px 2px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); }
@@ -244,6 +330,16 @@ let lastChoice = 'relates'
   .search .field { height: 44px; font-size: 16px; }
   .option, .option-row, .read-row { min-height: 44px; }
   .foot { display: none; }
+  .confirm-row .btn { flex: 1 0 auto; min-height: 44px; }
+  .confirm-row .keycap { display: none; }
+}
+/* Phone sheet (pattern B): the results and a refusal scroll; Link stays pinned. */
+@media (max-width: 720px) and (min-height: 481px) {
+  .picker.multi { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .picker.multi .head, .picker.multi .search, .picker.multi .confirm-row { flex: none; }
+  .picker.multi .picker-body { order: 1; flex: 1 1 auto; min-height: 0; overflow: auto; }
+  .picker.multi .confirm-row { order: 2; padding: 2px 2px 0; }
+  .picker.multi .confirm-row .link-picked { height: 32px; }
 }
 
 @media (max-width: 720px) {

@@ -5,6 +5,7 @@ import {
   type AgentAccountCatalog, type CatalogAccount, type CascadeChoice, type CascadeTouch,
 } from '../src/lib/accountCascade'
 import { WAIT_CODES } from '../src/lib/capacityWait'
+import { absoluteTime } from '../src/lib/work'
 
 const NOW = Date.parse('2026-09-27T12:00:00Z')
 const profileA = 'b1000000-0000-4000-8000-000000000001'
@@ -102,6 +103,57 @@ describe('account catalog contract', () => {
     const tied = catalog([tieHigh, tieLow])
     tied.hosts[0].harnesses[0].default_account_id = accountA
     expect(presented(tied).filled.accountId).toBe(accountA)
+  })
+
+  // R17: a re-pair must not silently select the stale same-name daemon or merge
+  // its account grants into the current pairing. All times use catalog.as_of.
+  it('keeps same-name pairings distinct and prefers the online daemon over stale allowance', () => {
+    const current = account({ id: accountB, remaining_fraction: 0.2, registered_by_principal_id: agentB })
+    const value = catalog([account({ remaining_fraction: 0.9, last_probe_at: new Date(NOW - 180_000).toISOString() })], [{
+      daemon_id: 'workstation-new', label: 'Work Mac', harnesses: [{ harness: 'codex', accounts: [current], default_account_id: accountB }],
+    }])
+    const { filled, view } = presented(value)
+    expect(view.hosts).toEqual([
+      { value: 'workstation-new', label: 'Work Mac · Online' },
+      { value: 'workstation', label: `Work Mac · Offline · last seen ${absoluteTime(new Date(NOW - 180_000).toISOString())}` },
+    ])
+    expect(filled.hostId).toBe('workstation-new')
+    expect(filled.accountId).toBe(accountB)
+    expect(view.agentId).toBe(agentB)
+    expect(view.accounts.map(item => item.value)).toEqual([accountB])
+    const picked = chooseStep(filled, emptyTouch(), 'host', 'workstation')
+    const manual = presented(value, picked.choice, picked.touch)
+    expect(manual.filled.hostId).toBe('workstation')
+    expect(manual.filled.accountId).toBe(accountA)
+    expect(manual.view.accounts.map(item => item.value)).toEqual([accountA])
+    // The last-seen label uses the newest probe across every harness/account,
+    // including a failed probe, rather than the first enrollment in the list.
+    value.hosts[0].harnesses.push({ harness: 'claude', default_account_id: null, accounts: [account({
+      id: 'ac000000-0000-4000-8000-000000000003', last_probe_at: new Date(NOW - 120_000).toISOString(), last_probe_ok: false,
+      available: false, unavailable_reasons: ['probe'],
+    })] })
+    expect(presented(value).view.hosts[1].label).toBe(`Work Mac · Offline · last seen ${absoluteTime(new Date(NOW - 120_000).toISOString())}`)
+    // A second live pairing remains distinguishable and manually selectable.
+    value.hosts[0].harnesses[0].accounts[0].last_probe_at = new Date(NOW - 1000).toISOString()
+    expect(presented(value).view.hosts.map(item => item.label)).toEqual(['Work Mac · Online · pairing 2', 'Work Mac · Online · pairing 1'])
+  })
+
+  it('distinguishes stale, missing and failed host probes without mistaking account capacity for offline', () => {
+    const value = catalog()
+    const probe = value.hosts[0].harnesses[0].accounts[0]
+    for (const timestamp of [null, 'invalid', new Date(NOW + 1000).toISOString()]) {
+      probe.last_probe_at = timestamp
+      expect(presented(value).view.hosts[0].label).toBe('Work Mac · Status unknown')
+    }
+    probe.last_probe_at = new Date(NOW - 120_000).toISOString()
+    expect(presented(value).view.hosts[0].label).toBe('Work Mac · Offline')
+    probe.last_probe_at = new Date(NOW).toISOString()
+    probe.last_probe_ok = false
+    expect(presented(value).view.hosts[0].label).toBe('Work Mac · Sign-in unavailable')
+    probe.last_probe_ok = true
+    probe.available = false
+    probe.unavailable_reasons = ['capacity']
+    expect(presented(value).view.hosts[0].label).toBe('Work Mac')
   })
 
   it('does not invent a model when the role has no route or the grant is empty', () => {

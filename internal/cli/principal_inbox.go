@@ -95,7 +95,7 @@ func (rt *runtime) listenPrincipalInbox(ctx context.Context, after string, limit
 			for _, msg := range page.Items {
 				if _, err := fmt.Fprintf(rt.stdout, "cursor=%d  %s  %s → %s\n<aeon-inbox-message sender=\"%s\" recipient=\"%s\" message_id=\"%s\">\n%s\n\n%s\n</aeon-inbox-message>\n",
 					msg.SentEventID, msg.ID, msg.SenderPrincipalID, msg.RecipientPrincipalID,
-					html.EscapeString(msg.SenderPrincipalID), html.EscapeString(msg.RecipientPrincipalID), html.EscapeString(msg.ID), principalInboxPreamble, msg.Body); err != nil {
+					html.EscapeString(msg.SenderPrincipalID), html.EscapeString(msg.RecipientPrincipalID), html.EscapeString(msg.ID), principalInboxPreamble, html.EscapeString(msg.Body)); err != nil {
 					return err
 				}
 			}

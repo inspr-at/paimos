@@ -14,7 +14,7 @@ const accountId = 'ac000000-0000-4000-8000-000000000001'
 const spareAccountId = 'ac000000-0000-4000-8000-000000000002'
 const laptopAccountId = 'ac000000-0000-4000-8000-000000000003'
 
-export async function mockStartAgent(page: Page, options: { ticketTitle?: string; wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
+export async function mockStartAgent(page: Page, options: { ticketTitle?: string; wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'same-name-hosts' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
   const work = fixtures()
   if (options.ticketTitle) work.nodes.find(node => node.id === 'n-1')!.title = options.ticketTitle
   const workParents = new Set(work.nodes.filter(node => ['work', 'epic', 'ticket', 'task'].includes(node.kind_slug)).map(node => node.parent_id))
@@ -71,6 +71,15 @@ export async function mockStartAgent(page: Page, options: { ticketTitle?: string
         }],
       }],
     })
+  }
+  if (options.catalog === 'same-name-hosts') {
+    hosts[0].harnesses[0].accounts = [primary]
+    // Keep identical grants/labels but a separate account on the old daemon.
+    // Stale high headroom must not override the current host's connection.
+    hosts.unshift({ daemon_id: 'workstation-old', label: 'Work Mac', harnesses: [{
+      harness: 'codex', default_account_id: laptopAccountId,
+      accounts: [{ ...primary, id: laptopAccountId, last_probe_at: new Date(now - 180_000).toISOString(), remaining_fraction: 0.95 }],
+    }] })
   }
   const catalog = { as_of: new Date(now).toISOString(), role: 'build', hosts }
   const account: AgentAccount = {

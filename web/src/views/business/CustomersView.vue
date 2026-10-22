@@ -214,6 +214,10 @@ watch(() => business.open.crm, on => { if (on) void store.load(true) })
 
     <IntegrationCard v-if="business.admin" :admin="true" bare @imported="created" />
 
+    <div v-if="store.error && store.items" class="load-status">
+      <p role="status">{{ store.error }}</p>
+      <button type="button" class="btn sm" :disabled="store.loading" @click="store.load(true)">Try again</button>
+    </div>
     <div v-if="store.error && !store.items" class="state glass-card" role="alert">
       <span class="state-icon danger"><AppIcon name="alert" :size="18" /></span>
       <h2>Customers could not be loaded</h2>

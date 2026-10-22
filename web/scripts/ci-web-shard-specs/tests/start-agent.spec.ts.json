@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/start-agent.spec.ts",
-    "listedTests": 28,
+    "listedTests": 36,
     "tierTiming": {
       "caseSeconds": {
         "max": 4.899,

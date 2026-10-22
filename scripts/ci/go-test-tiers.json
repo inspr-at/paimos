@@ -1830,6 +1830,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestManagedStartWaitsForHostCapacityBeforeRouteAndClaim","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestManagedToolsCloseBeforeServeClosesListener","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestManagedToolsRunBinding","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestMetadataOverflowDoesNotInventEffort","tier":"GATED-FULL"}
@@ -5184,6 +5186,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestIssueCommentCompatTranscript","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestIssueConditionalStatusCarriesPreconditionAndConflict","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestIssueConvert","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestIssueCreateAddsEstimateHint","tier":"GATED-FULL"}
@@ -5223,6 +5227,8 @@
     {"kind":"go","package":"internal/cli","name":"TestKnowledgeKindSlug","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestLeadCLIContractAndProofPrivacy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestLeadConditionalStatusGuards","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIReadAndRecord","tier":"GATED-FULL"}
     ,
@@ -6906,6 +6912,10 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalPauseUsesLatestStoppedSession","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalPeopleCreateLinkUnlinkDelete","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalPeopleRenameUnlinkDeleteRights","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalPercentComputedUnlessHandSet","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalProjectWriterUpdatesOnlyVisibleOutcomes","tier":"ESSENTIAL"}
@@ -6937,6 +6947,8 @@
     {"kind":"go","package":"internal/goals","name":"TestGoalStorageVisibility","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalTooLargeDetailKeepsOnlyVisibleCounts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalWorkDeltaAndImplicitRef","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestPersonCeilingGoals","tier":"ESSENTIAL"}
     ,
@@ -6999,6 +7011,10 @@
     {"kind":"go","package":"internal/harness","name":"TestCoordinatorLargeHandover","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestCoordinatorProgressCountsMissingAndFinishedWorkers","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestCrossProjectChildrenKeepWorkAndPrivacy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestCrossProjectRegistrationRechecksRevokedAccess","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestCurrentActivityPolicyFreshnessHistoryAndIsolation","tier":"GATED-FULL"}
     ,
@@ -8918,6 +8934,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestConcurrentMovesPrecondition","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestConditionalStatusPreservesConcurrentCancel","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestConvertClearsForgedRoadmapPublication","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestConvertCustomIssueFamily","tier":"GATED-FULL"}
@@ -10268,6 +10286,8 @@
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestPausePlanningHeartbeatFieldsStayOptional","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestPinGeneratorFailureDiagnostic","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/reportercontract","name":"TestPinnedShapeKeys","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestProjectLeadReadContractAdditionIsMinor","tier":"ESSENTIAL"}
@@ -11056,6 +11076,8 @@
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionGroupsAndKindTimePagination","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionLegacyCursorRestartsWhenAnchorUnavailable","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionMissedReleaseApplyUndoApplyRefreshesIdentity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionMissedReleaseUsesPlanningMembershipAndUndo","tier":"GATED-FULL"}
@@ -11067,6 +11089,8 @@
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionReleaseUndoRejectsExternalProjectAndReleaseChanges","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionResolutionVisibilityPreservesHiddenReferences","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionRowAndPreviewReasonPrecedence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionSharedReleaseBulkUndoUsesRefreshedFences","tier":"ESSENTIAL"}
     ,
@@ -11564,9 +11588,13 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestAnnotatedTagGuardFailsClosed","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestBrowserShardRecoversAfterCacheEviction","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestBuilderChecksumAndPluginPathFailClosed","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestBuilderVersionAssertionFailsClosed","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestCICachesRemainReadOnlyForPullRequestsAndMergeGroups","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestComposeAppProbesReadiness","tier":"GATED-FULL"}
     ,
