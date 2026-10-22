@@ -2315,8 +2315,8 @@
     ]
   },
   "harness-session": {
-    "version": "harness-session/3.3",
-    "sha256": "7f2dd47614a2c7b04edb57abcc6e7ce88cd40150bfb5eea5a7b331a5b82c5110",
+    "version": "harness-session/3.4",
+    "sha256": "dafd17425d2df7bfe865f9fd02eee8040725ce3545b8471d118c3eb9697dcb70",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -2786,6 +2786,11 @@
           },
           "created_at": {
             "format": "date-time",
+            "type": "string"
+          },
+          "cross_project_parent_harness_session_id": {
+            "format": "uuid",
+            "readOnly": true,
             "type": "string"
           },
           "current_activity": {
@@ -4179,6 +4184,11 @@
           },
           "created_at": {
             "format": "date-time",
+            "type": "string"
+          },
+          "cross_project_parent_harness_session_id": {
+            "format": "uuid",
+            "readOnly": true,
             "type": "string"
           },
           "current_activity": {

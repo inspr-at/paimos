@@ -980,6 +980,20 @@
     {
       "classification": "personal",
       "columns": {
+        "child_session_id": "metadata",
+        "owner_person_id": "personal",
+        "parent_session_id": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "harness_session_lineage"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "agent_principal_id": "personal",
         "inbox_binding_error": "metadata",
         "parallel_reason": "personal",
