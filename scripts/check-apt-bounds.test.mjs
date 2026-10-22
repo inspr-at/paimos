@@ -297,13 +297,14 @@ test('browser download errors do not trigger an apt mirror retry', async () => {
 // AEON-1652 fix5 risk: fetching in every shard multiplies mirror outages;
 // partial artifacts must fall back before dpkg, never after a failed write.
 test('one complete image bundle installs offline and invalid bundles retain network fallback', async () => {
-  const producer = await run(state => `bash "${script}" bundle "${join(state, 'bundle')}"`, { mode: 'bundle-fetch-retry', mirrorList: 'hosted' })
+  const producer = await run(state => `bash "${script}" bundle "${join(state, 'bundle')}"`, { mode: 'bundle-fetch-retry', mirrorList: 'hosted', elapsed: [0, 0, 260, 0, 260, 0, 0, 0] })
   assert.equal(producer.status, 0, `${producer.error}\n${producer.stdout}\n${producer.stderr}`)
   const bundleDir = join(producer.state, 'bundle')
   const manifest = JSON.parse(readFileSync(join(bundleDir, 'manifest.json'), 'utf8'))
   assert.deepEqual(manifest.packages, ['fish', 'fonts-test', 'libtest', 'zsh'], 'retain installed libraries from the dry-run argument list')
   assert.deepEqual(manifest.image, ['ubuntu24', '20261021.1', 'X64'])
   assert.equal(producer.calls.filter(call => call.includes('--download-only')).length, 3, 'allow several bounded fetch attempts across mirrors')
+  assert.deepEqual(producer.timeouts.filter(timeout => timeout.root === '1').map(timeout => timeout.seconds), [150, 240, 150, 240, 150, 240], 'each fetch attempt has its own cap inside the shared 18-minute budget')
   assert.match(producer.attempts.filter(attempt => attempt.command.includes('--download-only'))[1].sources['ubuntu.sources'], /http:\/\/archive\.ubuntu\.com/)
   assert.ok(producer.attempts.filter(attempt => attempt.command.includes('--download-only')).every(attempt => attempt.root === '1' && attempt.command.includes('--reinstall')))
   for (const [file, original] of Object.entries(producer.sources)) assert.equal(readFileSync(join(producer.sourceRoot, file), 'utf8'), original)

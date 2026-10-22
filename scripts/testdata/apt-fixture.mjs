@@ -168,7 +168,7 @@ if [[ "\$mode" == fetch-fail || "\$mode" == fetch-always-fail || "\$mode" == ins
   exit 0
 fi
 if [[ "\$mode" == always-fail ]]; then echo "Error: Installation process exited with code: 100" >&2; exit 100; fi
-if [[ "\$mode" == ok ]]; then exit 0; fi
+if [[ "\$mode" == ok || "\$mode" == offline-missing ]]; then exit 0; fi
 if [[ "\$mode" == hung && "\$lines" -ge 2 ]]; then exit 0; fi
 # The lock file is the hold. Write it here, before this process can be killed,
 # so an unprivileged SIGKILL leaves it for the next attempt. Only the root
