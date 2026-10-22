@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
-import { effectScope, ref } from 'vue'
+import { effectScope, reactive, ref } from 'vue'
 import * as API from '../src/lib/api'
 import * as Receipts from '../src/lib/crm'
 import * as Toast from '../src/lib/toast'
 import type { Attachment } from '../src/lib/attachments'
 import type { TimeEntry } from '../src/lib/business'
-import { deferred, flush, sourceModule } from './record-source'
+import * as Week from '../src/lib/week'
+import * as Duration from '../src/components/business/duration'
+import { deferred, flush, setupSource, sourceModule } from './record-source'
 
 const Attachments = sourceModule<typeof import('../src/lib/attachments')>('lib/attachments.ts', { './api.ts': API, './crm.ts': Receipts })
 const Business = sourceModule<typeof import('../src/lib/business')>('lib/business.ts', {
@@ -85,10 +87,12 @@ it('AEON-1416: deletion receipts keep exact IDs and refuse missing or ambiguous 
 it('AEON-1416: attachment Undo restores immediately through reloads and rolls back failures', async () => {
   const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
   for (const outcome of ['success', 'failure', 'unconfirmed', 'unknown']) {
+    logged.mockClear()
     const before = { ...attachment(), id: 'before', position: '0' }
     const after = { ...attachment(), id: 'after', position: '2' }
     let listed = [before, attachment(), after]
-    const deletion = deferred<Response>(), undo = deferred<Response>()
+    const deletion = deferred<Response>(), undo = deferred<Response>(), reload = deferred<Response>()
+    let holdReload = false
     const requests: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
       const path = String(input); requests.push(path)
@@ -98,6 +102,7 @@ it('AEON-1416: attachment Undo restores immediately through reloads and rolls ba
         return response
       }
       if (path.endsWith('/undo')) return undo.promise
+      if (holdReload) return reload.promise
       return Response.json({ items: listed })
     }))
     const { model, stop } = setup()
@@ -114,6 +119,7 @@ it('AEON-1416: attachment Undo restores immediately through reloads and rolls ba
     expect(requests.filter(path => path.endsWith('/undo'))).toEqual(['/api/events/10/undo'])
     await model.load() // DELETE finished; /undo is pending and the row is absent on the server.
     expect(model.items.value.map(item => item.id)).toEqual(['before', 'image', 'after'])
+    holdReload = outcome !== 'success'
     if (outcome === 'success') undo.resolve(Response.json({ after: { ...attachment(), caption: 'server restored' } }))
     else if (outcome === 'unconfirmed') undo.resolve(Response.json({ after: { ...attachment('B') } }))
     else if (outcome === 'unknown') undo.reject('internal diagnostic')
@@ -126,6 +132,56 @@ it('AEON-1416: attachment Undo restores immediately through reloads and rolls ba
       expect(Toast.toasts.at(-1)!.tone).toBe('error')
       expect(logged).toHaveBeenCalled()
     }
+    reload.resolve(Response.json({ items: listed })); await flush()
+    stop(); Toast.resetToasts()
+  }
+})
+
+it('AEON-1416: Hours Undo is immediate, keeps its view and uses plain failures or silent DELETE 404', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.stubGlobal('window', { matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), removeEventListener() {} })
+  for (const outcome of ['success', 'failure', 'unconfirmed', 'missing', 'gone', 'conflict', 'stale']) {
+    const deletion = deferred<string | null>(), undo = deferred<TimeEntry | null>(), reload = deferred<[]>()
+    const undoEntryEvent = vi.fn(() => undo.promise)
+    const route = reactive({ query: { week: '2026-09-21', person: 'person' } })
+    const { state, stop } = setupSource('views/business/HoursView.vue', {}, {
+      'vue-router': { useRoute: () => route, useRouter: () => ({ replace() {} }) },
+      '../../lib/api': API,
+      '../../lib/business': { ...Business, deleteEntry: () => deletion.promise, undoEntryEvent, listPeriods: () => reload.promise },
+      '../../lib/commands': { command: ref(null), consume() {} }, '../../lib/toast': Toast,
+      '../../lib/work': {}, '../../lib/week': Week,
+      '../../components/business/duration': Duration, '../../components/business/money': {},
+      '../../stores/business': { useBusiness: () => ({ staff: true, admin: true, principals: [], open: { hours: false } }) },
+      '../../stores/projects': { useProjects: () => ({}) },
+      '../../stores/session': { useSession: () => ({ identity: { principal: { id: 'person' } } }) },
+    })
+    const entry = { id: 'entry', period_id: 'period', principal_id: 'person', node_id: 'A', started_at: '2026-09-22T10:00:00Z', duration_seconds: 3600 } as TimeEntry
+    state.entries.value = [entry]
+    state.remove(entry)
+    expect(state.entries.value).toEqual([])
+    Toast.toasts.at(-1)!.actions[0].run()
+    expect(state.entries.value).toEqual([entry])
+    expect(undoEntryEvent).not.toHaveBeenCalled()
+    if (outcome === 'gone') deletion.reject(new API.APIError(404, 'gone'))
+    else deletion.resolve(outcome === 'missing' ? null : '10')
+    await flush()
+    if (outcome === 'gone') expect(Toast.toasts).toEqual([])
+    else if (outcome !== 'missing') {
+      expect(undoEntryEvent).toHaveBeenCalledExactlyOnceWith('10')
+      expect(state.entries.value).toEqual([entry])
+      if (outcome === 'stale') { route.query.person = 'other'; state.entries.value = []; await flush() }
+      if (outcome === 'failure') undo.reject('internal receipt diagnostic')
+      else if (outcome === 'conflict') undo.reject(new API.APIError(409, 'internal receipt diagnostic'))
+      else undo.resolve({ ...entry, id: outcome === 'unconfirmed' ? 'wrong-entry' : entry.id, note: 'server restored' })
+      await flush()
+    }
+    if (outcome === 'success') expect(state.entries.value[0].note).toBe('server restored')
+    else {
+      expect(state.entries.value).toEqual([])
+      if (!['gone', 'stale'].includes(outcome)) expect(Toast.toasts.at(-1)!.message).toBe(outcome === 'conflict'
+        ? 'The entry could not be restored: its period was approved or it changed meanwhile.' : 'The entry could not be restored.')
+    }
+    reload.resolve([]); await flush()
     stop(); Toast.resetToasts()
   }
 })

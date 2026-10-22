@@ -18138,6 +18138,8 @@
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: Hours Undo is immediate, keeps its view and uses plain failures or silent DELETE 404","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: attachment Undo keeps its own receipt across two deletion cycles","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: attachment Undo restores immediately through reloads and rolls back failures","tier":"ESSENTIAL"}
