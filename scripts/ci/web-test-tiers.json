@@ -24278,6 +24278,50 @@
     ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"the ⋯ menu binds to the record it opened on; Archive is disabled for built-in kinds and Everything else has no Move","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 autopilot settings actions > Undo refuses both a newer settings revision and a different person","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 autopilot settings actions > a rejected settings write preserves the saved limits and never offers Undo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 autopilot settings actions > a response after session expiry cannot replace settings or offer Undo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 autopilot settings actions > validates all day bounds before writing and preserves the server cap after explicit upgrade","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 estimate actions > a late conflict for ticket A cannot close or mark ticket B’s estimate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 estimate actions > a late error for ticket A cannot close or mark ticket B’s estimate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 estimate actions > a late ok for ticket A cannot close or mark ticket B’s estimate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 estimate actions > invalid values never write; a conflict preserves the draft; clearing writes null after explicit retry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 estimate actions > read-only estimates cannot write and parent editing starts from the plan, not the leaf total","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 logbook callbacks > a deep-linked run is pinned once, then deduplicated when Show older reaches it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 logbook callbacks > an older page cannot land after the filter changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 logbook callbacks > an older page cannot land after the person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 logbook callbacks > an older page cannot land after the routine changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 logbook callbacks > failed pagination retains the shown rows and cursor so Retry reads that exact page","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > a failed consent stays resumed, never reports consented or kept paused, and does not retry itself","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > a held resume cannot carry consent across a permission change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > a held resume cannot carry consent across a person change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > a held resume cannot carry consent across a project change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > a held resume cannot carry consent across a record change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > a held resume cannot carry consent across a tenant change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > another owner or an unavailable agent cannot begin either consent write","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > resumes the reviewed record before consenting to the returned revision as the captured agent","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"accepts authoritative relation-blocker readiness, coalesces checks and fences revisions and tenant resets","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"clears tenant state and prevents an old tenant read landing after reset","tier":"ESSENTIAL"}
