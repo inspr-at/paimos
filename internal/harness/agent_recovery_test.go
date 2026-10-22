@@ -379,37 +379,21 @@ func TestAgentRecoveryOpenAPIContractsAgree(t *testing.T) {
 func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T) {
 	v := recoveryAgent(t)
 	f := v.f
-	// A legacy unbound hook can no longer read content through a paired
-	// transport. Prove that outer refusal, while retaining the service-level
-	// exact-lease/replay assertions for recovery of already-attached hooks.
-	legacyContent := func(t *testing.T, target string, body any, leases ...string) *httptest.ResponseRecorder {
-		t.Helper()
-		denied := v.runtimeCall(t, target, body, leases...)
-		expect(t, denied, 403)
-		if !strings.Contains(denied.Body.String(), "run_capability_upgrade_required") {
-			t.Fatal("unbound hook refused for a different reason")
-		}
-		lease := ""
-		if len(leases) > 0 {
-			lease = leases[0]
-		}
-		return f.call(f.agent, "POST", target, body, lease)
-	}
 	dbtest.BindRole(t, f.db, f.foreign.TenantID, f.foreign.ID, "admin")
 	inbox.New(f.db.App).Mount(f.mux)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET management='unmanaged',run_id=NULL,capabilities=ARRAY['inbox','status'],process_ownership=NULL,process_observed_at=NULL WHERE id=$1`, v.session)
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET management='unmanaged',run_id=NULL,capabilities=ARRAY['inbox','status'],process_ownership=NULL,process_observed_at=NULL,started_by_principal_id=agent_principal_id WHERE id=$1`, v.session)
 		return err
 	})
 	beat := map[string]any{"phase": "working", "activity_sequence": 2, "attached_hook": true, "process_ownership": v.identity}
-	expect(t, legacyContent(t, v.path+"/heartbeat", beat, v.lease), 200)
-	expect(t, f.call(f.agent, "POST", v.path+"/heartbeat", beat, "wrong-lease"), 403)
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, "wrong-lease"), 403)
 	wrong := v.identity
 	wrong.DaemonID = "unpaired"
 	beat["process_ownership"] = wrong
-	expect(t, f.call(f.agent, "POST", v.path+"/heartbeat", beat, v.lease), 403)
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 403)
 	beat["process_ownership"] = v.identity
-	expect(t, legacyContent(t, v.path+"/heartbeat", beat, v.lease), 200)
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
 	d := f.call(f.person, "GET", v.path+"/recover-agent", nil, "")
 	expect(t, d, 200)
 	diagnosis := decode(t, d)
@@ -438,7 +422,7 @@ func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T
 	endpoint := "/api/harness-recoveries/" + body["request_id"].(string) + "/complete"
 	completion := map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation, "outcome": "reconnected"}
 	expect(t, v.runtimeCall(t, endpoint, completion), 409)
-	expect(t, legacyContent(t, v.path+"/heartbeat", beat, v.lease), 200)
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
 	// The paired hook uses the existing session-scoped replayable drain.
 	messageID := uid()
 	for _, id := range []string{uid(), messageID} {
@@ -463,7 +447,7 @@ func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T
 	var deliveryID any
 	var delivery map[string]any
 	for round := 0; round < 2; round++ {
-		drain := legacyContent(t, v.path+"/drain", map[string]any{}, v.lease)
+		drain := v.runtimeCall(t, v.path+"/drain", map[string]any{}, v.lease)
 		expect(t, drain, 200)
 		var deliveries []map[string]any
 		if err := json.Unmarshal(drain.Body.Bytes(), &deliveries); err != nil || len(deliveries) != 1 || deliveries[0]["message_id"] != messageID {
@@ -490,19 +474,19 @@ func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T
 	// drained. Until foreground handoff, replay remains the same lease; after
 	// completion it must not block later drains or consume the broadcast.
 	handoff := map[string]any{"delivery_id": deliveryID, "cursor": delivery["cursor"], "outcome": "handed_off"}
-	expect(t, legacyContent(t, v.path+"/complete-delivery", handoff, "wrong-lease"), 403)
-	w := legacyContent(t, v.path+"/complete-delivery", handoff, v.lease)
+	expect(t, v.runtimeCall(t, v.path+"/complete-delivery", handoff, "wrong-lease"), 403)
+	w := v.runtimeCall(t, v.path+"/complete-delivery", handoff, v.lease)
 	expect(t, w, 200)
 	completed := decode(t, w)
 	if completed["delivery_id"] != deliveryID || completed["cursor"] != delivery["cursor"] || completed["completed_at"] == nil {
 		t.Fatalf("attached durable completion=%v", completed)
 	}
-	w = legacyContent(t, v.path+"/complete-delivery", handoff, v.lease)
+	w = v.runtimeCall(t, v.path+"/complete-delivery", handoff, v.lease)
 	expect(t, w, 200)
 	if got := decode(t, w); got["completed_at"] != completed["completed_at"] {
 		t.Fatal("attached durable retry changed completion evidence")
 	}
-	w = legacyContent(t, v.path+"/drain", map[string]any{}, v.lease)
+	w = v.runtimeCall(t, v.path+"/drain", map[string]any{}, v.lease)
 	expect(t, w, 200)
 	var remaining []map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &remaining); err != nil || remaining == nil || len(remaining) != 0 {

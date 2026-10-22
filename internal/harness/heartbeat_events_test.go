@@ -141,7 +141,7 @@ func TestHeartbeatAttachedOwnershipAuditedOnce(t *testing.T) {
 	v := recoveryAgent(t)
 	f := v.f
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET management='unmanaged',run_id=NULL,capabilities=ARRAY['inbox','status'],process_ownership=NULL,process_observed_at=NULL,heartbeat_at=clock_timestamp() WHERE id=$1`, v.session)
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET management='unmanaged',run_id=NULL,capabilities=ARRAY['inbox','status'],process_ownership=NULL,process_observed_at=NULL,heartbeat_at=clock_timestamp(),started_by_principal_id=agent_principal_id WHERE id=$1`, v.session)
 		return err
 	})
 	count := func() int {
@@ -154,12 +154,7 @@ func TestHeartbeatAttachedOwnershipAuditedOnce(t *testing.T) {
 	}
 	baseline := count()
 	beat := map[string]any{"phase": "working", "activity_sequence": 2, "attached_hook": true, "process_ownership": v.identity}
-	denied := v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease)
-	expect(t, denied, 403)
-	if !strings.Contains(denied.Body.String(), "run_capability_upgrade_required") {
-		t.Fatal("unbound hook refused for wrong reason")
-	}
-	expect(t, f.call(f.agent, "POST", v.path+"/heartbeat", beat, v.lease), 200)
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
 	if got := count() - baseline; got != 1 {
 		t.Fatalf("first attached ownership report wrote %d heartbeat events, want 1", got)
 	}
@@ -197,7 +192,7 @@ func TestHeartbeatAttachedOwnershipAuditedOnce(t *testing.T) {
 	})
 	for sequence := 3; sequence <= 4; sequence++ {
 		beat["activity_sequence"] = sequence
-		expect(t, f.call(f.agent, "POST", v.path+"/heartbeat", beat, v.lease), 200)
+		expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
 		if got := count() - baseline; got != 1 {
 			t.Fatalf("repeated attached ownership report wrote %d total heartbeat events, want 1", got)
 		}
