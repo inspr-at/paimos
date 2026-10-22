@@ -15212,6 +15212,8 @@
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"layout shift audit arms after navigation and resets startup movement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"layout shift audit filters delayed entries by start time without rounding away small shifts","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"overlap rule ignores a card action and modal background but keeps peer collisions","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"partially visible controls wait until they can be assessed after scrolling","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
