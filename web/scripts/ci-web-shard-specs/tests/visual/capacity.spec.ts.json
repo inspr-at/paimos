@@ -1,0 +1,9 @@
+{
+  "group": "remaining-ui",
+  "spec": {
+    "file": "tests/visual/capacity.spec.ts",
+    "listedTests": 4,
+    "weightSeconds": 40,
+    "weightSource": "AEON-1674-initial-estimate"
+  }
+}

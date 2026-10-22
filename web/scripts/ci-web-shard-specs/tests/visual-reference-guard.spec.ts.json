@@ -1,0 +1,9 @@
+{
+  "group": "remaining-ui",
+  "spec": {
+    "file": "tests/visual-reference-guard.spec.ts",
+    "listedTests": 1,
+    "weightSeconds": 10,
+    "weightSource": "AEON-1674-initial-estimate"
+  }
+}

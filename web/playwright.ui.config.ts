@@ -14,6 +14,11 @@ export default defineConfig({
   testMatch: '**/*.spec.ts',
   // The performance config builds this head before applying cold-load throttling.
   testIgnore: '**/performance.spec.ts',
+  // References are materialized from the reviewed, digest-pinned attachment.
+  // Neither references nor captures belong in Git, and a missing reference
+  // must never be generated from the page being checked.
+  snapshotPathTemplate: '{testDir}/../test-results/visual-references/{testFilePath}/{arg}{ext}',
+  updateSnapshots: 'none',
   ...browserPolicy(process.env, 4, true),
   // AEON-410's one-worker shards must override policy after the spread.
   ...uiShardPolicy(process.env),
