@@ -115,7 +115,8 @@ test('AEON-1360 cross-project children nest with their own work and survive thei
     await stable.check(async () => {
       counts.cross_project = [{ project_key: 'AEON', current: 1, all: 1 }]
       await signal(page, 'harness.registered')
-      await expect(parent.locator('.l2t')).toContainText('2 workers · includes 1 from AEON')
+      await expect(parent.locator('.l2t')).toContainText('2 workers')
+      await expect(parent.locator('.l2t')).toContainText('includes 1 from AEON')
       await expect(fold).toHaveAccessibleName(/2 workers, 1 working · includes 1 from AEON/)
     })
     const after = await Promise.all(Object.values(controls).map(control => control.boundingBox()))
