@@ -10,6 +10,30 @@ const rows = (page: Page) => page.locator('tr.ticket-row:not(.ghost)')
 const puts = (calls: Call[], key: string) => calls.filter(c => c.method === 'PUT' && c.path === `/api/preferences/${key}`)
 const patches = (calls: Call[]) => calls.filter(c => c.method === 'PATCH' && c.path.startsWith('/api/nodes/'))
 
+test('P02 a wide table accepts native column drag and keyboard resize and restores the stored width', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  const data = fixtures(), calls = await mockWork(page, data)
+  await page.goto('/p/PHAROS')
+  await expect(rows(page)).toHaveCount(5)
+  const status = page.locator('thead th.c-status'), handle = page.getByRole('separator', { name: 'Resize Status column' })
+  const before = (await status.boundingBox())!.width, hit = (await handle.boundingBox())!
+  await page.mouse.move(hit.x + hit.width / 2, hit.y + hit.height / 2)
+  await page.mouse.down(); await page.mouse.move(hit.x + 60, hit.y + hit.height / 2, { steps: 4 }); await page.mouse.up()
+  await expect.poll(async () => (await status.boundingBox())!.width).toBeGreaterThan(before + 50)
+  await handle.focus()
+  const dragged = (await status.boundingBox())!.width
+  await handle.press('ArrowRight')
+  await expect.poll(async () => Math.abs((await status.boundingBox())!.width - dragged - 16)).toBeLessThanOrEqual(.5)
+  const stored = (await status.boundingBox())!.width
+  await expect.poll(() => Math.abs(Number((data.preferences['list:p-pharos']?.widths as Record<string, number> | undefined)?.status) - stored)).toBeLessThanOrEqual(.5)
+  expect(puts(calls, 'list:p-pharos').length).toBeGreaterThan(0)
+  await page.reload()
+  await expect(rows(page)).toHaveCount(5)
+  await expect.poll(async () => Math.abs((await status.boundingBox())!.width - stored)).toBeLessThanOrEqual(.5)
+  await handle.dblclick()
+  await expect.poll(async () => (await status.boundingBox())!.width).toBeLessThan(before + 10)
+})
+
 test.describe('wide lists', () => {
   test('columns grow with the width: Parent, Release, Tags and Created join from about 1800px', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })

@@ -76,8 +76,14 @@ export function domAudit(): Raw[] {
   const elements = [...document.querySelectorAll<HTMLElement>('body *')].filter(shown)
   for (const el of elements) {
     const style = getComputedStyle(el), rect = el.getBoundingClientRect()
-    let scrollContainer = el.parentElement
-    while (scrollContainer && !/auto|scroll|hidden|clip/.test(getComputedStyle(scrollContainer).overflowX)) scrollContainer = scrollContainer.parentElement
+    // A fixed/top-layer panel is not clipped by the page that opened it.
+    // Still inspect its own scrolling body: oversized children inside that
+    // body remain real overflow, unlike the modal's narrow page ancestor.
+    let scrollContainer = getComputedStyle(el).position === 'fixed' || el.matches(':modal') ? null : el.parentElement
+    while (scrollContainer && !/auto|scroll|hidden|clip/.test(getComputedStyle(scrollContainer).overflowX)) {
+      if (getComputedStyle(scrollContainer).position === 'fixed' || scrollContainer.matches(':modal')) { scrollContainer = null; break }
+      scrollContainer = scrollContainer.parentElement
+    }
     if (scrollContainer && !el.closest('svg')) {
       const pr = scrollContainer.getBoundingClientRect()
       if (rect.width > pr.width + 2 && rect.left < pr.right - 1 && rect.right > pr.right + 2)

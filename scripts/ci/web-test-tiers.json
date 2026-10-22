@@ -8020,6 +8020,8 @@
     ,
     {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 390px light › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"P02 real phone hold reveals text, scrolling cancels a pending hold and the next tap still activates","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px dark › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px dark › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8241,6 +8243,12 @@
     {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"768px light › lifecycle: keyboard disclosure follows unclipped without refocus","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"768px light › ticket titles keep the existing two-line phone layout and reveal full desktop names","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"P02 a clipped ticket name exposes its full text and keyboard opens that exact record","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"P02 a disclosed reused anchor follows changed text and dismisses when the record disappears","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"P02 keyboard disclosure follows scrolling, reads overflow and restores the same picker option on Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/coarse-hit-area.spec.ts","name":"1024px coarse pointer › shared controls extend to a 44px hit area","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10070,6 +10078,8 @@
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"screenshots › ticket-header-business 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/headings.spec.ts","name":"P02 keyboard and touch read the full heading in a short viewport without moving its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/headings.spec.ts","name":"Rules Preview refreshes a keyboard-focused identity after clipping (dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/headings.spec.ts","name":"Rules Preview refreshes a keyboard-focused identity after clipping (light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11592,6 +11602,10 @@
     ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"Business tabs: a closed Customers or Quotes says how to open it; earlier links lead there","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/nav.spec.ts","name":"P02 account menu keyboard focus returns through a route and browser Back","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/nav.spec.ts","name":"P02 keyboard places navigate outside fields and preserve text-field shortcuts","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"at 390 the ticket fits: previous and next fold into More, chips and screens wrap","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"axe: header places and the business tabs in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11851,6 +11865,14 @@
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk native choices, reason and failure stay still 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk native choices, reason and failure stay still 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"P02 desktop top actions stay anchored while content grows and scrolls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"P02 floating search and selectors keep positive geometry through loading, empty and returned results","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"P02 phone choices and pinned actions retain geometry and focus across a memo series","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"P02 physical switch geometry and the stability guard reject displaced, collapsed and overflowing controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"confirmation content grows away from its controls at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -13444,6 +13466,12 @@
     ,
     {"kind":"browser","file":"tests/resilient-polling.spec.ts","name":"Live Agents pauses in a hidden tab and refreshes when shown and back online","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"P02 a refused role change preserves authority and stationary choices until a successful retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"P02 native radio arrows and Enter apply the chosen role while keyboard Cancel writes nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"P02 phone long role choices scroll inside a pinned sheet with real reachable hit targets","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"a description distinguishes duplicate role names when it is present in the payload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"a rejected role change and another choice keep actions still at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14340,6 +14368,10 @@
     ,
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"sign-out confirmation names its scope and a failed write keeps the reviewed account open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"P02 a Settings dock becomes an isolated phone sheet with pinned series actions and focus return","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"P02 failed Settings submits preserve the field, platform shortcut and two-step Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"Settings primary actions have no glow and retain keyboard focus in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"Settings primary actions have no glow and retain keyboard focus in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -14451,6 +14483,12 @@
     {"kind":"browser","file":"tests/shell.spec.ts","name":"404 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/shell.spec.ts","name":"OIDC sign-in resumes the saved path after the full-page callback","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"P02 OIDC callback restores the protected return path and workspace title","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"P02 a failed route chunk offers an honest reload of its intended destination","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"P02 session expiry refuses protected navigation and resumes after sign-in","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/shell.spec.ts","name":"a raw api 401 also leaves a public route in place until protected navigation","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14818,6 +14856,8 @@
     ,
     {"kind":"browser","file":"tests/tap-targets.spec.ts","name":"768px fine light compact › ticket and tier controls keep their visuals, reach and position","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/tenant-brand.spec.ts","name":"P02 an admin uploads a bounded sanitized logo and reloads the saved workspace brand","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/tenant-brand.spec.ts","name":"SVG upload names non-drawing removals in de-AT","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/tenant-brand.spec.ts","name":"SVG upload names non-drawing removals in en-GB","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -14876,6 +14916,10 @@
     ,
     {"kind":"browser","file":"tests/theme-agents.spec.ts","name":"visible screenshots and Personal agent behaviour controls stay stable in all viewport modes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"P02 live OS mode changes retain the selected theme colours","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"P02 saved theme restoration blocks the first app paint until confirmed colours arrive","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"a reload waits for the saved colours before rendering the app","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"extreme saved accents keep personal appearance links readable in both modes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -14909,6 +14953,10 @@
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Load more is disabled while the current theme is unavailable and works again after Reload (390 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"New theme duplicates the default even on a later list page; managers may edit it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"P02 a staged theme edit saves once, preserves independent fields and survives reload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"P02 a theme conflict retains the unsaved draft and needs a deliberate choice after reload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1024 dark: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15244,6 +15292,8 @@
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"a sideways strip is assessed as it stands; a control under a vertical scroller’s edge waits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"a top-layer modal escapes its page clipping while its own scroller still rejects oversized children","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"known fixture responses and decorative labelled versions are filtered precisely","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"layout shift audit arms after navigation and resets startup movement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -15575,6 +15625,8 @@
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"start-time typing keeps the cost unit and controls stable (390, light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"timing failures keep typed values and controls anchored, and save again on blur","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/wide.spec.ts","name":"P02 a wide table accepts native column drag and keyboard resize and restores the stored width","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/wide.spec.ts","name":"back trail › following links inside the panel builds a trail with Back and Alt+Left; list moves clear it","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,

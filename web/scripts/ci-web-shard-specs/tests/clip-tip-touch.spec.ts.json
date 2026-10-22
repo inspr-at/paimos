@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/clip-tip-touch.spec.ts",
-    "listedTests": 39,
+    "listedTests": 40,
     "tierTiming": {
       "caseSeconds": {
         "max": 25.719,

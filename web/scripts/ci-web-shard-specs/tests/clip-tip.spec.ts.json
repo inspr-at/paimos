@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/clip-tip.spec.ts",
-    "listedTests": 72,
+    "listedTests": 75,
     "tierTiming": {
       "caseSeconds": {
         "max": 9.938,

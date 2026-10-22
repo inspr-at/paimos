@@ -31,7 +31,9 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
       hasTouch: checkpoint.profile === 'phone', locale: 'en-GB', timezoneId: 'Europe/Vienna' })
     const page = await context.newPage()
     const errors: string[] = []
-    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+    const responses: { path: string; status: number }[] = []
+    page.on('response', response => { if (response.status() >= 400) responses.push({ path: new URL(response.url()).pathname, status: response.status() }) })
+    page.on('console', message => { if (message.type() === 'error') errors.push(`${message.text()} ${message.location().url}`) })
     page.on('pageerror', error => errors.push(error.message))
     // All relative fixtures and the application use this one clock. Timers
     // continue normally so readiness never depends on a frozen animation frame.
@@ -51,7 +53,7 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
       const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
       const violations = axe.violations.map(row => ({ id: row.id, impact: row.impact, nodes: row.nodes.map(node => node.target) }))
       writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify({ id: checkpoint.id, fixture: checkpoint.fixture,
-        viewport, theme: checkpoint.theme, layout, axe: violations, console: errors }, null, 2))
+        viewport, theme: checkpoint.theme, layout, axe: violations, console: errors, responses }, null, 2))
       expect(errors, 'unexpected console/page failure').toEqual([])
       expect(layout, 'unexpected clipping, overlap or overflow').toEqual([])
       expect(violations, 'WCAG A/AA violations').toEqual([])
@@ -59,7 +61,7 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
       await expect(page).toHaveScreenshot(`${checkpoint.id}.png`, { fullPage: false, animations: 'disabled', caret: 'hide', threshold: .2, maxDiffPixels: 0 })
     } catch (error) {
       await page.screenshot({ path: info.outputPath(`failed-${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }).catch(() => {})
-      writeFileSync(info.outputPath(`failed-${checkpoint.id}.md`), `${checkpoint.id}: ${String(error)}\n`)
+      writeFileSync(info.outputPath(`failed-${checkpoint.id}.md`), `${checkpoint.id}: ${String(error)}\n${JSON.stringify({ console: errors, responses }, null, 2)}\n`)
       throw error
     } finally { await context.close() }
 }

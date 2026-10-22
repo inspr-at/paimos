@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/no-shift.spec.ts",
-    "listedTests": 20,
+    "listedTests": 24,
     "tierTiming": {
       "caseSeconds": {
         "max": 5.794,

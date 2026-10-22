@@ -11,6 +11,62 @@ const writes = (page: Page) => page.getByLabel('Writes')
 const pane = (page: Page) => page.getByRole('dialog', { name: /^(Arbeitscomputer mit ausführlichem Namen|Computer 2)$/ })
 async function noOverflow(page: Page) { expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1) }
 
+test('P02 a Settings dock becomes an isolated phone sheet with pinned series actions and focus return', async ({ page }) => {
+  await open(page, 1440, true)
+  const row = page.locator('[data-row="1"]')
+  const nav = page.getByRole('button', { name: 'Accounts and computers', exact: true })
+  const before = { row: await row.boundingBox(), nav: await nav.boundingBox() }
+  await row.click()
+  await expect(page.locator('.settings-frame')).toHaveClass(/mode-dock/)
+  await expect(pane(page).getByRole('heading')).toBeFocused()
+  expect(await row.boundingBox()).toEqual(before.row)
+  await expect(page.locator('.dock-content')).toHaveJSProperty('inert', false)
+  await expectStableControls({ controls: { close: page.getByRole('button', { name: 'Close details' }), next: page.getByRole('button', { name: 'Next computer' }), apply: page.getByRole('button', { name: 'Apply capacity' }), clickedRow: row },
+    scrollAreas: { body: pane(page).locator('.pane-body') }, interactions: [{ name: 'long dock content', run: async () => {
+      await page.getByRole('button', { name: 'Toggle content' }).evaluate(el => (el as HTMLButtonElement).click())
+      await expect(pane(page).locator('.pane-body p')).toHaveCount(60)
+    } }] })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.locator('.settings-frame')).toHaveClass(/mode-sheet/)
+  await expect(page.locator('.dock-content')).toHaveJSProperty('inert', true)
+  const close = page.getByRole('button', { name: 'Close details' }), next = page.getByRole('button', { name: 'Next computer' }), apply = page.getByRole('button', { name: 'Apply capacity' })
+  await expectStableControls({ controls: { frame: pane(page), close, next, apply }, scrollAreas: { body: pane(page).locator('.pane-body') }, interactions: [
+    { name: 'scroll the sheet body', run: () => pane(page).locator('.pane-body').evaluate(el => { el.scrollTop = 200 }) },
+    { name: 'next computer retains the same action and focus', run: async () => { await next.click(); await expect(next).toBeFocused(); await expect(pane(page).locator('.pane-body p')).toHaveCount(2) } },
+  ] })
+  const input = pane(page).getByRole('textbox')
+  await input.focus(); await input.press('Escape')
+  await expect(pane(page)).toBeVisible(); await expect(pane(page).getByRole('heading')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(pane(page)).toHaveCount(0); await expect(row).toBeFocused()
+  await expect(page.locator('.dock-content')).toHaveJSProperty('inert', false)
+  await noOverflow(page)
+})
+
+test('P02 failed Settings submits preserve the field, platform shortcut and two-step Escape', async ({ page }) => {
+  await open(page, 1440)
+  const trigger = page.getByRole('button', { name: 'Change quota' })
+  await trigger.click()
+  const form = page.getByRole('dialog', { name: 'Quota warnings' }), input = form.getByRole('textbox')
+  const save = form.getByRole('button', { name: /^Save/ })
+  await input.fill('fail')
+  await expectStableControls({ controls: { trigger, save, cancel: form.getByRole('button', { name: 'Cancel' }), input }, interactions: [{ name: 'refused submit', run: async () => {
+    await save.click(); await expect(form).toContainText('Could not save. Try again.'); await expect(input).toHaveValue('fail')
+  } }] })
+  await expect(writes(page)).toHaveText('0')
+  const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
+  await input.fill('20'); await input.press('Enter')
+  await expect(writes(page)).toHaveText('0')
+  await input.press(mac ? 'Control+Enter' : 'Meta+Enter')
+  await expect(writes(page)).toHaveText('0')
+  await input.press(mac ? 'Meta+Enter' : 'Control+Enter')
+  await expect(writes(page)).toHaveText('1'); await expect(trigger).toBeFocused()
+  await trigger.click(); await input.focus(); await input.press('Escape')
+  await expect(form).toBeVisible(); await expect(input).not.toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(form).toHaveCount(0); await expect(trigger).toBeFocused()
+})
+
 test('needs-you counts problems, keeps calm kinds and uses the container for narrow actions', async ({ page }) => {
   await open(page)
   await expect(page.locator('.att-row.calm')).toHaveText(/No missed releases/)

@@ -52,6 +52,87 @@ async function insidePanel(control: Locator, panel: Locator, page: Page) {
   expect(box.y + box.height).toBeLessThanOrEqual(frame.y + frame.height + .5)
 }
 
+test('P02 native radio arrows and Enter apply the chosen role while keyboard Cancel writes nothing', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { world, picker, subject } = await openRoles(page, 0)
+  const member = picker.getByRole('radio', { name: /^Member/ }), admin = picker.getByRole('radio', { name: /^Admin/ })
+  await expect(member).toBeFocused()
+  await member.press('ArrowUp')
+  await expect(admin).toBeFocused(); await expect(admin).toHaveAttribute('aria-checked', 'true')
+  await admin.press('Enter')
+  await expect(picker).toHaveCount(0)
+  expect(world.calls.filter(call => call.method === 'PUT' && call.path.endsWith('/workspace-role')).map(call => call.body)).toEqual([{ role_id: 'role-admin' }])
+  const trigger = page.getByRole('button', { name: `Role of ${subject}: Admin. Change`, exact: true })
+  await expect(trigger).toBeFocused()
+  await trigger.press('Enter')
+  await expect(admin).toBeFocused()
+  await admin.press('ArrowDown'); await expect(member).toBeFocused()
+  await member.press('Tab'); await expect(picker.getByRole('region', { name: 'What changes' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  const cancel = picker.getByRole('button', { name: 'Cancel', exact: true })
+  await expect(cancel).toBeFocused(); await cancel.press('Space')
+  await expect(picker).toHaveCount(0); await expect(trigger).toBeFocused()
+  expect(world.calls.filter(call => call.method === 'PUT' && call.path.endsWith('/workspace-role'))).toHaveLength(1)
+  expect(world.agents.find(agent => agent.principal_id === COORDINATOR)!.workspace_role).toBe('role-admin')
+})
+
+test('P02 phone long role choices scroll inside a pinned sheet with real reachable hit targets', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, reducedMotion: 'reduce' })
+  const page = await context.newPage()
+  try {
+    const { world, picker } = await openRoles(page, 30, true)
+    const body = picker.locator('.picker-body'), options = picker.getByRole('radiogroup'), rows = options.getByRole('radio')
+    const apply = picker.locator('.actions .primary'), cancel = picker.getByRole('button', { name: 'Cancel', exact: true })
+    const frame = (await picker.boundingBox())!
+    expect(frame.width).toBe(390); expect(frame.height).toBe(844)
+    expect(await body.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(32)
+    expect(await options.evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1)
+    expect(new Set(await rows.evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height)))).toEqual(new Set([76]))
+    const admin = options.getByRole('radio', { name: /^Admin/ })
+    await expectStableControls({ controls: { frame: picker, selectors: options, clickedRow: admin, apply, cancel, actions: picker.locator('.actions') },
+      scrollAreas: { picker, body }, interactions: [
+        { name: 'tap the long role', run: async () => { await admin.tap(); await expect(admin).toHaveAttribute('aria-checked', 'true') } },
+        { name: 'scroll through the same selector group', run: async () => { await rows.last().scrollIntoViewIfNeeded() } },
+      ] })
+    const last = rows.last()
+    await expectStableControls({ controls: { frame: picker, selectors: options, clickedRow: last, apply, cancel }, scrollAreas: { body },
+      interactions: [{ name: 'tap the last long choice', run: async () => { await last.tap(); await expect(last).toHaveAttribute('aria-checked', 'true') } }] })
+    for (const control of [last, apply, cancel]) {
+      await insidePanel(control, picker, page)
+      const box = (await control.boundingBox())!
+      expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44)
+      expect(await control.evaluate(el => { const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) })).toBe(true)
+    }
+    await cancel.tap()
+    expect(world.calls.filter(call => call.method === 'PUT' && call.path.endsWith('/workspace-role'))).toEqual([])
+  } finally { await context.close() }
+})
+
+test('P02 a refused role change preserves authority and stationary choices until a successful retry', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { world, picker, subject } = await openRoles(page, 0, true)
+  let refused = true
+  const requests: unknown[] = []
+  await page.route(`**/api/members/${COORDINATOR}/workspace-role`, route => {
+    requests.push(route.request().postDataJSON())
+    return refused ? route.fulfill({ status: 403, json: { error: 'forbidden', reason: 'Role assignment refused: access changed.' } }) : route.fallback()
+  })
+  const options = picker.getByRole('radiogroup'), admin = options.getByRole('radio', { name: /^Admin/ }), member = options.getByRole('radio', { name: /^Member/ })
+  const apply = picker.locator('.actions .primary')
+  await expectStableControls({ controls: { options, clickedRow: admin, member, preview: picker.getByRole('region', { name: 'What changes' }), apply, cancel: picker.getByRole('button', { name: 'Cancel', exact: true }) },
+    scrollAreas: { body: picker.locator('.picker-body') }, interactions: [
+      { name: 'choose Admin', run: async () => { await admin.click(); await expect(admin).toHaveAttribute('aria-checked', 'true') } },
+      { name: 'refused write', run: async () => { await apply.click(); await expect(picker.getByRole('alert')).toContainText('Role assignment refused: access changed.'); expect(world.agents.find(agent => agent.principal_id === COORDINATOR)!.workspace_role).toBe('role-member') } },
+      { name: 'another choice clears the refusal', run: async () => { await member.click(); await expect(picker.getByRole('alert')).toHaveCount(0) } },
+      { name: 'deliberately choose Admin again', run: async () => { await admin.click(); await expect(apply).toBeEnabled() } },
+    ] })
+  refused = false
+  await apply.click(); await expect(picker).toHaveCount(0)
+  expect(requests).toEqual([{ role_id: 'role-admin' }, { role_id: 'role-admin' }])
+  expect(world.agents.find(agent => agent.principal_id === COORDINATOR)!.workspace_role).toBe('role-admin')
+  await expect(page.getByRole('button', { name: `Role of ${subject}: Admin. Change`, exact: true })).toBeFocused()
+})
+
 for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024, 390]) {
   test(`role choices use the screen and stay still at ${width} ${theme}`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: theme })

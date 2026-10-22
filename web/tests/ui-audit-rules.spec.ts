@@ -79,6 +79,17 @@ test('partially visible controls wait until they can be assessed after scrolling
   expect((await page.evaluate(domAudit)).filter(f => f.kind === 'small-touch-target')).toEqual([])
 })
 
+test('a top-layer modal escapes its page clipping while its own scroller still rejects oversized children', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.setContent('<style>body{margin:0}main{width:300px;overflow:hidden}dialog{width:800px;max-width:none}#body{width:600px;overflow:auto}#content{width:400px;height:60px}</style><main><dialog><div id="body"><div id="content">A deliberately bounded modal body</div></div></dialog></main>')
+  await page.locator('dialog').evaluate(el => (el as HTMLDialogElement).showModal())
+  expect((await page.evaluate(domAudit)).filter(row => row.kind === 'horizontal-overflow')).toEqual([])
+  await page.locator('#content').evaluate(el => { el.style.width = '900px' })
+  const errors = (await page.evaluate(domAudit)).filter(row => row.kind === 'horizontal-overflow')
+  expect(errors).toHaveLength(1)
+  expect(errors[0]!.selector).toBe('#content')
+})
+
 test('known fixture responses and decorative labelled versions are filtered precisely', () => {
   expect(expectedMockConsole('sign in', 'Failed to load resource: the server responded with a status of 401 (Unauthorized) http://127.0.0.1:5175/api/me')).toBe(true)
   expect(expectedMockConsole('projects', 'Failed to load resource: the server responded with a status of 404 (Not Found) http://127.0.0.1:5175/api/me')).toBe(false)

@@ -9,6 +9,48 @@ import { businessData, mockBusiness, NOW, type BusinessMockOptions } from './bus
 import { mockSettings, settingsData } from './settings-fixtures'
 import { expectStableControls } from './helpers/stable'
 
+test('P02 keyboard places navigate outside fields and preserve text-field shortcuts', async ({ page }) => {
+  await setup(page)
+  await page.goto('/')
+  await page.locator('main').focus()
+  await page.keyboard.press('g'); await page.keyboard.press('a')
+  await expect(page).toHaveURL('/agents')
+  await expect(places(page).getByRole('link', { name: 'Agents', exact: true })).toHaveAttribute('aria-current', 'page')
+  await page.keyboard.press('g'); await page.keyboard.press('p')
+  await expect(page).toHaveURL('/')
+  const search = page.getByRole('searchbox').first()
+  await search.focus(); await page.keyboard.type('ga')
+  await expect(search).toHaveValue('ga')
+  await expect(page).toHaveURL(/\/(?:\?q=ga)?$/)
+  const mod = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? 'Meta' : 'Control')
+  await search.press(`${mod}+a`); await search.press('Backspace')
+  await expect(search).toHaveValue('')
+})
+
+test('P02 account menu keyboard focus returns through a route and browser Back', async ({ page }) => {
+  await setup(page)
+  await page.goto('/')
+  const account = page.getByRole('button', { name: /^Account for / })
+  await account.focus(); await page.keyboard.press('Enter')
+  const menu = page.getByRole('menu', { name: 'Account', exact: true })
+  await expect(menu.getByRole('menuitem', { name: 'Personal settings', exact: true })).toBeFocused()
+  await page.keyboard.press('End')
+  await expect(menu.getByRole('menuitem').last()).toBeFocused()
+  await page.keyboard.press('Home')
+  await expect(menu.getByRole('menuitem', { name: 'Personal settings', exact: true })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(account).toBeFocused()
+  await page.keyboard.press('Enter'); await page.keyboard.press('Enter')
+  await expect(page).toHaveURL('/settings/personal')
+  await expect(page.getByRole('heading', { name: 'Personal', exact: true })).toBeVisible()
+  await page.goBack()
+  await expect(page).toHaveURL('/')
+  await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible()
+  await account.focus(); await page.keyboard.press('Enter'); await page.keyboard.press('Escape')
+  await expect(account).toBeFocused()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+})
+
 const places = (page: Page) => page.getByRole('navigation', { name: 'Places' })
 const crumbs = (page: Page) => page.getByRole('navigation', { name: 'Breadcrumb' })
 async function setup(page: Page, options: BusinessMockOptions = {}) {

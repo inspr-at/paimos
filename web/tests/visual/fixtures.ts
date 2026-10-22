@@ -14,7 +14,7 @@ import { mockModels } from '../models-simple-fixtures'
 import { openModelsSettings } from '../models-settings-page'
 import { deliveryMetrics, mockDelivery } from '../delivery-numbers-fixtures'
 import { mockFlow } from '../delivery-flow-fixtures'
-import { ACCOUNTS, capacityWorld, NOW as CAPACITY_NOW } from '../capacity-fixtures'
+import { capacityWorld, NOW as CAPACITY_NOW } from '../capacity-fixtures'
 import { mockDailyPlan } from '../agents-daily-fixtures'
 import { mockStartAgent } from '../start-agent-fixtures'
 import type { VisualSetup, Theme } from './checkpoint'
@@ -68,7 +68,7 @@ export const agents: VisualSetup = async (page, _profile, theme) => {
   await mockAgents(page, data)
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible()
-  await expect(page.locator('.session-row').first()).toBeVisible()
+  await expect(page.locator('.sessions [data-row]').first()).toBeVisible()
 }
 
 export const sessionChat: VisualSetup = async (page, _profile, theme) => {
@@ -88,7 +88,8 @@ export const sessionChat: VisualSetup = async (page, _profile, theme) => {
 }
 
 export const decisionDesk: VisualSetup = async (page, _profile, theme) => {
-  await mockDecisionDesk(page, { theme, long: true })
+  const world = await mockDecisionDesk(page, { theme, long: true })
+  world.approval.expires_at = new Date(NOW + 3_600_000).toISOString()
   await page.goto('/agents?needs=a:approval-1')
   await expect(page.getByTestId('desk-decide')).toBeDisabled()
   await expect(page.getByTestId('desk-choices')).toBeVisible()
