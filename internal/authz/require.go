@@ -376,9 +376,10 @@ func readGrants(ctx context.Context, tx pgx.Tx, p tenant.Principal) (grants, err
 		return g, err
 	}
 	// Full-access keys may schedule work wherever their role permits writing.
+	// Keyless background identities still need explicit recurrence grants.
 	// Derive this before creator/person intersections so every ceiling still
 	// applies, and keep workspace and project grants separate for list queries.
-	if p.Kind == tenant.Agent && p.FullAccess {
+	if p.Kind == tenant.Agent && p.FullAccess && p.KeyID != "" {
 		if contains(g.workspace, "nodes.write") {
 			g.workspace = append(g.workspace, "recurrences.manage")
 		}
