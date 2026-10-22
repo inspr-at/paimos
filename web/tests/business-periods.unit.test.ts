@@ -127,6 +127,20 @@ it('AEON-1417: 200 units use at most six rate reads and a rejected unit remains 
   expect(store.costUnitsError).toBe('')
   expect(store.costUnit('cu-0')?.ratesError).toBeUndefined()
   expect(store.rateOn('cu-0', 'hour', 'EUR', '2026-10-21')?.bill_amount).toBe('90')
+
+  const hours = setupSource('components/business/LogTimeBar.vue', {
+    days: [new Date('2026-10-21T09:00:00Z')], suggestions: [], busy: false,
+    preset: { id: 'ticket', key: 'AEON-1417', title: 'Picker hiccups' },
+  }, {
+    '../../lib/api': {}, '../../lib/recents': { recents: [] }, '../../lib/week': week,
+    './duration': duration, './money': money, '../../stores/business': { useBusiness: () => store },
+  })
+  expect(hours.state.costUnitId.value).toBe('')
+  expect(hours.state.problem.value).toBe('Choose a cost unit.')
+  // Select while rates are available, as in the browser: a later refresh can fail.
+  hours.state.costUnitId.value = 'cu-0'
+  hours.state.duration.value = '1h'
+  expect(hours.state.problem.value).toBe('')
   const refresh = deferred<import('../src/lib/business').CostRate[]>()
   rates.mockImplementation(id => id === 'cu-0' ? refresh.promise : Promise.resolve([hourlyRate(id)]))
   const refreshing = store.loadCostUnits(true)
@@ -136,6 +150,7 @@ it('AEON-1417: 200 units use at most six rate reads and a rejected unit remains 
   expect(store.costUnit('cu-0')?.ratesError).toBeUndefined()
   expect(store.costUnitsError).toBe('')
   expect(store.rateOn('cu-0', 'hour', 'EUR', '2026-10-21')?.bill_amount).toBe('90')
+  expect(hours.state.problem.value).toBe('')
   refresh.reject(new Error('refresh failed'))
   await refreshing
   expect(store.costUnit('cu-0')?.rates).toEqual([])
@@ -143,15 +158,13 @@ it('AEON-1417: 200 units use at most six rate reads and a rejected unit remains 
   expect(store.usable('hour', 'EUR', '2026-10-21').map(unit => unit.node.id)).toContain('cu-0')
   expect(store.rateOn('cu-1', 'hour', 'EUR', '2026-10-21')?.bill_amount).toBe('90')
 
-  // The Hours field reports settled failures even before a cost unit is chosen.
-  const hours = setupSource('components/business/LogTimeBar.vue', {
-    days: [new Date('2026-10-21T09:00:00Z')], suggestions: [], busy: false,
-    preset: { id: 'ticket', key: 'AEON-1417', title: 'Picker hiccups' },
-  }, {
-    '../../lib/api': {}, '../../lib/recents': { recents: [] }, '../../lib/week': week,
-    './duration': duration, './money': money, '../../stores/business': { useBusiness: () => store },
-  })
+  expect(hours.state.costUnitId.value).toBe('cu-0')
   expect(hours.state.problem.value).toBe('Rates for this cost unit could not be loaded.')
+  hours.state.submit()
+  expect(hours.emitted).toEqual([])
+  // Without a selection, settled errors must describe the rate list or directory.
+  hours.state.costUnitId.value = ''
+  expect(hours.state.problem.value).toBe('Some rates could not be loaded.')
   store.reset()
   const failedList = deferred<Awaited<ReturnType<typeof list>>>()
   list.mockReturnValueOnce(failedList.promise)
@@ -159,7 +172,24 @@ it('AEON-1417: 200 units use at most six rate reads and a rejected unit remains 
   expect(hours.state.problem.value).toBe('Loading rates…')
   failedList.reject(new Error('cost unit list failed'))
   await listing
-  expect(hours.state.problem.value).toBe('Rates for this cost unit could not be loaded.')
+  expect(hours.state.costUnitId.value).toBe('')
+  expect(hours.state.problem.value).toBe('Cost units could not be loaded.')
+  hours.state.submit()
+  expect(hours.emitted).toEqual([])
+
+  rates.mockImplementation(id => Promise.resolve([hourlyRate(id)]))
+  list.mockResolvedValueOnce({ items: [unitNode(0), unitNode(1)], partial: true, next_cursor: null })
+  await store.loadCostUnits()
+  expect(store.costUnitsLoaded).toBe(true)
+  expect(store.costUnitsPartial).toBe(true)
+  expect(hours.state.costUnitId.value).toBe('')
+  expect(hours.state.problem.value).toBe('Some cost units could not be loaded.')
+  hours.state.submit()
+  expect(hours.emitted).toEqual([])
+  await store.loadCostUnits()
+  expect(store.costUnitsPartial).toBe(false)
+  expect(store.costUnitsError).toBe('')
+  expect(hours.state.problem.value).toBe('Choose a cost unit.')
   hours.stop()
 })
 
