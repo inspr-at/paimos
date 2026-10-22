@@ -46,8 +46,9 @@ export function withoutOptionalAptDownload(text) {
         continue-on-error: true
         uses: actions/download-artifact@PINNED
         with:
-          name: \${{ steps.apt-image.outputs.artifact }}
-          path: \${{ runner.temp }}/apt-bundle`
+          pattern: apt-bundle-*
+          path: \${{ runner.temp }}/apt-bundle
+          merge-multiple: false`
   if (normalized !== expected) throw new Error('optional apt download cannot suppress test execution')
   return text.replace(step, '')
 }

@@ -4,7 +4,7 @@
 // commit because its workflow commands are the historical ones below.
 import { afterEach, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync, cpSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { aptFixture } from './testdata/apt-fixture.mjs'
@@ -48,7 +48,8 @@ async function run(command, options) {
     }) : []
     const configPaths = existsSync(join(state, 'config-paths')) ? readFileSync(join(state, 'config-paths'), 'utf8').trim().split('\n') : []
     const killGraces = existsSync(join(state, 'kill-graces')) ? readFileSync(join(state, 'kill-graces'), 'utf8').trim().split('\n').map(Number) : []
-    return { status, stderr, stdout, error, calls, state, attempts, sources, sourceRoot, timeouts, configPaths, killGraces }
+    const summary = existsSync(join(state, 'summary')) ? readFileSync(join(state, 'summary'), 'utf8') : ''
+    return { status, stderr, stdout, error, calls, state, attempts, sources, sourceRoot, timeouts, configPaths, killGraces, summary }
   } finally { clearTimeout(deadline); fixtures.cleanup() }
 }
 
@@ -319,6 +320,7 @@ test('one complete image bundle installs offline and invalid bundles retain netw
     const offline = await run(`bash "${script}" ${command}`, { mode: 'always-fail', bundleDir })
     assert.equal(offline.status, 0, `${offline.error}\n${offline.stdout}\n${offline.stderr}`)
     assert.match(offline.stdout, /dependencies installed offline/)
+    assert.match(offline.summary, /path=exact bundle/)
     const dependencies = offline.calls.filter(call => !call.includes('playwright install --only-shell'))
     assert.equal(dependencies.length, 2, 'archive-only preflight followed by one bounded install')
     assert.ok(dependencies.every(call => call.includes('--no-download') && !call.includes('update') && !call.includes('npx')))
@@ -328,20 +330,80 @@ test('one complete image bundle installs offline and invalid bundles retain netw
     assert.ok(offline.timeouts.filter(timeout => timeout.root === '1').every(timeout => timeout.seconds <= 150))
   }
 
-  for (const options of [{ imageVersion: 'different-image' }, { imageOS: 'ubuntu26' }, { imageVersion: '' }, { mode: 'offline-missing' }]) {
+  // Model download-artifact's pattern layout, including two image versions.
+  const downloaded = join(producer.state, 'downloaded')
+  mkdirSync(downloaded)
+  const exactDir = join(downloaded, 'apt-bundle-ubuntu24-20261021.1-X64')
+  const crossDir = join(downloaded, 'apt-bundle-ubuntu24-20261012.334.1-X64')
+  cpSync(bundleDir, exactDir, { recursive: true })
+  cpSync(bundleDir, crossDir, { recursive: true })
+  writeFileSync(join(crossDir, 'manifest.json'), JSON.stringify({ ...manifest, image: ['ubuntu24', '20261012.334.1', 'X64'] }))
+  const preferred = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'always-fail', bundleDir: downloaded })
+  assert.equal(preferred.status, 0, preferred.stderr)
+  assert.match(preferred.summary, /path=exact bundle/)
+  assert.equal(preferred.calls.length, 2, 'exact match wins even when another image sorts first')
+  assert.ok(preferred.attempts.every(attempt => attempt.config.includes(`${exactDir}/archives`)))
+
+  for (const command of ['apt libtest', 'playwright install-deps chromium', 'playwright install --with-deps --only-shell chromium']) {
+    const cross = await run(`bash "${script}" ${command}`, { mode: 'always-fail', bundleDir: downloaded, imageVersion: '20261018.339.1', elapsed: [5, 10, 10, 0] })
+    assert.equal(cross.status, 0, `${cross.error}\n${cross.stdout}\n${cross.stderr}`)
+    assert.match(cross.summary, /path=cross-image bundle/)
+    const dependencies = cross.calls.filter(call => !call.includes('playwright install --only-shell'))
+    assert.equal(dependencies.length, 3)
+    assert.match(dependencies[0], /--simulate/)
+    assert.match(dependencies[1], /--download-only/)
+    assert.doesNotMatch(dependencies[2], /--simulate|--download-only/)
+    assert.ok(dependencies.every(call => call.includes('--no-download') && !call.includes('update') && !call.includes('npx')))
+    assert.ok(cross.attempts.filter(attempt => attempt.command.includes('--no-download')).every(attempt => attempt.config.includes(`${crossDir}/lists`) && attempt.config.includes(`${crossDir}/archives`)))
+    const rootTimeouts = cross.timeouts.filter(timeout => timeout.root === '1')
+    assert.equal(rootTimeouts.length, 3)
+    // Injected time spent validating and preflighting reduces the same cap;
+    // add the final reaping grace to prove the complete <=60-second bound.
+    assert.ok(rootTimeouts.at(-1).seconds + (command.includes('--only-shell') ? 20 : 25) + 20 <= 60)
+  }
+
+  for (const mode of ['offline-missing', 'offline-simulation-fail']) {
+    const missing = await run(`bash "${script}" playwright install-deps chromium`, { mode, bundleDir: downloaded, imageVersion: '20261018.339.1' })
+    assert.equal(missing.status, 0, missing.stderr)
+    assert.match(missing.summary, /path=network/)
+    assert.match(missing.calls[0], /--simulate/)
+    if (mode === 'offline-missing') assert.match(missing.calls[1], /--download-only/)
+    assert.match(missing.calls.at(-1), /playwright install-deps chromium$/)
+    assert.equal(existsSync(join(missing.state, 'offline-dpkg-started')), false, 'reject incomplete or incompatible cross-image bundles before dpkg')
+    assert.doesNotMatch(missing.attempts.at(-1).config, /Dir::State::lists|Dir::Cache::archives/, 'network fallback restores runner sources and caches')
+  }
+
+  const capped = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'ok', bundleDir: downloaded, imageVersion: '20261018.339.1', elapsed: [5, 35] })
+  assert.equal(capped.status, 0, capped.stderr)
+  assert.equal(capped.calls.length, 2, 'exhausted preflight time must prevent the offline install')
+  assert.match(capped.calls[0], /--simulate/)
+  assert.match(capped.calls[1], /playwright install-deps chromium$/)
+  assert.match(capped.summary, /path=network/)
+  assert.equal(existsSync(join(capped.state, 'offline-dpkg-started')), false)
+
+  const absent = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'ok' })
+  assert.equal(absent.status, 0, absent.stderr)
+  assert.deepEqual(absent.calls, ['playwright install-deps chromium'])
+  assert.match(absent.summary, /path=network/)
+
+  for (const options of [{ imageOS: 'ubuntu26' }, { runnerArch: 'ARM64' }, { imageVersion: '' }, { mode: 'offline-missing' }]) {
     const fallback = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'ok', bundleDir, ...options })
     assert.equal(fallback.status, 0, `${fallback.stdout}\n${fallback.stderr}`)
     assert.match(fallback.calls.at(-1), /playwright install-deps chromium$/)
     assert.doesNotMatch(fallback.stdout, /dependencies installed offline/)
+    assert.match(fallback.summary, /path=network/)
     if (options.mode === 'offline-missing') assert.ok(fallback.calls[0].includes('--no-download'), 'exercise resolution preflight, not identity rejection')
   }
 
-  const dpkg = await run(`bash "${script}" apt libtest`, { mode: 'offline-install-fail', bundleDir })
-  assert.equal(dpkg.status, 100, dpkg.stdout)
-  assert.match(dpkg.stderr, /dpkg: error/)
-  assert.equal(dpkg.calls.length, 2)
-  assert.ok(dpkg.calls.every(call => call.includes('--no-download')), 'no network fallback after an offline mutation fails')
-  assert.doesNotMatch(dpkg.stdout, /dependencies installed|retrying fetch/)
+  for (const imageVersion of ['20261021.1', '20261018.339.1']) {
+    const dpkg = await run(`bash "${script}" apt libtest`, { mode: 'offline-install-fail', bundleDir, imageVersion })
+    assert.equal(dpkg.status, 100, dpkg.stdout)
+    assert.match(dpkg.stderr, /dpkg: error/)
+    assert.equal(dpkg.calls.length, imageVersion === '20261021.1' ? 2 : 3)
+    assert.ok(dpkg.calls.every(call => call.includes('--no-download')), 'no network fallback after an offline mutation fails')
+    assert.doesNotMatch(dpkg.stdout, /dependencies installed|retrying fetch/)
+    assert.equal(existsSync(join(dpkg.state, 'offline-dpkg-started')), true)
+  }
 
   for (const filename of ['archives/fish_1_amd64.deb', 'lists/noble_Packages']) {
     const file = join(bundleDir, filename), original = readFileSync(file)

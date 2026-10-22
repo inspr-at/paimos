@@ -30,8 +30,8 @@ func TestRootAptTimeoutReapsBeforeRetry(t *testing.T) {
 	}
 }
 
-// Risk: a missing artifact must not skip tests, and an image rollout must not
-// install packages resolved for another image. Check the actual job wiring.
+// Risk: a missing artifact must not skip tests, and image rollouts need this
+// run's bundle with offline preflights. Check the actual job wiring.
 func checkOfflineAptWorkflow(t *testing.T) {
 	t.Helper()
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
@@ -82,7 +82,7 @@ func checkOfflineAptWorkflow(t *testing.T) {
 			t.Fatalf("%s must request its own image's bundle", id)
 		}
 		download := reuseStep(t, j, "Download optional apt bundle")
-		if download["continue-on-error"] != true || download["timeout-minutes"] != 2 || !strings.HasPrefix(fmt.Sprint(download["uses"]), "actions/download-artifact@") || treeMap(download["with"])["name"] != "${{ steps.apt-image.outputs.artifact }}" || treeMap(download["with"])["path"] != "${{ runner.temp }}/apt-bundle" {
+		if download["continue-on-error"] != true || download["timeout-minutes"] != 2 || !strings.HasPrefix(fmt.Sprint(download["uses"]), "actions/download-artifact@") || treeMap(download["with"])["name"] != nil || treeMap(download["with"])["pattern"] != "apt-bundle-*" || treeMap(download["with"])["merge-multiple"] != false || treeMap(download["with"])["path"] != "${{ runner.temp }}/apt-bundle" {
 			t.Fatalf("%s must tolerate missing artifacts and download into the helper's private path", id)
 		}
 		if id == "go-test" && (!strings.Contains(fmt.Sprint(identityStep["if"]), "runner.os == 'Linux'") || !strings.Contains(fmt.Sprint(download["if"]), "runner.os == 'Linux'")) {

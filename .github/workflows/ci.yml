@@ -314,8 +314,8 @@ jobs:
       required-idle-runners: 4
 
   # AEON-1652: one fetch per run, then offline installs in the hosted shards.
-  # Optional acceleration: an absent bundle or a runner image rollout retains
-  # the bounded network path. Do not store packages in the evicting cache.
+  # Optional acceleration: image rollouts try this run's bundle offline first;
+  # incomplete bundles retain the bounded network path. Never use the cache.
   apt-bundle:
     needs: [ci-plan, tree-reuse]
     if: always() && needs.ci-plan.result == 'success' && needs.ci-plan.outputs.lane != 'docs-only' && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
@@ -425,8 +425,9 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: ${{ steps.apt-image.outputs.artifact }}
+          pattern: apt-bundle-*
           path: ${{ runner.temp }}/apt-bundle
+          merge-multiple: false
       - name: Install shells when this shard runs pairing path-proof tests
         timeout-minutes: 4
         env:
@@ -865,8 +866,9 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: ${{ steps.apt-image.outputs.artifact }}
+          pattern: apt-bundle-*
           path: ${{ runner.temp }}/apt-bundle
+          merge-multiple: false
       - name: Install shells used by command round-trip unit tests
         timeout-minutes: 4
         run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt fish zsh
@@ -949,9 +951,10 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: ${{ steps.apt-image.outputs.artifact }}
+          pattern: apt-bundle-*
           path: ${{ runner.temp }}/apt-bundle
-      # OS libraries install offline from this run's matching image bundle.
+          merge-multiple: false
+      # Prefer the exact image; preflight this run's other image offline.
       - name: Install Chromium system dependencies
         timeout-minutes: 13
         working-directory: web

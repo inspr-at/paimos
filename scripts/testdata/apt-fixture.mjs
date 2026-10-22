@@ -44,7 +44,7 @@ advance_clock() {
 # Finite adapters return their status directly. Only the hang/reaping cases
 # need a background process and polling; fake deadlines advance identically.
 case "\$(cat "\$state/mode")" in
-  ok|bundle-*|always-fail|fetch-fail|fetch-always-fail|dependency-fail|install-fetch-always-fail|mirror-stall|offline-missing|offline-install-fail|browser-fail)
+  ok|bundle-*|always-fail|fetch-fail|fetch-always-fail|dependency-fail|install-fetch-always-fail|mirror-stall|offline-missing|offline-simulation-fail|offline-install-fail|browser-fail)
     "\$@"; status=\$?; advance_clock; exit \$status ;;
 esac
 # A previous attempt's hang marker must not make this attempt look hung
@@ -116,11 +116,16 @@ if [[ "\$*" == *'install-deps --dry-run chromium' ]]; then
 fi
 if [[ "\$*" == *--no-download* ]]; then
   if [[ "\${AEON_AS_ROOT:-}" != 1 ]]; then echo offline-not-root >&2; exit 1; fi
+  if [[ "\$mode" == offline-simulation-fail && "\$*" == *--simulate* ]]; then
+    echo 'E: Unable to correct problems, you have held broken packages.' >&2
+    exit 100
+  fi
   if [[ "\$mode" == offline-missing && "\$*" == *--download-only* ]]; then
     echo 'E: Unable to fetch some archives, --no-download is set' >&2
     exit 100
   fi
-  if [[ "\$mode" == offline-install-fail && "\$*" != *--download-only* ]]; then
+  if [[ "\$*" != *--download-only* && "\$*" != *--simulate* ]]; then touch "\$state/offline-dpkg-started"; fi
+  if [[ "\$mode" == offline-install-fail && "\$*" != *--download-only* && "\$*" != *--simulate* ]]; then
     echo 'Unpacking libtest (1.0) ...' >&2
     echo 'dpkg: error processing archive libtest.deb' >&2
     exit 100
@@ -178,7 +183,7 @@ if [[ "\$mode" == fetch-fail || "\$mode" == fetch-always-fail || "\$mode" == ins
   exit 0
 fi
 if [[ "\$mode" == always-fail ]]; then echo "Error: Installation process exited with code: 100" >&2; exit 100; fi
-if [[ "\$mode" == ok || "\$mode" == offline-missing ]]; then exit 0; fi
+if [[ "\$mode" == ok || "\$mode" == offline-missing || "\$mode" == offline-simulation-fail ]]; then exit 0; fi
 if [[ "\$mode" == hung && "\$lines" -ge 2 ]]; then exit 0; fi
 # The lock file is the hold. Write it here, before this process can be killed,
 # so an unprivileged SIGKILL leaves it for the next attempt. Only the root
@@ -204,7 +209,7 @@ exec "\$AEON_FIXTURE_NODE" "\$AEON_FIXTURE_APT_HOLD" "\$PPID"
   return bin
 }
 
-export function aptFixture({ mode, shells = false, format = 'sources', elapsed, mirrorList = false, timeoutStatus = 124, dpkgActivity = 'Unpacking libtest (1.0) ...', bundleDir, imageOS = 'ubuntu24', imageVersion = '20261021.1' }) {
+export function aptFixture({ mode, shells = false, format = 'sources', elapsed, mirrorList = false, timeoutStatus = 124, dpkgActivity = 'Unpacking libtest (1.0) ...', bundleDir, imageOS = 'ubuntu24', imageVersion = '20261021.1', runnerArch = 'X64' }) {
   const state = mkdtempSync(join(tmpdir(), 'aeon-apt-'))
   writeFileSync(join(state, 'mode'), mode)
   writeFileSync(join(state, 'calls'), '')
@@ -275,7 +280,8 @@ Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
     PATH: `${bin}:/usr/bin:/bin:${process.env.PATH}`, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
     AEON_STUB_STATE: state, AEON_AS_ROOT: '', GITHUB_WORKSPACE: fileURLToPath(new URL('../..', import.meta.url)),
     AEON_APT_SOURCES_DIR: sourceRoot,
-    AEON_APT_BUNDLE_DIR: bundleDir ?? join(state, 'absent-bundle'), ImageOS: imageOS, ImageVersion: imageVersion, RUNNER_ARCH: 'X64',
+    AEON_APT_BUNDLE_DIR: bundleDir ?? join(state, 'absent-bundle'), ImageOS: imageOS, ImageVersion: imageVersion, RUNNER_ARCH: runnerArch,
+    GITHUB_STEP_SUMMARY: join(state, 'summary'),
     AEON_FIXTURE_NODE: process.execPath, AEON_FIXTURE_APT_HOLD: fileURLToPath(new URL('./apt-hold.mjs', import.meta.url)),
   } }
 }

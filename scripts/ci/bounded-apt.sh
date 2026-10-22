@@ -5,7 +5,7 @@
 # that sudo or Playwright starts, so the lock survives and the next attempt
 # fails with exit 100 (PR 377, web-shard 3 and 11). Browser downloads stay
 # unprivileged so they land in the runner's cache, not root's.
-# AEON-1652: share one image-specific package bundle; retain mirror fallback.
+# AEON-1652: share this run's package bundle across image rollouts safely.
 set -euo pipefail
 
 usage() {
@@ -148,8 +148,11 @@ try:
         if manifest.stat().st_size > 1024 * 1024:
             raise ValueError('oversize manifest')
         data = json.loads(manifest.read_text())
-        if data['version'] != 1 or data['image'] != image:
-            raise ValueError('runner image differs')
+        producer = data['image']
+        if data['version'] != 1 or not isinstance(producer, list) or len(producer) != 3 or not all(isinstance(p, str) and p for p in producer):
+            raise ValueError('invalid runner image')
+        if producer[0] != image[0] or producer[2] != image[2]:
+            raise ValueError('runner OS or architecture differs')
         packages = data['packages']
     if not 2 <= len(packages) <= 258 or not {'fish', 'zsh'} <= set(packages) or not all(
             re.fullmatch(r'[a-z0-9][a-z0-9+.-]*(?<!-)', p) for p in packages):
@@ -178,6 +181,7 @@ try:
     if mode == 'write':
         manifest.write_text(json.dumps(data) + '\n')
     else:
+        print('exact' if producer == image else 'cross-image')
         print('\n'.join(packages))
 except (OSError, ValueError, KeyError, TypeError) as error:
     sys.exit(f'bounded-apt: bundle unavailable: {error}')
@@ -185,31 +189,61 @@ PY
 }
 
 try_offline() {
-  bundle=${AEON_APT_BUNDLE_DIR:-${RUNNER_TEMP:-/nonexistent}/apt-bundle}
-  [[ -f $bundle/manifest.json ]] || return 1
+  local bundle_root=${AEON_APT_BUNDLE_DIR:-${RUNNER_TEMP:-/nonexistent}/apt-bundle}
+  local candidate kind='' package original_deadline=$deadline
+  local deadline=$deadline attempt_deadline=$attempt_deadline
+  local offline_deadline=$(($(date +%s) + 60))
+  # Selection, validation, simulation and installation share 60 seconds,
+  # including the final SIGKILL grace. Exact matches keep the existing budget.
+  if [[ $deadline -gt $offline_deadline ]]; then deadline=$offline_deadline; fi
   if [[ $mode == playwright && ( ${#targets[@]} -ne 1 || ${targets[0]} != chromium ) ]]; then return 1; fi
+  # Pattern downloads preserve artifact directories. Prefer the exact image,
+  # then accept this run's other image only within the same OS/architecture.
+  for candidate in "$bundle_root/apt-bundle-${ImageOS:-}-${ImageVersion:-}-${RUNNER_ARCH:-}" "$bundle_root" "$bundle_root"/apt-bundle-*; do
+    [[ -f $candidate/manifest.json ]] || continue
+    bundle=$candidate
+    if bundle_manifest check > "$temporary/offline-packages"; then
+      {
+        IFS= read -r kind
+        packages=()
+        while IFS= read -r package; do packages+=("$package"); done
+      } < "$temporary/offline-packages"
+      break
+    fi
+  done
+  [[ -n $kind ]] || return 1
+  if [[ $kind == exact ]]; then deadline=$original_deadline; fi
   # Finish validation and an archive-only preflight BEFORE dpkg can mutate.
-  bundle_manifest check > "$temporary/offline-packages" || return 1
-  local package
-  packages=()
-  while IFS= read -r package; do packages+=("$package"); done < "$temporary/offline-packages"
   if [[ $mode == apt ]]; then
-    for package in "$@"; do grep -Fxq -- "$package" "$temporary/offline-packages" || return 1; done
+    for package in "$@"; do printf '%s\n' "${packages[@]}" | grep -Fxq -- "$package" || return 1; done
   fi
   write_config "$bundle/etc"
   bundle_config
+  if [[ $kind == cross-image ]] && ! run_root_timeout 15 apt-get install --simulate --no-download -y -qq --no-install-recommends "${packages[@]}"; then
+    echo 'bounded-apt: cross-image simulation failed before dpkg; using network fallback'
+    write_config "$source_root"
+    return 1
+  fi
   if ! run_root_timeout 30 apt-get install --download-only --no-download -y -qq --no-install-recommends "${packages[@]}"; then
     echo 'bounded-apt: incomplete offline resolution; using network fallback'
     write_config "$source_root"
     return 1
   fi
-  echo "bounded-apt: installing offline bundle for ${ImageOS} / ${ImageVersion}"
+  report_path "$kind bundle"
+  echo "bounded-apt: installing offline bundle from $bundle for ${ImageOS} / ${ImageVersion}"
   # A failure after this point is final: never retry after package mutation.
   if run_root_timeout 150 apt-get install --no-download -y -qq --no-install-recommends "${packages[@]}"; then
     echo 'bounded-apt: dependencies installed offline'
     exit 0
   else
     exit "$?"
+  fi
+}
+
+report_path() {
+  echo "bounded-apt: path=$1"
+  if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+    printf 'bounded-apt: path=%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
   fi
 }
 
@@ -396,6 +430,7 @@ fi
 # only once, even when the subsequent dependency fetch needs another mirror.
 if [[ ${#browser[@]} -gt 0 ]]; then run_timeout user 240 "${browser[@]}"; fi
 if [[ $mode != bundle ]]; then try_offline "$@" || true; fi
+if [[ $mode != bundle ]]; then report_path network; fi
 source_files=()
 for file in "$source_root/sources.list" "$source_root/sources.list.d/"*.list "$source_root/sources.list.d/"*.sources; do
   [[ ! -f $file ]] || source_files+=("$file")
