@@ -99,10 +99,11 @@ test('P02 a theme conflict retains the unsaved draft and needs a deliberate choi
   await expect(page.locator('.theme-status')).toContainText('changed elsewhere')
   await expect(bar(page)).toBeVisible()
   await expect(bar(page).getByRole('button', { name: /^Save/ })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Primary accent, light', exact: true })).toContainText('#3a5fc4')
   expect(data.items[2]!.values.primary.light).toBe('#0e6f6c')
   expect(data.writes.filter(write => write.method === 'PATCH')).toHaveLength(1)
   data.fail = 0; data.items[2]!.revision++
-  await page.getByRole('button', { name: 'Reload themes', exact: true }).click()
+  await bar(page).getByRole('button', { name: 'Discard', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Primary accent, light', exact: true })).toBeEnabled()
   // Reload is a read, never a replay of the stale write or implicit consent.
   expect(data.writes.filter(write => write.method === 'PATCH')).toHaveLength(1)

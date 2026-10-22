@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { verifyBaselineBundle, readBaselineBundle } from '../../scripts/test-prune/visual-baselines.mjs'
+import { packCandidates } from '../../scripts/test-prune/visual-candidates.mjs'
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const manifest = JSON.parse(readFileSync(new URL('../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
@@ -37,4 +38,25 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.throws(() => verifyBaselineBundle(duplicate.changed, duplicate.pinned), /duplicate/)
   const mismatch = rehash([{ ...files[0], base64: Buffer.concat([png, Buffer.from('changed')]).toString('base64') }, ...files.slice(1)])
   assert.throws(() => verifyBaselineBundle(mismatch.changed, mismatch.pinned), /member SHA-256 mismatch/)
+
+  const records = manifest.states.flatMap((state: { owner: string; fixture: string; fixturesByProfile?: Record<string, string>; checkpoints: { id: string; profile: string; theme: string }[] }) => state.checkpoints.map(checkpoint => {
+    const viewport = manifest.profiles[checkpoint.profile]
+    // Only the bounded PNG header is consumed by this packaging proof. Actual
+    // raster decoding and pixel differences remain in the browser negative test.
+    const sized = Buffer.from(png)
+    sized.writeUInt32BE(viewport.width, 16); sized.writeUInt32BE(viewport.height, 20)
+    return { png: sized, quality: { id: checkpoint.id, owner: state.owner,
+      fixture: state.fixturesByProfile?.[checkpoint.profile] ?? state.fixture, theme: checkpoint.theme, viewport,
+      captureSHA: 'a'.repeat(40), pngSHA256: hash(sized), layout: [], axe: [], console: [], responses: [] } }
+  }))
+  assert.equal(packCandidates(records, manifest).review.status, 'pending-Tick-review')
+  assert.throws(() => packCandidates(records.slice(1), manifest), /all 80/)
+  assert.throws(() => packCandidates([...records.slice(0, -1), records[0]], manifest), /Duplicate/)
+  const changedSource = records.map((record: { png: Buffer; quality: Record<string, unknown> }) => ({ png: record.png, quality: { ...record.quality } }))
+  changedSource[1].quality.captureSHA = 'b'.repeat(40)
+  assert.throws(() => packCandidates(changedSource, manifest), /one source SHA/)
+  const failedQuality = records.map((record: { quality: Record<string, unknown> }, index: number) => index ? record : { ...record, quality: { ...record.quality, console: ['Unmocked route'] } })
+  assert.throws(() => packCandidates(failedQuality, manifest), /Unresolved console/)
+  const wrongBytes = records.map((record: { png: Buffer }, index: number) => index ? record : { ...record, png: Buffer.concat([record.png, Buffer.from('changed')]) })
+  assert.throws(() => packCandidates(wrongBytes, manifest), /Capture digest mismatch/)
 })
