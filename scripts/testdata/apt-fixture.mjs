@@ -44,7 +44,8 @@ advance_clock() {
 # A previous attempt's hang marker must not make this attempt look hung
 # before it can take the lock or report that the lock is still held.
 rm -f "\$state/hung"
-"\$@" &
+# Keep explicit stdin for bounded Python here-docs, just as GNU timeout does.
+"\$@" <&0 &
 child=\$!
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
   if ! kill -0 "\$child" 2>/dev/null; then wait "\$child"; status=\$?; advance_clock; exit \$status; fi

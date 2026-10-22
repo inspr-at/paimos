@@ -95,11 +95,15 @@ if not 1 <= len(packages) <= 256 or not all(re.fullmatch(r'[a-z0-9][a-z0-9+.-]*(
 Path(os.environ['AEON_APT_PACKAGE_LIST']).write_text('\n'.join(sorted(set(packages + ['fish', 'zsh']))) + '\n')
 PY
   chmod +x "$temporary/dry-run/apt-get"
-  run_timeout user 90 env "PATH=$temporary/dry-run:$PATH" \
+  if ! run_timeout user 90 env "PATH=$temporary/dry-run:$PATH" \
     "AEON_APT_PACKAGE_LIST=$bundle/packages.txt" \
-    npx --no-install playwright install-deps --dry-run chromium
+    npx --no-install playwright install-deps --dry-run chromium > "$temporary/playwright-dry-run.log" 2>&1; then
+    cat "$temporary/playwright-dry-run.log" >&2
+    return 1
+  fi
   [[ -s $bundle/packages.txt ]] || return 1
   while IFS= read -r package; do packages+=("$package"); done < "$bundle/packages.txt"
+  echo "bounded-apt: resolved ${#packages[@]} Chromium and shell packages via Playwright dry-run"
 }
 
 attempt_bundle() {
@@ -386,8 +390,6 @@ if [[ $mode == bundle ]]; then
   mkdir -p "$bundle/archives/partial" "$bundle/lists/partial"
   resolve_bundle_packages
   bundle_config
-else
-  :
 fi
 
 # Same user as the runner: browser downloads land in their cache and happen

@@ -308,7 +308,7 @@ test('one complete image bundle installs offline and invalid bundles retain netw
   assert.ok(producer.attempts.filter(attempt => attempt.command.includes('--download-only')).every(attempt => attempt.root === '1' && attempt.command.includes('--reinstall')))
   for (const [file, original] of Object.entries(producer.sources)) assert.equal(readFileSync(join(producer.sourceRoot, file), 'utf8'), original)
 
-  for (const command of ['apt fish zsh', 'playwright install-deps chromium', 'playwright install --with-deps --only-shell chromium']) {
+  for (const command of ['apt libtest', 'playwright install-deps chromium', 'playwright install --with-deps --only-shell chromium']) {
     // The network adapter would fail. Success therefore requires the bundle.
     const offline = await run(`bash "${script}" ${command}`, { mode: 'always-fail', bundleDir })
     assert.equal(offline.status, 0, `${offline.error}\n${offline.stdout}\n${offline.stderr}`)
@@ -330,7 +330,7 @@ test('one complete image bundle installs offline and invalid bundles retain netw
     if (options.mode === 'offline-missing') assert.ok(fallback.calls[0].includes('--no-download'), 'exercise resolution preflight, not identity rejection')
   }
 
-  const dpkg = await run(`bash "${script}" apt fish zsh`, { mode: 'offline-install-fail', bundleDir })
+  const dpkg = await run(`bash "${script}" apt libtest`, { mode: 'offline-install-fail', bundleDir })
   assert.equal(dpkg.status, 100, dpkg.stdout)
   assert.match(dpkg.stdout, /dpkg: error/)
   assert.equal(dpkg.calls.length, 2)

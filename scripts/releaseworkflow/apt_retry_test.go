@@ -73,6 +73,7 @@ func checkOfflineAptWorkflow(t *testing.T) {
 		"web-shard": "Install Chromium system dependencies",
 	} {
 		j := treeMap(jobs[id])
+		reuseStep(t, j, installName)
 		if !containsNeed(j["needs"], "apt-bundle") || strings.Contains(fmt.Sprint(j["if"]), "needs.apt-bundle.result") || !strings.Contains(fmt.Sprint(j["if"]), "always()") {
 			t.Fatalf("%s must await the optional producer without requiring artifact success", id)
 		}

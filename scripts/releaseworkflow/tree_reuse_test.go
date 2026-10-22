@@ -330,6 +330,10 @@ func mergeGroupInventory(t *testing.T, w map[string]any) []string {
 	var names []string
 	for id, value := range treeMap(w["jobs"]) {
 		j := treeMap(value)
+		if id == "apt-bundle" {
+			checkOfflineAptWorkflow(t)
+			continue // Optional fetch acceleration, never execution evidence.
+		}
 		if id == "tree-reuse" || id == "cache-prime" {
 			if !strings.Contains(fmt.Sprint(j["if"]), "github.event_name == 'push'") {
 				t.Fatalf("%s must remain push-only", id)
@@ -919,7 +923,7 @@ func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
 	normalizeParallelWebSetup(t, jobs)
 	unit, browser := treeMap(jobs["web-unit"]), treeMap(jobs["web-shard"])
 	for _, j := range []map[string]any{unit, browser} {
-		if !reflect.DeepEqual(j["needs"], []any{"ci-plan", "web-setup", "tree-reuse"}) {
+		if !reflect.DeepEqual(j["needs"], []any{"ci-plan", "web-setup", "tree-reuse", "apt-bundle"}) {
 			t.Fatal("Unit and browser shards must start together from setup, without depending on each other")
 		}
 		if treeMap(reuseStep(t, j, "Download shared web runtime")["with"])["name"] != "web-runtime" || reuseStep(t, j, "Restore web runtime")["run"] != `tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"` {
