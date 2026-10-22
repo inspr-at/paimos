@@ -41,6 +41,12 @@ advance_clock() {
   elapsed=\$(sed -n "\${index}p" "\$state/elapsed")
   echo \$((\$(cat "\$state/clock") + \${elapsed:-0})) > "\$state/clock"
 }
+# Finite adapters return their status directly. Only the hang/reaping cases
+# need a background process and polling; fake deadlines advance identically.
+case "\$(cat "\$state/mode")" in
+  ok|bundle-*|always-fail|fetch-fail|fetch-always-fail|dependency-fail|install-fetch-always-fail|mirror-stall|offline-missing|offline-install-fail|browser-fail)
+    "\$@"; status=\$?; advance_clock; exit \$status ;;
+esac
 # A previous attempt's hang marker must not make this attempt look hung
 # before it can take the lock or report that the lock is still held.
 rm -f "\$state/hung"
