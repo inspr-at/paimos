@@ -34,7 +34,9 @@ export function requiredRisks(baseline) {
       return { id: `go-drift:${key}`, source: { kind: 'go', package: key.slice(0, split), name: key.slice(split + 1) } }
     }),
     ...baseline.deleteCandidateGroups.map(group => ({ id: `candidate-group:${group.file}`, source: { kind: 'candidate-group', file: group.file } })),
-    ...baseline.catalogue.filter(row => row.tags?.includes('delete-candidate')).map(row => ({
+    // The prune plan's candidate population is browser-only. Runtime drift
+    // obligations remain protected independently by driftObligations above.
+    ...baseline.catalogue.filter(row => row.kind === 'browser' && row.tags?.includes('delete-candidate')).map(row => ({
       id: `candidate-case:${identity(row)}`,
       source: { kind: row.kind, file: row.file, name: row.name, ...(row.occurrence === undefined ? {} : { occurrence: row.occurrence }) },
     })),
