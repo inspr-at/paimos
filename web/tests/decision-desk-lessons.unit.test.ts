@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { expect, it, vi } from 'vitest'
 import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
+import { createPinia } from 'pinia'
 import { lessonItem } from '../src/lib/decisionDeskApi'
 import type { DeskItem, DeskProjectionItem } from '../src/lib/decisionDesk'
 import type { MethodLearning } from '../src/lib/knowledge'
@@ -43,6 +44,8 @@ async function memoHtml(item: DeskItem) {
     items: [item], round: [item.id], start: item.id, arrivalsCount: 0, allowed: () => true, decide: vi.fn(async () => item),
   }) })
   app.component('RouterLink', { props: ['to'], setup: (_, { slots }) => () => slots.default?.() })
+  // AEON-1632: ticket links read their project's address from the projects store.
+  app.use(createPinia())
   return renderToString(app)
 }
 

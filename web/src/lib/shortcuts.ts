@@ -57,7 +57,7 @@ export const SHORTCUT_ENTRIES = [
   { id: 'goals.state.queued', keys: ['3'], scope: 'goals view', label: 'Show queued items' },
   { id: 'goals.state.paused', keys: ['4'], scope: 'goals view', label: 'Show paused items' },
   { id: 'goals.state.done', keys: ['5'], scope: 'goals view', label: 'Show done items' },
-  { id: 'goals.hide_done', keys: ['h'], scope: 'goals view', label: 'Hide done goals / show them' },
+  { id: 'goals.hide_done', keys: ['h'], scope: 'goals view', label: 'Done goals: show or hide' },
   { id: 'goals.toggle_all', keys: ['e'], scope: 'goals view', label: 'Expand all / Collapse all' },
   { id: 'goals.next', keys: ['j', 'ArrowDown'], scope: 'goals view', label: 'Next / previous goal or item' },
   { id: 'goals.prev', keys: ['k', 'ArrowUp'], scope: 'goals view', label: 'Next / previous goal or item' },

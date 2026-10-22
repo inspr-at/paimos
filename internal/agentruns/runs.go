@@ -5,6 +5,7 @@ package agentruns
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -27,7 +28,9 @@ import (
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 type Run struct {
@@ -167,7 +170,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 					return nil, err
 				}
 			}
-			v, err := route.fn(r, tx, p)
+			v, err := workqueue.PersonAdmissionTx(r.Context(), tx, p, route.pattern, func(step pgx.Tx) (any, error) { return route.fn(r, step, p) })
 			return v, pairingRunError(err)
 		}))
 	}
@@ -242,34 +245,30 @@ func load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Run, error) {
 
 // ErrActingPersonBinding refuses missing/non-person targets and attempts to
 // change an already bound run. It never falls back to requester or preferences.
-var ErrActingPersonBinding = errors.New("acting person binding refused")
+var ErrActingPersonBinding = workqueue.ErrActingPersonBinding
 
-// SetActingPersonTx is the write-once seam for server admission writers. The
-// caller owns the transaction, holds tenant/tree and work-order fences in
-// admission lock order, and has rechecked launch authority with RequireTx in
-// this transaction before calling, before appending any events. This
-// helper grants no admission authority and is not exposed as an API operation.
+// SetActingPersonTx retains S1-01's public seam. Composite admission writers
+// use the shared implementation and defer its event until all resources exist.
 func SetActingPersonTx(ctx context.Context, tx pgx.Tx, tenantID, runID, personID string) error {
-	var current *string
-	if err := tx.QueryRow(ctx, `SELECT acting_person_id::text FROM agent_runs
-		WHERE tenant_id=$1 AND id=$2 FOR NO KEY UPDATE`, tenantID, runID).Scan(&current); err != nil {
+	change, err := workqueue.SetActingPersonTx(ctx, tx, tenantID, runID, personID, "explicit")
+	if err != nil || change == nil {
 		return err
 	}
-	if current != nil {
-		if *current != personID {
-			return ErrActingPersonBinding
-		}
-		return nil
-	}
-	result, err := tx.Exec(ctx, `UPDATE agent_runs SET acting_person_id=$3
-		WHERE tenant_id=$1 AND id=$2 AND acting_person_id IS NULL
-		AND EXISTS (SELECT 1 FROM principals p WHERE p.tenant_id=$1 AND p.id=$3
-		 AND p.kind='person' AND p.status='active' AND p.linked_to IS NULL)`, tenantID, runID, personID)
+	_, err = events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: personID, Kind: tenant.Person}, *change)
+	return err
+}
+
+func bindRunPerson(ctx context.Context, tx pgx.Tx, p tenant.Principal, v *Run, person, rule string, pending *[]events.Change) error {
+	change, err := workqueue.SetActingPersonTx(ctx, tx, p.TenantID, v.ID, person, rule)
 	if err != nil {
 		return err
 	}
-	if result.RowsAffected() != 1 {
-		return ErrActingPersonBinding
+	v.ActingPersonID = &person
+	if err := tx.QueryRow(ctx, `SELECT row_version FROM agent_runs WHERE tenant_id=$1 AND id=$2`, p.TenantID, v.ID).Scan(&v.RowVersion); err != nil {
+		return err
+	}
+	if change != nil {
+		*pending = append(*pending, *change)
 	}
 	return nil
 }
@@ -472,6 +471,13 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 	if err := tx.QueryRow(ctx, `SELECT parent_id::text,project_id::text FROM nodes WHERE id=$1`, o.NodeID).Scan(&ticket, &project); err != nil {
 		return nil, err
 	}
+	projectID := ""
+	if project != nil {
+		projectID = *project
+	}
+	if err := authz.RequireTx(ctx, tx, p, "run.create", authz.Scope{ProjectID: projectID}); err != nil {
+		return nil, err
+	}
 	// The caller holds the tenant/tree fence and order lock through insertion.
 	// Explicit person starts keep every existing permission and daemon check;
 	// agent keys must still use the lead's dispatch path.
@@ -531,6 +537,41 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 			return nil, workorders.Fail(400, "retry_of_run_id must be an earlier run of this work order and agent")
 		}
 	}
+	personRule, source := "personal", ""
+	if in.Retry != nil {
+		personRule, source = "recovery", *in.Retry
+	}
+	if lease := workerlease.Read(r); in.Retry == nil && p.Kind == tenant.Agent && lease != "" {
+		// The existing worker proof identifies its parent run. No caller-chosen
+		// person, run-identity header or additional request field is accepted.
+		sum := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
+		rows, err := tx.Query(ctx, `SELECT DISTINCT r.id::text FROM harness_sessions s JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id WHERE s.tenant_id=$1 AND s.agent_principal_id=$2 AND r.agent_principal_id=$2 AND s.lease_digest=$3 AND s.archived_at IS NULL AND s.stopped_at IS NULL AND r.status IN ('running','starting','waiting') AND coalesce(n.project_id::text,'')=$4 ORDER BY r.id::text LIMIT 2`, p.TenantID, p.ID, sum[:], projectID)
+		if err != nil {
+			return nil, err
+		}
+		var parents []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			parents = append(parents, id)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		if len(parents) != 1 {
+			return nil, &workqueue.PersonAdmissionError{Code: "run_person_unresolved"}
+		}
+		personRule, source = "child", parents[0]
+	}
+	actingPerson, err := workqueue.ResolveRunPersonTx(ctx, tx, p, personRule, source)
+	if err != nil {
+		return nil, err
+	}
 	var escalationTrace map[string]any
 	var placement *modelregistry.WorkPlacement
 	if ticket != nil && project != nil {
@@ -572,7 +613,18 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 	if err != nil {
 		return nil, err
 	}
-	event := func() error { return workorders.Record(ctx, tx, p, o.NodeID, "run.created", nil, v) }
+	var personEvents []events.Change
+	if err = bindRunPerson(ctx, tx, p, &v, actingPerson, personRule, &personEvents); err != nil {
+		return nil, err
+	}
+	event := func() error {
+		for _, change := range personEvents {
+			if _, err := events.Append(ctx, tx, p, change); err != nil {
+				return err
+			}
+		}
+		return workorders.Record(ctx, tx, p, o.NodeID, "run.created", nil, v)
+	}
 	if deferred != nil {
 		*deferred = append(*deferred, event)
 		return v, nil
@@ -694,7 +746,15 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err = claimPermission(ctx, tx, p, v); err != nil {
 		return nil, err
 	}
-	if err = authz.RequireRunStartOnComputerTx(ctx, tx, p, v.ID); err != nil {
+	if v.ReadOnlyReview && r.Header.Get(reviewgate.PolicyHeader) != reviewgate.Policy {
+		return nil, workorders.Fail(409, "review-capable daemon policy required")
+	}
+	// Enrollment precedes the person and revocation checks. A classic or
+	// never-enrolled daemon is ledger_enrollment_required, not permission_revoked.
+	if err = agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
+		return nil, err
+	}
+	if err = workqueue.RequireRunPersonTx(ctx, tx, p, v.ID); err != nil {
 		return nil, err
 	}
 	admission := workorders.BuildAdmission{Candidate: o.BuildDelivery}
@@ -717,12 +777,6 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		}
 	}
 	if err = m.validateRoutinePickup(ctx, tx, p, v, o, in.Routine, in.Daemon, in.Generation); err != nil {
-		return nil, err
-	}
-	if v.ReadOnlyReview && r.Header.Get(reviewgate.PolicyHeader) != reviewgate.Policy {
-		return nil, workorders.Fail(409, "review-capable daemon policy required")
-	}
-	if err := agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
 		return nil, err
 	}
 	if in.Refusal != "" {
