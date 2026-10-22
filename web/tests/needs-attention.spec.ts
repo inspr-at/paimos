@@ -210,6 +210,68 @@ async function chooseRows(page: Page, ids: number[]) {
   for (const id of ids.slice(1)) await table(page).locator(`#row-attention-${id}`).getByRole('checkbox').click()
 }
 
+test('AEON-1639: attention search and singular turn-off copy keep controls still in both themes', async ({ page }, testInfo) => {
+  const errors = watchErrors(page)
+  const data = await groupActions(page, [row(0)])
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto('/tickets?view=needs-attention&q=%20vollst%C3%A4ndigen%20')
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    const head = page.locator('#row-group-p-aeon')
+    await expect(first(page)).toBeVisible()
+    await expect(head.locator('.group-check')).toHaveAttribute('aria-label', 'Select every suggestion in AEON')
+    await head.getByRole('button', { name: 'More for AEON' }).click()
+    await page.getByRole('menuitem', { name: /Turn autopilot off in AEON/ }).click()
+    const off = page.getByRole('dialog', { name: 'Turn autopilot off in AEON?' })
+    const also = off.getByRole('checkbox', { name: 'Also dismiss the flag waiting in AEON', exact: true })
+    const guard = await controlStability(page, { ...(width <= 600 ? { frame: off } : {}), also: also.locator('..'), turnOff: off.getByRole('button', { name: 'Turn off', exact: true }), cancel: off.getByRole('button', { name: /^Cancel/ }) })
+    await guard.check(() => also.check())
+    await guard.check(() => also.uncheck())
+    guard.done()
+    await page.screenshot({ path: testInfo.outputPath(`attention-off-${width}-${theme}.png`), fullPage: true })
+    await off.getByRole('button', { name: /^Cancel/ }).click()
+  }
+  expect(data.queries.length).toBeGreaterThan(0)
+  expect(data.queries.every(query => query.get('q') === 'vollständigen')).toBe(true)
+  expect(data.calls).toEqual([])
+  expect(errors).toEqual([])
+})
+
+test('AEON-1639: preview loading has an honest reserved status slot before any write', async ({ page }) => {
+  const data = await groupActions(page, [row(0)])
+  let release!: () => void, entered!: () => void
+  const held = new Promise<void>(resolve => { release = resolve }), started = new Promise<void>(resolve => { entered = resolve })
+  await page.route('**/api/status-autopilot/attention/bulk', async route => {
+    if (route.request().postDataJSON().dry_run) { entered(); await held }
+    await route.fallback()
+  })
+  await page.goto('/tickets?view=needs-attention')
+  const head = page.locator('#row-group-p-aeon'), apply = head.getByRole('button', { name: 'Apply all in AEON' })
+  await expect(apply).toBeVisible()
+  const guard = await controlStability(page, { slot: head.locator('.group-slot'), more: head.getByRole('button', { name: 'More for AEON' }), toggle: head.locator('.group-toggle') })
+  try {
+    await guard.check(async () => {
+      await apply.click(); await started
+      await expect(head.getByRole('status')).toHaveText('Loading preview…')
+      expect(data.calls).toEqual([])
+    })
+    release()
+    await guard.check(async () => { await expect(page.getByRole('dialog', { name: 'Apply all in AEON' })).toBeVisible() })
+    guard.done()
+    expect(data.calls).toHaveLength(1)
+    expect(data.calls[0]!.body.dry_run).toBe(true)
+  } finally { release() }
+})
+
+test('AEON-1639: fallback truncation explains the ten-page scan with fewer than 500 groups', async ({ page }) => {
+  const data = await setup(page, Array.from({ length: 501 }, (_, index) => row(index, { project_id: 'p-aeon' })), { groups: 'absent' })
+  await page.goto('/tickets?view=needs-attention')
+  await expect(page.locator('.list-footer').getByRole('status')).toHaveText('Some groups may be missing. The scan stops after 10 pages or 500 groups. Narrow the list with filters.')
+  await expect(page.locator('#row-group-p-aeon')).toBeVisible()
+  const scan = data.queries.filter(query => !query.has('by') && !query.has('project_id'))
+  expect(scan.map(query => Number(query.get('after') || 0))).toEqual(Array.from({ length: 10 }, (_, index) => index * 50))
+})
+
 test('Apply, Dismiss and Undo retain rows and control boxes on desktop and phone, in both themes', async ({ page }, testInfo) => {
   const errors = watchErrors(page)
   const data = await setup(page)

@@ -140,6 +140,80 @@ func TestAttentionGroupsAndKindTimePagination(t *testing.T) {
 	f.call(member, "GET", "/api/status-autopilot/attention/groups?by=bad", "", 400)
 }
 
+// Risk: a legacy cursor outlives its visible anchor and reports a missing
+// project, or exposes a position belonging to an unreadable project.
+func TestAttentionLegacyCursorRestartsWhenAnchorUnavailable(t *testing.T) {
+	f := setup(t)
+	visible := f.add("AUT-2", "work", "new", 8, nil)
+	primary := f.project
+	f.project = f.add("AUT-3", "project", "open", 0, nil)
+	hidden := f.add("AUT-4", "work", "backlog", 91, nil)
+	f.project = primary
+	f.run(f.now)
+	anchor := attentionRead(f, f.p, "?kind=cancel").Items[0]
+	if anchor.NodeID != hidden {
+		t.Fatalf("wrong hidden anchor %+v", anchor)
+	}
+	member := attentionMember(f)
+	for _, event := range []int64{anchor.EventID, anchor.EventID + 1000} {
+		cursor := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%s/%d", hidden, event)))
+		page := attentionRead(f, member, "?after="+cursor)
+		if page.Total != 1 || len(page.Items) != 1 || page.Items[0].NodeID != visible || page.Next != nil {
+			t.Fatalf("unavailable anchor did not restart the visible list: %+v", page)
+		}
+	}
+}
+
+// Risk: overlapping inapplicability conditions give different explanations
+// in a row and its bulk preview, or let a merge refusal into the bulk moves.
+func TestAttentionRowAndPreviewReasonPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name, want           string
+		parent, stale, merge bool
+	}{
+		{name: "paused", want: "The server operator has paused status autopilot."},
+		{name: "stale before paused", stale: true, want: "Ticket changed since the proposal. Dismiss it and review the ticket."},
+		{name: "parent before stale and paused", parent: true, stale: true, want: "Parent statuses follow their children."},
+		{name: "merge refusal before paused", merge: true, want: "Fix the named gate on the ticket, then retry the merge observation."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AEON_STATUS_AUTOPILOT", "suggest")
+			f := setup(t)
+			id := f.add("AUT-2", "work", "in_progress", 4, nil)
+			f.run(f.now)
+			if tc.parent {
+				child := f.add("AUT-3", "work", "open", 0, nil)
+				f.tx(func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE id=$2`, id, child)
+					return err
+				})
+				dbtest.EnableWorkParentStatus(t, f.d, f.p.TenantID)
+			}
+			f.tx(func(tx pgx.Tx) error {
+				if tc.stale {
+					if _, err := tx.Exec(t.Context(), `UPDATE nodes SET title='Changed proposal',updated_at=clock_timestamp() WHERE id=$1`, id); err != nil {
+						return err
+					}
+				}
+				if tc.merge {
+					_, err := tx.Exec(t.Context(), `UPDATE status_autopilot_proposals SET decision=jsonb_set(decision,'{Flag}','"merge_refused"') WHERE node_id=$1`, id)
+					return err
+				}
+				return nil
+			})
+			t.Setenv("AEON_STATUS_AUTOPILOT", "off")
+			page := attentionRead(f, f.p, "")
+			if len(page.Items) != 1 || page.Items[0].NodeID != id || page.Items[0].Applicable || page.Items[0].Unavailable != tc.want {
+				t.Fatalf("row reason %+v; want %q", page, tc.want)
+			}
+			_, preview := bulkPreview(f, f.p, "apply", attentionScope{ProjectID: f.project})
+			if preview.Total != 1 || len(preview.Moves) != 0 || len(preview.Skipped) != 1 || bulkSkipCount(preview.Skipped, tc.want) != 1 {
+				t.Fatalf("preview reason %+v; want %q", preview, tc.want)
+			}
+		})
+	}
+}
+
 // Risk: large groups silently stop at the row-selection cap, double click
 // repeats writes, audit loses batch attribution, or batch undo restores stale data.
 func TestAttentionBulkBeyondSelectionCapReplayAuditAndPartialUndo(t *testing.T) {
@@ -174,6 +248,16 @@ func TestAttentionBulkBeyondSelectionCapReplayAuditAndPartialUndo(t *testing.T) 
 	if !undone.Completed || undone.Changed != 119 || len(undone.Failed) != 1 || undone.Failed[0].Key != "AUT-2" || !strings.Contains(undone.Failed[0].Error, "changed") {
 		t.Fatalf("undo %+v", undone)
 	}
+	f.tx(func(tx pgx.Tx) error {
+		var items int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='status_autopilot.attention_undone' AND metadata->>'batch_id'=$1 AND metadata ? 'original' AND undo_of IS NOT NULL`, result.BatchID).Scan(&items); err != nil {
+			return err
+		}
+		if items != 119 {
+			return fmt.Errorf("undo lost batch attribution: items=%d", items)
+		}
+		return nil
+	})
 	if got := bulkUndo(f, member, result.BatchID, 200); got.Changed != 119 || len(got.Failed) != 1 {
 		t.Fatalf("undo replay %+v", got)
 	}
