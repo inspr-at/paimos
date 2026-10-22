@@ -10,7 +10,7 @@ const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
 
 test('a change in one browser patches the open ticket in the other in place', async ({ browser }) => {
-  const { a, b, data, live, errors, close } = await openBoth(browser, '/p/PHAROS/PHAROS-14')
+  const { a, b, data, live, errors, close } = await openBoth(browser, '/p/PHAROS/PHAROS-14', { clock: Date.parse('2026-09-23T12:00:00Z') })
   try {
     const wsA = panel(a), wsB = panel(b)
     await expect(wsB.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
@@ -25,6 +25,8 @@ test('a change in one browser patches the open ticket in the other in place', as
     await expect(title).toBeVisible()
     await expect(wsB.locator('.inline-title')).toHaveClass(/live-tint/)
     await expect(wsB.locator('p.sr-only[role="status"]')).toHaveText('PHAROS-14 was updated elsewhere: title.')
+    await b.clock.fastForward(2001)
+    await expect(wsB.locator('.inline-title')).not.toHaveClass(/live-tint/)
     // The row under the panel is the same ticket, patched in place too.
     await expect(b.locator('#row-n-4')).toContainText('before release')
 

@@ -83,6 +83,13 @@ test('a failed upload says why and can be retried or removed', async ({ page }) 
   expect(writes(calls, 'POST', '/api/nodes/n-1/attachments')).toHaveLength(2)
   expect(writes(calls, 'POST', '/api/nodes/n-1/attachments').every(call => String(call.body).includes('filename="huge.png"'))).toBe(true)
   expect(data.attachments['n-1'].at(-1)?.name).toBe('huge.png')
+  options.failUpload = true
+  await dropFiles(page, [{ name: 'remove-me.png', type: 'image/png' }])
+  await expect(failed.getByRole('status')).toHaveAttribute('aria-label', 'remove-me.png did not upload: The file is too large')
+  await failed.getByRole('button', { name: 'Remove' }).click()
+  await expect(failed).toHaveCount(0)
+  await expect(tiles(page)).toHaveCount(5)
+  expect(data.attachments['n-1']).toHaveLength(5)
   await tiles(page).first().click()
   const box = viewer(page)
   await expect(box).toBeVisible()
@@ -105,6 +112,7 @@ test('a failed upload says why and can be retried or removed', async ({ page }) 
 })
 
 test('delete reaches the server at once; Undo in the toast undoes it on the server', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-23T12:00:00Z') })
   const { calls, data } = await open(page)
   const revision = data.attachments['n-1'].find(item => item.id === 'att-1')!.updated_at
   const target = strip(page).locator('[data-attachment-id="att-1"]')
@@ -138,6 +146,8 @@ test('delete reaches the server at once; Undo in the toast undoes it on the serv
   await expect(tiles(page)).toHaveCount(3)
   await expect.poll(() => writes(calls, 'DELETE', '/api/attachments/').length).toBe(2)
   expect(writes(calls, 'DELETE', '/api/attachments/')[1].path).toBe('/api/attachments/att-3')
+  await page.clock.fastForward(9000)
+  await expect(page.locator('.toast').filter({ hasText: 'Deleted phone.png' })).toBeHidden()
   expect(writes(calls, 'POST', '/api/events/')).toHaveLength(1)
 })
 

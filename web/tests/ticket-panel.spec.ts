@@ -112,7 +112,8 @@ test('titles edit inline on click, save with Enter under a precondition, and can
 
 test('a title conflict shows the newer title and keeps the draft', async ({ page }) => {
   const data = fixtures(), node = data.nodes.find(row => row.id === 'n-2')!, originalRevision = node.updated_at
-  const calls = await mockWork(page, data, { conflictOn: 'n-2' })
+  const options: { conflictOn?: string; conflictAlways?: string } = { conflictOn: 'n-2' }
+  const calls = await mockWork(page, data, options)
   await page.goto('/p/PHAROS/PHAROS-12')
   const ws = panel(page)
   await ws.getByRole('button', { name: 'Edit', exact: true }).click()
@@ -135,6 +136,15 @@ test('a title conflict shows the newer title and keeps the draft', async ({ page
   expect(writes(calls)).toHaveLength(2)
   expect(writes(calls)[1].headers['if-unmodified-since']).toBe(currentRevision)
   expect(node).toMatchObject({ title: 'My better title', body: 'Keep my unsaved plan.' })
+  // Inline-title conflict copy and draft retention remain a rendered proof.
+  options.conflictAlways = 'n-2'
+  await ws.getByRole('heading', { name: 'My better title' }).click()
+  await ws.getByLabel('Title', { exact: true }).fill('My inline draft')
+  await page.keyboard.press('Enter')
+  await expect(ws.getByRole('alert')).toContainText('Changed elsewhere to “Renamed by Mira”')
+  await expect(ws.getByLabel('Title', { exact: true })).toHaveValue('My inline draft')
+  await page.keyboard.press('Escape')
+  await expect(ws.getByRole('heading', { name: 'Renamed by Mira' })).toBeVisible()
 })
 
 test('description edits with preview, Cmd/Ctrl+Enter saves, Esc asks before discarding', async ({ page }) => {
