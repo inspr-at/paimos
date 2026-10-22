@@ -1,0 +1,6 @@
+{
+  "riskId": "drift:browser:tests/release-ticket-links.spec.ts:a ticket still on its way when the person or workspace changes never shows",
+  "destinations": [],
+  "removeCurrentAnchors": true,
+  "expectedErrorPrefix": "Missing destination: "
+}
