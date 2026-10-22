@@ -347,8 +347,8 @@ prove that uncertain cleanup exhausts its bounded budget without releasing the
 supervisor lock. Both fail on reviewed head `dce094fbc`, using test-only snapshot
 `a43f422c4` outside the delivery branch: cleanup settled before the barrier, and
 the supervisor lacked the unconfirmed-exit result. The focused negative run used
-the permitted single small local fallback after the remote runner refused with
-`remote busy (2 remote runs already active on mbp2606, global cap)`. It ran two
+the permitted single small local fallback after the remote runner refused at
+its global two-run capacity limit. It ran two
 Node tests, no browser, with two expected failures and zero skips. The temporary
 branch was removed after returning to the assigned delivery branch.
 
