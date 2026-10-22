@@ -30,6 +30,10 @@ then closes without its content. Reload final history before a fresh live
 subscription. A viewer losing access closes silently. Replay is a transient
 convenience, not a durable transcript.
 
+Closing the session chat closes its live subscription and cancels retries.
+An initial history read that finishes after the panel closes cannot reopen
+the stream or apply delivery and read state to the disposed view.
+
 The private worker lease of a chat registration and the exact current binding
 authorize `POST /api/chat-deliveries/live`, which accepts the S1 normalized
 event DTO. Only update frames with a nonzero source sequence are admitted.

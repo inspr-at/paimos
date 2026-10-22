@@ -806,7 +806,13 @@ watch(() => liveTurn.value && `${liveTurn.value.text.length}:${liveTurn.value.to
   if (props.active && entered && stick && !paging) keepBottom()
   else onScroll()
 })
-onBeforeUnmount(() => { liveGeneration++; follower?.stop(); resetLive() })
+onBeforeUnmount(() => {
+  // An initial history read may still be pending. Invalidate its continuation
+  // before closing the follower so it cannot start a new stream after teardown.
+  readGeneration++; liveGeneration++
+  follower?.stop(); follower = undefined
+  resetLive()
+})
 
 // ---------- Composer ----------
 const composeBlock = computed(() => {

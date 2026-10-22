@@ -85,6 +85,53 @@ const emit = (page: Page, type: string, payload: unknown) => page.evaluate(([kin
 const update = (page: Page, sequence: number, body: Record<string, unknown>) => emit(page, 'chat', { type: 'update', update: body, dropped_events: 0, source_sequence: sequence })
 const chunk = (page: Page, sequence: number, text: string) => update(page, sequence, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } })
 
+// Risk: closing the panel while its initial history read is pending starts a
+// new live subscription after teardown, with no remaining owner to close it.
+test('AEON-1082 closing chat closes its stream and rejects a late initial history read', async ({ page }) => {
+  const { worker, lookups } = await setup(page, { timing: 'native' })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const streams = () => page.evaluate(() => ((window as unknown as { __live?: { readyState: number }[] }).__live ?? []).map(source => source.readyState))
+  await expect.poll(streams).toEqual([1])
+  await panelOf(page).getByRole('button', { name: 'Close session details', exact: true }).click()
+  await expect(panelOf(page)).toHaveCount(0)
+  expect(await streams()).toEqual([2])
+  const initialLookups = lookups.length
+
+  // Hold the store's public async read at the same boundary as a delayed HTTP
+  // response. The browser-side lookup counter makes the negative assertion
+  // synchronous with the released continuation, without waiting for a request.
+  await page.evaluate(async session => {
+    const agents = (await import('/src/stores/agents.ts' /* @vite-ignore */)).useAgents()
+    const refresh = agents.refreshThread
+    const fetch = window.fetch
+    const state = { started: 0, lookups: 0, release: () => {} }
+    const history = new Promise<void>(resolve => { state.release = resolve })
+    agents.refreshThread = (project, id) => {
+      if (id !== session) return refresh(project, id)
+      state.started++
+      return history
+    }
+    window.fetch = (input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes(`/chat-sessions/${session}/thread`)) state.lookups++
+      return fetch(input, init)
+    }
+    Object.assign(window, { __chatLoad: state })
+    await (await import('/src/router.ts' /* @vite-ignore */)).router.push(`/agents/${session}?tab=messages`)
+  }, worker.id)
+  await expect(panelOf(page)).toBeVisible()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __chatLoad: { started: number } }).__chatLoad.started)).toBeGreaterThan(0)
+  expect(lookups).toHaveLength(initialLookups)
+  await panelOf(page).getByRole('button', { name: 'Close session details', exact: true }).click()
+  await expect(panelOf(page)).toHaveCount(0)
+  await page.evaluate(() => (window as unknown as { __chatLoad: { release: () => void } }).__chatLoad.release())
+  // The released promise continuations drain before the next browser task.
+  // A new lookup calls fetch immediately, before its network response lands.
+  const lateLookups = await page.evaluate(() => (window as unknown as { __chatLoad: { lookups: number } }).__chatLoad.lookups)
+  expect(lateLookups).toBe(0)
+  expect(await streams()).toEqual([2])
+})
+
 for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`AEON-1071 streams in place, stops mid-stream and yields to the saved reply ${theme} ${width}`, async ({ page }, testInfo) => {
     const { worker, data, calls, lookups, chat } = await setup(page, { theme })
