@@ -35,3 +35,32 @@ The two swapped destinations are remapped throughout spec budgets, protected-ris
 The proposed reference authority is an existing authorized **PPM / INSPR attachment on AEON-1670**, retained for the lifetime of the visual set. Tick approval, attachment identity, archive digest, checkpoint member digests and a successful availability verification are explicitly unset. P02 must supply and verify those values before cuts. CI captures stay in the existing artifact flow under `testInfo.outputPath()`; PNGs are never committed. An unavailable, expired or mismatched reference fails and requires a newly reviewed reference. The current run cannot become its own baseline, and automatic rewriting is forbidden. This package captures or publishes no baseline and introduces no credential.
 
 New source ownership uses the existing `scripts/**` S7 and `web/tests/**` S9 slice rules; no additional slice pattern is necessary.
+
+## P07 runtime preparation — AEON-1679
+
+P07 is **incomplete**. Its browser registrations remain **451 → 451** across 33 owners, against the planned ceiling of 27. No browser case, historical drift identity, launch record, tier or visual expectation has been removed or demoted. P01's visual approval is still `pending`, its baseline authority is `pending-review`, and its attachment/digest pins are unset. `check.mjs` deliberately requires that authority before a protected cut; this package preserves that requirement. The original reader-drift negative control also remains until the retained browser journey can be proven. Session rows, composer/reader geometry, terminal side effects, exact-session controls, receipts, approval and recovery journeys all retain their original browser coverage.
+
+The executable prerequisites added here are:
+
+- `native-program.unit.test.ts`: six cases execute the unchanged context/response/stream boundary extracted from `SessionPanel.vue` into `nativeSessionProgram.ts`. They preserve the original malformed JSON, `null`, missing/invalid capability, replay `[null]`, invalid grant and invalid SSE-envelope vectors. They also check byte/UTF-8 limits, reader cleanup, view-only attach, exact binding/query/header/detach identities and cancellation before a late stream chunk. No native control port is added.
+- `native-diagnostics.unit.test.ts`: six cases execute production binding/privacy/shape/uint64 admission, exclusive replay cursors, count/byte bounds, deduplication/eviction, coalescing/correlations and view/consent derivation. Every original quota vector from `native-expert-stream.spec.ts` is retained. Browser revocation, origin enforcement, physical scrolling and terminal side effects remain separate obligations.
+- `resilient-polling.unit.test.ts`: four added cases use held promises and fake time for shared reads, stale-screen rejection, hidden/offline polling, wake recovery and shared event-burst catch-up. Existing GET retry checks now advance fake timers. `stream-health.unit.test.ts` adds a person-reset case that replaces the shared stream and rejects callbacks from the previous source.
+
+All **26 cases** in these four targeted runtime suites passed locally, one file and one worker at a time after remote admission refused. The **17 added native registrations** are ESSENTIAL, classified through the canonical tier writer using the targeted native Vitest inventory. Existing registrations and tiers are preserved. The new module and fixture are covered by the existing `web/src/**` and `web/tests/**` S9 ownership rules, so no slice rule is added. The three P07 runtime destinations now bind exact verified native identities; retained browser destinations remain planned. The shared P04 stream-health destination is not marked complete on another package's behalf.
+
+Six temporary negative controls, run from a captured positive-state stash without a negative-control commit, failed for their intended assertions:
+
+| Disabled production guard | Rejecting runtime case | Observed result |
+|---|---|---|
+| Required capability booleans | native-program: malformed context | Accepted invalid capability; assertion failed |
+| Attached viewer binding | native-program: malformed/controlling grant | Invalid grant resolved; rejection assertion failed |
+| Diagnostic event binding | native-diagnostics: binding dimensions | Foreign tenant frame admitted; assertion failed |
+| Diagnostic private-field filter | native-diagnostics: expert privacy | Synthetic private field admitted; assertion failed |
+| Poll generation fence | resilient-polling: shared current read | Late old-screen response applied; assertion failed |
+| Shared stream source identity | stream-health: person reset | Old-person callback dispatched; assertion failed |
+
+All mutants were restored, and the four complete targeted suites passed again. No timeout, compilation error or unrelated failure is counted as a successful negative control.
+
+The measured local resilient-polling invocation was **1.23 s for four cases before → 201 ms for eight cases after** (one observation each, including runner startup; not a performance assertion). Final individual process walls for the four suites were approximately 0.35–0.38 s each. **Browser runner-time change is unmeasured**, with no browser saving claimed. LEAD `remote-spec.sh` refused with `remote busy (host guard); wait or rely on PR CI`; `ci-static-remote.sh` refused with `remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job`. No heavy local substitute was run.
+
+Remaining work is the proven 27-case browser consolidation, all old-case mappings/current obligation updates and cuts after P02 supplies approved immutable references, plus affected browser execution and `ci-static --merge-main` through the authorized runner or PR CI. AEON-1662 is not declared closed: its mounted polling synchronization and browser proof are still required. The ledger check reports `cuts: false`; neither the absent visual authority nor refused runner capacity is reported as acceptance.

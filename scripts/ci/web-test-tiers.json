@@ -19958,6 +19958,30 @@
     ,
     {"kind":"vitest","file":"tests/models-situations.unit.test.ts","name":"situation matrix > shows every row with a cell, counts only what it shows, and writes orders the server accepts","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/native-diagnostics.unit.test.ts","name":"coalesces only explicit message and call identities and keeps final, receipt, quota and gap evidence honest","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-diagnostics.unit.test.ts","name":"deduplicates and bounds retained diagnostics without sacrificing the live end to earlier pages","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-diagnostics.unit.test.ts","name":"derives view-only requests from current person, permission, consent and binding without inheriting terminal authority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-diagnostics.unit.test.ts","name":"fences diagnostics by every binding dimension, generation, native source and uint64 sequence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-diagnostics.unit.test.ts","name":"rejects private, malformed, omitted, deep and oversized expert bodies before retaining a defensive copy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-diagnostics.unit.test.ts","name":"requires exclusive descending replay and advancing cursors while enforcing count and byte limits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-program.unit.test.ts","name":"bounds decoded response bytes and UTF-8, releases readers, and preserves precise refusal reasons","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-program.unit.test.ts","name":"detaches the captured viewer after invalid SSE and accepts only an exact bound structured stream","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-program.unit.test.ts","name":"late stream chunks after cancellation cannot emit an event and detach only the original viewer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-program.unit.test.ts","name":"refuses malformed or controlling attach grants without streaming or detaching an ungranted viewer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-program.unit.test.ts","name":"rejects malformed native context and incomplete capabilities before enabling a viewer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-program.unit.test.ts","name":"rejects malformed replay and event envelopes before granting or opening a stream","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After beyond the lifetime ends the follow instead of reading later","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After inside the lifetime still waits, and one that reaches the deadline does not","tier":"GATED-FULL"}
@@ -20502,11 +20526,19 @@
     ,
     {"kind":"vitest","file":"tests/reserved-versions.unit.test.ts","name":"waits for the initial read and a successful save before revealing reservations","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"a hung read cannot block another awake period or overwrite its recovered snapshot","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"hidden, offline and stopped polling cannot read or commit late data; visible recovery reads afresh","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"keeps a good snapshot through two failures and flags the third without losing its timestamp","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"mounted consumers share one keyed read and stream; event bursts fence held data and retain one catch-up","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"refresh reports a kept answer, a failure with its reason, and a dropped read","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"retries only idempotent GET transport failures, with bounded exponential jitter","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"shares a current read but never joins or adopts a response from the previous screen","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"stops after two GET retries, and never retries a 4xx or a write","tier":"ESSENTIAL"}
     ,
@@ -21131,6 +21163,8 @@
     {"kind":"vitest","file":"tests/stream-health.unit.test.ts","name":"detects suspended timers with no browser event, and a backwards clock jump","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/stream-health.unit.test.ts","name":"freshness is Live only for trusted reads; stale age preserves the last successful update","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/stream-health.unit.test.ts","name":"person reset replaces the shared stream and ignores every callback retained by its old source","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/stream-health.unit.test.ts","name":"removes timers and wake listeners when the stream owner stops","tier":"GATED-FULL"}
     ,
