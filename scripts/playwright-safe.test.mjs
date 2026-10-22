@@ -34,6 +34,16 @@ async function waitFor(check) {
     await sleep(25)
   }
 }
+// Root exit can precede the last group member's exit. Callers still assert
+// ESRCH after this bounded poll, so a group that stays alive must fail.
+async function waitForGroupExit(pid) {
+  const deadline = Date.now() + 3000
+  while (Date.now() < deadline) {
+    try { process.kill(-pid, 0) }
+    catch (error) { if (error.code === 'ESRCH') return; throw error }
+    await sleep(25)
+  }
+}
 // A root slower than the supervisor's whole attempt budget. The budget is
 // counted in attempts, so a load-dependent start must never decide these tests.
 const SLOW_ROOT_MS = 1000
@@ -644,10 +654,7 @@ test('unverifiable live roots terminate their group without an invalid journal e
         code: 'ERR_ASSERTION', message: 'Missing expected exception.',
       })
       groupChecks = 0
-      await waitFor(() => {
-        try { process.kill(-probe.child.pid, 0); return false }
-        catch (error) { assert.equal(error.code, 'ESRCH'); return true }
-      })
+      await waitForGroupExit(probe.child.pid)
       assert.ok(groupChecks >= 2, 'group disappearance must be checked after the root exits')
       assert.throws(() => process.kill(-probe.child.pid, 0), { code: 'ESRCH' })
     } finally { injected.mock.restore() }
@@ -803,6 +810,7 @@ test('root retries allow a fast child to exit normally instead of failing verifi
     assert.equal(retries, 1, 'the root exits between the failed lookup and the next attempt')
     assert.equal(await exited, 7)
     assert.deepEqual(entries, [])
+    await waitForGroupExit(child.pid)
     assert.throws(() => process.kill(-child.pid, 0), { code: 'ESRCH' })
   } finally { child.kill('SIGKILL'); await exited }
 })
@@ -895,6 +903,7 @@ test('persistent supervisor root verification failure kills the group before rel
   try {
     await assert.rejects(runOwnedCommand(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { lockPath: path, graceMs: 50 }), /spawned group terminated/)
     assert.equal(calls, 20)
+    await waitForGroupExit(rootPid)
     assert.throws(() => process.kill(-rootPid, 0), { code: 'ESRCH' })
     assert.equal(existsSync(path), false)
     assert.deepEqual(readdirSync(join(path, '..')), [], 'terminated root leaves neither lock nor journal')
