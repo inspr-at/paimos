@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"sort"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -36,7 +35,6 @@ func projectLineage(s Session) Session {
 // The caller already holds the tenant and work-tree fences. No project or
 // session ownership changes between discovery and the final validation.
 func lockRegistrationHierarchy(ctx context.Context, tx pgx.Tx, projectID string, parentID *string) (string, error) {
-	projectID = strings.ToLower(projectID)
 	parentProject := projectID
 	if parentID != nil {
 		if !workorders.UUID(*parentID) {
