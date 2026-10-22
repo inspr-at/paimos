@@ -26,5 +26,6 @@ The tenant-RLS table `harness_rules_deliveries` freezes issuance metadata and
 permits one acknowledgement. Its evidence type is
 `agentd_transmitted_bytes_acknowledged`. It describes transmission and a bridge
 startup acknowledgement; it does not prove model obedience or grant authority.
-The separate `harness_rules_receipts` history retains its
+New agentd runs no longer create legacy pre-launch receipts. The separate
+`harness_rules_receipts` history retains its
 `worker_reported_received` semantics.

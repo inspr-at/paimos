@@ -137,10 +137,17 @@ func TestRulesDeliveryRejectsForeignEvidence(t *testing.T) {
 	f := newDeliveryFixture(t)
 	manifest := f.issue(t)
 	ack := deliveryAck(manifest)
+	expect(t, f.call(f.foreign, "POST", f.path+"/rules-delivery-evidence", ack, f.lease), 403)
+	expect(t, f.call(f.foreign, "GET", f.path+"/rules-delivery-evidence", nil, ""), 404)
+	f.tx(t, f.foreign, func(tx pgx.Tx) error {
+		var count int
+		err := tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_rules_deliveries WHERE id=$1`, manifest.ID).Scan(&count)
+		if err == nil && count != 0 {
+			t.Fatal("foreign tenant read the delivery manifest")
+		}
+		return err
+	})
 	foreign := f.agent
-	foreign.TenantID = f.foreign.TenantID
-	expect(t, f.call(foreign, "POST", f.path+"/rules-delivery-evidence", ack, f.lease), 403)
-	foreign = f.agent
 	foreign.TransportComputerID = uid()
 	foreign.RunComputerID = foreign.TransportComputerID
 	w := f.call(foreign, "POST", f.path+"/rules-delivery-evidence", ack, f.lease)

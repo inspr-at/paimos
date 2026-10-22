@@ -396,7 +396,7 @@ func TestManagedRulesValidateExactEphemeralContext(t *testing.T) {
 	run := Run{WorkOrderID: c.TaskID}
 	profile := Profile{Harness: Claude}
 	body, err := s.managedRules(t.Context(), e, run, profile)
-	if err != nil || !strings.Contains(body, merged.Body) || api.receipts != 1 {
+	if err != nil || !strings.Contains(body, merged.Body) || api.receipts != 0 {
 		t.Fatalf("rules handoff: %v", err)
 	}
 	api.bundle.Context.ProjectID = id("8")
@@ -408,8 +408,8 @@ func TestManagedRulesValidateExactEphemeralContext(t *testing.T) {
 	if _, err = s.managedRules(t.Context(), e, run, profile); err == nil {
 		t.Fatal("changed rules accepted")
 	}
-	if api.receipts != 1 {
-		t.Fatal("invalid rules receipted")
+	if api.receipts != 0 {
+		t.Fatal("new managed run wrote a legacy pre-launch receipt")
 	}
 }
 
