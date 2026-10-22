@@ -20,8 +20,8 @@ func exerciseRelatedDeliveryTruth(t *testing.T) {
 	session := func(project, ticket string, stopped bool) string {
 		t.Helper()
 		var id string
-		err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,stopped_at,stop_reason)
- VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','scout',$5,$6,CASE WHEN $7 THEN clock_timestamp() END,CASE WHEN $7 THEN 'stopped' END) RETURNING id::text`, f.person.TenantID, project, f.otherAgent.ID, nullable(ticket), []byte(uid()), []byte(uid()), stopped).Scan(&id)
+		err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,stopped_at,stop_reason,phase)
+ VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','scout',$5,$6,CASE WHEN $7 THEN clock_timestamp() END,CASE WHEN $7 THEN 'stopped' END,CASE WHEN $7 THEN 'stopped' ELSE 'starting' END) RETURNING id::text`, f.person.TenantID, project, f.otherAgent.ID, nullable(ticket), []byte(uid()), []byte(uid()), stopped).Scan(&id)
 		if err != nil {
 			t.Fatal(err)
 		}
