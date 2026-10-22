@@ -60,9 +60,9 @@ export function validateVisual(visual, { cuts = false } = {}) {
   need(visual.version === 1, 'Invalid visual manifest version')
   const expected = ['projects', 'tickets', 'goals', 'agents', 'session-chat', 'decision-desk',
     'account-use-matrix', 'models', 'access', 'knowledge', 'delivery-numbers', 'hours',
-    'quote-editor', 'public-quote', 'releases', 'agent-rules', 'capacity', 'theme-editor']
+    'quote-editor', 'public-quote', 'start-agent', 'agent-rules', 'capacity', 'ticket-workspace']
   const tablet = new Set(['agents', 'decision-desk', 'account-use-matrix', 'quote-editor'])
-  need(same(visual.states?.map(row => row.id), expected), 'Visual state list must contain the exact 18 section-8 states')
+  need(same(visual.states?.map(row => row.id), expected), 'Visual state list must contain the exact 18 Tick-adjusted section-8 states')
   need(same(visual.profiles, { phone: { width: 390, height: 844 }, tablet: { width: 1024, height: 768 }, desktop: { width: 1440, height: 900 } }), 'Visual viewport matrix changed')
   need(same(visual.themes, ['light', 'dark']), 'Both visual themes are required')
   const checkpoints = new Set()
@@ -70,6 +70,8 @@ export function validateVisual(visual, { cuts = false } = {}) {
     const profiles = tablet.has(state.id) ? ['phone', 'tablet', 'desktop'] : ['phone', 'desktop']
     need(state.owner === `tests/visual/${state.id}.spec.ts` && text(state.fixture), `Missing independently owned visual fixture: ${state.id}`)
     need(same(state.profiles, profiles) && same(state.themes, visual.themes), `Unexpected visual matrix: ${state.id}`)
+    if (state.id === 'goals') need(same(Object.keys(state.fixturesByProfile ?? {}).sort(), [...profiles].sort()) &&
+      profiles.every(profile => text(state.fixturesByProfile[profile])), 'Missing Goals fixtures by profile')
     const expectedCases = profiles.flatMap(profile => visual.themes.map(theme => `V-${state.id}-${visual.profiles[profile].width}-${theme}`))
     need(same(state.checkpoints?.map(row => row.id), expectedCases), `Missing/duplicate visual checkpoint: ${state.id}`)
     for (const checkpoint of state.checkpoints) {
@@ -165,11 +167,12 @@ export function validateLedger({ baseline, ledger, visual, currentWeb, currentGo
         `Replacement native identity missing: ${risk.id} -> ${id}`)
     }
   }
-  const cuts = [...original.keys()].some(changed) || required.some(row => currentAnchors(row.source, baseline).some(changed))
-  const visualCases = validateVisual(visual, { cuts })
+  // Standing enforcement follows protected risks. The whole catalogue is a
+  // one-time P01 snapshot, not a visual-approval gate for unrelated unit edits.
+  const cuts = required.some(row => currentAnchors(row.source, baseline).some(changed))
   if (p01) {
     need(ledger.phase === 'P01', 'The P01 snapshot check only applies to P01')
-    need(!cuts, 'P01 cannot remove or demote any existing test execution')
+    need(!cuts && ![...original.keys()].some(changed), 'P01 cannot remove or demote any existing test execution')
     need(same(Object.fromEntries(Object.entries(currentWeb).filter(([key]) => key !== 'tests')), baseline.cataloguePolicy),
       'P01 changed catalogue selection/tagging/timing policy')
     for (const [key, before] of original) {
@@ -177,6 +180,7 @@ export function validateLedger({ baseline, ledger, visual, currentWeb, currentGo
       need(same(current.get(key), row), `P01 changed an existing catalogue row: ${key}`)
     }
   }
+  const visualCases = validateVisual(visual, { cuts })
   for (const pin of baseline.sourcePins) if (pin.category === 'historical-evidence' ||
     p01 && ['launch-policy', 'launch-record', 'selector-policy', 'browser-source', 'current-obligations'].includes(pin.category))
     need(sourceHash(pin.path) === pin.sha256, `Frozen ${pin.category} changed: ${pin.path}`)

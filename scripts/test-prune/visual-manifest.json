@@ -1,7 +1,7 @@
 {
   "version": 1,
   "ticket": "AEON-1673",
-  "source": "AEON-1668 section 8",
+  "source": "AEON-1668 section 8 and Tick addendum (2026-10-22)",
   "approval": {
     "reviewer": "Tick",
     "status": "pending",
@@ -172,7 +172,7 @@
       "id": "goals",
       "label": "Goals",
       "owner": "tests/visual/goals.spec.ts",
-      "fixture": "Expanded goal/epic with waiting work and a long title",
+      "fixture": "Long title and key; desktop Expert and phone Simple with profile-specific fixtures",
       "profiles": [
         "phone",
         "desktop"
@@ -218,7 +218,11 @@
             "sha256": null
           }
         }
-      ]
+      ],
+      "fixturesByProfile": {
+        "phone": "Simple; 56 px rows; candy bar frozen by reduced motion",
+        "desktop": "Expert; one goal expanded; pace badges; a late Lands with \"at this pace\"; numbered steps with stage tracks; waits marker"
+      }
     },
     {
       "id": "agents",
@@ -869,10 +873,10 @@
       ]
     },
     {
-      "id": "releases",
-      "label": "Release history",
-      "owner": "tests/visual/releases.spec.ts",
-      "fixture": "Historic/current benefits, long marketing name and copy/compare controls",
+      "id": "start-agent",
+      "label": "Start agent / Run once",
+      "owner": "tests/visual/start-agent.spec.ts",
+      "fixture": "Run once mode; task filled; \"Create a ticket in a project\"; read-only; folded \"Runs on …\" row with a capacity warning",
       "profiles": [
         "phone",
         "desktop"
@@ -883,7 +887,7 @@
       ],
       "checkpoints": [
         {
-          "id": "V-releases-390-light",
+          "id": "V-start-agent-390-light",
           "profile": "phone",
           "theme": "light",
           "reference": {
@@ -892,7 +896,7 @@
           }
         },
         {
-          "id": "V-releases-390-dark",
+          "id": "V-start-agent-390-dark",
           "profile": "phone",
           "theme": "dark",
           "reference": {
@@ -901,7 +905,7 @@
           }
         },
         {
-          "id": "V-releases-1440-light",
+          "id": "V-start-agent-1440-light",
           "profile": "desktop",
           "theme": "light",
           "reference": {
@@ -910,7 +914,7 @@
           }
         },
         {
-          "id": "V-releases-1440-dark",
+          "id": "V-start-agent-1440-dark",
           "profile": "desktop",
           "theme": "dark",
           "reference": {
@@ -1025,10 +1029,10 @@
       ]
     },
     {
-      "id": "theme-editor",
-      "label": "Theme editor",
-      "owner": "tests/visual/theme-editor.spec.ts",
-      "fixture": "Dirty custom theme, contrast explanation and conflict/reload state",
+      "id": "ticket-workspace",
+      "label": "Ticket workspace",
+      "owner": "tests/visual/ticket-workspace.spec.ts",
+      "fixture": "Long title and key; properties panel; attachment strip with one preview; checklist with the focus ring; chat dock open",
       "profiles": [
         "phone",
         "desktop"
@@ -1039,7 +1043,7 @@
       ],
       "checkpoints": [
         {
-          "id": "V-theme-editor-390-light",
+          "id": "V-ticket-workspace-390-light",
           "profile": "phone",
           "theme": "light",
           "reference": {
@@ -1048,7 +1052,7 @@
           }
         },
         {
-          "id": "V-theme-editor-390-dark",
+          "id": "V-ticket-workspace-390-dark",
           "profile": "phone",
           "theme": "dark",
           "reference": {
@@ -1057,7 +1061,7 @@
           }
         },
         {
-          "id": "V-theme-editor-1440-light",
+          "id": "V-ticket-workspace-1440-light",
           "profile": "desktop",
           "theme": "light",
           "reference": {
@@ -1066,7 +1070,7 @@
           }
         },
         {
-          "id": "V-theme-editor-1440-dark",
+          "id": "V-ticket-workspace-1440-dark",
           "profile": "desktop",
           "theme": "dark",
           "reference": {

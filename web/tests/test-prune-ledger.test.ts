@@ -44,6 +44,62 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
     currentWeb: json('scripts/ci/web-test-tiers.json'), currentGo: json('scripts/ci/go-test-tiers.json'),
   }
   const sourceHash = (path: string) => createHash('sha256').update(read(path)).digest('hex')
+  // Risk: pruning the old tours before Tick's replacement fixtures are encoded
+  // would lose the central workspace/start surfaces and Goals profile coverage.
+  for (const [id, fixture] of [
+    ['ticket-workspace', 'Long title and key; properties panel; attachment strip with one preview; checklist with the focus ring; chat dock open'],
+    ['start-agent', 'Run once mode; task filled; "Create a ticket in a project"; read-only; folded "Runs on …" row with a capacity warning'],
+  ]) {
+    const state = original.visual.states.find((row: { id: string }) => row.id === id)
+    assert.ok(state, `Tick's replacement state must be present: ${id}`)
+    assert.equal(state.fixture, fixture)
+    assert.equal(state.owner, `tests/visual/${id}.spec.ts`)
+    assert.deepEqual(state.checkpoints.map((row: { id: string }) => row.id),
+      [390, 1440].flatMap(width => ['light', 'dark'].map(theme => `V-${id}-${width}-${theme}`)))
+    const destination = original.ledger.destinations.find((row: { id: string }) => row.id === `visual:${id}`)
+    assert.equal(destination?.state, id)
+    assert.equal(destination?.owner, state.owner)
+    assert.equal(destination?.risk, fixture)
+  }
+  const goals = original.visual.states.find((row: { id: string }) => row.id === 'goals')
+  assert.deepEqual(goals.fixturesByProfile, {
+    phone: 'Simple; 56 px rows; candy bar frozen by reduced motion',
+    desktop: 'Expert; one goal expanded; pace badges; a late Lands with "at this pace"; numbered steps with stage tracks; waits marker',
+  })
+  const genericGoals = structuredClone(original.visual)
+  delete genericGoals.states.find((row: { id: string }) => row.id === 'goals').fixturesByProfile
+  assert.throws(() => validateVisual(genericGoals), /Missing Goals fixtures by profile/)
+  for (const retired of ['theme-editor', 'releases']) {
+    assert.ok(!original.visual.states.some((row: { id: string }) => row.id === retired))
+    assert.ok(!original.ledger.destinations.some((row: { id: string }) => row.id === `visual:${retired}`))
+  }
+
+  // Risk: an unrelated unit rename/removal must not turn the standing lineage
+  // check into a visual-approval gate for the entire frozen catalogue.
+  const protectedKeys = new Set(original.ledger.risks.flatMap((row: { currentKeys: string[] }) => row.currentKeys))
+  const unrelated = original.currentWeb.tests.find((row: Parameters<typeof key>[0]) =>
+    row.kind === 'vitest' && row.file === 'tests/access-keys.unit.test.ts' && !protectedKeys.has(key(row)))
+  assert.ok(unrelated, 'The counterexample must use an unprotected unit registration')
+  for (const operation of ['rename', 'remove']) {
+    const edited = structuredClone(original)
+    const index = edited.currentWeb.tests.findIndex((row: Parameters<typeof key>[0]) => key(row) === key(unrelated))
+    assert.notEqual(index, -1)
+    if (operation === 'rename') edited.currentWeb.tests[index].name += ' (renamed without changing its risk)'
+    else edited.currentWeb.tests.splice(index, 1)
+    assert.equal(validateLedger({ ...edited, sourceHash }).cuts, false,
+      `An unprotected unit ${operation} must pass without Tick references`)
+    assert.throws(() => validateLedger({ ...edited, sourceHash, p01: true }), {
+      message: 'P01 cannot remove or demote any existing test execution',
+    })
+  }
+  const renamedProtected = structuredClone(original)
+  const protectedRisk = renamedProtected.ledger.risks[0]
+  const anchor = renamedProtected.currentWeb.tests.find((row: Parameters<typeof key>[0]) => key(row) === protectedRisk.currentKeys[0])
+  assert.ok(anchor, 'The protected rename must start from a current risk anchor')
+  anchor.name += ' (renamed protected anchor)'
+  assert.throws(() => validateLedger({ ...renamedProtected, sourceHash }), {
+    message: `Removed risk has no verified destination: ${protectedRisk.id} -> ${protectedRisk.destinations[0]}`,
+  })
   const fixture = json('scripts/test-prune/testdata/missing-destination.json')
   const missing = structuredClone(original)
   const risk = missing.ledger.risks.find((row: { id: string }) => row.id === fixture.riskId)
