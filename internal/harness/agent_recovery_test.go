@@ -200,6 +200,8 @@ func TestPairedAttachedHookTransportCeiling(t *testing.T) {
 		{"no inbox", `UPDATE harness_sessions SET capabilities=ARRAY['status'] WHERE id=$1`},
 		{"stopped", `UPDATE harness_sessions SET stopped_at=clock_timestamp() WHERE id=$1`},
 		{"archived", `UPDATE harness_sessions SET archived_at=clock_timestamp(),stopped_at=clock_timestamp(),recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest=decode(repeat('a',64),'hex'),recovery_actor_id=started_by_principal_id,recovery_reason='fixture archive' WHERE id=$1`},
+		{"revoked pairing", `UPDATE agent_pairing_computers SET state='revoked' WHERE principal_id=(SELECT agent_principal_id FROM harness_sessions WHERE id=$1)`},
+		{"no person ceiling", `UPDATE agent_keys SET created_by_principal_id=NULL,person_id=NULL WHERE principal_id=(SELECT agent_principal_id FROM harness_sessions WHERE id=$1)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v := attachedRecoveryAgent(t)

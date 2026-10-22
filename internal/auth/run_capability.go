@@ -83,7 +83,7 @@ func transportAttachedHookRoute(r *http.Request) bool {
 func attachedHookAuthorityTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal) error {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	lease := workerlease.Read(r)
-	if !transportAttachedHookRoute(r) || p.TransportComputerID == "" || p.RunID != "" || len(parts) != 6 || !validRouteUUID(parts[2]) || !validRouteUUID(parts[4]) || lease == "" {
+	if !transportAttachedHookRoute(r) || p.TransportComputerID == "" || p.RunID != "" || p.KeyPersonID == "" && p.KeyCreatorID == "" || len(parts) != 6 || !validRouteUUID(parts[2]) || !validRouteUUID(parts[4]) || lease == "" {
 		return authz.ErrForbidden
 	}
 	if err := agentpairing.Lock(ctx, tx); err != nil {
@@ -106,9 +106,10 @@ func attachedHookAuthorityTx(ctx context.Context, tx pgx.Tx, r *http.Request, p 
  AND s.archived_at IS NULL AND s.stopped_at IS NULL AND s.handed_over_to_id IS NULL
  AND c.id=$5 AND c.key_id=$6 AND c.state='connected' AND q.state='redeemed'
  AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp())
+ AND coalesce(k.person_id::text,'')=$8
  AND ($7 OR ('attached_reconnect_v1'=ANY(s.capabilities) AND s.process_ownership->>'daemon_id'=c.daemon_id)))`,
 		p.TenantID, parts[2], parts[4], p.ID, p.TransportComputerID, p.KeyID,
-		r.Pattern == "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat").Scan(&attached)
+		r.Pattern == "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", p.KeyPersonID).Scan(&attached)
 	if err != nil {
 		return err
 	}
