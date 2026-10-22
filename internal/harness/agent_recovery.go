@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -400,7 +401,7 @@ func (m *Module) claimAgentRecoveries(r *http.Request, tx pgx.Tx, p tenant.Princ
 			return nil, err
 		}
 		if s.RunID != nil {
-			if err = authz.RequireRunStartOnComputerTx(r.Context(), tx, p, *s.RunID); err != nil {
+			if err = workqueue.RequireRunPersonTx(r.Context(), tx, p, *s.RunID); err != nil {
 				return nil, err
 			}
 		}

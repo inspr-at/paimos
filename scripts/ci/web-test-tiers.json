@@ -6426,6 +6426,34 @@
     ,
     {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"touch › AEON-1535 P3: O, A, R and D and a tap choose the right row, and choosing moves nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: a reader who presses e before permissions load gets no editor","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: c is spent when the person enters and leaves a field before permissions load","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: c pressed before project permissions load focuses the comment box once they arrive","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e is spent by a refreshed denial that lands after the request it waited on, so a later grant opens nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e is spent when a dialog opens and closes before permissions load","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e pressed before project permissions load opens the editor once they arrive","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e pressed while the ticket loads opens the editor when the ticket arrives after its permissions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e remembered for one ticket does not edit the ticket opened next","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Escape closes an open peek menu before the ticket and keeps the memo draft","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: the peek opens the ticket’s full page at its canonical address","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -9451,6 +9479,24 @@
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"390: the status note keeps its reserve through a live update, hours left sit under LANDS, items carry their note and the Done fold counts today; a dropped stream says Reconnecting in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"900: items nest under their goal at the step icons' x, labels run from the key to the ETA in at most two lines with the badge in the meta line; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 dark: Hide for me, Undo, Display › Show (Done goals, Hidden goals, Waiting on you), Unhide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 dark: the toolbar's Waiting on you toggle hides and shows the band, Display › Show follows, and the count stays without moving anything","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: Hide for me, Undo, Display › Show (Done goals, Hidden goals, Waiting on you), Unhide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: Waiting on you off leaves no band, keeps the header Desk count, and stays off from the first paint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: the toolbar's Waiting on you toggle hides and shows the band, Display › Show follows, and the count stays without moving anything","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 dark: the toolbar toggle steps aside; the ⋯ row reads \"Waiting on you · 1\", hides and shows the band, and keeps the count while hidden","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 dark: the ⋯ Goal display menu has the three Show rows; the opened goal hides, Undo restores, Hidden goals shows it and Unhide brings it back","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 light: the toolbar toggle steps aside; the ⋯ row reads \"Waiting on you · 1\", hides and shows the band, and keeps the count while hidden","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 light: the ⋯ Goal display menu has the three Show rows; the opened goal hides, Undo restores, Hidden goals shows it and Unhide brings it back","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1024 dark: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -17696,6 +17742,8 @@
     ,
     {"kind":"vitest","file":"tests/accounts-needs.unit.test.ts","name":"the Accounts part > lists a new account that asks first and one row for projects in Unassigned","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/aeon-1632-no-work-id-links.unit.test.ts","name":"AEON-1632: no web source builds a /work/<id> link","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/agent-appearance.unit.test.ts","name":"personal behaviour writes preserve stored accessibility choices while a theme is active","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agent-appearance.unit.test.ts","name":"reports a failed state save and lets the same choice be retried","tier":"GATED-FULL"}
@@ -18806,6 +18854,8 @@
     ,
     {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"what the rows and the footer show > the status note is one line with its author and age, without a fold chevron, and renders nothing without a note","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/goals-waiting-toggle.unit.test.ts","name":"Waiting on you: one setting for the toolbar toggle and Display › Show > a flip from either control shows in both, keeps the other Goals preferences, and the count stays while the band is hidden","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/graph-focus.unit.test.ts","name":"contains a rejected exit and tolerates a missing exit API","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/graph-focus.unit.test.ts","name":"does not request fullscreen after focus has already ended","tier":"GATED-FULL"}
@@ -19871,6 +19921,8 @@
     {"kind":"vitest","file":"tests/position.unit.test.ts","name":"the server position decides before the order the reads started in","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/preferences-owner.unit.test.ts","name":"AEON-1213: shared preference reads retry failures, coalesce recovery and accept an empty value","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/preferences-owner.unit.test.ts","name":"AEON-1614: a delay-0 save is on the wire with keepalive before the page hides","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/preferences-owner.unit.test.ts","name":"S9-001: a queued tail behind A's in-flight write is cancelled on sign-out","tier":"ESSENTIAL"}
     ,

@@ -3,6 +3,7 @@
 package harness
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -13,6 +14,43 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
+
+// Keep the safety exception local to the four worker control endpoints. Every
+// response and audit snapshot uses an explicit metadata projection; never
+// serialize a full session, transient steer, handover or setting through it.
+func safetyHandler(fn func(*http.Request, pgx.Tx, tenant.Principal) (any, error)) func(*http.Request, pgx.Tx, tenant.Principal) (any, error) {
+	return func(r *http.Request, tx pgx.Tx, p tenant.Principal) (out any, err error) {
+		if !workorders.WorkerSafetyOnly(r.Context()) {
+			return fn(r, tx, p)
+		}
+		r, finish := deferControlEvents(r, tx)
+		defer finish(&err)
+		out, err = fn(r, tx, p)
+		if _, ok := out.(map[string]any); !ok {
+			out = safetyMetadata(out)
+		}
+		return out, err
+	}
+}
+
+func safetyMetadata(value any) any {
+	switch v := value.(type) {
+	case Session:
+		return map[string]any{"id": v.ID, "project_id": v.ProjectID, "phase": v.Phase, "stopped_at": v.StoppedAt, "stop_reason": v.StopReason}
+	case Control:
+		c := Control{ID: v.ID, SessionID: v.SessionID, Kind: v.Kind, State: v.State, Sequence: v.Sequence, Outcome: v.Outcome, CreatedAt: v.CreatedAt, ClaimedAt: v.ClaimedAt, CompletedAt: v.CompletedAt, ExpectedOwnership: v.ExpectedOwnership, ExpectedGeneration: v.ExpectedGeneration, ExpiresAt: v.ExpiresAt}
+		if v.RequestPayload != nil && v.RequestPayload.StopNow {
+			c.RequestPayload = &SessionRequestPayload{StopNow: true}
+		}
+		return c
+	case nil:
+		return nil
+	default:
+		return map[string]bool{"safety": true}
+	}
+}
+
+func safetyOnly(ctx context.Context) bool { return workorders.WorkerSafetyOnly(ctx) }
 
 type Control struct {
 	Value              string                 `json:"value,omitempty"`
@@ -113,16 +151,18 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (result a
 	if s.Management != "managed" {
 		return nil, workorders.Fail(409, "managed worker required")
 	}
-	if s, err = expirePause(ctx, tx, p, s); err != nil {
-		return nil, err
-	}
-	if err := expireSessionRequests(ctx, tx, p, s); err != nil {
-		return nil, err
+	if !safetyOnly(ctx) {
+		if s, err = expirePause(ctx, tx, p, s); err != nil {
+			return nil, err
+		}
+		if err := expireSessionRequests(ctx, tx, p, s); err != nil {
+			return nil, err
+		}
 	}
 	if err := m.expireControls(r, tx, p, s); err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND state='pending' AND NOT(kind='stop' AND coalesce(request_payload->>'pause','false')='true') AND (coalesce(request_payload->>'stop_now','false')<>'true' OR $2::jsonb IS NOT NULL) ORDER BY sequence FOR UPDATE`, s.ID, s.ProcessOwnership)
+	rows, err := tx.Query(ctx, `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND state='pending' AND NOT(kind='stop' AND coalesce(request_payload->>'pause','false')='true') AND (NOT $3::boolean OR kind='stop') AND (coalesce(request_payload->>'stop_now','false')<>'true' OR $2::jsonb IS NOT NULL) ORDER BY sequence LIMIT 64 FOR UPDATE`, s.ID, s.ProcessOwnership, safetyOnly(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -233,6 +273,13 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (result a
 	}
 	for i := range claimed {
 		claimed[i].ExpiresInMS = controlTTL(claimed[i].ExpiresAt, now).Milliseconds()
+		if safetyOnly(ctx) {
+			claimed[i].Control = safetyMetadata(claimed[i].Control).(Control)
+			claimed[i].Text = ""
+		}
+	}
+	if safetyOnly(ctx) {
+		return map[string]any{"session": safetyMetadata(s), "controls": claimed}, nil
 	}
 	return map[string]any{"session": s, "controls": claimed}, nil
 }
@@ -257,8 +304,10 @@ func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal)
 	if err != nil {
 		return nil, err
 	}
-	if err := expireSessionRequests(r.Context(), tx, p, s); err != nil {
-		return nil, err
+	if !safetyOnly(ctx) {
+		if err := expireSessionRequests(ctx, tx, p, s); err != nil {
+			return nil, err
+		}
 	}
 	id := r.PathValue("controlId")
 	if !workorders.UUID(id) {
@@ -267,6 +316,16 @@ func (m *Module) completeControl(r *http.Request, tx pgx.Tx, p tenant.Principal)
 	c, err := scanControl(tx.QueryRow(ctx, `SELECT `+controlColumns+` FROM harness_controls WHERE session_id=$1 AND id=$2 FOR UPDATE`, s.ID, id))
 	if err != nil {
 		return nil, err
+	}
+	if safetyOnly(ctx) && c.Kind != "stop" {
+		return nil, workorders.Fail(403, "safety control required")
+	}
+	if safetyOnly(ctx) {
+		switch in.Reason {
+		case "agentd_applied", "native_close_exited", "owned_group_signalled_root_exited", "authorization_expired", "child_unavailable", "budget_exhausted", "nothing_running", "outcome_unconfirmed", "graceful_stop_timeout", "owned_group_signalled_root_exit_unconfirmed":
+		default:
+			return nil, workorders.Fail(400, "safety outcome code required")
+		}
 	}
 	if c.Kind == "stop" && c.RequestPayload != nil && c.RequestPayload.Pause {
 		return nil, workorders.Fail(409, "pause completes only with a planned handover and stop reason paused")

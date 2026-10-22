@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentruns"
-	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/jackc/pgx/v5"
 )
@@ -23,7 +22,7 @@ func TestComputerStartCreationAndClaimUseCurrentPersonGrant(t *testing.T) {
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		for i, principal := range []string{f.agent.ID, f.other.ID} {
 			request, fingerprint := uuid(), strings.ReplaceAll(uuid()+uuid(), "-", "")
-			if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,$3,$4,$4,$4,'{}',$4,'redeemed',$5)`, f.person.TenantID, request, []string{"123456789", "123456780"}[i], fingerprint, f.person.ID); err != nil {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,$3,$4,$4,$4,'{"platform":"darwin","arch":"arm64"}',$4,'redeemed',$5)`, f.person.TenantID, request, []string{"123456789", "123456780"}[i], fingerprint, f.person.ID); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) SELECT $1,$2,$3,$4,id,$5,$6 FROM agent_keys WHERE principal_id=$4 ORDER BY created_at LIMIT 1`, f.person.TenantID, computers[i], request, principal, []string{"daemon-test", "daemon-other"}[i], fingerprint); err != nil {
@@ -35,8 +34,8 @@ func TestComputerStartCreationAndClaimUseCurrentPersonGrant(t *testing.T) {
 	o := f.order(t, nil)
 	// Owner's Go template supplies start permission for A and B.
 	adminRun := f.run(t, o)
-	if adminRun.ActingPersonID != nil {
-		t.Fatal("computer permission inferred an acting person")
+	if adminRun.ActingPersonID == nil || *adminRun.ActingPersonID != f.person.ID {
+		t.Fatal("personal start lost its person")
 	}
 	otherOrder := f.order(t, nil)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -69,12 +68,13 @@ func TestComputerStartCreationAndClaimUseCurrentPersonGrant(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			grant(computers[0], true)
 			run := f.run(t, f.order(t, nil))
-			ids := f.reserve(t, run)
-			if mode != "legacy" {
+			if mode == "legacy" {
+				// Model a pre-expansion writer without changing a bound run's actor.
 				f.tx(t, f.person, func(tx pgx.Tx) error {
-					return agentruns.SetActingPersonTx(t.Context(), tx, f.person.TenantID, run.ID, f.person.ID)
+					return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id) SELECT tenant_id,work_order_id,agent_principal_id,model_profile_id FROM agent_runs WHERE id=$1 RETURNING id::text`, run.ID).Scan(&run.ID)
 				})
 			}
+			ids := f.reserve(t, run)
 			if mode != "granted" {
 				grant(computers[0], false)
 			}
@@ -90,7 +90,7 @@ func TestComputerStartCreationAndClaimUseCurrentPersonGrant(t *testing.T) {
 				t.Fatal(err)
 			}
 			w := f.request(f.agent, "POST", "/api/runs/"+run.ID+"/claim", string(raw), f.token)
-			if w.Code != status || status == 403 && !strings.Contains(w.Body.String(), authz.ErrForbidden.Error()) {
+			if w.Code != status || status == 403 && !strings.Contains(w.Body.String(), "permission_revoked") {
 				t.Fatalf("%s claim: %d %s", mode, w.Code, w.Body.String())
 			}
 		})

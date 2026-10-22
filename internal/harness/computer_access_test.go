@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
-	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -44,6 +43,7 @@ func TestComputerStartLeadRuntimeRechecksRunPerson(t *testing.T) {
 		}{
 			{`INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Lead run person')`, []any{f.person.TenantID, person}},
 			{`INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,computer_id) SELECT $1,$2,id,'computer',$3 FROM roles WHERE key='admin'`, []any{f.person.TenantID, person, computer}},
+			{`INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE key='viewer'`, []any{f.person.TenantID, person, f.project}},
 			{`UPDATE agent_runs SET acting_person_id=$2 WHERE id=$1`, []any{v.run, person}},
 			{`INSERT INTO recurrences(tenant_id,id,project_id,parent_id,template,trigger,created_by_principal_id) VALUES($1,$2,$3,$3,'{}','{"kind":"event"}',$4)`, []any{f.person.TenantID, recurrence, f.project, f.person.ID}},
 			{`INSERT INTO recurrence_definitions(tenant_id,recurrence_id,scope_type,scope_project_id,owner_principal_id,output_project_id,output_parent_id) VALUES($1,$2,'project',$3,$4,$3,$3)`, []any{f.person.TenantID, recurrence, f.project, f.person.ID}},
@@ -74,7 +74,7 @@ func TestComputerStartLeadRuntimeRechecksRunPerson(t *testing.T) {
 	})
 	w := f.call(f.agent, "POST", path, pickup, "")
 	expect(t, w, 403)
-	if !strings.Contains(w.Body.String(), authz.ErrForbidden.Error()) {
+	if !strings.Contains(w.Body.String(), "permission_revoked") {
 		t.Fatalf("lead runtime refused for another reason: %s", w.Body.String())
 	}
 }
@@ -95,6 +95,11 @@ func TestComputerStartRecoveryRechecksRunPerson(t *testing.T) {
 					person = f.person.ID
 				} else if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,computer_id) SELECT $1,$2,r.id,'computer',c.id FROM roles r CROSS JOIN agent_pairing_computers c WHERE r.key='admin' AND c.principal_id=$3`, f.person.TenantID, person, f.agent.ID); err != nil {
 					return err
+				}
+				if mode != "legacy" && mode != "workspace_admin" {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE key='viewer'`, f.person.TenantID, person, f.project); err != nil {
+						return err
+					}
 				}
 				if mode != "legacy" {
 					_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET acting_person_id=$2 WHERE id=$1`, v.run, person)
@@ -118,7 +123,7 @@ func TestComputerStartRecoveryRechecksRunPerson(t *testing.T) {
 			}
 			w := v.runtimeCall(t, "/api/harness-recoveries/claim", map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation})
 			expect(t, w, 403)
-			if !strings.Contains(w.Body.String(), authz.ErrForbidden.Error()) {
+			if !strings.Contains(w.Body.String(), "permission_revoked") {
 				t.Fatalf("recovery refused for another reason: %s", w.Body.String())
 			}
 			f.tx(t, f.person, func(tx pgx.Tx) error {
