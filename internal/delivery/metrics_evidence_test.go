@@ -199,7 +199,7 @@ func TestDeliveryMergeCompletionEmitsExplicitResolution(t *testing.T) {
 	s.Mode = "shadow"
 	f.call(t, f.person, "PUT", path+"/settings", s, 200, nil)
 	for i, outcome := range []string{"scripted", "model"} {
-		in := roundInput(f, "merge-"+outcome, "merge", 1)
+		in := roundInput(f, "merge-"+outcome, "merge", i+1)
 		in.PR = &p.Number
 		var round Round
 		f.call(t, f.person, "POST", path, in, 201, &round)
