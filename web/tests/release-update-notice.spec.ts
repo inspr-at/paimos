@@ -352,6 +352,7 @@ test.describe('update toast counts', () => {
         if (width === 390) {
           // Phones: the counts wrap under the sentence, the actions under the counts.
           expect(geo.counts.top).toBeGreaterThanOrEqual(geo.sentence.bottom - 0.5)
+          expect(Math.abs(geo.counts.left - geo.sentence.left)).toBeLessThanOrEqual(0.5)
           expect(geo.action.top).toBeGreaterThanOrEqual(geo.counts.bottom - 0.5)
           expect(geo.counts.right).toBeLessThanOrEqual(geo.toast.right)
         } else {

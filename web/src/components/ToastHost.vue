@@ -75,6 +75,7 @@ onBeforeUnmount(() => dialogs?.disconnect())
 /* Phones: 44px targets without a heavier toast. The toast loses its vertical
    padding and the buttons fill its height; the visible pill stays 28px. */
 @media (max-width: 600px) {
+  .toast-counts { margin-left: 0; }
   .toast:not(.sticky) { min-height: 44px; padding-block: 0; }
   .toast-action, .toast-close { position: relative; height: 44px; background: transparent; }
   .toast-close { width: 44px; margin-right: -6px; }
