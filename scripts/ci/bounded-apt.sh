@@ -20,9 +20,12 @@ run_root_timeout() {
 }
 
 run_timeout() {
-  local user=$1 seconds=$2 remaining
+  local user=$1 seconds=$2 remaining effective_deadline=$deadline
   shift 2
-  remaining=$((deadline - $(date +%s)))
+  if [[ $user == root && $attempt_deadline -lt $effective_deadline ]]; then
+    effective_deadline=$attempt_deadline
+  fi
+  remaining=$((effective_deadline - $(date +%s)))
   [[ $remaining -gt 0 ]] || return 124
   [[ $seconds -le $remaining ]] || seconds=$remaining
   # Put timeout after sudo/env so it can reap apt's root process group.
@@ -63,14 +66,28 @@ parse_playwright() {
 }
 
 attempt_playwright() {
+  # Refresh indexes through the override before Playwright resolves packages.
+  if [[ $retry -eq 1 ]]; then
+    run_root_timeout 150 apt-get update -qq || return "$?"
+  fi
   run_root_timeout 240 npx playwright install-deps "${targets[@]}"
 }
 
 write_config() {
+  # APT_CONFIG is read BEFORE apt.conf.d. Apply our bounds and sources again
+  # as the main config, after the image's retry/timeout settings. Preserve its
+  # original main config and all apt.conf.d security settings and hooks.
   cat > "$apt_config" <<EOF
-Acquire::Retries "3";
-Acquire::http::Timeout "20";
-Acquire::https::Timeout "20";
+Dir::Etc::main "$apt_final_config";
+EOF
+  : > "$apt_final_config"
+  if [[ -f $source_root/apt.conf ]]; then
+    printf '#include "%s/apt.conf";\n' "$source_root" >> "$apt_final_config"
+  fi
+  cat >> "$apt_final_config" <<EOF
+Acquire::Retries "0";
+Acquire::http::Timeout "15";
+Acquire::https::Timeout "15";
 APT::Update::Error-Mode "any";
 Dir::Etc::sourcelist "$1/sources.list";
 Dir::Etc::sourceparts "$1/sources.list.d";
@@ -80,10 +97,10 @@ EOF
 fetch_failure() {
   # Ignore Playwright's final wrapper error, but reject apt/dpkg errors even
   # when an earlier fetch in the same attempt printed Ign or Err lines.
-  if grep -E '^E:|^dpkg: error' "$log" | grep -Ev '^E: (Failed to fetch https?://|Unable to fetch some archives|Some index files failed to download)' >/dev/null; then
+  if grep -E '^E:|^dpkg: error' "$log" | grep -Ev '^E: (Failed to fetch (https?://|mirror\+file:)|Unable to fetch some archives|Some index files failed to download)' >/dev/null; then
     return 1
   fi
-  grep -Eq '^((W|E): Failed to fetch https?://|E: Unable to fetch some archives|Ign:[0-9]+ https?://|Err:[0-9]+ https?://)' "$log"
+  grep -Eq '^((W|E): Failed to fetch (https?://|mirror\+file:)|E: Unable to fetch some archives|Ign:[0-9]+ (https?://|mirror\+file:)|Err:[0-9]+ (https?://|mirror\+file:))' "$log"
 }
 
 fallback_sources() {
@@ -117,7 +134,7 @@ def mirror(text, security):
         except OSError:
             return text
         if len(contents) <= 65536 and any(host.search(line.split('#', 1)[0]) for line in contents.splitlines()):
-            return 'https://' + ('security.ubuntu.com' if security else 'archive.ubuntu.com') + '/ubuntu/'
+            return 'http://' + ('security.ubuntu.com' if security else 'archive.ubuntu.com') + '/ubuntu/'
         return text
     return host.sub('security.ubuntu.com' if security else 'archive.ubuntu.com', text)
 
@@ -185,12 +202,14 @@ case "$mode" in
     done
     [[ $missing -eq 0 ]] && exit 0
     budget=210
+    first_attempt_seconds=90
     attempt=(attempt_apt "$@")
     ;;
   playwright)
     [[ $# -gt 0 ]] || usage
     parse_playwright "$@"
     budget=720
+    first_attempt_seconds=120
     attempt=(attempt_playwright)
     ;;
   *) usage ;;
@@ -199,12 +218,15 @@ esac
 # Both mirrors and the optional browser download share this budget. The final
 # root timeout has a 20-second kill grace, still inside the workflow step limit.
 deadline=$(($(date +%s) + budget))
+attempt_deadline=$deadline
+retry=0
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 chmod 755 "$temporary"
 apt_config=$temporary/apt.conf
+apt_final_config=$temporary/apt-final.conf
 log=$temporary/attempt.log
 source_root=${AEON_APT_SOURCES_DIR:-/etc/apt}
 write_config "$source_root"
@@ -221,6 +243,9 @@ if [[ ${#source_files[@]} -gt 0 ]]; then
   mirrors=$(grep -hEo 'https?://(([[:alnum:]-]+\.)?archive|security)\.ubuntu\.com|mirror\+file:[^[:space:]]+' "${source_files[@]}" | sed -E 's#https?://##' | sort -u | paste -sd, -) || true
 fi
 echo "bounded-apt: using ${mirrors:-configured apt sources}"
+# Reserve time for a different mirror even if the first fetch never returns.
+# This cap covers the whole first attempt, including apt update + install.
+attempt_deadline=$(($(date +%s) + first_attempt_seconds))
 if capture_attempt; then
   echo "bounded-apt: dependencies installed via ${mirrors:-configured apt sources}"
   exit 0
@@ -233,6 +258,8 @@ if ! fallback_sources; then
   exit "$status"
 fi
 write_config "$temporary/apt"
+attempt_deadline=$deadline
+retry=1
 echo 'bounded-apt: retrying fetch once via archive.ubuntu.com (security.ubuntu.com for -security)'
 if capture_attempt; then
   echo 'bounded-apt: dependencies installed via archive.ubuntu.com / security.ubuntu.com'

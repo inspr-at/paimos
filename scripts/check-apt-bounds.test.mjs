@@ -38,7 +38,7 @@ async function run(command, options) {
     const attempts = calls.map((command, index) => {
       const snapshot = join(state, `attempt-${index + 1}`)
       const read = file => existsSync(join(snapshot, file)) ? readFileSync(join(snapshot, file), 'utf8') : ''
-      return { command, root: read('root'), config: read('config'), sources: existsSync(snapshot)
+      return { command, root: read('root'), bootstrap: read('bootstrap'), config: read('config'), sources: existsSync(snapshot)
         ? Object.fromEntries(readdirSync(snapshot).filter(file => /\.(list|sources)$/.test(file)).map(file => [file, read(file)])) : {} }
     })
     const timeouts = existsSync(join(state, 'timeouts')) ? readFileSync(join(state, 'timeouts'), 'utf8').trim().split('\n').map(line => {
@@ -93,13 +93,13 @@ test('fetch failures retry once through temporary Ubuntu mirrors for apt and Pla
       const result = await run(`bash "${script}" ${command}`, { mode: 'fetch-fail', format })
       assert.equal(result.status, 0, `${command}: ${result.error}\n${result.stdout}\n${result.stderr}`)
       const dependencies = result.attempts.filter(attempt => attempt.config)
-      assert.equal(dependencies.length, command.startsWith('apt ') ? 3 : 2)
+      assert.equal(dependencies.length, 3, 'refresh alternate indexes before retrying the original install')
       assert.match(Object.values(dependencies[0].sources).join('\n'), /http:\/\/azure\.archive\.ubuntu\.com\/ubuntu\//)
       for (const attempt of dependencies) {
         assert.equal(attempt.root, '1', 'apt and Playwright dependencies must run under a root timeout')
-        assert.match(attempt.config, /Acquire::Retries "3";/)
-        assert.match(attempt.config, /Acquire::http::Timeout "20";/)
-        assert.match(attempt.config, /Acquire::https::Timeout "20";/)
+        assert.match(attempt.config, /Acquire::Retries "0";/)
+        assert.match(attempt.config, /Acquire::http::Timeout "15";/)
+        assert.match(attempt.config, /Acquire::https::Timeout "15";/)
         assert.match(attempt.config, /APT::Update::Error-Mode "any";/)
         assert.equal(attempt.sources['vendor.list'], result.sources['sources.list.d/vendor.list'])
         assert.equal(attempt.sources['vendor.sources'], result.sources['sources.list.d/vendor.sources'])
@@ -155,22 +155,49 @@ test('dependency errors never retry even after an ignored fetch', async () => {
 // AEON-1652 fix2: hosted runners hide Azure behind mirror+file URIs. A
 // timeout with only Ign lines must still reach a different Ubuntu mirror.
 test('hosted Ubuntu mirror lists recover after fetch errors and stalls without changing vendor lists', async () => {
-  for (const format of ['list', 'sources']) {
+  for (const [format, mirrorList] of [['list', true], ['sources', true], ['sources', 'hosted']]) {
     for (const mode of ['fetch-fail', 'mirror-stall']) {
-      for (const command of ['apt aeon-apt-fixture-missing-tool', 'playwright install-deps chromium']) {
-        const result = await run(`bash "${script}" ${command}`, { mode, format, mirrorList: true })
-        assert.equal(result.status, 0, `${format} ${mode} ${command}: ${result.error}\n${result.stdout}\n${result.stderr}`)
-        assert.equal(result.calls.length, command.startsWith('apt ') ? 3 : 2)
-        const initial = result.attempts[0].sources[format === 'list' ? 'sources.list' : 'ubuntu.sources']
+      for (const command of ['apt aeon-apt-fixture-missing-tool', 'playwright install-deps chromium', 'playwright install --with-deps --only-shell chromium']) {
+        const browser = command.includes('--with-deps')
+        const firstLimit = command.startsWith('apt ') ? 90 : 120
+        // Use an injected clock to spend the entire first-attempt allowance.
+        // A stub returning 124 immediately would not prove time remains.
+        const elapsed = [...(browser ? [0] : []), mode === 'mirror-stall' ? firstLimit : 0, 0, 0]
+        const result = await run(`bash "${script}" ${command}`, { mode, format, mirrorList, elapsed })
+        assert.equal(result.status, 0, `${format} ${mirrorList} ${mode} ${command}: ${result.error}\n${result.stdout}\n${result.stderr}`)
+        const dependencies = result.attempts.filter(attempt => attempt.config)
+        assert.equal(dependencies.length, 3)
+        assert.match(dependencies[1].command, /update -qq$/)
+        assert.equal(dependencies[2].command, dependencies[0].command.includes('install-deps') ? dependencies[0].command : 'install -y -qq aeon-apt-fixture-missing-tool')
+        const timeouts = result.timeouts.filter(timeout => timeout.root === '1')
+        assert.equal(timeouts[0].seconds, firstLimit)
+        assert.ok(timeouts[1].seconds > 0, 'reserve time to refresh alternate indexes')
+        assert.ok(timeouts[2].seconds > 0, 'reserve time to retry the original install')
+        const initial = dependencies[0].sources[format === 'list' ? 'sources.list' : 'ubuntu.sources']
         assert.match(initial, /mirror\+file:.*\/apt-mirrors\.txt/)
-        const served = result.attempts.at(-1).sources
+        const served = dependencies.at(-1).sources
         const ubuntu = served[format === 'list' ? 'sources.list' : 'ubuntu.sources']
         assert.doesNotMatch(ubuntu, /mirror\+file:|azure\.archive\.ubuntu\.com/)
-        assert.match(ubuntu, /https:\/\/archive\.ubuntu\.com\/ubuntu\//)
-        assert.match(ubuntu, /https:\/\/security\.ubuntu\.com\/ubuntu\//)
+        assert.match(ubuntu, /http:\/\/archive\.ubuntu\.com\/ubuntu\//)
+        assert.match(ubuntu, /http:\/\/security\.ubuntu\.com\/ubuntu\//)
         assert.match(ubuntu, /signed-by=\/usr\/share\/keyrings\/ubuntu-archive-keyring\.gpg|Signed-By: \/usr\/share\/keyrings\/ubuntu-archive-keyring\.gpg/)
-        for (const attempt of result.attempts) {
+        if (format === 'sources') {
+          const blocks = ubuntu.trim().split(/\n\s*\n/)
+          assert.equal(blocks.length, 2)
+          assert.match(blocks[0], /Suites: noble noble-updates noble-backports\n/)
+          assert.match(blocks[0], /URIs: http:\/\/archive\.ubuntu\.com\/ubuntu\//)
+          assert.match(blocks[1], /Suites: noble-security\n/)
+          assert.match(blocks[1], /URIs: http:\/\/security\.ubuntu\.com\/ubuntu\//)
+          for (const block of blocks) assert.match(block, /Components: main restricted universe multiverse\n/)
+        }
+        assert.deepEqual(dependencies[1].sources, served, 'update and install must use the same alternate sources')
+        for (const attempt of dependencies) {
           assert.equal(attempt.root, '1')
+          assert.match(attempt.bootstrap, /^Dir::Etc::main ".*\/apt-final\.conf";\n$/)
+          assert.match(attempt.config, /Acquire::Retries "0";\nAcquire::http::Timeout "15";\nAcquire::https::Timeout "15";/)
+          assert.match(attempt.config, /APT::Update::Error-Mode "any";/)
+          assert.doesNotMatch(attempt.config, /AllowUnauthenticated|AllowInsecure|Verify-Peer|trusted=/i)
+          if (mirrorList === 'hosted') assert.ok(attempt.config.startsWith(`#include "${result.sourceRoot}/apt.conf";\n`), 'retain host main config before the final overrides')
           assert.equal(attempt.sources['vendor.list'], result.sources['sources.list.d/vendor.list'])
           assert.equal(attempt.sources['vendor.sources'], result.sources['sources.list.d/vendor.sources'])
         }
@@ -178,22 +205,31 @@ test('hosted Ubuntu mirror lists recover after fetch errors and stalls without c
         for (const config of result.configPaths) assert.equal(existsSync(config), false)
         assert.match(result.stdout, /bounded-apt: using .*mirror\+file:/)
         assert.match(result.stdout, /dependencies installed via archive\.ubuntu\.com \/ security\.ubuntu\.com/)
+        if (browser) {
+          const downloads = result.attempts.filter(attempt => !attempt.config)
+          assert.equal(downloads.length, 1)
+          assert.equal(downloads[0].root, '0')
+        }
       }
     }
   }
 })
 
 test('a failed fallback fetch fails with its status after exactly two attempts', async () => {
-  const result = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'fetch-always-fail' })
-  assert.equal(result.status, 100, result.stderr)
-  assert.equal(result.calls.length, 2)
-  assert.doesNotMatch(result.stdout, /dependencies installed/)
+  for (const mode of ['fetch-always-fail', 'install-fetch-always-fail']) {
+    const result = await run(`bash "${script}" playwright install-deps chromium`, { mode })
+    assert.equal(result.status, 100, result.stderr)
+    assert.equal(result.calls.length, mode === 'fetch-always-fail' ? 2 : 3, 'stop after a failed alternate update or one failed retry install')
+    assert.equal(result.calls.filter(call => call.includes('install-deps')).length, mode === 'fetch-always-fail' ? 1 : 2)
+    assert.doesNotMatch(result.stdout, /dependencies installed/)
+    for (const config of result.configPaths) assert.equal(existsSync(config), false)
+  }
 })
 
 test('both apt mirrors share the overall deadline', async () => {
-  const result = await run(`bash "${script}" apt aeon-apt-fixture-missing-tool`, { mode: 'fetch-fail', elapsed: [150, 60] })
+  const result = await run(`bash "${script}" apt aeon-apt-fixture-missing-tool`, { mode: 'fetch-fail', elapsed: [90, 120] })
   assert.equal(result.status, 124, `${result.error}\n${result.stdout}\n${result.stderr}`)
-  assert.deepEqual(result.timeouts.map(({ root, seconds }) => ({ root, seconds })), [{ root: '1', seconds: 150 }, { root: '1', seconds: 60 }])
+  assert.deepEqual(result.timeouts.map(({ root, seconds }) => ({ root, seconds })), [{ root: '1', seconds: 90 }, { root: '1', seconds: 120 }])
   assert.equal(result.calls.length, 2, 'the exhausted budget must prevent apt install')
   assert.ok(result.calls.every(call => call.includes('update -qq')))
   assert.doesNotMatch(result.stdout, /dependencies installed/)

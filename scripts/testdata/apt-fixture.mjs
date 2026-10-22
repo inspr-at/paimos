@@ -67,10 +67,8 @@ if [[ -f "\$state/lock" ]]; then
   exit 100
 fi
 mode=\$(cat "\$state/mode")
-deps=0
 lines=0
 if [[ -f "\$state/calls" ]]; then
-  deps=\$(grep -c install-deps "\$state/calls" || true)
   lines=\$(grep -c . "\$state/calls" || true)
 fi
 snapshot="\$state/attempt-\$lines"
@@ -78,9 +76,16 @@ mkdir "\$snapshot"
 printf '%s' "\${AEON_AS_ROOT:-0}" > "\$snapshot/root"
 if [[ -n "\${APT_CONFIG:-}" ]]; then
   printf '%s\\n' "\$APT_CONFIG" >> "\$state/config-paths"
-  cp "\$APT_CONFIG" "\$snapshot/config"
-  main=\$(sed -n '/^Dir::Etc::sourcelist "/{s/^Dir::Etc::sourcelist "//;s/";$//;p;}' "\$APT_CONFIG")
-  parts=\$(sed -n '/^Dir::Etc::sourceparts "/{s/^Dir::Etc::sourceparts "//;s/";$//;p;}' "\$APT_CONFIG")
+  cp "\$APT_CONFIG" "\$snapshot/bootstrap"
+  config=\$(sed -n '/^Dir::Etc::main "/{s/^Dir::Etc::main "//;s/";$//;p;}' "\$APT_CONFIG")
+  if [[ -n "\$config" ]]; then
+    printf '%s\\n' "\$config" >> "\$state/config-paths"
+  else
+    config=\$APT_CONFIG
+  fi
+  cp "\$config" "\$snapshot/config"
+  main=\$(sed -n '/^Dir::Etc::sourcelist "/{s/^Dir::Etc::sourcelist "//;s/";$//;p;}' "\$config")
+  parts=\$(sed -n '/^Dir::Etc::sourceparts "/{s/^Dir::Etc::sourceparts "//;s/";$//;p;}' "\$config")
 else
   main="\$AEON_APT_SOURCES_DIR/sources.list"
   parts="\$AEON_APT_SOURCES_DIR/sources.list.d"
@@ -104,10 +109,12 @@ if [[ "\$mode" == dependency-fail ]]; then
   echo 'E: Unable to correct problems, you have held broken packages.' >&2
   exit 100
 fi
-if [[ "\$mode" == fetch-fail || "\$mode" == fetch-always-fail || "\$mode" == mirror-stall ]]; then
-  if [[ "\$mode" == fetch-always-fail ]] || grep -Eq '://azure.archive.ubuntu.com/|mirror[+]file:[^[:space:]]*/apt-mirrors(-security)?[.]txt' "\$snapshot/"*.sources "\$snapshot/"*.list 2>/dev/null; then
+if [[ "\$mode" == install-fetch-always-fail && "\$*" == 'update -qq' ]]; then exit 0; fi
+if [[ "\$mode" == fetch-fail || "\$mode" == fetch-always-fail || "\$mode" == install-fetch-always-fail || "\$mode" == mirror-stall ]]; then
+  if [[ "\$mode" == fetch-always-fail || "\$mode" == install-fetch-always-fail ]] || grep -Eq '://azure.archive.ubuntu.com/|mirror[+]file:[^[:space:]]*/apt-mirrors(-security)?[.]txt' "\$snapshot/"*.sources "\$snapshot/"*.list 2>/dev/null; then
     if [[ "\$mode" == mirror-stall ]]; then
-      echo 'Ign:2 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 libtest' >&2
+      echo "Get:1 file:\$AEON_APT_SOURCES_DIR/apt-mirrors.txt Mirrorlist" >&2
+      echo "Ign:2 mirror+file:\$AEON_APT_SOURCES_DIR/apt-mirrors.txt noble/main amd64 libtest" >&2
       exit 124
     fi
     echo 'E: Failed to fetch http://azure.archive.ubuntu.com/ubuntu/pool/main/libtest.deb Connection timed out' >&2
@@ -118,8 +125,7 @@ if [[ "\$mode" == fetch-fail || "\$mode" == fetch-always-fail || "\$mode" == mir
 fi
 if [[ "\$mode" == always-fail ]]; then echo "Error: Installation process exited with code: 100" >&2; exit 100; fi
 if [[ "\$mode" == ok ]]; then exit 0; fi
-if [[ "\$mode" == hung && "\$deps" -eq 0 && "\$lines" -ge 2 ]]; then exit 0; fi
-if [[ "\$mode" == hung && "\$deps" -ge 2 ]]; then exit 0; fi
+if [[ "\$mode" == hung && "\$lines" -ge 2 ]]; then exit 0; fi
 # The lock file is the hold. Write it here, before this process can be killed,
 # so an unprivileged SIGKILL leaves it for the next attempt. Only the root
 # timeout removes it. Ignore the removal and stay up until that timeout's
@@ -166,6 +172,25 @@ Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
     if (format === 'list') sources[ubuntu] = sources[ubuntu].replace(`deb-src ${mirror}`, `deb-src ${security}`)
     sources['apt-mirrors.txt'] = 'http://azure.archive.ubuntu.com/ubuntu/\nhttps://archive.ubuntu.com/ubuntu/\n'
     sources['apt-mirrors-security.txt'] = 'http://azure.archive.ubuntu.com/ubuntu/\nhttps://security.ubuntu.com/ubuntu/\n'
+    if (mirrorList === 'hosted') {
+      // ubuntu-24.04 hosted layout: separate deb822 stanzas sharing a list
+      // whose first entry is Azure. Keep all four Noble suites/components.
+      sources[ubuntu] = `Types: deb
+URIs: ${mirror}
+Suites: noble noble-updates noble-backports
+Components: main restricted universe multiverse
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+Types: deb
+URIs: ${mirror}
+Suites: noble-security
+Components: main restricted universe multiverse
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+`
+      mkdirSync(join(sourceRoot, 'apt.conf.d'))
+      sources['apt.conf.d/99runner-retries'] = 'Acquire::Retries "10";\nAcquire::http::Timeout "120";\nAcquire::https::Timeout "120";\n'
+      sources['apt.conf'] = 'APT::Get::Assume-Yes "true";\n'
+    }
     const vendor = `mirror+file:${join(sourceRoot, 'vendor-mirrors.txt')}`
     sources['vendor-mirrors.txt'] = 'https://packages.example.test/ubuntu/\n'
     sources['sources.list.d/vendor.list'] += `deb ${vendor} stable main\n`
