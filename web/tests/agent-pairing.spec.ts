@@ -541,6 +541,9 @@ test.describe('AEON-1611 connected computer readability', () => {
         await expect(path).toHaveCSS('direction', 'rtl')
         const tail = await path.evaluate(element => {
           const bounds = element.getBoundingClientRect()
+          const style = getComputedStyle(element)
+          const context = document.createElement('canvas').getContext('2d')!
+          context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
           const walker = document.createTreeWalker(element.querySelector('bdi')!, NodeFilter.SHOW_TEXT)
           let first: Node | null = null
           let last: Node | null = null
@@ -549,12 +552,16 @@ test.describe('AEON-1611 connected computer readability', () => {
           range.selectNodeContents(last!)
           const visible = range.getBoundingClientRect()
           range.selectNodeContents(first!)
-          return { segment: last!.textContent, left: visible.left - bounds.left, right: visible.right - bounds.right, start: range.getBoundingClientRect().left - bounds.left, clipped: element.scrollWidth > element.clientWidth }
+          return { segment: last!.textContent, left: visible.left - bounds.left, right: visible.right - bounds.right, start: range.getBoundingClientRect().left - bounds.left, clipped: element.scrollWidth > element.clientWidth, ellipsisWidth: context.measureText('…').width }
         })
         expect(tail.segment).toBe(workspacePath.split('/').at(-1))
         expect(tail.left, 'the whole last folder must remain visible after the leading ellipsis').toBeGreaterThanOrEqual(-1)
         expect(tail.right, 'the path must show its ending, not its beginning').toBeLessThanOrEqual(1)
-        if (tail.clipped) expect(tail.start, 'a shortened path must clip its start').toBeLessThan(-1)
+        if (tail.clipped) {
+          expect(tail.start, 'a shortened path must clip its start').toBeLessThan(-1)
+          expect(tail.ellipsisWidth).toBeGreaterThan(0)
+          expect(tail.left, 'the leading ellipsis must not cover the last folder').toBeGreaterThanOrEqual(tail.ellipsisWidth - 1)
+        }
       }
       const assertWideLayout = async () => {
         await expect(name).toHaveCSS('overflow-wrap', 'normal')

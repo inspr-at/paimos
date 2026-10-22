@@ -399,11 +399,11 @@ function assign(error: unknown, fallback: string) {
 .meta { color: var(--ink-2); font-size: 13px; }
 .problem { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 10px; color: var(--danger); }
 .next-step { padding: 0 10px 8px; color: var(--ink-2); font-size: 13px; }
-.list { display: grid; grid-template-columns: minmax(14rem, 1fr) auto auto auto auto; column-gap: 14px; }
-.sheet, .computer { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; gap: 6px 14px; align-items: center; }
+.list { display: grid; grid-template-columns: minmax(15.5rem, 1fr) auto auto auto auto; column-gap: 6px; }
+.sheet, .computer { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; gap: 6px; align-items: center; }
 .sheet span:nth-child(4), .last-active { min-width: 0; }
 @container computers (max-width: 760px) {
-  .list { grid-template-columns: minmax(14rem, 1fr) auto auto auto; }
+  .list { grid-template-columns: minmax(15.5rem, 1fr) auto auto auto; }
   .sheet span:nth-child(4), .last-active { display: none; }
 }
 .sheet { padding: 0 10px 6px; color: var(--ink-3); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; font-variant-ligatures: none; }
