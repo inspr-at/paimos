@@ -46,18 +46,28 @@ test('a glimpse frame paints only while its measured box is connected and non-em
 })
 
 test('a stale wide glimpse box does not paint once the visual viewport has left 1280', () => {
-  // The host measurement lags 1280 → 390. That frame used to draw the wide
-  // software-GL scene and block the layout read (AEON-1471).
+  // At a 1280px viewport, two 28px gutters leave a 1224px host. Its
+  // measurement can lag the shrink to 390px (AEON-1471); comparing the host
+  // against the layout breakpoint misses that stale software-GL frame.
+  assert.equal(glimpseStaleWideFrame(1224, 390, 1), true)
+  assert.equal(glimpseStaleWideFrame(1224, 1280, 1), false)
   assert.equal(glimpseStaleWideFrame(1280, 390, 1), true)
   assert.equal(glimpseStaleWideFrame(1600, 1278, 1), true)
+  // One-pixel catch-up is tolerated; a larger stale box must wait.
+  assert.equal(glimpseStaleWideFrame(1224, 1223, 1), false)
+  assert.equal(glimpseStaleWideFrame(1224, 1222, 1), true)
   assert.equal(glimpseStaleWideFrame(1280, 1279, 1), false)
   assert.equal(glimpseStaleWideFrame(1280, 1280, 1), false)
   assert.equal(glimpseStaleWideFrame(390, 390, 1), false)
-  assert.equal(glimpseStaleWideFrame(1279, 390, 1), false)
+  assert.equal(glimpseStaleWideFrame(1279, 390, 1), true)
   // Pinch-zoom reports a narrower visual width while the layout stays wide.
+  assert.equal(glimpseStaleWideFrame(1224, 390, 1.5), false)
   assert.equal(glimpseStaleWideFrame(1280, 390, 1.5), false)
   assert.equal(glimpseStaleWideFrame(1280, null, 1), false)
   assert.equal(glimpseStaleWideFrame(Number.NaN, 390, 1), false)
+  assert.equal(glimpseStaleWideFrame(Number.POSITIVE_INFINITY, 390, 1), false)
+  assert.equal(glimpseStaleWideFrame(1224, Number.NaN, 1), false)
+  assert.equal(glimpseStaleWideFrame(1224, Number.POSITIVE_INFINITY, 1), false)
 })
 
 test('glimpse links reject off-view endpoints including partial orbs and invalid coordinates', () => {
