@@ -135,7 +135,8 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 		Check struct {
 			Head  string `json:"head_sha"`
 			Suite struct {
-				ID int64 `json:"id"`
+				ID     int64  `json:"id"`
+				Status string `json:"status"`
 			} `json:"check_suite"`
 			App struct {
 				Slug string `json:"slug"`
@@ -198,11 +199,11 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 	case "check_run", "check_suite":
 		reader, ok := m.github.(metricsReader)
 		if name == "check_run" {
-			if e.Check.App.Slug != "github-actions" || e.Check.Suite.ID <= 0 {
+			if e.Check.App.Slug != "github-actions" || e.Check.Suite.ID <= 0 || e.Check.Suite.Status != "completed" {
 				return webhookNothingToRecord, nil, nil
 			}
 			e.Suite.ID, e.Suite.Head = e.Check.Suite.ID, e.Check.Head
-			e.Suite.App.Slug, e.Suite.Status = e.Check.App.Slug, "completed"
+			e.Suite.App.Slug, e.Suite.Status = e.Check.App.Slug, e.Check.Suite.Status
 		}
 		if !ok || e.Suite.App.Slug != "github-actions" || e.Suite.Status != "completed" {
 			return webhookNothingToRecord, nil, nil
@@ -229,20 +230,6 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 			}
 		}
 		err = reader.MetricsRead(ctx, m.config.TenantID, func(get func(string, any) error, source string) error {
-			if name == "check_run" {
-				var suite metricCheckSuite
-				if err := get(fmt.Sprintf("/check-suites/%d", e.Suite.ID), &suite); err != nil {
-					return err
-				}
-				if suite.ID != e.Suite.ID || suite.Head != e.Suite.Head {
-					return errRead
-				}
-				// One completed check is not a completed workflow. Never store
-				// a partial job map while its sibling checks are still running.
-				if suite.Status != "completed" {
-					return nil
-				}
-			}
 			if source == historyChecks {
 				var suite metricCheckSuite
 				if err := get(fmt.Sprintf("/check-suites/%d", e.Suite.ID), &suite); err != nil {

@@ -24,6 +24,7 @@ type metricsFake struct {
 	*auditFake
 	respond func(path string) (any, error)
 	calls   []string
+	reads   int
 	source  string
 }
 
@@ -39,6 +40,7 @@ func (g *metricsFake) MetricsRead(_ context.Context, tenantID string, read func(
 	if tenantID == "" {
 		return errRead
 	}
+	g.reads++
 	source := g.source
 	if source == "" {
 		source = historyActions

@@ -6426,6 +6426,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryGitHubJobAttemptsProjection","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryGitHubMetricReadsWaitForCompletion","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryActionsRefusalFromGitHub","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryFirstReadFailurePreservesSelectedWindow","tier":"ESSENTIAL"}
