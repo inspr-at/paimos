@@ -670,7 +670,23 @@ func TestNativeHostPTYExportOutageKeepsRuntimeAndReportsGap(t *testing.T) {
 			if event.Kind != "gap" || json.Unmarshal(event.Payload, &gap) != nil || gap.Reason != "frame_omitted" || gap.DroppedFrames != "2" {
 				t.Fatal("outage loss was hidden", event)
 			}
-			if event := readNativePTYEvent(t, sub); event.Kind != "terminal" || event.Seq != "3" {
+			select {
+			case _, ok := <-sub.Events():
+				if ok {
+					t.Fatal("gap did not require a fresh subscription")
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("gap did not close the stream")
+			}
+			after, err := nativecontract.EventID(event.Generation, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reconnected := subscribeNativePTY(t, f, b, after)
+			if event := readNativePTYEvent(t, reconnected); event.Kind != "snapshot" {
+				t.Fatal("reconnect did not re-establish the authorized snapshot", event)
+			}
+			if event := readNativePTYEvent(t, reconnected); event.Kind != "terminal" || event.Seq != "3" {
 				t.Fatal("terminal export did not recover", event)
 			}
 			select {
