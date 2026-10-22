@@ -11,7 +11,13 @@ import (
 // apt-get holding the lock. The node regression fails on 5d155476, whose
 // workflow commands are that unprivileged retry.
 func TestRootAptTimeoutReapsBeforeRetry(t *testing.T) {
-	cmd := exec.Command("node", "--test", "scripts/check-apt-bounds.test.mjs")
+	program := "node"
+	args := []string{"--test", "scripts/check-apt-bounds.test.mjs"}
+	if runtime.GOOS == "linux" {
+		args = append([]string{"scripts/testdata/fixture-reaper.py", program}, args...)
+		program = "python3"
+	}
+	cmd := exec.Command(program, args...)
 	cmd.Dir = root(t)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
