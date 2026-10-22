@@ -532,7 +532,7 @@ label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; c
 .bad { color: var(--danger); }
 footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
 footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
-@media (pointer: coarse), (max-width: 600px) { footer .btn { min-height: 44px; } }
+@media (pointer: coarse), (max-width: 600px) { footer .btn, .remember { min-height: 44px; } }
 .run-result { display: grid; justify-items: center; text-align: center; padding: 14px 0; gap: 12px; outline: none; }
 .run-result h3 { font-size: 25px; letter-spacing: -.5px; }
 .run-result > p:not(.eyebrow) { color: var(--ink-2); font-size: 14px; line-height: 1.6; max-width: 410px; }

@@ -81,6 +81,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     await form.getByLabel('Project', { exact: true }).selectOption('p-pharos')
     await form.getByLabel('Task', { exact: true }).fill('Ausführliche Bestandsaufnahme der bereitgestellten Projektinformationen')
     const checkbox = form.getByRole('checkbox', { name: 'May change files', exact: true })
+    if (width === 390) expect(await checkbox.evaluate(el => el.parentElement!.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44)
     await expectStableControls({
       controls: { queue: form.getByRole('button', { name: /^Queue run/ }), cancel: form.getByRole('button', { name: 'Cancel', exact: true }), context: form.getByLabel('Context', { exact: true }), host: form.getByLabel('Host', { exact: true }), harness: form.getByLabel('Harness', { exact: true }), account: form.getByLabel('Account', { exact: true }), thinking: form.getByLabel('Thinking', { exact: true }), selectors: form.locator('.pair').first(), instruction: form.getByLabel('Instruction (optional)', { exact: true }), restriction: checkbox, project: form.getByLabel('Project', { exact: true }), task: form.getByLabel('Task', { exact: true }), ...(width === 390 ? { phone: form } : {}) },
       interactions: [
