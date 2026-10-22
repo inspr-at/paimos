@@ -32,9 +32,9 @@ func (a *runOnceAdapter) Start(_ context.Context, r StartRequest, _ func(Adapter
 	return &deliveryStartProcess{fakeProcess: a.proc, hash: hex.EncodeToString(sum[:])}, nil
 }
 
-// Risk: a trusted host hides a bridge fixture that uses an ambient Node path
-// refused on CI. The real adapter must retain its path checks and still
-// enforce the read-only ceiling with this test's private interpreter copy.
+// Risk: a trusted host and private umask hide bridge fixtures that use an
+// ambient Node path or non-private account home refused on CI. The real
+// adapter must retain its checks under a shared umask and untrusted Node path.
 func TestRunOnceReadOnlyBridgeWithUntrustedAmbientNode(t *testing.T) {
 	installedNode, err := exec.LookPath("node")
 	if err != nil {
@@ -60,7 +60,7 @@ func TestRunOnceReadOnlyBridgeWithUntrustedAmbientNode(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, executable, "-test.v", "-test.run=^TestRunOnceReadOnlyCeilingAndInstruction$/^bridge$")
+	command := exec.CommandContext(ctx, "sh", "-c", `umask 022; exec "$@"`, "run-once-bridge", executable, "-test.v", "-test.run=^TestRunOnceReadOnlyCeilingAndInstruction$/^bridge$")
 	command.Env = append(os.Environ(), "PATH="+prefix+string(os.PathListSeparator)+os.Getenv("PATH"))
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -118,6 +118,9 @@ func TestRunOnceReadOnlyCeilingAndInstruction(t *testing.T) {
 		}
 		root, err := filepath.EvalSymlinks(t.TempDir())
 		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(root, 0700); err != nil {
 			t.Fatal(err)
 		}
 		vendor := fakeVendorPath(t, "claude")

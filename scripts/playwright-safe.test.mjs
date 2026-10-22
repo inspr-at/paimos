@@ -469,9 +469,10 @@ test('stale recovery skips a reused detached PID and releases the stale lock', a
 })
 
 function detachedProbe() {
-  const child = fixtures.spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+  const child = fixtures.spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000); process.stdout.write("ready")'], { stdio: ['ignore', 'pipe', 'ignore'] })
   const completion = new Promise(resolve => child.once('exit', resolve))
-  return { child, completion }
+  const ready = Promise.race([new Promise(resolve => child.stdout.once('data', data => resolve(data.toString()))), completion.then(() => 'exited')])
+  return { child, completion, ready }
 }
 
 test('stale recovery reaps verified siblings and ignores reused group PIDs', async () => {
@@ -614,10 +615,14 @@ test('root identity retries a first-ps miss and records only its verified start'
   } finally { probe.child.kill('SIGKILL'); await probe.completion }
 })
 
-test('unverifiable live roots terminate their group without an invalid journal entry', async () => {
+test('unverifiable live roots terminate their group without an invalid journal entry', { timeout: 15000 }, async () => {
   const probe = detachedProbe(), entries = []
   let calls = 0
   try {
+    // The fixture preload starts ps while establishing its own journal. Join
+    // startup before killing the root so Linux cannot orphan that helper as a
+    // zombie group member after the root's exit event has already arrived.
+    assert.equal(await probe.ready, 'ready')
     await assert.rejects(recordRootGroup(probe.child, entry => entries.push(entry), {
       start: () => { calls++; return '' }, attempts: 3,
     }), /spawned group terminated/)
