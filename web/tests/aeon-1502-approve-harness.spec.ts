@@ -290,6 +290,8 @@ test("AEON-1502 first pairing 1280x800 en and de: Pair or Deny with the harness 
     await checklistGuard.check(() => boxes.last().check())
     await expect(boxes.last()).toBeChecked()
     checklistGuard.done()
+    // Deliver the repaint after scrolling with the installed browser clock.
+    await page.clock.runFor(32)
     await shot(page, testInfo, `first-pairing-${language}`)
     await detailsHold(page, review, copy.pairButton)
     record(`first pairing ${language}`, { viewport: '1280x800', fit, sentences: 2, detailsMovementPx: 0 })
