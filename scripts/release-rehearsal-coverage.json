@@ -514,8 +514,14 @@
     {
       "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
       "mode": "action",
-      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "sha256": "c4401fc2b7e83eee42ca50e14e56c3e2910a05a92df0aaefef4cb9e72e8d4461",
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    },
+    {
+      "counterpart": "TestReleaseToolchainsRequireExactSecurityPatches",
+      "mode": "test",
+      "sha256": "7b3109898e0c31abc549f169275236fdbef148c11293f330f797d899495eb44a",
+      "step": "Assert Node 24.22.1"
     },
     {
       "counterpart": "TestImageDoesNotWaitForClients",

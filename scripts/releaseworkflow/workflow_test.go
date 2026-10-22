@@ -89,13 +89,14 @@ func named(t *testing.T, j job, name string) (int, step) {
 }
 
 // Risk: setup actions can select vulnerable cached toolchains. Every workflow
-// pins the security patch; release assertions reject stale or lookalike versions.
+// pins the security patch; every release toolchain, including the duplicate-tag
+// preflight, asserts its runtime and rejects stale or lookalike versions.
 func TestReleaseToolchainsRequireExactSecurityPatches(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join(root(t), ".github/workflows/*.yml"))
 	if err != nil || len(files) == 0 {
 		t.Fatalf("workflow inventory: %v", err)
 	}
-	assertions := 0
+	assertions := map[string]int{}
 	for _, file := range files {
 		body, err := os.ReadFile(file)
 		if err != nil {
@@ -130,7 +131,7 @@ func TestReleaseToolchainsRequireExactSecurityPatches(t *testing.T) {
 					if filepath.Base(file) != "release.yml" {
 						continue
 					}
-					assertions++
+					assertions[id+"/"+tool.command]++
 					if i+1 >= len(j.Steps) || j.Steps[i+1].Name != tool.assertion {
 						t.Fatalf("%s: %s must immediately follow setup", id, tool.assertion)
 					}
@@ -164,8 +165,13 @@ func TestReleaseToolchainsRequireExactSecurityPatches(t *testing.T) {
 			}
 		}
 	}
-	if assertions != 3 {
-		t.Fatalf("expected three release toolchain assertions, found %d", assertions)
+	if !reflect.DeepEqual(assertions, map[string]int{
+		"publication/node":    1,
+		"image-platform/node": 1,
+		"image-platform/go":   1,
+		"image/node":          1,
+	}) {
+		t.Fatalf("release toolchain assertion inventory differs: %v", assertions)
 	}
 }
 
@@ -247,10 +253,10 @@ func TestImageDoesNotWaitForClients(t *testing.T) {
 		!reflect.DeepEqual(guard.Env, map[string]string{"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}", "RELEASE_TAG": "${{ github.ref_name }}"}) {
 		t.Fatal("tag publication preflight can skip verification")
 	}
-	if len(publication.Steps) != 4 || publication.Steps[0].With["persist-credentials"] != "false" ||
-		publication.Steps[2].Uses != "docker/login-action@dbcb813823bdd20940b903addbd779551569679f" ||
-		publication.Steps[2].If != "" || publication.Steps[2].ContinueOnError ||
-		!reflect.DeepEqual(publication.Steps[2].With, map[string]string{"registry": "ghcr.io", "username": "${{ github.actor }}", "password": "${{ secrets.GITHUB_TOKEN }}"}) {
+	if len(publication.Steps) != 5 || publication.Steps[0].With["persist-credentials"] != "false" ||
+		publication.Steps[3].Uses != "docker/login-action@dbcb813823bdd20940b903addbd779551569679f" ||
+		publication.Steps[3].If != "" || publication.Steps[3].ContinueOnError ||
+		!reflect.DeepEqual(publication.Steps[3].With, map[string]string{"registry": "ghcr.io", "username": "${{ github.actor }}", "password": "${{ secrets.GITHUB_TOKEN }}"}) {
 		t.Fatal("publication verification must authenticate read-only registry inspection with the existing workflow token")
 	}
 	var policy struct {
