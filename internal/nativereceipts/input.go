@@ -58,9 +58,10 @@ func (w *InputWriter) Send(ctx context.Context, actorID, operationID string, in 
 	}
 	// The live hint loop and an explicit local request may meet at the same
 	// input. Accept checked the immutable payload/actor/binding. Return already
-	// confirmed evidence without another write; uncertainty still fails closed.
+	// confirmed evidence from this journal lifetime without another write;
+	// restored receipts and uncertainty still require reconciliation.
 	if r.State == "write_acknowledged" || r.State == "turn_started" || r.State == "turn_completed" {
-		return r, nil
+		return w.Journal.replayInput(b, operationID)
 	}
 	if r.State != "accepted" && r.State != "queued" {
 		return r, Fail(nativecontract.ReasonInputOutcomeUnconfirmed)

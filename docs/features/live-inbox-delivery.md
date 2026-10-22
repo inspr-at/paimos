@@ -23,12 +23,14 @@ provider capabilities and claim deadline. No person principal is installed
 on the daemon's behalf, and no message can approve a tool or native decision.
 Unqualified and terminal sessions keep their inbox fallback.
 
-P3a fsyncs the possible-write marker before provider I/O. Confirmed replay
-returns its existing receipt without another native write. Uncertainty holds
-the input and prevents automatic reinjection; correlated late evidence can
-resolve the hold. The server projects native write acknowledgement separately
-from correlated turn evidence. Ordinary inbox hooks cannot concurrently
-consume an open managed/native delivery lease.
+P3a fsyncs the possible-write marker before provider I/O. Confirmed replay in
+the same live journal returns its existing receipt without another native
+write. Restored input receipts retain their evidence but require reconciliation;
+they never report a successful live retry. Uncertainty holds the input and
+prevents automatic reinjection; correlated late evidence can resolve the hold.
+The server projects native write acknowledgement separately from correlated
+turn evidence. Ordinary inbox hooks cannot concurrently consume an open
+managed/native delivery lease.
 
 Each dispatched Desk answer also records metadata-only FYIs for the explicitly
 bound project lead and active sessions bound to the same ticket or its immediate
@@ -57,8 +59,8 @@ registered behavior tests; tier manifests and web specs are unchanged.
 
 Remote verification used the approved entry points, without vendor/model calls:
 the full inbox, questions, native store and P3a receipt packages passed with
-`-race -count=1` on `8d6be5d8af` (mbp2606). The final trusted-Desk ordering
-checks passed on `fd76159032` (native composition and harness drain, agm2).
+`-race -count=1` on `8d6be5d8af` (remote runner). The final trusted-Desk ordering
+checks passed on `fd76159032` (native composition and harness drain, Linux runner).
 The busy-owner case, including control-shaped self-sent content and a lost
 completion acknowledgement, passed on `481fdc3bf6`. Native composition also
 proved uncertain-write holds and late acknowledgement followed by separate
@@ -80,7 +82,7 @@ fixture failures assigned to AEON-1685: the three pause heartbeat/wake tests,
 `TestSupervisorQueueHintsUnavailableBackoff/401`. Those fixtures are unchanged
 here apart from the minimal priority-case extension in harness notifications.
 AEON-1685 was still open when the latest main was merged. The static wrapper
-returned exit 3 twice with `remote static check paused at night (night protocol:
-mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job`.
+returned exit 3 twice because the remote static lane was paused at night;
+the wrapper directed validation to the PR's hosted CI static job.
 Handoff therefore stays at 95 percent, pending that shared race fix and hosted
 static checks. No origin push, deployment or model review gate was run.

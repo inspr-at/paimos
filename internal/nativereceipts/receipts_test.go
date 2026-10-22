@@ -103,6 +103,7 @@ func openStore(t *testing.T, path string, now func() time.Time) *Store {
 // Risk: a crash after a possible stdin write but before its correlated ack can
 // make a RAM relay resend an input. The barrier proves the marker existed before
 // the fake transport touched stdin, and recovery never permits another write.
+// Even a restored acknowledgement is historical evidence, not a live replay.
 func TestCrashBeforeNativeAckHoldsInputAndReplaysOnlyMetadata(t *testing.T) {
 	now := time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)
 	clock := func() time.Time { return now }
@@ -162,6 +163,48 @@ func TestCrashBeforeNativeAckHoldsInputAndReplaysOnlyMetadata(t *testing.T) {
 	}
 	if transport.writes.Load() != 1 {
 		t.Fatal("receipt replay wrote native stdin")
+	}
+	for _, stage := range []string{"write_acknowledged", "turn_started", "turn_completed"} {
+		t.Run("restored_"+stage, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "receipts")
+			s := openStore(t, path, clock)
+			b := testBinding()
+			in := testInput(b, now)
+			op, actor := uuid.NewString(), uuid.NewString()
+			transport := &testTransport{identity: nativecontract.NativeIdentity{RuntimeEpoch: b.RuntimeEpoch, ProcessIdentityDigest: strings.Repeat("a", 64)}, now: clock}
+			writer := &InputWriter{Journal: s, Authority: &testAuthority{}, Transport: transport}
+			r, err := writer.Send(t.Context(), actor, op, in)
+			if err != nil || r.State != "write_acknowledged" {
+				t.Fatalf("initial input: %+v %v", r, err)
+			}
+			for i, next := range []string{"turn_started", "turn_completed"} {
+				if r.State == stage {
+					break
+				}
+				r, err = s.Observe(t.Context(), b, op, nativecontract.NativeEvidence{Stage: next, RequestID: in.RequestID, InputID: in.InputID, TurnRef: "fixture-turn", SourceSequence: uint64(i + 2), ObservedAt: now})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if replay, err := writer.Send(t.Context(), actor, op, in); err != nil || !reflect.DeepEqual(replay, r) || transport.writes.Load() != 1 {
+				t.Fatal("live replay changed evidence or repeated input", replay, err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			s = openStore(t, path, clock)
+			// A new writer with the saved identity cannot make restored evidence
+			// a current-owner success, even if the authority stub allows it.
+			writer = &InputWriter{Journal: s, Authority: &testAuthority{}, Transport: transport}
+			replay, err := writer.Send(t.Context(), actor, op, in)
+			checkReason(t, err, nativecontract.ReasonInputOutcomeUnconfirmed)
+			if !reflect.DeepEqual(replay, r) || transport.writes.Load() != 1 {
+				t.Fatal("restored replay changed evidence or repeated input", replay)
+			}
+			if saved, err := s.Get(b, op); err != nil || !reflect.DeepEqual(saved, r) {
+				t.Fatal("restored evidence was lost", saved, err)
+			}
+		})
 	}
 }
 

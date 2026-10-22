@@ -31,6 +31,9 @@ func (s *Store) recover() error {
 		return Fail(nativecontract.ReasonBufferFull)
 	}
 	ids, requests := map[string]bool{}, map[string]bool{}
+	// Restored input evidence stays available for reports and reconciliation.
+	// It cannot prove that this journal lifetime owns the original live writer.
+	s.recoveredInputs = map[string]bool{}
 	changed := false
 	for i := range s.entries {
 		in := &s.entries[i]
@@ -65,6 +68,9 @@ func (s *Store) recover() error {
 			return Fail(nativecontract.ReasonIdentityMismatch)
 		}
 		ids[key], requests[req] = true, true
+		if in.Receipt.Operation == "input" {
+			s.recoveredInputs[key] = true
+		}
 		if in.Receipt.State == "write_started" {
 			r := nativecontract.ReasonInputOutcomeUnconfirmed
 			if in.Receipt.Operation == "stop" {
@@ -147,6 +153,23 @@ func (s *Store) Accept(ctx context.Context, in Intent) (nativecontract.Receipt, 
 	}
 	s.entries = next
 	return cloneReceipt(in.Receipt), nil
+}
+
+// replayInput returns confirmed evidence only for this live journal lifetime.
+// Reopening a journal preserves history, never current native ownership or a
+// successful retry of an old input. Recovery must reconcile those effects.
+func (s *Store) replayInput(b nativecontract.Binding, id string) (nativecontract.Receipt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i, err := s.index(b, id)
+	if err != nil {
+		return nativecontract.Receipt{}, err
+	}
+	r := cloneReceipt(s.entries[i].Receipt)
+	if s.recoveredInputs[b.TenantID+"/"+id] || r.State != "write_acknowledged" && r.State != "turn_started" && r.State != "turn_completed" {
+		return r, Fail(nativecontract.ReasonInputOutcomeUnconfirmed)
+	}
+	return r, nil
 }
 
 // RetirePTYReports keeps a small tail of settled terminal metadata. Unreported
