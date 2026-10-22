@@ -204,7 +204,7 @@ const nativeGrant = start.native_grant;
 const grantExpiry = native ? Date.parse(nativeGrant?.expires_at) : 0;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
 if ((start.profile !== undefined && !native) || (!native && (start.resume !== undefined || nativeGrant !== undefined)) ||
-    (native && (start.purpose || start.read_only_review || nativeGrant?.history_approved !== true ||
+    (native && (start.purpose || start.read_only_review || start.read_only_run || nativeGrant?.history_approved !== true ||
       !UUID.test(nativeGrant?.session_id) || !/^[a-f0-9]{64}$/u.test(nativeGrant?.policy_digest) ||
       !Number.isFinite(grantExpiry) || grantExpiry <= Date.now() || grantExpiry - Date.now() > 86400000 ||
       !Array.isArray(nativeGrant?.allowed_tools) || nativeGrant.allowed_tools.length > AEON_TOOLS.length ||
@@ -433,7 +433,7 @@ try {
   const physicalWorkspace = realpathSync(workspace);
   if (!isAbsolute(workspace) || physicalWorkspace !== workspace) throw new Error("workspace is not physical");
   const { query } = await import(pathToFileURL(sdkPath));
-  const verification = start.purpose === "pairing_verification" || start.read_only_review === true;
+  const verification = start.purpose === "pairing_verification" || start.read_only_review === true || start.read_only_run === true;
   if (verification && start.tools != null) throw new Error("verification cannot have tools");
   const toolBinding = start.tools ?? undefined;
   if (toolBinding !== undefined &&
@@ -572,7 +572,7 @@ const handleControlLine = (line) => {
         fail("app_server_protocol", correlationID, "native_control_forbidden");
         return;
       }
-      if ((start.purpose === "pairing_verification" || start.read_only_review === true) && request.op !== "stop") {
+      if ((start.purpose === "pairing_verification" || start.read_only_review === true || start.read_only_run === true) && request.op !== "stop") {
         fail("app_server_protocol", correlationID, "verification_control_forbidden");
         return;
       }
@@ -790,7 +790,7 @@ try {
       const completedCorrelation = native ? activeCorrelationID : reactedCorrelations.get(message.user_message_uuid);
       if (!native) reactedCorrelations.delete(message.user_message_uuid);
       emit({ kind: "turn_completed", ...(completedCorrelation ? { correlation_id: completedCorrelation } : {}), ...(start.native_c0 === true ? { native_turn_ref: activeNativeTurnRef } : {}) });
-      if (start.purpose === "pairing_verification" || start.read_only_review === true) {
+      if (start.purpose === "pairing_verification" || start.read_only_review === true || start.read_only_run === true) {
         verificationSucceeded = message.subtype === "success" && message.is_error !== true;
         if (start.read_only_review === true && verificationSucceeded) {
           if (typeof message.result !== "string" || Buffer.byteLength(message.result) > 65536) {

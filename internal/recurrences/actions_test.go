@@ -12,25 +12,25 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/routineactions"
-	"github.com/inspr-at/paimos/internal/routineguard"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Risks: queue/assignment acting as a grant, a tampered frozen assignment or
 // fabricated evaluation granting a write, and owner revocation before mutation. Uses
 // synthetic qualification and a PostgreSQL barrier at the final access fence.
-func TestRoutineActionGrantRejectsUnverifiedAndRevokedOwner(t *testing.T) {
+// CheckRoutineActionGrantRejectsUnverifiedAndRevokedOwner keeps the internal
+// consent fixture while the external integration test wires the action broker.
+func CheckRoutineActionGrantRejectsUnverifiedAndRevokedOwner(t *testing.T, mountActions func(*http.ServeMux, *pgxpool.Pool, *Module)) {
+	t.Helper()
 	f, in, q, reader := consentFixture(t)
 	enableConsentProject(t, f, q, reader)
 	install := func(m *Module) {
 		f.install(m)
 		mux := http.NewServeMux()
 		m.Mount(mux)
-		routineactions.New(m.pool, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, b routineactions.Binding, c routineguard.Context) (tenant.Principal, routineguard.Decision, string, error) {
-			return m.AuthorizeActionTx(ctx, tx, p, ActionBinding(b), c)
-		}).Mount(mux)
+		mountActions(mux, m.pool, m)
 		f.handler = mux
 	}
 	install(f.m)
@@ -52,7 +52,7 @@ func TestRoutineActionGrantRejectsUnverifiedAndRevokedOwner(t *testing.T) {
 		}
 		return tx.QueryRow(t.Context(), `SELECT updated_at FROM nodes WHERE id=$1`, f.parent).Scan(&at)
 	})
-	request := routineactions.Request{AttemptID: attempt, ActionKey: "effect", Kind: "work.create", ProjectID: f.project, TargetID: f.parent, ExpectedRevision: at.UnixMicro(), WorkCreate: &routineactions.WorkCreate{Title: "Must not exist", Body: "No verified verdict"}}
+	request := map[string]any{"attempt_id": attempt, "action_key": "effect", "kind": "work.create", "project_id": f.project, "target_id": f.parent, "expected_revision": at.UnixMicro(), "work_create": map[string]string{"title": "Must not exist", "body": "No verified verdict"}}
 	actionPath := "/api/routine-runs/" + o.Run.ID + "/actions"
 	denied := f.call(f.p, "POST", actionPath, request, 403)
 	if !strings.Contains(string(denied), "active_run_grant_required") {
