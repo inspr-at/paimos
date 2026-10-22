@@ -191,6 +191,18 @@ func TestPinnedRulesLaunchRefusesBeforeAdapter(t *testing.T) {
 			if adapter.starts != 0 || api.receipts != 0 {
 				t.Fatal("refused pack reached model or receipt")
 			}
+			entry := s.runs[a.run.ID]
+			entry.mu.Lock()
+			record, process := entry.record, entry.process
+			entry.mu.Unlock()
+			a.mu.Lock()
+			reports, stops := append([]Telemetry(nil), a.reports...), append([]string(nil), a.harnessStops...)
+			a.mu.Unlock()
+			if process != nil || record.LaunchState != launchPrepared || record.State != "failed" || record.Sequence != 1 || len(record.Pending) != 0 ||
+				len(reports) != 1 || reports[0].Kind != "finished" || reports[0].Status != "failed" || reports[0].ErrorCode != "child_exit_failed" ||
+				len(stops) != 1 || stops[0] != "process_failed" {
+				t.Fatalf("rules refusal lost its single settlement or harness cleanup: record=%+v reports=%+v stops=%v", record, reports, stops)
+			}
 		})
 	}
 }
