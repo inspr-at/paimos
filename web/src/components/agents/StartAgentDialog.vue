@@ -548,14 +548,14 @@ footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
 .pair.pi-bound { grid-template-columns: minmax(0, 1fr) 130px; }
 .field.pinned-model { font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; }
 @media (max-width: 600px) {
-  .launch-dialog { height: 100dvh; max-height: 100dvh; width: 100vw; max-width: 100vw; margin: 0; border-radius: 0; }
-  .launch-card { height: 100%; padding: max(20px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); }
-  .launch-body { flex: 1; }
+  .launch-dialog { width: 100%; max-width: none; height: 100dvh; max-height: none; margin: 0; border: 0; border-radius: 0; overflow: hidden; scrollbar-gutter: auto; }
+  .launch-card { height: 100%; display: flex; flex-direction: column; overflow: hidden; padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  .launch-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
   .pair, .pair.pi-bound { grid-template-columns: minmax(0, 1fr); gap: 14px; }
-  .launch-head { margin-bottom: 14px; }
+  .launch-head { flex-shrink: 0; margin-bottom: 14px; }
   .launch-fields { gap: 14px; }
   .dispatch-status { margin-top: 16px; }
-  footer { order: 3; margin: 16px 0 0; padding: 16px 0 0; border-bottom: 0; border-top: 1px solid var(--line); }
+  footer { order: 3; flex-shrink: 0; margin: 18px 0 0; padding: 16px 0 0; border-bottom: 0; border-top: 1px solid var(--line); }
   .launch-head .icon-btn { width: 44px; height: 44px; }
   .chosen-ticket { flex-wrap: wrap; }
   .chosen-ticket .btn { min-height: 44px; }
