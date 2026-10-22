@@ -30,6 +30,16 @@ func TestRootAptTimeoutReapsBeforeRetry(t *testing.T) {
 	}
 }
 
+// AEON-1082: slow mirror requests must recover within the shard's existing
+// budget, with transport deadlines inherited by Playwright's root apt child.
+func TestPlaywrightMirrorFetchesAreBounded(t *testing.T) {
+	cmd := exec.Command("node", "--test", "--test-name-pattern=AEON-1082", "scripts/check-apt-bounds.test.mjs")
+	cmd.Dir = root(t)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Playwright mirror deadline regression: %v\n%s", err, out)
+	}
+}
+
 // Risk: a missing artifact must not skip tests, and image rollouts need this
 // run's bundle with offline preflights. Check the actual job wiring.
 func checkOfflineAptWorkflow(t *testing.T) {

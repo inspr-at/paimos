@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/agent-pairing.spec.ts",
-    "listedTests": 35,
+    "listedTests": 41,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.881,

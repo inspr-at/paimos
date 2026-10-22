@@ -30,6 +30,10 @@ then closes without its content. Reload final history before a fresh live
 subscription. A viewer losing access closes silently. Replay is a transient
 convenience, not a durable transcript.
 
+Closing the session chat closes its live subscription and cancels retries.
+An initial history read that finishes after the panel closes cannot reopen
+the stream or apply delivery and read state to the disposed view.
+
 The private worker lease of a chat registration and the exact current binding
 authorize `POST /api/chat-deliveries/live`, which accepts the S1 normalized
 event DTO. Only update frames with a nonzero source sequence are admitted.
@@ -55,9 +59,10 @@ visible-message read-marker union supplies person read evidence. Final-message,
 receipt and read-marker notifications contain no message body; clients fetch
 the durable outbox/history to reconcile them.
 
-These routes preserve the disabled-by-default chat gate. They do not launch,
-resume, steer, stop or automatically resend an agent's work. No schema
-migration or release version change is required for this server slice.
+These routes preserve the disabled-by-default chat gate. Selected input timing
+applies only inside an already-owned session; it never launches, resumes,
+stops or automatically resends an agent's work. No schema migration or release
+version change is required for this server slice.
 
 ## Daemon relay (AEON-1074)
 
@@ -93,13 +98,48 @@ assembled into a final. Cursor and Grok have no such marker, so their
 runs deliver live frames only. Each final carries a client message ID derived from the session and
 stream sequence, so a retried final persists once.
 
-**Person inputs** are read from the worker outbox and, for runs that accept
-inbox input, written to the harness only while it is idle, through the same journaled inbox control as other
-harness input, so a crash never re-injects one. **Delivered** is reported when
-the harness starts a turn after that write, **read** when that turn completes.
-Fetching or queueing an input is no evidence, nor is a turn another input
-started while this write waited. If no turn starts within two
-minutes, the input stays `sent`. Person read evidence remains the read markers.
+**Person inputs** retain the person's selected `delivery_level` through the
+outbox and worker projection (AEON-1082). Omitted timing and `simple` mean
+**After this turn**. `steer` means **Send now** for a qualified native adapter,
+or **At next step** only for an adapter that owns that boundary. It never
+falls back to stopping and restarting a session. Steering also requires the
+person's current `harness.control` permission on the thread's project, checked
+under the tenant access fence in the same transaction that accepts the input.
+Without that permission, the composer offers **After this turn**; ordinary
+chat input still requires `chat.send`. Queued simple input does not
+block a later eligible native steer. All writes use the same bounded,
+journaled input control: the journal retains IDs, digests and outcomes, never
+message bodies, and an uncertain write is never automatically injected again.
+
+The concrete Claude SDK and Codex app-server adapters advertise
+`chat_timing_v1` with their `chat` and `steer` flags. A family name or generic
+steering flag from an older daemon is insufficient. The session lookup returns
+`input_timing` only when the browser opts in with `Aeon-Chat-Timing: 1`;
+the worker binding returns it only to registrations with the new capability.
+The composer uses that exact-session negotiation in its existing reserved
+action slot. Without it, chat replies offer only After this turn and omit the
+new send fields, preserving older strict servers. New servers refuse steering
+when the selected session no longer qualifies, and `expected_session_id`
+refuses a changed binding. Registration retries without the timing extension
+when an older server rejects it, before trying the existing pre-chat fallback.
+No currently relayed production adapter advertises next-step timing: Pi still
+lacks exact input correlation, and queued ACP adapters remain after-turn only.
+
+Timing is stored atomically in the existing content-free `chat.live_message`
+acceptance event, retained with its inbox message; no migration is needed.
+The idempotent payload includes timing, so reusing a client ID with different
+timing conflicts. History and person outbox reads opt in with
+`include_timing=true`; upgraded worker reads send `include_timing: true` only
+after negotiation. Legacy readers receive their original message DTOs.
+
+**Delivered** requires a confirmed write followed by the input's own adapter
+reaction; **read** requires that input's own turn completion. Claude uses the
+SDK's matching input UUID through its result; Codex matches an actual
+`userMessage` item to the digest of the full relayed input (including message
+ID), on the owned thread and turn. A native write acknowledgement, fetching,
+queueing, reconnecting, or markers from earlier work are no receipt evidence.
+Multiple reacted native inputs remain bounded; an input with no reaction
+within two minutes stays `sent`. Person read evidence remains the read markers.
 
 **Pi** is not relayed. Its turn markers do not say which queued input started
 a turn, so agentd neither advertises `chat` for a Pi run nor writes person
@@ -166,8 +206,8 @@ that a hint does not recreate an expired buffer. The handover, stopped-session
 and expired-heartbeat cases in `TestChatLiveObsoleteBindingReplayRequestsResync`
 require explicit resync without obsolete content.
 
-No migration is needed. The registration request accepts one more capability
-value, `chat`; pinned response schemas are unchanged.
+No migration is needed. Registration accepts `chat` and its optional
+`chat_timing_v1` qualification; pinned legacy response schemas are unchanged.
 
 
 Unmanaged Claude sessions with a generic inbox hook use the live source-session

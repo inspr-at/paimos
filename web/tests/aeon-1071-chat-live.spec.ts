@@ -25,7 +25,7 @@ async function interruptTurn(page: Page) {
   await page.getByRole('menuitem', { name: /^Interrupt/ }).click()
 }
 
-async function setup(page: Page, options: { theme?: 'light' | 'dark'; session?: Record<string, unknown>; bound?: boolean } = {}) {
+async function setup(page: Page, options: { theme?: 'light' | 'dark'; session?: Record<string, unknown>; bound?: boolean; timing?: 'native' | 'next-step' | 'queue' } = {}) {
   // A scripted EventSource: the agents feed opens quietly, and the chat-live
   // stream takes frames from the test.
   await page.addInitScript(() => {
@@ -73,7 +73,7 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; session?: 
     lookups.push(new URL(route.request().url()).pathname)
     return options.bound === false
       ? route.fulfill({ status: 404, json: { error: 'chat binding unavailable' } })
-      : route.fulfill({ json: { contract: 'chat-v1', conversation_id: conversation, role: { contract: 'chat-v1' }, revision: '2', binding_epoch: '1', readiness: { state: 'offline', capabilities: [], reason: 'session_offline' } } })
+      : route.fulfill({ json: { contract: 'chat-v1', conversation_id: conversation, role: { contract: 'chat-v1' }, revision: '2', binding_epoch: '1', readiness: { state: 'offline', capabilities: [], reason: 'session_offline' }, ...(options.timing ? { input_timing: options.timing } : {}) } })
   })
   return { worker, data, calls, lookups, chat }
 }
@@ -84,6 +84,53 @@ const emit = (page: Page, type: string, payload: unknown) => page.evaluate(([kin
 }, [type, JSON.stringify(payload)] as const)
 const update = (page: Page, sequence: number, body: Record<string, unknown>) => emit(page, 'chat', { type: 'update', update: body, dropped_events: 0, source_sequence: sequence })
 const chunk = (page: Page, sequence: number, text: string) => update(page, sequence, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } })
+
+// Risk: closing the panel while its initial history read is pending starts a
+// new live subscription after teardown, with no remaining owner to close it.
+test('AEON-1082 closing chat closes its stream and rejects a late initial history read', async ({ page }) => {
+  const { worker, lookups } = await setup(page, { timing: 'native' })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const streams = () => page.evaluate(() => ((window as unknown as { __live?: { readyState: number }[] }).__live ?? []).map(source => source.readyState))
+  await expect.poll(streams).toEqual([1])
+  await panelOf(page).getByRole('button', { name: 'Close session details', exact: true }).click()
+  await expect(panelOf(page)).toHaveCount(0)
+  expect(await streams()).toEqual([2])
+  const initialLookups = lookups.length
+
+  // Hold the store's public async read at the same boundary as a delayed HTTP
+  // response. The browser-side lookup counter makes the negative assertion
+  // synchronous with the released continuation, without waiting for a request.
+  await page.evaluate(async session => {
+    const agents = (await import('/src/stores/agents.ts' /* @vite-ignore */)).useAgents()
+    const refresh = agents.refreshThread
+    const fetch = window.fetch
+    const state = { started: 0, lookups: 0, release: () => {} }
+    const history = new Promise<void>(resolve => { state.release = resolve })
+    agents.refreshThread = (project, id) => {
+      if (id !== session) return refresh(project, id)
+      state.started++
+      return history
+    }
+    window.fetch = (input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes(`/chat-sessions/${session}/thread`)) state.lookups++
+      return fetch(input, init)
+    }
+    Object.assign(window, { __chatLoad: state })
+    await (await import('/src/router.ts' /* @vite-ignore */)).router.push(`/agents/${session}?tab=messages`)
+  }, worker.id)
+  await expect(panelOf(page)).toBeVisible()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __chatLoad: { started: number } }).__chatLoad.started)).toBeGreaterThan(0)
+  expect(lookups).toHaveLength(initialLookups)
+  await panelOf(page).getByRole('button', { name: 'Close session details', exact: true }).click()
+  await expect(panelOf(page)).toHaveCount(0)
+  await page.evaluate(() => (window as unknown as { __chatLoad: { release: () => void } }).__chatLoad.release())
+  // The released promise continuations drain before the next browser task.
+  // A new lookup calls fetch immediately, before its network response lands.
+  const lateLookups = await page.evaluate(() => (window as unknown as { __chatLoad: { lookups: number } }).__chatLoad.lookups)
+  expect(lateLookups).toBe(0)
+  expect(await streams()).toEqual([2])
+})
 
 for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`AEON-1071 streams in place, stops mid-stream and yields to the saved reply ${theme} ${width}`, async ({ page }, testInfo) => {
@@ -273,14 +320,14 @@ async function projectValidation(page: Page, data: { messages: { id: string }[];
 
 // The chat outbox accepts a reply only to a message of its own thread.
 async function chatOutbox(page: Page, chat: { message: Record<string, unknown> }[]) {
-  const outbox: { client_message_id: string; body: string; reply_to?: string }[] = []
+  const outbox: { client_message_id: string; body: string; reply_to?: string; delivery_level?: 'simple' | 'steer'; expected_session_id?: string }[] = []
   await page.route(/\/api\/chat-threads\/[^/]+\/outbox$/, route => {
     if (route.request().method() !== 'POST') return route.fallback()
-    const input = route.request().postDataJSON() as { client_message_id: string; body: string; reply_to?: string }
+    const input = route.request().postDataJSON() as typeof outbox[number]
     outbox.push(input)
     if (input.reply_to && !chat.some(item => item.message.message_id === input.reply_to)) return route.fulfill({ status: 404, json: { error: 'not found' } })
     const position = 901 + outbox.length - 1
-    const message = { message_id: `3e000000-0000-4000-8000-${String(position).padStart(12, '0')}`, conversation_id: conversation, read_seq: String(position), sent_event_position: String(position), body: input.body, payload_mode: 'inline', reply_to: input.reply_to ?? null }
+    const message = { message_id: `3e000000-0000-4000-8000-${String(position).padStart(12, '0')}`, conversation_id: conversation, read_seq: String(position), sent_event_position: String(position), body: input.body, payload_mode: 'inline', reply_to: input.reply_to ?? null, ...(input.delivery_level ? { delivery_level: input.delivery_level } : {}) }
     chat.push({ message: { ...message, sender_principal_id: me.id, created_at: new Date(now).toISOString() } })
     return route.fulfill({ json: { contract: 'chat-live-v1', message, receipt: { message_id: message.message_id, state: 'sent' } } })
   })
@@ -506,10 +553,13 @@ for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only
     await composer.press('Control+Enter')
     await expect.poll(() => outbox.length).toBe(1)
     expect(outbox[0]).toMatchObject({ body: 'Ship it after the smoke test.', reply_to: final })
+    expect(outbox[0]).not.toHaveProperty('delivery_level')
+    expect(outbox[0]).not.toHaveProperty('expected_session_id')
     // The reply is done: the next message is managed again and may steer.
     await expect(steer).toContainText('Send now')
     await expect(note).toHaveCount(0)
   }
+
   // On phones the second row leaves with the sent draft (AEON-1438 design); desktop keeps every control still.
   if (width > 720) await guard.check(sendReply)
   else { await sendReply(); await expect(panel.locator('.composer')).not.toHaveClass(/two/) }
@@ -541,4 +591,84 @@ for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only
     }
   }
   expect(data.sent.some(message => message.body === 'Ship it after the smoke test.')).toBe(false)
+})
+
+// AEON-1082: the session stays explicitly paused mid-turn throughout both
+// sends. The relay's real boundary interleaving is tested in Go; here the
+// selected mode, exact target, legacy compatibility and stable controls cross
+// the actual composer/API boundary without an implicit interrupt.
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`AEON-1082 chat-native timing reaches the outbox ${theme} ${width}`, async ({ page }, testInfo) => {
+    const { worker, calls, chat } = await setup(page, { theme, timing: 'native', session: { activity: 'busy' } })
+    const final = '3e000000-0000-4000-8000-000000000900'
+    chat.push(nativeFinal(worker, final, 900, 'Final: the release checks pass.'))
+    const outbox = await chatOutbox(page, chat)
+    await page.setViewportSize({ width, height: 860 })
+    await page.goto(`/agents/${worker.id}?tab=messages`)
+    const panel = panelOf(page)
+    const composer = panel.getByRole('textbox', { name: 'Message to release-lead' })
+    const row = panel.locator('.msg', { hasText: 'Final: the release checks pass.' })
+    const send = panel.locator('.compose .send'), steer = panel.locator('.steer-send')
+    const stop = panel.getByRole('button', { name: 'More session actions', exact: true })
+    await expect(row).toBeVisible()
+    await update(page, 1, { sessionUpdate: 'state', state: 'running' })
+    await chunk(page, 2, 'The active turn waits at its explicit end barrier.')
+    const endTurn = () => update(page, 3, { sessionUpdate: 'state', state: 'idle' })
+    const reply = async (body: string) => {
+      await composer.fill(body)
+      await composer.blur()
+      await row.hover()
+      await row.getByRole('button', { name: 'Reply', exact: true }).click()
+      await expect(panel.locator('.replying')).toContainText('Final: the release checks pass.')
+      await expect(steer).toHaveText('Send now')
+      await expect(steer).toBeEnabled()
+      await expect(send).toHaveAccessibleName('After this turn')
+    }
+    await reply('Bitte die vollständige Freigabeprüfung nach dieser Antwortrunde berücksichtigen.')
+    const guard = await controlStability(page, { composer, send, steer, stop })
+    await guard.check(async () => {
+      await panel.getByRole('button', { name: 'Cancel the reply', exact: true }).click()
+      await row.hover()
+      await row.getByRole('button', { name: 'Reply', exact: true }).click()
+      await expect(steer).toBeEnabled()
+    })
+    guard.done()
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1082-native-${theme}-${width}.png`) })
+    await send.click()
+    await expect.poll(() => outbox.length).toBe(1)
+    expect(outbox[0]).toMatchObject({ delivery_level: 'simple', expected_session_id: worker.id, reply_to: final })
+    await expect(panel.locator('.live-turn .working')).toContainText('Working')
+    await reply('Bitte die Korrektur bereits während der laufenden Antwortrunde berücksichtigen.')
+    await steer.click()
+    await expect.poll(() => outbox.length).toBe(2)
+    expect(outbox[1]).toMatchObject({ delivery_level: 'steer', expected_session_id: worker.id, reply_to: final })
+    await expect(panel.locator('.live-turn .working')).toContainText('Working')
+    expect(calls.filter(call => call.method === 'POST' && /\/controls\//.test(call.path))).toEqual([])
+    await endTurn()
+    await expect(panel.locator('.live-turn .working')).toHaveCount(0)
+  })
+}
+
+for (const timing of ['next-step', 'queue'] as const) test(`AEON-1082 chat-native replies use negotiated ${timing} timing`, async ({ page }) => {
+  const { worker, chat } = await setup(page, { timing, session: { activity: 'busy' } })
+  const final = '3e000000-0000-4000-8000-000000000900'
+  chat.push(nativeFinal(worker, final, 900, 'Final: the release checks pass.'))
+  const outbox = await chatOutbox(page, chat)
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const panel = panelOf(page), row = panel.locator('.msg', { hasText: 'Final: the release checks pass.' })
+  const composer = panel.getByRole('textbox', { name: 'Message to release-lead' })
+  await expect(row).toBeVisible()
+  await composer.fill('Respect the exact adapter boundary.')
+  await row.hover()
+  await row.getByRole('button', { name: 'Reply', exact: true }).click()
+  if (timing === 'next-step') {
+    await expect(panel.locator('.steer-send')).toHaveText('At next step')
+    await panel.locator('.steer-send').click()
+  } else {
+    await expect(panel.locator('.steer-send')).toHaveCount(0)
+    await expect(panel.locator('.steer-note')).toHaveText('Chat replies arrive between turns')
+    await panel.locator('.compose .send').click()
+  }
+  await expect.poll(() => outbox.length).toBe(1)
+  expect(outbox[0]).toMatchObject({ delivery_level: timing === 'next-step' ? 'steer' : 'simple', expected_session_id: worker.id })
 })

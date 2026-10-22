@@ -338,14 +338,36 @@ test('pi registry model ids stay offered and a secret-shaped id does not', async
   await expect(dialog(page).getByRole('button', { name: 'Queue run', exact: true })).toBeEnabled()
 })
 
-test('a provisional window is unknown and is not treated as fully unused', async ({ page }) => {
+test('a provisional window is unknown and is not treated as fully unused', async ({ page }, info) => {
+  test.setTimeout(120_000)
   await mockStartAgent(page, { catalog: 'provisional' })
   await open(page, true)
   await ready(page, true)
   await expect(dialog(page).getByText('Selected because it has the most allowance left.')).toBeVisible()
   const spare = dialog(page).getByRole('option', { name: /Spare account/ })
-  await expect(spare).toContainText('allowance unknown')
+  await expect(spare).toContainText('No quota reading yet')
   await expect(spare).not.toContainText('100%')
+  const account = dialog(page).getByLabel('Account', { exact: true })
+  const primary = await account.inputValue()
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    await expectStableControls({
+      controls: { account, model: dialog(page).getByLabel('Model', { exact: true }), thinking: dialog(page).getByLabel('Thinking', { exact: true }), queue: dialog(page).getByRole('button', { name: 'Queue run', exact: true }), cancel: dialog(page).getByRole('button', { name: 'Cancel', exact: true }) },
+      scrollAreas: { dialog: dialog(page) },
+      interactions: [{ name: 'select an account without a reading', run: async () => {
+        await account.selectOption(await spare.getAttribute('value') ?? '')
+        await expect(dialog(page).locator('.account-notes > p:not(.sizer)')).toContainText('Agents can start now. The quota shows once this account reports it.')
+        await expect(dialog(page)).not.toContainText('Reads after the first run')
+        await expect(dialog(page).getByRole('button', { name: 'Queue run', exact: true })).toBeEnabled()
+        await dialog(page).screenshot({ path: info.outputPath(`aeon-1511-start-${width}-${theme}-no-reading.png`), animations: 'disabled' })
+      } }, { name: 'return to the measured account', run: async () => {
+        await account.selectOption(primary)
+        await expect(dialog(page).locator('.account-notes > p:not(.sizer)')).toContainText('80%')
+      } }],
+    })
+  }
 })
 
 test('a stale grant does not queue or fall back, and catalog refresh drops the hidden model', async ({ page }) => {
@@ -401,11 +423,38 @@ test('an unreported session does not reuse the requested labels as fact', async 
   await expect(dialog(page).getByText('This differs from the requested configuration.')).toHaveCount(0)
 })
 
-test('changing host replaces the granted model', async ({ page }) => {
+test('changing host replaces the granted model', async ({ page }, info) => {
+  test.setTimeout(120_000)
   await mockStartAgent(page, { catalog: 'two-hosts' })
   await open(page, true)
   await expect(dialog(page).getByLabel('Model', { exact: true }).locator('option:checked')).toHaveText('workspace-build')
-  await dialog(page).getByLabel('Host', { exact: true }).selectOption({ label: 'Laptop' })
+  // Risk: a longer host explanation after a harness switch moves every later
+  // selector. Reserve the tallest candidate and require exactly zero height change.
+  const host = dialog(page).getByLabel('Host', { exact: true })
+  const harness = dialog(page).getByLabel('Harness', { exact: true })
+  const hostNotes = dialog(page).locator('.host-notes')
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    await page.evaluate(async () => { await document.fonts.ready })
+    const height = await hostNotes.evaluate(element => element.getBoundingClientRect().height)
+    expect(height).toBeGreaterThan(0)
+    await expectStableControls({
+      controls: { host, harness, selectors: dialog(page).locator('.pair').first(), account: dialog(page).getByLabel('Account', { exact: true }), model: dialog(page).getByLabel('Model', { exact: true }), thinking: dialog(page).getByLabel('Thinking', { exact: true }), queue: dialog(page).getByRole('button', { name: 'Queue run', exact: true }), cancel: dialog(page).getByRole('button', { name: 'Cancel', exact: true }) },
+      scrollAreas: { dialog: dialog(page) },
+      interactions: ['claude', 'codex'].map(value => ({ name: `switch harness to ${value}`, run: async () => {
+        await harness.selectOption(value)
+        await expect(hostNotes.locator('p:not(.sizer)')).toHaveText(value === 'claude' ? 'Agents can start now. The quota shows once this account reports it.' : 'Chosen because it has the account with the most allowance left.')
+        expect(await hostNotes.evaluate(element => element.getBoundingClientRect().height) - height).toBe(0)
+        await dialog(page).screenshot({ path: info.outputPath(`aeon-1511-host-note-${width}-${theme}-${value}.png`), animations: 'disabled' })
+      } })),
+    })
+  }
+  const heightBeforeHostChange = await hostNotes.evaluate(element => element.getBoundingClientRect().height)
+  await host.selectOption({ label: 'Laptop' })
+  await expect(hostNotes.locator('p:not(.sizer)')).toHaveCount(0)
+  expect(await hostNotes.evaluate(element => element.getBoundingClientRect().height) - heightBeforeHostChange).toBe(0)
   await expect(dialog(page).getByLabel('Harness', { exact: true }).locator('option:checked')).toHaveText('Claude Code')
   await expect(dialog(page).getByLabel('Model', { exact: true }).locator('option:checked')).toHaveText('other-model')
   await expect(dialog(page).getByRole('option', { name: 'workspace-build' })).toHaveCount(0)

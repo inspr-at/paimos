@@ -126,15 +126,18 @@ func (m *Module) liveMetricRuns(ctx context.Context, name string, raw []byte, sc
 		return nil, nil
 	}
 	if name == "workflow_job" {
-		var complete bool
+		var needsJobs bool
 		service := db.AllProjects(ctx, "delivery completed job metric identity")
 		if err := db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-			return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_metric_runs WHERE repository=$1 AND run_id=$2 AND attempt=$3 AND jobs_read_at IS NOT NULL AND required_jobs->>'complete'='true')`, m.config.Repository, body.Job.Run, body.Job.Attempt).Scan(&complete)
+			return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_metric_runs WHERE repository=$1 AND run_id=$2 AND attempt=$3 AND (jobs_read_at IS NULL OR required_jobs->>'complete' IS DISTINCT FROM 'true'))`, m.config.Repository, body.Job.Run, body.Job.Attempt).Scan(&needsJobs)
 		}); err != nil {
 			return nil, err
 		}
-		if complete {
-			return nil, nil // the job timestamp write will update its existing map
+		if !needsJobs {
+			// Store timestamps without opening an installation read. The
+			// workflow completion fills a missing run; a complete map only
+			// needs the local timestamp hydration below.
+			return nil, nil
 		}
 	}
 	var runs []metricRun

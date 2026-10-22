@@ -5,6 +5,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { HOMEBREW_COMMAND, NIX_PAIR_COMMAND, SETUP_COMMAND, mockAnonymousGuide, mockFormulaGuide, mockPairing, pairingEnrollment, pairingGuide, pairingView } from './agent-pairing-fixtures'
+import { controlStability } from './control-stability'
 
 test('Homebrew offers two commands and removal after draining', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
@@ -506,4 +507,188 @@ test('Agents links to Connect your machine', async ({ page }) => {
   await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+// Risk: cramped names split words, separate grids mislabel columns, and clipped
+// paths hide the working folder. Instructions stay whole and actions stay still
+// through Details and a live connectivity update.
+test.describe('AEON-1611 connected computer readability', () => {
+  test.use({ locale: 'de-AT' })
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    test(`AEON-1611 connected rows show whole instructions and stable actions at ${width}px ${theme}`, async ({ page }, info) => {
+      await page.clock.install()
+      await page.setViewportSize({ width, height: 1100 })
+      await page.emulateMedia({ colorScheme: theme })
+      await mockWork(page, fixtures())
+      const computerName = 'Entwicklungsrechner für die Arbeitsbereichsverwaltung'
+      const workspacePath = '/home/team/Arbeitsbereichsverwaltung/Projektunterlagen-und-Freigaben'
+      const computer = { computer_name: computerName, workspace_path: workspacePath, connectivity: 'online', revision: 4 }
+      await mockPairing(page, {}, computer)
+      await page.goto('/agents/register-agent')
+      const card = page.getByRole('region', { name: 'Connected computers' })
+      const row = card.locator('.computer')
+      await expect(row).toHaveCount(1)
+      const name = row.locator('.name')
+      const path = row.locator('.path')
+      await expect(name).toHaveText(computerName)
+      await expect(name).toHaveAttribute('title', computerName)
+      await expect(name).toHaveCSS('overflow-wrap', width === 390 ? 'break-word' : 'normal')
+      await expect(path).toBeVisible()
+      await expect(path).toHaveText(workspacePath)
+      await expect(path).toHaveAttribute('title', workspacePath)
+      await expect(path).toHaveCSS('text-overflow', 'ellipsis')
+      const assertPathTail = async () => {
+        await expect(path).toHaveCSS('direction', 'rtl')
+        const tail = await path.evaluate(element => {
+          const bounds = element.getBoundingClientRect()
+          const style = getComputedStyle(element)
+          const context = document.createElement('canvas').getContext('2d')!
+          context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+          const walker = document.createTreeWalker(element.querySelector('bdi')!, NodeFilter.SHOW_TEXT)
+          let first: Node | null = null
+          let last: Node | null = null
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) if (node.textContent?.trim()) { first ??= node; last = node }
+          const range = document.createRange()
+          range.selectNodeContents(last!)
+          const visible = range.getBoundingClientRect()
+          range.selectNodeContents(first!)
+          return { segment: last!.textContent, left: visible.left - bounds.left, right: visible.right - bounds.right, start: range.getBoundingClientRect().left - bounds.left, clipped: element.scrollWidth > element.clientWidth, ellipsisWidth: context.measureText('…').width }
+        })
+        expect(tail.segment).toBe(workspacePath.split('/').at(-1))
+        expect(tail.left, 'the whole last folder must remain visible after the leading ellipsis').toBeGreaterThanOrEqual(-1)
+        expect(tail.right, 'the path must show its ending, not its beginning').toBeLessThanOrEqual(1)
+        if (tail.clipped) {
+          expect(tail.start, 'a shortened path must clip its start').toBeLessThan(-1)
+          expect(tail.ellipsisWidth).toBeGreaterThan(0)
+          expect(tail.left, 'the leading ellipsis must not cover the last folder').toBeGreaterThanOrEqual(tail.ellipsisWidth - 1)
+        }
+      }
+      const assertWideLayout = async () => {
+        await expect(name).toHaveCSS('overflow-wrap', 'normal')
+        await expect(name).toHaveCSS('-webkit-line-clamp', '2')
+        const nameLayout = await name.evaluate(element => {
+          const bounds = element.getBoundingClientRect()
+          const lineHeight = parseFloat(getComputedStyle(element).lineHeight)
+          const words = [...element.querySelectorAll<HTMLElement>('.name-word')].map(word => {
+            const range = document.createRange()
+            range.selectNodeContents(word)
+            // Ellipsis can add a second rectangle on the same line in Chromium.
+            // Distinct vertical positions measure word wrapping on every host.
+            const lineTops = [...new Set([...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0).map(rect => rect.top))]
+            return { lines: lineTops.length, whiteSpace: getComputedStyle(word).whiteSpace, ellipsis: getComputedStyle(word).textOverflow, width: word.clientWidth }
+          })
+          return { height: bounds.height, lineHeight, words }
+        })
+        expect(nameLayout.height).toBeGreaterThan(0)
+        expect(nameLayout.lineHeight).toBeGreaterThan(0)
+        expect(nameLayout.height, 'desktop names take at most two lines').toBeLessThanOrEqual(2 * nameLayout.lineHeight + 1)
+        expect(nameLayout.words).toHaveLength(computerName.split(' ').length)
+        for (const word of nameLayout.words) {
+          expect(word.lines, 'each word stays on one line, with an ellipsis if it cannot fit').toBe(1)
+          expect(word.whiteSpace).toBe('nowrap')
+          expect(word.ellipsis).toBe('ellipsis')
+          expect(word.width).toBeGreaterThan(0)
+        }
+        const glyphTop = await row.locator('.glyph').evaluate(element => element.getBoundingClientRect().top)
+        expect(glyphTop).toBe((await name.boundingBox())!.y)
+        const columns = await card.evaluate(element => {
+          const headers = [...element.querySelectorAll<HTMLElement>('.sheet > span')]
+          const cells = [...element.querySelectorAll<HTMLElement>('.computer > .identity, .computer > .harness-line, .computer > .status, .computer > .last-active, .computer > .actions')]
+          return headers.flatMap((header, index) => header.getBoundingClientRect().width > 0
+            ? [{ label: header.textContent || 'Actions', headerWidth: header.getBoundingClientRect().width, cellWidth: cells[index]!.getBoundingClientRect().width, offset: header.getBoundingClientRect().left - cells[index]!.getBoundingClientRect().left }]
+            : [])
+        })
+        expect(columns.length).toBeGreaterThanOrEqual(4)
+        for (const column of columns) {
+          expect(column.cellWidth, `${column.label} cell must have a visible width`).toBeGreaterThan(0)
+          expect(Math.abs(column.offset), `${column.label} header must align with its cell`).toBeLessThanOrEqual(.5)
+          expect(Math.abs(column.headerWidth - column.cellWidth), `${column.label} header must share its cell's column width`).toBeLessThanOrEqual(.5)
+        }
+        await expect(path).toHaveCSS('white-space', 'nowrap')
+        expect(await path.evaluate(element => element.clientHeight <= parseFloat(getComputedStyle(element).lineHeight) + 1), 'desktop path must occupy one line').toBe(true)
+        expect(await path.evaluate(element => element.scrollWidth > element.clientWidth), 'desktop path must visibly truncate with a leading ellipsis').toBe(true)
+        await assertPathTail()
+      }
+      if (width === 390) {
+        await expect(path).toHaveCSS('direction', 'ltr')
+        await expect(path).toHaveCSS('-webkit-line-clamp', '2')
+        expect(await path.locator('wbr').count()).toBeGreaterThan(0)
+        expect(await path.evaluate(element => element.clientHeight <= 2 * parseFloat(getComputedStyle(element).lineHeight))).toBe(true)
+      } else {
+        await assertWideLayout()
+      }
+      await expect(row.locator('.confirmation')).toHaveText('Touch ID confirmation: pairing readiness unknown — run aeon-agentd status on this computer.')
+      await expect(card.locator(':scope > .muted')).toHaveText('Pairing connects the computer to AEON. Link each running session separately to its ticket.')
+
+      const assertReadable = async () => {
+        const targets = width === 390 ? '.name, .confirmation, .harness-line, .status' : '.confirmation'
+        const clipped = await row.locator(targets).evaluateAll(elements => elements.filter(element => {
+          const bounds = element.getBoundingClientRect()
+          const range = document.createRange()
+          range.selectNodeContents(element)
+          return [...range.getClientRects()].some(rect => rect.left < bounds.left - 1 || rect.right > bounds.right + 1 || rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1)
+        }).map(element => element.className))
+        expect(clipped, 'row text must fit its visible bounds').toEqual([])
+      }
+      await assertReadable()
+      const details = row.locator('.details-toggle')
+      const disconnect = row.getByRole('button', { name: 'Disconnect', exact: true })
+      if (width === 390) {
+        for (const action of [disconnect, details]) {
+          const bounds = await action.boundingBox()
+          expect(bounds!.width).toBeGreaterThanOrEqual(44)
+          expect(bounds!.height).toBeGreaterThanOrEqual(44)
+        }
+        const layout = await row.evaluate(element => {
+          const name = element.querySelector('.name')!.getBoundingClientRect()
+          const glyph = element.querySelector('.glyph')!.getBoundingClientRect()
+          const identity = element.querySelector('.identity')!.getBoundingClientRect()
+          const status = element.querySelector('.status')!.getBoundingClientRect()
+          const actions = element.querySelector('.actions')!.getBoundingClientRect()
+          return { nameTop: name.top, glyphTop: glyph.top, identityRight: identity.right, actionsRight: actions.right, actionsTop: actions.top, statusBottom: status.bottom }
+        })
+        expect(layout.glyphTop).toBe(layout.nameTop)
+        expect(layout.identityRight).toBe(layout.actionsRight)
+        expect(layout.actionsTop).toBeGreaterThanOrEqual(layout.statusBottom)
+      }
+      expect(await name.evaluate(element => !!(element.compareDocumentPosition(element.closest('.computer')!.querySelector('.actions')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true)
+      await disconnect.focus()
+      await page.keyboard.press('Tab')
+      await expect(details).toBeFocused()
+      const guard = await controlStability(page, {
+        refresh: card.getByRole('button', { name: 'Refresh computers' }),
+        add: card.getByRole('link', { name: 'Add computer', exact: true }),
+        name,
+        actions: row.locator('.actions'),
+        disconnect,
+        details,
+      })
+      await guard.check(async () => { await details.click(); await expect(row.locator('.detail')).toBeVisible() })
+      await assertReadable()
+      await guard.check(async () => { await row.getByRole('button', { name: `Hide details for ${computerName}` }).click(); await expect(row.locator('.detail')).toHaveCount(0) })
+      await page.mouse.move(0, 0)
+      await details.blur()
+      await card.screenshot({ path: info.outputPath(`connected-computers-${width}-${theme}.png`), animations: 'disabled' })
+      const beforeStatus = await row.boundingBox()
+      await guard.check(async () => {
+        computer.connectivity = 'offline'
+        computer.revision++
+        await page.clock.runFor(20_000)
+        await expect(row.locator('.status')).toHaveText('Offline')
+      })
+      expect(await row.boundingBox(), 'live status changes must move or resize the row by 0 px').toEqual(beforeStatus)
+      guard.done()
+      if (width === 390) {
+        await card.screenshot({ path: info.outputPath(`connected-computers-${width}-${theme}-offline.png`), animations: 'disabled' })
+        for (const resizedWidth of [521, 720, 1024, 1440]) {
+          await page.setViewportSize({ width: resizedWidth, height: 1100 })
+          await expect(path).toHaveCSS('white-space', 'nowrap')
+          await assertPathTail()
+          if (resizedWidth >= 1024) await assertWideLayout()
+          expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+          await card.screenshot({ path: info.outputPath(`connected-computers-${resizedWidth}-${theme}.png`), animations: 'disabled' })
+        }
+      }
+    })
+  }
 })

@@ -322,6 +322,88 @@ type pendingCodexChat struct {
 	update ChatUpdate
 }
 
+type codexChatInput struct {
+	digest, turn       string
+	reacted, completed bool
+	published          bool
+}
+
+// App-server userMessage items carry the exact input text on the owned
+// thread/turn. Match its digest, including Aeon's unique message ID, rather
+// than treating turn/steer's acknowledgement or earlier output as a receipt.
+func (p *codexProcess) observeCodexInputs(raw json.RawMessage) {
+	if len(p.chatInputs) == 0 || len(raw) > 8<<20 || !utf8.Valid(raw) {
+		return
+	}
+	var f struct {
+		Method string `json:"method"`
+		Params struct {
+			Thread string `json:"threadId"`
+			TurnID string `json:"turnId"`
+			Turn   struct {
+				ID string `json:"id"`
+			} `json:"turn"`
+			Item struct {
+				Type    string `json:"type"`
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"item"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(raw, &f) != nil || p.threadID == "" || f.Params.Thread != p.threadID {
+		return
+	}
+	turn := firstNonempty(f.Params.TurnID, f.Params.Turn.ID)
+	if !validChatID(turn, 256) || p.acknowledged && turn != p.turnID {
+		return
+	}
+	if f.Method == "item/started" && f.Params.Item.Type == "userMessage" && len(f.Params.Item.Content) == 1 {
+		text := f.Params.Item.Content[0]
+		if text.Type != "text" || len(text.Text) > inboxTextLimit {
+			return
+		}
+		digest := sha256Hex([]byte(text.Text))
+		for _, input := range p.chatInputs {
+			if !input.reacted && input.digest == digest && (input.turn == "" || input.turn == turn) {
+				input.turn, input.reacted = turn, true
+			}
+		}
+	}
+	if f.Method == "turn/completed" || f.Method == "turn/failed" {
+		for id, input := range p.chatInputs {
+			if input.turn == turn {
+				input.completed = true
+				if !input.reacted {
+					delete(p.chatInputs, id) // no matching input reaction: no evidence
+				}
+			}
+		}
+	}
+	if p.acknowledged {
+		p.flushCodexInputs(turn)
+	}
+}
+
+func (p *codexProcess) flushCodexInputs(turn string) {
+	for id, input := range p.chatInputs {
+		if input.turn != turn || !input.reacted {
+			continue
+		}
+		if !input.published {
+			input.published = true
+			update := chatState("running")
+			p.observe(AdapterEvent{Chat: &update, InputID: id})
+		}
+		if input.completed {
+			update := chatState("idle")
+			p.observe(AdapterEvent{Chat: &update, InputID: id})
+			delete(p.chatInputs, id)
+		}
+	}
+}
+
 // Before acknowledgement, content and state have separate budgets, so chunks
 // and the final can never take the slot of the turn's terminal state.
 const (
@@ -354,6 +436,7 @@ func (p *codexProcess) pendingRoom(u ChatUpdate) bool {
 // a completion seen before acknowledgement queues it ahead of that turn's idle
 // state; otherwise flushCodexChat hands it to codexFinal for the completion.
 func (p *codexProcess) observeCodexChat(raw json.RawMessage) {
+	p.observeCodexInputs(raw)
 	if p.acknowledged {
 		p.observeChat(Codex, raw)
 		return

@@ -85,8 +85,9 @@ a cursor exists, selecting another window requires `restart`.
 
 Completed `workflow_run` deliveries now write exact run attempts into
 `delivery_metric_runs`, including earlier attempts returned by Actions. Completed
-GitHub Actions `check_run` deliveries resolve their completed suite to the same
-run identity. A completed job never stands in for an unfinished workflow. Job
+GitHub Actions `check_run` deliveries resolve the same run identity only when
+the payload's suite status is completed; earlier checks wait for `check_suite`
+completion. A completed job never stands in for an unfinished workflow. Job
 maps are read only after the workflow completes, and retain every conclusion
 within the existing 500-job bound. Redelivery and repeated backfill pages converge
 on `(tenant, repository, run, attempt)`.
@@ -95,12 +96,15 @@ The installation-bound `workflow_job` queued, waiting, in-progress and completed
 events store only run/attempt/job IDs and queue/start timestamps in
 `delivery_metric_jobs` (expansion 1422). No logs, steps, runner names or runner
 labels are projected. The complete REST job list supplies job identities, so
-early or late job events can fill missing queue timestamps. Runner wait is
-withheld while any non-skipped job's wait is unknown. Historical jobs without
-queue timestamps stay partial; backfill does not invent a queue time from the
-workflow's start. Confirmed flaky executions remain withheld under the existing
-measurement contract: a successful rerun is a workflow rescue, not proof that
-the same case, workflow revision and runner class failed and passed.
+early or late job events can fill missing queue timestamps. Completed job events
+open a GitHub read only to repair an existing run attempt without a complete job
+map; events before workflow completion and events with a complete map store
+timestamps locally. Runner wait is withheld while any non-skipped job's wait is
+unknown. Historical jobs without queue timestamps stay partial; backfill does not
+invent a queue time from the workflow's start. Confirmed flaky executions remain
+withheld under the existing measurement contract: a successful rerun is a workflow
+rescue, not proof that the same case, workflow revision and runner class failed
+and passed.
 
 A failed best-effort live job read wakes the durable history worker, including
 after an earlier history window finished. Each jobs step makes at most 40 reads,

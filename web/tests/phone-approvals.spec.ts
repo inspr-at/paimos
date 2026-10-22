@@ -128,6 +128,17 @@ async function phoneDevice(page: Page) {
  }, { endpoint })
 }
 
+async function phoneSettingsReady(page: Page) {
+ // These independent reads render above Phone approvals. Take the baseline
+ // after their content arrives, so the guard measures the notification action.
+ await expect(page.getByLabel('First name')).toBeVisible()
+ await expect(page.getByRole('radio', { name: /Approve in/ })).toBeVisible()
+ const notifications = page.locator('#notifications').getByRole('status')
+ await expect(notifications).toBeVisible()
+ await expect(notifications).not.toHaveText('Loading notifications…')
+ await page.evaluate(() => document.fonts.ready.then(() => undefined))
+}
+
 // Risk: another browser's subscription is mistaken for enabling this device,
 // or pausing that account is unreachable until this browser subscribes.
 // Status and feedback must not move the next tap.
@@ -150,10 +161,7 @@ test('device notifications replace Enable with state and stable Pause in both th
   await page.setViewportSize({ width, height: 1000 }); await page.goto('/settings/personal#phone-approvals')
   const card = page.getByRole('region', { name: 'Phone approvals', exact: true })
   await expect(card.getByRole('button', { name: 'Add device passkey' })).toBeEnabled()
-  // Profile and session-watching sit above this card and finish after the phone
-  // form. Measuring before they settle attributes their arrival to the tap.
-  await expect(page.getByLabel('First name')).toBeVisible()
-  await expect(page.getByRole('radio', { name: /Approve in/ })).toBeVisible()
+  await phoneSettingsReady(page)
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; document.querySelector('#phone-approvals .phone-settings > p')!.textContent = 'Benachrichtigungen zu Freigabeanfragen werden auf diesem Gerät angezeigt. Die ausführliche Anfrage bleibt im angemeldeten Arbeitsbereich und wird vor jeder Entscheidung mit dem Geräte-Passkey bestätigt.' }, theme)
   await card.scrollIntoViewIfNeeded()
   const action = card.locator('.notification-action')
@@ -227,6 +235,7 @@ test('registration awaits one fresh options response before platform verificatio
  await page.setViewportSize({ width: 390, height: 1000 }); await page.goto('/settings/personal#phone-approvals')
  const card = page.getByRole('region', { name: 'Phone approvals', exact: true }), add = card.getByRole('button', { name: 'Add device passkey' })
  await expect(add).toBeEnabled()
+ await phoneSettingsReady(page)
  const guard = await controlStability(page, { add, notification: card.locator('.notification-action'), save: card.getByRole('button', { name: 'Save notification settings' }) })
  await guard.check(async () => {
   await add.click(); await expect(card.getByRole('status')).toHaveText('Preparing passkey verification…')
@@ -267,6 +276,7 @@ test('account pause stays available when this browser has no Web Push', async ({
  await expect(action).toBeEnabled()
  await expect(card.getByRole('button', { name: 'Enable notifications on this device', exact: true })).toBeDisabled()
  await expect(card.getByText('Notifications on for this device', { exact: true })).toHaveCount(0)
+ await phoneSettingsReady(page)
  const guard = await controlStability(page, { action, save: card.getByRole('button', { name: 'Save notification settings' }), add: card.getByRole('button', { name: 'Add device passkey' }) })
  await guard.check(async () => {
   await action.click()

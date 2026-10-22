@@ -5,7 +5,7 @@
 // they are never stored, logged or replayed. The persisted final message
 // replaces the live block once it lands in the thread.
 import { parseJson } from '../../lib/json.ts'
-import type { ChatHistoryMessage, ProjectMessage } from '../../lib/agents.ts'
+import type { ChatHistoryMessage, ChatInputTiming, ProjectMessage } from '../../lib/agents.ts'
 import type { ChatCapability, ReadMark } from './sessionChat.ts'
 import type { MessageGroup } from './sessionMessages.ts'
 
@@ -180,7 +180,7 @@ export function chatFinals(items: readonly { message: ChatHistoryMessage; person
     return [{
       id: message.message_id, sender_principal_id: sender, recipient_principal_id: fromAgent ? viewer : agent, to: '', body: message.body, reply_to: message.reply_to ?? null,
       sent_event_id: position, created_at: message.created_at, ...(fromAgent ? { sender_session_id: session, sender_label: label } : { recipient_session_id: session }),
-      is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none',
+      is_action_request: false, expects_reply: false, delivery_level: message.delivery_level ?? 'simple', status: 'accepted', reply_obligation: 'none',
       chat_thread: thread, chat_seen: person_read_state === 'seen',
     } satisfies ProjectMessage]
   })
@@ -191,7 +191,7 @@ export function chatSent(message: ChatHistoryMessage, viewer: string, agent: str
   return {
     id: message.message_id, sender_principal_id: viewer, recipient_principal_id: agent, recipient_session_id: session, to: '', body: message.body, reply_to: message.reply_to ?? null,
     sent_event_id: Number(message.sent_event_position), created_at: message.created_at ?? at,
-    is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none', chat_thread: thread,
+    is_action_request: false, expects_reply: false, delivery_level: message.delivery_level ?? 'simple', status: 'accepted', reply_obligation: 'none', chat_thread: thread,
   }
 }
 
@@ -226,11 +226,12 @@ export function chatSeenMark(messages: readonly ProjectMessage[]): { event: numb
 
 // The mid-turn send a message's transport consumes. Managed delivery takes
 // Send now (native steer) or At next step where the harness advertises steer.
-// A reply to a chat-native message goes to the chat outbox, which the daemon
-// relay reads only at turn boundaries: After this turn is all it offers.
+// Chat timing requires an explicit response from this server for the exact
+// bound session. Older server/daemon pairs retain After this turn.
 export type SendTransport = 'managed' | 'chat'
-export function offeredSteer(capability: ChatCapability, steerAdvertised: boolean, transport: SendTransport): 'now' | 'next' | null {
-  if (transport !== 'managed' || !steerAdvertised) return null
+export function offeredSteer(capability: ChatCapability, steerAdvertised: boolean, transport: SendTransport, timing?: ChatInputTiming | null): 'now' | 'next' | null {
+  if (!steerAdvertised) return null
+  if (transport === 'chat') return timing === 'native' ? 'now' : timing === 'next-step' ? 'next' : null
   return capability === 'native' ? 'now' : capability === 'next' ? 'next' : null
 }
 
@@ -255,7 +256,7 @@ export interface LiveSource {
   readonly readyState: number
 }
 export interface LiveDeps {
-  lookup: (sessionId: string) => Promise<{ status: number; thread?: string }>
+  lookup: (sessionId: string) => Promise<{ status: number; thread?: string; timing?: ChatInputTiming }>
   open: (url: string) => LiveSource | null
   // Injected in tests; the browser's timers otherwise.
   later?: (run: () => void, ms: number) => () => void
@@ -266,7 +267,7 @@ export interface LiveHandlers {
   // history; the caller drops interim content.
   resync: () => void
   // The thread this session is bound to, once found.
-  thread?: (id: string) => void
+  thread?: (id: string, timing?: ChatInputTiming) => void
   // Whether a stream is attached right now.
   attached: (live: boolean) => void
 }
@@ -324,7 +325,7 @@ export function followChatLive(sessionId: string, handlers: LiveHandlers, deps: 
     try {
       const found = await deps.lookup(sessionId)
       if (stopped) return
-      if (found.status === 200 && found.thread) { thread = found.thread; handlers.thread?.(thread); connect() }
+      if (found.status === 200 && found.thread) { thread = found.thread; handlers.thread?.(thread, found.timing); connect() }
     } catch { /* Final history stays authoritative. */ }
     finally { looking = false }
   }

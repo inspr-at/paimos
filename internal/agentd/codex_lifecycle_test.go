@@ -135,6 +135,95 @@ const lifecycleUsage = `{"method":"thread/tokenUsage/updated","params":{"threadI
 const lifecycleTerminal = `{"method":"turn/completed","params":{"threadId":"synthetic-thread","turn":{"id":"synthetic-turn","status":"completed"}}}`
 const lifecycleAck = `"result":{"turn":{"id":"synthetic-turn","status":"inProgress"}}`
 
+// Risk (AEON-1082): turn/steer ACK or output from the already-running turn
+// fabricates delivery. Use the real app-server adapter with a held turn and
+// explicit input-item/completion notifications, including wrong-turn controls.
+func TestChatSteerReceiptsUseExactCodexInputReactions(t *testing.T) {
+	f := newCodexLifecycleFixture(t)
+	if err := f.ack(t, lifecycleAck); err != nil {
+		t.Fatal(err)
+	}
+	api := newFakeRelayAPI()
+	api.binding.InputTiming = "native"
+	input := chatInput("m1", "sent")
+	input.Message.Level = "steer"
+	api.inputs = []ChatInput{input}
+	r := NewChatRelay(api, HarnessSession{ID: "session"}, ChatRelayOptions{Steer: "native", RequireInputCorrelation: true,
+		DeliverTimed: func(ctx context.Context, id, body, _ string, writing func()) error {
+			writing()
+			return f.proc.ControlChat(ctx, "steer", chatInputText(id, body), id)
+		},
+	})
+	seq := uint64(1)
+	running := chatState("running")
+	r.Observe(ChatSessionEvent{Sequence: seq, Update: &running})
+	f.proc.eventMu.Lock()
+	f.proc.observe = func(ev AdapterEvent) {
+		if ev.Chat != nil {
+			seq++
+			r.Observe(ChatSessionEvent{Sequence: seq, InputID: ev.InputID, Update: ev.Chat})
+		}
+	}
+	f.proc.eventMu.Unlock()
+	result := make(chan error, 1)
+	go func() { result <- r.deliverNext(t.Context(), api.binding) }()
+	var request struct {
+		ID     int    `json:"id"`
+		Method string `json:"method"`
+		Params struct {
+			Thread string `json:"threadId"`
+			Turn   string `json:"expectedTurnId"`
+			Input  []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"input"`
+		} `json:"params"`
+	}
+	select {
+	case raw := <-f.proc.stdin.(codexSyntheticInput).requests:
+		if err := json.Unmarshal(raw, &request); err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("native steer never reached the held active turn")
+	}
+	if request.Method != "turn/steer" || request.Params.Thread != "synthetic-thread" || request.Params.Turn != "synthetic-turn" || len(request.Params.Input) != 1 || request.Params.Input[0].Text != chatInputText("m1", input.Message.Body) {
+		t.Fatalf("wrong native operation/target: %+v", request)
+	}
+	ack, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]string{"turnId": "synthetic-turn"}})
+	if _, err := f.output.Write(append(ack, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	if len(r.receipts) != 0 {
+		t.Fatal("native write ACK invented a receipt")
+	}
+	item := func(thread, turn, text string) string {
+		raw, _ := json.Marshal(map[string]any{"method": "item/started", "params": map[string]any{"threadId": thread, "turnId": turn, "item": map[string]any{"type": "userMessage", "id": "input-item", "content": []map[string]string{{"type": "text", "text": text}}}}})
+		return string(raw)
+	}
+	for _, raw := range []string{
+		item("other-thread", "synthetic-turn", request.Params.Input[0].Text),
+		item("synthetic-thread", "earlier-turn", request.Params.Input[0].Text),
+		item("synthetic-thread", "synthetic-turn", "unrelated earlier input"),
+	} {
+		f.emit(t, raw)
+		if len(r.receipts) != 0 {
+			t.Fatal("unrelated input supplied receipt evidence")
+		}
+	}
+	f.emit(t, item("synthetic-thread", "synthetic-turn", request.Params.Input[0].Text))
+	if len(r.receipts) != 1 || r.receipts[0].message != "m1" || r.receipts[0].state != "delivered" {
+		t.Fatalf("exact input reaction: %+v", r.receipts)
+	}
+	f.emit(t, lifecycleTerminal)
+	if len(r.receipts) != 2 || r.receipts[1].message != "m1" || r.receipts[1].state != "read" {
+		t.Fatalf("exact turn completion: %+v", r.receipts)
+	}
+}
+
 func TestCodexAcknowledgedTerminalAndDrain(t *testing.T) {
 	for _, tc := range []struct {
 		name, ack, terminal, tail string

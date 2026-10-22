@@ -43,7 +43,7 @@ func TestManagedChatSessionUsesLeaseBoundCurrentBinding(t *testing.T) {
 	f.bind(t, f.alice, thread, first, "0")
 	w := f.current(first, firstLease)
 	got := decode[CurrentBinding](t, w)
-	if got != (CurrentBinding{"chat-live-v1", thread.ID, "1"}) {
+	if got != (CurrentBinding{Contract: "chat-live-v1", ConversationID: thread.ID, BindingEpoch: "1"}) {
 		t.Fatalf("current binding %+v", got)
 	}
 	for _, hidden := range []string{"private-", "lease", "session", "role", "person", "body"} {
@@ -111,6 +111,198 @@ func TestManagedChatSessionUsesLeaseBoundCurrentBinding(t *testing.T) {
 	f.stopNative(t, second)
 	expect(t, f.current(second, secondLease), 404)
 	expect(t, publish(second, secondLease, "2"), 404)
+}
+
+// Risk (AEON-1082): timing disappears on restart/readback, a changed timing
+// replays as the same payload, or generic flags on an older daemon falsely
+// offer native steering. Strict legacy DTOs must retain their original shape.
+func TestChatOutboxTimingIsDurableNegotiatedAndSessionBound(t *testing.T) {
+	f := newFixture(t)
+	f.grantSend(t)
+	thread := f.thread(t, f.alice, f.role(t, f.alice, f.project, "worker", "input-timing"))
+	session, lease := f.sessionWith(t, f.agent.ID, f.alice, f.project, "worker", "managed", "chat", "inbox", "steer")
+	f.bind(t, f.alice, thread, session, "0")
+	path := "/api/chat-threads/" + thread.ID + "/outbox"
+	steer := outboxSend{ClientID: "native-input", Body: "correction", Level: "steer", Session: session}
+	expect(t, f.call(f.alice, "POST", path, steer, ""), 409)
+	if got := decode[CurrentBinding](t, f.current(session, lease)); got.InputTiming != "" {
+		t.Fatal("older daemon received an unknown binding field")
+	}
+	legacy := f.call(f.alice, "POST", path, outboxSend{ClientID: "legacy-input", Body: "after this turn"}, "")
+	decode[outboxResult](t, legacy)
+	if strings.Contains(legacy.Body.String(), "delivery_level") {
+		t.Fatal("legacy sender received an unknown message field")
+	}
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE harness_sessions SET capabilities=array_append(capabilities,'chat_timing_v1') WHERE id=$1`, session); err != nil {
+		t.Fatal(err)
+	}
+	if got := decode[CurrentBinding](t, f.current(session, lease)); got.InputTiming != "native" {
+		t.Fatalf("qualified timing %+v", got)
+	}
+	r := httptest.NewRequest("GET", "/api/chat-sessions/"+session+"/thread", nil).WithContext(tenant.WithPrincipal(t.Context(), f.alice))
+	r.Header.Set("Aeon-Chat-Timing", "1")
+	w := httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	if got := decode[Thread](t, w); got.InputTiming != "native" {
+		t.Fatalf("composer timing %+v", got)
+	}
+	if got := decode[Thread](t, f.call(f.alice, "GET", "/api/chat-sessions/"+session+"/thread", nil, "")); got.InputTiming != "" {
+		t.Fatal("older viewer received an unknown timing field")
+	}
+	sent := decode[outboxResult](t, f.call(f.alice, "POST", path, steer, ""))
+	if sent.Message.Level != "steer" || sent.Receipt.State != "sent" {
+		t.Fatalf("acceptance overclaimed or lost timing: %+v", sent)
+	}
+	if replay := decode[outboxResult](t, f.call(f.alice, "POST", path, steer, "")); replay.Message.ID != sent.Message.ID {
+		t.Fatal("retry changed message identity")
+	}
+	changed := steer
+	changed.Level = "simple"
+	expect(t, f.call(f.alice, "POST", path, changed, ""), 409)
+	changed.ClientID, changed.Level = "invalid-timing", "immediate-stop"
+	expect(t, f.call(f.alice, "POST", path, changed, ""), 400)
+	proof := WorkerBindingRequest{thread.ID, session, "1"}
+	oldPage := f.call(f.agent, "POST", "/api/chat-deliveries/outbox", workerPageRequest{WorkerBindingRequest: proof}, lease)
+	decode[outboxPage](t, oldPage)
+	if strings.Contains(oldPage.Body.String(), "delivery_level") {
+		t.Fatal("older strict worker received an unknown message field")
+	}
+	page := decode[outboxPage](t, f.call(f.agent, "POST", "/api/chat-deliveries/outbox", workerPageRequest{WorkerBindingRequest: proof, IncludeTiming: true}, lease))
+	if len(page.Items) != 2 || page.Items[0].Message.Level != "simple" || page.Items[1].Message.Level != "steer" {
+		t.Fatalf("worker timing did not survive readback: %+v", page.Items)
+	}
+	history := decode[historyPage](t, f.call(f.alice, "GET", "/api/chat-threads/"+thread.ID+"/messages?include_timing=true", nil, ""))
+	if len(history.Items) != 2 || history.Items[0].Message.Level != "simple" || history.Items[1].Message.Level != "steer" {
+		t.Fatalf("history lost timing: %+v", history.Items)
+	}
+	other, otherLease := f.sessionWith(t, f.agent.ID, f.alice, f.project, "worker", "managed", "chat", "inbox", "steer", "chat_timing_v1")
+	f.bind(t, f.alice, thread, other, "1")
+	rebound := steer
+	rebound.Session = other
+	conflict := f.call(f.alice, "POST", path, rebound, "")
+	expect(t, conflict, 409)
+	if !strings.Contains(conflict.Body.String(), "chat client message ID conflicts") {
+		t.Fatal("target replay rejected for the wrong reason", conflict.Body.String())
+	}
+	steer.ClientID = "late-input"
+	expect(t, f.call(f.alice, "POST", path, steer, ""), 409)
+	expect(t, f.call(f.bob, "POST", path, steer, ""), 404)
+	next := decode[outboxPage](t, f.call(f.agent, "POST", "/api/chat-deliveries/outbox", workerPageRequest{WorkerBindingRequest: WorkerBindingRequest{thread.ID, other, "2"}, IncludeTiming: true}, otherLease))
+	if len(next.Items) != 0 {
+		t.Fatal("successor received the previous session's input")
+	}
+}
+
+// Risk (AEON-1082): chat.send bypasses harness.control through native steering,
+// including after a project grant is revoked while the send waits on its fence.
+func TestChatSteeringRequiresCurrentProjectControl(t *testing.T) {
+	for _, revoked := range []bool{false, true} {
+		name := "chat send without control"
+		if revoked {
+			name = "control revoked at send fence"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			thread := f.thread(t, f.alice, f.role(t, f.alice, f.project, "worker", "control-authority"))
+			session, lease := f.sessionWith(t, f.agent.ID, f.alice, f.project, "worker", "managed", "chat", "inbox", "steer", "chat_timing_v1", "managed_control_v1", "session_recovery_v1")
+			f.bind(t, f.alice, thread, session, "0")
+			var senderRole, controlRole string
+			for _, role := range []struct {
+				key   string
+				id    *string
+				perms []string
+			}{
+				{"chat_sender", &senderRole, []string{"nodes.read", "chat.read", "chat.send"}},
+				{"chat_controller", &controlRole, []string{"harness.control"}},
+			} {
+				if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,$2,$2) RETURNING id::text`, f.alice.TenantID, role.key).Scan(role.id); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, f.alice.TenantID, *role.id, role.perms); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := f.d.Admin.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, f.alice.ID, senderRole); err != nil {
+				t.Fatal(err)
+			}
+			// Control of another project must never qualify this session.
+			projects := []string{f.secondProject}
+			if revoked {
+				projects = append(projects, f.project)
+			}
+			for _, project := range projects {
+				if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.alice.TenantID, f.alice.ID, controlRole, project); err != nil {
+					t.Fatal(err)
+				}
+			}
+			viewerTiming := func(want string) {
+				t.Helper()
+				r := httptest.NewRequest("GET", "/api/chat-sessions/"+session+"/thread", nil).WithContext(tenant.WithPrincipal(t.Context(), f.alice))
+				r.Header.Set("Aeon-Chat-Timing", "1")
+				w := httptest.NewRecorder()
+				f.mux.ServeHTTP(w, r)
+				if got := decode[Thread](t, w); got.InputTiming != want {
+					t.Errorf("viewer timing %q want %q", got.InputTiming, want)
+				}
+			}
+			path := "/api/chat-threads/" + thread.ID + "/outbox"
+			steer := outboxSend{ClientID: "forbidden-steer", Body: "interrupt this turn", Level: "steer", Session: session}
+			if revoked {
+				viewerTiming("native")
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				defer cancel()
+				revoke, err := f.d.Admin.Begin(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer revoke.Rollback(ctx)
+				if _, err = revoke.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.alice.TenantID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = revoke.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1 AND scope_type='project' AND scope_id=$2`, f.alice.ID, f.project); err != nil {
+					t.Fatal(err)
+				}
+				result := make(chan *httptest.ResponseRecorder, 1)
+				go func() { result <- f.call(f.alice, "POST", path, steer, "") }()
+				// Observe this transaction as the blocker, so the competing send
+				// must reach the tenant fence before the revocation commits.
+				var blocked bool
+				for !blocked {
+					if err = f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND $1=ANY(pg_blocking_pids(pid)) AND query LIKE '%FROM tenants WHERE id=$1 FOR NO KEY UPDATE%')`, int32(revoke.Conn().PgConn().PID())).Scan(&blocked); err != nil {
+						t.Fatal("send never reached the access fence", err)
+					}
+				}
+				if err = revoke.Commit(ctx); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case w := <-result:
+					expect(t, w, 404)
+				case <-ctx.Done():
+					t.Fatal("send did not finish after revocation")
+				}
+			} else {
+				viewerTiming("queue")
+				expect(t, f.call(f.alice, "POST", path, steer, ""), 404)
+			}
+			viewerTiming("queue")
+			if got := decode[CurrentBinding](t, f.current(session, lease)); got.InputTiming != "native" {
+				t.Fatal("viewer authority changed the worker's transport capability")
+			}
+			// A successful ordinary send proves that the refusal was specific
+			// to control authority, with ownership, chat.send and binding intact.
+			for _, level := range []string{"", "simple"} {
+				decode[outboxResult](t, f.call(f.alice, "POST", path, outboxSend{ClientID: "allowed-" + level, Body: "after this turn", Level: level, Session: session}, ""))
+			}
+			var messages, events int
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM inbox_messages WHERE chat_thread_id=$1),(SELECT count(*) FROM events WHERE tenant_id=$2 AND type='chat.live_message')`, thread.ID, f.alice.TenantID).Scan(&messages, &events); err != nil {
+				t.Fatal(err)
+			}
+			if messages != 2 || events != 2 {
+				t.Fatalf("forbidden steering persisted a message/event: messages=%d events=%d", messages, events)
+			}
+		})
+	}
 }
 
 // Risk: an older daemon that never relays makes the chat look broken. The

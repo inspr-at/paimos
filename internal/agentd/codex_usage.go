@@ -186,6 +186,10 @@ func (p *codexProcess) signalTerminal() {
 	if p.persistent && !p.invalid && p.terminal != nil && p.terminal.Clean {
 		if !p.idlePublished {
 			p.idlePublished = true
+			if p.chatBoundary != nil {
+				close(p.chatBoundary)
+				p.chatBoundary = nil
+			}
 			p.armIdleCompletion()
 			p.observe(AdapterEvent{Activity: "idle", BudgetTurnsDelta: 1})
 		}
@@ -302,6 +306,7 @@ func (p *codexProcess) startTurn(ctx context.Context, r StartRequest) error {
 		return errors.New("Codex turn start failed")
 	}
 	p.turnID, p.acknowledged = turn, true
+	p.flushCodexInputs(turn)
 	p.flushCodexChat(turn)
 	if p.pendingLimit != nil && p.pendingLimitTurn == turn {
 		p.emitVendorLimit(p.pendingLimit)

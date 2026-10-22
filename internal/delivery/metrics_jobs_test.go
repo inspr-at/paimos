@@ -45,6 +45,111 @@ func jobAttemptFixture(t *testing.T, name string, day time.Time) map[string]any 
 	return body
 }
 
+func TestDeliveryGitHubMetricReadsWaitForCompletion(t *testing.T) {
+	// Risk: each job/check completion opens an installation read while its
+	// workflow is running, exhausting the shared GitHub budget. Count read
+	// sessions too: opening one costs requests even if its callback does none.
+	for _, tc := range []struct {
+		name, event, source, suiteStatus string
+		storedAttempt, reads             int
+		complete                         bool
+	}{
+		{name: "job before workflow", event: "workflow_job"},
+		{name: "job before workflow with checks access", event: "workflow_job", source: historyChecks},
+		{name: "job from another attempt", event: "workflow_job", storedAttempt: 2},
+		{name: "job repairs missing map", event: "workflow_job", storedAttempt: 1, reads: 1},
+		{name: "job hydrates complete map", event: "workflow_job", storedAttempt: 1, complete: true},
+		{name: "check before suite", event: "check_run", suiteStatus: "in_progress"},
+		{name: "check without suite status", event: "check_run"},
+		{name: "check before suite with checks access", event: "check_run", source: historyChecks, suiteStatus: "in_progress"},
+		{name: "check after suite", event: "check_run", suiteStatus: "completed", reads: 1},
+		{name: "check after suite with checks access", event: "check_run", source: historyChecks, suiteStatus: "completed", reads: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, g := newMetricsFixture(t)
+			f.tx(t, func(tx pgx.Tx) error { return tx.QueryRow(t.Context(), `SELECT now()`).Scan(&f.at) })
+			day := dayStart(f.at).AddDate(0, 0, -1)
+			green := jobAttemptFixture(t, "workflow_run.first_green.json", day)["workflow_run"].(map[string]any)
+			head := green["head_sha"].(string)
+			if tc.storedAttempt > 0 {
+				var body githubRun
+				if err := writeMetricJSON(&body, green); err != nil {
+					t.Fatal(err)
+				}
+				run, ok, err := metricRunFrom(body)
+				if err != nil || !ok {
+					t.Fatalf("invalid completed workflow fixture: %v", err)
+				}
+				run.Attempt, run.JobsRead, run.JobsComplete = tc.storedAttempt, tc.complete, tc.complete
+				if tc.complete {
+					run.Required = map[string]string{"go": "success"}
+					run.JobWaits = map[string]*int{"5011": nil}
+				}
+				f.tx(t, func(tx pgx.Tx) error {
+					return upsertRunsTx(t.Context(), tx, f.person.TenantID, f.m.config.Repository, "webhook", []metricRun{run}, f.at)
+				})
+			}
+			g.source = tc.source
+			g.respond = func(endpoint string) (any, error) {
+				u, _ := url.Parse(endpoint)
+				if body, ok := historyWorkflowFixture(u); ok {
+					return body, nil
+				}
+				switch u.Path {
+				case "/actions/runs/501/attempts/1":
+					if tc.storedAttempt == 0 {
+						return map[string]any{"id": 501, "run_attempt": 1, "head_sha": head, "status": "in_progress"}, nil
+					}
+					return green, nil
+				case "/actions/runs/501/attempts/1/jobs":
+					return githubJobsBody(day.Add(6*time.Hour), 60, nil), nil
+				case "/actions/runs":
+					return map[string]any{"total_count": 1, "workflow_runs": []any{green}}, nil
+				case "/check-suites/901":
+					suite := historySuiteBody(901, head, "work/job-first", day.Add(6*time.Hour), false)
+					suite["status"] = tc.suiteStatus
+					return suite, nil
+				case "/check-suites/901/check-runs":
+					return historyChecksBody(901, head, day.Add(6*time.Hour), false), nil
+				default:
+					return nil, fmt.Errorf("unexpected completion fixture read %s", endpoint)
+				}
+			}
+			body := jobAttemptFixture(t, "workflow_job.completed.json", day)
+			if tc.event == "check_run" {
+				body = map[string]any{"action": "completed", "check_run": map[string]any{"head_sha": head, "name": "go", "status": "completed", "conclusion": "success", "app": map[string]any{"slug": "github-actions"}, "check_suite": map[string]any{"id": 901, "status": tc.suiteStatus}, "pull_requests": []any{}}}
+			}
+			auditSend(t, f, tc.event, "completion-boundary", body, 204)
+			if g.reads != tc.reads || tc.reads == 0 && len(g.calls) != 0 {
+				t.Fatalf("GitHub reads: sessions=%d paths=%v; want %d sessions", g.reads, g.calls, tc.reads)
+			}
+			if tc.event == "workflow_job" {
+				var created, started time.Time
+				f.tx(t, func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), `SELECT created_at,started_at FROM delivery_metric_jobs WHERE run_id=501 AND attempt=1 AND job_id=5011`).Scan(&created, &started)
+				})
+				if !created.Equal(day.Add(6*time.Hour+time.Minute)) || !started.Equal(day.Add(6*time.Hour+2*time.Minute)) {
+					t.Fatal("job completion lost its timestamps")
+				}
+				if tc.storedAttempt == 1 && !readStoredRun(t, f, 501, 1).jobsRead {
+					t.Fatal("completed workflow job map was not repaired or preserved")
+				}
+			}
+			if tc.source == historyChecks && tc.reads > 0 {
+				suiteReads := 0
+				for _, endpoint := range g.calls {
+					if endpoint == "/check-suites/901" {
+						suiteReads++
+					}
+				}
+				if suiteReads != 1 {
+					t.Fatalf("completed checks suite was read %d times, want once", suiteReads)
+				}
+			}
+		})
+	}
+}
+
 func TestDeliveryGitHubJobAttemptsProjection(t *testing.T) {
 	// Risk: live attempts disappear, one completed job is mistaken for the
 	// whole run, late job timing is lost, retries duplicate facts, or failed
@@ -153,7 +258,7 @@ func TestDeliveryGitHubJobAttemptsProjection(t *testing.T) {
 	runs[504] = queueGreen
 	auditSend(t, f, "workflow_run", "queue-green", map[string]any{"action": "completed", "workflow_run": queueGreen}, 204)
 	// Completion from the check-run channel converges on the same run identity.
-	check := map[string]any{"action": "completed", "check_run": map[string]any{"head_sha": strings.Repeat("a", 40), "name": "go", "status": "completed", "conclusion": "success", "app": map[string]any{"slug": "github-actions"}, "check_suite": map[string]any{"id": 901}, "pull_requests": []any{}}}
+	check := map[string]any{"action": "completed", "check_run": map[string]any{"head_sha": strings.Repeat("a", 40), "name": "go", "status": "completed", "conclusion": "success", "app": map[string]any{"slug": "github-actions"}, "check_suite": map[string]any{"id": 901, "status": "completed"}, "pull_requests": []any{}}}
 	auditSend(t, f, "check_run", "attempt-check", check, 204)
 	calls := len(g.calls)
 	auditSend(t, f, "workflow_run", "rerun-green", rerun, 204)
