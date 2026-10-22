@@ -22,8 +22,47 @@ env:
   AEON_BUILDKIT_IMAGE: moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
 
 jobs:
+  # Workflow concurrency serializes duplicate tag pushes, but does not dedupe
+  # them. Verify completed coordinates before starting any build or write job.
+  publication:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      # Draft-aware release lookup requires push access, as in image-platform.
+      contents: write
+      packages: read
+      attestations: read
+    outputs:
+      publish: ${{ steps.publication.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24.22.1"
+      - name: Assert Node 24.22.1
+        run: |
+          set -euo pipefail
+          node_version="$(node --version)"
+          printf '%s\n' "$node_version"
+          [[ "$node_version" == "v24.22.1" ]]
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify publication state for this tag
+        id: publication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/release-publication.mjs
+
   # The server digest must never wait for signing/notarization or client builds.
   image-platform:
+    needs: [publication]
+    if: needs.publication.outputs.publish == 'true'
     strategy:
       fail-fast: false
       matrix:

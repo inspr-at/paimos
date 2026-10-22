@@ -503,5 +503,37 @@
       "sha256": "e944af7ccb4b1ce2534251ab063f0aa9c7a94924dd7316ae1791e321bf8249a5",
       "step": "Record completion provenance"
     }
+  ],
+  "publication": [
+    {
+      "counterpart": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "mode": "action",
+      "sha256": "69983d424f70d56e16aca2c5bc441464578ac832b548ce342069dd3e5a1ca9e1",
+      "step": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    },
+    {
+      "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+      "mode": "action",
+      "sha256": "c4401fc2b7e83eee42ca50e14e56c3e2910a05a92df0aaefef4cb9e72e8d4461",
+      "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    },
+    {
+      "counterpart": "TestReleaseToolchainsRequireExactSecurityPatches",
+      "mode": "test",
+      "sha256": "7b3109898e0c31abc549f169275236fdbef148c11293f330f797d899495eb44a",
+      "step": "Assert Node 24.22.1"
+    },
+    {
+      "counterpart": "TestImageDoesNotWaitForClients",
+      "mode": "test",
+      "sha256": "db7508a740529d4a33ae55668d7e410ff7d029275e2758f190553298b14ceb56",
+      "step": "docker/login-action@dbcb813823bdd20940b903addbd779551569679f"
+    },
+    {
+      "counterpart": "TestImageDoesNotWaitForClients",
+      "mode": "test",
+      "sha256": "1bee16c8b84dfa4dbec5187395de38583c4920ba9ee60459bdf3482e46d3747f",
+      "step": "Verify publication state for this tag"
+    }
   ]
 }
