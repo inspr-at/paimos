@@ -22,6 +22,9 @@ lease, and the current run/computer/daemon generation. Foreign, rebound,
 expired, or hash-mismatched requests are rejected before replay. Identical
 retries return their original metadata; divergent reuse conflicts.
 
+A successful first acknowledgement appends the audit event
+`harness.rules_delivery_acknowledged`; a replay appends no additional event.
+
 The tenant-RLS table `harness_rules_deliveries` freezes issuance metadata and
 permits one acknowledgement. Its evidence type is
 `agentd_transmitted_bytes_acknowledged`. It describes transmission and a bridge
