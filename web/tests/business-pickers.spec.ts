@@ -80,6 +80,12 @@ test('AEON-1417: rejected rates remain in the hours picker and retry keeps contr
     await expect(form.getByRole('status').filter({ hasText: 'Some rates could not be loaded' })).toBeVisible()
     await expect(failed).toHaveText('Entwicklung und langfristige technische Betreuung — rates unavailable')
     await expect(failed).toHaveJSProperty('disabled', true)
+    await form.getByRole('button', { name: /^Ticket:/ }).click()
+    await page.getByRole('combobox', { name: 'Ticket' }).fill('PHAROS-11')
+    await page.getByRole('option', { name: /PHAROS-11/ }).click()
+    await form.getByRole('button', { name: 'Log', exact: true }).click()
+    await expect(form.locator('.log-status')).toHaveText('Rates for this cost unit could not be loaded.')
+    await expect(form.getByText('Loading rates…', { exact: true })).toHaveCount(0)
     const chosenDay = form.getByRole('radio').first()
     const stability = await controlStability(page, {
       cost, days: form.getByRole('radiogroup', { name: 'Day' }), chosenDay,
@@ -119,6 +125,7 @@ test('AEON-1417: rejected rates remain in the hours picker and retry keeps contr
     held.release(); held = undefined
     await expect(page.getByRole('status').filter({ hasText: 'Some rates could not be loaded' })).toBeVisible()
     await expect(page.getByText('Rates could not be loaded.', { exact: true })).toBeVisible()
+    await expect(page.getByText('Loading rates…', { exact: true })).toHaveCount(0)
     await expect(page.getByRole('table', { name: 'Rates of Entwicklung und langfristige technische Betreuung', exact: true })).toHaveCount(0)
     await expect(page.getByRole('table', { name: 'Rates of Design', exact: true })).toBeVisible()
     const ratesStability = await controlStability(page, {

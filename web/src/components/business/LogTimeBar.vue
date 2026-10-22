@@ -108,8 +108,8 @@ const rate = computed<{ bill_amount: string; currency: string } | null>(() => {
 const problem = computed(() => {
   if (!ticket.value) return 'Choose a ticket.'
   if (!rate.value && business.costUnit(costUnitId.value)?.ratesError) return 'Rates for this cost unit could not be loaded.'
-  if (!rate.value && (!business.costUnitsLoaded || business.costUnit(costUnitId.value)?.ratesPending)) return 'Loading rates…'
-  if (!costUnitId.value && business.costUnitsPartial) return 'Some rates could not be loaded.'
+  if (!rate.value && ((!business.costUnitsLoaded && business.costUnitsLoading) || business.costUnit(costUnitId.value)?.ratesPending)) return 'Loading rates…'
+  if (!costUnitId.value && business.costUnitsPartial) return 'Rates for this cost unit could not be loaded.'
   if (!costUnitId.value) return hourly.value.length ? 'Choose a cost unit.' : 'No cost unit has an hourly rate on this day. Add one under Rates.'
   if (!rate.value) return seed ? `This cost unit has no hourly rate in ${seed.currency} on that day.` : 'This cost unit has no hourly rate on this day.'
   if (!duration.value.trim()) return 'Enter how long, like 1h30 or 90m.'

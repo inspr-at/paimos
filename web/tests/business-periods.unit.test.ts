@@ -5,7 +5,10 @@ import { listNodePages, type ListItem } from '../src/lib/api'
 import { listPeriods, PERIOD_HISTORY_START, type TimePeriod } from '../src/lib/business'
 import * as Pinia from 'pinia'
 import { reactive } from 'vue'
-import { deferred, flush, sourceModule } from './record-source'
+import { deferred, flush, setupSource, sourceModule } from './record-source'
+import * as week from '../src/lib/week'
+import * as duration from '../src/components/business/duration'
+import * as money from '../src/components/business/money'
 
 vi.mock('../src/lib/api', async importOriginal => ({ ...await importOriginal<typeof import('../src/lib/api')>(), api: vi.fn() }))
 afterEach(() => { vi.resetAllMocks(); vi.unstubAllGlobals(); const pinia = Pinia.getActivePinia(); if (pinia) Pinia.disposePinia(pinia) })
@@ -139,6 +142,25 @@ it('AEON-1417: 200 units use at most six rate reads and a rejected unit remains 
   expect(store.costUnit('cu-0')?.ratesError).toBe('refresh failed')
   expect(store.usable('hour', 'EUR', '2026-10-21').map(unit => unit.node.id)).toContain('cu-0')
   expect(store.rateOn('cu-1', 'hour', 'EUR', '2026-10-21')?.bill_amount).toBe('90')
+
+  // The Hours field reports settled failures even before a cost unit is chosen.
+  const hours = setupSource('components/business/LogTimeBar.vue', {
+    days: [new Date('2026-10-21T09:00:00Z')], suggestions: [], busy: false,
+    preset: { id: 'ticket', key: 'AEON-1417', title: 'Picker hiccups' },
+  }, {
+    '../../lib/api': {}, '../../lib/recents': { recents: [] }, '../../lib/week': week,
+    './duration': duration, './money': money, '../../stores/business': { useBusiness: () => store },
+  })
+  expect(hours.state.problem.value).toBe('Rates for this cost unit could not be loaded.')
+  store.reset()
+  const failedList = deferred<Awaited<ReturnType<typeof list>>>()
+  list.mockReturnValueOnce(failedList.promise)
+  const listing = store.loadCostUnits()
+  expect(hours.state.problem.value).toBe('Loading rates…')
+  failedList.reject(new Error('cost unit list failed'))
+  await listing
+  expect(hours.state.problem.value).toBe('Rates for this cost unit could not be loaded.')
+  hours.stop()
 })
 
 it('AEON-1417: changing the rate-cache owner retires pending reads and stops queued requests', async () => {
