@@ -54,6 +54,11 @@ func shortMetricRetry() time.Duration {
 }
 
 func metricRetry(failure error, readError MetricReadError, source *metricSourceRow) time.Time {
+	var upstream *webhookGitHubError
+	var response *crossreview.GitHubHTTPError
+	if errors.As(failure, &upstream) && webhookLimited(upstream.class) || errors.As(failure, &response) && response.StatusCode == http.StatusTooManyRequests {
+		return readError.At.Add(webhookLimitBackoff(failure, readError.At))
+	}
 	if crossreview.IsTransientGitHubError(failure) {
 		return readError.At.Add(shortMetricRetry())
 	}

@@ -4,6 +4,9 @@ package delivery
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +15,268 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// Content-free recorded webhook shapes are shifted onto the fixture clock;
+// no fixed event date is compared with the database's real clock.
+func jobAttemptFixture(t *testing.T, name string, day time.Time) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 10, 7, 0, 0, 0, 0, time.UTC)
+	var shift func(map[string]any)
+	shift = func(object map[string]any) {
+		for key, value := range object {
+			if nested, ok := value.(map[string]any); ok {
+				shift(nested)
+			} else if text, ok := value.(string); ok && strings.HasSuffix(key, "_at") {
+				if stamp, err := time.Parse(time.RFC3339, text); err == nil {
+					object[key] = day.Add(stamp.Sub(base)).Format(time.RFC3339)
+				}
+			}
+		}
+	}
+	shift(body)
+	return body
+}
+
+func TestDeliveryGitHubJobAttemptsProjection(t *testing.T) {
+	// Risk: live attempts disappear, one completed job is mistaken for the
+	// whole run, late job timing is lost, retries duplicate facts, or failed
+	// best-effort reads never wake a finished history worker.
+	f, g := newMetricsFixture(t)
+	f.tx(t, func(tx pgx.Tx) error { return tx.QueryRow(t.Context(), `SELECT now()`).Scan(&f.at) })
+	day := dayStart(f.at).AddDate(0, 0, -1)
+	seedBareRuns(t, f, 0)
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE delivery_metric_sources SET backfill_pending=false`)
+		return err
+	})
+	green := jobAttemptFixture(t, "workflow_run.first_green.json", day)
+	rerun := jobAttemptFixture(t, "workflow_run.rerun_green.json", day)
+	ejected := jobAttemptFixture(t, "workflow_run.queue_ejection.json", day)
+	runs := map[int64]map[string]any{501: green["workflow_run"].(map[string]any), 502: rerun["workflow_run"].(map[string]any), 503: ejected["workflow_run"].(map[string]any)}
+	firstRed := githubRunBody(502, 1, defaultCIWorkflow, "pull_request", "work/job-rerun", strings.Repeat("b", 40), day.Add(6*time.Hour+30*time.Minute), 10*time.Minute, "failure", 902)
+	jobsUnavailable := true
+	g.respond = func(endpoint string) (any, error) {
+		u, err := url.Parse(endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(u.Path, "/actions/runs/") {
+			parts := strings.Split(u.Path, "/")
+			id, _ := strconv.ParseInt(parts[3], 10, 64)
+			if strings.HasSuffix(u.Path, "/jobs") {
+				if jobsUnavailable {
+					return nil, errRead
+				}
+				conclusions := map[string]string{}
+				if id == 502 || id == 503 {
+					conclusions["web"] = "failure"
+				}
+				body := githubJobsBody(day.Add(6*time.Hour), 30, conclusions)
+				for i, entry := range body["jobs"].([]any) {
+					job := entry.(map[string]any)
+					job["id"] = id*10 + int64(i+1)
+					if id == 501 && i < 2 {
+						delete(job, "created_at") // REST need not provide queue times
+					}
+				}
+				return body, nil
+			}
+			if id == 502 && strings.HasSuffix(u.Path, "/attempts/1") {
+				return firstRed, nil
+			}
+			if run, ok := runs[id]; ok {
+				return run, nil
+			}
+		}
+		if u.Path == "/check-suites/901" {
+			return map[string]any{"id": 901, "head_sha": strings.Repeat("a", 40), "status": "completed"}, nil
+		}
+		if u.Path == "/actions/runs" {
+			return map[string]any{"total_count": 1, "workflow_runs": []any{runs[501]}}, nil
+		}
+		return nil, fmt.Errorf("unexpected attempt fixture read %s", endpoint)
+	}
+	jobBody := jobAttemptFixture(t, "workflow_job.completed.json", day)
+	job := jobBody["workflow_job"].(map[string]any)
+	jobBody["action"], job["status"] = "queued", "queued"
+	started := job["started_at"]
+	job["started_at"], job["conclusion"] = nil, nil
+	auditSend(t, f, "workflow_job", "job-queued", jobBody, 204)
+	jobBody["action"], job["status"], job["started_at"] = "in_progress", "in_progress", started
+	auditSend(t, f, "workflow_job", "job-started", jobBody, 204)
+	if len(g.calls) != 0 {
+		t.Fatal("an unfinished job read GitHub or pretended the workflow finished")
+	}
+	auditSend(t, f, "workflow_run", "first-green", green, 204)
+	if readStoredRun(t, f, 501, 1).jobsRead {
+		t.Fatal("failed jobs read was reported complete")
+	}
+	var pending bool
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT backfill_pending FROM delivery_metric_sources WHERE project_id=$1`, f.project).Scan(&pending)
+	})
+	if !pending {
+		t.Fatal("a live gap left the completed backfill asleep")
+	}
+	jobsUnavailable = false
+	f.m.sweepMetrics(t.Context())
+	if stored := readStoredRun(t, f, 501, 1); !stored.jobsRead || stored.waitMS != nil {
+		t.Fatalf("one unknown job wait must withhold the worst wait: %+v", stored)
+	}
+	// The other job arrives after completion, and repairs the same attempt.
+	jobBody["action"], job["status"], job["conclusion"] = "completed", "completed", "success"
+	job["id"], job["name"], job["started_at"] = 5012, "web", day.Add(6*time.Hour+3*time.Minute)
+	auditSend(t, f, "workflow_job", "late-job", jobBody, 204)
+	if stored := readStoredRun(t, f, 501, 1); stored.waitMS == nil || *stored.waitMS != 120000 {
+		t.Fatalf("early and late job timestamps did not converge: %+v", stored)
+	}
+	auditSend(t, f, "workflow_run", "rerun-green", rerun, 204)
+	auditSend(t, f, "workflow_run", "queue-ejection", ejected, 204)
+	queueGreen := githubRunBody(504, 1, defaultCIWorkflow, "merge_group", "gh-readonly-queue/main/pr-7-"+strings.Repeat("a", 40), strings.Repeat("d", 40), day.Add(8*time.Hour+30*time.Minute), 10*time.Minute, "success", 904)
+	runs[504] = queueGreen
+	auditSend(t, f, "workflow_run", "queue-green", map[string]any{"action": "completed", "workflow_run": queueGreen}, 204)
+	// Completion from the check-run channel converges on the same run identity.
+	check := map[string]any{"action": "completed", "check_run": map[string]any{"head_sha": strings.Repeat("a", 40), "name": "go", "status": "completed", "conclusion": "success", "app": map[string]any{"slug": "github-actions"}, "check_suite": map[string]any{"id": 901}, "pull_requests": []any{}}}
+	auditSend(t, f, "check_run", "attempt-check", check, 204)
+	calls := len(g.calls)
+	auditSend(t, f, "workflow_run", "rerun-green", rerun, 204)
+	if len(g.calls) != calls {
+		t.Fatal("redelivery repeated an already checkpointed read")
+	}
+	if count, _, _ := metricCounts(t, f); count != 5 {
+		t.Fatalf("attempts were lost or duplicated: %d", count)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		merged := day.Add(9 * time.Hour)
+		return upsertPullsTx(t.Context(), tx, f.person.TenantID, f.m.config.Repository, "webhook", []metricPull{{Number: 7, Branch: "work/job-first", Opened: day, Merged: &merged}}, f.at)
+	})
+	var out DeliveryMetrics
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &out)
+	wantWindow(t, metricByKey(t, out.Metrics, "first_attempt_green"), 7, "ok", 2, f64(50), nil, nil)
+	wantWindow(t, metricByKey(t, out.Metrics, "required_checks_green"), 7, "ok", 2, f64(50), nil, nil)
+	wantWindow(t, metricByKey(t, out.Metrics, "queue_runs_per_pr"), 7, "ok", 1, f64(2), f64(2), f64(2))
+	wantWindow(t, metricByKey(t, out.Metrics, "queue_ejections"), 7, "ok", 1, f64(100), nil, nil)
+	for _, key := range []string{"time_to_first_green", "time_to_first_green_commit", "runner_wait"} {
+		if window := metricWindow(t, metricByKey(t, out.Metrics, key), 7); window.N != 2 || window.Value == nil {
+			t.Fatalf("%s did not read both projected branches: %+v", key, window)
+		}
+	}
+	flakes := metricWindow(t, metricByKey(t, out.Metrics, "flaked_failures"), 7)
+	if flakes.Value != nil || flakes.Counts["workflow_rescue"] != 1 {
+		t.Fatalf("a rescued workflow was falsely called a confirmed flaky execution: %+v", flakes)
+	}
+	// Authentication and installation binding apply equally to job events.
+	bad := jobAttemptFixture(t, "workflow_job.completed.json", day)
+	bad["workflow_job"].(map[string]any)["run_attempt"] = 0
+	auditSend(t, f, "workflow_job", "bad-job-attempt", bad, 400)
+}
+
+func TestDeliverySevenDayJobBackfillIsIdempotentAndBounded(t *testing.T) {
+	// Risk: a seven-day repair reports done before jobs, exceeds the request
+	// budget on paginated jobs, ignores GitHub's retry hint, or duplicates an
+	// attempt when the same history window is restarted.
+	f, g := newMetricsFixture(t)
+	f.tx(t, func(tx pgx.Tx) error { return tx.QueryRow(t.Context(), `SELECT now()`).Scan(&f.at) })
+	day := dayStart(f.at).AddDate(0, 0, -1)
+	green := jobAttemptFixture(t, "workflow_run.first_green.json", day)["workflow_run"]
+	limited := false
+	g.respond = func(endpoint string) (any, error) {
+		u, _ := url.Parse(endpoint)
+		switch {
+		case u.Path == "":
+			return map[string]any{"full_name": f.m.config.Repository, "default_branch": "main"}, nil
+		case strings.HasPrefix(u.Path, "/actions/workflows/"):
+			runs := []any{}
+			if u.Path == "/actions/workflows/ci.yml/runs" && u.Query().Get("created") == day.Format("2006-01-02") {
+				runs = append(runs, green)
+			}
+			return map[string]any{"total_count": len(runs), "workflow_runs": runs}, nil
+		case strings.HasSuffix(u.Path, "/jobs"):
+			if limited {
+				return nil, &webhookGitHubError{class: "http_429", retryAfter: 2 * time.Minute, cause: &crossreview.GitHubHTTPError{StatusCode: 429}}
+			}
+			return githubJobsBody(day.Add(6*time.Hour), 30, nil), nil
+		case u.Path == "/pulls":
+			return []any{}, nil
+		}
+		return nil, fmt.Errorf("unexpected seven-day history read %s", endpoint)
+	}
+	path := "/api/projects/" + f.project + "/delivery/metrics/backfill"
+	var step BackfillResult
+	f.call(t, f.person, "POST", path, map[string]any{"days": 7, "restart": true}, 200, &step)
+	if step.State != "running" || step.Phase != "jobs" || step.Calls > backfillCallBudget || !step.Since.Equal(dayStart(f.at.AddDate(0, 0, -7))) {
+		t.Fatalf("seven-day runs did not enter the jobs pass: %+v", step)
+	}
+	limited = true
+	f.call(t, f.person, "POST", path, map[string]any{}, 502, nil)
+	source := historySource(t, f)
+	if source.RetryAt == nil || !source.RetryAt.Equal(f.at.Add(2*time.Minute)) {
+		t.Fatalf("GitHub's rate limit was not persisted: %+v", source)
+	}
+	calls := len(g.calls)
+	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
+	if len(g.calls) != calls || step.State != "running" {
+		t.Fatal("backfill ignored the persisted retry deadline")
+	}
+	f.at, limited = *source.RetryAt, false
+	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
+	if step.State != "done" || step.Jobs != 1 || step.Calls > jobFillBudget {
+		t.Fatalf("jobs did not finish the window: %+v", step)
+	}
+	calls = len(g.calls)
+	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
+	if step.State != "done" || len(g.calls) != calls {
+		t.Fatal("finished history reread complete jobs")
+	}
+	f.call(t, f.person, "POST", path, map[string]any{"days": 7, "restart": true}, 200, &step)
+	if step.State != "done" {
+		t.Fatalf("restarting the same window lost its complete job facts: %+v", step)
+	}
+	if count, _, _ := metricCounts(t, f); count != 1 {
+		t.Fatalf("restarted history duplicated the attempt: %d", count)
+	}
+	// After 39 small reads the next attempt needs three pages. Its second
+	// page must not exceed the budget, and the next step must retry it whole.
+	seedBareRuns(t, f, 45)
+	g.respond = func(endpoint string) (any, error) {
+		u, _ := url.Parse(endpoint)
+		parts := strings.Split(u.Path, "/")
+		id, _ := strconv.ParseInt(parts[3], 10, 64)
+		if id != 1006 {
+			return githubJobsBody(day.Add(6*time.Hour), 30, nil), nil
+		}
+		page, _ := strconv.Atoi(u.Query().Get("page"))
+		count := 100
+		if page == 3 {
+			count = 1
+		}
+		jobs := make([]any, count)
+		for i := range jobs {
+			jobs[i] = map[string]any{"id": page*100 + i, "name": fmt.Sprintf("matrix-%d-%d", page, i), "conclusion": "success", "created_at": day, "started_at": day.Add(time.Second)}
+		}
+		return map[string]any{"total_count": 201, "jobs": jobs}, nil
+	}
+	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
+	if step.Calls != jobFillBudget || step.Jobs != 39 || step.Phase != "jobs" || step.RetryAt == nil || !step.RetryAt.Equal(f.at.Add(time.Minute)) {
+		t.Fatalf("pagination exceeded the budget or stored an incomplete map: %+v", step)
+	}
+	if stored := readStoredRun(t, f, 1006, 1); stored.jobsRead || stored.failed {
+		t.Fatalf("budget exhaustion was confused with a GitHub failure: %+v", stored)
+	}
+	f.at = *step.RetryAt
+	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
+	if step.State != "done" || step.Jobs != 6 || step.Calls != 8 {
+		t.Fatalf("the whole paginated attempt did not resume: %+v", step)
+	}
+}
 
 type storedRun struct {
 	tree       *string

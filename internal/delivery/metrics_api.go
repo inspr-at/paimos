@@ -4,6 +4,7 @@ package delivery
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"path"
@@ -499,7 +500,7 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 			return fail(409, "the backfill moved or the source changed meanwhile; call again to continue")
 		}
 		at := m.now()
-		if next.ReadSource == historyChecks && next.Phase != "done" {
+		if next.Phase != "done" && (next.ReadSource == historyChecks || batch.Calls >= backfillCallBudget) {
 			paced := at.Add(time.Minute)
 			retryAt = &paced
 		}
@@ -696,6 +697,8 @@ func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
 
 const jobFillBudget = 40 // GitHub reads per step
 
+var errJobReadBudget = errors.New("delivery job read budget reached")
+
 // jobFactsMissing matches a run whose job map is absent or not complete.
 // A legacy flat map (no "complete": true) is missing and is read once more.
 const jobFactsMissing = `(jobs_read_at IS NULL OR coalesce(required_jobs->>'complete','') <> 'true')`
@@ -772,6 +775,9 @@ func startPreflightCatchup(cursor *backfillCursor, source *metricSourceRow) back
 
 func jobWorklistTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow, now time.Time, limit int) ([]int64, error) {
 	from := windowSpan(now, metricLongDays, true).first.Add(-metricSlack)
+	if source.Cursor != nil && source.Cursor.Since.After(from) {
+		from = source.Cursor.Since
+	}
 	rows, err := tx.Query(ctx, `SELECT run_id FROM delivery_metric_runs
 		WHERE repository=$1 AND run_id>0 AND attempt=1 AND event IN ('pull_request','merge_group') AND completed_at>=$2
 		AND regexp_replace(workflow_path,'^.*/','')=$3 AND `+jobFactsMissing+`
@@ -811,12 +817,21 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 	calls := 0
 	if len(runs) > 0 {
 		err = func() error {
-			counted := func(path string, out any) error { calls++; return get(path, out) }
+			counted := func(path string, out any) error {
+				if calls >= jobFillBudget {
+					return errJobReadBudget
+				}
+				calls++
+				return get(path, out)
+			}
 			for _, id := range runs {
 				if calls >= jobFillBudget {
 					break
 				}
 				f, err := readJobFacts(counted, id, 1)
+				if errors.Is(err, errJobReadBudget) {
+					break // leave the whole attempt eligible for the next step
+				}
 				if err != nil {
 					failedRuns = append(failedRuns, id)
 					// Actions refusals take priority; otherwise retain a transient
@@ -866,6 +881,9 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 		}
 		at := m.now()
 		for id, f := range facts {
+			if err := hydrateJobWaitsTx(ctx, tx, source.Repository, id, 1, &f); err != nil {
+				return err
+			}
 			raw, err := encodeStoredJobs(f)
 			if err != nil {
 				return err
@@ -908,6 +926,9 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 				return err
 			}
 			retry := metricRetry(readFailure, diagnostic, current)
+			result.RetryAt = &retry
+		} else if len(pending) > 0 && calls >= jobFillBudget {
+			retry := at.Add(time.Minute)
 			result.RetryAt = &retry
 		}
 		if _, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1,last_read_error=$3,backfill_retry_at=$4,backfill_pending=$5 WHERE project_id=$1`, project, raw, readError, result.RetryAt, result.State != "done"); err != nil {
