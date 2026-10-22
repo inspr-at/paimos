@@ -63,7 +63,6 @@ import QueueDetails from './QueueDetails.vue'
 import QueueView from './QueueView.vue'
 import AssigneeMenu from './AssigneeMenu.vue'
 import { useWorkQueue } from '../../stores/workQueue'
-import { usePoller } from '../../lib/usePolledData'
 import { useSession } from '../../stores/session'
 import RecurrenceEditor from '../recurrences/RecurrenceEditor.vue'
 import RecurrenceProvenance from '../recurrences/RecurrenceProvenance.vue'
@@ -191,10 +190,7 @@ const queue = useWorkQueue()
 const queueAction = ref<InstanceType<typeof QueueAction>>()
 const queueAnchor = ref<HTMLElement | null>(null)
 const queueEntry = computed(() => item.value && queueable(item.value) ? queue.entry(props.project.id, item.value.id) : null)
-const queuePoller = usePoller(() => queue.load(props.project.id), 20_000)
-watch(() => props.project.id, id => { void queue.load(id) }, { immediate: true })
-onMounted(() => queuePoller.start())
-onBeforeUnmount(() => queuePoller.stop())
+watch(() => props.project.id, (id, _before, cleanup) => { cleanup(queue.watch(id)) }, { immediate: true, flush: 'sync' })
 const canQueue = computed(() => props.item?.is_leaf !== false && !ticket.readOnly.value && !ticket.gone.value && can('run.create', props.project.id))
 // AEON-741: a parent queues its open leaves; Start now on… is an expert control.
 const parentQueue = ref<InstanceType<typeof ParentQueueAction>>()

@@ -10332,6 +10332,10 @@
     ,
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"new-tab response enforces sandbox without the iframe; residual self-navigation is explicit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/idle-requests.spec.ts","name":"AEON-1117 raw ticket readers and quote heartbeats stop while hidden and resume with current screen identity","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/idle-requests.spec.ts","name":"AEON-1117 shares mounted reads and event transport, fences stale answers and recovers missed events and access","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -16121,6 +16125,10 @@
     {"kind":"node","file":"tests/agents-cleanup.test.ts","name":"a paused account says why and how to resume","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agents-cleanup.test.ts","name":"a revoked or never-confirmed computer can be removed by a person who manages accounts","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/api.test.ts","name":"AEON-1117 a stream opening immediately replaces an invalidated initial read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/api.test.ts","name":"AEON-1117 native Node consumers share the browser event transport","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/api.test.ts","name":"API requests use same-origin credentials, no cache and a timeout signal","tier":"ESSENTIAL"}
     ,
