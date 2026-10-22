@@ -246,11 +246,14 @@ func cleanupLegacyItem(ctx context.Context, pool *pgxpool.Pool, p tenant.Princip
 			item.Source = "comment"
 		}
 		err = tx.QueryRow(ctx, `SELECT CASE WHEN k.slug='project' THEN n.id::text ELSE coalesce(n.project_id::text,'') END FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.tenant_id=$1 AND n.id=$2::uuid AND n.deleted_at IS NULL`, p.TenantID, nodeID).Scan(&item.projectID)
-		if errors.Is(err, pgx.ErrNoRows) || item.projectID == "" {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
+		}
+		if item.projectID == "" {
+			return nil
 		}
 		var cutoff time.Time
 		if err := tx.QueryRow(ctx, `SELECT cutoff FROM method_learning_legacy_cleanup WHERE tenant_id=$1`, p.TenantID).Scan(&cutoff); err != nil {

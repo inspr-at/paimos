@@ -75,6 +75,8 @@ func TestEntryChecksLessonRecorded(t *testing.T) {
 		{"non-obvious-label", map[string]any{"labels": []string{"non-obvious-fix"}}},
 		{"non-obvious-spaces", map[string]any{"labels": []string{"non-obvious fix"}}},
 		{"named-case-insensitive-tag", map[string]any{"tags": []map[string]string{{"name": "Regression"}}}},
+		{"comma-separated-tags", map[string]any{"tags": "other, Incident, regression"}},
+		{"comma-separated-labels", map[string]any{"labels": " , Other, NON-OBVIOUS FIX, "}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			n := newTicket(tc.fields, "")

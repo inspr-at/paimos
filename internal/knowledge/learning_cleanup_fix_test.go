@@ -4,17 +4,65 @@ package knowledge
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 )
+
+// Risk: a failed source-project lookup is treated as an absent source and loses
+// its database error. Fault injection must return that query error and leave
+// the cleanup checkpoint unchanged so the source can be retried.
+func TestLegacyCleanupProjectLookupPreservesError(t *testing.T) {
+	f := setup(t)
+	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO method_learning_legacy_cleanup(tenant_id) VALUES($1) ON CONFLICT(tenant_id) DO UPDATE SET completed_at=NULL,after_key=NULL`, f.a.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	trace := &legacyProjectFailureTrace{}
+	cfg := f.db.App.Config().Copy()
+	cfg.ConnConfig.Tracer = trace
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	wrote, err := cleanupLegacyItem(db.AllProjects(t.Context(), "cleanup query failure test"), pool, f.a, nodeLearningID(f.ticket))
+	var injected, queryError *pgconn.PgError
+	if !errors.As(trace.injected, &injected) || injected.Code != "22012" {
+		t.Fatalf("project lookup fault did not fire: %v", trace.injected)
+	}
+	if wrote || !errors.As(err, &queryError) || queryError.Code != "25P02" {
+		t.Fatalf("cleanup masked the project query error: wrote=%v err=%v", wrote, err)
+	}
+	var checkpoint string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT coalesce(after_key,'') FROM method_learning_legacy_cleanup WHERE tenant_id=$1`, f.a.TenantID).Scan(&checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	if checkpoint != "" || decisionOf(t, f, nodeLearningID(f.ticket)) != "" {
+		t.Fatalf("failed lookup advanced cleanup: checkpoint=%q", checkpoint)
+	}
+}
+
+type legacyProjectFailureTrace struct{ injected error }
+
+func (tr *legacyProjectFailureTrace) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.HasPrefix(data.SQL, "SELECT CASE WHEN k.slug='project'") {
+		// Abort this transaction just before the lookup. That query must report
+		// PostgreSQL's aborted-transaction error, rather than a later Commit error.
+		_, tr.injected = conn.Exec(ctx, `SELECT 1 / 0`)
+	}
+	return ctx
+}
+
+func (*legacyProjectFailureTrace) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
 // Risk: a tenant created after the release has no legacy row, so the first
 // cleanup invents "now" as its cutoff and dismisses learnings people just made.

@@ -249,18 +249,25 @@ func EntryStatusTx(ctx context.Context, tx pgx.Tx, kindID, state string) (string
 
 func entryLabels(fields map[string]any) []string {
 	out := []string{}
+	add := func(label string) {
+		if label = strings.ToLower(strings.TrimSpace(label)); label != "" {
+			out = append(out, label)
+		}
+	}
 	for _, key := range []string{"tags", "labels"} {
 		switch v := fields[key].(type) {
 		case string:
-			out = append(out, strings.ToLower(v))
+			for _, label := range strings.Split(v, ",") {
+				add(label)
+			}
 		case []any:
 			for _, x := range v {
 				switch y := x.(type) {
 				case string:
-					out = append(out, strings.ToLower(y))
+					add(y)
 				case map[string]any:
 					if s, ok := y["name"].(string); ok {
-						out = append(out, strings.ToLower(s))
+						add(s)
 					}
 				}
 			}
@@ -377,7 +384,7 @@ func EvaluateEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t Entry
 			r.Passed = len(ticketbenefits.Issues(mustEntryJSON(t.Fields))) == 0
 			r.Reason = strings.Join(ticketbenefits.Issues(mustEntryJSON(t.Fields)), "; ")
 		case "lesson_recorded":
-			r.Passed, err = entryLessonTx(ctx, tx, t)
+			r.Passed, err = entryLessonTx(ctx, tx, p.TenantID, t)
 			r.Reason = "Record the lesson in project Knowledge or add a No lesson: <reason> note"
 		case "no_active_build":
 			err = RequireBuildAdmissionTx(ctx, tx, p, t.ID, "", nil)
@@ -465,7 +472,7 @@ func EvaluateEntryTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, t Entry
 	return out, nil
 }
 
-func entryLessonTx(ctx context.Context, tx pgx.Tx, t EntryTicket) (bool, error) {
+func entryLessonTx(ctx context.Context, tx pgx.Tx, tenantID string, t EntryTicket) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	// Explicit notes can live in the ticket body/description or a current
@@ -486,25 +493,25 @@ func entryLessonTx(ctx context.Context, tx pgx.Tx, t EntryTicket) (bool, error) 
 	err := tx.QueryRow(ctx, `SELECT EXISTS (
 	    SELECT 1 FROM method_learning_decisions d
 	    JOIN nodes k ON k.tenant_id=d.tenant_id AND k.id=d.knowledge_id
-	    WHERE d.project_id=$2 AND k.project_id=$2 AND k.deleted_at IS NULL
+	    WHERE d.tenant_id=$3::uuid AND d.project_id=$2 AND k.project_id=$2 AND k.deleted_at IS NULL
 	      AND d.decision='accepted' AND btrim(d.line)<>''
 	      AND strpos(E'\n'||k.body||E'\n', E'\n'||d.line||E'\n')>0
 	      AND (d.source_key='n-'||$1::uuid::text OR EXISTS (
-	          SELECT 1 FROM events c WHERE c.node_id=$1::uuid AND c.type='comment.created'
+	          SELECT 1 FROM events c WHERE c.tenant_id=d.tenant_id AND c.node_id=$1::uuid AND c.type='comment.created'
 	            AND d.source_key='c-'||$1::uuid::text||'-'||c.id::text
 	      ))
 	) OR EXISTS (
 	    SELECT 1 FROM events c
 	    LEFT JOIN LATERAL (
-	        SELECT e.after FROM events e WHERE e.node_id=c.node_id
+	        SELECT e.after FROM events e WHERE e.tenant_id=c.tenant_id AND e.node_id=c.node_id
 	          AND e.type IN ('comment.updated','comment.deleted')
 	          AND e.after->>'comment_id'=c.id::text ORDER BY e.id DESC LIMIT 1
 	    ) latest ON true
-	    WHERE c.node_id=$1::uuid AND c.type='comment.created'
+	    WHERE c.tenant_id=$3::uuid AND c.node_id=$1::uuid AND c.type='comment.created'
 	      AND coalesce(latest.after->>'deleted','false')<>'true'
 	      AND coalesce(latest.after->>'body_markdown',c.after->>'body_markdown','')
 	          ~ E'(^|\n)[ \\t]*No lesson:[ \\t]*[^ \\t\\r\\n]'
-	)`, t.ID, t.ProjectID).Scan(&passed)
+	)`, t.ID, t.ProjectID, tenantID).Scan(&passed)
 	return passed, err
 }
 

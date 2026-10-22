@@ -8048,6 +8048,8 @@
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLegacyCleanupPostReleaseTenant","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLegacyCleanupProjectLookupPreservesError","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/knowledge","name":"TestLinksAuthorAndImportedEntries","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLooksSensitive","tier":"GATED-FULL"}
@@ -8921,6 +8923,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestFieldSchemaExactNumbers","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestFigureColumnsLeafPolicyAndUsage","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestFiguresCacheRevisionsReplacementAndNil","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestFitKindFieldsExactNumbers","tier":"GATED-FULL"}
     ,
@@ -11387,6 +11391,8 @@
     {"kind":"go","package":"internal/workorders","name":"TestEndpointBodyNetworkDeadline","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/workorders","name":"TestEndpointPositionedBodyNetworkDeadline","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/workorders","name":"TestEntryLessonTenantScope","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/workorders","name":"TestPersonCeilingRefresh","tier":"ESSENTIAL"}
     ,

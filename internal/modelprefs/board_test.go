@@ -251,11 +251,9 @@ func TestRankedBoardOmittedKindsFollowDefault(t *testing.T) {
 	}
 }
 
-// Risk: situation fallback or a person's row bypasses the workspace lock or
-// never lines, or a closed order acquires an unlisted model after exhaustion.
+// Risk: stored exceptions have no End field and silently stop at Wait,
+// including after a situation returns to its row.
 func TestModelsV2ExceptionDefaultContinuation(t *testing.T) {
-	// Risk: stored exceptions have no End field and silently stop at Wait,
-	// including after a situation returns to its row.
 	for _, tc := range []struct {
 		name, end, situation string
 		want                 []string
@@ -285,6 +283,8 @@ func TestModelsV2ExceptionDefaultContinuation(t *testing.T) {
 	}
 }
 
+// Risk: situation fallback or a person's row bypasses the workspace lock or
+// never lines, or a closed order acquires an unlisted model after exhaustion.
 func TestModelsV2RowOwnershipAndSituations(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

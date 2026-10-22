@@ -54,6 +54,13 @@ func TestProjectFiguresScopeBucketsCacheAndIsolation(t *testing.T) {
 		t.Fatalf("delete: %d %s", code, body)
 	}
 	mod := New(appPool, nil).(*Module)
+	// Use one database-derived instant for event windows and an injected clock
+	// for all handler reads. Slow runners cannot expire a warm read by accident.
+	var now time.Time
+	if err := adminPool.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		t.Fatal(err)
+	}
+	mod.figures.clock = func() time.Time { return now }
 	base := "/api/projects/" + root.ID + "/figures"
 	get := func(who tenant.Principal, query string) projectFigures {
 		t.Helper()
@@ -86,9 +93,14 @@ func TestProjectFiguresScopeBucketsCacheAndIsolation(t *testing.T) {
 	}
 	// Same response object and timestamp prove the warm read, including an
 	// invalid presentation cursor, did not recompute or narrow to the first page.
+	now = whole.ComputedAt.Add(figuresMaxAge - time.Nanosecond)
 	hidden := get(p, "?hide_closed=true&hide_states=accepted&limit=1&cursor=expired&sort=-estimate&facets=state")
 	if !reflect.DeepEqual(whole, hidden) || len(mod.figures.entries) != 1 {
 		t.Fatal("Hide/paging changed cached figures")
+	}
+	now = whole.ComputedAt.Add(figuresMaxAge)
+	if expired := get(p, ""); !expired.ComputedAt.Equal(now) || expired.TotalHours != whole.TotalHours || expired.Scope != whole.Scope || len(mod.figures.entries) != 1 {
+		t.Fatalf("expired figures did not recompute at the injected instant: %+v", expired)
 	}
 	searched := get(p, "?q=Needle&priority=high&limit=1")
 	if searched.TotalHours != 5 || searched.Scope.Leaves != 2 || searched.Scope.ProjectLeaves != 9 || searched.Scope.Kind != "this_view" {
@@ -156,7 +168,7 @@ func TestProjectFiguresScopeBucketsCacheAndIsolation(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		noReleases, err = mod.computeFigures(tenant.WithPrincipal(t.Context(), p), tx, root.ID, listQuery{Within: &root.ID, Kinds: []string{"work", "ticket", "task", "epic"}}, seen, time.Now().UTC().AddDate(0, 0, 91))
+		noReleases, err = mod.computeFigures(tenant.WithPrincipal(t.Context(), p), tx, root.ID, listQuery{Within: &root.ID, Kinds: []string{"work", "ticket", "task", "epic"}}, seen, now.AddDate(0, 0, 91))
 		return err
 	})
 	if err != nil {
@@ -222,6 +234,60 @@ func TestProjectFiguresScopeBucketsCacheAndIsolation(t *testing.T) {
 			t.Fatal("fixture missing")
 		}
 	}
+}
+
+// Risk: replacing a scope or reading/publishing an older snapshot evicts
+// unrelated or newer figures; modules created without an HTTP cache panic.
+// Independent supplied instants prove expiry without wall-clock assumptions.
+func TestFiguresCacheRevisionsReplacementAndNil(t *testing.T) {
+	now := time.Unix(1000, 0).UTC()
+	t.Run("nil cache", func(t *testing.T) {
+		var cache *figuresCache
+		cache.put("scope", 1, now, &projectFigures{})
+		if cache.get("scope", 1, now) != nil || cache.now().IsZero() {
+			t.Fatal("uncached modules must return a miss and a usable clock")
+		}
+	})
+	t.Run("older snapshot", func(t *testing.T) {
+		cache := &figuresCache{}
+		newer := &projectFigures{ViewKey: "newer"}
+		cache.put("scope", 2, now, newer)
+		if cache.get("scope", 1, now) != nil || cache.get("scope", 2, now) != newer {
+			t.Fatal("an older read removed newer figures")
+		}
+		cache.put("scope", 1, now, &projectFigures{ViewKey: "older"})
+		if cache.get("scope", 2, now) != newer {
+			t.Fatal("an older publication replaced newer figures")
+		}
+		if cache.get("scope", 3, now) != nil || len(cache.entries) != 0 {
+			t.Fatal("a newer read retained stale figures")
+		}
+	})
+	t.Run("full cache", func(t *testing.T) {
+		cache := &figuresCache{}
+		for i := 0; i < 256; i++ {
+			key := fmt.Sprintf("scope-%03d", i)
+			cache.put(key, 2, now.Add(time.Duration(i)*time.Nanosecond), &projectFigures{ViewKey: key})
+		}
+		latest := now.Add(time.Microsecond)
+		replacement := &projectFigures{ViewKey: "replacement"}
+		cache.put("scope-255", 3, latest, replacement)
+		if len(cache.entries) != 256 || cache.get("scope-000", 2, latest) == nil || cache.get("scope-255", 3, latest) != replacement {
+			t.Fatal("replacing a full-cache key evicted an unrelated entry")
+		}
+		cache.put("scope-255", 1, latest, &projectFigures{})
+		cache.put("scope-000", 1, latest, &projectFigures{})
+		if len(cache.entries) != 256 || cache.get("scope-000", 2, latest) == nil || cache.get("scope-255", 3, latest) != replacement {
+			t.Fatal("rejecting an old full-cache publication evicted current figures")
+		}
+		cache.put("new", 1, latest, &projectFigures{})
+		if len(cache.entries) != 256 || cache.get("scope-000", 2, latest) != nil || cache.get("new", 1, latest) == nil {
+			t.Fatal("new scopes must still evict the oldest entry at capacity")
+		}
+		if cache.get("scope-255", 3, latest.Add(figuresMaxAge)) != nil {
+			t.Fatal("replacement did not expire at its deadline")
+		}
+	})
 }
 
 // Risk: column totals could double-count parent plans, mix estimated and
