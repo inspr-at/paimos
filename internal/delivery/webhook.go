@@ -52,6 +52,12 @@ type envelope struct {
 			Number int64 `json:"number"`
 		} `json:"pull_requests"`
 	} `json:"check_suite"`
+	Job struct {
+		ID      int64  `json:"id"`
+		Run     int64  `json:"run_id"`
+		Attempt int    `json:"run_attempt"`
+		Head    string `json:"head_sha"`
+	} `json:"workflow_job"`
 	Group struct {
 		Head string `json:"head_sha"`
 		Base string `json:"base_sha"`
@@ -103,7 +109,7 @@ func uniqueJSON(d *json.Decoder, depth int) error {
 }
 func authenticate(name, id, signature string, raw, secret []byte) (envelope, error) {
 	var e envelope
-	if len(secret) < 32 || len(raw) == 0 || len(raw) > 2<<20 || !deliveryID.MatchString(id) || !slices.Contains([]string{"pull_request", "check_run", "check_suite", "merge_group", "push", "status", "workflow_run"}, name) {
+	if len(secret) < 32 || len(raw) == 0 || len(raw) > 2<<20 || !deliveryID.MatchString(id) || !slices.Contains([]string{"pull_request", "check_run", "check_suite", "merge_group", "push", "status", "workflow_run", "workflow_job"}, name) {
 		return e, fmt.Errorf("invalid envelope")
 	}
 	want, err := hex.DecodeString(strings.TrimPrefix(signature, "sha256="))
@@ -146,6 +152,8 @@ func handledWebhookAction(name, action string) bool {
 		return action == ""
 	case "workflow_run":
 		return action == "requested" || action == "in_progress" || action == "completed"
+	case "workflow_job":
+		return action == "queued" || action == "in_progress" || action == "completed" || action == "waiting"
 	}
 	return false
 }
@@ -170,6 +178,8 @@ func documentedWebhookActions(name string) []string {
 		return []string{"checks_requested", "destroyed"}
 	case "workflow_run":
 		return []string{"completed", "in_progress", "requested"}
+	case "workflow_job":
+		return []string{"queued", "waiting", "in_progress", "completed"}
 	}
 	return nil
 }
@@ -199,9 +209,9 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 }
 
 func (m *Module) projectWebhookAttempt(ctx context.Context, name, id string, raw []byte, e envelope) (webhookOutcome, error) {
-	// A workflow run is a flow fact, not a delivery observation. The audit
-	// handler records the live checks after this acceptance.
-	if name == "workflow_run" {
+	// Workflow events feed metrics and flow without changing a live delivery
+	// observation. Their receipt checkpoints own those projections.
+	if name == "workflow_run" || name == "workflow_job" {
 		return webhookNothingToRecord, nil
 	}
 	// The publisher's own aeon/admission status is an echo of a write already

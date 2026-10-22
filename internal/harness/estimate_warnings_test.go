@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -257,6 +258,45 @@ func warningCodes(t *testing.T, body map[string]any, want ...string) {
 }
 
 func TestHeartbeatEstimateWarningMatrix(t *testing.T) {
+
+	// R5/R7: saturation and a repeated valid report must not rewrite the
+	// warning counter or change its grace/reset semantics and response fields.
+	t.Run("unchanged counter and unused ETA reads", func(t *testing.T) {
+		f := fixture(t)
+		pool, counts := dbtest.CountedPool(t, f.db.App)
+		f.mux = http.NewServeMux()
+		harness.New(pool).Mount(f.mux)
+		lease := "counted-warning-worker-lease-0000001"
+		session := f.registerSession(t, f.agent.ID, "worker", f.ticket, "counted-warning-worker-ref-0001", lease)
+		counts.Reset()
+		for seq := 1; seq <= 7; seq++ {
+			body := f.beat(t, session, lease, seq, nil)
+			if body["activity_sequence"] != float64(seq) || body["heartbeat_at"] == nil || body["finished"] != false {
+				t.Fatalf("heartbeat receipt lost authoritative fields: %v", body)
+			}
+		}
+		isCounter := func(sql string) bool {
+			return strings.Contains(sql, "UPDATE harness_sessions SET missing_progress_beats=")
+		}
+		calls, writes := counts.Count(isCounter)
+		if calls != 3 || writes != 3 {
+			t.Errorf("grace counter calls/writes=%d/%d, want 3/3", calls, writes)
+		}
+		reads, _ := counts.Count(func(sql string) bool {
+			return strings.HasPrefix(sql, "SELECT coalesce((SELECT interval_minutes FROM eta_settings)")
+		})
+		if reads != 0 {
+			t.Errorf("heartbeat without an estimate read ETA interval %d times", reads)
+		}
+		counts.Reset()
+		for seq := 8; seq <= 9; seq++ {
+			warningCodes(t, f.beat(t, session, lease, seq, map[string]any{"progress_pct": 0}), "missing_eta", "ticket_without_estimate")
+		}
+		calls, writes = counts.Count(isCounter)
+		if calls != 1 || writes != 1 {
+			t.Errorf("counter reset calls/writes=%d/%d, want 1/1", calls, writes)
+		}
+	})
 	f := fixture(t)
 	lease := "guidance-worker-lease-00000000000001"
 	session := f.registerSession(t, f.agent.ID, "worker", f.ticket, "guidance-worker-ref-0000000001", lease)
