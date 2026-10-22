@@ -564,6 +564,22 @@
     {
       "classification": "metadata",
       "columns": {
+        "attempt": "metadata",
+        "created_at": "metadata",
+        "job_id": "metadata",
+        "repository": "metadata",
+        "run_id": "metadata",
+        "started_at": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_metric_jobs"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
         "at": "metadata",
         "head_sha": "metadata",
         "healthy_at": "metadata",
