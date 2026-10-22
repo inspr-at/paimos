@@ -28,6 +28,7 @@ import (
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/piprobe"
+	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 	"github.com/inspr-at/paimos/internal/usageprobe"
@@ -120,6 +121,7 @@ type Record struct {
 }
 
 type owned struct {
+	rulesDelivery                                  *rules.RulesDeliveryManifest
 	chat                                           *sessionChat // ephemeral; excluded from Record and checkpoints
 	relay                                          *ChatRelay   // ephemeral server relay of chat; never journaled
 	budgetMu                                       sync.Mutex
@@ -1547,6 +1549,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	entry.budgetMu.Unlock()
 	s.observeBudget(entry, AdapterEvent{})
 	go s.runDeadline(entry, proc, done, time.Until(launchedAt.Add(duration)))
+	saveErr = errors.Join(saveErr, s.acknowledgeRulesDelivery(ctx, entry, proc, ephemeralRules))
 	var startedErr error
 	if saveErr == nil {
 		startedErr = s.update(ctx, entry, Telemetry{Kind: "started", Status: "running"})

@@ -240,7 +240,8 @@
         "internal/crossreview/routine_pr_app.go",
         "internal/crossreview/github_history_test.go",
         "internal/delivery/metrics_checks.go",
-        "internal/delivery/metrics_checks_test.go"
+        "internal/delivery/metrics_checks_test.go",
+        "internal/db/migrations/1408_rules_delivery_evidence.sql"
       ]
     },
     {
