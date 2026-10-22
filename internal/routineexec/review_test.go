@@ -145,6 +145,12 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	first := advance(finished, true)
 	reviewRun := first["agent_run_id"].(string)
 	reviewOrder := first["review_order_id"].(string)
+	var buildPerson, reviewPerson string
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT (SELECT acting_person_id::text FROM agent_runs WHERE id=$1),(SELECT acting_person_id::text FROM agent_runs WHERE id=$2)`, d.agentRun, reviewRun).Scan(&buildPerson, &reviewPerson))
+	if buildPerson != f.owner.ID || reviewPerson != buildPerson {
+		t.Fatal("routine review lost originating person")
+	}
+
 	advance(finished, false)
 	var count int
 	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM work_order_reviews WHERE ticket_node_id=$1`, f.work).Scan(&count))
@@ -185,6 +191,12 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	d.e = New(f.d.App, d.options)
 	fix := advance(reviewFinished, true)
 	fixRun := fix["agent_run_id"].(string)
+	var fixPerson string
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT acting_person_id::text FROM agent_runs WHERE id=$1`, fixRun).Scan(&fixPerson))
+	if fixPerson != buildPerson {
+		t.Fatal("fix replaced originating person")
+	}
+
 	f.exec(`INSERT INTO model_situation_limits(tenant_id,fix_rounds) VALUES($1,1) ON CONFLICT(tenant_id) DO UPDATE SET fix_rounds=1`, f.owner.TenantID)
 	advance(reviewFinished, false)
 	must(t, f.tx(func(tx pgx.Tx) error {

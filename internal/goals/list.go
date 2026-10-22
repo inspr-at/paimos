@@ -32,6 +32,9 @@ type GoalList struct {
 	// latest authored ETA over every goal the filters match, for freshness.
 	StatusNote   *StatusNote `json:"status_note,omitempty"`
 	ETALastSetAt *time.Time  `json:"eta_last_set_at,omitempty"`
+	// AEON-1614: the goals the caller hid for themselves among the project/group
+	// filters, whatever the search, state, hide-done or hidden filter (Goals only).
+	HiddenCount *int `json:"hidden_count,omitempty"`
 	Watermark
 }
 
@@ -43,6 +46,7 @@ type listParams struct {
 	search, project, group string
 	sortBy, dir, state     string
 	hideDone               bool
+	includeHidden          bool
 	queryKey               string
 	cursor                 *goalCursor
 }
@@ -74,6 +78,15 @@ func parseListParams(r *http.Request, scope string) (listParams, error) {
 		return l, invalid("hide_done", "must be true or false")
 	}
 	parts := []string{l.project, l.group, l.search, l.state, q.Get("hide_done"), l.sortBy, l.dir}
+	// AEON-1614: hidden=exclude (the default) or include; only the Goals list reads it.
+	switch hidden := q.Get("hidden"); hidden {
+	case "", "exclude":
+	case "include":
+		l.includeHidden = true
+		parts = append(parts, "hidden="+hidden)
+	default:
+		return l, invalid("hidden", "must be exclude or include")
+	}
 	if scope != "" {
 		parts = append([]string{scope}, parts...)
 	}
@@ -154,6 +167,22 @@ func (m *module) list(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		ids := make([]string, len(goals))
+		for i, g := range goals {
+			ids[i] = g.ID
+		}
+		hidden, err := hiddenAmong(ctx, tx, p, ids)
+		if err != nil {
+			return err
+		}
+		count := 0
+		for i := range goals {
+			if hidden[goals[i].ID] {
+				goals[i].Hidden = true
+				count++
+			}
+		}
+		out.HiddenCount = &count
 		return finishList(ctx, tx, p, l, goals, &out, w)
 	})
 	respond(w, out, err)
@@ -184,6 +213,10 @@ func finishList(ctx context.Context, tx pgx.Tx, p tenant.Principal, l listParams
 					movingProjects[id] = true
 				}
 			}
+		}
+		// A goal the person hid counts like a hidden done goal: in the totals, not in the list.
+		if g.Hidden && !l.includeHidden {
+			continue
 		}
 		if l.hideDone && g.Done != nil && *g.Done {
 			continue

@@ -238,6 +238,9 @@ func TestAgentRecoveryRequestAuthorityAndSingleClaim(t *testing.T) {
 func TestAgentRecoveryRestartQueuesOneBoundContinuation(t *testing.T) {
 	v := recoveryAgent(t)
 	f := v.f
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return agentruns.SetActingPersonTx(t.Context(), tx, f.person.TenantID, v.run, f.person.ID)
+	})
 	agentruns.New(f.db.App).Mount(f.mux)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET display_label='Keep this name',service_tier='fast',continuation_handover='{"handover":{"state":"Existing recovery work is committed","next_steps":["Finish validation"],"open_questions":[],"worktree_state":"Keep local changes"}}' WHERE id=$1`, v.session)
@@ -521,6 +524,9 @@ func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T
 func TestAgentRecoveryBudgetRejectionCommitsDecisionWithoutContinuation(t *testing.T) {
 	v := recoveryAgent(t)
 	f := v.f
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return agentruns.SetActingPersonTx(t.Context(), tx, f.person.TenantID, v.run, f.person.ID)
+	})
 	body := v.request(t)
 	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
 	v.claim(t)

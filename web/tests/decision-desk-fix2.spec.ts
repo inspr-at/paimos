@@ -54,10 +54,11 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expect(effects).toContainText('Das bearbeitete Kriterium benötigt eine Prüfung durch eine Person.')
     // The delivery itself is one line in the head, apart from the outcome's failure (AEON-1339).
     await expect(page.getByTestId('desk-line')).toContainText('waiting for it to read')
-    await expect(effects.getByRole('link', { name: 'Open the ticket' })).toHaveAttribute('href', '/work/n-a1')
+    // AEON-1632: ticket links carry the canonical address and open as a peek, never the dead /work/<id>.
+    await expect(effects.getByRole('link', { name: 'Open the ticket' })).toHaveAttribute('href', '/p/AEON/AEON-1')
     await expect(effects.getByRole('link', { name: 'Open the decision in Knowledge' })).toHaveAttribute('href', '/api/nodes/knowledge-1')
     await expect(effects.getByRole('link', { name: 'Review the doctrine draft' })).toHaveAttribute('href', '/settings/agent-rules')
-    await expect(effects.getByRole('link', { name: 'Open the criterion to review' })).toHaveAttribute('href', '/work/n-a1')
+    await expect(effects.getByRole('link', { name: 'Open the criterion to review' })).toHaveAttribute('href', '/p/AEON/AEON-1')
     await page.getByTestId('desk-paper').press('c')
     // A round of one decided item has no pager (AEON-1339).
     await expect(page.getByTestId('desk-pager')).toHaveCount(0)

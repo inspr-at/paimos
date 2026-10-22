@@ -145,7 +145,7 @@ async function chooseGroup(page: Page, group: 'goals' | 'epics') {
 async function stableControls(page: Page) {
   const controls: Record<string, Locator> = {
     filter: page.locator('.project-search'), views: page.locator('.view-seg'), display: page.locator('.display-btn'),
-    hide: page.locator('.goals-chips .toggle-btn'), expand: page.locator('.goals-chips .expand-btn'),
+    expand: page.locator('.goals-chips .expand-btn'),
   }
   const chips = page.locator('.goals-chips .state-seg [role="radio"]')
   for (let i = 0; i < await chips.count(); i++) controls[`chip ${i}`] = chips.nth(i)

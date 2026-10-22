@@ -106,6 +106,8 @@ type GoalView struct {
 	Done       *bool          `json:"done,omitempty"`
 	Stall      *Stall         `json:"stall,omitempty"`
 	HandedOver *HandedOver    `json:"handed_over,omitempty"`
+	// AEON-1614: the caller hid this goal for themselves (Goals list only).
+	Hidden bool `json:"hidden,omitempty"`
 	Watermark
 	created        time.Time
 	etaSetAt       time.Time
