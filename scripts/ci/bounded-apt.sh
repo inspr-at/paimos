@@ -413,6 +413,11 @@ if [[ $mode == bundle ]]; then
   for number in 1 2 3 4; do
     attempt_deadline=$(($(date +%s) + first_attempt_seconds))
     if capture_attempt; then
+      # Apt owns partial directories as _apt:root (0700) and its lock files
+      # as root. They are not bundle inputs and an unprivileged artifact
+      # upload cannot traverse them. Apt has exited before this cleanup.
+      attempt_deadline=$deadline
+      run_root_timeout 30 rm -rf -- "$bundle/archives/partial" "$bundle/archives/lock" "$bundle/lists/partial" "$bundle/lists/lock"
       mkdir -p "$bundle/etc/sources.list.d"
       [[ ! -f $selected_sources/sources.list ]] || cp "$selected_sources/sources.list" "$bundle/etc/sources.list"
       for file in "$selected_sources/sources.list.d/"*.list "$selected_sources/sources.list.d/"*.sources; do

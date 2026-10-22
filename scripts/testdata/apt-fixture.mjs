@@ -127,6 +127,8 @@ if [[ "\$mode" == bundle-* ]]; then
   [[ -n "\$lists" && -n "\$archives" ]] || { echo shared-apt-cache >&2; exit 1; }
   if [[ "\$*" == 'update -qq' ]]; then
     echo 'fixture package indexes' > "\$lists/noble_Packages"
+    touch "\$lists/lock" "\$archives/lock"
+    echo 'partial index' > "\$lists/partial/unneeded"
     exit 0
   fi
   [[ "\$*" == *--download-only* ]] || { echo unexpected-package-mutation >&2; exit 1; }
@@ -136,6 +138,7 @@ if [[ "\$mode" == bundle-* ]]; then
     exit 100
   fi
   for name in fish zsh libtest fonts-test; do echo "\$name" > "\$archives/\${name}_1_amd64.deb"; done
+  echo 'partial download' > "\$archives/partial/unneeded"
   exit 0
 fi
 browser=0
