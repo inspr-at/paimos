@@ -244,6 +244,34 @@ func TestDisabledFeaturesMakeNoRequestsAndConnectionTestIsExplicit(t *testing.T)
 }
 
 func TestWorkspaceEmbeddingsUseSameEndpointAndKey(t *testing.T) {
+
+	// R9: repeated disabled-provider resolution must avoid database reads,
+	// while a later settings save must invalidate that negative result.
+	t.Run("idle configuration reads", func(t *testing.T) {
+		f := setup(t)
+		pool, counts := dbtest.CountedPool(t, f.d.App)
+		s := New(pool, bytes.Repeat([]byte{9}, 32))
+		for pass := 0; pass < 30; pass++ {
+			p, err := s.Embeddings(t.Context(), f.admin.TenantID)
+			if err != nil || p != nil {
+				t.Fatalf("disabled embeddings: %v", err)
+			}
+		}
+		reads, _ := counts.Count(func(sql string) bool {
+			return strings.HasPrefix(sql, "SELECT ") && strings.Contains(sql, "FROM workspace_model_provider")
+		})
+		t.Logf("30 idle embedding passes: provider reads=%d", reads)
+		if reads != 1 {
+			t.Errorf("unchanged provider reads=%d, want 1", reads)
+		}
+		settings := Settings{Enabled: true, BaseURL: "http://localhost:11434/v1", ChatModel: "fixture-chat", EmbeddingModel: "fixture-embed", Features: Features{Embeddings: true}}
+		if _, err := s.Save(tenant.WithPrincipal(t.Context(), f.admin), f.admin, Write{Settings: settings}); err != nil {
+			t.Fatal(err)
+		}
+		if p, err := s.Embeddings(t.Context(), f.admin.TenantID); err != nil || p == nil {
+			t.Fatal("save did not invalidate disabled configuration", err)
+		}
+	})
 	f := setup(t)
 	seedSearchNode(t, f, f.admin)
 	calls := 0
