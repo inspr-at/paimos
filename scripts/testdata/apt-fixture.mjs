@@ -68,7 +68,7 @@ advance_clock() {
 # Finite adapters return their status directly. Only the hang/reaping cases
 # need a background process and polling; fake deadlines advance identically.
 case "\$(cat "\$state/mode")" in
-  ok|bundle-*|always-fail|fetch-fail|fetch-always-fail|dependency-fail|install-fetch-always-fail|mirror-stall|offline-missing|offline-simulation-fail|offline-install-fail|browser-fail)
+  ok|bundle-*|always-fail|fetch-fail|fetch-always-fail|dependency-fail|install-fetch-always-fail|mirror-stall|offline-missing|offline-simulation-fail|offline-install-fail|browser-fail|slow-mirror)
     "\$@"; status=\$?; advance_clock; clock_status=\$?
     [[ \$status -ne 0 || \$clock_status -eq 0 ]] || status=\$clock_status
     exit \$status ;;
@@ -90,10 +90,7 @@ if [[ "\${AEON_AS_ROOT:-}" == 1 ]]; then
   rm -f "\$state/hung" "\$state/lock" "\$state/apt.pid"
 fi
 kill -KILL "\$child" 2>/dev/null || true
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  kill -0 "\$child" 2>/dev/null || break
-  sleep 0.05
-done
+wait "\$child" 2>/dev/null || true
 advance_clock
 exit "\$(cat "\$state/timeout-status")"
 `)
@@ -241,7 +238,20 @@ case "\$0 \$*" in
 esac
 if [[ "\$browser" -eq 1 ]]; then
   if [[ "\${AEON_AS_ROOT:-}" == 1 ]]; then echo root-browser >> "\$state/errors"; exit 1; fi
+  if [[ -n "\${APT_CONFIG:-}" ]]; then echo browser-apt-config >> "\$state/errors"; exit 1; fi
   if [[ "\$mode" == browser-fail ]]; then echo 'browser download failed' >&2; exit 1; fi
+  exit 0
+fi
+if [[ "\$mode" == slow-mirror ]]; then
+  if [[ "\${AEON_AS_ROOT:-}" != 1 || ! -f "\${APT_CONFIG:-}" || ! -f "\$config" ]]; then
+    echo "mirror fetch has no transport deadline" >&2; exit 100
+  fi
+  for setting in 'Acquire::Retries "0";' 'Acquire::http::Timeout "15";' 'Acquire::https::Timeout "15";'; do
+    grep -qxF "\$setting" "\$config" || { echo "mirror fetch has no transport deadline" >&2; exit 100; }
+  done
+  if [[ "\$*" == *install-deps* && "\$(grep -c install-deps "\$state/calls")" -eq 1 ]]; then
+    echo 'E: Failed to fetch http://azure.archive.ubuntu.com/ubuntu/pool/libtest.deb mirror fetch timed out' >&2; exit 100
+  fi
   exit 0
 fi
 if [[ "\$mode" == dependency-fail ]]; then
@@ -281,7 +291,7 @@ else
   echo 'Ign:1 http://azure.archive.ubuntu.com/ubuntu noble InRelease' >&2
 fi
 echo \$\$ > "\$state/apt.pid"
-touch "\$state/hung" "\$state/lock"
+touch "\$state/lock"
 # exec retains the pid; parent death and a hard deadline bound this hang too.
 exec "\$AEON_FIXTURE_NODE" "\$AEON_FIXTURE_APT_HOLD" "\$PPID"
 `

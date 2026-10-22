@@ -16,6 +16,7 @@ paths:
       description: "chat-v1. The caller's own conversation whose current binding is this harness session, so the session panel can open the live stream. Person participant only, with current chat.read project authority. Past bindings, other people's threads and unbound sessions return 404."
       parameters:
         - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Chat-Timing, in: header, required: false, schema: {type: string, const: '1'}, description: "Opt in to exact-session input_timing negotiation. Older servers omit the marker; omit timing fields from sends to them."}
       responses:
         '200': {description: Participant conversation, content: {application/json: {schema: {$ref: '#/components/schemas/ChatThread'}}}}
         '404': {description: "Disabled, unbound or unauthorized session"}
@@ -41,7 +42,7 @@ paths:
       operationId: "listChatMessages"
       x-aeon-package: "R2"
       description: "Mounted opt-in chat-v1 R2 participant history contract. Default latest 50, max 100, ascending display order. before/after/around_message are mutually exclusive; opaque cursors bind caller and conversation. Page at most 1 MiB, even if fewer than the count limit. Snapshot and migration epoch accompany exact per-message person read state. Imported source audiences remain enforced."
-      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}}, {"name": "before", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "after", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "around_message", "in": "query", "required": false, "schema": {"type": "string", "format": "uuid"}}]
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}}, {"name": "before", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "after", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "around_message", "in": "query", "required": false, "schema": {"type": "string", "format": "uuid"}}, {"name": "include_timing", "in": "query", "required": false, "schema": {"type": "boolean"}, "description": "Opt in to the persisted delivery_level projection; older clients receive the original DTO."}]
       responses:
         '200':
           description: "Authorized bounded result"
@@ -241,6 +242,7 @@ components:
         reply_to: {type: [string, 'null'], format: uuid}
         sender_principal_id: {type: string, format: uuid, description: "Author of the message. Present on history pages (AEON-1071)."}
         created_at: {type: string, format: date-time, description: "When the message was stored. Present on history pages (AEON-1071)."}
+        delivery_level: {type: string, enum: [simple, steer], description: "Selected input timing, included only in opted-in history/outbox projections. Missing means simple (After this turn)."}
     ChatMessagePage:
       type: "object"
       additionalProperties: false

@@ -212,11 +212,16 @@ test('AEON-1401 lists, the status menu, the ticket header, Desk and activity rea
         await page.setViewportSize({ width: 1440, height: 900 })
         await page.goto('/p/PHAROS?group=status&status=in_progress,qa,open')
         await expect(row).toContainText('Building')
+        // Whole-project figures decide Parent after the rows have painted.
+        // Wait for that column before measuring the rename: columns-settled
+        // only covers the columns already present, not the pending figures.
+        const parent = grid.locator('thead th.c-parent')
+        await expect(parent).toBeVisible()
         await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
         // A live rename re-renders the words in place: no header cell or row moves.
         const head = grid.locator('thead th[data-column-id="status"]'), title = grid.locator('thead th[data-column-id="title"]')
         await expectStableControls({
-          controls: { head, title, row, next: grid.locator('tr.ticket-row', { hasText: 'PHAROS-13' }), group: grid.locator('tr.group-row').first() },
+          controls: { head, title, parent, row, next: grid.locator('tr.ticket-row', { hasText: 'PHAROS-13' }), group: grid.locator('tr.group-row').first() },
           interactions: [{ name: 'live rename event', run: async () => {
             data.statusNames.revision = 2; data.statusNames.names = { in_progress: { en: 'Under construction' } }
             await page.evaluate(() => (window as unknown as { fixtureQuietStreams: { emit(type: string, data: string, id: number): void } }).fixtureQuietStreams.emit('tenant.status_names_updated', '{}', 9001))

@@ -432,6 +432,7 @@ type ControlRequest struct {
 	// Only the chat relay supplies writing: it runs when the inbox write
 	// begins, after this control waited behind any other.
 	writing           func()
+	chatInputID       string                 // private relay-only correlation, never decoded from a request
 	Value             string                 `json:"value,omitempty"`
 	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
 	ExpectedOwnership *ownedprocess.Identity `json:"expected_ownership,omitempty"`
