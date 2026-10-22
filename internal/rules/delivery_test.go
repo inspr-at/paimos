@@ -422,3 +422,51 @@ func TestDoctrineSurvivesCompatibilityCut(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Risk: the pinned channel must not retire the database composer before its
+// project/person/role content has moved to git (db_authoring remains on).
+func TestManagedPinnedFilesKeepDatabaseLayers(t *testing.T) {
+	w := newBatchWorld(t, "rules-pinned-pack")
+	admin := w.principal(tenant.Person, "owner", "admin")
+	agent := w.principal(tenant.Agent, "managed builder", "admin")
+	agent.KeyCreatorID = admin.ID
+	sets := []Set{
+		w.set(admin, w.layer(admin, Scope{Layer: "company"}), "Company", lockedRule("company", "Company database rule.")),
+		w.set(admin, w.layer(admin, Scope{Layer: "project", ProjectID: w.project}), "Project", testRule("project", "Project database rule.")),
+		w.set(admin, w.layer(admin, Scope{Layer: "person", OwnerID: admin.ID}), "Person", testRule("person", "Person database rule.")),
+		w.set(admin, w.layer(admin, Scope{Layer: "agent", Role: "builder"}), "Role", testRule("role", "Role database rule.")),
+	}
+	for _, set := range sets {
+		w.publish(admin, set, "260928120000.0.0")
+	}
+	doc := []byte("# Company pin\n\nPinned company instruction.\n" + strings.Repeat("D", 15000))
+	commit := strings.Repeat("a", 40)
+	var source string
+	if err := db.InTenant(tenant.WithPrincipal(t.Context(), admin), w.d.App, w.tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,commit_sha,paths,indexed_at) VALUES($1,'fixture/company','public',$2,ARRAY['docs/AGENTS-KERNEL.md'],clock_timestamp()) RETURNING id::text`, w.tid, commit).Scan(&source); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO doctrine_cache(tenant_id,source_id,commit_sha,path,blob_sha,content) VALUES($1,$2,$3,'docs/AGENTS-KERNEL.md',$4,$5)`, w.tid, source, commit, doctrine.BlobSHA(doc), doc)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var got Merged
+	if err := db.InTenant(tenant.WithPrincipal(t.Context(), agent), w.d.App, w.tid, func(tx pgx.Tx) error {
+		var err error
+		got, err = ForManagedFiles(t.Context(), tx, agent, w.project, "", "claude-code", doctrine.ManagedPackMaxBytes)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	const golden = "# Aeon session rules\n\n- [company] Company database rule.\n- [person] Person database rule.\n- [project] Project database rule.\n- [role] Role database rule.\n"
+	if got.Body != golden {
+		t.Fatalf("database golden differs: %q", got.Body)
+	}
+	if len(got.PinnedFiles) != 1 || got.PinnedFiles[0].Content != string(doc) || strings.Contains(got.Body, "harness channel") {
+		t.Fatal("pinned bytes or database layers lost")
+	}
+	if err := ValidateManagedFiles(got, got.Context, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+}

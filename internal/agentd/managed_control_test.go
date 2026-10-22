@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 )
 
 // No vendor executable or process signal: ownership and outcomes are fixtures.
@@ -259,7 +260,7 @@ func TestSteerOnYieldedStartsNextTurn(t *testing.T) {
 	}
 	p.mu2.Lock()
 	defer p.mu2.Unlock()
-	if len(p.texts) != 1 || p.texts[0] != "continue" {
+	if len(p.texts) != 1 || p.texts[0] != labelledMessage("", "continue") {
 		t.Fatalf("texts %v", p.texts)
 	}
 	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "yielded-steer:applied:started_next_turn" {
@@ -279,7 +280,7 @@ func TestSteerMidTurnStaysQueued(t *testing.T) {
 	}
 	p.mu2.Lock()
 	defer p.mu2.Unlock()
-	if len(p.texts) != 1 || p.texts[0] != "later" {
+	if len(p.texts) != 1 || p.texts[0] != labelledMessage("", "later") {
 		t.Fatalf("texts %v", p.texts)
 	}
 	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "busy-steer:applied:queued_next_turn" {
@@ -387,13 +388,14 @@ func TestManagedRulesValidateExactEphemeralContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	merged.PinnedFiles = []doctrine.PinnedFile{packFile("public", "fixture/company", "docs/AGENTS-KERNEL.md", "Pinned company rules.\n")}
 	api := &managedRulesFixture{bundle: merged}
 	s := &Supervisor{api: api, tenantID: c.TenantID, principalID: c.AgentID}
 	e := &owned{harness: HarnessSession{ID: id("7"), ProjectID: c.ProjectID}}
 	run := Run{WorkOrderID: c.TaskID}
 	profile := Profile{Harness: Claude}
 	body, err := s.managedRules(t.Context(), e, run, profile)
-	if err != nil || body != merged.Body || api.receipts != 1 {
+	if err != nil || !strings.Contains(body, merged.Body) || api.receipts != 1 {
 		t.Fatalf("rules handoff: %v", err)
 	}
 	api.bundle.Context.ProjectID = id("8")

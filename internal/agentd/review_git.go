@@ -4,14 +4,17 @@ package agentd
 import (
 	"bytes"
 	"context"
-	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 )
 
 type boundedReviewBuffer struct {
@@ -63,7 +66,11 @@ func (r *sealedReviewRepo) close() { _ = os.RemoveAll(r.dir) }
 // newSealedReviewRepo imports only the sealed objects, never workspace refs,
 // config, attributes, grafts, shallow boundaries, hooks or an index. An empty
 // head captures the workspace's raw HEAD for the completed-change binding.
-func newSealedReviewRepo(ctx context.Context, workspace, base, head string) (r *sealedReviewRepo, err error) {
+func newSealedReviewRepo(ctx context.Context, workspace, base, head string) (*sealedReviewRepo, error) {
+	return newSealedRepository(ctx, workspace, base, head, false)
+}
+
+func newSealedRepository(ctx context.Context, workspace, base, head string, allowSame bool) (r *sealedReviewRepo, err error) {
 	if strings.TrimSpace(workspace) == "" || !reviewgate.ValidSHA(base) || (head != "" && !reviewgate.ValidSHA(head)) {
 		return nil, errReviewContext
 	}
@@ -100,7 +107,7 @@ func newSealedReviewRepo(ctx context.Context, workspace, base, head string) (r *
 			return nil, errReviewContext
 		}
 	}
-	if r.base == r.head {
+	if r.base == r.head && !allowSame {
 		return nil, errReviewContext
 	}
 	// Even upload-pack must not open the workspace's configuration. Expose its
@@ -225,6 +232,8 @@ func reviewWorkspaceDirs(workspace string) (string, string, error) {
 	return gitDir, commonDir, nil
 }
 
+var errRepositoryUnborn = errors.New("repository has no commits")
+
 func reviewWorkspaceHEAD(gitDir, commonDir string) (string, error) {
 	value, err := reviewMetadataFile(filepath.Join(gitDir, "HEAD"))
 	for depth := 0; err == nil && depth < 8; depth++ {
@@ -240,6 +249,9 @@ func reviewWorkspaceHEAD(gitDir, commonDir string) (string, error) {
 		if os.IsNotExist(err) {
 			packed, e := reviewMetadataFile(filepath.Join(commonDir, "packed-refs"))
 			if e != nil {
+				if os.IsNotExist(e) {
+					return "", errors.Join(errReviewContext, errRepositoryUnborn)
+				}
 				break
 			}
 			var resolved string
@@ -257,7 +269,37 @@ func reviewWorkspaceHEAD(gitDir, commonDir string) (string, error) {
 			if resolved != "" {
 				return resolved, nil
 			}
+			return "", errors.Join(errReviewContext, errRepositoryUnborn)
 		}
 	}
 	return "", errReviewContext
+}
+
+// agentsAtBase reads a regular blob from the trusted commit, never a symlink,
+// working-tree file, textconv driver, or the reviewed head. Absence is valid.
+func (r *sealedReviewRepo) agentsAtBase(ctx context.Context) (string, error) {
+	entry, err := reviewGit(ctx, r.dir, "ls-tree", "-z", r.base, "--", "AGENTS.md")
+	if err != nil {
+		return "", ErrRulesRepository
+	}
+	if entry == "" {
+		return "", nil
+	}
+	fields := strings.Fields(strings.TrimSuffix(entry, "\x00"))
+	if len(fields) != 4 || (fields[0] != "100644" && fields[0] != "100755") || fields[1] != "blob" || !validPackSHA(fields[2], 40) || fields[3] != "AGENTS.md" {
+		return "", ErrRulesRepository
+	}
+	size, err := reviewGit(ctx, r.dir, "cat-file", "-s", fields[2])
+	n, e := strconv.Atoi(strings.TrimSpace(size))
+	if err != nil || e != nil || n < 0 {
+		return "", ErrRulesRepository
+	}
+	if n > doctrine.ManagedFileMaxBytes {
+		return "", ErrRulesPackTooLarge
+	}
+	body, err := reviewGit(ctx, r.dir, "cat-file", "blob", fields[2])
+	if err != nil || len(body) != n {
+		return "", ErrRulesRepository
+	}
+	return body, nil
 }

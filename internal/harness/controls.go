@@ -182,8 +182,9 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (result a
 	}
 	type offered struct {
 		Control
-		Text        string `json:"text,omitempty"`
-		ExpiresInMS int64  `json:"expires_in_ms"`
+		Text              string `json:"text,omitempty"`
+		AuthorPrincipalID string `json:"author_principal_id,omitempty"`
+		ExpiresInMS       int64  `json:"expires_in_ms"`
 	}
 	claimed := []offered{}
 	for _, old := range pending {
@@ -253,7 +254,13 @@ func (m *Module) yield(r *http.Request, tx pgx.Tx, p tenant.Principal) (result a
 				continue
 			}
 		}
-		claimed = append(claimed, offered{Control: c, Text: text})
+		author := ""
+		if c.Kind == "steer" {
+			if err := tx.QueryRow(ctx, `SELECT requested_by_principal_id::text FROM harness_controls WHERE id=$1`, c.ID).Scan(&author); err != nil {
+				return nil, err
+			}
+		}
+		claimed = append(claimed, offered{Control: c, Text: text, AuthorPrincipalID: author})
 	}
 	if s.Phase != "yielded" {
 		before := s

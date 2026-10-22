@@ -30,7 +30,7 @@ func TestTerminalControlCompletionReleasesQueue(t *testing.T) {
 	p.mu2.Lock()
 	texts := append([]string(nil), p.texts...)
 	p.mu2.Unlock()
-	if len(texts) != 2 || texts[0] != "late" || texts[1] != "next" {
+	if len(texts) != 2 || texts[0] != labelledMessage("", "late") || texts[1] != labelledMessage("", "next") {
 		t.Fatalf("texts %v", texts)
 	}
 	if len(e.pending) != 0 {
@@ -74,7 +74,7 @@ func TestNonTerminalControlCompletionBlocksQueue(t *testing.T) {
 	p.mu2.Lock()
 	texts := append([]string(nil), p.texts...)
 	p.mu2.Unlock()
-	if len(texts) != 1 || texts[0] != "late" || len(e.pending) != 2 {
+	if len(texts) != 1 || texts[0] != labelledMessage("", "late") || len(e.pending) != 2 {
 		t.Fatalf("texts %v pending %d", texts, len(e.pending))
 	}
 }
