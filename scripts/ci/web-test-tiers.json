@@ -16630,6 +16630,8 @@
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a hit-bitmap pixel belongs to a node only when it is opaque and holds its index colour","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a stale wide glimpse box does not paint once the visual viewport has left 1280","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a ticket adapter needs no knowledge schema and engines cannot mutate the source","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"elliptic anchors stay distinct for small, prime and composite graph sizes","tier":"GATED-FULL"}
