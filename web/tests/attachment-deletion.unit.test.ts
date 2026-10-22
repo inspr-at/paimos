@@ -77,9 +77,57 @@ it('AEON-1416: deletion receipts keep exact IDs and refuse missing or ambiguous 
     Toast.toasts.at(-1)!.actions[0].run() // Undo before DELETE has answered
     await flush()
     expect(model.items.value).toEqual([])
-    expect(Toast.toasts.at(-1)!.message).toContain('receipt is unavailable')
+    expect(Toast.toasts.at(-1)!.message).toBe('image.png could not be restored.')
   }
   expect(calls.some(path => path.includes('/events'))).toBe(false)
+})
+
+it('AEON-1416: attachment Undo restores immediately through reloads and rolls back failures', async () => {
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  for (const outcome of ['success', 'failure', 'unconfirmed', 'unknown']) {
+    const before = { ...attachment(), id: 'before', position: '0' }
+    const after = { ...attachment(), id: 'after', position: '2' }
+    let listed = [before, attachment(), after]
+    const deletion = deferred<Response>(), undo = deferred<Response>()
+    const requests: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
+      const path = String(input); requests.push(path)
+      if (init?.method === 'DELETE') {
+        const response = await deletion.promise
+        listed = [before, after]
+        return response
+      }
+      if (path.endsWith('/undo')) return undo.promise
+      return Response.json({ items: listed })
+    }))
+    const { model, stop } = setup()
+    await model.load()
+    model.remove(model.items.value[1])
+    const action = Toast.toasts.at(-1)!.actions[0]
+    action.run(); action.run()
+    expect(model.items.value.map(item => item.id)).toEqual(['before', 'image', 'after'])
+    expect(requests.some(path => path.endsWith('/undo'))).toBe(false)
+    await model.load() // DELETE is pending and the server still lists the row.
+    expect(model.items.value.map(item => item.id)).toEqual(['before', 'image', 'after'])
+    deletion.resolve(new Response(null, { status: 204, headers: { 'X-Aeon-Event-Ids': '10' } }))
+    await flush()
+    expect(requests.filter(path => path.endsWith('/undo'))).toEqual(['/api/events/10/undo'])
+    await model.load() // DELETE finished; /undo is pending and the row is absent on the server.
+    expect(model.items.value.map(item => item.id)).toEqual(['before', 'image', 'after'])
+    if (outcome === 'success') undo.resolve(Response.json({ after: { ...attachment(), caption: 'server restored' } }))
+    else if (outcome === 'unconfirmed') undo.resolve(Response.json({ after: { ...attachment('B') } }))
+    else if (outcome === 'unknown') undo.reject('internal diagnostic')
+    else undo.resolve(Response.json({ error: 'internal receipt diagnostic' }, { status: 500 }))
+    await flush()
+    if (outcome === 'success') expect(model.items.value[1].caption).toBe('server restored')
+    else {
+      expect(model.items.value.map(item => item.id)).toEqual(['before', 'after'])
+      expect(Toast.toasts.at(-1)!.message).toBe('image.png could not be restored.')
+      expect(Toast.toasts.at(-1)!.tone).toBe('error')
+      expect(logged).toHaveBeenCalled()
+    }
+    stop(); Toast.resetToasts()
+  }
 })
 
 it('AEON-1416: upload cleanup revokes each preview once and rejects late completions', async () => {

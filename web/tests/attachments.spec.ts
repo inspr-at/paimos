@@ -3,6 +3,7 @@
 // with undo, inline Markdown images and the full-screen viewer with compare.
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors, type Call } from './work-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
 const strip = (page: Page) => panel(page).getByRole('region', { name: /^Attachments/ })
@@ -79,6 +80,9 @@ test('a failed upload says why and can be retried or removed', async ({ page }) 
 
 test('delete reaches the server at once; Undo in the toast undoes it on the server', async ({ page }) => {
   const { calls, data } = await open(page)
+  let release!: () => void
+  const pending = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/events/1/undo', async route => { await pending; await route.fallback() })
   await tiles(page).first().hover()
   await strip(page).getByRole('button', { name: 'Delete fleet-list-before.png' }).click()
   await expect(tiles(page)).toHaveCount(3)
@@ -88,9 +92,11 @@ test('delete reaches the server at once; Undo in the toast undoes it on the serv
   await toast.getByRole('button', { name: 'Undo' }).click()
   await expect(tiles(page)).toHaveCount(4)
   await expect(tiles(page).first()).toHaveAttribute('data-attachment-id', 'att-1')
+  expect(data.attachments['n-1'].map(a => a.id)).not.toContain('att-1')
+  release()
   await expect.poll(() => writes(calls, 'POST', '/api/events/').map(c => c.path)).toEqual(['/api/events/1/undo'])
   expect(calls.filter(c => c.path === '/api/events')).toEqual([])
-  expect(data.attachments['n-1'].map(a => a.id)).toContain('att-1')
+  await expect.poll(() => data.attachments['n-1'].map(a => a.id)).toContain('att-1')
   // From the keyboard, and without Undo: the delete stands.
   await tiles(page).nth(2).focus()
   await page.keyboard.press('Delete')
@@ -99,6 +105,50 @@ test('delete reaches the server at once; Undo in the toast undoes it on the serv
   expect(writes(calls, 'DELETE', '/api/attachments/')[1].path).toBe('/api/attachments/att-3')
   await expect(page.locator('.toast').filter({ hasText: 'Deleted phone.png' })).toBeHidden({ timeout: 9000 })
   expect(writes(calls, 'POST', '/api/events/')).toHaveLength(1)
+})
+
+test('AEON-1416: pending attachment Undo stays in place and failed Undo shows plain copy', async ({ page }, testInfo) => {
+  test.setTimeout(120_000)
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    const { data } = await open(page, width)
+    await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, theme)
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    await page.route('**/api/events/1/undo', async route => {
+      await pending
+      await route.fulfill({ status: 500, json: { error: 'internal receipt diagnostic' } })
+    })
+    const target = strip(page).locator('[data-attachment-id="att-1"]')
+    const add = strip(page).getByRole('button', { name: 'Add', exact: true })
+    const deletion = page.waitForResponse(response => response.request().method() === 'DELETE')
+    await expectStableControls({
+      controls: { add, restoredAttachment: target }, scrollAreas: { strip: strip(page) },
+      interactions: [{ name: 'delete and immediately undo', run: async () => {
+        await target.focus()
+        await page.keyboard.press('Delete')
+        await deletion
+        await expect(target).toHaveCount(0)
+        const request = page.waitForRequest('**/api/events/1/undo')
+        await page.getByRole('button', { name: 'Undo', exact: true }).click()
+        await request
+        await expect(target).toBeVisible()
+        expect(data.attachments['n-1'].some(item => item.id === 'att-1')).toBe(false)
+        await page.screenshot({ path: testInfo.outputPath(`attachment-${width}-${theme}-pending.png`) })
+      } }],
+    })
+    await expectStableControls({
+      controls: { add }, scrollAreas: { strip: strip(page) },
+      interactions: [{ name: 'failed Undo', run: async () => {
+        release()
+        await expect(target).toHaveCount(0)
+        const error = page.locator('.toast.error')
+        await expect(error.locator('span')).toHaveText('fleet-list-before.png could not be restored.')
+        await expect(error).not.toContainText(/receipt|diagnostic|unknown error/i)
+        await page.screenshot({ path: testInfo.outputPath(`attachment-${width}-${theme}-failed.png`) })
+      } }],
+    })
+    await page.unroute('**/api/events/1/undo')
+  }
 })
 
 test('Alt+arrows reorder with the attachment precondition', async ({ page }) => {

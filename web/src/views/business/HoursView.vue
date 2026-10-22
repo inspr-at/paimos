@@ -295,8 +295,10 @@ function remove(listed: TimeEntry) {
 // Only the confirmed deletion's receipt can bring this entry back.
 async function undoRemove(e: TimeEntry, done: Promise<Deletion>, toastId: number, context: { owner: () => boolean; here: () => boolean; key: string }) {
   dismiss(toastId)
+  if (context.here()) { putEntry(e); void focusEntry(e.id) }
   try {
     const outcome = await done
+    if (outcome.status === 'gone' && context.here()) dropEntry(e)
     if (outcome.status !== 'deleted' || !context.owner()) return
     if (!outcome.eventId) throw new Error('The exact deletion receipt is unavailable. Reload to check the entry.')
     const restored = await undoEntryEvent(outcome.eventId)
@@ -306,8 +308,9 @@ async function undoRemove(e: TimeEntry, done: Promise<Deletion>, toastId: number
     toast(`Restored ${formatSpan(e.duration_seconds)} on ${context.key}.`)
   } catch (err) {
     if (!context.owner()) return
-    toast(err instanceof APIError && err.status === 409 ? 'The entry could not be restored: its period was approved or it changed meanwhile.' : `The entry could not be restored: ${err instanceof Error ? err.message : 'unknown error'}`, { tone: 'error' })
-    if (context.here()) void loadWeek()
+    console.error('Hours Undo failed', err)
+    toast(err instanceof APIError && err.status === 409 ? 'The entry could not be restored: its period was approved or it changed meanwhile.' : 'The entry could not be restored.', { tone: 'error' })
+    if (context.here()) { dropEntry(e); void loadWeek() }
   }
 }
 function rowKey(event: KeyboardEvent, e: TimeEntry) {

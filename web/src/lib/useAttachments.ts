@@ -18,6 +18,7 @@ export function useAttachments(nodeId: Ref<string | null>) {
   const error = ref('')
   // Deletes still on their way, so an early Undo waits for them.
   const deleting = new Map<string, Promise<{ eventId: string | null } | null>>()
+  const restoring = new Map<string, { item: Attachment; here: () => boolean }>()
   let generation = 0
   let recordEpoch = 0
   let active = true
@@ -34,7 +35,11 @@ export function useAttachments(nodeId: Ref<string | null>) {
     loading.value = true; error.value = ''
     try {
       const list = await listAttachments(id)
-      if (current === generation && here()) items.value = list.filter(item => !deleting.has(item.id))
+      if (current === generation && here()) {
+        const pending = [...restoring.values()].filter(undo => undo.here()).map(undo => undo.item)
+        const ids = new Set(pending.map(item => item.id))
+        items.value = [...list.filter(item => !deleting.has(item.id) && !ids.has(item.id)), ...pending].sort(byPosition)
+      }
     } catch (e) {
       if (current !== generation || !here()) return
       // A server without the attachments surface simply shows none.
@@ -124,10 +129,17 @@ export function useAttachments(nodeId: Ref<string | null>) {
   function remove(item: Attachment) {
     const node = nodeId.value
     const here = captureRecord(), owner = captureToastOwner()
+    const restoration = { item, here }
+    function rollback() {
+      if (restoring.get(item.id) !== restoration) return
+      restoring.delete(item.id)
+      if (here()) items.value = items.value.filter(x => x.id !== item.id)
+    }
     items.value = items.value.filter(x => x.id !== item.id)
     let toastId = 0
     const done = deleteAttachment(item.id).then(eventId => ({ eventId }), e => {
       dismiss(toastId)
+      rollback()
       if (!owner()) return null
       if (e instanceof APIError && e.status === 404) return null
       toast(`${item.name} could not be deleted.`, { tone: 'error' })
@@ -143,6 +155,10 @@ export function useAttachments(nodeId: Ref<string | null>) {
     } } })
     async function undo() {
       dismiss(toastId)
+      if (here()) {
+        restoring.set(item.id, restoration)
+        items.value = [...items.value.filter(x => x.id !== item.id), item].sort(byPosition)
+      }
       try {
         const deletion = await done
         if (!deletion || !owner()) return
@@ -153,8 +169,12 @@ export function useAttachments(nodeId: Ref<string | null>) {
         if (here()) items.value = [...items.value.filter(x => x.id !== item.id), restored].sort(byPosition)
       } catch (e) {
         if (!owner()) return
-        toast(`${item.name} could not be restored: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
+        console.error('Attachment Undo failed', e)
+        rollback()
+        toast(`${item.name} could not be restored.`, { tone: 'error' })
         if (here()) void load()
+      } finally {
+        if (restoring.get(item.id) === restoration) restoring.delete(item.id)
       }
     }
   }
