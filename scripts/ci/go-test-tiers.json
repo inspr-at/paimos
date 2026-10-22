@@ -2190,6 +2190,10 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStartRunBudgetExits","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunCleanupProcessOwnership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunCleanupRetainsSingleSettlementOnDeliveryFailure","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestStartRunContinuationExits","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStartRunExits","tier":"ESSENTIAL"}
@@ -11635,6 +11639,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestRehearsedBuilderPins","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReleaseBinariesRefuseWarmOrUnverifiedGo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestReleaseToolchainsRequireExactSecurityPatches","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReuseAggregatesIgnoreAmbientImpactKillSwitch","tier":"ESSENTIAL"}
     ,
