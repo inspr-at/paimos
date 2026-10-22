@@ -131,12 +131,21 @@ func TestDeliveryGitHubJobAttemptsProjection(t *testing.T) {
 	if stored := readStoredRun(t, f, 501, 1); !stored.jobsRead || stored.waitMS != nil {
 		t.Fatalf("one unknown job wait must withhold the worst wait: %+v", stored)
 	}
+	var partial DeliveryMetrics
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &partial)
+	if wait := metricWindow(t, metricByKey(t, partial.Metrics, "runner_wait"), 7); wait.Status == "ok" || wait.Value != nil {
+		t.Fatalf("unknown runner wait was reported complete: %+v", wait)
+	}
 	// The other job arrives after completion, and repairs the same attempt.
+	reads := len(g.calls)
 	jobBody["action"], job["status"], job["conclusion"] = "completed", "completed", "success"
 	job["id"], job["name"], job["started_at"] = 5012, "web", day.Add(6*time.Hour+3*time.Minute)
 	auditSend(t, f, "workflow_job", "late-job", jobBody, 204)
 	if stored := readStoredRun(t, f, 501, 1); stored.waitMS == nil || *stored.waitMS != 120000 {
 		t.Fatalf("early and late job timestamps did not converge: %+v", stored)
+	}
+	if len(g.calls) != reads {
+		t.Fatal("a late job unnecessarily reread a complete workflow")
 	}
 	auditSend(t, f, "workflow_run", "rerun-green", rerun, 204)
 	auditSend(t, f, "workflow_run", "queue-ejection", ejected, 204)
@@ -201,7 +210,7 @@ func TestDeliverySevenDayJobBackfillIsIdempotentAndBounded(t *testing.T) {
 			return map[string]any{"total_count": len(runs), "workflow_runs": runs}, nil
 		case strings.HasSuffix(u.Path, "/jobs"):
 			if limited {
-				return nil, &webhookGitHubError{class: "http_429", retryAfter: 2 * time.Minute, cause: &crossreview.GitHubHTTPError{StatusCode: 429}}
+				return nil, &webhookGitHubError{class: "secondary_limit", retryAfter: 2 * time.Minute, cause: &crossreview.GitHubHTTPError{StatusCode: 403, ActionsReadRequired: true}}
 			}
 			return githubJobsBody(day.Add(6*time.Hour), 30, nil), nil
 		case u.Path == "/pulls":
@@ -220,6 +229,9 @@ func TestDeliverySevenDayJobBackfillIsIdempotentAndBounded(t *testing.T) {
 	source := historySource(t, f)
 	if source.RetryAt == nil || !source.RetryAt.Equal(f.at.Add(2*time.Minute)) {
 		t.Fatalf("GitHub's rate limit was not persisted: %+v", source)
+	}
+	if source.LastReadError == nil || source.LastReadError.Reason != "github_unavailable" || source.LastReadError.Permission != nil {
+		t.Fatalf("rate limiting was mistaken for a missing permission: %+v", source.LastReadError)
 	}
 	calls := len(g.calls)
 	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)

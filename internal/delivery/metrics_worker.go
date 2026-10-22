@@ -31,6 +31,8 @@ func metricError(err error, at time.Time) MetricReadError {
 	switch {
 	case errors.Is(err, errNotConfigured):
 		out.Reason = "not_installed"
+	case metricRateLimited(err):
+		// A rate-limited Actions read is not evidence of a missing grant.
 	case errors.As(err, &response):
 		if response.StatusCode == http.StatusForbidden && response.ActionsReadRequired {
 			permission := "actions:read"
@@ -53,10 +55,14 @@ func shortMetricRetry() time.Duration {
 	return (30 + time.Duration(rand.Int64N(30))) * time.Second
 }
 
-func metricRetry(failure error, readError MetricReadError, source *metricSourceRow) time.Time {
+func metricRateLimited(failure error) bool {
 	var upstream *webhookGitHubError
 	var response *crossreview.GitHubHTTPError
-	if errors.As(failure, &upstream) && webhookLimited(upstream.class) || errors.As(failure, &response) && response.StatusCode == http.StatusTooManyRequests {
+	return errors.As(failure, &upstream) && webhookLimited(upstream.class) || errors.As(failure, &response) && response.StatusCode == http.StatusTooManyRequests
+}
+
+func metricRetry(failure error, readError MetricReadError, source *metricSourceRow) time.Time {
+	if metricRateLimited(failure) {
 		return readError.At.Add(webhookLimitBackoff(failure, readError.At))
 	}
 	if crossreview.IsTransientGitHubError(failure) {

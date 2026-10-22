@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -123,6 +124,18 @@ func (m *Module) liveMetricRuns(ctx context.Context, name string, raw []byte, sc
 	}
 	if body.Action != "completed" {
 		return nil, nil
+	}
+	if name == "workflow_job" {
+		var complete bool
+		service := db.AllProjects(ctx, "delivery completed job metric identity")
+		if err := db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_metric_runs WHERE repository=$1 AND run_id=$2 AND attempt=$3 AND jobs_read_at IS NOT NULL AND required_jobs->>'complete'='true')`, m.config.Repository, body.Job.Run, body.Job.Attempt).Scan(&complete)
+		}); err != nil {
+			return nil, err
+		}
+		if complete {
+			return nil, nil // the job timestamp write will update its existing map
+		}
 	}
 	var runs []metricRun
 	if name == "workflow_run" {

@@ -834,6 +834,10 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 				}
 				if err != nil {
 					failedRuns = append(failedRuns, id)
+					if metricRateLimited(err) {
+						readFailure = err
+						break // stop making requests as soon as GitHub limits this read
+					}
 					// Actions refusals take priority; otherwise retain a transient
 					// failure so a later ordinary error cannot lengthen its retry.
 					if readFailure == nil || metricError(err, now).Reason == "actions_read_missing" ||
