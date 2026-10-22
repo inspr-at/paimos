@@ -27,6 +27,7 @@ type CreateInput struct {
 	Instruction               *string `json:"instruction"`
 	RepositoryMutationAllowed *bool   `json:"repository_mutation_allowed"`
 	RequestDigest             string  `json:"-"`
+	EffectiveInstruction      string  `json:"-"`
 }
 
 type runOnceBinding struct {

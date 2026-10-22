@@ -199,7 +199,7 @@ async function open(initial?: WorkNode, mode: 'expert' | 'once' = 'expert') {
   choice.value = emptyChoice(); touch.value = emptyTouch()
   remember.value = false; remembered.value = ''
   runId.value = ''; requested.value = null; managedId.value = ''; reused.value = false
-  error.value = ''; checkError.value = ''; searchError.value = ''; grantStale.value = false
+  error.value = ''; checkError.value = ''; searchError.value = ''; grantStale.value = false; checking.value = false
   dialog.value?.showModal()
   void loadCatalog()
   if (oneOff.value) void projects.load()
@@ -263,7 +263,7 @@ async function submit(runNow = false) {
     runId.value = result.run.id; reused.value = result.reused; requested.value = pinned
     void agents.afterWrite()
     await refresh()
-    await nextTick(); dialog.value?.querySelector<HTMLElement>('[data-result]')?.focus()
+    await nextTick(); if (isCurrent()) dialog.value?.querySelector<HTMLElement>('[data-result]')?.focus()
   } catch (e) {
     if (!isCurrent()) return
     // A pin or a work order may already be written when a later step fails: the lists re-read either way.
@@ -281,18 +281,21 @@ async function submit(runNow = false) {
 }
 async function overrideQueued() {
   if (!run.value || busy.value) return
+  const turn = generation, owner = person.value, id = run.value.id
+  const current = () => turn === generation && owner === person.value && visible.value && runId.value === id
   busy.value = true; checkError.value = ''
-  try { agents.admitRun(await runNowOnce(run.value.id)); void agents.afterWrite() }
-  catch (e) { checkError.value = message(e) }
-  finally { busy.value = false }
+  try { const wire = await runNowOnce(id); if (current()) { agents.admitRun(wire); void agents.afterWrite() } }
+  catch (e) { if (current()) checkError.value = message(e) }
+  finally { if (current()) busy.value = false }
 }
 async function refresh() {
   if (!run.value || checking.value) return
   const turn = generation, id = run.value.id
   checking.value = true
   try {
-    agents.admitRun(await getRun(id))
+    const wire = await getRun(id)
     if (turn !== generation || !visible.value) return
+    agents.admitRun(wire)
     checkError.value = ''
     const agentId = agents.runs[id]?.agent_principal_id
     if (!agentId) return
@@ -301,7 +304,7 @@ async function refresh() {
     managedId.value = agents.admitSessions(page.items).find(s => s.run_id === id && s.management_mode === 'managed')?.id ?? ''
     if (managedId.value) void agents.refreshSessions()
   } catch { if (turn === generation) checkError.value = 'Status could not be refreshed. The last reported state is shown.' }
-  finally { checking.value = false }
+  finally { if (turn === generation) checking.value = false }
 }
 onBeforeUnmount(() => { narrowQuery?.removeEventListener('change', onNarrow); generation++; searchGeneration++; catalogGeneration++; poll.stop(); clearTimeout(searchTimer) })
 defineExpose({ open, openOnce })

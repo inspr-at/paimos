@@ -574,9 +574,13 @@ func createRunTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, orderID str
 	}
 	if in.Retry != nil {
 		var orderID, agentID string
-		err = tx.QueryRow(ctx, `SELECT work_order_id::text, agent_principal_id::text FROM agent_runs WHERE id=$1`, *in.Retry).Scan(&orderID, &agentID)
+		var oneOff bool
+		err = tx.QueryRow(ctx, `SELECT work_order_id::text, agent_principal_id::text,coalesce(trace ? 'run_once',false) FROM agent_runs WHERE id=$1`, *in.Retry).Scan(&orderID, &agentID, &oneOff)
 		if err != nil || orderID != o.NodeID || agentID != in.Agent {
 			return nil, workorders.Fail(400, "retry_of_run_id must be an earlier run of this work order and agent")
+		}
+		if oneOff {
+			return nil, workorders.Fail(409, "restart this one-off through Run once to retain its instruction and file permissions")
 		}
 	}
 	personRule, source := "personal", ""
@@ -657,10 +661,16 @@ func createRunTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, orderID str
 		if in.Instruction != nil {
 			instruction = *in.Instruction
 		}
+		if in.EffectiveInstruction != "" {
+			instruction = in.EffectiveInstruction
+		}
 		if strings.TrimSpace(instruction) == "" {
 			if err := tx.QueryRow(ctx, `SELECT CASE WHEN btrim(body)<>'' THEN body ELSE title END FROM nodes WHERE id=$1`, o.NodeID).Scan(&instruction); err != nil {
 				return nil, err
 			}
+		}
+		if len(instruction) > 240<<10 {
+			return nil, workorders.Fail(400, "one-off task context exceeds the execution bound")
 		}
 		allowed := in.mutationAllowed()
 		dispatchTrace.RunOnce = &runOnceBinding{Instruction: instruction, RepositoryMutationAllowed: &allowed, RequestDigest: in.RequestDigest}

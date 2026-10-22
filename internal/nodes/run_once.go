@@ -165,6 +165,12 @@ func (m *Module) runOnce(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 		}
 		pending = append(pending, events.Change{NodeID: &order.NodeID, Type: "work_order.updated", Before: before, After: order})
 	}
+	if in.Instruction == nil || strings.TrimSpace(*in.Instruction) == "" {
+		in.EffectiveInstruction = ticket.Body
+		if strings.TrimSpace(in.EffectiveInstruction) == "" {
+			in.EffectiveInstruction = ticket.Title
+		}
+	}
 	run, runEvents, err := agentruns.CreatePersonRunTx(ctx, tx, p, order.NodeID, in.CreateInput)
 	if err != nil {
 		return nil, err

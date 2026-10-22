@@ -3,6 +3,8 @@ package agentd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
@@ -26,7 +28,8 @@ func (*runOnceAdapter) ReadOnlyRunSupported() bool    { return true }
 func (*runOnceAdapter) ManagedControlSupported() bool { return true }
 func (a *runOnceAdapter) Start(_ context.Context, r StartRequest, _ func(AdapterEvent)) (Process, error) {
 	a.request = r
-	return a.proc, nil
+	sum := sha256.Sum256([]byte(r.Rules))
+	return &deliveryStartProcess{fakeProcess: a.proc, hash: hex.EncodeToString(sum[:])}, nil
 }
 
 // Risk: a generic no-mutation flag is ignored, the original work-order text

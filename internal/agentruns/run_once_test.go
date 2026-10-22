@@ -83,21 +83,19 @@ func TestRunOnceBindsContextOptionsAndCurrentAuthority(t *testing.T) {
 		return err
 	})
 	// Qualify a real read-only profile without changing account permissions.
+	claudeProfile := uuid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_profiles SET harness='claude',family='anthropic' WHERE id=$1`, f.profile)
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'one-off-reader','1','claude','anthropic','fixture-reader','high','strong')`, f.person.TenantID, claudeProfile)
 		return err
 	})
+	in["model_profile_id"] = claudeProfile
 	in["repository_mutation_allowed"] = false
 	readOnly := call(in, 201)
 	if readOnly.RepositoryMutationAllowed || !readOnly.RunOnce || readOnly.ReadOnlyReview || readOnly.Instruction != "Inspect supplied context" {
 		t.Fatalf("read-only/fallback lost: %+v", readOnly)
 	}
-	// Restore Codex only for the ordinary reservation fixture. The claim must
-	// refuse the person's revoked run.create BEFORE adapter/account validation.
-	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_profiles SET harness='codex',family='openai' WHERE id=$1`, f.profile)
-		return err
-	})
+	// The ordinary reservation fixture suffices: claim must refuse the
+	// person's revoked run.create BEFORE adapter/account validation.
 	ids := f.reserve(t, readOnly)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		var role string
