@@ -5184,6 +5184,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestIssueCommentCompatTranscript","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestIssueConditionalStatusCarriesPreconditionAndConflict","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestIssueConvert","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestIssueCreateAddsEstimateHint","tier":"GATED-FULL"}
@@ -5223,6 +5225,8 @@
     {"kind":"go","package":"internal/cli","name":"TestKnowledgeKindSlug","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestLeadCLIContractAndProofPrivacy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestLeadConditionalStatusGuards","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIReadAndRecord","tier":"GATED-FULL"}
     ,
@@ -8917,6 +8921,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestClassicAssigneeProjectionAndFacets","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestConcurrentMovesPrecondition","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestConditionalStatusPreservesConcurrentCancel","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestConvertClearsForgedRoadmapPublication","tier":"GATED-FULL"}
     ,

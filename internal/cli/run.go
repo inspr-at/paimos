@@ -155,6 +155,13 @@ func (rt *runtime) fail(err error, secrets ...string) error {
 	var status *client.StatusError
 	if errors.As(err, &status) {
 		exit.apiStatus = status.Status
+		if status.CurrentState != nil {
+			state := *status.CurrentState
+			for _, secret := range secrets {
+				state = redact(state, secret)
+			}
+			exit.apiBody, _ = json.Marshal(map[string]string{"error": "status precondition failed", "code": "status_mismatch", "current_state": state})
+		}
 		if len(status.EntryChecksFailure) > 0 {
 			body := bytes.Clone(status.EntryChecksFailure)
 			for _, secret := range secrets {
