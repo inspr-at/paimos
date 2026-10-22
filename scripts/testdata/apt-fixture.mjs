@@ -79,34 +79,47 @@ if [[ -f "\$state/lock" ]]; then
   echo "Error: Installation process exited with code: 100" >&2
   exit 100
 fi
-mode=\$(cat "\$state/mode")
+mode=\$(< "\$state/mode")
 lines=0
-if [[ -f "\$state/calls" ]]; then
-  lines=\$(grep -c . "\$state/calls" || true)
-fi
+# Keep snapshots identical without spawning cp/sed/basename for every source
+# file on every apt call. The full matrix also runs on shared macOS hosts.
+while IFS= read -r call; do [[ -z "\$call" ]] || lines=\$((lines + 1)); done < "\$state/calls"
 snapshot="\$state/attempt-\$lines"
-mkdir "\$snapshot"
-printf '%s' "\${AEON_AS_ROOT:-0}" > "\$snapshot/root"
-if [[ -n "\${APT_CONFIG:-}" ]]; then
-  printf '%s\\n' "\$APT_CONFIG" >> "\$state/config-paths"
-  cp "\$APT_CONFIG" "\$snapshot/bootstrap"
-  config=\$(sed -n '/^Dir::Etc::main "/{s/^Dir::Etc::main "//;s/";$//;p;}' "\$APT_CONFIG")
-  if [[ -n "\$config" ]]; then
-    printf '%s\\n' "\$config" >> "\$state/config-paths"
-  else
-    config=\$APT_CONFIG
-  fi
-  cp "\$config" "\$snapshot/config"
-  main=\$(sed -n '/^Dir::Etc::sourcelist "/{s/^Dir::Etc::sourcelist "//;s/";$//;p;}' "\$config")
-  parts=\$(sed -n '/^Dir::Etc::sourceparts "/{s/^Dir::Etc::sourceparts "//;s/";$//;p;}' "\$config")
-else
-  main="\$AEON_APT_SOURCES_DIR/sources.list"
-  parts="\$AEON_APT_SOURCES_DIR/sources.list.d"
-fi
-if [[ -f "\$main" ]]; then cp "\$main" "\$snapshot/sources.list"; fi
-for file in "\$parts/"*.list "\$parts/"*.sources; do
-  [[ ! -f "\$file" ]] || cp "\$file" "\$snapshot/\$(basename "\$file")"
-done
+config=\$(python3 - "\$state" "\$snapshot" "\${AEON_AS_ROOT:-0}" "\${APT_CONFIG:-}" "\$AEON_APT_SOURCES_DIR" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+state, snapshot, root, bootstrap, sources = sys.argv[1:]
+snapshot = Path(snapshot)
+snapshot.mkdir()
+(snapshot / 'root').write_text(root)
+main, parts = Path(sources) / 'sources.list', Path(sources) / 'sources.list.d'
+config = ''
+if bootstrap:
+    text = Path(bootstrap).read_text()
+    (snapshot / 'bootstrap').write_text(text)
+    def field(text, name):
+        match = re.search(r'^' + re.escape(name) + r' "([^"]*)";$', text, re.M)
+        return match[1] if match else ''
+    config = field(text, 'Dir::Etc::main')
+    with (Path(state) / 'config-paths').open('a') as paths:
+        paths.write(bootstrap + '\\n')
+        if config:
+            paths.write(config + '\\n')
+    config = config or bootstrap
+    text = Path(config).read_text()
+    (snapshot / 'config').write_text(text)
+    main, parts = Path(field(text, 'Dir::Etc::sourcelist')), Path(field(text, 'Dir::Etc::sourceparts'))
+if main.is_file():
+    (snapshot / 'sources.list').write_bytes(main.read_bytes())
+for pattern in ('*.list', '*.sources'):
+    for file in parts.glob(pattern):
+        if file.is_file():
+            (snapshot / file.name).write_bytes(file.read_bytes())
+print(config)
+PY
+) || exit 1
 if [[ "\$*" == *'install-deps --dry-run chromium' ]]; then
   # Playwright 1.63 passes ALL packages to apt's simulation but prints only
   # missing ones. Both fixture libraries appear installed to the dry run.
