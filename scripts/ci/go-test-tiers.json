@@ -10224,6 +10224,8 @@
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestPausePlanningHeartbeatFieldsStayOptional","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestPinGeneratorFailureDiagnostic","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/reportercontract","name":"TestPinnedShapeKeys","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestProjectLeadReadContractAdditionIsMinor","tier":"ESSENTIAL"}

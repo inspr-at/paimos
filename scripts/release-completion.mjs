@@ -272,7 +272,7 @@ export function complete(release, directory, { write = false, pinEvidence = '', 
       `Container: ghcr.io/inspr-at/aeon:${release.version}`, `Digest: ${release.digest}`,
       `Runtime closure linux/amd64: ${runtimeAMD64 || 'unknown'}`,
       `Runtime closure linux/arm64: ${runtimeARM64 || 'unknown'}`,
-      `Source commit: ${release.source_sha}`, '', pinEvidence,
+      `Source commit: ${release.source_sha}`, ...(pinEvidence ? ['', pinEvidence] : []),
     ].join('\n'));
     const created = loadCreated(run('gh', draftArgs(release, notes)), release.tag, run, sleep);
     if (!created?.draft) fail('draft creation did not produce a draft');

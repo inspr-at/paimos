@@ -987,6 +987,16 @@ gh workflow run release-completion.yml --repo inspr-at/paimos --ref main \
   -f tag="$tag" -f digest="$DIGEST"
 ```
 
+Completion also needs the successful exact-source-SHA **main** rehearsal receipt
+and its artifacts to remain retrievable. GitHub retention or deletion can
+therefore block completion of an old tag even when its image still exists.
+The coordinator must recover the retained original receipt/artifacts, or
+obtain a fresh qualifying main rehearsal for that exact source SHA under
+the existing rehearsal rules. A newer main SHA, a PR receipt or a local
+attestation cannot substitute. If that evidence cannot be obtained, keep
+completion closed and follow the coordinator's new-coordinate release path;
+never republish or change the existing image to bypass the receipt check.
+
 The completion workflow and reconciliation tools come from the immutable
 workflow revision of the dispatch (current approved main); binary source,
 build scripts and signing scripts come from the original tag's resolved commit
