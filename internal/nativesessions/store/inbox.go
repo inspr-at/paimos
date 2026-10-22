@@ -71,7 +71,7 @@ func (s *Store) admitInbox(ctx context.Context, d nativecontract.DaemonActor) er
  AND (m.pickup_lease_until IS NULL OR m.pickup_lease_until<=clock_timestamp())
  AND NOT EXISTS(SELECT 1 FROM inbox_receipts r WHERE r.tenant_id=m.tenant_id AND r.message_id=m.id AND r.state='failed')
  AND NOT EXISTS(SELECT 1 FROM harness_deliveries h WHERE h.tenant_id=m.tenant_id AND h.message_id=m.id AND h.session_id=$3)
- ORDER BY (m.idempotency_key LIKE 'desk/%') DESC,m.sent_event_id LIMIT 1 FOR NO KEY UPDATE OF m SKIP LOCKED`, b.TenantID, d.PrincipalID, b.HarnessSessionID).Scan(&message, &sender, &body, &cursor, &priority)
+ ORDER BY (`+inbox.DeskAnswerSQL+`) DESC,m.sent_event_id LIMIT 1 FOR NO KEY UPDATE OF m SKIP LOCKED`, b.TenantID, d.PrincipalID, b.HarnessSessionID).Scan(&message, &sender, &body, &cursor, &priority)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}

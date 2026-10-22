@@ -77,7 +77,8 @@ func exerciseLiveInbox(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		desk, err = inbox.AcceptMessageTx(t.Context(), tx, f.person, inbox.Acceptance{RecipientPrincipalID: f.agent.ID, RecipientSessionID: &b.HarnessSessionID, Body: `{"type":"question.answer","answer":"recorded human decision"}`, IdempotencyKey: "desk/" + guuid.NewString()})
+		desk = inbox.Message{ID: guuid.NewString(), Body: `{"type":"question.answer","answer":"recorded human decision"}`}
+		err = inbox.RecordDeskReply(t.Context(), tx, f.person, inbox.DeskReply{ID: desk.ID, RootID: guuid.NewString(), ProjectID: f.project, RecipientID: f.agent.ID, RecipientSessionID: b.HarnessSessionID, Body: desk.Body, RootBody: "Decision Desk fixture", RootSenderSessionID: b.HarnessSessionID, RecipientName: f.agent.Name})
 		if err != nil {
 			return err
 		}

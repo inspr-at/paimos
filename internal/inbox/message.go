@@ -33,6 +33,10 @@ const LivePrioritySQL = `m.recipient_session_id IS NOT NULL AND NOT EXISTS(
  WHERE pc.tenant_id=m.tenant_id AND pc.inbox_message_id=m.id AND pc.delivery_level='simple' AND sp.kind='person'
  AND pc.key_digest<>'desk/'||pc.id::text)`
 
+// DeskAnswerSQL identifies the trusted Desk dispatch row, not a sender-chosen
+// idempotency key or a JSON claim inside untrusted message content.
+const DeskAnswerSQL = `EXISTS(SELECT 1 FROM inbox_compat_messages dc WHERE dc.tenant_id=m.tenant_id AND dc.inbox_message_id=m.id AND dc.key_digest='desk/'||dc.id::text)`
+
 // Message is one durable inbox row. AckedAt is null until the recipient acks.
 type Message struct {
 	ContentMode                string     `json:"content_mode,omitempty"`
