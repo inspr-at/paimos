@@ -461,7 +461,7 @@ function lineTwo(branch: Branch, view: SessionView) {
   const handedOver = view.session.stopped_at && view.session.handed_over_to_id ? `Handed over to ${lineageName(view.session.handed_over_to_id)}` : ''
   // A retried attempt names its retry while it keeps its place (AEON-1285), as a handover does.
   if (keepsPlace(branch.view)) return [lead, handedOver, view.retry ? `Retried as ${view.retry.name}` : '', endedLine(view)].filter(Boolean).join(' · ')
-  const step = handedOver || activityLine(branch, view) || currentStep(view, descendants(branch).filter(countedLive).length, props.now)
+  const step = handedOver || activityLine(branch, view) || currentStep(view, view.session.child_counts?.current ?? descendants(branch).filter(countedLive).length, props.now)
   // A word more precise than the badge's ("Stop requested", "Lost contact") opens the line.
   const precise = view.status.label !== STATE_LABEL[view.status.state] && view.status.label !== step ? view.status.label : ''
   return [lead, precise, step].filter(Boolean).join(' · ')
@@ -1161,7 +1161,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
                 </span>
                 <!-- Whether it listens (AEON-280) or has an inbox (AEON-282) is said in words in the details. -->
                 <span class="l2" :class="{ asks: row.view.status.group === 'needs' }">
-                  <span class="l2t" :title="row.line">{{ row.line }}</span>
+                  <span v-clip-tip="row.line" class="l2t" :title="row.line">{{ row.line }}</span>
                 </span>
               </span>
             </a>

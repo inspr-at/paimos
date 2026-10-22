@@ -105,7 +105,7 @@ func stampChildCounts(ctx context.Context, tx pgx.Tx, sessions []*Session, now t
  SELECT pc.*,sum(all_count) OVER(PARTITION BY root)::int AS all_total,
  sum(current_count) OVER(PARTITION BY root)::int AS current_total,
  count(*) OVER(PARTITION BY root)::int AS projects,
- row_number() OVER(PARTITION BY root ORDER BY project_key,project_id) AS ordinal
+ row_number() OVER(PARTITION BY root ORDER BY (project_id=(SELECT project_id FROM harness_sessions WHERE id=pc.root)) DESC,project_key,project_id) AS ordinal
  FROM project_counts pc
 )
  SELECT root::text,project_id::text,project_key,all_count,current_count,all_total,current_total,projects
