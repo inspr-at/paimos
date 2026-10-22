@@ -380,9 +380,46 @@ test('one complete image bundle installs offline and invalid bundles retain netw
     assert.ok(cross.attempts.filter(attempt => attempt.command.includes('--no-download')).every(attempt => attempt.config.includes(`${crossDir}/lists`) && attempt.config.includes(`${crossDir}/archives`)))
     const rootTimeouts = cross.timeouts.filter(timeout => timeout.root === '1')
     assert.equal(rootTimeouts.length, 3)
-    // Injected time spent validating and preflighting reduces the same cap;
-    // add the final reaping grace to prove the complete <=60-second bound.
-    assert.ok(rootTimeouts.at(-1).seconds + (command.includes('--only-shell') ? 20 : 25) + 20 <= 60)
+    assert.equal(rootTimeouts.at(-1).seconds, 150, 'dpkg has its own full allowance after the short decision')
+  }
+
+  // AEON-1652 fix9: a nearly exhausted decision window must not kill dpkg.
+  // Enforce injected durations against the actual timeout arguments, so a
+  // fixture that simply returns success cannot hide the old shortened cap.
+  for (const imageVersion of ['20261021.1', '20261018.339.1']) {
+    const cross = imageVersion !== '20261021.1'
+    const decisionElapsed = cross ? [10, 15, 30] : [25, 30]
+    const slowDecision = await run(`bash "${script}" playwright install-deps chromium`, {
+      mode: 'always-fail', bundleDir, imageVersion, elapsed: [...decisionElapsed, 90], enforceTimeouts: true,
+    })
+    assert.equal(slowDecision.status, 0, `${slowDecision.error}\n${slowDecision.stdout}\n${slowDecision.stderr}`)
+    assert.match(slowDecision.summary, cross ? /path=cross-image bundle/ : /path=exact bundle/)
+    assert.match(slowDecision.stdout, /dependencies installed offline/)
+    assert.equal(readFileSync(join(slowDecision.state, 'clock'), 'utf8').trim(), '1145', '55 seconds deciding then 90 seconds installing')
+    assert.equal(slowDecision.timeouts.at(-1).seconds, 150)
+    assert.equal(existsSync(join(slowDecision.state, 'offline-dpkg-started')), true)
+    assert.ok(slowDecision.calls.every(call => call.includes('--no-download')), 'no network required after a successful decision')
+
+    const sharedDeadline = await run(state => {
+      const copy = join(state, 'shared-decision-deadline.sh')
+      writeFileSync(copy, readFileSync(script, 'utf8').replace('if start_timeout root "$install_seconds" apt-get install --no-download', 'if run_root_timeout "$install_seconds" apt-get install --no-download'))
+      return `bash "${copy}" playwright install-deps chromium`
+    }, { mode: 'always-fail', bundleDir, imageVersion, elapsed: [...decisionElapsed, 90], enforceTimeouts: true })
+    assert.equal(sharedDeadline.status, 124, 'negative control: sharing the decision deadline kills the 90-second install')
+    assert.equal(sharedDeadline.timeouts.at(-1).seconds, 5)
+    assert.equal(existsSync(join(sharedDeadline.state, 'offline-dpkg-started')), true)
+    assert.ok(sharedDeadline.calls.every(call => call.includes('--no-download')), 'a timed-out dpkg must still fail without network retry')
+
+    const insufficient = await run(`bash "${script}" apt libtest`, {
+      mode: 'ok', bundleDir, imageVersion, elapsed: decisionElapsed, enforceTimeouts: true,
+    })
+    assert.equal(insufficient.status, 0, `${insufficient.stdout}\n${insufficient.stderr}`)
+    assert.match(insufficient.stdout, /insufficient offline install budget before dpkg/)
+    assert.match(insufficient.summary, /path=network/)
+    assert.equal(existsSync(join(insufficient.state, 'offline-dpkg-started')), false)
+    assert.equal(insufficient.calls.filter(call => call.includes('--no-download')).length, cross ? 2 : 1, 'only read-only preflights run offline')
+    assert.match(insufficient.calls.at(-1), /^install -y -qq libtest$/)
+    assert.doesNotMatch(insufficient.attempts.at(-1).config, /Dir::State::lists|Dir::Cache::archives/, 'fallback restores runner caches before network apt')
   }
 
   for (const mode of ['offline-missing', 'offline-simulation-fail']) {
@@ -396,7 +433,7 @@ test('one complete image bundle installs offline and invalid bundles retain netw
     assert.doesNotMatch(missing.attempts.at(-1).config, /Dir::State::lists|Dir::Cache::archives/, 'network fallback restores runner sources and caches')
   }
 
-  const capped = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'ok', bundleDir: downloaded, imageVersion: '20261018.339.1', elapsed: [5, 35] })
+  const capped = await run(`bash "${script}" playwright install-deps chromium`, { mode: 'ok', bundleDir: downloaded, imageVersion: '20261018.339.1', elapsed: [45, 15], enforceTimeouts: true })
   assert.equal(capped.status, 0, capped.stderr)
   assert.equal(capped.calls.length, 2, 'exhausted preflight time must prevent the offline install')
   assert.match(capped.calls[0], /--simulate/)

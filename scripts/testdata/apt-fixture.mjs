@@ -55,12 +55,16 @@ advance_clock() {
   index=\$(wc -l < "\$state/timeouts" | tr -d ' ')
   elapsed=\$(sed -n "\${index}p" "\$state/elapsed")
   echo \$((\$(cat "\$state/clock") + \${elapsed:-0})) > "\$state/clock"
+  if [[ -f "\$state/enforce-timeouts" && \${elapsed:-0} -gt \$limit ]]; then return 124; fi
+  return 0
 }
 # Finite adapters return their status directly. Only the hang/reaping cases
 # need a background process and polling; fake deadlines advance identically.
 case "\$(cat "\$state/mode")" in
   ok|bundle-*|always-fail|fetch-fail|fetch-always-fail|dependency-fail|install-fetch-always-fail|mirror-stall|offline-missing|offline-simulation-fail|offline-install-fail|browser-fail)
-    "\$@"; status=\$?; advance_clock; exit \$status ;;
+    "\$@"; status=\$?; advance_clock; clock_status=\$?
+    [[ \$status -ne 0 || \$clock_status -eq 0 ]] || status=\$clock_status
+    exit \$status ;;
 esac
 # A previous attempt's hang marker must not make this attempt look hung
 # before it can take the lock or report that the lock is still held.
@@ -279,13 +283,14 @@ exec "\$AEON_FIXTURE_NODE" "\$AEON_FIXTURE_APT_HOLD" "\$PPID"
   return bin
 }
 
-export function aptFixture({ mode, shells = false, format = 'sources', elapsed, mirrorList = false, timeoutStatus = 124, dpkgActivity = 'Unpacking libtest (1.0) ...', bundleDir, rootOnly = false, imageOS = 'ubuntu24', imageVersion = '20261021.1', runnerArch = 'X64' }) {
+export function aptFixture({ mode, shells = false, format = 'sources', elapsed, enforceTimeouts = false, mirrorList = false, timeoutStatus = 124, dpkgActivity = 'Unpacking libtest (1.0) ...', bundleDir, rootOnly = false, imageOS = 'ubuntu24', imageVersion = '20261021.1', runnerArch = 'X64' }) {
   const state = mkdtempSync(join(tmpdir(), 'aeon-apt-'))
   writeFileSync(join(state, 'mode'), mode)
   writeFileSync(join(state, 'calls'), '')
   writeFileSync(join(state, 'timeout-status'), String(timeoutStatus))
   writeFileSync(join(state, 'dpkg-activity'), dpkgActivity + '\n')
   if (rootOnly) writeFileSync(join(state, 'root-only'), '')
+  if (enforceTimeouts) writeFileSync(join(state, 'enforce-timeouts'), '')
   const sourceRoot = join(state, 'apt')
   mkdirSync(join(sourceRoot, 'sources.list.d'), { recursive: true })
   const sources = format === 'list' ? {

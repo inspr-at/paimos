@@ -26,9 +26,18 @@ run_timeout() {
   if [[ $user == root && $attempt_deadline -lt $effective_deadline ]]; then
     effective_deadline=$attempt_deadline
   fi
+  if [[ ${decision_deadline:-$effective_deadline} -lt $effective_deadline ]]; then
+    effective_deadline=$decision_deadline
+  fi
   remaining=$((effective_deadline - $(date +%s)))
   [[ $remaining -gt 0 ]] || return 124
   [[ $seconds -le $remaining ]] || seconds=$remaining
+  start_timeout "$user" "$seconds" "$@"
+}
+
+start_timeout() {
+  local user=$1 seconds=$2
+  shift 2
   # Put timeout after sudo/env so it can reap apt's root process group.
   if [[ $user == root ]]; then
     sudo -- env "PATH=$PATH" "APT_CONFIG=$apt_config" LC_ALL=C timeout --kill-after=20s "$seconds" "$@"
@@ -320,12 +329,10 @@ PY
 
 try_offline() {
   local bundle_root=${AEON_APT_BUNDLE_DIR:-${RUNNER_TEMP:-/nonexistent}/apt-bundle}
-  local candidate kind='' package original_deadline=$deadline
-  local deadline=$deadline attempt_deadline=$attempt_deadline
-  local offline_deadline=$(($(date +%s) + 60))
-  # Selection, validation, simulation and installation share 60 seconds,
-  # including the final SIGKILL grace. Exact matches keep the existing budget.
-  if [[ $deadline -gt $offline_deadline ]]; then deadline=$offline_deadline; fi
+  local candidate kind='' package install_seconds=150 remaining
+  local decision_deadline=$(($(date +%s) + 60))
+  # Selection, validation and archive-only preflights share a short decision
+  # window on both image paths. Reaping still fits in the overall step budget.
   if [[ $mode == playwright && ( ${#targets[@]} -ne 1 || ${targets[0]} != chromium ) ]]; then return 1; fi
   # Pattern downloads preserve artifact directories. Prefer the exact image,
   # then accept this run's other image only within the same OS/architecture.
@@ -342,7 +349,6 @@ try_offline() {
     fi
   done
   [[ -n $kind ]] || return 1
-  if [[ $kind == exact ]]; then deadline=$original_deadline; fi
   # Finish validation and an archive-only preflight BEFORE dpkg can mutate.
   if [[ $mode == apt ]]; then
     for package in "$@"; do printf '%s\n' "${packages[@]}" | grep -Fxq -- "$package" || return 1; done
@@ -359,10 +365,19 @@ try_offline() {
     write_config "$source_root"
     return 1
   fi
+  # Admit dpkg only with its FULL install allowance plus SIGKILL grace left.
+  # Once admitted, start a fresh timeout without the decision deadline or a
+  # second clock check that could silently shorten the promised allowance.
+  remaining=$((deadline - 20 - $(date +%s)))
+  if [[ $remaining -lt $install_seconds ]]; then
+    echo 'bounded-apt: insufficient offline install budget before dpkg; using network fallback'
+    write_config "$source_root"
+    return 1
+  fi
   report_path "$kind bundle"
   echo "bounded-apt: installing offline bundle from $bundle for ${ImageOS} / ${ImageVersion}"
   # A failure after this point is final: never retry after package mutation.
-  if run_root_timeout 150 apt-get install --no-download -y -qq --no-install-recommends "${packages[@]}"; then
+  if start_timeout root "$install_seconds" apt-get install --no-download -y -qq --no-install-recommends "${packages[@]}"; then
     echo 'bounded-apt: dependencies installed offline'
     exit 0
   else
