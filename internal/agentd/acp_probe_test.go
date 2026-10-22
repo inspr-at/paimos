@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 )
 
 func acpProbeExecutable(t *testing.T, body string) string {
@@ -28,6 +30,7 @@ func acpProbeExecutable(t *testing.T, body string) string {
 }
 
 func TestACPLauncherProbeFailureCauses(t *testing.T) {
+	sleepExec := fixturebin.ShellExec(t, "sleep", "30")
 	for _, harness := range []string{Gemini, OpenCode} {
 		for _, tc := range []struct {
 			name, body, failure string
@@ -38,7 +41,7 @@ func TestACPLauncherProbeFailureCauses(t *testing.T) {
 			{"two streams", "echo version; echo diagnostic >&2", ProbeProtocol, false},
 			{"overflow", "head -c 4097 /dev/zero", ProbeProtocol, false},
 			{"nonzero is not sign-out", "echo 'Not logged in'; exit 1", ProbeLaunchFailed, false},
-			{"timeout", "exec /bin/sleep 30", ProbeTimeout, true},
+			{"timeout", sleepExec, ProbeTimeout, true},
 		} {
 			t.Run(harness+"/"+tc.name, func(t *testing.T) {
 				a := &ACPAdapter{Harness: harness, Path: acpProbeExecutable(t, tc.body), Homes: map[string]string{"local": privateHome(t)}}

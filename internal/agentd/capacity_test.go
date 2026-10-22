@@ -18,6 +18,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
@@ -309,7 +310,7 @@ func TestClaudeBridgeCapacityProjectionAndEndTime(t *testing.T) {
 	if err := os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.CommandContext(t.Context(), node, path, sdkPath, "/bin/true", root)
+	cmd := exec.CommandContext(t.Context(), node, path, sdkPath, fixturebin.Require(t, "true"), root)
 	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"fixture","model":"test-model","effort":"high"}` + "\n")
 	output, _ := cmd.Output()
 	if strings.Contains(string(output), "DO_NOT_FORWARD") {

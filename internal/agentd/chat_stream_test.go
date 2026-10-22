@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 )
 
 // Risk: native message, tool and lifecycle schemas drift apart, or a vendor
@@ -378,7 +380,7 @@ func TestClaudeBridgeProjectsNativeChatWithoutPayloads(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, "/bin/true", root)
+	cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, fixturebin.Require(t, "true"), root)
 	cmd.Stdin = strings.NewReader(`{"op":"start","purpose":"managed","read_only_review":true,"prompt":"Fixture","capabilities":[]}` + "\n")
 	out, err := cmd.Output()
 	if err != nil {

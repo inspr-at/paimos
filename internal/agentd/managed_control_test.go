@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd/fixturebin"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
 )
@@ -437,6 +438,7 @@ func TestClaudeBridgeEphemeralRulesBudgetAndNativeClose(t *testing.T) {
 	if err = os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
 		t.Fatal(err)
 	}
+	truePath := fixturebin.Require(t, "true")
 	for _, tc := range []struct{ name, result, reason string }{
 		{"native_close", "", ""},
 		{"missing_usage", `yield {type:'result',subtype:'success'};`, "token_budget_exhausted"},
@@ -453,7 +455,7 @@ func TestClaudeBridgeEphemeralRulesBudgetAndNativeClose(t *testing.T) {
 			if err := os.WriteFile(sdkPath, []byte(fixture), 0600); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", root)
+			cmd := exec.Command(node, bridgePath, sdkPath, truePath, root)
 			input := `{"op":"start","prompt":"fixture","rules":"Ephemeral safety fixture","max_turns":3,"max_tokens":100}` + "\n"
 			if tc.reason == "" {
 				input += `{"op":"stop","correlation_id":"close-fixture"}` + "\n"
@@ -597,6 +599,7 @@ func TestClaudeBridgeOnlyAllowsDaemonFileTools(t *testing.T) {
  yield {type:'result',modelUsage:{fixture:{inputTokens:1,outputTokens:1}}};
  }};
 }`
+	truePath := fixturebin.Require(t, "true")
 	for _, fixture := range []struct {
 		name                 string
 		routine, browserOnly bool
@@ -612,7 +615,7 @@ func TestClaudeBridgeOnlyAllowsDaemonFileTools(t *testing.T) {
 		}
 		frame, _ := json.Marshal(map[string]any{"op": "start", "prompt": "fixture", "max_tokens": 1,
 			"tools": RunTools{URL: "http://127.0.0.1:12345", Token: strings.Repeat("a", 64), Routine: fixture.routine, BrowserCaptureOnly: fixture.browserOnly}})
-		cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", workspace)
+		cmd := exec.Command(node, bridgePath, sdkPath, truePath, workspace)
 		cmd.Stdin = strings.NewReader(string(frame) + "\n")
 		out, err := cmd.Output()
 		if err != nil || !strings.Contains(string(out), `"kind":"budget_exhausted"`) {
