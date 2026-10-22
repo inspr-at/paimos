@@ -30,6 +30,28 @@ export function stepsOf(text) {
   return { lines, steps }
 }
 
+// AEON-1652: only this pinned artifact download may fail without failing a
+// shard. Validate every field before historical execution guards exclude it;
+// a renamed test command or another continue-on-error must still be rejected.
+export function withoutOptionalAptDownload(text) {
+  const found = stepsOf(text).steps.filter(step => /^      - name: Download optional apt bundle$/m.test(step.text))
+  if (found.length !== 1) throw new Error('expected exactly one optional apt download')
+  const step = found[0].text
+  const normalized = step.split('\n').filter(line => line.trim() && !line.trim().startsWith('#')).join('\n')
+    .replace("runner.os == 'Linux' && ", '')
+    .replace(/actions\/download-artifact@[a-f0-9]{40} # v[0-9.]+/, 'actions/download-artifact@PINNED')
+  const expected = `      - name: Download optional apt bundle
+        if: steps.apt-image.outputs.artifact != ''
+        timeout-minutes: 2
+        continue-on-error: true
+        uses: actions/download-artifact@PINNED
+        with:
+          name: \${{ steps.apt-image.outputs.artifact }}
+          path: \${{ runner.temp }}/apt-bundle`
+  if (normalized !== expected) throw new Error('optional apt download cannot suppress test execution')
+  return text.replace(step, '')
+}
+
 function minutes(step) {
   const found = step.match(/^        timeout-minutes: (\d+)\s*$/m)
   return found ? Number(found[1]) : null

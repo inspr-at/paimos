@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { aptFixture } from './testdata/apt-fixture.mjs'
 import { fixtureOwner } from './testdata/fixture-lifecycle.mjs'
-import { auditWorkflows, auditWorkflowText } from './check-apt-bounds.mjs'
+import { auditWorkflows, auditWorkflowText, withoutOptionalAptDownload } from './check-apt-bounds.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const script = join(root, 'scripts/ci/bounded-apt.sh')
@@ -54,6 +54,10 @@ async function run(command, options) {
 
 test('workflow installs delegate to the root-timeout helper', () => {
   assert.deepEqual(auditWorkflows(), [])
+  const workflow = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8')
+  const shard = workflow.slice(workflow.indexOf('\n  web-shard:'), workflow.indexOf('\n  web:'))
+  assert.doesNotMatch(withoutOptionalAptDownload(shard), /continue-on-error/)
+  assert.throws(() => withoutOptionalAptDownload(shard.replace('      - name: Download optional apt bundle', '      - name: Download optional apt bundle\n        run: npm test')), /cannot suppress test execution/)
   const old = `jobs:\n  demo:\n    steps:\n      - name: Install Chromium system dependencies\n        timeout-minutes: 13\n        run: |\n          for i in 1 2 3; do\n            timeout 240 npx playwright install-deps chromium && break\n          done\n`
   const failures = auditWorkflowText('old.yml', old)
   assert.ok(failures.some(line => line.includes('must go through')), failures.join('\n'))
@@ -333,7 +337,7 @@ test('one complete image bundle installs offline and invalid bundles retain netw
 
   const dpkg = await run(`bash "${script}" apt libtest`, { mode: 'offline-install-fail', bundleDir })
   assert.equal(dpkg.status, 100, dpkg.stdout)
-  assert.match(dpkg.stdout, /dpkg: error/)
+  assert.match(dpkg.stderr, /dpkg: error/)
   assert.equal(dpkg.calls.length, 2)
   assert.ok(dpkg.calls.every(call => call.includes('--no-download')), 'no network fallback after an offline mutation fails')
   assert.doesNotMatch(dpkg.stdout, /dependencies installed|retrying fetch/)

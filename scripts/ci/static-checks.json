@@ -882,8 +882,8 @@
       "needs": [
         "node"
       ],
-      "timeout_seconds": 30,
-      "local_only": "AEON-933: every apt and Playwright install-deps step must carry a step timeout and a bounded retry. This guard only reads workflow files."
+      "timeout_seconds": 60,
+      "local_only": "AEON-933/1652: workflow bounds and root-timeout/offline-bundle fixture regressions; the expanded matrix has a 60-second hang guard."
     },
     {
       "id": "web-classification",
