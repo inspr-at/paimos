@@ -38,6 +38,9 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/goals/{goalId}/history", reportercontract.WithHeader(reportercontract.Goals, m.history))
 	mux.HandleFunc("POST /api/goals", reportercontract.WithHeader(reportercontract.Goals, m.create))
 	mux.HandleFunc("PATCH /api/goals/{goalId}", reportercontract.WithHeader(reportercontract.Goals, m.patch))
+	mux.HandleFunc("DELETE /api/goals/{goalId}", reportercontract.WithHeader(reportercontract.Goals, m.deleteGoal))
+	mux.HandleFunc("POST /api/goals/{goalId}/work", reportercontract.WithHeader(reportercontract.Goals, m.linkWork))
+	mux.HandleFunc("DELETE /api/goals/{goalId}/work", reportercontract.WithHeader(reportercontract.Goals, m.unlinkWork))
 	// AEON-1614: Hide for me, per person.
 	mux.HandleFunc("PUT /api/me/goals/{goalId}/hidden", m.setHidden(true))
 	mux.HandleFunc("DELETE /api/me/goals/{goalId}/hidden", m.setHidden(false))
@@ -127,6 +130,8 @@ func (m *module) patch(w http.ResponseWriter, r *http.Request) {
 type createInput struct {
 	Title     string  `json:"title"`
 	ProjectID *string `json:"project_id,omitempty"`
+	// ETA is the optional Lands of a person's New goal (AEON-1618).
+	ETA *ETAInput `json:"eta,omitempty"`
 }
 type WriteResult struct {
 	ID      string `json:"id"`
@@ -162,11 +167,15 @@ func (m *module) create(w http.ResponseWriter, r *http.Request) {
 	if err == nil && in.ProjectID != nil && !uuidPattern.MatchString(*in.ProjectID) {
 		err = invalid("project_id", "must be a project UUID or null")
 	}
+	if err == nil {
+		err = validateETA(in.ETA, "eta", m.now(), false)
+	}
 	if err != nil {
 		respond(w, nil, invalid("body", err.Error()))
 		return
 	}
 	var out WriteResult
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { var e error; out, e = createTx(ctx, tx, p, key, in); return e })
+	now := m.now()
+	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { var e error; out, e = createTx(ctx, tx, p, key, in, now); return e })
 	respond(w, out, err)
 }

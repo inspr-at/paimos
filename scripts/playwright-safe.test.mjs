@@ -633,6 +633,78 @@ test('unverifiable live roots terminate their group without an invalid journal e
   } finally { probe.child.kill('SIGKILL'); await probe.completion }
 })
 
+// Process-control risk: a delivered SIGKILL and the root's exit do not prove
+// its whole group is gone. Hold group retirement at an explicit barrier.
+test('root verification failure waits for group exit and reports incomplete cleanup', { timeout: 15000 }, async t => {
+  const child = { pid: 12345, exitCode: null, signalCode: null }, entries = [], signals = []
+  let gone = false, reached, release
+  const waiting = new Promise(resolve => { reached = resolve })
+  const retired = new Promise(resolve => { release = resolve })
+  const injected = t.mock.method(process, 'kill', (pid, signal) => {
+    assert.ok(pid === child.pid || pid === -child.pid, 'only the newly spawned group may be inspected')
+    if (signal !== 0) { signals.push([pid, signal]); return true }
+    if (pid < 0) throw Object.assign(new Error(gone ? 'gone' : 'awaiting reaping'), { code: gone ? 'ESRCH' : 'EPERM' })
+    return true
+  })
+  let result
+  try {
+    result = recordRootGroup(child, entry => entries.push(entry), {
+      start: () => '', attempts: 1,
+      wait: async () => { reached(); await retired; gone = true },
+    }).then(() => assert.fail('unverifiable roots must fail'), error => error)
+    assert.equal(await Promise.race([waiting.then(() => 'waiting'), result.then(() => 'returned')]), 'waiting',
+      'termination must remain pending while the group still exists')
+    release()
+    assert.match((await result).message, /spawned group terminated/)
+    assert.deepEqual(entries, [])
+    assert.deepEqual(signals, [[-child.pid, 'SIGKILL']], 'cleanup must never re-signal an unverified PID')
+
+    gone = false
+    const error = await recordRootGroup(child, entry => entries.push(entry), {
+      start: () => '', attempts: 1, wait: async () => {},
+    }).then(() => assert.fail('surviving groups must fail'), error => error)
+    assert.match(error.message, /Could not confirm spawned process group exit; host lock retained/)
+    assert.equal(error.unverifiedGroup, child.pid)
+    assert.deepEqual(entries, [], 'incomplete cleanup cannot publish an invalid identity')
+    assert.deepEqual(signals, [[-child.pid, 'SIGKILL'], [-child.pid, 'SIGKILL']])
+  } finally { release(); await result; injected.mock.restore() }
+})
+
+test('supervisor retains its lock when an unjournalled root group cannot be confirmed dead', { timeout: 15000 }, async t => {
+  const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-root-unconfirmed-')), 'suite.lock')
+  const child = Object.assign(new EventEmitter(), { pid: 12345, exitCode: null, signalCode: null })
+  const kill = process.kill.bind(process), original = childProcess.spawnSync, signals = []
+  const spawned = t.mock.method(childProcess, 'spawn', () => child)
+  const inspected = t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
+    if (command === 'ps' && args[0] === '-p' && args[1] === String(child.pid)) return { status: 1, stdout: '' }
+    return original(command, args, options)
+  })
+  const signalled = t.mock.method(process, 'kill', (pid, signal) => {
+    if (pid !== child.pid && pid !== -child.pid) return kill(pid, signal)
+    if (signal === 0) return true // A group member survives the root's exit.
+    signals.push([pid, signal])
+    child.signalCode = signal
+    child.emit('exit', null, signal)
+    return true
+  })
+  syncBuiltinESMExports()
+  try {
+    const error = await runOwnedCommand(process.execPath, [], {
+      lockPath: path, heartbeat: false, rootIdentityWait: async () => {},
+    }).then(() => assert.fail('unconfirmed cleanup must fail'), error => error)
+    assert.equal(existsSync(path), true, 'an empty journal cannot prove the unverified group is gone')
+    assert.match(error.message, /Could not confirm spawned process group exit; host lock retained/)
+    assert.equal(error.unverifiedGroup, child.pid)
+    assert.deepEqual(signals, [[-child.pid, 'SIGKILL']])
+    assert.equal(child.signalCode, 'SIGKILL', 'the root exited before group cleanup completed')
+    const owner = JSON.parse(readFileSync(path, 'utf8'))
+    assert.equal(readFileSync(`${path}.${owner.token}.groups`, 'utf8'), '')
+    await assert.rejects(acquireLock(path), /Another Aeon browser suite/)
+  } finally {
+    spawned.mock.restore(); inspected.mock.restore(); signalled.mock.restore(); syncBuiltinESMExports()
+  }
+})
+
 // Process-control risk: root exit is not proof that its entire group is gone.
 // Hold that kernel observation behind a barrier, without real orphan timing.
 test('root verification failure waits for group disappearance after root exit', async t => {
@@ -688,7 +760,7 @@ test('unconfirmed root group exit retains the supervisor lock and empty journal'
   try {
     await assert.rejects(runOwnedCommand('fixture-root', [], {
       lockPath: path, heartbeat: false, rootIdentityWait: async () => {},
-    }), error => error.unconfirmedGroup === child.pid && /exit not confirmed; host lock retained/.test(error.message))
+    }), error => error.unconfirmedGroup === child.pid && /Could not confirm spawned process group exit; host lock retained/.test(error.message))
     assert.equal(probes, 200, 'cleanup has a bounded observation budget')
     assert.equal(existsSync(path), true, 'an empty journal cannot authorize releasing uncertain ownership')
     const owner = JSON.parse(readFileSync(path, 'utf8')), journal = `${path}.${owner.token}.groups`

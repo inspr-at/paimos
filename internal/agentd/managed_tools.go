@@ -39,7 +39,13 @@ func (s *managedToolServer) Close() error {
 	if s == nil {
 		return nil
 	}
-	return s.server.Close()
+	err := s.server.Close()
+	// Serve may not have registered the listener when startup fails. Close
+	// the listener we own as well, including before the serving goroutine runs.
+	if closeErr := s.listener.Close(); !errors.Is(closeErr, net.ErrClosed) {
+		err = errors.Join(err, closeErr)
+	}
+	return err
 }
 
 type toolBinding struct {

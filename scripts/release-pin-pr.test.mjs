@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// CI's release-pin test entry point also owns the withdrawal-policy regressions.
+// Keep this import explicit and pinned: dropping it must fail this same lane.
 import './release-withdrawals.test.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -72,6 +74,10 @@ function fixture(overrides = {}) {
   return { calls, data, dependencies };
 }
 const changes = f => f.calls.filter(call => ["POST", "PUT", "PATCH"].includes(call.method) && call.path.startsWith(`/repos/${TARGET}/`) && !call.path.endsWith("/installation"));
+
+test('withdrawal-policy regressions stay registered in the release-pin CI entry point', () => {
+  assert.match(readFileSync(new URL('./release-pin-pr.test.mjs', import.meta.url), 'utf8'), /^import '\.\/release-withdrawals\.test\.mjs';$/m);
+});
 
 for (const write of [false, true]) {
   for (const [label, policy] of [

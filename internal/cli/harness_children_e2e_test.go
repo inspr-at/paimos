@@ -199,6 +199,54 @@ func TestClaudeCoordinatorRegistersChildrenEndToEnd(t *testing.T) {
 	if code != 2 || !strings.Contains(stderr, fmt.Sprintf("authenticated agent %q", "aeon-coordinator")) || !strings.Contains(stderr, "--parent-session") {
 		t.Fatal("wrong agent diagnostic omitted the authenticated identity or child guidance")
 	}
+
+	// Risk: a cross-project child borrows its parent's ticket/project or the
+	// CLI looks up the parent inside the child's project. Bind the exact key
+	// to the parent's recorded canonical person, never its issuer as fallback.
+	if parent.OwnerPrincipalID == nil {
+		t.Fatal("parent has no recorded canonical person")
+	}
+	var tenantID, other, ticket, ticketKey string
+	if err := d.Admin.QueryRow(t.Context(), `SELECT tenant_id::text FROM harness_sessions WHERE id=$1`, parent.ID).Scan(&tenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Other project','{"project_key":"OTHER"}'::jsonb FROM node_kinds WHERE slug='project' RETURNING id::text`, tenantID).Scan(&other); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Cross-project work',$2 FROM node_kinds WHERE slug='work' RETURNING id::text,key`, tenantID, other).Scan(&ticket, &ticketKey); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET person_id=$1 WHERE principal_id=$2`, *parent.OwnerPrincipalID, key.PrincipalID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	crossLease, crossArgs := prepare("cross-project", parent.ID, "worker")
+	for i, arg := range crossArgs {
+		if arg == "--project" {
+			crossArgs[i+1] = "OTHER"
+		}
+	}
+	crossArgs = append(crossArgs, "--ticket", ticketKey, "--work-shape", "scout")
+	code, out, stderr = runCLI(crossArgs, "")
+	cross := registered("cross-project", code, out, stderr)
+	assertCross := func(s harness.Session) {
+		t.Helper()
+		if s.ProjectID != other || s.TicketNodeID == nil || *s.TicketNodeID != ticket || s.WorkShape != "scout" || s.ParentID != nil || s.CrossProjectParentID == nil || *s.CrossProjectParentID != parent.ID || s.OwnerPrincipalID == nil || *s.OwnerPrincipalID != *parent.OwnerPrincipalID {
+			t.Fatal("cross-project child lost its own work or canonical lineage")
+		}
+	}
+	assertCross(cross)
+	var crossRead harness.Session
+	if err := c.Do(t.Context(), http.MethodGet, harnessPath(other, cross.ID), nil, &crossRead); err != nil {
+		t.Fatal(err)
+	}
+	assertCross(crossRead)
+	if err := c.DoWithHeaders(t.Context(), http.MethodPost, harnessPath(other, cross.ID)+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1}, &crossRead, map[string]string{"X-Aeon-Worker-Lease": crossLease}); err != nil {
+		t.Fatal(err)
+	}
+	assertCross(crossRead)
 }
 
 // Risk: the CLI omits --branch or hides continuation metadata returned by the

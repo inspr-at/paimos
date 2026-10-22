@@ -7,6 +7,11 @@ show a live row and Working, Waiting, Throttled, Problem and Idle. Draft appeara
 stays in the previews until a successful save; reduced motion stills artwork.
 Personal › Agents retains heartbeat warnings and estimate display.
 
+Settings bookmarks wait up to five seconds for their card or field to render,
+then scroll to it and show its arrival ring. The wait ends on wheel, touch,
+pointer or keyboard input, navigation, an owner change or leaving Settings.
+The existing three-second layout hold starts when the target is found.
+
 Migration 1235 copies saved personal appearance into an owner-only theme based
 on the workspace default and selects it, unless the person already saved an
 explicit theme choice. Legacy avatar/palette names and drawn geometry retain
