@@ -109,24 +109,25 @@ type Answer struct {
 	DeliverAfter time.Time `json:"deliver_after"`
 }
 type Pending struct {
-	Delivery            *DeliveryTruth `json:"delivery,omitempty"`
-	deliveryLabel       string
-	deliveredAt, seenAt *time.Time
-	PickedUpAt          *time.Time `json:"picked_up_at,omitempty"`
-	DoctrineState       string     `json:"doctrine_state,omitempty"`
-	ErrorMessage        string     `json:"error_message,omitempty"`
-	EffectData          EffectData `json:"effect_data,omitempty"`
-	ReceiptState        string     `json:"receipt_state,omitempty"`
-	ReceiptFailure      string     `json:"receipt_failure,omitempty"`
-	DeliverySessionID   string     `json:"delivery_session_id,omitempty"`
-	ID                  string     `json:"id"`
-	AskerID             string     `json:"asker_id,omitempty"`
-	Revision            int64      `json:"revision"`
-	Kind                string     `json:"kind"`
-	State               string     `json:"state"`
-	DeliverAfter        time.Time  `json:"deliver_after"`
-	EffectRef           string     `json:"effect_ref,omitempty"`
-	ErrorCode           string     `json:"error_code,omitempty"`
+	Delivery                   *DeliveryTruth `json:"delivery,omitempty"`
+	nativeState, nativeFailure string
+	deliveryLabel              string
+	deliveredAt, seenAt        *time.Time
+	PickedUpAt                 *time.Time `json:"picked_up_at,omitempty"`
+	DoctrineState              string     `json:"doctrine_state,omitempty"`
+	ErrorMessage               string     `json:"error_message,omitempty"`
+	EffectData                 EffectData `json:"effect_data,omitempty"`
+	ReceiptState               string     `json:"receipt_state,omitempty"`
+	ReceiptFailure             string     `json:"receipt_failure,omitempty"`
+	DeliverySessionID          string     `json:"delivery_session_id,omitempty"`
+	ID                         string     `json:"id"`
+	AskerID                    string     `json:"asker_id,omitempty"`
+	Revision                   int64      `json:"revision"`
+	Kind                       string     `json:"kind"`
+	State                      string     `json:"state"`
+	DeliverAfter               time.Time  `json:"deliver_after"`
+	EffectRef                  string     `json:"effect_ref,omitempty"`
+	ErrorCode                  string     `json:"error_code,omitempty"`
 }
 type Question struct {
 	Outcomes         []OutcomeAvailability `json:"outcomes"`

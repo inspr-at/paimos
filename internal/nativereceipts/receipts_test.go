@@ -277,6 +277,9 @@ func completedInput(t *testing.T, s *Store, b nativecontract.Binding, now time.T
 	if err != nil || r.State != "write_acknowledged" {
 		t.Fatalf("input: %+v %v", r, err)
 	}
+	if replay, err := w.Send(t.Context(), actor, op, in); err != nil || replay.State != r.State || tr.writes.Load() != 1 {
+		t.Fatal("confirmed input replay wrote again or lost its receipt", replay, err)
+	}
 	for i, stage := range []string{"turn_started", "turn_completed"} {
 		r, err = s.Observe(t.Context(), b, op, nativecontract.NativeEvidence{Stage: stage, InputID: in.InputID, RequestID: in.RequestID, TurnRef: "opaque-turn", SourceSequence: uint64(i + 2), ObservedAt: now})
 		if err != nil {

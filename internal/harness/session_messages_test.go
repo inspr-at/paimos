@@ -16,7 +16,7 @@ func exerciseDirectPriorityInbox(t *testing.T) {
 	f := fixture(t)
 	lease := "live-inbox-priority-lease-000000000000001"
 	base := "/api/projects/" + f.project + "/harness-sessions"
-	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test", "harness_session_ref": "priority-ref", "worker_lease": lease, "management_mode": "managed", "role": "worker", "advertised_capabilities": []string{"inbox"}}, "")
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test", "harness_session_ref": "priority-inbox-reference", "worker_lease": lease, "management_mode": "managed", "role": "worker", "advertised_capabilities": []string{"inbox"}}, "")
 	expect(t, w, 201)
 	id := decode(t, w)["id"].(string)
 	var message inbox.Message

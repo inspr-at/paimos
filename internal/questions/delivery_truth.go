@@ -91,6 +91,11 @@ func deliveryTruth(e Pending, original string, now time.Time) *DeliveryTruth {
 		if e.ReceiptFailure != "" {
 			d.FailureReason = e.ReceiptFailure
 		}
+	case e.nativeState == "uncertain" || e.nativeState == "rejected" || e.nativeState == "expired":
+		d.State, d.FailureReason = "failed", e.nativeFailure
+		if d.FailureReason == "" {
+			d.FailureReason = e.nativeState
+		}
 	case e.State == "pending" && now.Before(e.DeliverAfter):
 		d.State = "decided-grace"
 	case d.SeenAt != nil:

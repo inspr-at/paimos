@@ -16,9 +16,7 @@ func exerciseRelatedDeliveryTruth(t *testing.T) {
 	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT tenant_id,kind_id,'PARENT-1','Parent',$2 FROM nodes WHERE id=$1 RETURNING id::text`, f.ticket, f.project).Scan(&parent); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, f.ticket, parent); err != nil {
-		t.Fatal(err)
-	}
+
 	session := func(project, ticket string, stopped bool) string {
 		t.Helper()
 		var id string
@@ -31,6 +29,9 @@ func exerciseRelatedDeliveryTruth(t *testing.T) {
 	}
 	same := session(f.project, f.ticket, false)
 	parentSession := session(f.project, parent, false)
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, f.ticket, parent); err != nil {
+		t.Fatal(err)
+	}
 	lead := session(f.project, "", false)
 	unrelated := session(f.project, "", false)
 	ended := session(f.project, f.ticket, true)

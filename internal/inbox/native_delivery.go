@@ -49,18 +49,16 @@ func RecordNativeInputTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, r n
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_receipts WHERE tenant_id=$1 AND message_id=$2)`, p.TenantID, message).Scan(&hasReceipt); err != nil {
 		return err
 	}
-	failed := r.State == "uncertain" || r.State == "rejected" || r.State == "expired"
-	seen := r.State == "turn_started" || r.State == "turn_completed"
-	if failed || seen {
-		if _, err = tx.Exec(ctx, `UPDATE harness_deliveries SET completed_at=coalesce(completed_at,$3),shown_at=CASE WHEN $4 THEN coalesce(shown_at,$3) ELSE shown_at END WHERE tenant_id=$1 AND id=$2`, p.TenantID, r.OperationID, r.UpdatedAt, seen); err != nil {
-			return err
-		}
+	if r.State == "uncertain" {
+		return nil // Retain the possible-write hold; late P3a evidence may resolve it.
 	}
-	if failed {
-		if hasReceipt {
-			return FailSessionMessage(ctx, tx, p, message, "outcome_unconfirmed")
-		}
-		return nil
+	if r.State == "rejected" || r.State == "expired" {
+		_, err = tx.Exec(ctx, `UPDATE harness_deliveries SET released_at=coalesce(released_at,$3) WHERE tenant_id=$1 AND id=$2 AND completed_at IS NULL`, p.TenantID, r.OperationID, r.UpdatedAt)
+		return err // The inbox remains available; this generation never reinjects it.
+	}
+	seen := r.State == "turn_started" || r.State == "turn_completed"
+	if _, err = tx.Exec(ctx, `UPDATE harness_deliveries SET body_released_at=coalesce(body_released_at,$3),completed_at=CASE WHEN $4 THEN coalesce(completed_at,$3) ELSE completed_at END,shown_at=CASE WHEN $4 THEN coalesce(shown_at,$3) ELSE shown_at END WHERE tenant_id=$1 AND id=$2`, p.TenantID, r.OperationID, r.UpdatedAt, seen); err != nil {
+		return err
 	}
 	// This is the first actual native acknowledgement, not the earlier lease.
 	if err = MarkFetched(ctx, tx, p, SeenDrain, message); err != nil {
