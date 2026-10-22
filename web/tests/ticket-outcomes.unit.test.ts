@@ -65,7 +65,7 @@ it('P03: optional outcomes render recorded evidence and full long text, with hon
         expect(textOf(view.root)).toContain('CI failed')
         expect(textOf(view.root)).toContain('Released in September release')
         expect(textOf(view.root)).not.toContain('raw-release-id')
-        expect(flatten(view.root).find(node => node.props.class === 'detail')?.props.title).toContain(summary)
+        expect(flatten(view.root).find(node => node.props.class === 'detail')?.props.title).toBe(`Review passed. ${summary.trim()}`)
       }
       if (result === 'error') {
         expect(view.find(node => node.props.role === 'alert')).toBeDefined()

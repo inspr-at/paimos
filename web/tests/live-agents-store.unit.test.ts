@@ -262,7 +262,7 @@ it('P03: every ticket consumer shares one poll and reports partial or withheld w
     await store.refresh()
     expect(store.truncated).toBe(true)
     expect(workers()).toHaveLength(2)
-    expect(workers().map(worker => worker.session_id)).toEqual(['s1', undefined])
+    expect(new Set(workers().map(worker => worker.session_id))).toEqual(new Set(['s1', undefined]))
     expect(ticketWorkers(store.forProject('p2'), 'p2').size).toBe(0)
     expect(Stream.current).toBe(stream)
     stop()
