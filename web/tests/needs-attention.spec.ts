@@ -228,7 +228,7 @@ test('AEON-1639: attention search and singular turn-off copy keep controls still
     await guard.check(() => also.check())
     await guard.check(() => also.uncheck())
     guard.done()
-    await page.screenshot({ path: testInfo.outputPath(`AEON-1639/attention-off-${width}-${theme}.png`), fullPage: true })
+    await page.screenshot({ path: testInfo.outputPath(`attention-off-${width}-${theme}.png`), fullPage: true })
     await off.getByRole('button', { name: /^Cancel/ }).click()
   }
   expect(data.queries.length).toBeGreaterThan(0)
