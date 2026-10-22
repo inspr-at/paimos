@@ -17,6 +17,21 @@ const Scheme = "Aeon-Worker"
 
 const LegacyHeader = "X-Aeon-Worker-Lease"
 
+// SafetyRoute is the closed metadata-only worker transport allowlist. It is
+// not an authorization decision: handlers still require the live key, exact
+// session agent/lease and process-generation fences, and must redact content
+// when the run person's live authority is unavailable.
+func SafetyRoute(r *http.Request) bool {
+	switch r.Pattern {
+	case "POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield",
+		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/stop",
+		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/confirm-exit",
+		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete":
+		return true
+	}
+	return false
+}
+
 const (
 	minLease = 32
 	maxLease = 4096

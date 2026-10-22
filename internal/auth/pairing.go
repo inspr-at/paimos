@@ -10,6 +10,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -35,6 +36,23 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 		}
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		deny := &agentpairing.Error{Status: 403, Code: "forbidden", Message: "outside this computer's runtime authority"}
+		// Stop and yield stay available after the starting person is revoked.
+		// That exemption is metadata-only: a non-empty worker lease on a safety
+		// route still has to prove this exact session is this computer's harness
+		// generation, and never falls through to the coarse project check.
+		if lease := workerlease.Read(r); workerlease.SafetyRoute(r) && lease != "" {
+			if len(parts) < 5 || parts[0] != "api" || parts[1] != "projects" || parts[3] != "harness-sessions" || !validRouteUUID(parts[2]) || !validRouteUUID(parts[4]) {
+				return deny
+			}
+			owned, err := db.PairedSafetyGenerationOwned(r.Context(), tx, p.TenantID, p.ID, parts[2], parts[4], lease)
+			if err != nil {
+				return err
+			}
+			if !owned {
+				return deny
+			}
+			return nil
+		}
 		if len(parts) < 2 {
 			return deny
 		}
