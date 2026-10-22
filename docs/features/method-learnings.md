@@ -27,9 +27,10 @@ requests without a reason remain valid.
 
 At the next server startup, each instance clears pre-release open sources
 without any recommendation. Migration 1350 records a fixed cutoff for existing
-tenants; startup records one for new tenants. Cleanup runs under each tenant's
-System principal, in bounded batches and separate item transactions, logs counts
-per project, and writes the normal undoable dismissal event with the reason:
+tenants; startup marks later tenants complete without a legacy scan. Cleanup
+runs under each tenant's System principal, in bounded batches and separate item
+transactions, logs counts per project, and writes the normal undoable dismissal
+event with the reason:
 
 > auto-dismissed: legacy title-only nomination without a lesson (Markus 2026-10-14)
 
@@ -38,11 +39,3 @@ ones. It copies no source text into new events. Checkpoints resume interrupted
 work, and the completion marker prevents a restart from dismissing a source
 that a person has reopened by undo. This backend package does not add the
 Decision Desk UI; that is the separate P2 delivery.
-
-The six ESSENTIAL behavior tests cover signal selection, prepared person and
-project visibility, audited agent dismissal and authorized person undo,
-person-only acceptance, resumable cleanup, and exact prepared rule text.
-Full knowledge and contract suites pass; isolated negative controls reject
-broadened signals, unprepared person visibility, blocked agent dismissal,
-agent acceptance, disabled cleanup and a missing source-summary range enum.
-The static merge check passes all 42 checks without skips.
