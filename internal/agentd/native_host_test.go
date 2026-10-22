@@ -26,19 +26,21 @@ import (
 // nativeHostServer is the paired server as the C0 host sees it: start and
 // command claims, the owner's view, receipts and the per-runtime command queue.
 type nativeHostServer struct {
-	mu        sync.Mutex
-	now       time.Time
-	tenant    string
-	owner     string
-	project   string
-	policy    nativecontract.Policy
-	launch    nativecontract.LaunchConfig
-	sessions  map[string]*nativeHostSession // intent request ID
-	commands  map[string]*nativeHostCommand // operation ID
-	revoked   map[string]bool               // intent request IDs whose launch re-check is refused
-	refused   map[string]bool               // owned session IDs whose receipts are refused
-	rejected  []nativecontract.Receipt
-	completed chan nativecontract.Receipt
+	mu               sync.Mutex
+	now              time.Time
+	tenant           string
+	owner            string
+	project          string
+	policy           nativecontract.Policy
+	launch           nativecontract.LaunchConfig
+	sessions         map[string]*nativeHostSession // intent request ID
+	commands         map[string]*nativeHostCommand // operation ID
+	revoked          map[string]bool               // intent request IDs whose launch re-check is refused
+	refused          map[string]bool               // owned session IDs whose receipts are refused
+	rejected         []nativecontract.Receipt
+	completed        chan nativecontract.Receipt
+	startMode        string
+	terminalEvidence []daemon.TerminalEvidence
 }
 type nativeHostSession struct {
 	local     nativecontract.LocalStart
@@ -47,9 +49,10 @@ type nativeHostSession struct {
 	view      nativecontract.SessionView
 }
 type nativeHostCommand struct {
-	item    nativecontract.PendingCommand
-	command nativecontract.DaemonCommand
-	done    bool
+	item      nativecontract.PendingCommand
+	command   nativecontract.DaemonCommand
+	done      bool
+	successor *nativecontract.Binding
 }
 
 func nativeHostRefuse(w http.ResponseWriter, status int, reason nativecontract.Reason) {
@@ -79,6 +82,9 @@ func (f *nativeHostServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && r.URL.Path == "/api/agentd/native-sessions/receipts":
 		var in nativecontract.Receipt
 		_ = json.Unmarshal(raw, &in)
+		if proof.Terminal != nil {
+			f.terminalEvidence = append(f.terminalEvidence, *proof.Terminal)
+		}
 		out, status, reason = f.receipt(in)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/projects/"+f.project+"/native-sessions/"):
 		s := f.byOwned(strings.TrimPrefix(r.URL.Path, "/api/projects/"+f.project+"/native-sessions/"))
@@ -118,6 +124,11 @@ func (f *nativeHostServer) claim(proof daemon.Proof, in nativecontract.Claim) (a
 		if s == nil {
 			s = &nativeHostSession{local: local, operation: uuid.NewString(), binding: nativecontract.Binding{TenantID: f.tenant, ProjectID: f.project, OwnedSessionID: uuid.NewString(), HarnessSessionID: uuid.NewString(), RuntimeEpoch: uuid.NewString(), DaemonID: in.DaemonID, DaemonGeneration: in.DaemonGeneration, BindingRevision: 2}}
 			s.view = nativecontract.SessionView{OwnedSessionID: s.binding.OwnedSessionID, CurrentBinding: &s.binding, OwnerPersonID: f.owner, Role: "coordinator", Profile: "native", Harness: Claude, State: "starting", Mode: "structured", Revision: 2, ConversationRef: "fixture-conversation"}
+			if f.startMode != "" {
+				s.view.Mode = f.startMode
+			}
+			s.view.Generation = 1
+			s.view.Capabilities.Steer, s.view.Capabilities.Quota = "unsupported", "unsupported"
 			f.sessions[local.Intent.RequestID] = s
 		} else if f.revoked[local.Intent.RequestID] {
 			return nil, http.StatusForbidden, nativecontract.ReasonPermissionRevoked
@@ -132,6 +143,29 @@ func (f *nativeHostServer) claim(proof daemon.Proof, in nativecontract.Claim) (a
 		b, command := c.item.ExpectedBinding, c.command
 		s := f.byOwned(b.OwnedSessionID)
 		return nativecontract.ClaimResult{OperationID: in.OperationID, OwnedSessionID: b.OwnedSessionID, Intent: s.local.Intent, Policy: f.policy, ExpectedBinding: &b, ExpiresAt: f.now.Add(20 * time.Second), ClaimKind: "command", LaunchConfig: f.launch, Command: &command, CommandActor: &nativecontract.CommandActor{TenantID: f.tenant, PrincipalID: f.owner, OwnerPersonID: f.owner, GrantID: f.policy.GrantID, GrantRevision: f.policy.GrantRevision}, AuthorizationTTLMS: 20000}, 0, ""
+	case "resume":
+		c := f.commands[in.OperationID]
+		_, _, x := proof.Runtime()
+		if c == nil || x == nil || !x.RootExited || !x.GroupAbsent {
+			return nil, http.StatusConflict, nativecontract.ReasonOwnershipUnconfirmed
+		}
+		s := f.byOwned(c.item.OwnedSessionID)
+		if c.successor == nil {
+			b := s.binding
+			b.RuntimeEpoch, b.HarnessSessionID = uuid.NewString(), uuid.NewString()
+			b.BindingRevision++
+			c.successor = &b
+			s.binding = b
+			s.view.CurrentBinding = &s.binding
+			s.view.Generation++
+			s.view.Revision++
+			if c.command.Kind == "take" {
+				s.view.Mode, s.view.State = "terminal", "taken"
+			} else {
+				s.view.Mode, s.view.State = "structured", "idle"
+			}
+		}
+		return nativecontract.ClaimResult{OperationID: in.OperationID, OwnedSessionID: s.binding.OwnedSessionID, Intent: s.local.Intent, Policy: f.policy, ExpectedBinding: c.successor, ExpiresAt: f.now.Add(20 * time.Second), ClaimKind: "resume", LaunchAuthorized: true, LaunchConfig: f.launch, AuthorizationTTLMS: 20000}, 0, ""
 	}
 	return nil, http.StatusBadRequest, nativecontract.ReasonUnsupported
 }
@@ -164,6 +198,11 @@ func (f *nativeHostServer) receipt(in nativecontract.Receipt) (any, int, nativec
 		switch in.State {
 		case "applied":
 			s.view.State = "running"
+			if s.view.Mode == "terminal" {
+				s.view.State = "taken"
+			}
+		case "exit_confirmed":
+			s.view.State = "stopped"
 		case "rejected":
 			s.view.State, s.view.Reason = "failed", in.Reason
 			f.rejected = append(f.rejected, in)
@@ -202,14 +241,15 @@ func (p nativeHostProfiles) Resolve(_ context.Context, q nativecontract.ProfileR
 // nativeHostProvider stands in for an owned provider. Turns are explicit
 // test observations, never inferred from a successful write.
 type nativeHostProvider struct {
-	mu       sync.Mutex
-	identity nativecontract.NativeIdentity
-	events   chan nativecontract.ProviderEvent
-	sequence uint64
-	inputs   []string
-	closes   int
-	exited   bool
-	now      time.Time
+	mu                         sync.Mutex
+	identity                   nativecontract.NativeIdentity
+	events                     chan nativecontract.ProviderEvent
+	sequence                   uint64
+	inputs                     []string
+	closes                     int
+	exited                     bool
+	now                        time.Time
+	closeEntered, closeRelease chan struct{}
 }
 
 func (p *nativeHostProvider) Send(_ context.Context, in nativecontract.Input) (nativecontract.NativeEvidence, error) {
@@ -225,7 +265,15 @@ func (*nativeHostProvider) Interrupt(context.Context, nativecontract.Interrupt) 
 func (*nativeHostProvider) Decide(context.Context, nativecontract.ApprovalDecision) (nativecontract.NativeEvidence, error) {
 	return nativecontract.NativeEvidence{}, ErrUnsupported
 }
-func (p *nativeHostProvider) Close(context.Context) (nativecontract.ExitEvidence, error) {
+func (p *nativeHostProvider) Close(ctx context.Context) (nativecontract.ExitEvidence, error) {
+	if p.closeEntered != nil {
+		close(p.closeEntered)
+		select {
+		case <-ctx.Done():
+			return nativecontract.ExitEvidence{}, ctx.Err()
+		case <-p.closeRelease:
+		}
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.closes++
@@ -276,6 +324,7 @@ type nativeHostLauncher struct {
 	now       time.Time
 	opens     int
 	providers map[string]*nativeHostProvider // runtime epoch
+	step      time.Duration
 }
 
 func (l *nativeHostLauncher) Open(_ context.Context, spec nativecontract.LaunchSpec) (nativecontract.NativeTransport, error) {
@@ -284,6 +333,10 @@ func (l *nativeHostLauncher) Open(_ context.Context, spec nativecontract.LaunchS
 	l.opens++
 	digest := sha256.Sum256([]byte(spec.Binding.RuntimeEpoch))
 	p := &nativeHostProvider{now: l.now, events: make(chan nativecontract.ProviderEvent, 16), identity: nativecontract.NativeIdentity{Provider: Claude, NativeSessionRef: uuid.NewString(), RuntimeEpoch: spec.Binding.RuntimeEpoch, PID: 4000 + l.opens, StartedAt: l.now, ProcessIdentityDigest: hex.EncodeToString(digest[:])}}
+	if spec.ResumeRef != "" {
+		p.identity.NativeSessionRef = spec.ResumeRef
+	}
+	p.identity.StartedAt = l.now.Add(time.Duration(l.opens) * l.step)
 	l.providers[spec.Binding.RuntimeEpoch] = p
 	return p, nil
 }

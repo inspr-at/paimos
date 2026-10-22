@@ -20,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -301,6 +302,17 @@ func appendEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, proje
 		harness = &view.CurrentBinding.HarnessSessionID
 		epoch = &view.CurrentBinding.RuntimeEpoch
 	}
-	_, err := events.Append(ctx, tx, p, events.Change{NodeID: &project, Type: kind, After: map[string]any{"project_id": project, "owned_session_id": view.OwnedSessionID, "harness_session_id": harness, "runtime_epoch": epoch, "revision": view.Revision, "request_id": request, "state": view.State, "reason": view.Reason, "operation_id": operation}})
+	after := map[string]any{"project_id": project, "owned_session_id": view.OwnedSessionID, "harness_session_id": harness, "runtime_epoch": epoch, "revision": view.Revision, "request_id": request, "state": view.State, "reason": view.Reason, "operation_id": operation}
+	// The existing authorized lifecycle transaction is the only persistence
+	// path. Live replay remains RAM-only; only aggregate counts and a content
+	// hash for this exact runtime are added to its lifecycle evidence.
+	if proof, ok := ctx.Value(proofKey{}).(daemon.Proof); ok && proof.Terminal != nil && epoch != nil {
+		if proof.Terminal.RuntimeEpoch == *epoch {
+			after["terminal"] = *proof.Terminal
+		} else if proof.Exit != nil && proof.Exit.RootExited && proof.Exit.GroupAbsent && proof.Terminal.RuntimeEpoch == proof.Identity.RuntimeEpoch {
+			after["predecessor_terminal"] = *proof.Terminal
+		}
+	}
+	_, err := events.Append(ctx, tx, p, events.Change{NodeID: &project, Type: kind, After: after})
 	return err
 }

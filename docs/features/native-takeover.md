@@ -144,3 +144,67 @@ package tests and `nativepty -race` passed on implementation commit `f11a1d4ff`.
 Guarded `ci-static --merge-main` exited 0 with 42 checks passed and no optional
 skips. Canonical tier validation and affected selection also exited 0; selection
 requires the FULL CI lane. Non-blocking review findings remain follow-up work.
+
+## Route 3 owning host (AEON-1361 P1)
+
+The C0 owning host now connects a qualified terminal runtime to the existing
+account ledger, person-bound start, command journal and transient relay. A
+terminal start uses the mode and exact conversation identity returned by the
+authorized server start/profile policy. Local requests have no mode selector.
+Only enrolled Claude Code and Codex CLI profiles are eligible; ordinary
+structured starts continue without allocating a PTY. The released server
+policy still selects structured starts. Production terminal launch, TUI
+qualification, screen export and the person PTY command adapter remain closed.
+
+An initial command plan must bind the server conversation without inventing a
+vendor resume reference. Its bounded readiness parser observes the native
+conversation identity from provider output. A fork alone cannot produce the
+host's applied start/take receipt. Startup output is held in a bounded RAM
+spool; readiness failure, cancellation and excessive initialization output
+retain the returned owned handle. The operation context never becomes the
+runtime lifetime. Binary qualification and the host's current grant check run
+again immediately before fork through `PTYLaunchSpec.Revalidate`.
+
+`NativePTYAuthority` is the explicit integration port for package G. It must
+prepare a payload-bound server operation for the independently authenticated
+local person and resolve the viewer to its actual controller client. Its
+`WithWrite` holds the shared access-change fence through the final native I/O;
+no database transaction spans I/O. The host also holds the same per-owner lock
+used by structured commands, stop, take and hand-back. The metadata journal
+records the possible-write boundary before I/O and rechecks expiry and daemon
+identity after that disk barrier. The existing nativepty controller enforces
+exact binding, current actor/client/controller epoch, monotonic sequence,
+40×12–320×100 dimensions and changed-size-only resize. Reconnect reapplies the
+holder's dimensions. The existing 150 ms client debounce is unchanged. An
+uncertain write consumes its sequence and requires explicit recovery; it never
+automatically injects input again. A socket bearer or paired agent supplies no
+person authority. The released person bridge does not install this new port.
+
+Terminal output is drained even when no export relay is installed. A qualified
+relay uses its existing bounded RAM ring, per-viewer delivery authorization and
+explicit eviction gaps. Missing source frames produce an explicit gap. EOF,
+owner lifetime cancellation and deadlines use the same ownedprocess cleanup
+owner as the launcher. Natural terminal exit is reported on the original start
+operation through the existing private receipt route. The server rechecks the
+paired lease, exact binding and root/group exit inside its access-change
+transaction before releasing the root. Local occupancy is freed only after
+that write succeeds. Unknown exit or a refused report keeps occupancy; Poll
+reconciles an observed exit without another signal or writer. Supervisor Close
+continues to refuse while a process may still exist and never signals it.
+
+LEAD decision D4 supersedes raw transcript persistence for r140. Replay remains
+RAM-only and is erased on retirement. The existing event log retains lifecycle
+events, observed output byte/frame counts and a cumulative SHA-256 content hash
+for the exact terminal epoch, including an exited predecessor on hand-back.
+PTY command journals contain receipt metadata and payload hashes. Raw terminal
+bytes, reasoning, interim chat and tool bodies never enter these paths. Counts
+describe observed output, not a durable or complete transcript. Existing final
+delivery and its explicit retention authorization remain separate.
+
+Qualification evidence in this package uses fake providers and compiled harmless
+test children. Live acceptance (AEON-268) must still qualify the exact official
+Claude Code/Codex command, profile, readiness parser, settings/tool ceiling,
+native-history policy and OS fence. Initial server/profile terminal selection,
+the package G person command adapter and independently qualified watch export
+must be installed before enabling their production capabilities. This package
+changes no operator accounts, host enrollment, browser frontend or deployment.

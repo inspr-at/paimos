@@ -101,6 +101,39 @@ type Manager struct {
 	structured    nativecontract.NativeTransport // retained even if commit fails
 }
 
+// OwnedControl binds the existing input/size fencing to a handle retained by
+// the owning host. It neither launches nor adopts a process and cannot switch
+// runtimes. Initial starts and taken successors use the same control rules.
+type OwnedControl struct{ manager *Manager }
+
+func NewOwnedControl(spec nativecontract.LaunchSpec, runtime nativecontract.PTYRuntime, authority Authority, clock nativecontract.Clock) (*OwnedControl, error) {
+	if runtime == nil || authority == nil || spec.Mode != "terminal" || spec.OwnedWriterID == "" || !validConversationIdentity(runtime.Identity(), spec) {
+		return nil, refuse(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	if clock == nil {
+		clock = realClock{}
+	}
+	v, err := nativecontract.NewValidator()
+	if err != nil {
+		return nil, err
+	}
+	if _, err = nativestream.Encode(v, "NativeBinding", spec.Binding); err != nil {
+		return nil, err
+	}
+	if _, err = nativestream.Encode(v, "NativePolicy", spec.Policy); err != nil {
+		return nil, err
+	}
+	m := &Manager{gate: make(chan struct{}, 1), config: Config{Authority: authority, Clock: clock}, validator: v, spec: cloneSpec(spec), state: "taken", mode: "terminal", pty: runtime, cols: DefaultCols, rows: DefaultRows}
+	return &OwnedControl{manager: m}, nil
+}
+
+func (c *OwnedControl) Input(ctx context.Context, caller Caller, in nativecontract.PTYInput) (nativecontract.NativeEvidence, error) {
+	return c.manager.Input(ctx, caller, in)
+}
+func (c *OwnedControl) Resize(ctx context.Context, caller Caller, in nativecontract.Resize) (nativecontract.NativeEvidence, error) {
+	return c.manager.resizeOwned(ctx, caller, in, false, true)
+}
+
 type realClock struct{}
 
 func (realClock) Now() time.Time                         { return time.Now() }
@@ -524,6 +557,9 @@ func (m *Manager) Resize(ctx context.Context, caller Caller, in nativecontract.R
 	return m.resize(ctx, caller, in, false)
 }
 func (m *Manager) resize(ctx context.Context, caller Caller, in nativecontract.Resize, regain bool) (evidence nativecontract.NativeEvidence, err error) {
+	return m.resizeOwned(ctx, caller, in, regain, false)
+}
+func (m *Manager) resizeOwned(ctx context.Context, caller Caller, in nativecontract.Resize, regain, reconnect bool) (evidence nativecontract.NativeEvidence, err error) {
 	if err = m.validate("NativeResize", in, in.Cols, in.Rows); err != nil {
 		return evidence, err
 	}
@@ -536,6 +572,7 @@ func (m *Manager) resize(ctx context.Context, caller Caller, in nativecontract.R
 	if m.state != "taken" || m.pty == nil {
 		return evidence, refuse(nativecontract.ReasonOwnershipUnconfirmed)
 	}
+	regain = regain || reconnect && (m.holder == nil || m.holder.Controller.Epoch != in.ControllerEpoch)
 	err = m.authorize(ctx, caller, in.ExpectedBinding, in.ControllerEpoch, "resize", in.ExpiresAt, func(access Access) error {
 		ioCtx, finish := context.WithDeadline(ctx, minDeadline(access.Deadline, in.ExpiresAt))
 		defer finish()

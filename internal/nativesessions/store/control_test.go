@@ -3,7 +3,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativesessions/consent"
+	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
 	"github.com/inspr-at/paimos/internal/nativesessions/interaction"
 	"github.com/inspr-at/paimos/internal/nativesessions/stream"
 	"github.com/inspr-at/paimos/internal/nativestream"
@@ -64,6 +67,9 @@ func (p *controlPTYFixture) Identity() nativecontract.NativeIdentity {
 	return p.identity
 }
 func (p *controlPTYFixture) Frames() <-chan nativecontract.TerminalFrame { return p.frames }
+func (p *controlPTYFixture) Ready(context.Context) (nativecontract.NativeIdentity, error) {
+	return p.Identity(), nil
+}
 func (p *controlPTYFixture) Write(context.Context, nativecontract.PTYInput) (nativecontract.NativeEvidence, error) {
 	p.mu.Lock()
 	p.writes++
@@ -256,6 +262,21 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 	}
 	if accepted.Receipt.OperationID == returned.Receipt.OperationID {
 		t.Fatal("different transitions reused operation")
+	}
+	// D4 permits aggregate lifecycle evidence, never persisted screen content.
+	// The final PTY summary is recorded in the authorized successor admission
+	// transaction against the exact exited predecessor epoch.
+	var metadata []byte
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT after->'predecessor_terminal' FROM events WHERE tenant_id=$1 AND after->'predecessor_terminal'->>'runtime_epoch'=$2`, f.person.TenantID, takenBinding.RuntimeEpoch).Scan(&metadata); err != nil {
+		t.Fatal("terminal lifecycle evidence", err)
+	}
+	var evidence daemon.TerminalEvidence
+	hash := sha256.Sum256([]byte("live owned terminal"))
+	if err := json.Unmarshal(metadata, &evidence); err != nil || evidence.OutputBytes != uint64(len("live owned terminal")) || evidence.Frames != 1 || evidence.OutputSHA256 != hex.EncodeToString(hash[:]) {
+		t.Fatal("terminal counts/hash", string(metadata), err)
+	}
+	if strings.Contains(string(metadata), "live owned terminal") || strings.Contains(string(metadata), base64.StdEncoding.EncodeToString([]byte("live owned terminal"))) {
+		t.Fatal("terminal content persisted")
 	}
 	// An explicit provider-exit observation drives P5 manual recovery. The
 	// retained handle, existing ledger and journal are checked; no saved PID

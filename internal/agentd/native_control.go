@@ -3,21 +3,233 @@ package agentd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"hash"
 	"net/http"
 	"reflect"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativeintegration/delivery"
+	"github.com/inspr-at/paimos/internal/nativepty"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
 	"github.com/inspr-at/paimos/internal/nativesessions/stream"
 	"github.com/inspr-at/paimos/internal/nativestream"
 )
+
+// NativePTYAuthority is the qualified local person command port. Prepare must
+// durably accept the exact payload on the server and resolve its viewer to the
+// actual client. WithWrite revalidates that operation, person, controller,
+// binding and grant while holding the shared access-change fence through I/O.
+// It must not hold a database transaction through the callback.
+type NativePTYAuthority interface {
+	nativepty.Authority
+	Prepare(context.Context, nativecontract.Actor, nativestream.LocalRequest, string) (nativepty.Caller, string, error)
+}
+
+type nativeHostClock struct{ now func() time.Time }
+
+func (c nativeHostClock) Now() time.Time                         { return c.now() }
+func (c nativeHostClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
+
+// nativePTYWrite adds the existing metadata journal to the nativepty fence.
+// Its intent is request-scoped under nativeOwned.opMu, shared with transitions,
+// stop and structured writes. No PTY bytes are written to this journal.
+type nativePTYWrite struct {
+	owner  *nativeOwned
+	intent nativereceipts.Intent
+	begun  bool
+	epoch  string
+}
+
+func (w *nativePTYWrite) WithWrite(ctx context.Context, caller nativepty.Caller, binding nativecontract.Binding, kind string, fn func(nativepty.Access) error) error {
+	e := w.owner
+	a := e.host.config.PTYAuthority
+	if a == nil {
+		return nativeRefusal(nativecontract.ReasonQualificationMissing)
+	}
+	return a.WithWrite(ctx, caller, binding, kind, func(access nativepty.Access) error {
+		now := e.host.s.capacityNow()
+		if !binding.Equal(*e.grant.ExpectedBinding) || binding.DaemonID != e.host.s.daemonID || binding.DaemonGeneration != e.host.s.generation {
+			return nativeRefusal(nativecontract.ReasonWrongGeneration)
+		}
+		if access.Controller.ActorID != caller.Actor.PrincipalID || access.Controller.ClientID != caller.ClientID || access.Controller.Epoch != w.epoch || access.Controller.ControllerID == "" {
+			return nativeRefusal(nativecontract.ReasonControllerConflict)
+		}
+		if !now.Before(access.Deadline) || !now.Before(w.intent.ExpiresAt) || !now.Before(e.grant.Policy.ExpiresAt) {
+			return nativeRefusal(nativecontract.ReasonControllerExpired)
+		}
+		if _, err := e.journal.BeginWrite(ctx, binding, w.intent.Receipt.OperationID); err != nil {
+			return err
+		}
+		w.begun = true
+		// The access-change fence is still held after fsync. Recheck time and
+		// the daemon/runtime immediately before the controller touches the PTY.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if binding.DaemonID != e.host.s.daemonID || binding.DaemonGeneration != e.host.s.generation || e.transport.Identity().ProcessIdentityDigest != w.intent.ProcessIdentityDigest {
+			return nativeRefusal(nativecontract.ReasonWrongGeneration)
+		}
+		now = e.host.s.capacityNow()
+		if !now.Before(access.Deadline) || !now.Before(w.intent.ExpiresAt) || !now.Before(e.grant.Policy.ExpiresAt) {
+			return nativeRefusal(nativecontract.ReasonControllerExpired)
+		}
+		return fn(access)
+	})
+}
+
+func (h *NativeHost) ptyOperation(ctx context.Context, b nativecontract.Binding, request, kind string, value any, expires time.Time) (out nativecontract.OperationResult, err error) {
+	ctx, cancel := context.WithTimeout(ctx, nativecontract.LocalOperationSeconds*time.Second)
+	defer cancel()
+	schema := map[string]string{"pty_input": "NativePTYInput", "resize": "NativeResize"}[kind]
+	v, err := nativecontract.NewValidator()
+	if err != nil {
+		return out, err
+	}
+	raw, err := nativestream.Encode(v, schema, value)
+	if err != nil {
+		return out, err
+	}
+	local, ok := ctx.Value(nativeLocalRequestKey{}).(nativeLocalRequest)
+	if !ok || local.actor.PrincipalKind != "person" || len(local.actor.KeyCeiling) != 0 || local.actor.TenantID != b.TenantID {
+		return out, nativeRefusal(nativecontract.ReasonWrongPrincipal)
+	}
+	if h.config.PTYAuthority == nil {
+		return out, nativeRefusal(nativecontract.ReasonQualificationMissing)
+	}
+	if b.DaemonID != h.s.daemonID || b.DaemonGeneration != h.s.generation {
+		return out, nativeRefusal(nativecontract.ReasonWrongGeneration)
+	}
+	h.mu.Lock()
+	var e *nativeOwned
+	for _, candidate := range h.entries {
+		if candidate.grant.ExpectedBinding != nil && candidate.grant.ExpectedBinding.Equal(b) {
+			e = candidate
+			break
+		}
+	}
+	h.mu.Unlock()
+	if e == nil {
+		return out, ErrNotOwned
+	}
+	if err = e.opMu.LockContext(ctx); err != nil {
+		return out, err
+	}
+	defer e.opMu.Unlock()
+	if e.transition != nil || e.terminal == nil || e.terminal.control == nil || e.exited || !b.Equal(*e.grant.ExpectedBinding) {
+		return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	if err = e.faulted(); err != nil {
+		return out, err
+	}
+	local.request.Method, local.request.OwnedSessionID, local.request.ExpectedBinding = kind, b.OwnedSessionID, &b
+	local.request.Envelope = &nativecontract.LocalEnvelope{Protocol: nativecontract.LocalProtocol, RequestID: request, Method: kind, ExpectedBinding: &b, Params: raw}
+	digest, err := nativereceipts.Digest(value)
+	if err != nil {
+		return out, err
+	}
+	caller, operation, err := h.config.PTYAuthority.Prepare(ctx, local.actor, local.request, digest)
+	if err != nil {
+		return out, err
+	}
+	if !caller.Local || caller.Actor.PrincipalKind != "person" || caller.Actor.PrincipalID != local.actor.PrincipalID || caller.Actor.TenantID != b.TenantID || len(caller.Actor.KeyCeiling) != 0 || !uuidPattern.MatchString(operation) {
+		return out, nativeRefusal(nativecontract.ReasonWrongPrincipal)
+	}
+	intent := nativereceipts.Intent{Receipt: nativecontract.Receipt{RequestID: request, OperationID: operation, Binding: &b, Operation: kind, State: "accepted", SourceSequence: "0", UpdatedAt: h.s.capacityNow().UTC()}, ActorID: caller.Actor.PrincipalID, PayloadSHA256: digest, ExpiresAt: expires, ProcessIdentityDigest: e.transport.Identity().ProcessIdentityDigest}
+	r, err := e.journal.Accept(ctx, intent)
+	if err != nil {
+		return out, err
+	}
+	if r.State != "accepted" {
+		return out, nativeRefusal(nativecontract.ReasonInputOutcomeUnconfirmed)
+	}
+	e.ptyWrite.intent, e.ptyWrite.begun = intent, false
+	if kind == "pty_input" {
+		e.ptyWrite.epoch = value.(nativecontract.PTYInput).ControllerEpoch
+	} else {
+		e.ptyWrite.epoch = value.(nativecontract.Resize).ControllerEpoch
+	}
+	var evidence nativecontract.NativeEvidence
+	if kind == "pty_input" {
+		evidence, err = e.terminal.control.Input(ctx, caller, value.(nativecontract.PTYInput))
+	} else {
+		evidence, err = e.terminal.control.Resize(ctx, caller, value.(nativecontract.Resize))
+	}
+	if err == nil {
+		evidence.SourceSequence = 1
+		e.mu.Lock()
+		e.observations[evidence.Stage+"/"+request] = evidence
+		e.mu.Unlock()
+		r, err = e.journal.Observe(ctx, b, operation, evidence)
+	}
+	if err != nil && e.ptyWrite.begun {
+		reason := nativecontract.ReasonInputOutcomeUnconfirmed
+		cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer stop()
+		r, journalErr := e.journal.SetIntentState(cleanup, b, operation, "uncertain", &reason)
+		out.Receipt = r
+		e.mu.Lock()
+		e.refused = nativeRefusal(reason) // Explicit recovery, never reinjection.
+		e.mu.Unlock()
+		return out, errors.Join(err, journalErr)
+	}
+	if err != nil {
+		return out, err
+	}
+	out.Receipt = r
+	e.eventMu.Lock()
+	_, err = e.journal.FlushOperationReports(ctx, b, operation, 16, e)
+	e.eventMu.Unlock()
+	return out, err
+}
+
+func (e *nativeOwned) openTerminal(ctx context.Context, spec nativecontract.LaunchSpec, cols, rows int) (nativecontract.NativeTransport, error) {
+	actor := nativecontract.Actor{TenantID: e.owner.TenantID, PrincipalID: e.owner.PrincipalID, PrincipalKind: "person", OwnerPersonID: e.owner.OwnerPersonID, GrantID: e.owner.GrantID, GrantRevision: e.owner.GrantRevision}
+	if e.host.config.Terminal == nil || e.host.config.Qualification == nil {
+		return nil, nativeRefusal(nativecontract.ReasonQualificationMissing)
+	}
+	check := func(ctx context.Context) error {
+		if err := e.host.config.Qualification.Require(ctx, actor, spec, "terminal"); err != nil {
+			return err
+		}
+		return e.require(ctx)
+	}
+	if err := check(ctx); err != nil {
+		return nil, err
+	}
+	pty, err := e.host.config.Terminal.OpenPTY(ctx, nativecontract.PTYLaunchSpec{LaunchSpec: spec, Cols: cols, Rows: rows, Revalidate: check})
+	if pty == nil {
+		return nil, err
+	}
+	t := &nativeTerminalTransport{PTYRuntime: pty, events: make(chan nativecontract.ProviderEvent), digest: sha256.New(), spec: spec}
+	e.mu.Lock()
+	e.terminal = t
+	e.mu.Unlock()
+	if err != nil {
+		return t, err
+	}
+	identity, err := nativecontract.ReadyPTY(ctx, pty)
+	if err != nil {
+		return t, err
+	}
+	if identity != pty.Identity() || identity.Provider != e.local.Intent.Harness || identity.RuntimeEpoch != spec.Binding.RuntimeEpoch || identity.NativeSessionRef == "" || spec.ResumeRef != "" && identity.NativeSessionRef != spec.ResumeRef {
+		return t, nativeRefusal(nativecontract.ReasonIdentityMismatch)
+	}
+	spec.ResumeRef = identity.NativeSessionRef
+	e.ptyWrite = &nativePTYWrite{owner: e}
+	t.control, err = nativepty.NewOwnedControl(spec, pty, e.ptyWrite, nativeHostClock{e.host.s.capacityNow})
+	return t, err
+}
 
 // Only content-free transition metadata enters the existing possible-fork
 // journal. Handles, native resume references and worker proof remain in RAM.
@@ -185,7 +397,9 @@ func (e *nativeOwned) admitSuccessor(ctx context.Context, g nativecontract.Claim
 	t.previous = e.proof
 	e.mu.Unlock()
 	t.previous.SetRuntime(i, nativecontract.NativeEvidence{}, &x)
+	t.previous.Terminal = e.terminalEvidence()
 	t.next = t.previous
+	t.next.Terminal = nil
 	t.next.WorkerLease, err = randomID()
 	if err != nil {
 		return spec, err
@@ -212,7 +426,7 @@ func (e *nativeOwned) admitSuccessor(ctx context.Context, g nativecontract.Claim
 	if err = e.save("transition"); err != nil {
 		return spec, err
 	}
-	profile, err := h.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: fresh.TenantID, OwnerPersonID: e.owner.OwnerPersonID, AccountID: e.local.Intent.AccountID, AccountKey: e.local.AccountKey, WorkspaceID: e.local.Intent.WorkspaceID, Harness: Claude, Policy: t.grant.Policy, BindingRevision: e.profile.ProfileBindingRevision})
+	profile, err := h.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: fresh.TenantID, OwnerPersonID: e.owner.OwnerPersonID, AccountID: e.local.Intent.AccountID, AccountKey: e.local.AccountKey, WorkspaceID: e.local.Intent.WorkspaceID, Harness: e.local.Intent.Harness, Policy: t.grant.Policy, BindingRevision: e.profile.ProfileBindingRevision})
 	if err != nil {
 		return spec, err
 	}
@@ -254,6 +468,7 @@ func (e *nativeOwned) openSuccessor(ctx context.Context, spec nativecontract.Lau
 	e.grant = t.grant
 	e.proof = t.next
 	e.transport = nil
+	e.terminal = nil
 	e.profile = profile
 	e.ownership = nil
 	e.observations = map[string]nativecontract.NativeEvidence{}
@@ -285,11 +500,7 @@ func (e *nativeOwned) openSuccessor(ctx context.Context, spec nativecontract.Lau
 		if err = decodeNativeControl(g.Command.Params, &in); err != nil {
 			return out, err
 		}
-		pty, openErr := h.config.Terminal.OpenPTY(ctx, nativecontract.PTYLaunchSpec{LaunchSpec: spec, Rows: int(in.Rows), Cols: int(in.Cols)})
-		if pty != nil {
-			transport = &nativeTerminalTransport{PTYRuntime: pty, events: make(chan nativecontract.ProviderEvent)}
-		}
-		err = openErr
+		transport, err = e.openTerminal(ctx, spec, int(in.Cols), int(in.Rows))
 	} else {
 		transport, err = h.config.Launcher.Open(ctx, spec)
 	}
@@ -350,52 +561,102 @@ func (e *nativeOwned) openSuccessor(ctx context.Context, spec nativecontract.Lau
 
 func (e *nativeOwned) startTerminalFrames(view nativecontract.SessionView, pty nativecontract.PTYRuntime) error {
 	live := e.host.config.Live
-	if live == nil {
-		return nil
-	}
 	// The daemon receipt is projected for its agent key. Local screen export
 	// is separately installed and qualified; it still needs the viewer's
 	// current person/watch consent at every delivery via LocalAuthority.
 	view.Capabilities.TerminalView = e.host.caps.TerminalView
-	if !view.Capabilities.TerminalView {
-		return nativeRefusal(nativecontract.ReasonQualificationMissing)
-	}
-	if err := live.Register(view); err != nil {
-		return err
+	export := live != nil && view.Capabilities.TerminalView
+	if export {
+		if err := live.Register(view); err != nil {
+			return err
+		}
 	}
 	ctx, cancel := context.WithCancel(e.host.s.lifetime)
 	done := make(chan struct{})
 	e.mu.Lock()
 	e.eventCancel = cancel
 	e.eventDone = done
+	terminal := e.terminal
 	e.mu.Unlock()
 	go func() {
 		defer close(done)
-		var sequence uint64
+		if export {
+			defer live.Remove(*view.CurrentBinding)
+		}
+		var sequence, source uint64
+		publish := func(kind string, payload any, dropped string) error {
+			if !export {
+				return nil
+			}
+			sequence++
+			raw, err := json.Marshal(payload)
+			if err != nil || len(raw) > nativecontract.ExportedFrameBytes {
+				return nativeRefusal(nativecontract.ReasonBufferFull)
+			}
+			position := strconv.FormatUint(sequence, 10)
+			event := nativecontract.StreamEvent{Binding: *view.CurrentBinding, Generation: view.Generation, Sequence: position, Seq: position, Source: "native", ObservedAt: e.host.s.capacityNow(), Kind: kind, Payload: raw, DroppedFrames: dropped}
+			return live.Publish(ctx, nativecontract.Publish{RequestID: uuid.NewString(), ExpectedBinding: *view.CurrentBinding, Events: []nativecontract.StreamEvent{event}}, func(ctx context.Context, deliver func(nativecontract.ValidationContext) error) error {
+				if err := e.require(ctx); err != nil {
+					return err
+				}
+				return deliver(nativecontract.ValidationContext{Binding: view.CurrentBinding, OwnedSessionID: view.OwnedSessionID, Generation: view.Generation, Private: true, PrincipalKind: "agent", Capabilities: &view.Capabilities, Mode: "terminal", State: "taken", View: "terminal"})
+			})
+		}
+		fail := func(err error) {
+			e.mu.Lock()
+			e.lastError, e.refused = err, err
+			e.mu.Unlock()
+			// Only the owner cancels its lifetime. Occupancy is released solely
+			// after owned exit AND the existing server lifecycle write succeeds.
+			e.cancel()
+		}
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case frame, ok := <-pty.Frames():
 				if !ok {
+					// Never wait for opMu before closing eventDone: a transition
+					// owns that lock while draining this reader.
+					go func() {
+						cleanup, finish := context.WithTimeout(context.WithoutCancel(ctx), nativecontract.LocalOperationSeconds*time.Second)
+						defer finish()
+						if err := e.finishTerminalExit(cleanup, terminal); err != nil {
+							_ = e.fault(err)
+						}
+					}()
 					return
 				}
-				sequence++
-				raw, err := json.Marshal(frame)
-				if err != nil || len(raw) > nativecontract.ExportedFrameBytes {
-					_ = e.fault(nativeRefusal(nativecontract.ReasonBufferFull))
+				if len(frame.DataBase64) > base64.StdEncoding.EncodedLen(nativecontract.PTYInputDecodedBytes) {
+					fail(nativeRefusal(nativecontract.ReasonBufferFull))
 					return
 				}
-				position := strconv.FormatUint(sequence, 10)
-				event := nativecontract.StreamEvent{Binding: *view.CurrentBinding, Generation: view.Generation, Sequence: position, Seq: position, Source: "native", ObservedAt: e.host.s.capacityNow(), Kind: "terminal", Payload: raw, DroppedFrames: "0"}
-				err = live.Publish(ctx, nativecontract.Publish{RequestID: uuid.NewString(), ExpectedBinding: *view.CurrentBinding, Events: []nativecontract.StreamEvent{event}}, func(ctx context.Context, deliver func(nativecontract.ValidationContext) error) error {
-					if err := e.require(ctx); err != nil {
-						return err
+				data, err := base64.StdEncoding.Strict().DecodeString(frame.DataBase64)
+				next, parseErr := strconv.ParseUint(frame.Sequence, 10, 64)
+				if err != nil || parseErr != nil || next <= source || frame.TerminalEpoch != view.CurrentBinding.RuntimeEpoch || !nativepty.ValidSize(frame.Cols, frame.Rows) {
+					clear(data)
+					fail(nativeRefusal(nativecontract.ReasonIdentityMismatch))
+					return
+				}
+				terminal.mu.Lock()
+				terminal.bytes += uint64(len(data))
+				terminal.frames++
+				_, _ = terminal.digest.Write(data)
+				terminal.mu.Unlock()
+				clear(data)
+				if next != source+1 {
+					dropped := next - source - 1
+					if err := publish("gap", nativecontract.Gap{Reason: "frame_omitted", DroppedFrames: strconv.FormatUint(dropped, 10), ReloadSnapshot: true}, strconv.FormatUint(dropped, 10)); err != nil {
+						fail(err)
+						return
 					}
-					return deliver(nativecontract.ValidationContext{Binding: view.CurrentBinding, OwnedSessionID: view.OwnedSessionID, Generation: view.Generation, Private: true, PrincipalKind: "agent", Capabilities: &view.Capabilities, Mode: "terminal", State: "taken", View: "terminal"})
-				})
-				if err != nil {
-					_ = e.fault(err)
+					if export && dropped > 1 {
+						sequence += dropped - 1
+					}
+				}
+				source = next
+				if err := publish("terminal", frame, "0"); err != nil {
+					fail(err)
 					return
 				}
 			}
@@ -432,7 +693,67 @@ func sameNativeConversation(a, b nativecontract.Binding) bool {
 
 type nativeTerminalTransport struct {
 	nativecontract.PTYRuntime
-	events chan nativecontract.ProviderEvent
+	events        chan nativecontract.ProviderEvent
+	mu            sync.Mutex
+	digest        hash.Hash
+	bytes, frames uint64
+	spec          nativecontract.LaunchSpec
+	control       *nativepty.OwnedControl
+}
+
+func (e *nativeOwned) terminalEvidence() *daemon.TerminalEvidence {
+	e.mu.Lock()
+	t := e.terminal
+	e.mu.Unlock()
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return &daemon.TerminalEvidence{RuntimeEpoch: t.spec.Binding.RuntimeEpoch, OutputBytes: t.bytes, Frames: t.frames, OutputSHA256: hex.EncodeToString(t.digest.Sum(nil))}
+}
+
+func (t *nativeTerminalTransport) ObserveExit(ctx context.Context) (nativecontract.ExitEvidence, error) {
+	observer, ok := t.PTYRuntime.(interface {
+		ObserveExit(context.Context) (nativecontract.ExitEvidence, error)
+	})
+	if !ok {
+		return nativecontract.ExitEvidence{}, ErrProcessesUnconfirmed
+	}
+	return observer.ObserveExit(ctx)
+}
+
+func (e *nativeOwned) finishTerminalExit(ctx context.Context, terminal *nativeTerminalTransport) error {
+	x, err := terminal.Wait(ctx)
+	if err != nil {
+		return err
+	}
+	if !x.RootExited || !x.GroupAbsent || x.ObservedAt.IsZero() || x.ProcessIdentityDigest != terminal.Identity().ProcessIdentityDigest {
+		return nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	if err := e.opMu.LockContext(ctx); err != nil {
+		return err
+	}
+	defer e.opMu.Unlock()
+	return e.finishTerminalExitLocked(ctx, terminal, x)
+}
+func (e *nativeOwned) finishTerminalExitLocked(ctx context.Context, terminal *nativeTerminalTransport, x nativecontract.ExitEvidence) error {
+	if e.transition != nil || e.terminal != terminal || e.exited {
+		return nil
+	}
+	e.mu.Lock()
+	e.exit = &x
+	e.mu.Unlock()
+	b := *e.grant.ExpectedBinding
+	r := nativecontract.Receipt{RequestID: e.local.Intent.RequestID, OperationID: e.startOperation, Binding: &b, Operation: "start", State: "exit_confirmed", SourceSequence: "1", UpdatedAt: e.host.s.capacityNow().UTC()}
+	var out nativecontract.OperationResult
+	if err := e.call(ctx, "POST", "/api/agentd/native-sessions/receipts", r, &out); err != nil {
+		return err
+	}
+	if out.Session == nil || out.Session.CurrentBinding == nil || !out.Session.CurrentBinding.Equal(b) || out.Session.State != "stopped" {
+		return nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	return e.release(ctx, b, x)
 }
 
 func (t *nativeTerminalTransport) Send(context.Context, nativecontract.Input) (nativecontract.NativeEvidence, error) {

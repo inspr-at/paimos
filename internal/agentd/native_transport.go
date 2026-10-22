@@ -56,7 +56,7 @@ func (a *nativeSocketAuthority) Authenticate(r *http.Request) (nativecontract.Ac
 		return nativecontract.Actor{}, nativeRefusal(nativecontract.ReasonWrongPrincipal)
 	}
 	query := r.URL.Query()
-	request := nativestream.LocalRequest{Method: "stream", OwnedSessionID: r.PathValue("ownedSessionId"), ViewerID: r.Header.Get(nativecontract.ViewerHeader), Query: query, View: query.Get("view")}
+	request := nativestream.LocalRequest{Method: "stream", OwnedSessionID: r.PathValue("ownedSessionId"), ViewerID: r.Header.Get(nativecontract.ViewerHeader), ControlCapability: r.Header.Get(nativecontract.ControlHeader), Query: query, View: query.Get("view")}
 	if request.View == "" {
 		request.View = "structured"
 	}
@@ -116,7 +116,7 @@ func serveNativeStart(s *Supervisor, authorize func(*http.Request) bool) http.Ha
 			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonWrongPrincipal))
 			return
 		}
-		if local.Intent.Role != "coordinator" || local.Intent.Profile != "native" || local.Intent.Harness != Claude {
+		if local.Intent.Role != "coordinator" || local.Intent.Profile != "native" || (local.Intent.Harness != Claude && local.Intent.Harness != Codex) {
 			nativestream.WriteError(w, nativestream.Refuse(nativecontract.ReasonUnsupported))
 			return
 		}

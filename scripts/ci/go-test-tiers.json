@@ -1870,7 +1870,21 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostAbandonsStartRefusedBeforeFork","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostInitialPTYWaitsForProviderReadiness","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostLimitsCountOnlyLiveWork","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYCurrentHolderInputAndResize","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYOutputEOFAndLifecycleMetadata","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYRejectsUntrustedOrStaleWrites","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYTransitionsWaitForBothOwnedExits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYUncertainInputRequiresRecovery","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYUnconfirmedExitKeepsOccupancy","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPollIsolatesSessionWithRefusedReports","tier":"ESSENTIAL"}
     ,
@@ -8752,9 +8766,13 @@
     ,
     {"kind":"go","package":"internal/nativepty","name":"TestPTYResizeTwoHolderTabsAndViewers","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYUnixInitialConversationReadinessAndCancellation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativepty","name":"TestPTYUnixOwnershipResizeAndExit","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativepty","name":"TestPTYUnixPasteDrainsOutputWhileInputIsBlocked","reason":"AEON-1288 FIX2: blocked PTY paste drains child output and acknowledges all 8 KiB","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestPTYUnixReadinessCancellationDoesNotReleaseWriter","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativepty","name":"TestTakeoverClientLossAndExpiredLeaseDoNotRestart","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
