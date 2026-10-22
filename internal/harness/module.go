@@ -1186,7 +1186,7 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if err != nil {
 		return nil, err
 	}
-	crossProject := in.ParentID != nil && parentProject != projectID
+	crossProject := in.ParentID != nil && !strings.EqualFold(parentProject, projectID)
 	ref, lease := digest("ref", in.SessionRef), digest("lease", in.WorkerLease)
 	if err = fenceLeadRegistration(ctx, tx, projectID, in, ref, lease); err != nil {
 		return nil, err

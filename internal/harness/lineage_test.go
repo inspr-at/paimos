@@ -55,6 +55,20 @@ func TestCrossProjectChildrenKeepWorkAndPrivacy(t *testing.T) {
 	if decode(t, w)["id"] != id {
 		t.Fatal("replay duplicated the child")
 	}
+	// UUID spelling does not turn a legacy same-project writer into a
+	// cross-project writer or cause it to take different hierarchy fences.
+	legacyBody := map[string]any{}
+	for k, v := range body {
+		legacyBody[k] = v
+	}
+	legacyBody["ticket_node_id"] = f.ticket
+	legacyBody["harness_session_ref"], legacyBody["worker_lease"] = "legacy-lineage-reference-"+uid(), "legacy-lineage-lease-"+uid()
+	w = f.call(f.agent, "POST", "/api/projects/"+strings.ToUpper(f.project)+"/harness-sessions", legacyBody, "")
+	expect(t, w, 201)
+	legacyChild := decode(t, w)
+	if legacyChild["parent_harness_session_id"] != parent || legacyChild["cross_project_parent_harness_session_id"] != nil || legacyChild["project_id"] != f.project {
+		t.Fatal("same-project UUID spelling changed legacy lineage")
+	}
 	path := base + "/" + id
 	w = f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}, body["worker_lease"].(string))
 	expect(t, w, 200)
