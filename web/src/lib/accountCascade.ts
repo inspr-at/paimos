@@ -435,7 +435,7 @@ function modelNote(choice: CascadeChoice, touch: CascadeTouch, account: CatalogA
 function effortNote(choice: CascadeChoice, model: CatalogModel | undefined, efforts: CatalogEffort[], selected: CatalogEffort | undefined, account: CatalogAccount | undefined) {
   if (!model) return ''
   if (!efforts.length) return 'No thinking level is granted for this model.'
-  if (efforts.length === 1) return `This account’s catalog offers only ${effortLabel(efforts[0].effort)} for this model.`
+  if (efforts.length === 1) return `This account offers only ${effortLabel(efforts[0].effort)} thinking for this model.`
   if (!selected && !account?.default_model_profile_id) return 'Choose a thinking level this model allows.'
   if (selected && selected.model_profile_id === account?.default_model_profile_id && choice.profileId) return 'The thinking level is the one routed for this work.'
   return ''

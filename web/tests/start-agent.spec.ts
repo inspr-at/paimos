@@ -179,7 +179,7 @@ test('AEON-1510: Sonnet explains a single catalog level and keeps every granted 
   const model = dialog(page).getByLabel('Model', { exact: true })
   const note = dialog(page).locator('[id$="-effort-note"]')
   const queue = dialog(page).getByRole('button', { name: 'Queue run', exact: true })
-  const singleLevelNote = 'This account’s catalog offers only High for this model.'
+  const singleLevelNote = 'This account offers only High thinking for this model.'
   await expect(thinking.locator('option')).toHaveText(['Choose a thinking level', 'High'])
   await expect(note).toHaveText(singleLevelNote)
   await expect(thinking).toHaveAccessibleDescription(singleLevelNote)
