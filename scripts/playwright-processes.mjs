@@ -30,9 +30,9 @@ const pause = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0,
 
 // Only call for the process just spawned, or for this preload's own root.
 // Root and detached launches must establish identity before starting work.
-function* identityAttempts(child, append, { start = processStart, attempts = 20 } = {}) {
+function* identityAttempts(child, append, { start = processStart, attempts = 20, onTerminate = () => {} } = {}) {
   if (!child.pid) return child
-  const terminate = () => signalGroup(child.pid, 'SIGKILL')
+  const terminate = () => { onTerminate(); signalGroup(child.pid, 'SIGKILL') }
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (child.exitCode != null || child.signalCode != null) return child
     const started = start(child.pid)
@@ -58,10 +58,30 @@ export function recordSpawnedGroup(child, append, { wait = pause, ...options } =
 // Yield in the parent so Node can reap fast roots and update their exit code
 // during retries. The preload and spawn hooks stay synchronous before work.
 export async function recordRootGroup(child, append, { wait = ms => new Promise(resolve => setTimeout(resolve, ms)), ...options } = {}) {
-  const attempts = identityAttempts(child, append, options)
-  let step = attempts.next()
-  while (!step.done) { await wait(step.value); step = attempts.next() }
-  return step.value
+  let terminated = false
+  const attempts = identityAttempts(child, append, { ...options, onTerminate: () => { terminated = true } })
+  try {
+    let step = attempts.next()
+    while (!step.done) { await wait(step.value); step = attempts.next() }
+    return step.value
+  } catch (error) {
+    if (!terminated) throw error
+    // A reaped root can leave helpers (including a startup ps) in its group.
+    // Confirm the whole newly spawned group is gone before reporting cleanup.
+    // Probe only: retrying KILL could signal a reused, unverified group.
+    for (let attempt = 0; attempt < 200; attempt++) {
+      try { process.kill(-child.pid, 0) }
+      catch (probeError) {
+        if (probeError.code === 'ESRCH') throw error
+        // Darwin may report EPERM for a group still awaiting kernel reaping.
+        if (probeError.code !== 'EPERM') break
+      }
+      if (attempt + 1 < 200) {
+        try { await wait(10) } catch { break }
+      }
+    }
+    throw Object.assign(new Error('Spawned process group exit not confirmed; host lock retained', { cause: error }), { unconfirmedGroup: child.pid })
+  }
 }
 
 // Read the full journal each time. A failed ps, malformed record or signal

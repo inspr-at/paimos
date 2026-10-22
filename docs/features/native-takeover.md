@@ -329,3 +329,40 @@ release rehearsal consequently failed. The non-required policy preview reported
 `no trusted gate/verdict`; the coordinator must post the fresh review verdict.
 Neither path was rerun or bypassed by this worker. No origin push, deployment,
 model CLI or product review gate was run.
+
+### P1 third fix round
+
+The CI no-browser safety suite exposed an unverified-root cleanup race: the
+root's exit event can precede disappearance of its whole process group. Root
+identity failure now sends SIGKILL once and waits for group disappearance with
+at most 200 probes and 199 ten-millisecond waits. ESRCH confirms completion;
+EPERM remains evidence of an observable group awaiting reaping. No retry signals
+an unverified or possibly reused process group. If cleanup cannot be confirmed,
+the supervisor retains its lock and ownership journal, including when that
+journal is empty. No invalid start identity is written to make cleanup appear
+successful.
+
+Two deterministic regressions hold group disappearance behind a barrier and
+prove that uncertain cleanup exhausts its bounded budget without releasing the
+supervisor lock. Both fail on reviewed head `dce094fbc`, using test-only snapshot
+`a43f422c4` outside the delivery branch: cleanup settled before the barrier, and
+the supervisor lacked the unconfirmed-exit result. The focused negative run used
+the permitted single small local fallback after the remote runner refused with
+`remote busy (2 remote runs already active on mbp2606, global cap)`. It ran two
+Node tests, no browser, with two expected failures and zero skips. The temporary
+branch was removed after returning to the assigned delivery branch.
+
+Outside the write set: `scripts/playwright-processes.mjs`,
+`scripts/playwright-safe.mjs` and `scripts/playwright-safe.test.mjs` contain only
+the cleanup fix, its lock-retention hook and regressions required by this CI
+brief. The existing `test:browser-safety` command owns these script tests;
+no new source file or test-tier registry entry is needed. No web application
+source, UI spec, production capability or account policy changes.
+
+The original hosted `web-shard (16)` failed before executing tests: its
+`Install Chromium system dependencies` step exhausted twelve minutes while apt
+downloads stalled. The aggregate web job consequently failed, and tier
+measurements reported missing `web-shard-16` evidence and incomplete browser
+case reports. These hosted jobs need fresh CI evidence after the coordinator
+pushes. The non-required policy preview still requires the coordinator's fresh
+trusted verdict. This worker does not run, replace or bypass that gate.
