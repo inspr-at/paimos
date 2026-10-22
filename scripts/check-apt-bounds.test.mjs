@@ -447,11 +447,20 @@ test('one complete image bundle installs offline and invalid bundles retain netw
   const corruptInfo = statSync(join(bundleDir, 'archives/fish_1_amd64.deb'))
   assert.ok(corrupt.stderr.includes(`st_mode=0o${corruptInfo.mode.toString(8)}, owner=${corruptInfo.uid}:${corruptInfo.gid}`), corrupt.stderr)
 
-  const exhausted = await run(state => `bash "${script}" bundle "${join(state, 'bundle')}"`, { mode: 'bundle-fetch-fail' })
+  const exhausted = await run(state => `bash "${script}" bundle "${join(state, 'bundle')}"`, {
+    mode: 'bundle-fetch-fail', elapsed: [30, 0, 260, 0, 260, 0, 260, 0, 260],
+  })
   assert.equal(exhausted.status, 100, exhausted.stdout)
   assert.equal(exhausted.calls.filter(call => call.includes('--download-only')).length, 4)
   assert.equal(existsSync(join(exhausted.state, 'bundle/manifest.json')), false, 'never publish a completion marker for partial downloads')
   assert.match(exhausted.stderr, /failed bundle tree \(at most 200 entries, depth 4\)/)
+  const listing = exhausted.stderr.split('\n').filter(line => /^[bcdlps-][rwxStTs-]{9} \d+:\d+ \d+ /.test(line))
+  assert.ok(listing.length > 0 && listing.length <= 200, 'failure diagnostics must still list files after exhausting the fetch deadline')
+  assert.equal(exhausted.timeouts.at(-1).seconds, 5)
+  assert.equal(exhausted.killGraces.at(-1), 2)
+  const spent = Number(readFileSync(join(exhausted.state, 'clock'), 'utf8')) - 1000
+  assert.equal(spent, 1070, 'exhaust the fetch deadline before attempting diagnostics')
+  assert.ok(spent + 5 + 2 <= 1080, 'the failure listing and its kill grace fit inside the original 18-minute budget')
 })
 
 // AEON-1652 fix8 risk: a timed-out mirror+file attempt leaves symlinks and

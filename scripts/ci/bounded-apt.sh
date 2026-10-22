@@ -284,11 +284,11 @@ PY
 
 finish() {
   local status=$?
-  local attempt_deadline=$deadline
   if [[ $mode == bundle && $status -ne 0 && -d $bundle ]]; then
     echo "bounded-apt: failed bundle tree (at most 200 entries, depth 4): $bundle" >&2
-    # The root timeout also bounds listings of _apt-owned working directories.
-    run_root_timeout 10 python3 - "$bundle" >&2 <<'PY' || true
+    # Ten seconds were reserved outside the fetch deadline for diagnostics,
+    # including this short kill grace, even when apt exhausted its budget.
+    sudo -- env "PATH=$PATH" LC_ALL=C timeout --kill-after=2s 5 python3 - "$bundle" >&2 <<'PY' || true
 import os
 from pathlib import Path
 import stat
@@ -509,7 +509,7 @@ case "$mode" in
   bundle)
     [[ $# -eq 1 && ! -e $1 && -n ${ImageOS:-} && -n ${ImageVersion:-} ]] || usage
     bundle=$1
-    budget=1080
+    budget=1070 # 18 minutes, with 10 seconds reserved for failure diagnostics.
     first_attempt_seconds=240
     attempt=(attempt_bundle)
     ;;
