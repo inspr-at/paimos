@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { absoluteTime } from '../../lib/work'
 import { harnessLabel } from '../../lib/agentState'
 import { activeAgentLabel, activeSessions, chipText, elapsedFor, liveSummary, phaseLabel, who, type LiveAgent } from '../../lib/liveAgents'
@@ -25,6 +25,7 @@ const { appearance } = useAgentAppearance()
 // its session in Agents, each ticket its page. Status only: nothing here acts.
 const props = withDefaults(defineProps<{ agents: LiveAgent[]; project: { title: string; routeKey: string }; variant?: 'card' | 'row' }>(), { variant: 'card' })
 const live = useLiveAgents()
+const router = useRouter()
 const { choice: indicator } = useAgentIndicator()
 const projects = useProjects()
 const id = useId()
@@ -56,7 +57,7 @@ const ticketHref = (agent: LiveAgent) => {
 }
 
 // Settings › Models has no per-project choices, so the link promises none (Tick, AEON-1138): it opens Models as it is.
-function preferences() { hide(); openModelPrefs() }
+function preferences() { hide(); openModelPrefs(href => router.push(href)) }
 
 // ---------- Opening ----------
 let openTimer: ReturnType<typeof setTimeout> | undefined
