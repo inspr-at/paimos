@@ -6,7 +6,8 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { releaseWorld, mockReleases } from './release-fixtures'
 import { expectStableControls } from './helpers/stable'
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1677: retain phone sheet and desktop picker interactions without theme copies.
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`parent ships-in and release choice ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.emulateMedia({ colorScheme: theme })

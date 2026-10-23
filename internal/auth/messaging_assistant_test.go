@@ -66,6 +66,7 @@ func assistantAgent(t *testing.T, m *Module, owner tenant.Principal, full bool) 
 // Risk: a narrow provisioning exception delegates general creation, exceeds
 // its quota/expiry/owner ceiling, or lets general key editing bypass renewal.
 func TestMessagingAssistantProvisioningBounds(t *testing.T) {
+	t.Run("hosted identity and policy", testAssistantIdentityPolicy)
 	for _, full := range []bool{false, true} {
 		t.Run(map[bool]string{false: "coordinator", true: "full access"}[full], func(t *testing.T) {
 			m, owner, now := assistantFixture(t)

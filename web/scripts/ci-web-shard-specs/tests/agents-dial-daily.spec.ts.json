@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/agents-dial-daily.spec.ts",
-    "listedTests": 34,
+    "listedTests": 32,
     "tierTiming": {
       "caseSeconds": {
         "max": 22.361,

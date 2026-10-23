@@ -86,7 +86,8 @@ test('extreme primary accents keep recurrence glyphs readable without moving con
 test.describe('touch permission changes', () => {
   test.use({ hasTouch: true })
 
-  for (const width of [1024, 1440]) {
+  // AEON-1677: retain coarse-pointer behavior once; protected option-B profiles stay.
+  for (const width of [1440]) {
     test(`coarse-pointer list keeps the recurring marker and title still at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1000 })
       const { errors } = await setup(page)
@@ -106,7 +107,7 @@ test.describe('touch permission changes', () => {
     })
   }
 
-  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) for (const change of ['grant', 'revoke'] as const) {
+  for (const width of [390, 1440]) for (const theme of ['light'] as const) for (const change of ['grant', 'revoke'] as const) {
     test(`${change} keeps the recurring pill and ticket content still at ${width}px in ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
@@ -390,7 +391,8 @@ test('a source link for another project exposes the error without selecting a su
   expect(errors).toEqual([])
 })
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1677: preserve held permission reads in phone and desktop layouts.
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`delayed source permissions keep the edit action and stable header at ${width}px in ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme })

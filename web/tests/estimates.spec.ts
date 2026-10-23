@@ -32,7 +32,8 @@ async function shot(page: Page, name: string) {
   if (process.env.ESTIMATE_SHOTS) await page.screenshot({ path: test.info().outputPath(`${name}.png`), fullPage: true })
 }
 
-for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
+// AEON-1677: retain both protected phone profiles and one identical desktop edit journey.
+for (const { theme, width } of [{ theme: 'light', width: 1600 }, { theme: 'light', width: 390 }, { theme: 'dark', width: 390 }]) {
   test(`estimate display and edit at ${width} in ${theme}`, async ({ page }) => {
     const errors = watchErrors(page)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })

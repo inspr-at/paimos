@@ -4,8 +4,12 @@
 // settles where the browser has no scrollend (Safari); the anchor scrolls at the very top, scrolls
 // by a sub-pixel, follows a row that left instead of one still on screen, or loses its mark when a
 // component updates twice in one flush. Timers are injected.
-import { describe, expect, it } from 'vitest'
-import { sourceModule } from './record-source'
+import { describe, expect, it, vi } from 'vitest'
+import { ref } from 'vue'
+import { parse } from '@vue/compiler-sfc'
+import ts from 'typescript'
+import * as columns from '../src/lib/columns'
+import { setupSource, sourceModule, sourceText } from './record-source'
 
 const { SETTLE_MS, readerAnchor, touchScroll } = sourceModule<typeof import('../src/lib/readerAnchor')>('lib/readerAnchor.ts', {})
 
@@ -159,4 +163,67 @@ describe('readerAnchor', () => {
     atTop.restore()
     expect(top.scrollTop).toBe(0)
   })
+})
+
+it('P03: delayed table resize deliveries settle on the live width and discard superseded frame callbacks', () => {
+  const { descriptor } = parse(sourceText('components/work/TicketTable.vue'))
+  const source = ts.createSourceFile('TicketTable.ts', descriptor.scriptSetup!.content, ts.ScriptTarget.Latest, true)
+  const names = ['finishCardSettle', 'settleCardWidth', 'applyCardSize', 'measureSoon']
+  const declarations = source.statements.filter(statement => ts.isFunctionDeclaration(statement) && names.includes(statement.name?.text ?? ''))
+  expect(declarations).toHaveLength(names.length)
+  const body = ts.transpileModule(declarations.map(statement => statement.getText(source)).join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  let live = 1000
+  const frames: (() => void)[] = [], width = ref(1000), cardEpoch = ref(0), cardWidthSettled = ref(false)
+  const dependencies = { ...columns, width, cardEpoch, cardWidthSettled, readCardWidth: () => live,
+    phone: ref(false), columnsSettled: ref(false), columnsAreSettled: () => true,
+    requestAnimationFrame: (callback: () => void) => { frames.push(callback) }, window: { innerWidth: 1440 } }
+  const make = new Function(...Object.keys(dependencies), `let cardFrame = 0, columnsAlive = true, resizing = false, lastInner = 1440, viewportGrew = false, shrinkCeiling = null, shrinkBefore = null; ${body}; return { applyCardSize, measureSoon }`)
+  const table = make(...Object.values(dependencies)) as { applyCardSize: (entries: { contentRect: { width: number } }[]) => void; measureSoon: () => void }
+  const drain = () => {
+    let count = 0
+    while (frames.length) { expect(++count).toBeLessThanOrEqual(64); frames.shift()!() }
+  }
+  table.applyCardSize([{ contentRect: { width: 760 } }])
+  expect(width.value).toBe(760)
+  drain()
+  expect(width.value).toBe(1000)
+  expect(cardWidthSettled.value).toBe(true)
+  expect(cardEpoch.value).toBe(1)
+  live = 760; table.applyCardSize([{ contentRect: { width: 760 } }])
+  live = 1100; table.applyCardSize([{ contentRect: { width: 1100 } }])
+  drain()
+  expect(width.value).toBe(1100)
+  expect(cardEpoch.value).toBe(2)
+})
+
+it('P03: editor fit math preserves growth and only spends the scroller slack on delete, late font or resize', () => {
+  const pane = { parentElement: null, scrollTop: 900, scrollHeight: 1200, clientHeight: 300 }
+  const values: Record<string, string> = {}
+  const area = { parentElement: pane, offsetWidth: 300, offsetHeight: 560, value: 'draft', placeholder: '', style: {
+    height: '560px', setProperty: (key: string, value: string) => { values[key] = value }, removeProperty: (key: string) => { delete values[key] },
+  } }
+  const mirror = { value: '', scrollHeight: 120, offsetHeight: 2, clientHeight: 0 }
+  vi.stubGlobal('getComputedStyle', () => ({ overflowY: 'auto' }))
+  vi.stubGlobal('document', { scrollingElement: null, fonts: { removeEventListener() {} } })
+  const props = { modelValue: 'draft', label: 'Description', minRows: 5, split: false }
+  const component = setupSource('components/work/MarkdownEditor.vue', props, {})
+  try {
+    component.state.area.value = area; component.state.mirror.value = mirror
+    component.state.refit()
+    expect(area.style.height).toBe('560px')
+    pane.scrollHeight = 1300 // 100px of real slack can be reclaimed, no more.
+    component.state.refit()
+    expect(area.style.height).toBe('460px')
+    area.offsetHeight = 460; mirror.scrollHeight = 180
+    component.state.fit(component.state.hold(true))
+    expect(area.style.height).toBe('460px')
+    mirror.scrollHeight = 900
+    component.state.fit(component.state.hold(true))
+    expect(area.style.height).toBe('560px')
+    props.split = true
+    component.state.fit(component.state.hold(true))
+    expect(area.style.height).toBe('')
+    expect(values['--md-fit']).toBe('903px')
+    expect(pane.scrollTop).toBe(900)
+  } finally { component.stop(); vi.unstubAllGlobals() }
 })

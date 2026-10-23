@@ -6,14 +6,14 @@
   },
   "spec": {
     "file": "tests/deploy-target.spec.ts",
-    "listedTests": 7,
+    "listedTests": 1,
     "tierTiming": {
       "caseSeconds": {
-        "max": 2.142,
-        "median": 2.142,
-        "min": 2.142
+        "max": 3.502,
+        "median": 3.502,
+        "min": 3.502
       },
-      "seconds": 2.233,
+      "seconds": 4.410029,
       "selectedTests": 1
     },
     "weightSeconds": 15.536585,

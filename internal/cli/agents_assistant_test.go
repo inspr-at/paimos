@@ -16,6 +16,7 @@ import (
 // Risk: a one-time assistant secret is echoed with JSON/errors, written into an
 // existing/symlink file or a world-readable file, or confused with rotation ID.
 func TestMessagingAssistantCLISecretOutput(t *testing.T) {
+	t.Run("hosted identity and policy commands", testAssistantIdentityPolicyCLI)
 	isolate(t)
 	const secret = "aeon_fixture_once-only-secret"
 	const id = "11111111-1111-4111-8111-111111111111"

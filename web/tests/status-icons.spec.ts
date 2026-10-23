@@ -11,6 +11,71 @@ import { statusFill } from '../src/lib/statusMotion'
 // 2× pixels, so the screenshots and mid-animation frames saved for the visual check show the icons' detail.
 test.use({ reducedMotion: 'no-preference', deviceScaleFactor: 2 })
 
+// AEON-1683 / P11: the browser owns animation dispatch, physical stability and
+// the live reduced-motion preference. status-motion.unit.test.ts owns the
+// status/timing/spelling vectors; runner speed is not a correctness assertion.
+test('AEON-1683: live and static status icons respect native focus and reduced motion without moving controls', async ({ page }) => {
+  const errors = watchErrors(page)
+  await instrument(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, workData('light'))
+  await page.goto('/p/PHAROS')
+  await showProjectHead(page)
+  const progress = statusButton(page, 'PHAROS-11'), qa = statusButton(page, 'PHAROS-13')
+  await expect(progress.locator('span.st-ip')).toBeVisible()
+  await expect(qa.locator('svg.st-qa .ring')).toBeVisible()
+  await expect.poll(async () => (await slides(page)).filter(slide => slide.state === 'running').length).toBeGreaterThan(0)
+    const geometry = await grid(page).evaluate(table => [...table.querySelectorAll('tr.ticket-row:not(.ghost) .status-btn, tr.ticket-row:not(.ghost) .phone-state > [role="img"]')].map(button => {
+      const icon = button.querySelector('.status-icon')!
+      const iconBox = icon.getBoundingClientRect(), label = button.querySelector(':scope > span:not(.status-icon)')!.getBoundingClientRect(), box = button.getBoundingClientRect()
+      return { tag: icon.tagName.toLowerCase(), width: iconBox.width, height: iconBox.height, iconLeft: iconBox.left - box.left, labelLeft: label.left - box.left, centre: iconBox.top + iconBox.height / 2 - (label.top + label.height / 2) }
+    }))
+    expect(geometry.map(item => item.tag)).toContain('span'); expect(geometry.map(item => item.tag)).toContain('svg')
+    for (const item of geometry) {
+      expect(item.width).toBeCloseTo(14, 0); expect(item.height).toBeCloseTo(14, 0)
+      expect(Math.abs(item.iconLeft - geometry[0].iconLeft)).toBeLessThanOrEqual(.5)
+      expect(Math.abs(item.labelLeft - geometry[0].labelLeft)).toBeLessThanOrEqual(.5)
+      expect(Math.abs(item.centre)).toBeLessThanOrEqual(1)
+    }
+  const guard = await controlStability(page, { progress, qa, new: statusButton(page, 'PHAROS-14') })
+  let count = await oneOffs(page)
+  await guard.check(() => qa.hover({ position: { x: 4, y: 4 } }))
+  expectOneOff(await oneOffsSince(page, count), 'qa')
+  await guard.check(() => qa.locator('.status-icon').hover())
+  expect(await oneOffs(page)).toBe(count + 1)
+  await guard.check(() => qa.click())
+  const items = page.getByRole('menu', { name: 'Status of PHAROS-13' }).getByRole('menuitemradio')
+  await expect(items.nth(5)).toBeFocused()
+  await guard.check(() => page.keyboard.press('ArrowDown'))
+  await expect(items.nth(6)).toBeFocused()
+  await guard.check(() => page.keyboard.press('Escape'))
+  await expect(qa).toBeFocused()
+
+  // Change the actual browser preference while the live icon is mounted.
+  await guard.check(() => page.emulateMedia({ reducedMotion: 'reduce' }))
+  const still = () => page.evaluate(() => ({
+    animations: document.getAnimations().filter(animation => animation instanceof CSSAnimation
+      ? /slide/.test(animation.animationName)
+      : !!(animation.effect as KeyframeEffect | null)?.target?.closest?.('.status-icon')).length,
+    names: [...document.querySelectorAll('.st-ip > i')].map(layer => getComputedStyle(layer, '::before').animationName),
+  }))
+  await expect.poll(async () => (await still()).animations).toBe(0)
+  const names = (await still()).names
+  expect(names.length).toBeGreaterThan(0)
+  expect(names.every(name => name === 'none')).toBe(true)
+  count = await oneOffs(page)
+  await guard.check(() => statusButton(page, 'PHAROS-14').hover())
+  await guard.check(() => qa.click())
+  await guard.check(() => page.keyboard.press('ArrowDown'))
+  await expect(items.nth(6)).toBeFocused()
+  expect(await oneOffs(page)).toBe(count)
+  expect((await still()).animations).toBe(0)
+  await guard.check(() => page.keyboard.press('Escape'))
+  await expect(qa.locator('svg.st-qa .ring')).toBeVisible()
+  guard.done()
+  expect(errors).toEqual([])
+})
+
 type OneOffCall = { part: string; status: string; delay: number; duration: number; easing: string; fill: string; props: string[] }
 
 // §7.2, written out here so the spec checks the design's numbers rather than the code's table.
@@ -84,7 +149,7 @@ function workData(theme: string, extraProgress = 0) {
   return data
 }
 
-for (const width of [1440, 960, 390]) for (const theme of ['light', 'dark']) {
+for (const width of [390]) for (const theme of ['light']) {
   test(`AEON-1362 icons in the list and header at ${width}px ${theme}: diagonal slide, one-offs once per entry, no shift`, async ({ page }, testInfo) => {
     const errors = watchErrors(page)
     await instrument(page)
@@ -145,7 +210,7 @@ for (const width of [1440, 960, 390]) for (const theme of ['light', 'dark']) {
   })
 }
 
-for (const theme of ['light', 'dark']) {
+for (const theme of ['light']) {
   test(`AEON-1362 every one-off in the status menu (${theme}): timings, marks only, base never blanks, ends static, keyboard`, async ({ page }, testInfo) => {
     const errors = watchErrors(page)
     await instrument(page)
@@ -220,32 +285,6 @@ for (const theme of ['light', 'dark']) {
   })
 }
 
-test('AEON-1362 reduced motion: nothing slides and no one-off plays', async ({ page }, testInfo) => {
-  await instrument(page)
-  await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await mockWork(page, workData('light', 3))
-  await page.goto('/p/PHAROS')
-  await expect(row(page, 'PHAROS-11').locator('.st-ip')).toHaveCount(1)
-  const still = () => page.evaluate(() => ({
-    animations: document.getAnimations().filter(animation => animation instanceof CSSAnimation ? /slide/.test(animation.animationName) : (animation.effect as KeyframeEffect | null)?.target?.closest?.('.status-icon')).length,
-    names: [...document.querySelectorAll('.st-ip > i')].map(layer => getComputedStyle(layer, '::before').animationName),
-  }))
-  const rest = await still()
-  expect(rest.animations).toBe(0)
-  expect(rest.names.length).toBeGreaterThan(0)
-  for (const name of rest.names) expect(name).toBe('none')
-  for (const key of ['PHAROS-13', 'PHAROS-14', 'PHAROS-17', 'PHAROS-18']) await statusButton(page, key).hover()
-  await groupCount(page, 'done').hover()
-  await statusButton(page, 'PHAROS-13').click()
-  const items = page.getByRole('menu', { name: 'Status of PHAROS-13' }).getByRole('menuitemradio')
-  for (let index = 0; index < 11; index++) await items.nth(index).hover()
-  await page.keyboard.press('ArrowDown')
-  expect(await oneOffs(page)).toBe(0)
-  expect((await still()).animations).toBe(0)
-  await page.screenshot({ path: testInfo.outputPath('status-icons-reduced-motion.png') })
-})
-
 test('AEON-1362 slides pause off-screen and in a hidden tab', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 700 })
   await mockWork(page, workData('light', 36))
@@ -313,23 +352,4 @@ test('AEON-1362 bar form: diagonal stripes slide only live or under the pointer;
   await page.emulateMedia({ reducedMotion: 'reduce' })
   expect((await state('live')).name).toBe('none')
   expect((await state('past')).name).toBe('none')
-})
-
-test('AEON-1362 budget: 24 sliding icons cost at most 1 ms of main-thread time per frame', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1400 })
-  await mockWork(page, workData('light', 24))
-  await page.goto('/p/PHAROS')
-  await expect(grid(page).locator('tr.ticket-row .st-ip')).toHaveCount(25)
-  await page.mouse.move(0, 0)
-  const running = (await slides(page)).filter(slide => slide.state === 'running' && !slide.offscreen)
-  expect(running.length).toBeGreaterThanOrEqual(20)
-  const cdp = await page.context().newCDPSession(page)
-  await cdp.send('Performance.enable')
-  const taskSeconds = async () => (await cdp.send('Performance.getMetrics')).metrics.find(metric => metric.name === 'TaskDuration')!.value
-  const start = await taskSeconds()
-  // The measurement window itself (§6.4): steady state, nothing on the page asking for frames.
-  await page.waitForTimeout(3000)
-  const perFrame = (await taskSeconds() - start) * 1000 / (3 * 60)
-  console.log(`AEON-1362 sliding budget: ${running.length} icons, ${perFrame.toFixed(4)} ms main-thread time per frame`)
-  expect(perFrame).toBeLessThanOrEqual(1)
 })

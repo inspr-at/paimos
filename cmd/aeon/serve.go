@@ -33,6 +33,7 @@ import (
 	"github.com/inspr-at/paimos/internal/aithema/journal"
 	"github.com/inspr-at/paimos/internal/aithema/tokens"
 	"github.com/inspr-at/paimos/internal/approvals"
+	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachments"
 	"github.com/inspr-at/paimos/internal/auth"
@@ -540,6 +541,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			runMod,
 			agentruns.NewDaemonWait(pool),
 			approvals.New(pool, inbox.RecordActionOutcomeTx),
+			assistants.New(pool),
 			phoneMod,
 			stepupMod,
 			questionsMod,

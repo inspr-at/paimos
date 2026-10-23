@@ -16,7 +16,7 @@ import (
 )
 
 func (rt *runtime) cmdAgentsAssistant() *Command {
-	root := &Command{Name: "assistant", Short: "Provision, rotate or revoke a messaging-only assistant", Use: "agents assistant <create|rotate|revoke>"}
+	root := &Command{Name: "assistant", Short: "Provision, rotate, revoke or configure a messaging-only assistant", Use: "agents assistant <create|rotate|revoke|policy>"}
 	for _, operation := range []string{"create", "rotate"} {
 		var name, expiry, keyOut string
 		cmd := &Command{Name: operation, Short: operation + " a messaging-only assistant", Use: "agents assistant " + operation + " [principal-id] --expires 30d --key-out PATH|-", maxArgs: 0,
@@ -120,6 +120,9 @@ func (rt *runtime) cmdAgentsAssistant() *Command {
 		_, err := fmt.Fprintln(rt.stdout, "Messaging assistant revoked")
 		return err
 	}})
+	policy := rt.cmdAssistantPolicy("agents assistant")
+	rt.assistantSessions(policy)
+	root.subs = append(root.subs, policy)
 	return root
 }
 

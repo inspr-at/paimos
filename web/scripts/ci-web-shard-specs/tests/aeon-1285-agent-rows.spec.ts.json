@@ -9,12 +9,12 @@
     "listedTests": 5,
     "tierTiming": {
       "caseSeconds": {
-        "max": 13.47,
-        "median": 3.926,
-        "min": 3.346
+        "max": 11.306,
+        "median": 11.306,
+        "min": 11.306
       },
-      "seconds": 28.355,
-      "selectedTests": 5
+      "seconds": 14.736286,
+      "selectedTests": 1
     },
     "weightSeconds": 30,
     "weightSource": "local-single-worker-AEON-1285-14s-plus-margin"

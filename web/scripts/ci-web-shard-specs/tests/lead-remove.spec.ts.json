@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/lead-remove.spec.ts",
-    "listedTests": 7,
+    "listedTests": 3,
     "tierTiming": {
       "caseSeconds": {
-        "max": 7.824,
-        "median": 7.182,
-        "min": 1.934
+        "max": 9.854,
+        "median": 9.262,
+        "min": 2.689
       },
-      "seconds": 46.201,
-      "selectedTests": 7
+      "seconds": 29.414283,
+      "selectedTests": 3
     },
     "weightSeconds": 25.5,
     "weightSource": "measured-local-targeted"

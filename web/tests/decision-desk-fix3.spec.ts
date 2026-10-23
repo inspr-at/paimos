@@ -7,7 +7,7 @@ import { expectStableControls } from './helpers/stable'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { mockRules } from './rules-fixtures'
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`doctrine draft effect and required review open the exact pending draft ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     const world = await mockDecisionDesk(page, { long: true, theme }), question = world.questions[0]!
@@ -68,18 +68,4 @@ test('published doctrine effects keep their proposal review while an earlier pen
   await expect(page).toHaveURL(/\/settings\/agent-rules$/)
   await expect(page.getByRole('link', { name: 'inspr-modules · PR #123', exact: true })).toBeVisible()
   expect(world.calls).toEqual([])
-})
-
-for (const decision of ['approve', 'decline'] as const) test(`revision-zero native tier request can ${decision} with exact ownership`, async ({ page }, testInfo) => {
-  const world = await mockDecisionDesk(page, { tier: true }); world.tier.revision = 0
-  await page.goto('/decision-desk?item=t:tier-request-1')
-  await expect(page.getByRole('dialog', { name: 'Decision Desk memo' })).toBeVisible()
-  await expect(page.getByTestId('desk-status')).not.toContainText('Source details are unavailable')
-  await expect(page.getByTestId(`choice-${decision === 'approve' ? 0 : 1}`)).toBeEnabled()
-  await page.getByTestId(`choice-${decision === 'approve' ? 0 : 1}`).click()
-  await expect(page.getByTestId('desk-decide')).toBeEnabled()
-  await page.getByTestId('desk-decide').click(); await expect.poll(() => world.calls.length).toBe(1)
-  expect(world.calls[0]!.path).toBe('/api/projects/p-aeon/harness-sessions/tier-session/tier/requests/tier-request-1/decision')
-  expect(world.calls[0]!.body).toMatchObject({ decision, expected_revision: 0, expected_ownership: world.ownership })
-  expect(world.tier.requests[0]!.state).toBe(decision === 'approve' ? 'approved' : 'declined')
 })

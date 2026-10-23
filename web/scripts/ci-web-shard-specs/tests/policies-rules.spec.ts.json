@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/policies-rules.spec.ts",
-    "listedTests": 9,
+    "listedTests": 5,
     "tierTiming": {
       "caseSeconds": {
-        "max": 2.958,
-        "median": 1.658,
-        "min": 1.009
+        "max": 4.855,
+        "median": 2.64,
+        "min": 1.252
       },
-      "seconds": 17.968,
-      "selectedTests": 9
+      "seconds": 17.554241,
+      "selectedTests": 5
     },
     "weightSeconds": 20,
     "weightSource": "AEON-1165 estimate, 9 cases replacing the ladder editor spec"

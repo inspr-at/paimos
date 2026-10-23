@@ -15,6 +15,8 @@ void hitAreaStylesheetModule
 
 const css = readFileSync(new URL('../src/styles/base.css', import.meta.url), 'utf8')
 if (css.toLowerCase().includes('</style')) throw new Error('base.css cannot be inlined into the regression document')
+const tokens = readFileSync(new URL('../src/styles/tokens.css', import.meta.url), 'utf8')
+if (tokens.toLowerCase().includes('</style')) throw new Error('tokens.css cannot be inlined into the regression document')
 
 const controls = [
   ['btn', 'button', 'btn'],
@@ -27,7 +29,8 @@ const controls = [
 function documentWithSheet() {
   const items = controls.map(([id, tag, cls]) =>
     `<${tag} class="${cls}" id="${id}" ${tag === 'a' ? 'href="#reach"' : 'type="button"'} style="display:inline-block;width:28px;height:26px;padding:0;margin:0">${id[0]}</${tag}>`).join('')
-  return `<!doctype html><style>${css}</style><main style="display:grid;grid-template-columns:repeat(3,28px);gap:64px;padding:80px">${items}</main>`
+  // Load the same font and colour tokens as the product before the base sheet.
+  return `<!doctype html><style>${tokens}\n${css}</style><main style="display:grid;grid-template-columns:repeat(3,28px);gap:64px;padding:80px">${items}</main>`
 }
 
 async function reach(page: Page, id: string) {

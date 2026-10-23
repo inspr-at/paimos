@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/provenance.spec.ts",
-    "listedTests": 13,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
         "max": 2.291,

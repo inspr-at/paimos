@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/decision-desk-project.spec.ts",
-    "listedTests": 14,
+    "listedTests": 9,
     "tierTiming": {
       "caseSeconds": {
-        "max": 6.193,
-        "median": 5.041,
-        "min": 0.685
+        "max": 4.592,
+        "median": 2.634,
+        "min": 0.472
       },
-      "seconds": 69.253,
-      "selectedTests": 14
+      "seconds": 34.859666,
+      "selectedTests": 9
     },
     "weightSeconds": 40,
     "weightSource": "hosted-CI-39565819178"

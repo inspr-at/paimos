@@ -143,7 +143,7 @@ test('native doctrine proposals retain diff, notices, source links and protected
   expect(errors).toEqual([])
 })
 
-for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1440, 390]) for (const theme of ['light'] as const) {
   test(`native Edit then propose and outdated protection ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 }); await page.emulateMedia({ colorScheme: theme })
     const outdated = { ...REVIEWED, outdated: true, base: '- Small commits, one topic each.' }

@@ -2,6 +2,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors, type Call } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 // setSystemTime lets time flow (setFixedTime would freeze Vue's event timestamps).
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
@@ -53,7 +54,24 @@ test('the panel shows title, properties, Markdown sections, relations and the ti
 })
 
 test('titles edit inline on click, save with Enter under a precondition, and cancel with Esc', async ({ page }) => {
-  const calls = await mockWork(page, fixtures())
+  const data = fixtures(), revision = data.nodes.find(node => node.id === 'n-2')!.updated_at
+  const calls = await mockWork(page, data)
+  const evidence = { evidence: '<script>verbatim source</script>', ready: false, score: 0 }
+  const intakeReads: string[] = []
+  await page.route('**/api/me/permissions?*', route => {
+    const grants = mockEffectivePermissions('admin', 'p-pharos')
+    grants.workspace.permissions.push('intake.read')
+    return route.fulfill({ json: grants })
+  })
+  await page.route('**/api/projects/p-pharos/intake?*', route => {
+    intakeReads.push(new URL(route.request().url()).searchParams.get('node_id') ?? '')
+    return route.fulfill({ json: { sources: [], turns: [], drafts: [{ id: 'origin', extensions: { 'x-p03.source@1': { version: '1.0', data: evidence } } }] } })
+  })
+  await page.route('**/api/nodes/n-2/agent-work', route => route.fulfill({ json: {
+    node_id: 'n-2', kind: 'ticket', currency: 'USD', usage_available: false, includes_descendants: false,
+    scope_truncated: false, list_truncated: false, totals: { session_count: 1 },
+    sessions: [{ id: 'p03-worker', ticket_node_id: 'n-2', ticket_key: 'PHAROS-12', harness: 'codex', label: 'Oracle worker', phase: 'working', duration_seconds: 45, duration_state: 'ongoing' }],
+  } }))
   await page.goto('/p/PHAROS/PHAROS-12')
   const ws = panel(page)
   await expect(ws.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
@@ -71,18 +89,62 @@ test('titles edit inline on click, save with Enter under a precondition, and can
   expect(writes(calls)[0].body).toEqual({ title: 'Add an Oracle Cloud Always Free connector' })
   expect(writes(calls)[0].headers['if-unmodified-since']).toBe(hour(3))
   await expect(page.locator('#row-n-2')).toContainText('Always Free')
+  await ws.focus()
+  await page.keyboard.press('s')
+  await page.getByRole('menu', { name: 'Status of PHAROS-12' }).getByRole('menuitemradio', { name: 'QA', exact: true }).click()
+  await expect(ws.getByRole('button', { name: /Status: QA/ })).toBeVisible()
+  expect(writes(calls).at(-1)).toMatchObject({ path: '/api/nodes/n-2', body: { state: 'qa' } })
+  expect(writes(calls)[1].headers['if-unmodified-since']).not.toBe(revision)
+  await ws.getByRole('button', { name: 'Add a description' }).click()
+  await ws.getByLabel('Description, Markdown').fill('Saved with the current ticket revision.')
+  await page.keyboard.press(`${mod}+Enter`)
+  await expect(ws.getByRole('region', { name: 'Description' })).toContainText('Saved with the current ticket revision.')
+  expect(writes(calls).at(-1)).toMatchObject({ path: '/api/nodes/n-2', body: { body: 'Saved with the current ticket revision.' } })
+  expect(data.nodes.find(node => node.id === 'n-2')).toMatchObject({ title: 'Add an Oracle Cloud Always Free connector', body: 'Saved with the current ticket revision.', state: 'qa' })
+  const extension = ws.getByRole('region', { name: 'Extension data' })
+  await extension.getByLabel('x-p03.source · version 1.0', { exact: true }).click()
+  expect(JSON.parse((await extension.locator('pre').textContent())!)).toEqual(evidence)
+  await expect(extension.locator('script')).toHaveCount(0)
+  expect(intakeReads).toEqual(['n-2'])
+  const worker = ws.getByRole('region', { name: 'Agent work' }).getByRole('link', { name: /Oracle worker/ })
+  await expect(worker).toHaveAttribute('href', '/agents/p03-worker')
 })
 
 test('a title conflict shows the newer title and keeps the draft', async ({ page }) => {
-  await mockWork(page, fixtures(), { conflictAlways: 'n-2' })
+  const data = fixtures(), node = data.nodes.find(row => row.id === 'n-2')!, originalRevision = node.updated_at
+  const options: { conflictOn?: string; conflictAlways?: string } = { conflictOn: 'n-2' }
+  const calls = await mockWork(page, data, options)
   await page.goto('/p/PHAROS/PHAROS-12')
   const ws = panel(page)
-  await ws.getByRole('heading', { name: 'Add an Oracle Cloud connector' }).click()
-  await ws.getByLabel('Title', { exact: true }).fill('My better title')
-  await page.keyboard.press('Enter')
+  await ws.getByRole('button', { name: 'Edit', exact: true }).click()
+  const title = ws.getByLabel('Title', { exact: true }), body = ws.getByLabel('Description, Markdown')
+  await title.fill('My better title')
+  await body.fill('Keep my unsaved plan.')
+  await page.keyboard.press(`${mod}+Enter`)
   await expect(page.getByText('PHAROS-12 was changed elsewhere. The newer version is shown; your draft is kept.')).toBeVisible()
+  await expect(title).toHaveValue('My better title')
+  await expect(body).toHaveValue('Keep my unsaved plan.')
+  expect(writes(calls)).toHaveLength(1)
+  expect(writes(calls)[0]).toMatchObject({ path: '/api/nodes/n-2', headers: { 'if-unmodified-since': originalRevision }, body: { title: 'My better title', body: 'Keep my unsaved plan.' } })
+  expect(node.title).toBe('Add an Oracle Cloud connector (edited elsewhere)')
+  expect(node.body).toBe('')
+  const currentRevision = node.updated_at
+  await body.focus()
+  await page.keyboard.press(`${mod}+Enter`)
+  await expect(ws.getByRole('heading', { name: 'My better title' })).toBeVisible()
+  await expect(ws.getByRole('region', { name: 'Description' })).toContainText('Keep my unsaved plan.')
+  expect(writes(calls)).toHaveLength(2)
+  expect(writes(calls)[1].headers['if-unmodified-since']).toBe(currentRevision)
+  expect(node).toMatchObject({ title: 'My better title', body: 'Keep my unsaved plan.' })
+  // Inline-title conflict copy and draft retention remain a rendered proof.
+  options.conflictAlways = 'n-2'
+  await ws.getByRole('heading', { name: 'My better title' }).click()
+  await ws.getByLabel('Title', { exact: true }).fill('My inline draft')
+  await page.keyboard.press('Enter')
   await expect(ws.getByRole('alert')).toContainText('Changed elsewhere to “Renamed by Mira”')
-  await expect(ws.getByLabel('Title', { exact: true })).toHaveValue('My better title')
+  await expect(ws.getByLabel('Title', { exact: true })).toHaveValue('My inline draft')
+  await page.keyboard.press('Escape')
+  await expect(ws.getByRole('heading', { name: 'Renamed by Mira' })).toBeVisible()
 })
 
 test('description edits with preview, Cmd/Ctrl+Enter saves, Esc asks before discarding', async ({ page }) => {
@@ -117,17 +179,63 @@ test('description edits with preview, Cmd/Ctrl+Enter saves, Esc asks before disc
 test('s, p and a open status, priority and assignee from the panel', async ({ page }) => {
   let releaseGrants!: () => void
   const grants = new Promise<void>(resolve => { releaseGrants = resolve })
-  const calls = await mockWork(page, fixtures(), {
-    hold: request => request.path === '/api/me/permissions' && request.query.get('project_id') === 'p-pharos' ? { until: grants } : undefined,
+  const calls = await mockWork(page, fixtures())
+  let role: 'viewer' | 'member' = 'viewer'
+  await page.route(url => url.pathname === '/api/me/permissions' && url.searchParams.get('project_id') === 'p-pharos', async route => {
+    await grants
+    await route.fulfill({ json: mockEffectivePermissions(role, 'p-pharos') })
   })
   await page.goto('/p/PHAROS/PHAROS-14')
   const ws = panel(page)
-  await expect(ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+  const heading = ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })
+  await expect(heading).toBeVisible()
   // The ticket can render before its project grants arrive. A keyboard press
   // has no Playwright actionability wait, unlike clicking the status button.
   await expect(ws.getByRole('button', { name: /Status: New/ })).toBeDisabled()
+  await ws.focus()
+  await heading.evaluate(async () => { await document.fonts.ready })
+  const before = await heading.boundingBox()
+  if (!before) throw new Error('ticket heading has no baseline box')
+  expect(before.width).toBeGreaterThan(0)
+  expect(before.height).toBeGreaterThan(0)
+  const headingStays = async (step: string) => {
+    const after = await heading.boundingBox()
+    if (!after) throw new Error(`${step}: ticket heading has no box`)
+    for (const axis of ['x', 'y', 'width', 'height'] as const) {
+      expect(Math.abs(after[axis] - before[axis]), `${step}: ticket heading.${axis}`).toBeLessThanOrEqual(0.5)
+    }
+  }
+  await page.keyboard.press('e')
+  await expect(ws.locator('.edit-form')).toHaveCount(0)
+  await headingStays('e while permissions are pending')
+  // Fault control: the same oracle must reject an actual four-pixel shift.
+  const previousStyle = await heading.getAttribute('style')
+  try {
+    await heading.evaluate(element => { element.style.translate = '4px 0' })
+    await expect(headingStays('shift fault control')).rejects.toThrow(/shift fault control: ticket heading\.x/)
+  } finally {
+    await heading.evaluate((element, style) => {
+      if (style === null) element.removeAttribute('style')
+      else element.setAttribute('style', style)
+    }, previousStyle)
+  }
+  await headingStays('restored after shift fault control')
+  const denied = page.waitForResponse(response => {
+    const url = new URL(response.url())
+    return url.pathname === '/api/me/permissions' && url.searchParams.get('project_id') === 'p-pharos'
+  })
   releaseGrants()
+  await denied
+  await heading.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+  await expect(ws.locator('.edit-form')).toHaveCount(0)
+  await headingStays('read-only permissions have arrived')
+  // A denied pending e is spent. A fresh grant enables the existing shortcut
+  // journey without opening an editor or changing its record behind the user.
+  role = 'member'
+  await page.evaluate(() => { window.dispatchEvent(new Event('focus')) })
   await expect(ws.getByRole('button', { name: /Status: New/ })).toBeEnabled()
+  await expect(ws.locator('.edit-form')).toHaveCount(0)
+  await ws.focus()
   await page.keyboard.press('s')
   await page.getByRole('menu', { name: 'Status of PHAROS-14' }).getByRole('menuitemradio', { name: 'Backlog' }).click()
   await expect(ws.getByRole('button', { name: /Status: Backlog/ })).toBeVisible()
@@ -143,6 +251,19 @@ test('s, p and a open status, priority and assignee from the panel', async ({ pa
   expect((bodies[1].fields as Record<string, unknown>).priority).toBe('high')
   expect((bodies[2].fields as Record<string, unknown>).assignee).toBe('22222222-2222-4222-8222-222222222222')
   expect(writes(calls).every(call => !!call.headers['if-unmodified-since'])).toBe(true)
+  await ws.focus()
+  await page.keyboard.press('e')
+  const title = ws.getByLabel('Title', { exact: true })
+  await expect(title).toBeFocused()
+  // A field owns letters and native browser modifiers; they cannot dispatch a
+  // project shortcut while its editor is active.
+  await title.fill('epasc')
+  await expect(page.locator('.floating, dialog[open]')).toHaveCount(0)
+  expect(writes(calls)).toHaveLength(3)
+  await page.keyboard.press('Escape')
+  const discard = page.getByRole('dialog', { name: 'Discard your changes?' })
+  await discard.getByRole('button', { name: 'Discard', exact: true }).click()
+  await expect(ws).toBeFocused()
 })
 
 test('an epic lists its tickets with progress and adds new ones inline', async ({ page }) => {
@@ -190,6 +311,13 @@ test('comments post with Cmd/Ctrl+Enter from c, and own comments can be edited a
   await page.getByRole('dialog', { name: 'Delete this comment?' }).getByRole('button', { name: 'Delete comment' }).click()
   await expect(ws.locator('.entry.comment')).toHaveCount(0)
   expect(calls.some(call => call.method === 'DELETE' && /\/comments\/\d+$/.test(call.path))).toBe(true)
+  const posted = writes(calls, 'POST').filter(call => call.path.endsWith('/comments'))
+  expect(posted.map(call => call.path)).toEqual(['/api/nodes/n-3/comments'])
+  await ws.getByRole('button', { name: 'Previous ticket' }).click()
+  await ws.getByRole('button', { name: 'Previous ticket' }).click()
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
+  await expect(ws.locator('.entry.comment')).toHaveCount(2)
+  await expect(ws.getByRole('button', { name: 'Edit comment' })).toHaveCount(0)
 })
 
 test('comments by others or older than 15 minutes cannot be edited', async ({ page }) => {
@@ -201,7 +329,9 @@ test('comments by others or older than 15 minutes cannot be edited', async ({ pa
 
 test('full page shows the same ticket in two columns; f and Back return to the panel', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await mockWork(page, fixtures())
+  const data = fixtures()
+  data.nodes.find(node => node.key === 'PHAROS-11')!.body = '## Verwaltete Bereitstellung\n\nDie Verbindung mit Hetzner Cloud ermöglicht eine nachvollziehbare Bereitstellung. Berechtigungen, Wiederholungsversuche und verständliche Fehlermeldungen bleiben auch bei längeren Beschreibungen lesbar.\n\nEine laufende Bereitstellung bleibt dem ursprünglichen Arbeitsauftrag zugeordnet. Änderungen an den Zugangsvoraussetzungen werden vor dem nächsten Schreibzugriff erneut geprüft.'
+  await mockWork(page, data)
   await page.goto('/p/PHAROS/PHAROS-11')
   await expect(panel(page)).toBeVisible()
   await page.keyboard.press('f')
@@ -213,11 +343,17 @@ test('full page shows the same ticket in two columns; f and Back return to the p
   await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('PHAROS-11')
   const measure = await article.locator('.markdown-body').first().evaluate(el => el.getBoundingClientRect().width / parseFloat(getComputedStyle(el).fontSize))
   expect(measure).toBeLessThanOrEqual(46)
-  for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
-    await page.setViewportSize({ width, height: 1000 })
-    await page.emulateMedia({ colorScheme })
-    await page.screenshot({ path: info.outputPath(`aeon-1691/ticket-${width}-${colorScheme}.png`) })
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({ colorScheme: theme })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await page.evaluate(() => document.fonts.ready)
+    const readingWidth = await article.locator('.markdown-body').first().evaluate(el => el.getBoundingClientRect().width / parseFloat(getComputedStyle(el).fontSize))
+    expect(readingWidth, `${width} ${theme}: the reading measure stays within 46 em`).toBeLessThanOrEqual(46)
+    await page.screenshot({ path: info.outputPath(`AEON-1699-ticket-full-${width}-${theme}.png`) })
   }
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
   await page.goBack()
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
   await expect(panel(page)).toBeVisible()

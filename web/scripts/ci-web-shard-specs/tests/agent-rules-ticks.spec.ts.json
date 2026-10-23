@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/agent-rules-ticks.spec.ts",
-    "listedTests": 13,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
         "max": 2.747,

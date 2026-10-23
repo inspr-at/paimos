@@ -293,10 +293,14 @@ onMounted(() => {
   visualViewport?.addEventListener('resize', onResize)
   viewportWatch = new ResizeObserver(entries => {
     // Keep the delivered layout sample: rereading window/media/geometry here
-    // can still return the preceding wide frame. Body-only deliveries must
-    // not overwrite the root's viewport width or revive a cleared glimpse.
+    // can still return the preceding wide frame. If the root delivery was
+    // dropped, the body's box can clear a wide sample, but cannot widen it.
     const viewport = entries.find(entry => entry.target === document.documentElement)
     if (viewport) observedViewportWidth = viewport.borderBoxSize[0]?.inlineSize ?? viewport.contentRect.width
+    else {
+      const body = entries.find(entry => entry.target === document.body)
+      if (body) observedViewportWidth = Math.min(observedViewportWidth, body.borderBoxSize[0]?.inlineSize ?? body.contentRect.width)
+    }
     followViewport()
   })
   viewportWatch.observe(document.documentElement)

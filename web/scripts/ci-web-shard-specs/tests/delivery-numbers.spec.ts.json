@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/delivery-numbers.spec.ts",
-    "listedTests": 14,
+    "listedTests": 6,
     "tierTiming": {
       "caseSeconds": {
-        "max": 7.491,
-        "median": 3.446,
-        "min": 2.207
+        "max": 7.504,
+        "median": 2.9835,
+        "min": 2.44
       },
-      "seconds": 51.39,
-      "selectedTests": 14
+      "seconds": 31.160179,
+      "selectedTests": 6
     },
     "weightSeconds": 30,
     "weightSource": "aeon-1002-estimate"

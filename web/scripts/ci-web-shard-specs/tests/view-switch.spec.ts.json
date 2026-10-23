@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/view-switch.spec.ts",
     "listedTests": 7,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 6.727,
+        "median": 6.221,
+        "min": 3.379
+      },
+      "seconds": 45.211437,
+      "selectedTests": 7
+    },
     "weightSeconds": 13.317073,
     "weightSource": "unmeasured-test-rate"
   }

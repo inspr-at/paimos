@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/aeon-1028-projheader.spec.ts",
-    "listedTests": 42,
+    "listedTests": 38,
     "tierTiming": {
       "caseSeconds": {
         "max": 5.603,

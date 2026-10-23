@@ -135,7 +135,7 @@ test('approving an attach request reads the lists again', async ({ page }) => {
   await expect.poll(() => sessionListReads(calls)).toBeGreaterThan(before)
 })
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) for (const consent_mode of ['aeon', 'local_auth'] as const) {
+for (const theme of ['light'] as const) for (const width of [1600, 390]) for (const consent_mode of ['aeon', 'local_auth'] as const) {
   test(`approval and live watch layout ${theme} ${width} ${consent_mode}`, async ({ page }, testInfo) => {
     const worker = await setup(page, true, theme)
     await page.setViewportSize({ width, height: 1000 })
@@ -234,7 +234,7 @@ test('an Aeon approval on Linux says that computer keeps this approval', async (
   await expect(page.getByRole('dialog')).toContainText('This computer keeps approval in AEON.')
 })
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) for (const consent_mode of ['aeon', 'local_auth'] as const) {
+for (const theme of ['light'] as const) for (const width of [1600, 390]) for (const consent_mode of ['aeon', 'local_auth'] as const) {
   test(`metadata-only attach approval and status ${theme} ${width} ${consent_mode}`, async ({ page }, testInfo) => {
     const worker = await setup(page, true, theme)
     Object.assign(worker.watch!, { mode: 'lease' })

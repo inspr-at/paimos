@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/goals-hide.spec.ts",
     "listedTests": 5,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 6.302,
+        "median": 4.095,
+        "min": 1.514
+      },
+      "seconds": 25.434275,
+      "selectedTests": 5
+    },
     "weightSeconds": 11.097561,
     "weightSource": "unmeasured-test-rate"
   }

@@ -205,7 +205,29 @@ async function openEntry(page: Page, width: number, theme: 'light' | 'dark') {
   return { form, box, editor, above }
 }
 
-for (const { width, theme } of [{ width: 1440, theme: 'light' }, { width: 1440, theme: 'dark' }, { width: 1024, theme: 'light' }, { width: 390, theme: 'light' }] as const) {
+async function deleteFiftyLines(page: Page, box: Locator, guard: Awaited<ReturnType<typeof controlStability>>, checks: ReturnType<typeof checker>) {
+  // M2, middle: plenty of text below, so the row simply shrinks.
+  await guard.check(async () => {
+    const run = await typeAt(page, box, lineStart(await box.inputValue(), 100), lineStart(await box.inputValue(), 150), .4, () => page.keyboard.press('Backspace'))
+    const [sample] = run.samples
+    checks.add('delete-middle', 'page scrollTop unchanged (px)', moved(run.samples, run.top) <= .5 && Math.abs(run.end - run.top) <= .5, { movedPx: moved(run.samples, run.top), before: run.top, after: run.end })
+    checks.add('delete-middle', 'the row shrank with the text', sample.after < sample.before - 500, { before: sample.before, after: sample.after })
+    checks.add('delete-middle', 'textarea and preview heights equal ±1 px', unequal(run.samples) <= 1, { maxDiffPx: unequal(run.samples) })
+    checks.add('delete-middle', 'textarea scrollHeight ≤ clientHeight', inner(run.samples) <= 0, { maxOverflowPx: inner(run.samples) })
+  })
+  // M2, end: the last 50 lines go while the view shows the end of the page; a
+  // collapsing row would clamp scrollTop here.
+  await guard.check(async () => {
+    const text = await box.inputValue(), lines = text.split('\n').length
+    const run = await typeAt(page, box, lineStart(text, lines - 50) - 1, text.length, .3, () => page.keyboard.press('Backspace'))
+    checks.add('delete-end', 'page scrollTop unchanged (px)', moved(run.samples, run.top) <= .5 && Math.abs(run.end - run.top) <= .5, { movedPx: moved(run.samples, run.top), before: run.top, after: run.end })
+    checks.add('delete-end', 'textarea and preview heights equal ±1 px', unequal(run.samples) <= 1, { maxDiffPx: unequal(run.samples) })
+    checks.add('delete-end', 'textarea scrollHeight ≤ clientHeight', inner(run.samples) <= 0, { maxOverflowPx: inner(run.samples) })
+  })
+  checks.add('delete', 'movementPx 0 for the title, slug, status and Text label', true, { tolerancePx: .5 })
+}
+
+for (const { width, theme } of [{ width: 1440, theme: 'light' }, { width: 390, theme: 'light' }] as const) {
   test(`AEON-1532: typing in a 300-line knowledge entry at ${width} ${theme} never shrinks the box or moves the page`, async ({ page }) => {
     test.setTimeout(90_000)
     const errors = watchErrors(page)
@@ -251,40 +273,15 @@ for (const { width, theme } of [{ width: 1440, theme: 'light' }, { width: 1440, 
       }
     })
     checks.add('end', 'movementPx 0 for the title, slug, status and Text label', true, { tolerancePx: .5 })
+    // One retained browser proof covers real input growth and both deletion
+    // positions; runtime sizing checks do not claim physical scroll geometry.
+    if (width === 1440 && theme === 'light') await deleteFiftyLines(page, box, guard, checks)
     guard.done()
     await page.screenshot({ path: test.info().outputPath(`aeon1532-${width}-${theme}-end.png`) })
     checks.add('page', 'no page errors', errors.length === 0, { errors })
     await checks.save(`${width}-${theme}`)
   })
 }
-
-test('AEON-1532: deleting 50 lines keeps the page where it is, in the middle and at the end', async ({ page }) => {
-  test.setTimeout(90_000)
-  const { box, above } = await openEntry(page, 1440, 'light')
-  const checks = checker(1440, 'light')
-  const guard = await controlStability(page, above)
-  // M2, middle: plenty of text below, so the row simply shrinks.
-  await guard.check(async () => {
-    const run = await typeAt(page, box, lineStart(LONG, 100), lineStart(LONG, 150), .4, () => page.keyboard.press('Backspace'))
-    const [sample] = run.samples
-    checks.add('delete-middle', 'page scrollTop unchanged (px)', moved(run.samples, run.top) <= .5 && Math.abs(run.end - run.top) <= .5, { movedPx: moved(run.samples, run.top), before: run.top, after: run.end })
-    checks.add('delete-middle', 'the row shrank with the text', sample.after < sample.before - 500, { before: sample.before, after: sample.after })
-    checks.add('delete-middle', 'textarea and preview heights equal ±1 px', unequal(run.samples) <= 1, { maxDiffPx: unequal(run.samples) })
-    checks.add('delete-middle', 'textarea scrollHeight ≤ clientHeight', inner(run.samples) <= 0, { maxOverflowPx: inner(run.samples) })
-  })
-  // M2, end: the last 50 lines go while the view shows the end of the page; a
-  // collapsing row would clamp scrollTop here.
-  await guard.check(async () => {
-    const text = await box.inputValue(), lines = text.split('\n').length
-    const run = await typeAt(page, box, lineStart(text, lines - 50) - 1, text.length, .3, () => page.keyboard.press('Backspace'))
-    checks.add('delete-end', 'page scrollTop unchanged (px)', moved(run.samples, run.top) <= .5 && Math.abs(run.end - run.top) <= .5, { movedPx: moved(run.samples, run.top), before: run.top, after: run.end })
-    checks.add('delete-end', 'textarea and preview heights equal ±1 px', unequal(run.samples) <= 1, { maxDiffPx: unequal(run.samples) })
-    checks.add('delete-end', 'textarea scrollHeight ≤ clientHeight', inner(run.samples) <= 0, { maxOverflowPx: inner(run.samples) })
-  })
-  checks.add('delete', 'movementPx 0 for the title, slug, status and Text label', true, { tolerancePx: .5 })
-  guard.done()
-  await checks.save('delete-1440-light')
-})
 
 // Posts a comment in the ticket panel and opens it for editing.
 async function editComment(page: Page) {

@@ -144,8 +144,9 @@ async function newGoalEntry(page: Page, phone: boolean): Promise<Locator> {
   return page.getByRole('menuitem', { name: 'New goal' })
 }
 
-for (const [width, height] of [[1440, 900], [1024, 800], [390, 844]] as const) {
-  for (const colorScheme of ['light', 'dark'] as const) {
+// AEON-1677: retain desktop and phone creation/keyboard journeys without theme copies.
+for (const [width, height] of [[1440, 900], [390, 844]] as const) {
+  for (const colorScheme of ['light'] as const) {
     test(`${width} ${colorScheme}: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo`, async ({ page }, info) => {
       await page.setViewportSize({ width, height })
       await page.emulateMedia({ colorScheme })
@@ -242,7 +243,7 @@ for (const [width, height] of [[1440, 900], [1024, 800], [390, 844]] as const) {
 }
 
 for (const [width, height] of [[1440, 900], [390, 844]] as const) {
-  for (const colorScheme of ['light', 'dark'] as const) {
+  for (const colorScheme of ['light'] as const) {
     test(`${width} ${colorScheme}: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm`, async ({ page }, info) => {
       await page.setViewportSize({ width, height })
       await page.emulateMedia({ colorScheme })

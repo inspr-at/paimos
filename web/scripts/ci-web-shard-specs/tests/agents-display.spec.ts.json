@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/agents-display.spec.ts",
-    "listedTests": 9,
+    "listedTests": 13,
     "tierTiming": {
       "caseSeconds": {
-        "max": 5.04,
-        "median": 3.128,
-        "min": 1.901
+        "max": 6.285,
+        "median": 3.4915000000000003,
+        "min": 2.058
       },
-      "seconds": 54.712,
-      "selectedTests": 17
+      "seconds": 40.075177,
+      "selectedTests": 8
     },
     "weightSeconds": 19.975609755,
     "weightSource": "unmeasured-test-count"

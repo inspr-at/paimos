@@ -6,14 +6,14 @@
   },
   "spec": {
     "file": "tests/aeon-1210-agents-tree.spec.ts",
-    "listedTests": 19,
+    "listedTests": 13,
     "tierTiming": {
       "caseSeconds": {
-        "max": 8.084,
-        "median": 5.042,
-        "min": 2.756
+        "max": 7.526,
+        "median": 4.641,
+        "min": 2.549
       },
-      "seconds": 37.205,
+      "seconds": 44.567496,
       "selectedTests": 7
     },
     "weightSeconds": 54,

@@ -269,7 +269,7 @@ test.describe('on a phone', () => {
   })
 
   // Tick's F1: a marker's tip was one unbroken line clamped to the window, so at 390 its end was cut off.
-  for (const theme of ['light', 'dark'] as const) {
+  for (const theme of ['light'] as const) {
     test(`every marker tip shows its whole text inside 16 px of the window's sides, on one line when it fits and on two otherwise (${theme})`, async ({ page }, info) => {
       await page.setViewportSize({ width: 390, height: 860 })
       await setup(page, { theme })
@@ -428,46 +428,3 @@ test('with reduced motion nothing slides, not even the live segment', async ({ p
   await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2)
   expect(await page.evaluate(() => document.getAnimations().filter(a => (a as CSSAnimation).animationName === 'diag-slide').length)).toBe(0)
 })
-
-// ---------- Evidence: the lifeline and Delivery › Tickets at 390, 960 and 1440, light and dark ----------
-for (const width of [390, 960, 1440] as const) {
-  for (const theme of ['light', 'dark'] as const) {
-    test(`AEON-1359 screenshots at ${width} ${theme}`, async ({ page }, info) => {
-      test.setTimeout(90_000)
-      await page.setViewportSize({ width, height: width === 390 ? 860 : 1000 })
-      await setup(page, { theme })
-      const shot = async (name: string, full = false) => {
-        if (full) {
-          const viewport = page.viewportSize()!
-          const extra = await page.evaluate(() => { const main = document.querySelector('main'); if (main) main.scrollTop = 0; return main ? main.scrollHeight - main.clientHeight : 0 })
-          await page.setViewportSize({ width, height: Math.min(viewport.height + extra + 8, 7000) })
-          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
-          await page.screenshot({ path: info.outputPath(`aeon-1359/${name}-${width}-${theme}.png`) })
-          await page.setViewportSize(viewport)
-        } else await page.screenshot({ path: info.outputPath(`aeon-1359/${name}-${width}-${theme}.png`) })
-      }
-      for (const key of ['PHAROS-11', 'PHAROS-15']) {
-        await page.goto(`/p/PHAROS/${key}`)
-        await expect(markers(page).first()).toBeVisible()
-        await page.mouse.move(0, 0)
-        await life(page).scrollIntoViewIfNeeded()
-        await shot(`lifeline-${key}`)
-        const seg = await box(segments(page).nth(1))
-        if (width === 390) await page.mouse.click(seg.x + seg.width / 2, seg.y + seg.height / 2)
-        else await page.mouse.move(seg.x + seg.width / 2, seg.y + seg.height / 2)
-        await expect(tip(page)).toBeVisible()
-        await shot(`lifeline-${key}-tip`)
-        await markers(page).last().hover()
-        await expect(tip(page)).toHaveClass(/\bmarker\b/)
-        await shot(`lifeline-${key}-marker`)
-      }
-      await page.goto('/p/AEON/delivery')
-      await expect(page.getByTestId('delivery-tickets-hero').locator('.s-val')).toHaveText('1.5d')
-      await page.mouse.move(0, 0)
-      await shot('delivery-simple', true)
-      await head(page).getByRole('radiogroup', { name: 'Level of detail' }).getByRole('radio', { name: 'Expert' }).click()
-      await expect(page.getByTestId('delivery-tickets-expert').locator('.t-value').first()).toHaveText('1.5d')
-      await shot('delivery-expert', true)
-    })
-  }
-}

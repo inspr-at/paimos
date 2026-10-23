@@ -33,7 +33,8 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
+// AEON-1677: retain both row layouts; every numeric/event vector remains below.
+for (const theme of ['light']) for (const width of [390, 1440]) {
   test(`parent leaf totals at ${width} ${theme}`, async ({ page }) => {
     const errors = watchErrors(page)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
@@ -150,7 +151,7 @@ for (const scenario of [
   { name: 'weighted 100%', progress: 100, estimated: 1, partial: true },
   { name: 'server-rounded 100%', progress: 100, estimated: 2, partial: false },
   { name: 'formatter-rounded 100%', progress: 99.6, estimated: 2, partial: false },
-]) for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
+]) for (const theme of ['light']) for (const width of [390, 1440]) {
   test(`unfinished ${scenario.name} parent retains ETA and honest Progress at ${width} ${theme}`, async ({ page }) => {
     const errors = watchErrors(page)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
