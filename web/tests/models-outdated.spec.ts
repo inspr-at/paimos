@@ -275,6 +275,11 @@ test('screenshots of the tray and the sheet at 1440, 1024 and 390 px, light and 
       await expect(sheet(page)).toBeVisible()
       await expect(sheet(page).locator('.rf').first()).toContainText('Mia')
       await expect(sheet(page).locator('.rf').nth(1)).toContainText('Backend build')
+      // AEON-1712: counts 4→0→4 preserve both action boxes in all six layouts.
+      const boxes = sheet(page).locator('[data-od]')
+      const guard = await controlStability(page, { first: boxes.first(), last: boxes.last(), keep: sheet(page).locator('[data-od-keep]'), go: go(page), close: sheet(page).getByRole('button', { name: 'Close Remove old versions' }) })
+      for (const checked of [false, true]) for (let index = 0; index < 4; index++) await guard.check(() => boxes.nth(index).setChecked(checked))
+      guard.done()
       await page.screenshot({ path: testInfo.outputPath(`sheet-${width}-${scheme}.png`) })
       await page.keyboard.press('Escape')
       await expect(sheet(page)).toHaveCount(0)

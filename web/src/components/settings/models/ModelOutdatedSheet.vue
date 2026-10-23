@@ -69,7 +69,6 @@ const note = computed(() => {
 })
 // The button keeps one size for every count, so the actions beside it never move.
 const goLabel = computed(() => chosen.value.length ? `Remove ${chosen.value.length} old version${chosen.value.length === 1 ? '' : 's'}` : 'Nothing selected')
-const widest = computed(() => `Remove ${props.entries.length} old versions`)
 function go() {
   if (props.busy || !chosen.value.length) return
   emit('remove', chosen.value.map(entry => entry.version))
@@ -109,7 +108,10 @@ function go() {
     <template #foot>
       <button type="button" class="btn ghost od-keep" data-od-keep @click="emit('close')">Keep them</button>
       <button type="button" class="btn primary" data-od-go :disabled="!chosen.length" :aria-busy="busy" @click="go">
-        <span class="btn-label od-go-label"><span>{{ goLabel }}</span><span aria-hidden="true">{{ widest }}</span><span aria-hidden="true">Nothing selected</span></span>
+        <span class="btn-label od-go-label">
+          <span v-if="chosen.length">Remove <span class="od-count">{{ chosen.length }}</span> old version{{ chosen.length === 1 ? '' : 's' }}</span><span v-else>{{ goLabel }}</span>
+          <span aria-hidden="true">Remove <span class="od-count">{{ entries.length }}</span> old versions</span><span aria-hidden="true">Nothing selected</span>
+        </span>
       </button>
     </template>
   </AccessSheet>
@@ -142,8 +144,8 @@ function go() {
 .rf.none { display: block; color: var(--ink-3); }
 .od-note { display: flex; gap: 8px; margin-top: 18px; padding: 10px 12px; border-radius: 10px; background: var(--surface-sunken); font-size: 12px; line-height: 1.5; color: var(--ink-2); }
 .od-note > :first-child { flex: none; margin-top: 2px; color: var(--ink-3); }
-/* Keep tabular counts independent of their neighbouring spaces and letters. */
-.od-go-label { font-variant-numeric: tabular-nums; font-kerning: none; }
+/* The reserved maximum and live count use the same fixed-advance digits. */
+.od-count { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 @container (max-width: 480px) { .rf { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 @media (pointer: coarse) {
   .od-l { min-height: 44px; }

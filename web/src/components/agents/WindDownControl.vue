@@ -280,7 +280,7 @@ defineExpose({
         <p id="wd-hint" class="qhint" :class="{ err: error || pause.leavingError }" aria-live="polite">{{ error || (!ownershipReady && !pause.leavingError ? 'Reading owned sessions…' : '') }}<template v-if="pause.leavingError">{{ pause.leavingError }} <button type="button" class="link-btn" @click="pause.refreshLeaving()">Retry</button></template></p>
         <div class="wdf-acts">
           <button type="button" class="btn ghost" @click="closePanel(true)">Cancel<kbd class="keycap">Esc</kbd></button>
-          <button type="submit" class="btn primary" :disabled="!ownershipReady || pause.leavingBusy">Wind down<span class="go-by" :class="{ hidden: !!timeError }">· by {{ goTime }}</span><span class="submit-keys"><KeyCap k="mod" /><KeyCap k="enter" /></span></button>
+          <button type="submit" class="btn primary" :disabled="!ownershipReady || pause.leavingBusy">Wind down<span class="go-by" :class="{ hidden: !!timeError }">· by <span class="go-time">{{ goTime }}</span></span><span class="submit-keys"><KeyCap k="mod" /><KeyCap k="enter" /></span></button>
         </div>
         <div class="wd-sep" role="separator" />
         <p class="eyebrow now-head">Right now</p>
@@ -320,8 +320,8 @@ defineExpose({
 </template>
 <style scoped>
 .wind-down { display: inline-flex; align-items: center; flex: none; }
-/* Tabular advances still allow kerning with the colon and surrounding text. */
-.go-by { font-variant-numeric: tabular-nums; font-kerning: none; }
+/* The system face need not support tabular figures. Use the shared number face. */
+.go-time { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .go-by.hidden { visibility: hidden; }
 .submit-keys { display: inline-flex; gap: 2px; align-items: center; flex: none; }
 .wd-btn { color: var(--ink-2); }
