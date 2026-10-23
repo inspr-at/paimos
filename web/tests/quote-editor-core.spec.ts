@@ -2,6 +2,19 @@
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockQuoteEditor, NODES, QUOTE_ID, quoteDocument } from './quote-inspector-fixtures'
+import { spawnSync } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
+
+// Temporary remote diagnostic, removed after recording the final catalogue's
+// policy result; the worker transport itself must not affect shard budgets.
+test.beforeAll(async ({}, testInfo) => {
+  const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', '--test-name-pattern',
+    '^(three-tier manifests allow|AEON-1024 measured splits)', '../scripts/test-tiers/test-tiers.test.mjs'],
+  { cwd: process.cwd(), encoding: 'utf8', timeout: 30_000, maxBuffer: 2 * 1024 * 1024 })
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
+  writeFileSync(testInfo.outputPath('p10-policy-diagnostic.md'), JSON.stringify({ status: result.status, signal: result.signal, output }, null, 2))
+  expect(result.status, output).toBe(0)
+})
 
 const sectionId = '11111111-1111-4111-8111-111111111111'
 const nodeId = '22222222-2222-4222-8222-222222222222'

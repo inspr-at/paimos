@@ -1,9 +1,0 @@
-{
-  "group": "quote-native",
-  "spec": {
-    "file": "tests/p10-runtime-proof.spec.ts",
-    "listedTests": 1,
-    "weightSeconds": 60,
-    "weightSource": "temporary-worker-runtime-proof"
-  }
-}

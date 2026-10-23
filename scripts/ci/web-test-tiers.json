@@ -11976,8 +11976,6 @@
     ,
     {"kind":"browser","file":"tests/outline.spec.ts","name":"the List | Outline switch keeps the view in the URL and the same toolbar","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/p10-runtime-proof.spec.ts","name":"AEON-1682 worker runtime and negative-control proof","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/palette.spec.ts","name":"/ opens the palette only where the page has no list search","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/palette.spec.ts","name":"Cmd or Ctrl+Enter opens the result in a new tab and keeps the palette","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
