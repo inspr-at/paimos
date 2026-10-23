@@ -59,6 +59,12 @@ func messagingFrame(v inbox.CompatMessage, project string) string {
 	b.WriteString(html.EscapeString(from))
 	b.WriteString(`" project="`)
 	b.WriteString(html.EscapeString(project))
+	if v.SenderProjectID != nil {
+		b.WriteString(`" sender_project="`)
+		b.WriteString(html.EscapeString(v.SenderProject))
+		b.WriteString(`" sender_project_id="`)
+		b.WriteString(html.EscapeString(*v.SenderProjectID))
+	}
 	b.WriteString(`" hop="`)
 	b.WriteString(strconv.Itoa(hop))
 	b.WriteString(`" message_id="`)
