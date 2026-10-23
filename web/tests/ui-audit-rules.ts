@@ -137,6 +137,28 @@ export function domAudit(): Raw[] {
   const chipInSlot = (chip: Element, link: Element) => link.matches('.item-link') && chip.matches('.live-chip') && chip.closest('.live')?.parentElement === link.parentElement && !coversContent(link, chip.getBoundingClientRect())
   const actionInSlot = (action: Element, link: Element) => link.matches('.item-link') && action.matches('button.row-more')
     && action.parentElement === link.parentElement && !coversContent(link, action.getBoundingClientRect())
+  // A scrolled control's box can extend behind a stationary header even though
+  // its scrollport clips that part completely. Compare the visible rectangles;
+  // collisions inside the scrollport still count, with the same threshold.
+  const visibleBounds = new Map(controls.map(el => {
+    const rect = el.getBoundingClientRect()
+    const bounds = { left: Math.max(0, rect.left), right: Math.min(innerWidth, rect.right), top: Math.max(0, rect.top), bottom: Math.min(innerHeight, rect.bottom) }
+    if (getComputedStyle(el).position !== 'fixed' && !el.matches(':modal')) {
+      for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent), box = parent.getBoundingClientRect()
+        if (style.overflowX !== 'visible') {
+          bounds.left = Math.max(bounds.left, box.left + parent.clientLeft)
+          bounds.right = Math.min(bounds.right, box.left + parent.clientLeft + parent.clientWidth)
+        }
+        if (style.overflowY !== 'visible') {
+          bounds.top = Math.max(bounds.top, box.top + parent.clientTop)
+          bounds.bottom = Math.min(bounds.bottom, box.top + parent.clientTop + parent.clientHeight)
+        }
+        if (style.position === 'fixed' || parent.matches(':modal')) break
+      }
+    }
+    return [el, bounds] as const
+  }))
   for (let i = 0; i < controls.length; i++) {
     const a = controls[i], ar = a.getBoundingClientRect()
     const label = a.closest('label') ?? (a instanceof HTMLInputElement ? a.labels?.item(0) : null)
@@ -169,7 +191,7 @@ export function domAudit(): Raw[] {
     if (innerWidth <= 390 && fullyInViewport && (ar.width < 44 || ar.height < 44) && !labelArea && !hitArea && !inline && !a.closest('[role="checkbox"], [role="radio"], [role="switch"]'))
       add('small-touch-target', 'moderate', selector(a), `${Math.round(ar.width)}×${Math.round(ar.height)}px touch target at ${Math.round(ar.x)},${Math.round(ar.y)}; blocked ${['left', 'right', 'top', 'bottom'].filter((_, n) => !hits[n]).join(', ')} by ${document.elementFromPoint(cx, cy + 21.5)?.className || '?'} at ${Math.round(document.elementFromPoint(cx, cy + 21.5)?.getBoundingClientRect().x ?? 0)},${Math.round(document.elementFromPoint(cx, cy + 21.5)?.getBoundingClientRect().y ?? 0)}`)
     for (let j = i + 1; j < controls.length; j++) {
-      const b = controls[j], br = b.getBoundingClientRect()
+      const b = controls[j]
       if (a.contains(b) || b.contains(a) || a.closest('label') === b.closest('label') && a.closest('label')) continue
       // The row link deliberately extends behind its separate action button.
       if ((a.matches('.card-link') || b.matches('.card-link')) && a.parentElement === b.parentElement) continue
@@ -182,7 +204,8 @@ export function domAudit(): Raw[] {
       // Open menus cover the page below; their background controls are not peers.
       const overlay = (el: Element) => el.closest('.floating.pop, .hm-panel')
       if (overlay(a) !== overlay(b) && (overlay(a) || overlay(b))) continue
-      const overlap = Math.max(0, Math.min(ar.right, br.right) - Math.max(ar.left, br.left)) * Math.max(0, Math.min(ar.bottom, br.bottom) - Math.max(ar.top, br.top))
+      const av = visibleBounds.get(a)!, bv = visibleBounds.get(b)!
+      const overlap = Math.max(0, Math.min(av.right, bv.right) - Math.max(av.left, bv.left)) * Math.max(0, Math.min(av.bottom, bv.bottom) - Math.max(av.top, bv.top))
       if (overlap > 16) add('interactive-overlap', 'serious', selector(a), `overlaps ${selector(b)} by ${Math.round(overlap)}px²`)
     }
   }

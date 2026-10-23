@@ -139,6 +139,9 @@ function saveCaption(item: Attachment) { if (editing.value !== item.id) return; 
 .list { display: flex; gap: 10px; margin: 0; padding: 2px 2px 6px; list-style: none; overflow-x: auto; scrollbar-width: thin; }
 .strip .list { min-height: 118px; }
 .item { position: relative; flex-shrink: 0; display: grid; gap: 5px; }
+/* Reserve a separate action row so Open and Delete keep disjoint hit areas,
+   including when keyboard focus reveals the action. */
+.item:has(> .remove) { padding-top: 28px; }
 .tile {
   position: relative; display: grid; place-items: center; width: 132px; height: 88px; padding: 0; border: 0; border-radius: 10px; overflow: hidden; cursor: zoom-in;
   background: var(--surface-sunken, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent);
@@ -157,7 +160,7 @@ function saveCaption(item: Attachment) { if (editing.value !== item.id) return; 
 .file-name { max-width: 116px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--ink); }
 .file-size { font-size: 10.5px; color: var(--ink-2); }
 .remove {
-  position: absolute; top: 5px; right: 5px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%;
+  position: absolute; top: 0; right: 0; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%;
   background: color-mix(in srgb, var(--overlay-ink) 72%, transparent); color: var(--surface-highlight); opacity: 0; transition: opacity .12s ease;
 }
 .item:hover .remove, .item:focus-within .remove { opacity: 1; }
@@ -181,6 +184,10 @@ function saveCaption(item: Attachment) { if (editing.value !== item.id) return; 
 .caption-input { background: var(--field-bg); box-shadow: var(--focus-ring); color: var(--ink); }
 .gallery .item.drop-before::before, .gallery .item.drop-after::after { bottom: 26px; }
 @media (hover: none) { .remove { opacity: 1; } }
+@media (pointer: coarse) {
+  .item:has(> .remove) { padding-top: 48px; }
+  .remove { width: 44px; height: 44px; }
+}
 /* Phones: the strip becomes the two-up grid; no tile is cut at the edge. */
 @media (max-width: 600px) {
   .list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 10px; overflow: visible; }

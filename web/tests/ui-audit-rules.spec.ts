@@ -49,6 +49,16 @@ test('overlap rule ignores a card action and modal background but keeps peer col
   const fixed = (await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')
   expect(fixed).toHaveLength(1)
   expect(fixed[0]?.selector).toBe('#header-first'); expect(fixed[0]?.detail).toContain('#header-second')
+  // A partially scrolled selector is clipped below a stationary control. Its
+  // hidden rectangle must not count, while two visible pixels still collide.
+  await page.setContent(`<style>body { margin: 0; } #stationary { position: absolute; z-index: 2; left: 20px; top: 50px; width: 100px; height: 60px; } #scrollport { position: absolute; top: 110px; left: 20px; width: 160px; height: 180px; overflow: auto; } #clipped { display: block; width: 100px; height: 60px; } .filler { height: 300px; }</style><button id="stationary">Key</button><div id="scrollport"><button id="clipped">Selector</button><div class="filler"></div></div>`)
+  await page.locator('#scrollport').evaluate(el => { el.scrollTop = 25 })
+  expect((await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')).toEqual([])
+  await page.locator('#stationary').evaluate(el => { el.style.top = '52px' })
+  const visibleCollision = (await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')
+  expect(visibleCollision).toHaveLength(1)
+  expect(visibleCollision[0]?.selector).toBe('#stationary')
+  expect(visibleCollision[0]?.detail).toContain('#clipped')
 })
 
 test('touch rule lets an open menu cover controls and exempts dates in the paper’s text', async ({ page }) => {

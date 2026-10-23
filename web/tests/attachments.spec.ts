@@ -28,14 +28,38 @@ async function dropFiles(page: Page, files: { name: string; type: string }[]) {
   }, files)
 }
 
-test('the strip shows a count, thumbnails and file cards', async ({ page }) => {
-  const errors = watchErrors(page)
-  await open(page)
-  await expect(strip(page).locator('.count')).toHaveText('4')
-  await expect(tiles(page).nth(3)).toContainText('PDF')
-  await expect(tiles(page).nth(3)).toContainText('provider-notes.pdf')
-  await expect(tiles(page).first().locator('img')).toHaveAttribute('src', '/api/attachments/att-1/content?variant=thumb')
-  expect(errors).toEqual([])
+test('the strip shows a count, thumbnails and file cards', async ({ browser }, info) => {
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    const context = await browser.newContext({ baseURL: info.project.use.baseURL, hasTouch: width === 390, colorScheme: theme })
+    try {
+      const page = await context.newPage(), errors = watchErrors(page)
+      await open(page, width)
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+      await expect(strip(page).locator('.count')).toHaveText('4')
+      await expect(tiles(page).nth(3)).toContainText('PDF')
+      await expect(tiles(page).nth(3)).toContainText('provider-notes.pdf')
+      const preview = tiles(page).first(), remove = strip(page).getByRole('button', { name: 'Delete fleet-list-before.png', exact: true })
+      await expect(preview.locator('img')).toHaveAttribute('src', '/api/attachments/att-1/content?variant=thumb')
+      await expectStableControls({ controls: { preview, remove, attachment: preview.locator('..') },
+        interactions: [
+          { name: 'keyboard reveals Delete', run: async () => { await preview.focus(); await expect(remove).toHaveCSS('opacity', '1') } },
+          { name: 'Tab reaches the separate Delete action', run: async () => { await page.keyboard.press('Tab'); await expect(remove).toBeFocused() } },
+        ],
+      })
+      const [openBox, deleteBox] = await Promise.all([preview.boundingBox(), remove.boundingBox()])
+      expect(openBox!.width).toBeGreaterThan(0); expect(openBox!.height).toBeGreaterThan(0)
+      expect(deleteBox!.width).toBeGreaterThan(0); expect(deleteBox!.height).toBeGreaterThan(0)
+      const overlap = Math.max(0, Math.min(openBox!.x + openBox!.width, deleteBox!.x + deleteBox!.width) - Math.max(openBox!.x, deleteBox!.x))
+        * Math.max(0, Math.min(openBox!.y + openBox!.height, deleteBox!.y + deleteBox!.height) - Math.max(openBox!.y, deleteBox!.y))
+      expect(overlap, 'Open and Delete must have disjoint hit areas').toBe(0)
+      if (width === 390) {
+        expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+        expect(deleteBox!.width).toBeGreaterThanOrEqual(44); expect(deleteBox!.height).toBeGreaterThanOrEqual(44)
+      }
+      await page.screenshot({ path: info.outputPath(`attachment-actions-${width}-${theme}.png`) })
+      expect(errors).toEqual([])
+    } finally { await context.close() }
+  }
 })
 
 test('dropping files anywhere on the ticket uploads them with a drop overlay', async ({ page }) => {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 
@@ -22,6 +23,8 @@ for (const width of [390, 1440]) {
     const complexity = ws.getByRole('combobox', { name: 'Complexity', exact: true })
     const areaRow = area.locator('..'), complexityRow = complexity.locator('..')
     await expect(area).toBeEnabled()
+    await expect(ws.getByRole('status', { name: 'Classification feedback', exact: true })).toContainText('Suggested')
+    expect((await new AxeBuilder({ page }).include('.ticket-ws').withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()).violations).toEqual([])
     await expect(area.locator('option')).toHaveText(['Unspecified', 'backend', 'security', 'Firmware and embedded hardware'])
     await expectStableControls({
       controls: { area, complexity, areaRow, complexityRow }, scrollAreas: { properties: ws.locator('.ws-props') },
