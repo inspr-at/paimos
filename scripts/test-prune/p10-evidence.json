@@ -1,0 +1,222 @@
+{
+  "version": 1,
+  "ticket": "AEON-1682",
+  "package": "P10",
+  "complete": false,
+  "stage": "replacement-preparation",
+  "sourceCommit": "653660d89af8a92038610839f8f232fe99ed195f",
+  "counts": {
+    "beforeBrowserCases": 225,
+    "currentBrowserCases": 227,
+    "originalCasesRemoved": 0,
+    "originalCasesDemoted": 0,
+    "newRuntimeCases": 10,
+    "newBrowserCandidates": 2,
+    "targetCeiling": 30,
+    "formerNightlyBoundariesPromoted": 7
+  },
+  "prerequisites": [
+    {
+      "requirement": "Replacement success and behavioral negative controls before any original case is removed",
+      "status": "pending-remote-execution"
+    },
+    {
+      "requirement": "Tick-approved immutable visual reference authority for protected cuts",
+      "status": "pending",
+      "source": "scripts/test-prune/visual-manifest.json",
+      "observed": {
+        "approval": "pending",
+        "baselineAuthority": "pending-review",
+        "referencePins": "unpopulated"
+      }
+    }
+  ],
+  "validation": {
+    "beforeBrowserBatch": {
+      "sourceCommit": "653660d89af8a92038610839f8f232fe99ed195f",
+      "entryPoint": "remote-spec.sh",
+      "specs": [
+        "tests/business-pickers.spec.ts",
+        "tests/hours-edit.spec.ts",
+        "tests/quote-editor-input.spec.ts",
+        "tests/quote-editor-core.spec.ts",
+        "tests/quote-collaboration.spec.ts",
+        "tests/quote-public.spec.ts"
+      ],
+      "exitCode": 0,
+      "nativeResult": "33 passed (1.5m)",
+      "measuredCaseRunnerSeconds": null,
+      "evidenceKind": "worker-observed-entry-point-output"
+    },
+    "replacementBatch": {
+      "entryPoint": "remote-spec.sh",
+      "status": "refused",
+      "exitCode": 3,
+      "messages": [
+        "remote busy (host guard); wait or rely on PR CI",
+        "remote busy: 2/2 remote runs (CI pool 0/4)"
+      ]
+    },
+    "static": {
+      "entryPoint": "ci-static-remote.sh",
+      "status": "refused",
+      "exitCode": 3,
+      "message": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job"
+    },
+    "localFallback": {
+      "file": "tests/quote-editor.unit.test.ts",
+      "result": "5 passed, 1 failed; copied vector corrected to original sequential setNumbering operations; no rerun claimed"
+    },
+    "ledger": {
+      "command": "node scripts/test-prune/check.mjs",
+      "result": "passed; visualApproval=pending; cuts=false"
+    }
+  },
+  "negativeControls": {
+    "status": "prepared-not-executed",
+    "count": 9,
+    "transportSource": {
+      "commit": "d988f84bfb98800d6168472f200faf22e6c5c29c",
+      "path": "web/tests/p10-runtime-proof.spec.ts"
+    },
+    "transportInFinalCatalogue": false,
+    "runScope": "Run transport alone in its own disposable remote checkout; it mutates and restores production source between isolated unit processes.",
+    "risks": [
+      "rate-read concurrency",
+      "half-open effective rates",
+      "validation before rate write",
+      "draft CAS header",
+      "explicit numbering start",
+      "null profile normalization",
+      "late reload ownership",
+      "retry backoff clock",
+      "uncertain save mutation identity"
+    ]
+  },
+  "timing": {
+    "beforeReportedBrowserWall": "1.5m for the six-spec baseline batch",
+    "afterCaseRunnerSeconds": null,
+    "runnerTimeChangeSeconds": null,
+    "conclusion": "No measured runner-time reduction claimed: replacement/negative proof was refused, so original cases remain."
+  },
+  "runtimeCandidates": [
+    "vitest:tests/business-periods.unit.test.ts:AEON-1682: effective rates use the selected day, unit and currency and reject failed rates",
+    "vitest:tests/business-periods.unit.test.ts:AEON-1682: rate form validates before writing, retains a refused draft and refreshes confirmed rates",
+    "vitest:tests/quote-editor.unit.test.ts:AEON-1682: persisted editor vectors > keeps six numbered levels, marks, measurements, IDs, order and exact money through history",
+    "vitest:tests/quote-editor.unit.test.ts:AEON-1682: persisted editor vectors > numbers restart, explicit start and continuation across prose with section binding",
+    "vitest:tests/quote-editor.unit.test.ts:AEON-1682: persisted editor vectors > sends CAS and mutation identity, normalizes legacy measurements without changing money or the source",
+    "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+    "vitest:tests/quote-workspace-recovery.unit.test.ts:AEON-1682: loading refuses writes and a held reload cannot replace an edit made after it began",
+    "vitest:tests/quote-workspace-recovery.unit.test.ts:AEON-1682: merge review preserves text overlaps, deleted anchors and competing order",
+    "vitest:tests/quote-workspace-recovery.unit.test.ts:AEON-1682: refused saves preserve work and distinguish corrected mutations from uncertain same-id retry",
+    "vitest:tests/quote-workspace-recovery.unit.test.ts:AEON-1682: revision watch backs off on the injected clock and focus rechecks without waiting"
+  ],
+  "browserCandidates": [
+    "browser:tests/quote-editor-core.spec.ts:AEON-1682: native prose edit, measurement history and CAS save survive a reload with stable IDs",
+    "browser:tests/quotes/print-receipt.spec.ts:AEON-1682: emitted multipage receipt preserves Unicode marks, fixed evidence and unclipped A4 text"
+  ],
+  "preparedMappings": [
+    {
+      "source": "browser:tests/business-pickers.spec.ts:AEON-1417: 200 cost units keep rate request concurrency at six",
+      "destination": "vitest:tests/business-periods.unit.test.ts:AEON-1417: 200 units use at most six rate reads and a rejected unit remains visible until retry succeeds",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/business-pickers.spec.ts:AEON-1417: continuation on the last allowed page reports partial for every business directory",
+      "destination": "vitest:tests/business-periods.unit.test.ts:AEON-1417: a cursor at every directory cap returns typed partial rows and the final complete page stays complete",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-editor-core.spec.ts:draft save converts measurements in old browser recovery without changing money",
+      "destination": "vitest:tests/quote-editor.unit.test.ts:AEON-1682: persisted editor vectors > sends CAS and mutation identity, normalizes legacy measurements without changing money or the source",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-editor-core.spec.ts:structured prose, all six levels, numbering, section and row changes survive JSON and history",
+      "destination": "vitest:tests/quote-editor.unit.test.ts:AEON-1682: persisted editor vectors > keeps six numbered levels, marks, measurements, IDs, order and exact money through history",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-editor-core.spec.ts:typed P1 client sends CAS and stable document to the mocked draft API",
+      "destination": "vitest:tests/quote-editor.unit.test.ts:AEON-1682: persisted editor vectors > sends CAS and mutation identity, normalizes legacy measurements without changing money or the source",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-editor-core.spec.ts:numbering restart, explicit start, continuation across prose and section binding",
+      "destination": "vitest:tests/quote-editor.unit.test.ts:AEON-1682: persisted editor vectors > numbers restart, explicit start and continuation across prose with section binding",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-collaboration.spec.ts:loading cannot save and a late reload never replaces an edit made while it waited",
+      "destination": "vitest:tests/quote-workspace-recovery.unit.test.ts:AEON-1682: loading refuses writes and a held reload cannot replace an edit made after it began",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-collaboration.spec.ts:merge review keeps text overlaps, deleted anchors and competing order explicit",
+      "destination": "vitest:tests/quote-workspace-recovery.unit.test.ts:AEON-1682: merge review preserves text overlaps, deleted anchors and competing order",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-collaboration.spec.ts:revision watch backs off after outages and rechecks immediately on focus",
+      "destination": "vitest:tests/quote-workspace-recovery.unit.test.ts:AEON-1682: revision watch backs off on the injected clock and focus rechecks without waiting",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-showcase.spec.ts:a stored profile snapshot with null lists still opens (A260929-04 as stored before the fix)",
+      "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-showcase.spec.ts:showcase quote acme-acceptance opens beside the list without an error page",
+      "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-showcase.spec.ts:showcase quote acme-fitout opens beside the list without an error page",
+      "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-showcase.spec.ts:showcase quote acme-platform opens beside the list without an error page",
+      "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-showcase.spec.ts:showcase quote acme-retainer opens beside the list without an error page",
+      "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-showcase.spec.ts:showcase quote steinwender-belegleser opens beside the list without an error page",
+      "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    },
+    {
+      "source": "browser:tests/quote-showcase.spec.ts:the fixture holds all five showcase quotes, the English one with its own profile",
+      "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+      "status": "prepared-unverified",
+      "action": "keep-original-until-runtime-and-negative-proof-pass"
+    }
+  ],
+  "remaining": [
+    "Complete and prove the other P10 native journeys and runtime conversions.",
+    "Execute all positive and negative proof before cutting the original groups.",
+    "Resolve the P01/P02 visual-reference prerequisite without bypassing the ledger guard.",
+    "Remove proven duplicates, remap current obligations, and regenerate tiers/shard source records; measure actual before/after runner time."
+  ]
+}
