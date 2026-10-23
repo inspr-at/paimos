@@ -113,6 +113,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
       { name: 'read the last day with the keyboard', run: async () => { await scroll.press('ArrowRight') } },
       { name: 'return to the first day', run: async () => { await scroll.press('ArrowLeft') } },
     ] })
+    expect(await scroll.evaluate(element => element.scrollWidth - element.clientWidth), 'week grid has 0 px horizontal overflow').toBe(0)
     expect(await Promise.all(Object.values(controls).map(control => control.boundingBox())), 'week controls and rows move by 0 px').toEqual(boxes)
     const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
     expect(layout, `${width} ${theme}: week descendants fit without clipping or overlap`).toEqual([])

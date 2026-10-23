@@ -188,7 +188,8 @@ async function contrast(locator: Locator) {
 
 for (const width of [1440, 1024, 390, 320]) for (const theme of ['light', 'dark'] as const) {
   test(`AEON-1438 thread ${width} ${theme}: Desk cards, quiet meta, latest receipt, calm composer`, async ({ page }, testInfo) => {
-    const { worker, latest } = await setup(page, { theme })
+    const { worker, latest, data } = await setup(page, { theme })
+    data.messages.find(message => message.body.includes(longWord))!.body = `Die vollständige Freigabeprüfung einschließlich sämtlicher Abrechnungseinstellungen ist abgeschlossen. Der geprüfte Dateischlüssel lautet ${longWord}.`
     await page.setViewportSize({ width, height: width === 320 ? 568 : width <= 390 ? 844 : 900 })
     await page.goto(`/agents/${worker.id}?tab=messages`)
     const panel = panelOf(page)
