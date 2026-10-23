@@ -1938,7 +1938,7 @@
         {"file":"tests/session-removal.spec.ts","registrations":8},
         {"file":"tests/session-requests.spec.ts","registrations":4}
       ],
-      "runnerEvidence": {"host":"mbp2606","entrypoint":"remote-spec.sh","before":{"status":"refused","reason":"remote busy (host guard); later attempts: remote busy (no free mbp2606 slot: global cap / CI pool / battery)"},"after":{"status":"pending"},"static":"Hosted CI, as required by the Cut A brief."}
+      "runnerEvidence": {"host":"mbp2606","entrypoint":"remote-spec.sh","before":{"status":"refused","reason":"remote busy (host guard); later attempts: remote busy (no free mbp2606 slot: global cap / CI pool / battery)"},"after":{"status":"refused","reason":"remote busy: 2/2 remote runs (CI pool 0/4); remote busy (no free mbp2606 slot: global cap / CI pool / battery)","batches":3},"static":"Hosted CI, as required by the Cut A brief.","finalMainCommit":"11b092730e55abd0d0cdb645f0feb0dd970c0076"}
     }
   ]
 }
