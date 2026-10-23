@@ -1355,7 +1355,30 @@
         "replacementPassed": 82,
         "replacementFailed": 0,
         "replacementReportedMinutes": 2.5,
-        "status": "82/82 passed on mbp2606. Subsequent restored removal/expiry/inline-conflict assertions in 53741be53 and the remaining four changed specs still require final browser validation; refused for remote capacity."
+        "status": "82/82 passed in the first affected subset; final six-spec batch 45/46, one test-oracle correction committed. Unique browser risks and all 177 original registrations remain.",
+        "finalBatch": {
+          "commit": "555c0fde3",
+          "specs": [
+            "aeon-1532-editor-steady",
+            "markdown-ticket-links",
+            "relations",
+            "ticket-reviews",
+            "attachments",
+            "live-panel"
+          ],
+          "passed": 45,
+          "failed": 1,
+          "reportedMinutes": 1.2,
+          "failure": "Strict locator found two identical removal toasts after exercising both creation-Undo and removal-Undo.",
+          "correctionCommit": "8b6643e46",
+          "correction": "Dismiss the completed first removal notification before exercising the independent second Undo action.",
+          "remainingSpecs": [
+            "tests/relations.spec.ts",
+            "tests/ticket-panel.spec.ts",
+            "tests/attachments.spec.ts"
+          ],
+          "finalRerunStatus": "refused: remote busy (host guard); final attempt pending"
+        }
       },
       "measuredRunnerTimeChange": {
         "status": "measured-subset-without-pruning",
