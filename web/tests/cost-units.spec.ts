@@ -87,3 +87,15 @@ test('members read rates without changing them', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Add rate' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'New cost unit' })).toHaveCount(0)
 })
+
+// Temporary same-host worker timing; removed before handoff.
+import { writeFileSync as writeCutATiming } from 'node:fs'
+import { hostname as cutAHost } from 'node:os'
+let cutAStarted = 0
+test.beforeEach(() => { cutAStarted = performance.now() })
+test.afterEach(async ({}, testInfo) => {
+  writeCutATiming(testInfo.outputPath('p10-cutA-timing.md'), JSON.stringify({
+    host: cutAHost(), title: testInfo.title, seconds: (performance.now() - cutAStarted) / 1000,
+    status: testInfo.status, retry: testInfo.retry,
+  }))
+})
