@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { test, expect, type Response } from '@playwright/test'
+import { test, expect, type Page, type Response } from '@playwright/test'
 import { sessionChat, sessionChatUnavailable } from './visual/fixtures'
 import { checkVisual, compareVisualReference, visualCases, prepareVisualFonts, renderedFonts } from './visual/checkpoint'
 
@@ -54,9 +54,15 @@ test('visual comparison rejects a changed control and never creates a missing re
     .rejects.toThrow('renderer differs from reference: locale')
   // Awaiting states retain strict quality checks without PNG captures.
   const qualityDocument = '<html lang="en"><head><title>Synthetic quality control</title><style>button { min-width: 80px; height: 44px; }</style></head><body><main><button>Continue</button></main></body></html>'
+  const setupQuality = async (qualityPage: Page) => {
+    await qualityPage.route('**/__visual-quality-proof', route => route.fulfill({ contentType: 'text/html', body: qualityDocument }))
+    // Fonts stay on the app origin, as in real checkpoints. about:blank would
+    // turn the self-hosted font into a cross-origin request from a null origin.
+    await qualityPage.goto('/__visual-quality-proof')
+  }
   const pending = visualCases('tickets')[0]!
   expect(await compareVisualReference(page, info, pending, { visual, baselineFile: info.outputPath('absent-bundle.json') })).toBe(false)
-  await checkVisual(browser, info, pending, async qualityPage => { await qualityPage.setContent(qualityDocument) })
+  await checkVisual(browser, info, pending, setupQuality)
   const report = JSON.parse(readFileSync(info.outputPath(`${pending.id}.md`), 'utf8'))
   expect(report).toMatchObject({ baselineCompared: false, pngSHA256: null, requirementsRun: true,
     reference: { mode: 'awaiting-reference' }, layout: [], axe: [], console: [], responses: [], fonts: [{ family: 'JetBrains Mono', custom: true }] })
@@ -72,10 +78,10 @@ test('visual comparison rejects a changed control and never creates a missing re
     expect(existsSync(info.outputPath(`${deferred.id}.png`))).toBe(false)
   }
   await expect(checkVisual(browser, info, visualCases('hours')[0]!, async qualityPage => {
-    await qualityPage.setContent(qualityDocument)
+    await setupQuality(qualityPage)
     await qualityPage.evaluate(() => console.error('Synthetic quality failure must still block an awaiting state'))
   })).rejects.toThrow(/unexpected console\/page failure/)
-  await page.setContent(qualityDocument)
+  await setupQuality(page)
   await prepareVisualFonts(page, String(info.project.use.baseURL))
   expect(await renderedFonts(page)).toEqual([{ family: 'JetBrains Mono', custom: true }])
   await page.addStyleTag({ content: 'button { font-family: Arial !important; }' })
