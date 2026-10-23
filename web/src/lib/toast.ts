@@ -5,7 +5,10 @@ export interface ToastAction { label: string; run: () => void }
 // A release named inside a toast's sentence: `message` is the whole sentence in
 // plain text, `release` says where the release stands in it so the toast can draw
 // the name with its version on hover or focus (AEON-430).
-export interface ToastRelease { version: string; name?: string; before: string; after?: string }
+// `counts` is what the release's public notes hold by kind, drawn after the
+// sentence with an icon each, and spoken as one line (AEON-1655).
+export interface ToastCounts { items: { kind: 'features' | 'fixes' | 'other'; count: number; label: string }[]; spoken: string }
+export interface ToastRelease { version: string; name?: string; before: string; after?: string; counts?: ToastCounts }
 export interface Toast { id: number; message: string; tone: 'info' | 'error'; actions: ToastAction[]; sticky: boolean; key?: string; release?: ToastRelease }
 export const toasts = reactive<Toast[]>([])
 // A fixed action bar reports its measured height and gap above the shell footer.
