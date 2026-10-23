@@ -574,14 +574,27 @@
         "removed preview-generation check accepts held JSON after leaving and returning"
       ]
     },
-    "runtime": "model-registry.unit.test.ts: 49 passed, 474ms; single small local fallback after remote-spec capacity refusal. Other new unit actions still require execution."
+    "runtime": "model-registry.unit.test.ts: 49 passed, 474ms; single small local fallback after remote-spec capacity refusal. Other new unit actions still require execution.",
+    "after": "371a2c9a8 after origin/main merge: same 6 specs through remote-spec; 86 passed / 1 unchanged existing skip, Playwright 1.3m, wrapper 82.35s. Includes phone expansion and the explicit guest Access gate.",
+    "static": {
+      "command": "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh",
+      "exitCode": 3,
+      "message": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job"
+    },
+    "pendingSuites": [
+      "tests/authz.unit.test.ts",
+      "tests/settings-owner.unit.test.ts",
+      "tests/settings-routing.unit.test.ts",
+      "tests/test-prune-ledger.test.ts",
+      "full ci-static --merge-main"
+    ]
   },
   "retainedReasons": [
     "Tick fixture approval and immutable reference bytes are pending on origin/main; protected and visual cases remain.",
     "Named runtime recipients are not assumed equivalent: originals remain until the actions execute and negative controls prove their replacements."
   ],
   "timing": {
-    "status": "after measurement pending",
+    "status": "measured affected six-spec remote command, not the complete P08 catalogue",
     "comparableSpecs": [
       "tests/html-sandbox.spec.ts",
       "tests/guest.spec.ts",
@@ -589,6 +602,23 @@
       "tests/key-scopes.spec.ts",
       "tests/models-simple.spec.ts",
       "tests/settings-host-capacity.spec.ts"
-    ]
+    ],
+    "before": {
+      "cases": 96,
+      "passed": 95,
+      "existingSkipped": 1,
+      "playwrightReportedMinutes": 1.3,
+      "remoteCommandWallSeconds": 85.46
+    },
+    "after": {
+      "cases": 87,
+      "passed": 86,
+      "existingSkipped": 1,
+      "playwrightReportedMinutes": 1.3,
+      "remoteCommandWallSeconds": 82.35
+    },
+    "remoteCommandDeltaSeconds": -3.11,
+    "remoteCommandDeltaPercent": -3.64,
+    "interpretation": "Playwright rounded both runs to 1.3m; no resolved native-runner reduction at that precision. Command wall includes setup and scheduling on a shared runner. No complete-P08 or unit saving is claimed. Per-spec historical case timings retain their provenance."
   }
 }
