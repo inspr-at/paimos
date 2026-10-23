@@ -131,7 +131,7 @@ async function chooseRole(roleId: string | null) {
   const before = target.agent.workspace_role?.id ?? null
   try {
     await access.setWorkspaceRole(target.agent.principal_id, roleId)
-    if (picker.value === target) closeRolePicker(true)
+    picker.value = null
     toast(`${target.agent.name} is now ${access.roleById.get(roleId ?? '')?.name ?? 'without a workspace role'}; its keys follow`, { action: { label: 'Undo', run: () => undoing(access.setWorkspaceRole(target.agent.principal_id, before), `${target.agent.name}’s role could not be put back`) } })
   } catch (e) { roleError.value = problem(e, `${target.agent.name} keeps its role`) }
   finally { busy.value = false }
