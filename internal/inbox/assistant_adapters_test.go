@@ -653,7 +653,16 @@ func testAssistantPickupRetention(t *testing.T) {
 			}
 			send := func(key string) Message {
 				t.Helper()
-				msg := mustJSON[Message](t, request(owner, "POST", "/api/inbox/messages", sendJSON(recipient, "waiting while host sleeps", key, nil, nil), 201))
+				var msg Message
+				if !implicit && (key == "retention-bound" || key == "disabled-assistant") {
+					queued := mustJSON[assistantAdapterTestResult](t, request(owner, "POST", "/api/projects/"+project+"/assistant-adapters/"+adapterID+"/test-send", fmt.Sprintf(`{"dry_run":false,"body":"waiting while host sleeps","idempotency_key":%q}`, key), 202))
+					msg.ID = queued.MessageID
+					if err := w.db.Admin.QueryRow(t.Context(), `SELECT created_at FROM inbox_messages WHERE id=$1`, msg.ID).Scan(&msg.CreatedAt); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					msg = mustJSON[Message](t, request(owner, "POST", "/api/inbox/messages", sendJSON(recipient, "waiting while host sleeps", key, nil, nil), 201))
+				}
 				// Acceptance is stamped by Postgres. Rebase the injected clock on that
 				// exact stamp; every duration below then has a single origin.
 				now = msg.CreatedAt
@@ -728,6 +737,27 @@ func testAssistantPickupRetention(t *testing.T) {
 			if len(page.Items) != 0 {
 				t.Fatalf("expired message resurrected: %+v", page)
 			}
+			rotating := send("rotation-preserves-pickup")
+			if implicit {
+				var replacement struct {
+					Token string `json:"token"`
+				}
+				data := request(owner, "POST", "/api/agents/assistants/"+recipient+"/rotate", fmt.Sprintf(`{"expires_at":%q}`, now.Add(30*24*time.Hour).Format(time.RFC3339Nano)), 201)
+				if err := json.Unmarshal(data, &replacement); err != nil {
+					t.Fatal(err)
+				}
+				credential = replacement.Token
+			} else {
+				credential = receiptAgentKey(t, w, w.agent, "inbox.read")
+				if _, err := w.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET revoked_at=$2 WHERE principal_id=$1 AND 'inbox.send'=ANY(scopes)`, recipient, now); err != nil {
+					t.Fatal(err)
+				}
+			}
+			sweep(0)
+			if got := receipt(rotating.ID); got.State != "queued" {
+				t.Fatalf("rotation failed pending message: %+v", got)
+			}
+			request(credential, "POST", "/api/inbox/messages/"+rotating.ID+"/ack", "{}", 200)
 			revoked := send("revoked-inbox-key")
 			if _, err := w.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET revoked_at=$2 WHERE principal_id=$1`, recipient, now); err != nil {
 				t.Fatal(err)
@@ -750,6 +780,9 @@ func testAssistantPickupRetention(t *testing.T) {
 			sweep(1)
 			if got := receipt(disabled.ID); got.State != "failed" || got.FailureReason != ReasonAssistantDisabled {
 				t.Fatalf("disable waited for a deadline: %+v", got)
+			}
+			if !implicit && countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM inbox_message_deliveries WHERE message_id=$1 AND state='dead' AND reason='unavailable'`, disabled.ID) != 1 {
+				t.Fatal("disabled compat delivery did not become terminal")
 			}
 			if len(noticesFor(t, w, disabled.ID)) != 1 {
 				t.Fatal("missing disabled notice")
