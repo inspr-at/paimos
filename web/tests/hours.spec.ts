@@ -122,13 +122,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
           ? [{ tag: child.tagName, class: child.className, right: box.right - bounds.right,
             textRight: text.right - bounds.right, overflow: child.scrollWidth - child.clientWidth }] : []
       }),
-      cells: Array.from(element.querySelectorAll('th, td')).map(cell => {
-        const range = document.createRange(); range.selectNodeContents(cell)
-        return { text: cell.textContent, width: cell.getBoundingClientRect().width,
-          textWidth: range.getBoundingClientRect().width, font: getComputedStyle(cell).font }
-      }),
     }))
-    await page.screenshot({ path: info.outputPath(`AEON-1687-hours-${width}-${theme}.png`) })
     expect(dimensions.overflow, `${width} ${theme}: 0 px horizontal overflow; ${JSON.stringify(dimensions)}`).toBe(0)
     const controls = { navigation: page.getByRole('group', { name: 'Week', exact: true }),
       person: page.getByRole('button', { name: 'Hours of You. Choose a person or agent' }),
@@ -186,12 +180,16 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
       if (!compact) throw new Error('Compact Hours rule not found')
       const measure = () => Array.from(document.querySelectorAll('.toolbar, .week-card, .week-grid th, .week-grid td, .week-foot'))
         .map(element => element.getBoundingClientRect().toJSON())
-      const fixed = measure(), condition = compact.media.mediaText
+      const measureTotals = () => Array.from(document.querySelectorAll('.week-grid .c-total')).map(element => ({
+        box: element.getBoundingClientRect().toJSON(), fontSize: getComputedStyle(element).fontSize,
+      }))
+      const fixed = measure(), fixedTotals = measureTotals(), condition = compact.media.mediaText
       try {
         compact.media.mediaText = 'not all'
-        return { fixed, previous: measure() }
+        return { fixed, fixedTotals, previous: measure(), previousTotals: measureTotals() }
       } finally { compact.media.mediaText = condition }
     })
+    expect(unchangedWideLayout.fixedTotals, `${width} ${theme}: Total keeps its position, size and font`).toEqual(unchangedWideLayout.previousTotals)
     if (width >= 1024) expect(unchangedWideLayout.fixed, `${width} ${theme}: 0 px change from the pre-fix layout`).toEqual(unchangedWideLayout.previous)
     measurements.push({ width, theme, textRows, unchangedWideLayout })
     const crowdedTickets = await grid(page).locator('tbody th').evaluateAll(cells => cells.flatMap(cell => {
