@@ -6262,6 +6262,10 @@
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1440 light: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1600 dark: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1600 light: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 320 dark: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 320 light: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -8760,11 +8764,27 @@
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"a 15 min window at a phone overview edge keeps both handles draggable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"a live update grows the Builder lane only once the pointer has left, never under it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"above twelve rows a lane folds into \"+N more\" and expands in place, by pointer or keyboard","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"at Fit all a phone overview keeps each 44 px handle inside and a drag at either edge resizes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"lanes zoom, pan and move the time without moving a control, and a click never moves the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"panning an incident to the right edge keeps its caption inside the lane frame","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"ten concurrent builders grow the Builder lane at 1024 dark, never one bar on another","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"ten concurrent builders grow the Builder lane at 1024 light, never one bar on another","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"ten concurrent builders grow the Builder lane at 1440 dark, never one bar on another","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"ten concurrent builders grow the Builder lane at 1440 light, never one bar on another","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"ten concurrent builders grow the Builder lane at 390 dark, never one bar on another","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"ten concurrent builders grow the Builder lane at 390 light, never one bar on another","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"the overview brush pans and resizes the window, and its playhead moves the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8978,11 +8998,11 @@
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1406 empty desk states keep the card still 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided start the list at the same y at 1024, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided keep controls still at 1024, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided start the list at the same y at 1440, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided keep controls still at 1440, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided start the list at the same y at 390, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided keep controls still at 390, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 a genuinely failed first load never claims an empty desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -10986,7 +11006,7 @@
     ,
     {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: old waiting starts remain cancellable; actual failures and pickup timeout are distinct","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: automatic fitting, saved widths and resize controls preserve host columns","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: automatic fitting, saved widths and resize controls preserve host columns","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: grouped host remains stable at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -18112,6 +18132,8 @@
     ,
     {"kind":"vitest","file":"tests/agents-cleanup-store.unit.test.ts","name":"a poll in flight during Remove does not restore the removed account","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/agents-cleanup-store.unit.test.ts","name":"a reconnect refreshes accounts before an invalidated bundle finishes and keeps the new bundle owned","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"Boost today and pace input > accepts only whole numbers in range and never clamps a wrong one into a right one","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"Boost today and pace input > compares settings by value, and a missing harness means the defaults","tier":"ESSENTIAL"}
@@ -18736,15 +18758,19 @@
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"a label falls back from tag and text, to the text, to the duration, to an ellipsis that keeps \"since\"","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"a live update grows lanes below the pointer only: nothing above it moves until the pointer has left","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"a wider face than the 5.9 px estimate still ends the incident caption inside the frame","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"following: Live keeps now at 65 % until the playhead leaves now; a run keeps its playhead in view","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"panning an incident onto the right edge keeps its caption inside a 320 px frame","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"rows are reserved once per data set: overlaps take the next free row, at most four","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"rows are reserved once per data set: each step takes the first free row and a lane grows to every row it needs","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"slivers in a row merge into one \"+N\" cluster; a lone sliver stays a step","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"ten concurrent builders take ten rows; above twelve a lane folds into \"+N more\" until a person expands it","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"the hint draws its keys instead of typing arrow symbols, in both languages","tier":"ESSENTIAL"}
     ,
@@ -20545,6 +20571,8 @@
     {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"refresh reports a kept answer, a failure with its reason, and a dropped read","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"retries only idempotent GET transport failures, with bounded exponential jitter","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"stops a pending GET retry while offline and allows a fresh read after reconnect","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"stops after two GET retries, and never retries a 4xx or a write","tier":"ESSENTIAL"}
     ,

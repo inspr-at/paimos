@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -243,7 +244,7 @@ func TestExactAPIScopedSearchRejectsOtherFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			lookups := 0
+			var lookups atomic.Int64
 			rt := exactRuntime(t, func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/api/kinds":
@@ -263,7 +264,7 @@ func TestExactAPIScopedSearchRejectsOtherFailures(t *testing.T) {
 						http.NotFound(w, r)
 						return
 					}
-					lookups++
+					lookup := lookups.Add(1)
 					switch tc.name {
 					case "forbidden", "server":
 						status := http.StatusForbidden
@@ -286,7 +287,7 @@ func TestExactAPIScopedSearchRejectsOtherFailures(t *testing.T) {
 					case "cycle":
 						fmt.Fprint(w, `{"id":"ancestor","parent_id":"ancestor"}`)
 					case "depth":
-						fmt.Fprintf(w, `{"id":%q,"parent_id":%q}`, strings.TrimPrefix(r.URL.Path, "/api/nodes/"), fmt.Sprintf("ancestor-%d", lookups))
+						fmt.Fprintf(w, `{"id":%q,"parent_id":%q}`, strings.TrimPrefix(r.URL.Path, "/api/nodes/"), fmt.Sprintf("ancestor-%d", lookup))
 					}
 				}
 			})
@@ -299,7 +300,7 @@ func TestExactAPIScopedSearchRejectsOtherFailures(t *testing.T) {
 			if rt.stdout.(*bytes.Buffer).Len() != 0 {
 				t.Fatal("failed search emitted a partial success")
 			}
-			if tc.name != "search-not-found" && lookups == 0 {
+			if tc.name != "search-not-found" && lookups.Load() == 0 {
 				t.Fatal("fixture never reached the ancestor lookup")
 			}
 		})

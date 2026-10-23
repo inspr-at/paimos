@@ -29,7 +29,7 @@ const notice = computed(() => {
 <style scoped>
 .compact-notice {
   position: fixed; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom)); z-index: 55; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 8px;
-  max-width: calc(100vw - 24px); min-height: 44px; margin: 0; padding: 0 16px 0 14px; border: 1px solid var(--glass-edge); border-radius: 999px;
+  width: max-content; max-width: calc(100vw - 24px); min-height: 44px; margin: 0; padding: 0 16px 0 14px; border: 1px solid var(--glass-edge); border-radius: 999px;
   background: var(--surface-raised); box-shadow: var(--shadow-pop); color: var(--ink); font: 500 13px/1.3 var(--font); text-align: left;
 }
 .compact-notice > svg { flex: none; color: var(--warn-ink); }

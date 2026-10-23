@@ -32,6 +32,10 @@ export interface Paged<T> { items: T[]; next_cursor: string | null }
 // A session as the API sends it. Nothing outside the ledger may hold one: see
 // HarnessSession in lib/agents.ts for the type the page works with.
 export interface CurrentAgentActivity { text: string; source: 'agent' | 'auto'; at: string }
+export interface ChildCounts {
+  current: number; all: number; omitted_projects: number
+  cross_project: readonly { project_key: string; current: number; all: number }[]
+}
 export interface HarnessSessionRow {
   inbox_binding_error?: string | null
   agent_recovery?: { session_id: string; observed_revision: string; cause: string; detail: string; action: '' | 'restart' | 'reconnect' }
@@ -50,6 +54,7 @@ export interface HarnessSessionRow {
   watch?: import('./attachWatch').AttachStatus
   id: string; project_id: string; agent_principal_id: string
   cross_project_parent_harness_session_id?: string | null
+  child_counts?: ChildCounts
   owner_principal_id?: string | null
   archived_at?: string | null; recovery_process_state?: 'unknown' | null
   process_ownership?: ProcessOwnership; process_observed_at?: string

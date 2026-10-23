@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { draftSelfcheck, validateSelfcheck, snapshot, selfcheckMain, readJSON, maxEvidenceBytes } from '../../scripts/review-selfcheck.mjs'
 import { weekWindow, collectMerged, auditPlan, auditFacts, auditMain } from '../../scripts/review-audit.mjs'
+import { publishFacts, evidenceMain, maxFactBytes } from '../../scripts/delivery-evidence.mjs'
 
 const head = 'b'.repeat(40), base = 'a'.repeat(40), merge = 'c'.repeat(40)
 const state = { head_sha: head, base_sha: base, paths: ['scripts/example.mjs'] }
@@ -185,6 +186,40 @@ test('offline audit CLI prepares API-compatible facts and rejects tampered selec
   assert.deepEqual(Object.keys(payload), ['facts']); assert.equal(payload.facts.length, 5)
   assert.deepEqual(Object.keys(payload.facts[0]), ['kind', 'key', 'pull_request', 'head_sha', 'at', 'outcome'])
   assert.throws(() => auditMain(['facts', '--plan', planPath, '--results', resultPath, '--output', factsPath], { now }), /EEXIST/)
+  // AEON-1659: completed audit tooling can publish its bounded typed facts
+  // with existing CLI authority. A failed/partial write never claims success.
+  const binding = { project: '00000000-0000-4000-8000-000000000001', repository: plan.repository, instance: 'ppm', aeon: 'fixture-aeon' }
+  let published = 0
+  const execute = (program, args, bounds) => {
+    assert.equal(program, binding.aeon)
+    assert.deepEqual(args.slice(0, 3), ['--instance', 'ppm', 'curl'])
+    assert.equal(args[3], `/api/projects/${binding.project}/delivery/metrics/facts`)
+    assert.deepEqual(JSON.parse(args[7]), { repository: plan.repository, facts: payload.facts })
+    assert.equal(bounds.timeout, 15_000); assert.equal(bounds.maxBuffer, maxFactBytes)
+    published++
+    return { status: 0, stdout: JSON.stringify({ stored: payload.facts.length }) }
+  }
+  const publish = options => {
+    assert.deepEqual(options, { ...binding, facts: payload.facts })
+    return publishFacts(options, { execute })
+  }
+  const submitFlags = ['--submit', '--project', binding.project, '--instance', 'ppm', '--aeon', binding.aeon]
+  const submitted = auditMain(['facts', '--plan', planPath, '--results', resultPath, '--output', join(root, 'submitted.json'), ...submitFlags], { now, publish })
+  assert.equal(submitted.status, 'evidence_recorded'); assert.equal(submitted.stored, 5); assert.equal(published, 1)
+  for (const [failure, reason] of [[{ status: 1, stderr: 'private diagnostic' }, /delivery_evidence_publish_failed/],
+    [{ status: 0, stdout: '{}' }, /delivery_evidence_receipt_partial/], [{ status: 0, stdout: '{"stored":4}' }, /delivery_evidence_receipt_partial/]]) {
+    assert.throws(() => publishFacts({ ...binding, facts: payload.facts }, { execute: () => failure }), reason)
+  }
+  assert.throws(() => auditMain(['facts', '--plan', planPath, '--results', resultPath, '--output', join(root, 'failed.json'), ...submitFlags],
+    { now, publish: () => { throw new Error('delivery_evidence_publish_failed') } }), /publish_failed/)
+  const evidenceArgs = ['--input', factsPath, '--project', binding.project, '--repository', plan.repository, '--instance', 'ppm', '--aeon', binding.aeon]
+  assert.equal(evidenceMain(evidenceArgs, { execute }).status, 'evidence_recorded')
+  const oversized = join(root, 'oversized-facts.json')
+  writeFileSync(oversized, ' '.repeat(maxFactBytes + 1))
+  assert.throws(() => evidenceMain(['--input', oversized], { execute }), /input_invalid/)
+  const stale = join(root, 'stale-facts.json')
+  writeFileSync(stale, JSON.stringify({ repository: 'example/other', facts: payload.facts }))
+  assert.throws(() => evidenceMain(evidenceArgs.map(arg => arg === factsPath ? stale : arg), { execute }), /binding_invalid/)
   plan.selected[0].number = 999
   writeFileSync(planPath, JSON.stringify(plan))
   assert.throws(() => auditMain(['facts', '--plan', planPath, '--results', resultPath, '--output', join(root, 'tampered.json')], { now }), /saved_plan_mismatch/)

@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Hours: the week grid, fast entry, people and agents, period review and approval.
 import { test, expect, type Page } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
+import { writeFile } from 'node:fs/promises'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { addHistoricalPeriod, businessData, mira, mockBusiness, nova, WEEK39, type BusinessMockOptions } from './business-fixtures'
 import { colourContrast } from '../src/lib/themeEngine'
+import { expectStableControls } from './helpers/stable'
+import { domAudit } from './ui-audit-rules'
 
 test.use({ timezoneId: 'Europe/Vienna' })
 
@@ -76,24 +80,150 @@ test('open periods older than a year appear in the home waiting count and week b
   }
 })
 
-test('the week grid sums per ticket and day with exact amounts', async ({ page }) => {
+test('the week grid sums per ticket and day with exact amounts', async ({ page }, info) => {
   const errors = watchErrors(page)
-  await setup(page)
+  const { data } = await setup(page)
+  // A five-character day value exposes clipping that shorter durations miss.
+  const longDay = data.entries.find(entry => entry.id === 'e-1')!
+  longDay.duration_seconds = 10.5 * 3600
+  longDay.ended_at = new Date(Date.parse(longDay.started_at) + longDay.duration_seconds * 1000).toISOString()
+  longDay.amount = '997.5000'
   await openWeek(page)
-  await expect(page.getByText('Week 39 · 21–27 Sep 2026 · 8h 30m logged')).toBeVisible()
+  await expect(page.getByText('Week 39 · 21–27 Sep 2026 · 17h logged')).toBeVisible()
   const rows = grid(page).locator('tbody tr')
   await expect(rows).toHaveCount(3)
   await expect(rows.first()).toContainText('PHAROS-11')
-  await expect(rows.first().locator('td')).toHaveText(['2:00', '3:30', '·', '·', '·', '·', '·', '5:30'])
-  await expect(grid(page).locator('tfoot td')).toHaveText(['2:00', '3:30', '1:30', '1:30', '·', '·', '·', '8:30'])
+  await expect(rows.first().locator('td')).toHaveText(['10:30', '3:30', '·', '·', '·', '·', '·', '14:00'])
+  await expect(grid(page).locator('tfoot td')).toHaveText(['10:30', '3:30', '1:30', '1:30', '·', '·', '·', '17:00'])
   await expect(grid(page).locator('thead th.today')).toContainText('Thu')
-  // 5.5h × 95 + 1.5h × 95 + 1.5h × 85, exactly.
-  await expect(page.locator('.week-foot')).toContainText('792.50 EUR')
+  // 14h × 95 + 1.5h × 95 + 1.5h × 85, exactly.
+  await expect(page.locator('.week-foot')).toContainText('1,600.00 EUR')
   await expect(page.locator('.period-chip')).toHaveText('21–27 Sep 2026')
   const entries = page.getByRole('region', { name: 'Entries' })
   await expect(entries.getByText('Thu 24')).toBeVisible()
   await expect(entries.locator('.entry').first()).toContainText('08:00–09:30')
   await expect(entries.locator('.entry').first()).toContainText('127.50')
+  // AEON-1687: the complete seven-day grid must fit its own container on a
+  // phone, rather than concealing a wider table in a horizontal scroller.
+  const measurements = []
+  for (const width of [390, 560, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await page.evaluate(() => document.fonts.ready)
+    const scroll = page.getByRole('region', { name: 'Weekly hours', exact: true })
+    await scroll.focus()
+    const dimensions = await scroll.evaluate(element => ({
+      overflow: element.scrollWidth - element.clientWidth, width: element.clientWidth,
+      descendants: Array.from(element.querySelectorAll('*')).flatMap(child => {
+        const box = child.getBoundingClientRect(), bounds = element.getBoundingClientRect()
+        const range = document.createRange(); range.selectNodeContents(child)
+        const text = range.getBoundingClientRect()
+        return box.right > bounds.right || text.right > bounds.right || child.scrollWidth > child.clientWidth
+          ? [{ tag: child.tagName, class: child.className, right: box.right - bounds.right,
+            textRight: text.right - bounds.right, overflow: child.scrollWidth - child.clientWidth }] : []
+      }),
+    }))
+    expect(dimensions.overflow, `${width} ${theme}: 0 px horizontal overflow; ${JSON.stringify(dimensions)}`).toBe(0)
+    const controls = { navigation: page.getByRole('group', { name: 'Week', exact: true }),
+      person: page.getByRole('button', { name: 'Hours of You. Choose a person or agent' }),
+      row: rows.first(), grid: scroll }
+    const boxes = await Promise.all(Object.values(controls).map(control => control.boundingBox()))
+    await expectStableControls({ controls, scrollAreas: { grid: scroll }, interactions: [
+      { name: 'read the last day with the keyboard', run: async () => { await scroll.press('ArrowRight') } },
+      { name: 'return to the first day', run: async () => { await scroll.press('ArrowLeft') } },
+    ] })
+    const dayCells = await grid(page).locator('.c-day').evaluateAll(cells => cells.map(cell => {
+      const style = getComputedStyle(cell), range = document.createRange()
+      range.selectNodeContents(cell)
+      return { text: cell.textContent, scrollWidth: cell.scrollWidth, clientWidth: cell.clientWidth,
+        textWidth: range.getBoundingClientRect().width,
+        contentWidth: cell.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) }
+    }))
+    expect(dayCells.some(cell => cell.text === '10:30'), 'the grid includes a five-character day value').toBe(true)
+    expect(dayCells.filter(cell => cell.scrollWidth > cell.clientWidth), `${width} ${theme}: every day value fits its cell`).toEqual([])
+    expect(dayCells.filter(cell => cell.textWidth > cell.contentWidth + 0.5), `${width} ${theme}: day text stays inside the content box`).toEqual([])
+    // At 521–600px the Total cell can fit while its text spills into Sunday.
+    // Check the text edges against the padded content box in every grid row.
+    const totalCells = await grid(page).locator('.c-total').evaluateAll(cells => cells.map(cell => {
+      const style = getComputedStyle(cell), box = cell.getBoundingClientRect(), range = document.createRange()
+      range.selectNodeContents(cell)
+      const text = range.getBoundingClientRect()
+      return { value: cell.textContent?.trim(), text: { left: text.left, right: text.right, width: text.width, height: text.height },
+        content: { left: box.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+          right: box.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight) } }
+    }))
+    expect(totalCells).toHaveLength(5) // Header, all three tickets and the grand total.
+    expect(totalCells.some(cell => cell.value === '14:00'), 'Total includes a five-character clock').toBe(true)
+    expect(totalCells.every(cell => cell.text.width > 0 && cell.text.height > 0), `${width} ${theme}: Total text boxes have positive size`).toBe(true)
+    expect(totalCells.filter(cell => cell.text.left < cell.content.left - 0.5 || cell.text.right > cell.content.right + 0.5),
+      `${width} ${theme}: every Total text box stays inside its content box`).toEqual([])
+    // Measure actual text, including both lines of the header. Cell boxes can
+    // fit perfectly while the adjacent time values still read as one number.
+    const textRows = await grid(page).locator('tr').evaluateAll(rows => rows.map(row => {
+      const header = row.parentElement?.tagName === 'THEAD'
+      const cells = Array.from(row.querySelectorAll(header ? '.c-day, .c-total' : '.c-day'))
+      const text = cells.map(cell => {
+        const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT)
+        const rects: DOMRect[] = []
+        while (walker.nextNode()) {
+          if (!walker.currentNode.textContent?.trim()) continue
+          const range = document.createRange()
+          range.selectNodeContents(walker.currentNode)
+          rects.push(...Array.from(range.getClientRects()))
+        }
+        return { value: cell.textContent, left: Math.min(...rects.map(rect => rect.left)),
+          right: Math.max(...rects.map(rect => rect.right)),
+          visible: rects.length > 0 && rects.every(rect => rect.width > 0 && rect.height > 0) }
+      })
+      return { label: row.querySelector('th')?.textContent?.trim(), header, text,
+        gaps: text.slice(1).map((next, i) => next.left - text[i].right) }
+    }))
+    expect(textRows).toHaveLength(5) // Header, all three tickets and per-day totals.
+    for (const row of textRows) {
+      expect(row.text).toHaveLength(row.header ? 8 : 7)
+      expect(row.text.every(text => text.visible), `${width} ${theme}: ${row.label} has positive text boxes`).toBe(true)
+      expect(row.gaps).toHaveLength(row.header ? 7 : 6)
+      for (const [i, gap] of row.gaps.entries()) {
+        expect(gap, `${width} ${theme}: ${row.label}, ${row.text[i].value} → ${row.text[i + 1].value}`).toBeGreaterThanOrEqual(6)
+      }
+    }
+    // Disabling only this round's compact rule restores the pre-fix layout.
+    // Tablet and desktop must retain exactly the same control and grid boxes.
+    const unchangedWideLayout = await page.evaluate(() => {
+      const compact = Array.from(document.styleSheets).flatMap(sheet => Array.from(sheet.cssRules))
+        .find((rule): rule is CSSMediaRule => rule instanceof CSSMediaRule
+          && rule.conditionText === '(max-width: 520px)' && rule.cssText.includes('.week-grid'))
+      if (!compact) throw new Error('Compact Hours rule not found')
+      const measure = () => Array.from(document.querySelectorAll('.toolbar, .week-card, .week-grid th, .week-grid td, .week-foot'))
+        .map(element => element.getBoundingClientRect().toJSON())
+      const measureTotals = () => Array.from(document.querySelectorAll('.week-grid .c-total')).map(element => ({
+        box: element.getBoundingClientRect().toJSON(), fontSize: getComputedStyle(element).fontSize,
+      }))
+      const fixed = measure(), fixedTotals = measureTotals(), condition = compact.media.mediaText
+      try {
+        compact.media.mediaText = 'not all'
+        return { fixed, fixedTotals, previous: measure(), previousTotals: measureTotals() }
+      } finally { compact.media.mediaText = condition }
+    })
+    expect(unchangedWideLayout.fixedTotals, `${width} ${theme}: Total keeps its position, size and font`).toEqual(unchangedWideLayout.previousTotals)
+    if (width >= 1024) expect(unchangedWideLayout.fixed, `${width} ${theme}: 0 px change from the pre-fix layout`).toEqual(unchangedWideLayout.previous)
+    measurements.push({ width, theme, textRows, totalCells, unchangedWideLayout })
+    const crowdedTickets = await grid(page).locator('tbody th').evaluateAll(cells => cells.flatMap(cell => {
+      const chip = cell.querySelector('.ticket-chip')!, edge = chip.getBoundingClientRect().right
+      const range = document.createRange(); range.selectNodeContents(cell.nextElementSibling!)
+      const gap = range.getBoundingClientRect().left - edge
+      return edge > cell.getBoundingClientRect().right || gap < 6 ? [{ ticket: chip.textContent, gap }] : []
+    }))
+    expect(crowdedTickets, 'ticket names stay inside their column, clear of the first day').toEqual([])
+    expect(await Promise.all(Object.values(controls).map(control => control.boundingBox())), 'week controls and rows move by 0 px').toEqual(boxes)
+    const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
+    expect(layout, `${width} ${theme}: week descendants fit without clipping or overlap`).toEqual([])
+    const axe = await new AxeBuilder({ page }).include('.biz-page')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+    expect(axe.violations, `${width} ${theme}: Hours WCAG A/AA`).toEqual([])
+    await page.screenshot({ path: info.outputPath(`AEON-1687-hours-${width}-${theme}.png`) })
+  }
+  await writeFile(info.outputPath('AEON-1687-hours-checks.md'), JSON.stringify(measurements, null, 2))
   expect(errors).toEqual([])
 })
 

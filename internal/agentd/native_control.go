@@ -295,8 +295,18 @@ func (e *nativeOwned) startEvents() {
 	e.eventCancel = cancel
 	done := make(chan struct{})
 	e.eventDone = done
+	e.inboxWake = make(chan struct{}, 1)
 	e.mu.Unlock()
-	go func() { defer close(done); e.events(ctx) }()
+	go func() {
+		defer close(done)
+		var workers sync.WaitGroup
+		workers.Add(2)
+		go func() { defer workers.Done(); e.watchInbox(ctx) }()
+		go func() { defer workers.Done(); e.serviceInboxHints(ctx) }()
+		e.events(ctx)
+		cancel()
+		workers.Wait()
+	}()
 }
 
 func (e *nativeOwned) stopEvents(ctx context.Context) error {

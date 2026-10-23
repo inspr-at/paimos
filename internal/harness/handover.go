@@ -15,6 +15,7 @@ import (
 // lineage and caller-specific move rights from lists and hierarchy mutations.
 func reporterSession(s Session) Session {
 	s.CanReparent, s.HandedOverToID, s.AdoptedFromID = nil, nil, nil
+	s.ChildCounts = nil
 	return projectLineage(s)
 }
 
