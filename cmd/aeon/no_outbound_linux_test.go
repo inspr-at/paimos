@@ -278,37 +278,42 @@ func TestDefaultServerHasNoOutboundNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	socketDir := t.TempDir()
-	proxy, err := net.Listen("unix", filepath.Join(socketDir, ".s.PGSQL.5432"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = proxy.Close() })
-	go func() {
-		for {
-			local, err := proxy.Accept()
-			if err != nil {
-				return
-			}
-			go func() {
-				defer local.Close()
-				upstream, err := net.DialTimeout("tcp", u.Host, 5*time.Second)
+	database := *u
+	connection := fresh.App.Config().ConnConfig
+	// The approved Linux runner already provides Postgres on a Unix socket.
+	// Reuse that socket; TCP fixtures still need the egress-free child proxy.
+	if !strings.HasPrefix(connection.Host, "/") {
+		socketDir := t.TempDir()
+		proxy, err := net.Listen("unix", filepath.Join(socketDir, ".s.PGSQL.5432"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = proxy.Close() })
+		go func() {
+			for {
+				local, err := proxy.Accept()
 				if err != nil {
 					return
 				}
-				defer upstream.Close()
-				go func() { _, _ = io.Copy(upstream, local); _ = upstream.Close() }()
-				_, _ = io.Copy(local, upstream)
-			}()
-		}
-	}()
-	database := *u
-	database.Host = ""
-	query := database.Query()
-	query.Set("host", socketDir)
-	query.Set("port", "5432")
-	query.Set("sslmode", "disable")
-	database.RawQuery = query.Encode()
+				go func() {
+					defer local.Close()
+					upstream, err := net.DialTimeout("tcp", net.JoinHostPort(connection.Host, fmt.Sprint(connection.Port)), 5*time.Second)
+					if err != nil {
+						return
+					}
+					defer upstream.Close()
+					go func() { _, _ = io.Copy(upstream, local); _ = upstream.Close() }()
+					_, _ = io.Copy(local, upstream)
+				}()
+			}
+		}()
+		database.Host = ""
+		query := database.Query()
+		query.Set("host", socketDir)
+		query.Set("port", "5432")
+		query.Set("sslmode", "disable")
+		database.RawQuery = query.Encode()
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
