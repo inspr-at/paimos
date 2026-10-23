@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,32 +28,48 @@ export function assertClockEvidence(evidence, clock) {
   `fixture clock changed or missing: ${clock.now}`)
 }
 
-// Read only these non-secret runner metadata fields. ImageVersion is recorded
-// by capture, then pinned by the person-reviewed reference round, never guessed.
+// A hosted image rollout is diagnostic metadata, never container identity.
+export function assertVisualContainer(visual, { env = process.env, platform = process.platform, arch = process.arch } = {}) {
+  if (platform !== 'linux' || arch !== 'x64' || !visual.renderer.container?.digest ||
+      env.AEON_VISUAL_CONTAINER_DIGEST !== visual.renderer.container.digest)
+    throw new Error('visual = CI only: use the digest-pinned Playwright container; missing/wrong AEON_VISUAL_CONTAINER_DIGEST or platform (agm2 native Chromium is not comparable)')
+}
+
 export function rendererIdentity(visual, browserVersion, { env = process.env, platform = process.platform, arch = process.arch,
+  fontconfigFile = env.FONTCONFIG_FILE,
   browserOptions = { browserName: 'chromium', headless: true, launchOptions: { args: ['--disable-gpu'] } } } = {}) {
   const browsers = JSON.parse(readFileSync(join(dirname(require.resolve('playwright-core/package.json')), 'browsers.json'), 'utf8')).browsers
   const browser = browsers.find(row => row.name === 'chromium-headless-shell')
   return { ...structuredClone(visual.renderer),
     runner: { label: env.AEON_VISUAL_RUNNER ?? 'unidentified', imageOS: env.ImageOS ?? 'unidentified',
       imageVersion: env.ImageVersion ?? 'unidentified', platform, arch },
+    container: { ...visual.renderer.container, digest: env.AEON_VISUAL_CONTAINER_DIGEST ?? 'unidentified', platform, arch },
     playwright: require('@playwright/test/package.json').version,
     browser: { name: browserOptions.browserName === 'chromium' && !browserOptions.channel && browserOptions.headless !== false ? 'chromium-headless-shell' : 'different-browser',
       revision: browser.revision, version: browserVersion, headless: browserOptions.headless !== false, args: browserOptions.launchOptions?.args ?? [] },
     fonts: visual.renderer.fonts.map(font => ({ ...font, sha256: createHash('sha256')
       .update(readFileSync(new URL(`../../${font.asset}`, import.meta.url))).digest('hex') })),
+    fontconfig: { ...visual.renderer.fontconfig, sha256: fontconfigFile ? createHash('sha256').update(readFileSync(fontconfigFile)).digest('hex') : 'unidentified' },
   }
 }
 
 export function assertRenderer(actual, expected, { capture = false } = {}) {
   need(actual && expected, 'missing renderer identity')
-  // Null is allowed only on an unapproved capture policy. An approved reference
-  // must pin the exact ImageVersion that the hosted capture observed.
-  if (capture) {
+  // Immutable historical archives retain their v1 identity checks. New captures
+  // and comparisons use v2; a v1 archive can never match a v2 renderer.
+  if (expected.version === 1 && capture) {
     need(typeof actual.runner?.imageVersion === 'string' && actual.runner.imageVersion !== 'unidentified', 'missing hosted runner ImageVersion')
     expected = { ...expected, runner: { ...expected.runner, imageVersion: actual.runner.imageVersion } }
-  } else need(typeof expected.runner?.imageVersion === 'string' && expected.runner.imageVersion !== 'unidentified', 'reference has no pinned runner ImageVersion')
-  for (const key of Object.keys(expected)) need(same(actual[key], expected[key]), key)
+  } else if (expected.version === 1) need(typeof expected.runner?.imageVersion === 'string' && expected.runner.imageVersion !== 'unidentified', 'reference has no pinned runner ImageVersion')
+  else {
+    need(/^sha256:[a-f0-9]{64}$/.test(expected.container?.digest ?? ''), 'reference has no pinned container digest')
+    if (actual.container?.digest !== expected.container.digest)
+      throw new Error('visual = CI only: renderer differs from reference: container digest (missing or wrong pinned container)')
+  }
+  for (const key of Object.keys(expected)) {
+    if (expected.version === 2 && key === 'runner') continue
+    need(same(actual[key], expected[key]), key)
+  }
   need(same(Object.keys(actual).sort(), Object.keys(expected).sort()), 'identity fields')
 }
 
@@ -78,12 +94,14 @@ export function installRendererFonts(visual, directory, { run = execFileSync } =
   verifyFontAssets(visual)
   const output = resolve(directory)
   mkdirSync(join(output, 'cache'), { recursive: true })
-  const escape = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;')
   const fontDirectory = fileURLToPath(new URL('../../web/tests/visual/fonts', import.meta.url))
-  const aliases = Object.entries(visual.renderer.fontconfig.aliases)
-    .map(([from, to]) => `<alias binding="strong"><family>${escape(from)}</family><prefer><family>${escape(to)}</family></prefer></alias>`).join('\n')
+  const link = join(output, 'fonts')
+  if (!existsSync(link)) symlinkSync(fontDirectory, link, 'dir')
+  need(realpathSync(link) === realpathSync(fontDirectory), 'private font directory')
   const path = join(output, 'fonts.conf')
-  writeFileSync(path, `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n<fontconfig>\n<dir>${escape(fontDirectory)}</dir>\n<cachedir>${escape(join(output, 'cache'))}</cachedir>\n${aliases}\n</fontconfig>\n`)
+  const bytes = readFileSync(new URL('../../' + visual.renderer.fontconfig.asset, import.meta.url))
+  need(createHash('sha256').update(bytes).digest('hex') === visual.renderer.fontconfig.sha256, 'fontconfig file SHA-256')
+  writeFileSync(path, bytes)
   const env = { ...process.env, FONTCONFIG_FILE: path }
   run('fc-cache', ['-f'], { env, timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] })
   for (const [alias, family] of Object.entries(visual.renderer.fontconfig.aliases)) {

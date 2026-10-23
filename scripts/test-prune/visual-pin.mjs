@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { collectCandidates, packCandidates } from './visual-candidates.mjs'
 import { verifyReferenceArchive, referenceGates } from './visual-baselines.mjs'
 import { validateVisual, visualCheckResult } from './check.mjs'
+import { assertRenderer } from './visual-renderer.mjs'
 
 const need = (condition, message) => { if (!condition) throw new Error(message) }
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -28,11 +29,28 @@ export function boundedFile(path, limit = 1024 * 1024) {
   return readFileSync(path)
 }
 
-export function pinManifest(visual, candidate, detachedBytes, approval, attachments, { dryRun = false } = {}) {
+export function assertPinIdentity(proof, candidate, visual) {
+  const ids = candidate.members.map(member => member.id).sort()
+  const complete = rows => Array.isArray(rows) && rows.length === 72 &&
+    JSON.stringify(rows.map(row => row.id).sort()) === JSON.stringify(ids) &&
+    rows.every(row => row.pixels === 0 && row.percent === 0 && row.regions?.length === 0)
+  need(proof?.version === 1 && proof.status === 'identical' && proof.captureSHA === candidate.captureSHA &&
+    proof.archiveSHA256 === candidate.archive.sha256 && proof.containerDigest === visual.renderer.container.digest &&
+    proof.reviewedRunnerArchiveSHA256 === visual.capture.identityProof.reviewedRunnerArchiveSHA256 &&
+    /^[a-f0-9]{64}$/.test(proof.repeatArchiveSHA256 ?? '') &&
+    proof.repeat?.byteIdentical === 72 && proof.repeat.pixelIdentical === 72 &&
+    proof.runner?.pixelIdentical === 72 && complete(proof.repeat.checkpoints) && complete(proof.runner.checkpoints) &&
+    proof.repeat.checkpoints.every(row => row.byteIdentical === true),
+  'Set 3 requires 72/72 byte-identical repeat captures and 72/72 identical Tick-reviewed runner pixels; STOP before pinning')
+}
+
+export function pinManifest(visual, candidate, detachedBytes, approval, attachments, { dryRun = false, identityProof, proofInput = false } = {}) {
   validateVisual(visual)
   need(visual.comparison.mode === 'report-only' && visual.approval.status === 'awaiting-set-3', 'Set 3 preparation requires the unpinned report-only manifest')
   need(candidate.status === 'pending-Tick-review' && candidate.members?.length === 72 && candidate.states?.length === 16,
     'Set 3 needs all 72 main-capture candidates from sixteen states')
+  assertRenderer(candidate.renderer, visual.renderer)
+  if (candidate.renderer.version === 2 && !(dryRun && proofInput)) assertPinIdentity(identityProof, candidate, visual)
   need(approval?.reviewer === 'Tick' && approval.status === 'approved' && Number.isFinite(Date.parse(approval.approvedAt)) &&
     typeof approval.evidence === 'string' && approval.evidence.trim().length > 0 && approval.captureSHA === candidate.captureSHA &&
     approval.archiveSHA256 === candidate.archive.sha256, 'A Tick approval receipt must identify these exact capture and archive bytes')
@@ -58,7 +76,7 @@ export function pinManifest(visual, candidate, detachedBytes, approval, attachme
   const source = { kind: 'existing-ppm-ticket-attachment', ticket: 'AEON-1670', instance: 'PPM / INSPR',
     attachmentId: dryRun ? 'DRY-RUN-NO-ATTACHMENT' : attachments.archive,
     name: candidate.archive.name, bytes: candidate.archive.bytes, sha256: candidate.archive.sha256, format: 'tar',
-    captureSHA: candidate.captureSHA, captureRun: '39949629594',
+    captureSHA: candidate.captureSHA, captureRun: candidate.captureRun ?? null,
     manifest: { attachmentId: dryRun ? 'DRY-RUN-NO-MANIFEST' : attachments.manifest,
       name: `${candidate.archive.name}.manifest.json`, bytes: detachedBytes.length, sha256: sha256(detachedBytes) },
     baselineBundle: { attachmentMember: 'baseline.json', sha256: candidate.baselineBundle.sha256 },
@@ -136,7 +154,10 @@ export function publicationCommands(directory, candidate, planDirectory = direct
   const q = value => `'${String(value).replaceAll("'", "'\\''")}'`
   const files = [candidate.archive.name, `${candidate.archive.name}.manifest.json`, `${candidate.archive.name}.sha256`].map(name => join(directory, name))
   return [
+    '#!/usr/bin/env bash',
+    'set -euo pipefail',
     '# LEAD only, after Tick approves these exact bytes. A pre-existing tag/release must stop this flow.',
+    `node scripts/test-prune/visual-pin.mjs verify-plan ${q(planDirectory)}`,
     `gh release create test-references-3 --repo inspr-at/paimos --target ${candidate.captureSHA} --prerelease --title 'Visual reference set 3' --notes 'Tick-approved reference set 3; AEON-1670 approval record; immutable assets.' ${files.map(q).join(' ')}`,
     ...files.slice(0, 2).map(path => `/Users/markus/.aeon/lead/aeon/pm --instance ppm --agent-name aeon-lead-claude --json attach AEON-1670 ${q(path)}`),
     '# Record returned attachment IDs, then use an actual Tick receipt (captureSHA, archiveSHA256, approvedAt, evidence, checkpoints).',
@@ -149,13 +170,14 @@ async function main() {
   const [mode, directory, argument, archiveID, manifestID] = process.argv.slice(2)
   const visualPath = fileURLToPath(new URL('./visual-manifest.json', import.meta.url))
   const visual = JSON.parse(boundedFile(visualPath))
-  need(['prepare', 'activate'].includes(mode) && directory && argument, 'Usage: visual-pin.mjs prepare <capture-dir> <new-plan-dir> | activate <plan-dir> <Tick-receipt.json> <archive-attachment-UUID> <manifest-attachment-UUID>')
+  need(['prepare', 'activate', 'verify-plan'].includes(mode) && directory && (mode === 'verify-plan' || argument), 'Usage: visual-pin.mjs prepare <container-capture-dir> <new-plan-dir> <identity-proof.json> | verify-plan <plan-dir> | activate <plan-dir> <Tick-receipt.json> <archive-attachment-UUID> <manifest-attachment-UUID>')
   if (mode === 'prepare') {
     need(resolve(directory).startsWith(resolve('web/test-results') + '/') && resolve(argument).startsWith(resolve('web/test-results') + '/'),
       'Dry-run artifacts must stay under web/test-results')
     const records = collectCandidates(directory)
     const { review } = packCandidates(records, visual)
-    need(review.captureSHA === 'ecb819ba898f3fcb944f395388fb2c24a8b7ce83', 'This brief requires the dispatched main capture')
+    need(review.renderer.version === 2 && archiveID, 'Preparation requires a container capture and its cross-capture identity proof')
+    const identityBytes = boundedFile(archiveID), identityProof = JSON.parse(identityBytes)
     need(records.every(record => record.quality.quality?.status === 'passed'), 'Every candidate needs a recorded quality pass')
     const archiveName = `AEON-1674-linux-${review.captureSHA.slice(0, 10)}.tar`
     const capturedArchive = join(directory, 'linux-candidate', archiveName)
@@ -166,7 +188,7 @@ async function main() {
     const approval = { reviewer: 'Tick', status: 'approved', dryRun: true, approvedAt: new Date().toISOString(),
       evidence: 'DRY RUN ONLY; no product approval', captureSHA: candidate.captureSHA, archiveSHA256: candidate.archive.sha256,
       checkpoints: candidate.members.map(member => member.id) }
-    const pinned = pinManifest(visual, candidate, detached, approval, {}, { dryRun: true })
+    const pinned = pinManifest(visual, candidate, detached, approval, {}, { dryRun: true, identityProof })
     const verified = verifyReferenceArchive(archive, detached, pinned)
     mkdirSync(argument, { recursive: false })
     const archiveDirectory = join(argument, 'publication')
@@ -179,6 +201,7 @@ async function main() {
     const proof = await replayCandidates(records, pinned, verified.references, argument)
     writeFileSync(join(argument, 'visual-manifest.dry-run.json'), JSON.stringify(pinned, null, 2) + '\n', { flag: 'wx' })
     writeFileSync(join(argument, 'proof.json'), JSON.stringify(proof, null, 2) + '\n', { flag: 'wx' })
+    writeFileSync(join(argument, 'identity-proof.json'), identityBytes, { flag: 'wx' })
     writeFileSync(join(argument, 'tick-approval.template.json'), JSON.stringify({ ...approval, status: 'pending-Tick-review', dryRun: false,
       approvedAt: null, evidence: null, standingConsent: { ticket: 'AEON-1692 item 1',
         checkpoints: candidate.members.filter(member => member.id.startsWith('V-delivery-numbers-390-')).map(member => member.id),
@@ -192,8 +215,17 @@ async function main() {
     const names = (await import('node:fs')).readdirSync(archiveDirectory).filter(name => name.endsWith('.tar.manifest.json'))
     need(names.length === 1, 'Pin plan must contain exactly one detached manifest')
     const detached = boundedFile(join(archiveDirectory, names[0]))
-    const candidate = JSON.parse(detached), approval = JSON.parse(boundedFile(argument))
-    const pinned = pinManifest(visual, candidate, detached, approval, { archive: archiveID, manifest: manifestID })
+    const candidate = JSON.parse(detached), identityProof = JSON.parse(boundedFile(join(directory, 'identity-proof.json')))
+    assertPinIdentity(identityProof, candidate, visual)
+    if (mode === 'verify-plan') {
+      const pinned = JSON.parse(boundedFile(join(directory, 'visual-manifest.dry-run.json')))
+      need(pinned.approval.dryRun === true && pinned.baselineAuthority.source.sha256 === candidate.archive.sha256, 'Invalid dry-run pin plan')
+      verifyReferenceArchive(boundedFile(join(archiveDirectory, candidate.archive.name), 64 * 1024 * 1024), detached, pinned)
+      console.log('Container identity proof and original publication archive verified; no publication or activation performed.')
+      return
+    }
+    const approval = JSON.parse(boundedFile(argument))
+    const pinned = pinManifest(visual, candidate, detached, approval, { archive: archiveID, manifest: manifestID }, { identityProof })
     verifyReferenceArchive(boundedFile(join(archiveDirectory, candidate.archive.name), 64 * 1024 * 1024), detached, pinned)
     need(!existsSync(join(directory, 'activation.json')), 'This pin plan was already activated')
     writeFileSync(visualPath, JSON.stringify(pinned, null, 2) + '\n')

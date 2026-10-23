@@ -35,55 +35,76 @@ env:
 jobs:
   visual-reference-capture:
     if: github.event_name == 'workflow_dispatch' && inputs.visual_capture == true
-    # The manual capture uses a fixed image; ordinary shards keep their hosted
-    # route. Comparison validates the actual ImageOS and reviewed ImageVersion.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    # MCR v1.64.1-noble amd64 manifest, resolved 2026-10-23; source in visual-manifest.json.
+    # Change this digest only in a PR that also regenerates visual baselines
+    # (capture artifact as evidence), never through an automated bump.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
+      options: --ipc=host --init
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: read
+      actions: read
+    timeout-minutes: 60
     env:
       PW_RETRIES: '0'
       PW_WORKERS: '1'
       AEON_REQUIRE_BACKEND: 'off'
       AEON_VISUAL_CAPTURE: '1'
-      AEON_VISUAL_RUNNER: ubuntu-24.04
+      AEON_VISUAL_CONTAINER_DIGEST: sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24.22.1"
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Verify the container pin and baseline update policy
+        run: node scripts/test-prune/visual-container-check.mjs
       - name: Install locked web dependencies
         working-directory: web
         run: npm ci
-      - name: Install the comparison browser build
-        working-directory: web
-        run: npx --no-install playwright install chromium
-      - name: Install comparison browser system dependencies
-        timeout-minutes: 13
-        working-directory: web
-        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install-deps chromium
-      - name: Capture the sixteen states awaiting Linux review
+      - name: Capture the same commit twice with strict quality checks
         run: |
           set -euo pipefail
           node scripts/test-prune/visual-candidates.mjs specs > "$RUNNER_TEMP/visual-specs.txt"
           mapfile -t specs < "$RUNNER_TEMP/visual-specs.txt"
-          npm --prefix web test -- "${specs[@]}" --workers=1 --retries=0 --reporter=line --output=test-results/capture-run
-      - name: Package quality-checked candidates and all digests
-        run: node scripts/test-prune/visual-candidates.mjs web/test-results/capture-run web/test-results/linux-candidate
-      - name: Record approval handoff
+          npm --prefix web test -- "${specs[@]}" --workers=1 --retries=0 --reporter=line --output=test-results/container-run-1/capture-run
+          node scripts/test-prune/visual-candidates.mjs web/test-results/container-run-1/capture-run web/test-results/container-run-1/linux-candidate
+          npm --prefix web test -- "${specs[@]}" --workers=1 --retries=0 --reporter=line --output=test-results/container-run-2/capture-run
+          node scripts/test-prune/visual-candidates.mjs web/test-results/container-run-2/capture-run web/test-results/container-run-2/linux-candidate
+      - name: Download Tick-reviewed runner capture for the identity proof
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: visual-linux-candidate-ecb819ba898f3fcb944f395388fb2c24a8b7ce83-1
+          run-id: 39949629594
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: web/test-results/reviewed-runner
+      - name: Prove repeat stability and identity with all reviewed runner pixels
+        run: node scripts/test-prune/visual-identity.mjs web/test-results/container-run-1 web/test-results/container-run-2 web/test-results/reviewed-runner web/test-results/container-identity
+      - name: Rehearse blocking pin and planted-pixel rejection
+        run: node scripts/test-prune/visual-pin.mjs prepare web/test-results/container-run-1 web/test-results/container-pin-plan web/test-results/container-identity/identity-proof.json
+      - name: Record identity proof and approval handoff
+        if: always()
         run: |
-          echo 'Pending Tick review: Linux candidates only. No references were changed or published.' >> "$GITHUB_STEP_SUMMARY"
-          cat web/test-results/linux-candidate/*.tar.sha256 >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload capture evidence and candidate archive
+          echo 'Container capture evidence only. No references were changed or published. Any difference stops pinning.' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f web/test-results/container-identity/identity-proof.md ]; then cat web/test-results/container-identity/identity-proof.md >> "$GITHUB_STEP_SUMMARY"; fi
+      - name: Upload both captures, identity evidence and guarded pin commands
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: visual-linux-candidate-${{ github.sha }}-${{ github.run_attempt }}
           path: |
-            web/test-results/capture-run/
-            web/test-results/linux-candidate/
+            web/test-results/container-run-1/
+            web/test-results/container-run-2/
+            web/test-results/container-identity/
+            web/test-results/container-pin-plan/
           retention-days: 7
           if-no-files-found: error
 
@@ -1004,10 +1025,6 @@ jobs:
       PW_RETRIES: '0'
       # Mocked UI specs. The e2e job is the backend-required shard.
       AEON_REQUIRE_BACKEND: 'off'
-      AEON_VISUAL_BASELINE_FILE: ${{ github.workspace }}/tmp/visual-baselines/baseline.json
-      # Renderer identity is checked against ImageOS and ImageVersion at runtime;
-      # Report-only until AEON-1692 pins set 3; renderer mismatches stay visible.
-      AEON_VISUAL_RUNNER: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -1054,10 +1071,6 @@ jobs:
         timeout-minutes: 13
         working-directory: web
         run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install-deps chromium
-      - name: Verify visual reference transport before comparison
-        run: |
-          node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines
-          cat tmp/visual-baselines/reference-gates.md >> "$GITHUB_STEP_SUMMARY"
       - name: Download affected browser execution plan
         if: github.event_name == 'pull_request' && needs.ci-plan.outputs.browser_scope == 'affected'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -1082,9 +1095,6 @@ jobs:
           else
             node scripts/test-tiers/cli.mjs run web --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
           fi
-      - name: Report every visual checkpoint and preserve comparison failures
-        if: always()
-        run: node scripts/test-prune/visual-baselines.mjs report web/test-results >> "$GITHUB_STEP_SUMMARY"
       - name: Confirm full tier execution
         if: github.event_name != 'pull_request' || (needs.ci-plan.outputs.lane == 'full' && needs.ci-plan.outputs.mode != 'essential')
         env:
@@ -1120,11 +1130,74 @@ jobs:
           retention-days: 7
           overwrite: true
 
+  visual-comparison:
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only' && (github.event_name != 'pull_request' || needs.ci-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.web-setup.result == 'success'
+    needs: [ci-plan, web-setup, tree-reuse]
+    runs-on: ubuntu-latest
+    # Change this digest only in a PR that also regenerates visual baselines
+    # (capture artifact as evidence), never through an automated bump.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
+      options: --ipc=host --init
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 40
+    env:
+      PW_RETRIES: '0'
+      PW_WORKERS: '1'
+      AEON_REQUIRE_BACKEND: 'off'
+      AEON_VISUAL_CONTAINER_DIGEST: sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
+      AEON_VISUAL_BASELINE_FILE: ${{ github.workspace }}/tmp/visual-baselines/baseline.json
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24.22.1"
+      - name: Verify the container pin and baseline update policy
+        env:
+          AEON_VISUAL_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || '' }}
+        run: node scripts/test-prune/visual-container-check.mjs
+      - name: Download shared web runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: web-runtime
+          path: ${{ runner.temp }}/web-runtime
+      - name: Restore web runtime
+        run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
+      - name: Verify visual reference transport before comparison
+        run: |
+          node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines
+          cat tmp/visual-baselines/reference-gates.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Run every visual case without retries
+        run: node scripts/test-tiers/cli.mjs run web --full --visual --job visual-comparison
+      - name: Report every visual checkpoint and preserve comparison failures
+        if: always()
+        run: node scripts/test-prune/visual-baselines.mjs report web/test-results >> "$GITHUB_STEP_SUMMARY"
+      - name: Confirm full visual tier execution
+        env:
+          TIER_REPORT: tmp/test-tiers/visual-comparison-measurement.json
+        run: node scripts/test-tiers/check-full.mjs
+      - name: Preserve visual traces, screenshots and tier measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-comparison-evidence
+          path: |
+            web/test-results/
+            web/playwright-report/
+            tmp/test-tiers/
+          if-no-files-found: error
+          retention-days: 7
+
   # Preserve the ruleset's required check identity, including failed/skipped setup.
   web:
     name: web
     if: always()
-    needs: [ci-plan, web-catalogue, web-setup, web-unit, web-shard, tree-reuse, cache-prime]
+    needs: [ci-plan, web-catalogue, web-setup, web-unit, web-shard, visual-comparison, tree-reuse, cache-prime]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1137,6 +1210,7 @@ jobs:
           TIER_LAYOUT: ${{ needs.ci-plan.outputs.layout }}
           CI_LANE: ${{ needs.ci-plan.outputs.lane }}
           WEB_SHARD: ${{ needs.web-shard.result }}
+          VISUAL_COMPARISON: ${{ needs.visual-comparison.result }}
         run: |
           set -euo pipefail
           if [ "${CI_IMPACT:-}" = off ]; then test "$BROWSER_SCOPE" = gated-full; fi
@@ -1149,11 +1223,13 @@ jobs:
               test "$TIER_LAYOUT" = full
               test "$CI_LANE" = full
               test "$WEB_SHARD" = success
+              test "$VISUAL_COMPARISON" = success
               ;;
             none)
               test "$GITHUB_EVENT_NAME" = pull_request
               test "$CI_LANE" = docs-only || test "$TIER_LAYOUT" = static
               test "$WEB_SHARD" = skipped
+            test "$VISUAL_COMPARISON" = skipped
               ;;
             gated-full) ;;
             *) exit 1 ;;
@@ -1191,6 +1267,7 @@ jobs:
           WEB_SETUP: ${{ needs.web-setup.result }}
           WEB_UNIT: ${{ needs.web-unit.result }}
           WEB_SHARD: ${{ needs.web-shard.result }}
+          VISUAL_COMPARISON: ${{ needs.visual-comparison.result }}
         run: |
           set -euo pipefail
           if [ "${CI_IMPACT:-}" = off ]; then
@@ -1214,6 +1291,7 @@ jobs:
             test "$WEB_SETUP" = skipped
             test "$WEB_UNIT" = skipped
             test "$WEB_SHARD" = skipped
+            test "$VISUAL_COMPARISON" = skipped
             echo "reused pull_request run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -1229,6 +1307,7 @@ jobs:
             test "$WEB_SETUP" = skipped
             test "$WEB_UNIT" = skipped
             test "$WEB_SHARD" = skipped
+            test "$VISUAL_COMPARISON" = skipped
             echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -1240,12 +1319,14 @@ jobs:
               test "$WEB_SETUP" = skipped
               test "$WEB_UNIT" = skipped
               test "$WEB_SHARD" = skipped
+            test "$VISUAL_COMPARISON" = skipped
               echo 'docs-only: web checks skipped' >> "$GITHUB_STEP_SUMMARY" ;;
             spec-only)
               test "$WEB_CATALOGUE" = success
               test "$WEB_SETUP" = success
               test "$WEB_UNIT" = success
               test "$WEB_SHARD" = success
+              test "$VISUAL_COMPARISON" = success
               echo 'spec-only: changed specs passed' >> "$GITHUB_STEP_SUMMARY" ;;
             full)
               test "$WEB_CATALOGUE" = success
@@ -1253,10 +1334,11 @@ jobs:
               test "$WEB_UNIT" = success
               # Static layout (PR-only affected lane): units run, browsers skip.
               case "$TIER_LAYOUT" in
-                full) test "$WEB_SHARD" = success ;;
+                full) test "$WEB_SHARD" = success; test "$VISUAL_COMPARISON" = success ;;
                 static)
                   test "$GITHUB_EVENT_NAME" = pull_request
                   test "$WEB_SHARD" = skipped
+            test "$VISUAL_COMPARISON" = skipped
                   echo 'static layout: browser shards skipped' >> "$GITHUB_STEP_SUMMARY" ;;
                 *) exit 1 ;;
               esac

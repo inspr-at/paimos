@@ -582,7 +582,14 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   assert.equal(real.groups.find(g => g.id === 'remaining-ui').gate, false)
   const gated = balanceShards(real, 12).flatMap(s => s.specs)
   assert.ok(gated.some(spec => spec.file === 'tests/knowledge.spec.ts'), 'Decision Knowledge regressions must gate CI')
-  assert.equal(gated.length, files(real).length - real.groups.find(g => g.id === 'remaining-ui').specs.length)
+  const visuals = real.groups.find(g => g.id === 'visual-comparison')
+  assert.equal(visuals.executionJob, 'visual-comparison')
+  assert.equal(visuals.gate, true)
+  assert.equal(visuals.specs.length, 19)
+  assert.ok(visuals.specs.every(spec => spec.file.startsWith('tests/visual/')))
+  assert.ok(gated.every(spec => !spec.file.startsWith('tests/visual/')))
+  assert.ok(balanceShards(real, 12, { all: true }).flatMap(shard => shard.specs).every(spec => !spec.file.startsWith('tests/visual/')))
+  assert.equal(gated.length, files(real).length - real.groups.find(g => g.id === 'remaining-ui').specs.length - visuals.specs.length)
   // Preserve main's five-minute estimate for every gated group except
   // AEON-697's attention spec. That spec is one file, so the balancer cannot
   // spread it; the expanded gate may grow by its whole weight and no more.

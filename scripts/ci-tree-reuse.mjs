@@ -22,6 +22,7 @@ export const executionSteps = {
   'go-timing': 'Timing budgets, alone',
   'web-catalogue': 'Require every web case to be classified',
   'web-setup': 'Build web',
+  'visual-comparison': 'Run every visual case without retries',
   'release-check-run': 'Enforce test runner trust boundary',
   'e2e-run': 'Start server and run smoke',
   'migration-compat': 'Previous binary on the candidate schema',
@@ -107,6 +108,10 @@ export function verifyJobs(jobs, attempt) {
     if(/^(go-test|web-unit|web-shard) \(/.test(name)) {
       const full=job.steps?.filter(step=>step.name==='Confirm full tier execution');
       ensure(full?.length===1&&full[0].status==='completed'&&full[0].conclusion==='success','missing full tier execution evidence');
+    }
+    if(name==='visual-comparison') {
+      const full=job.steps?.filter(step=>step.name==='Confirm full visual tier execution');
+      ensure(full?.length===1&&full[0].status==='completed'&&full[0].conclusion==='success','missing full visual execution evidence');
     }
     ensure(!job.steps?.some(step => step.name === 'Reuse the verified merge-group run' && step.conclusion !== 'skipped'), 'reused suite is not execution proof');
   }

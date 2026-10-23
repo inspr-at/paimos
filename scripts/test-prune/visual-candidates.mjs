@@ -55,7 +55,7 @@ export function packCandidates(records, visual) {
   }
   const bytes = Buffer.from(JSON.stringify({ version: 1, captureSHA, renderer, files }) + '\n')
   need(bytes.length <= 48 * 1024 * 1024, 'Review bundle exceeds 48 MiB')
-  return { bytes, review: { version: 1, status: 'pending-Tick-review', captureSHA, renderer, comparison: visual.comparison, sha256: hash(bytes),
+  return { bytes, review: { version: 1, status: 'pending-Tick-review', captureSHA, captureRun: records[0].quality.captureRun ?? null, renderer, comparison: visual.comparison, sha256: hash(bytes),
     clocks: Object.fromEntries(states.map(state => [state.id, state.clock])),
     states: states.map(state => state.id),
     deferred: visual.states.filter(state => state.referenceStatus === 'deferred').map(state => ({

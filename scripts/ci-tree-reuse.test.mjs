@@ -21,7 +21,7 @@ function fixture(attempt = 1) {
   const workflow = { id: 20, name: 'CI', path: workflowPath, decideMergeGroup, verifyPRFacts, verifyPRRun, prProofPrefix };
   const jobs = { total_count: requiredJobs.length + 2, jobs: requiredJobs.map(name => {
     const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard (essential plus changed area, or full on main)' : name.startsWith('web-unit (') ? 'Run selected web units without retries' : name.startsWith('web-shard (') ? 'Run selected UI cases without retries' : undefined);
-    return { name, run_attempt: attempt, status: 'completed', conclusion: 'success', steps: [...(stepName ? [{ name: stepName, status: 'completed', conclusion: 'success' }] : []), ...(name==='ci-plan'?[{name:'Plan test tiers',status:'completed',conclusion:'success'}]:[]), ...(/^(go-test|web-unit|web-shard) \(/.test(name)?[{name:'Confirm full tier execution',status:'completed',conclusion:'success'}]:[])] };
+    return { name, run_attempt: attempt, status: 'completed', conclusion: 'success', steps: [...(stepName ? [{ name: stepName, status: 'completed', conclusion: 'success' }] : []), ...(name==='ci-plan'?[{name:'Plan test tiers',status:'completed',conclusion:'success'}]:[]), ...(/^(go-test|web-unit|web-shard) \(/.test(name)?[{name:'Confirm full tier execution',status:'completed',conclusion:'success'}]:[]), ...(name==='visual-comparison'?[{name:'Confirm full visual tier execution',status:'completed',conclusion:'success'}]:[])] };
   }) };
   jobs.jobs.push({ name: 'cache-prime', status: 'completed', conclusion: 'skipped', run_attempt: attempt });
   jobs.jobs.push({ name: 'tree-reuse', status: 'completed', conclusion: 'skipped', run_attempt: attempt });

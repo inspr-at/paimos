@@ -8,7 +8,7 @@ import { test as base, expect, type Browser, type Page, type TestInfo } from '@p
 import AxeBuilder from '@axe-core/playwright'
 import { readBaselineBundle, referenceGate } from '../../../scripts/test-prune/visual-baselines.mjs'
 import { visualReportOnly, visualCheckResult } from '../../../scripts/test-prune/check.mjs'
-import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, rendererIdentity, verifyFontAssets, installRendererFonts } from '../../../scripts/test-prune/visual-renderer.mjs'
+import { assertVisualContainer, assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, rendererIdentity, verifyFontAssets, installRendererFonts } from '../../../scripts/test-prune/visual-renderer.mjs'
 import { domAudit } from '../ui-audit-rules'
 
 const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8'))
@@ -16,7 +16,9 @@ const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts
 // child environment, never the worker, dev server or another spec's browser.
 export const test = base.extend({
   launchOptions: [async ({ launchOptions }, use, workerInfo) => {
-    if (process.platform !== 'linux') return use(launchOptions)
+    // This infrastructure refusal stays outside report-only result handling.
+    // Native agm2/macOS browsers must never diff against CI container pixels.
+    assertVisualContainer(manifest)
     const fontconfig = installRendererFonts(manifest, join(workerInfo.project.outputDir, `visual-fontconfig-${workerInfo.workerIndex}`))
     await use({ ...launchOptions, env: { ...process.env, ...launchOptions.env, FONTCONFIG_FILE: fontconfig } })
   }, { scope: 'worker' }],
@@ -75,8 +77,9 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
       return
     }
     if (capture && !visual.capture.states.includes(gate.state)) throw new Error(`State is outside the manual capture set: ${gate.state}`)
-    const renderer = rendererIdentity(visual, browser.version(), { browserOptions: info.project.use })
-    if (capture || gate.mode === 'compare') assertRenderer(renderer, visual.renderer, { capture })
+    const renderer = rendererIdentity(visual, browser.version(), { browserOptions: info.project.use,
+      fontconfigFile: join(info.project.outputDir, `visual-fontconfig-${info.workerIndex}`, 'fonts.conf') })
+    assertRenderer(renderer, visual.renderer, { capture })
     const viewport = visual.profiles[checkpoint.profile]
     const context = await browser.newContext({ viewport, deviceScaleFactor: visual.renderer.deviceScaleFactor,
       colorScheme: checkpoint.theme, reducedMotion: visual.renderer.reducedMotion,
@@ -128,7 +131,8 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
       const unexpectedErrors = errors.filter(error => !expectedReads.some(row =>
         error.startsWith(`Failed to load resource: the server responded with a status of ${row.status} `) && error.endsWith(row.path)))
       const report = { id: checkpoint.id, sourceSpec: sourceSpec(info), owner: checkpoint.owner, fixture: checkpoint.fixture,
-        captureSHA, pngSHA256: png ? createHash('sha256').update(png).digest('hex') : null, baselineCompared: false,
+        captureSHA, captureRun: process.env.GITHUB_RUN_ID ?? null,
+        pngSHA256: png ? createHash('sha256').update(png).digest('hex') : null, baselineCompared: false,
         reference: gate, viewport, theme: checkpoint.theme, renderer, fonts, clock, requirementsRun: true,
         quality: { status: 'pending' }, comparison: { status: 'not run' },
         captureMode: capture, layout, axe: violations, console: unexpectedErrors, responses: unexpectedResponses, expectedReads }
@@ -183,7 +187,8 @@ async function reportReference(info: TestInfo, checkpoint: { id: string }, visua
 // Kept shared with the real checkpoint runner so negative controls exercise
 // the same pinned/awaiting dispatch and pixel comparator as product states.
 export async function compareVisualReference(page: Page, info: TestInfo, checkpoint: { id: string; reference: { attachmentMember: string } },
-  { visual = manifest, baselineFile = process.env.AEON_VISUAL_BASELINE_FILE, timeout, renderer = rendererIdentity(visual, page.context().browser()!.version(), { browserOptions: info.project.use }) }:
+  { visual = manifest, baselineFile = process.env.AEON_VISUAL_BASELINE_FILE, timeout, renderer = rendererIdentity(visual, page.context().browser()!.version(), { browserOptions: info.project.use,
+    fontconfigFile: join(info.project.outputDir, `visual-fontconfig-${info.workerIndex}`, 'fonts.conf') }) }:
     { visual?: typeof manifest; baselineFile?: string; timeout?: number; renderer?: Record<string, unknown> } = {}) {
   const gate = referenceGate(visual, checkpoint.id)
   if (!['compare', 'report-only'].includes(gate.mode)) {

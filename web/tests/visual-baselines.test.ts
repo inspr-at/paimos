@@ -7,10 +7,12 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGate, referenceGates, referenceReport, materializeBaseline, checkpointReport } from '../../scripts/test-prune/visual-baselines.mjs'
 import { collectCandidates, packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
-import { pinManifest, pngTools, replayCandidates, publicationCommands } from '../../scripts/test-prune/visual-pin.mjs'
+import { pinManifest, assertPinIdentity, pngTools, replayCandidates, publicationCommands } from '../../scripts/test-prune/visual-pin.mjs'
+import { compareCaptureRecords, proveCaptureIdentity } from '../../scripts/test-prune/visual-identity.mjs'
+import { checkContainerPin } from '../../scripts/test-prune/visual-container-check.mjs'
 import { pixelChanges } from '../../scripts/test-prune/visual-review.mjs'
 
-import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, verifyFontAssets, captureEnabled, rendererIdentity, installRendererFonts } from '../../scripts/test-prune/visual-renderer.mjs'
+import { assertVisualContainer, assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, verifyFontAssets, captureEnabled, rendererIdentity, installRendererFonts } from '../../scripts/test-prune/visual-renderer.mjs'
 import { validateVisual, visualCheckResult } from '../../scripts/test-prune/check.mjs'
 import { parseWorkflow } from '../../scripts/ci-static.mjs'
 
@@ -161,42 +163,59 @@ test('visual references require approval, immutable attachment bytes and every e
   lostPin.states.find((state: { id: string }) => state.id === 'projects').checkpoints[0].reference.sha256 = null
   assert.throws(() => referenceGates(lostPin), { message: 'Unpinned visual reference: V-projects-390-light' })
 
-  // Every renderer field is a rejection boundary. The version is deliberately
-  // synthetic; current runner metadata cannot authorize any product reference.
+  // Every pixel-determining field rejects changes. Hosted metadata is recorded
+  // without binding the renderer to GitHub's next image rollout.
   const renderer = visual.renderer
   assertRenderer(renderer, renderer)
-  for (const key of Object.keys(renderer)) {
+  for (const key of Object.keys(renderer).filter(key => key !== 'runner')) {
     const changed = { ...structuredClone(renderer), [key]: 'changed' }
-    assert.throws(() => assertRenderer(changed, renderer), /renderer differs from reference/)
+    assert.throws(() => assertRenderer(changed, renderer), /renderer differs from reference|visual = CI only/)
   }
-  const missingImage = structuredClone(renderer); missingImage.runner.imageVersion = null
-  assert.throws(() => assertRenderer(renderer, missingImage), /renderer differs from reference: reference has no pinned runner ImageVersion/)
-  assertRenderer(renderer, missingImage, { capture: true })
-  const actual = rendererIdentity(manifest, manifest.renderer.browser.version, { env: { AEON_VISUAL_RUNNER: 'ubuntu-24.04', ImageOS: 'ubuntu24', ImageVersion: 'synthetic-image' }, platform: 'linux', arch: 'x64' })
+  const environment = { AEON_VISUAL_CONTAINER_DIGEST: renderer.container.digest, ImageOS: 'ubuntu26', ImageVersion: 'new-hosted-image' }
+  const identityOptions = { env: environment, platform: 'linux', arch: 'x64', fontconfigFile: 'scripts/test-prune/visual-fonts.conf' }
+  const actual = rendererIdentity(manifest, manifest.renderer.browser.version, identityOptions)
   assertRenderer(actual, renderer)
+  assert.equal(actual.runner.imageVersion, 'new-hosted-image')
+  assertVisualContainer(manifest, identityOptions)
+  for (const options of [{ ...identityOptions, env: {} }, { ...identityOptions, env: { AEON_VISUAL_CONTAINER_DIGEST: 'sha256:' + '0'.repeat(64) } },
+    { ...identityOptions, platform: 'darwin' }, { ...identityOptions, arch: 'arm64' }])
+    assert.throws(() => assertVisualContainer(manifest, options), /visual = CI only/)
+  const missingContainer = structuredClone(actual); delete missingContainer.container.digest
+  assert.throws(() => assertRenderer(missingContainer, renderer), /visual = CI only/)
+  const wrongConfig = structuredClone(actual); wrongConfig.fontconfig.sha256 = '0'.repeat(64)
+  assert.throws(() => assertRenderer(wrongConfig, renderer), /renderer differs from reference: fontconfig/)
   assert.equal(captureEnabled(manifest, {}), false)
   assert.throws(() => captureEnabled(manifest, { AEON_VISUAL_CAPTURE: '1', GITHUB_EVENT_NAME: 'pull_request' }), /only by the manual/)
   assert.throws(() => captureEnabled(manifest, { AEON_VISUAL_CAPTURE: '1', GITHUB_EVENT_NAME: 'push' }), /only by the manual/)
   assert.equal(captureEnabled(manifest, { AEON_VISUAL_CAPTURE: '1', GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_WORKFLOW: 'CI', GITHUB_JOB: 'visual-reference-capture' }), true)
-  const changedBrowser = rendererIdentity(manifest, manifest.renderer.browser.version, { env: { AEON_VISUAL_RUNNER: 'ubuntu-24.04', ImageOS: 'ubuntu24', ImageVersion: 'synthetic-image' },
-    platform: 'linux', arch: 'x64', browserOptions: { browserName: 'chromium', headless: true, launchOptions: { args: [] } } })
+  const changedBrowser = rendererIdentity(manifest, manifest.renderer.browser.version, { ...identityOptions,
+    browserOptions: { browserName: 'chromium', headless: true, launchOptions: { args: [] } } })
   assert.throws(() => assertRenderer(changedBrowser, renderer), /renderer differs from reference: browser/)
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
   const captureJob = workflow.slice(workflow.indexOf('\n  visual-reference-capture:'), workflow.indexOf('\n  # Read-only proof.'))
-  const compareJob = workflow.slice(workflow.indexOf('\n  web-shard:'), workflow.indexOf('\n  # Preserve the ruleset'))
+  const compareJob = workflow.slice(workflow.indexOf('\n  visual-comparison:'), workflow.indexOf('\n  # Preserve the ruleset'))
+  const ordinaryJob = workflow.slice(workflow.indexOf('\n  web-shard:'), workflow.indexOf('\n  visual-comparison:'))
   assert.match(captureJob, /if: github.event_name == 'workflow_dispatch' && inputs.visual_capture == true/)
-  assert.match(captureJob, /runs-on: ubuntu-24\.04/)
   assert.doesNotMatch(captureJob, /\n    (needs|strategy|continue-on-error):/)
-  assert.match(compareJob, /runs-on: ubuntu-latest/)
+  assert.match(ordinaryJob, /runs-on: ubuntu-latest/)
+  assert.doesNotMatch(ordinaryJob, /AEON_VISUAL_|visual-baselines/)
   assert.doesNotMatch(compareJob, /AEON_VISUAL_CAPTURE/)
   for (const job of [captureJob, compareJob]) {
-    assert.match(job, /AEON_VISUAL_RUNNER: ubuntu-24\.04/)
-    assert.doesNotMatch(job, /install-fonts|FONTCONFIG/)
+    assert.ok(job.includes(`${renderer.container.image}@${renderer.container.digest}`))
+    assert.doesNotMatch(job, /playwright install|bounded-apt|install-fonts|FONTCONFIG/)
   }
-  // Risk: provisioning a private renderer must not mutate the worker/job env.
-  // Its subprocesses see fontconfig; an ordinary browser inherits no override.
+  assert.equal(checkContainerPin(workflow, manifest, manifest), true)
+  const bumped = structuredClone(manifest); bumped.renderer.container.digest = 'sha256:' + '1'.repeat(64)
+  const bumpedWorkflow = workflow.replaceAll(renderer.container.digest, bumped.renderer.container.digest)
+  assert.throws(() => checkContainerPin(bumpedWorkflow, bumped, manifest), /without regenerated, approved baselines/)
+  assert.throws(() => checkContainerPin(bumpedWorkflow, manifest, manifest), /pin differs from manifest/)
+  Object.assign(bumped.baselineAuthority.source, { sha256: '2'.repeat(64), captureSHA: '3'.repeat(40) })
+  bumped.approval.status = bumped.baselineAuthority.status = 'approved'; bumped.comparison.mode = 'blocking'
+  assert.equal(checkContainerPin(bumpedWorkflow, bumped, manifest), true)
+  // A private, path-independent fontconfig keeps the same confined font set,
+  // aliases and subprocess-only environment as P02.
   const fontconfigBefore = process.env.FONTCONFIG_FILE
-  const installDirectory = mkdtempSync(join(tmpdir(), 'aeon-1674-font-isolation-'))
+  const installDirectory = mkdtempSync(join(tmpdir(), 'aeon-1692-font-isolation-'))
   try {
     const calls: string[] = []
     const fontconfig = installRendererFonts(manifest, installDirectory, { run: (command, args, options) => {
@@ -205,21 +224,21 @@ test('visual references require approval, immutable attachment bytes and every e
       assert.equal(process.env.FONTCONFIG_FILE, fontconfigBefore)
       return command === 'fc-match' ? manifest.renderer.fontconfig.aliases[args[1].slice(':family='.length)] : Buffer.alloc(0)
     } })
-    assert.equal(fontconfig, join(installDirectory, 'fonts.conf'))
+    assert.equal(hash(readFileSync(fontconfig)), renderer.fontconfig.sha256)
+    assert.doesNotMatch(readFileSync(fontconfig, 'utf8'), /<include|<dir>\//)
     assert.deepEqual(calls, ['fc-cache', 'fc-match', 'fc-match', 'fc-match', 'fc-match'])
     assert.equal(process.env.FONTCONFIG_FILE, fontconfigBefore)
   } finally { rmSync(installDirectory, { recursive: true, force: true }) }
   const rendererSource = readFileSync(new URL('../../scripts/test-prune/visual-renderer.mjs', import.meta.url), 'utf8')
   assert.doesNotMatch(rendererSource, /GITHUB_ENV/)
   const changedImage = structuredClone(actual)
-  changedImage.runner.imageOS = 'different-image'
-  assert.throws(() => assertRenderer(changedImage, renderer), /renderer differs from reference: runner/)
-  changedImage.runner = { ...actual.runner, imageVersion: 'different-version' }
-  assert.throws(() => assertRenderer(changedImage, renderer), /renderer differs from reference: runner/)
+  changedImage.runner.imageOS = 'different-image'; changedImage.runner.imageVersion = 'different-version'
+  assertRenderer(changedImage, renderer)
   assert.match(captureJob, /retention-days: 7/)
   assert.doesNotMatch(captureJob, /contents: write|gh release|visual-baselines\.mjs/)
   const steps = parseWorkflow(workflow).get('visual-reference-capture')
-  assert.ok(steps.some((step: { run?: string }) => step.run?.includes('visual-candidates.mjs web/test-results/capture-run web/test-results/linux-candidate')))
+  assert.ok(steps.some((step: { run?: string }) => step.run?.includes('visual-candidates.mjs web/test-results/container-run-1/capture-run web/test-results/container-run-1/linux-candidate')))
+  assert.ok(steps.some((step: { run?: string }) => step.run?.includes('visual-candidates.mjs web/test-results/container-run-2/capture-run web/test-results/container-run-2/linux-candidate')))
 
   // One pinned area does not need reference bytes from unrelated pending or
   // deferred states. The required state's own missing member still rejects.
@@ -345,7 +364,18 @@ test('visual references require approval, immutable attachment bytes and every e
     const receipt = { reviewer: 'Tick', status: 'approved', dryRun: true, approvedAt: '2026-10-23T12:00:00Z',
       evidence: 'DRY RUN ONLY; no product approval', captureSHA: candidate.captureSHA, archiveSHA256: candidate.archive.sha256,
       checkpoints: candidate.members.map(member => member.id) }
-    const draft = pinManifest(manifest, candidate, detached, receipt, {}, { dryRun: true })
+    const identityRows = candidate.members.map(member => ({ id: member.id, byteIdentical: true, pixels: 0, total: 1, percent: 0, regions: [] }))
+    const identityProof = { version: 1, status: 'identical', captureSHA: candidate.captureSHA, archiveSHA256: candidate.archive.sha256,
+      repeatArchiveSHA256: 'f'.repeat(64), containerDigest: renderer.container.digest,
+      reviewedRunnerArchiveSHA256: manifest.capture.identityProof.reviewedRunnerArchiveSHA256,
+      repeat: { byteIdentical: 72, pixelIdentical: 72, checkpoints: identityRows }, runner: { pixelIdentical: 72, checkpoints: identityRows } }
+    const options = { dryRun: true, identityProof }
+    assert.throws(() => pinManifest(manifest, candidate, detached, receipt, {}, { dryRun: true }), /72\/72 byte-identical/)
+    const unstable = structuredClone(identityProof); unstable.repeat.checkpoints[0].pixels = 1
+    assert.throws(() => assertPinIdentity(unstable, candidate, manifest), /STOP before pinning/)
+    const wrongArchiveProof = { ...identityProof, archiveSHA256: '0'.repeat(64) }
+    assert.throws(() => assertPinIdentity(wrongArchiveProof, candidate, manifest), /STOP before pinning/)
+    const draft = pinManifest(manifest, candidate, detached, receipt, {}, options)
     assert.equal(draft.referenceSet, 3)
     assert.equal(draft.comparison.mode, 'blocking')
     assert.equal(draft.approval.checkpoints.length, 72)
@@ -355,12 +385,12 @@ test('visual references require approval, immutable attachment bytes and every e
       assert.equal(referenceGate(draft, `V-${id}-390-light`).mode, 'deferred')
     }
     assert.equal(verifyReferenceArchive(readFileSync(join(output, candidate.archive.name)), detached, draft).references.size, 72)
-    assert.throws(() => pinManifest(manifest, candidate, detached, receipt, {}), /dry-run approval cannot pin/)
+    assert.throws(() => pinManifest(manifest, candidate, detached, receipt, {}, { identityProof }), /dry-run approval cannot pin/)
     const realReceipt = { ...receipt, dryRun: false, evidence: 'Synthetic isolated test receipt' }
-    assert.throws(() => pinManifest(manifest, candidate, detached, realReceipt, {}), /Real, distinct AEON-1670/)
-    assert.throws(() => pinManifest(manifest, candidate, detached, { ...receipt, archiveSHA256: '0'.repeat(64) }, {}, { dryRun: true }), /exact capture and archive bytes/)
-    assert.throws(() => pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: ['V-goals-390-light'] }, {}, { dryRun: true }), /enumerate candidate checkpoint IDs/)
-    const partialDraft = pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: receipt.checkpoints.slice(1) }, {}, { dryRun: true })
+    assert.throws(() => pinManifest(manifest, candidate, detached, realReceipt, {}, { identityProof }), /Real, distinct AEON-1670/)
+    assert.throws(() => pinManifest(manifest, candidate, detached, { ...receipt, archiveSHA256: '0'.repeat(64) }, {}, options), /exact capture and archive bytes/)
+    assert.throws(() => pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: ['V-goals-390-light'] }, {}, options), /enumerate candidate checkpoint IDs/)
+    const partialDraft = pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: receipt.checkpoints.slice(1) }, {}, options)
     const partialRefs = verifyReferenceArchive(readFileSync(join(output, candidate.archive.name)), detached, partialDraft).references
     assert.equal(partialRefs.size, 71)
     assert.equal(partialRefs.has(`${receipt.checkpoints[0]}.png`), false)
@@ -378,6 +408,26 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.equal(change.pixels, 1)
     assert.equal(change.percent, 100 / 256)
     assert.deepEqual(change.regions, [{ x: 0, y: 0, width: 1, height: 1, pixels: 1 }])
+    const smallRecords = candidate.members.map(member => ({ quality: { id: member.id }, png: white }))
+    const baseCapture = { candidate, records: smallRecords, archiveSHA256: candidate.archive.sha256 }
+    const repeatProof = proveCaptureIdentity(baseCapture, baseCapture, { ...baseCapture, archiveSHA256: manifest.capture.identityProof.reviewedRunnerArchiveSHA256 }, manifest)
+    assert.equal(repeatProof.status, 'identical')
+    assert.equal(repeatProof.repeat.byteIdentical, 72)
+    assert.equal(repeatProof.runner.pixelIdentical, 72)
+    assertPinIdentity(repeatProof, candidate, manifest)
+    const differentRecords = smallRecords.map((record, index) => index ? record : { ...record, png: blackCorner })
+    const unstableProof = proveCaptureIdentity(baseCapture, { ...baseCapture, records: differentRecords }, baseCapture, manifest)
+    assert.equal(unstableProof.status, 'STOP-before-pinning')
+    assert.equal(unstableProof.repeat.byteIdentical, 71)
+    assert.equal(unstableProof.repeat.checkpoints[0].pixels, 1)
+    assert.deepEqual(unstableProof.repeat.checkpoints[0].regions, change.regions)
+    const runnerDifference = proveCaptureIdentity(baseCapture, baseCapture, { ...baseCapture, records: differentRecords }, manifest)
+    assert.equal(runnerDifference.repeat.byteIdentical, 72)
+    assert.equal(runnerDifference.runner.pixelIdentical, 71)
+    assert.equal(runnerDifference.status, 'STOP-before-pinning')
+    assert.throws(() => assertPinIdentity(runnerDifference, candidate, manifest), /STOP before pinning/)
+    assert.throws(() => proveCaptureIdentity(baseCapture, { ...baseCapture, candidate: { ...candidate, captureSHA: 'b'.repeat(40) } }, baseCapture, manifest), /SAME commit/)
+    assert.throws(() => compareCaptureRecords(smallRecords.slice(1), smallRecords), /exactly 72/)
     const single = { ...draft, approval: { ...draft.approval, checkpoints: [receipt.checkpoints[0]] } }
     const replay = await replayCandidates([{ png: white, quality: { id: receipt.checkpoints[0], captureSHA: candidate.captureSHA } }],
       single, new Map([[`${receipt.checkpoints[0]}.png`, white]]))

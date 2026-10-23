@@ -167,7 +167,7 @@
       "transport": "source.mirror; built-in GITHUB_TOKEN, contents:read only",
       "entrypoint": "node scripts/test-prune/visual-baselines.mjs download tmp/visual-baselines",
       "consumerVerification": "node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines",
-      "workflow": "web-setup downloads and verifies; web-runtime transports the original assets; each web-shard verifies again before comparison."
+      "workflow": "web-setup downloads and verifies immutable assets; web-runtime transports them to the dedicated digest-pinned visual-comparison job, which verifies them again. Ordinary hosted shards do not run visual specs."
     }
   },
   "profiles": {
@@ -725,7 +725,7 @@
     },
     {
       "id": "account-use-matrix",
-      "label": "Settings · Account use matrix",
+      "label": "Settings \u00b7 Account use matrix",
       "owner": "tests/visual/account-use-matrix.spec.ts",
       "fixture": "Long account/context names, partial selection and visible Undo",
       "profiles": [
@@ -908,7 +908,7 @@
     },
     {
       "id": "access",
-      "label": "Access · role/scopes picker",
+      "label": "Access \u00b7 role/scopes picker",
       "owner": "tests/visual/access.spec.ts",
       "fixture": "Long role descriptions, bounded choices and authority explanation",
       "profiles": [
@@ -1062,7 +1062,7 @@
     },
     {
       "id": "delivery-numbers",
-      "label": "Delivery · Numbers",
+      "label": "Delivery \u00b7 Numbers",
       "owner": "tests/visual/delivery-numbers.spec.ts",
       "fixture": "Representative counts/chart plus honest partial-data label",
       "profiles": [
@@ -1139,7 +1139,7 @@
     },
     {
       "id": "hours",
-      "label": "Business · Hours",
+      "label": "Business \u00b7 Hours",
       "owner": "tests/visual/hours.spec.ts",
       "fixture": "Week/period entries, correction control and approval state",
       "profiles": [
@@ -1401,7 +1401,7 @@
       "id": "start-agent",
       "label": "Start agent / Run once",
       "owner": "tests/visual/start-agent.spec.ts",
-      "fixture": "Run once mode; task filled; \"Create a ticket in a project\"; read-only; folded \"Runs on …\" row with a capacity warning",
+      "fixture": "Run once mode; task filled; \"Create a ticket in a project\"; read-only; folded \"Runs on \u2026\" row with a capacity warning",
       "profiles": [
         "phone",
         "desktop"
@@ -2245,7 +2245,7 @@
         "sourceCaptureSHA": "6fea542010b4c699dadadd74529fdaf7a1ef4c9a",
         "captureRun": "39912019882",
         "recordedBy": "LEAD-M",
-        "scope": "Exactly 53 checkpoints are comparison authority. Thirteen stale set-2 checkpoints report awaiting reference (needs re-capture) for AEON-1692 / reference set 3: nine named in round 11 plus four Hours failures proven by the attached CI log. Existing 14 explicit deferrals remain. No protected cuts are authorized in P02; P03–P11 own their subsequent cut rounds."
+        "scope": "Exactly 53 checkpoints are comparison authority. Thirteen stale set-2 checkpoints report awaiting reference (needs re-capture) for AEON-1692 / reference set 3: nine named in round 11 plus four Hours failures proven by the attached CI log. Existing 14 explicit deferrals remain. No protected cuts are authorized in P02; P03\u2013P11 own their subsequent cut rounds."
       },
       "baselineAuthority": {
         "status": "approved",
@@ -2860,7 +2860,7 @@
         },
         {
           "id": "account-use-matrix",
-          "label": "Settings · Account use matrix",
+          "label": "Settings \u00b7 Account use matrix",
           "owner": "tests/visual/account-use-matrix.spec.ts",
           "fixture": "Long account/context names, partial selection and visible Undo",
           "profiles": [
@@ -3028,7 +3028,7 @@
         },
         {
           "id": "access",
-          "label": "Access · role/scopes picker",
+          "label": "Access \u00b7 role/scopes picker",
           "owner": "tests/visual/access.spec.ts",
           "fixture": "Long role descriptions, bounded choices and authority explanation",
           "profiles": [
@@ -3156,7 +3156,7 @@
         },
         {
           "id": "delivery-numbers",
-          "label": "Delivery · Numbers",
+          "label": "Delivery \u00b7 Numbers",
           "owner": "tests/visual/delivery-numbers.spec.ts",
           "fixture": "Representative counts/chart plus honest partial-data label",
           "profiles": [
@@ -3231,7 +3231,7 @@
         },
         {
           "id": "hours",
-          "label": "Business · Hours",
+          "label": "Business \u00b7 Hours",
           "owner": "tests/visual/hours.spec.ts",
           "fixture": "Week/period entries, correction control and approval state",
           "profiles": [
@@ -3471,7 +3471,7 @@
           "id": "start-agent",
           "label": "Start agent / Run once",
           "owner": "tests/visual/start-agent.spec.ts",
-          "fixture": "Run once mode; task filled; \"Create a ticket in a project\"; read-only; folded \"Runs on …\" row with a capacity warning",
+          "fixture": "Run once mode; task filled; \"Create a ticket in a project\"; read-only; folded \"Runs on \u2026\" row with a capacity warning",
           "profiles": [
             "phone",
             "desktop"
@@ -3750,11 +3750,11 @@
     }
   ],
   "renderer": {
-    "version": 1,
+    "version": 2,
     "runner": {
-      "label": "ubuntu-24.04",
-      "imageOS": "ubuntu24",
-      "imageVersion": "20261012.334.1",
+      "label": "GitHub-hosted (diagnostic only)",
+      "imageOS": null,
+      "imageVersion": null,
       "platform": "linux",
       "arch": "x64"
     },
@@ -3841,7 +3841,6 @@
       }
     ],
     "fontPolicy": "Renderer only: digest-verified vendored Inter 4.1; fontconfig maps -apple-system, system-ui and sans-serif to Inter. Production font stacks stay intact. Body computed family and resolved Inter, painted font families, and all quote-profile faces are guarded before captures and comparisons. Full JetBrains Mono is reserved for mono text; profile documents use their Source Sans 3 / Source Serif 4 Display faces.",
-    "imageVersionPolicy": "Capture records ImageVersion. Tick-approved Linux pins must set this exact value before comparison; a later hosted image requires a new review.",
     "fontconfig": {
       "aliases": {
         "-apple-system": "Inter Variable",
@@ -3849,13 +3848,25 @@
         "sans-serif": "Inter Variable",
         "monospace": "JetBrains Mono"
       },
-      "installer": "node scripts/test-prune/visual-renderer.mjs install-fonts"
-    }
+      "installer": "node scripts/test-prune/visual-renderer.mjs install-fonts",
+      "asset": "scripts/test-prune/visual-fonts.conf",
+      "sha256": "5a5c74ed5fa9933f83ee65c73287309884ef00d08a1093373cd4f6319dc1eca1"
+    },
+    "container": {
+      "image": "mcr.microsoft.com/playwright:v1.64.1-noble",
+      "digest": "sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8",
+      "platform": "linux",
+      "arch": "x64",
+      "source": "https://mcr.microsoft.com/v2/playwright/manifests/v1.64.1-noble",
+      "indexDigest": "sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea",
+      "resolvedAt": "2026-10-23T12:34:55Z"
+    },
+    "containerPolicy": "Visual = CI only. Container digest, Chromium build, font SHA-256 and fontconfig file SHA-256 determine renderer identity. Hosted ImageOS/ImageVersion are diagnostic metadata. Change the container digest only with regenerated baseline evidence and a reviewed manifest in the same PR; never via an automated bump."
   },
   "comparison": {
     "threshold": 0,
     "maxDiffPixels": 0,
-    "justification": "No pixel tolerance: the same hosted image, bundled browser, scale, emulation and self-hosted glyphs must render identically. No layout or colour change is permitted; no anti-aliasing allowance is currently needed.",
+    "justification": "No pixel tolerance: the same digest-pinned Playwright container, bundled browser, fontconfig file, scale, emulation and vendored glyphs must render identically. Zero tolerance requires two byte-identical captures of the same commit before pinning.",
     "mode": "report-only"
   },
   "capture": {
@@ -3883,6 +3894,13 @@
     "approval": "pending-Tick-review",
     "writes": "Only Playwright testInfo.outputPath() captures and the run artifact under web/test-results; never reference paths, tickets, releases or Git.",
     "input": "visual_capture",
-    "job": "visual-reference-capture"
+    "job": "visual-reference-capture",
+    "identityProof": {
+      "reviewedRunnerCaptureSHA": "ecb819ba898f3fcb944f395388fb2c24a8b7ce83",
+      "reviewedRunnerRun": "39949629594",
+      "reviewedRunnerArchiveSHA256": "3c407f853fd48512b713543726c28bcf7d1c317d02fbf9c5d1479bf0a824e348",
+      "reviewedRunnerManifestSHA256": "e3d68ef66a4cd7ca7a93c125be9970c76d1fbf295ed2df3a3e1c39af31cbfb6e",
+      "condition": "Two independent captures of the same commit must have 72/72 byte-identical PNGs, then 72/72 identical decoded pixels against the Tick-approved runner capture. Any difference stops pinning and reports exact percentages and regions."
+    }
   }
 }

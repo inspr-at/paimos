@@ -102,9 +102,9 @@ export function aggregate(reports,jobs,{runId,attempt,sha,reusedFrom,lane,layout
   // The static layout (PR-only affected lane) schedules no Go shards, timing
   // or browser shards; unit evidence is still required and reported.
   const expectedSkip=job=>!job.name.startsWith('nightly-')&&
-    (lane==='docs-only'||lane==='spec-only'&&/^go-/.test(job.name)||layout==='static'&&/^(?:go-test|go-timing|web-shard)(?: \(\d+\))?$/.test(job.name))
+    (lane==='docs-only'||lane==='spec-only'&&/^go-/.test(job.name)||layout==='static'&&/^(?:go-test|go-timing|web-shard|visual-comparison)(?: \(\d+\))?$/.test(job.name))
   const required=jobs.filter(job=>
-    /^(?:nightly-)?(?:go-test|web-unit|web-shard)(?: \(\d+\))?$|^nightly-web-setup$|^(?:nightly-)?go-timing$/.test(job.name)&&
+    /^(?:nightly-)?(?:go-test|web-unit|web-shard)(?: \(\d+\))?$|^visual-comparison$|^nightly-web-setup$|^(?:nightly-)?go-timing$/.test(job.name)&&
     !(job.conclusion==='skipped'&&expectedSkip(job))&&
     !(lane==='spec-only'&&/^web-(?:unit|shard)(?: \(\d+\))?$/.test(job.name)))
   const evidenceName=name=>name.replace(/^nightly-/,'').replace(/^web-setup$/,'web-unit').replace(/ \((\d+)\)$/,'-$1')
@@ -146,7 +146,7 @@ export function readReports(directory) {
   for(const entry of readdirSync(directory,{withFileTypes:true})) {
     const path=resolve(directory,entry.name)
     if(entry.isDirectory()) reports.push(...readReports(path))
-    else if(/^(?:go-test-\d+|go-timing|web-unit(?:-\d+)?|web-shard-\d+)-measurement\.json$/.test(entry.name)) reports.push(JSON.parse(readFileSync(path,'utf8')))
+    else if(/^(?:go-test-\d+|go-timing|web-unit(?:-\d+)?|web-shard-\d+|visual-comparison)-measurement\.json$/.test(entry.name)) reports.push(JSON.parse(readFileSync(path,'utf8')))
   }
   return reports
 }
