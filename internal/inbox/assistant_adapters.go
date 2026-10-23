@@ -307,11 +307,15 @@ func (m *messaging) getAssistantAdapter(w http.ResponseWriter, r *http.Request) 
 }
 
 func (m *messaging) readAssistantAdapter(ctx context.Context, p tenant.Principal, project, id string, test bool) (AssistantAdapterConfig, error) {
+	if test && (p.Kind != tenant.Person || p.KeyID != "") {
+		return AssistantAdapterConfig{}, errForbidden
+	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var out AssistantAdapterConfig
+	var input *targetInput
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := requireAdapterTx(ctx, tx, p, project, test); err != nil {
+		if err := requireAdapterTx(ctx, tx, p, project, false); err != nil {
 			return err
 		}
 		now, err := m.databaseNow(ctx, tx)
@@ -349,13 +353,15 @@ func (m *messaging) readAssistantAdapter(ctx context.Context, p tenant.Principal
 				// contacting the sleeping host.
 				kind, private.Ref, private.Secret = "pull", "", ""
 			}
-			input := targetInput{Address: out.Address, Adapter: adapter, Kind: kind, Ref: private.Ref, Secret: private.Secret, MaximumLevel: "simple", Role: "primary"}
-			if validateCompatTarget(ctx, &input) != nil {
-				return &httpError{409, "target_invalid", "adapter target is unavailable"}
-			}
+			input = &targetInput{Address: out.Address, Adapter: adapter, Kind: kind, Ref: private.Ref, Secret: private.Secret, MaximumLevel: "simple", Role: "primary"}
 		}
 		return err
 	})
+	// DNS may wait on an external resolver. Finish the read transaction first;
+	// live sends re-check authority and target identity under their write fence.
+	if err == nil && input != nil && validateCompatTarget(ctx, input) != nil {
+		err = &httpError{409, "target_invalid", "adapter target is unavailable"}
+	}
 	return out, err
 }
 
