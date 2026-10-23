@@ -2,7 +2,7 @@
   "version": 1,
   "ticket": "AEON-1683",
   "package": "P11",
-  "status": "unprotected-cutA-applied-protected-cuts-deferred",
+  "status": "unprotected-cutA-applied-remote-capacity-handoff",
   "baseline": "scripts/test-prune/baseline.json",
   "baselineSha256": "e017c08a8cbad7451c9c1615a98f03cb10de1f1c85bef0d561c86fec1faaafc0",
   "before": 508,
@@ -2645,9 +2645,9 @@
   ],
   "evidence": "docs/features/test-prune-p11.md",
   "blockers": [
-    "Protected, after P02: see protectedAfterP02. Tick approval and immutable references remain pending; no protected anchor is removed or demoted.",
-    "Unproven runtime conversions retain browser donors, including delivery-tab-switch; unique binding, partial/stale results and retained-failure cases stay.",
-    "cutA same-host before/after browser timing and affected-set/static execution require remote capacity; earlier round timing is not reused as cutA evidence."
+    "Protected, after P02: all 194 protected cases in protectedAfterP02 retain their original identities, tiers and assertions; this round never depends on pinned references.",
+    "Hosted CI must prove the corrected six-spec boundaries after-run and full static; approved entry points refused with exit 3 at the bounded retry limit.",
+    "Unique lower-layer conversions remain future work; their browser donors stay, including both mounted Delivery section-switch cases."
   ],
   "actualAfter": 386,
   "frozenBefore": 493,
@@ -3569,30 +3569,220 @@
       }
     ],
     "measurements": {
-      "status": "before-running",
+      "status": "partial-after-complete-remaining-rerun-capacity-refused",
       "host": "mbp2606",
       "runner": "remote-spec.sh",
+      "workersPerChunk": 1,
       "before": {
         "sourceCommit": "2f26947bb",
-        "completedBatches": [
+        "cases": 260,
+        "passed": 246,
+        "skipped": 14,
+        "failed": 0,
+        "approximateRunnerSeconds": 708.4,
+        "batches": [
           {
             "id": "boundaries",
-            "cases": 86,
             "passed": 77,
             "skipped": 9,
-            "failed": 0,
-            "runnerDisplay": "4.5m",
-            "log": "web/test-results/p11-cutA/before-boundaries.log",
-            "approximateRunnerSeconds": 270,
-            "mergeReportWallMilliseconds": 54519
+            "runnerDisplay": "4.5m"
+          },
+          {
+            "id": "delivery",
+            "passed": 84,
+            "skipped": 0,
+            "runnerDisplay": "3.9m"
+          },
+          {
+            "id": "releases",
+            "passed": 53,
+            "skipped": 4,
+            "runnerDisplay": "2.8m"
+          },
+          {
+            "id": "historic",
+            "passed": 32,
+            "skipped": 1,
+            "runnerDisplay": "36.4s"
           }
         ]
       },
-      "after": null,
+      "after": {
+        "sourceCommits": [
+          "a0b57919c"
+        ],
+        "completedBatches": 3,
+        "cases": 118,
+        "passed": 118,
+        "skipped": 0,
+        "failed": 0,
+        "approximateRunnerSeconds": 150.7,
+        "batches": [
+          {
+            "id": "delivery",
+            "passed": 51,
+            "skipped": 0,
+            "runnerDisplay": "1.4m",
+            "sourceCommit": "a0b57919c"
+          },
+          {
+            "id": "releases",
+            "passed": 36,
+            "skipped": 0,
+            "runnerDisplay": "39.6s",
+            "sourceCommit": "a0b57919c"
+          },
+          {
+            "id": "historic",
+            "passed": 31,
+            "skipped": 0,
+            "runnerDisplay": "27.1s",
+            "sourceCommit": "a0b57919c"
+          }
+        ],
+        "expectedCompleteCases": 181,
+        "expectedOptInSkipped": 2
+      },
       "runnerSecondsSaved": null,
-      "previousRefusal": "remote busy: 2/2 remote runs (CI pool 0/4); remote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI",
-      "timingBasis": "Playwright merged run duration (rounded native summary); the final AEON_PW_PROCESSES wall_ms measures merge-reports only and is excluded from runner comparisons."
+      "completedCohorts": {
+        "beforeCases": 174,
+        "afterCases": 118,
+        "beforeApproximateRunnerSeconds": 438.4,
+        "afterApproximateRunnerSeconds": 150.7,
+        "approximateRunnerSecondsSaved": 287.7,
+        "scope": "The three completed cohorts cover 15 specs, including unchanged Building and lane controls; not a full cutA or P11 comparison."
+      },
+      "timingBasis": "Native merged Playwright duration. Minute summaries round to tenths of a minute. The final AEON_PW_PROCESSES wall_ms measures merge-reports only and is excluded.",
+      "correctedTestError": {
+        "sourceCommit": "a0b57919c",
+        "batch": "boundaries",
+        "error": "ReferenceError: SHOTS is not defined",
+        "passed": 60,
+        "failed": 1,
+        "skipped": 2,
+        "fixCommit": "54c46dbf1",
+        "fix": "Restore the original SHOTS constant used by a surviving case; no assertion changed.",
+        "rerun": "Refused with exit 3 after the original SHOTS constant was restored; hosted CI must run the complete boundaries cohort."
+      },
+      "refusals": {
+        "browser": {
+          "exitCode": 3,
+          "message": "mbp2606 not available (night/level protocol); wait or rely on PR CI",
+          "otherMessage": "remote busy: 2/2 remote runs (CI pool 0/4); remote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI"
+        },
+        "static": {
+          "exitCode": 3,
+          "message": "remote paused: mbp2606 not GREEN (night protocol, OPS host watch); not falling back to a heavy local run; retry later or rely on PR CI"
+        },
+        "retryWaitSeconds": 585
+      },
+      "limits": "The measured saving is only the three completed 15-spec cohorts. Four successful before batches cover all 21 affected/control owners; six specs still need a successful after run. Native minute summaries round to tenths. No full-cutA or full-P11 saving is claimed."
     },
-    "verification": "Standing check, P11 exact lineage and canonical manifests run locally; browser/static proof pending guarded remote execution."
+    "verification": "PASS: default standing ledger without P02, both ledger behavior cases and negative controls, canonical manifests, all 40 P11 listedTests counts, TypeScript syntax and 116 preserved test bodies. All baseline cohorts and three after cohorts passed. The corrected six-spec after rerun and full static remain unproven only because approved remote entry points refused capacity. Current branch contains latest origin/main; handoff pct 95.",
+    "inventorySynchronizations": [
+      {
+        "file": "tests/delivery-flow-lanes.spec.ts",
+        "from": 4,
+        "to": 12
+      },
+      {
+        "file": "tests/deploy-target.spec.ts",
+        "from": 7,
+        "to": 1
+      },
+      {
+        "file": "tests/footer-release-pill.spec.ts",
+        "from": 40,
+        "to": 42
+      },
+      {
+        "file": "tests/release-header.spec.ts",
+        "from": 23,
+        "to": 27
+      },
+      {
+        "file": "tests/release-picker.spec.ts",
+        "from": 26,
+        "to": 19
+      },
+      {
+        "file": "tests/version-reveal.spec.ts",
+        "from": 6,
+        "to": 4
+      }
+    ],
+    "assertionPreservation": {
+      "beforeCommit": "2f26947bb",
+      "survivingTestBodies": 116,
+      "changedOwners": 19,
+      "exception": "webcore screenshot path now uses testInfo.outputPath()",
+      "helper": "The original SHOTS constant was restored after the first after-run exposed its surviving use."
+    },
+    "requiredHostedChecks": [
+      {
+        "kind": "browser",
+        "specs": [
+          "tests/aeon-635.spec.ts",
+          "tests/policies-rules.spec.ts",
+          "tests/portal-public.spec.ts",
+          "tests/portal-roadmap.spec.ts",
+          "tests/release-switches.spec.ts",
+          "tests/release-update-notice.spec.ts"
+        ],
+        "reason": "Full rerun after restoring SHOTS; no current failure is claimed fixed by an unexecuted pass."
+      },
+      {
+        "kind": "static",
+        "command": "node scripts/ci-static.mjs --merge-main",
+        "reason": "Approved remote entry point returned exit 3 because mbp2606 is not GREEN."
+      }
+    ],
+    "checks": [
+      {
+        "command": "node scripts/test-prune/check.mjs",
+        "status": "passed",
+        "protectedCuts": false,
+        "visualApproval": "pending"
+      },
+      {
+        "command": "node --test web/tests/test-prune-ledger.test.ts",
+        "status": "passed",
+        "cases": 2
+      },
+      {
+        "command": "node scripts/test-tiers/cli.mjs manifests --check",
+        "status": "passed"
+      },
+      {
+        "command": "P11 current listedTests count comparison",
+        "status": "passed",
+        "owners": 40
+      },
+      {
+        "command": "TypeScript syntax check",
+        "status": "passed",
+        "files": 21
+      },
+      {
+        "command": "Surviving browser body comparison against 2f26947bb",
+        "status": "passed",
+        "bodies": 116,
+        "exception": "webcore screenshot path"
+      },
+      {
+        "command": "git diff --check",
+        "status": "passed"
+      },
+      {
+        "command": "corrected six-spec boundaries rerun",
+        "status": "capacity-refused",
+        "exitCode": 3
+      },
+      {
+        "command": "ci-static-remote.sh",
+        "status": "capacity-refused",
+        "exitCode": 3
+      }
+    ]
   }
 }

@@ -29,7 +29,7 @@ Main was merged first at `2f26947bb`. The Delivery lane conflict retains the pho
 | reserved-versions | 14 | 13 | Protected row layouts/counts, direct-link keyboard navigation, failed opt-in save and hidden comparison scopes |
 | **Changed owners** | **239** | **160** | **79 redundant registrations removed** |
 
-The source changes reduce registration loops or remove redundant artifact tours. They do not weaken assertions in surviving journeys or move removed cases into NIGHTLY. The webcore screenshot now uses `testInfo.outputPath()`. Tier rows and each affected shard source's `listedTests` were updated through the canonical manifest writer; historical timing samples and their original denominators remain historical measurements. No runtime donor is removed merely because a similarly named unit file exists.
+The source changes reduce registration loops or remove redundant artifact tours. They do not weaken assertions in surviving journeys or move removed cases into NIGHTLY. The webcore screenshot now uses `testInfo.outputPath()`. Tier rows and each affected shard source's `listedTests` were updated through the canonical manifest writer. Six additional stale count fields were synchronized for delivery-flow-lanes, deploy-target, footer-release-pill, release-header, release-picker and version-reveal; these corrections remove no tests. All 40 P11 owner counts match the current catalogue. Historical timing samples and their original denominators remain historical measurements. No runtime donor is removed merely because a similarly named unit file exists.
 
 The ledger behavior test now constructs a valid, isolated P01 snapshot before attempting an unrelated rename/removal. After P11 advanced the working phase, the old counterexample could fail at the phase guard instead of testing the intended removal. The positive snapshot assertion and exact expected removal error preserve that distinction. P11 checks also derive current-round removals from frozen plus new-main identities and reject a missing new-main mapping.
 
@@ -58,13 +58,29 @@ These owners retain every protected anchor. Pinned visual references alone will 
 | version-reveal | 4 |
 | **Total** | **194** |
 
-Unique unprotected risks also stay where no proven replacement exists: the two mounted Delivery section-switch cases, the new lane-growth/hover/fold coverage, retained failed Flow preferences, current-project writes/Undo, physical list/menu motion, release switch and public-binding refusals, stale/partial data and failed-save recovery. The runtime gaps include release-surfaces roadmap/frozen projections, usage-dashboard held-response rejection, accounts-overview incomplete inventory and aeon-635 pending/version loading. Both production cold-load request/lazy-module cases keep their original bounds, configuration and shared production-build identity.
+Unique unprotected risks also stay where no proven replacement exists: the two mounted Delivery section-switch cases, the new lane-growth/hover/fold coverage, retained failed Flow preferences, current-project writes/Undo, physical list/menu motion, release switch and public-binding refusals, stale/partial data and failed-save recovery. The runtime gaps include release-surfaces roadmap/frozen projections, usage-dashboard held-response rejection, accounts-overview incomplete inventory and aeon-635 pending/version loading. Building retains the three distinct column layouts and worst-five keyboard/phone/window races. Both production cold-load request/lazy-module cases keep their original bounds, configuration and shared production-build identity.
 
 ## Current-round verification and timing
 
 PASS: `node scripts/test-prune/check.mjs`, both cases in `node --test web/tests/test-prune-ledger.test.ts`, canonical manifest validation and `git diff --check`. TypeScript syntax passed for all 21 affected/merged test files. An AST comparison against the before commit confirms all 116 surviving browser test bodies in the 19 cut owners are byte-for-byte unchanged, except the webcore screenshot path. The ledger test includes missing frozen mapping, dangling destination and missing new-main mapping negative controls. Its P01 snapshot checks use the immutable baseline; no historical replay evidence is rewritten.
 
-The before measurement uses commit `2f26947bb` on mbp2606 through LEAD's `remote-spec.sh`, with one worker and no local fallback. Initial attempts returned exit 3: `remote busy: 2/2 remote runs (CI pool 0/4)` and `remote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI`. The boundaries baseline subsequently passed: 77 passed, 9 skipped / 86 registrations in a rounded 4.5 minutes. The last process metric is for merge-reports, not the complete browser run, so its wall time is excluded. The current-round before/after timing and complete affected-set execution are still pending; no runner-time saving or browser pass is claimed here. Full static checks belong to hosted CI for this cut round.
+The same-host comparison uses LEAD's `remote-spec.sh` on mbp2606, with `REMOTE_ONLY=1` and one worker per sequential file chunk. The four baseline batches at `2f26947bb` passed **246 cases with 14 existing opt-in skips**, accounting for 260 registrations. The measured cohort contains the 19 cut owners plus unchanged Building and lane controls. Three after cohorts at `a0b57919c` passed all 118 cases. Their runtime sources are unchanged by the helper/count-only follow-up at `54c46dbf1`.
+
+| Cohort | Registrations before → after | Successful before | Successful after |
+|---|---:|---:|---:|
+| Delivery/status plus Building control | 84 → 51 | 84 passed, 3.9 min | 51 passed, 1.4 min |
+| Releases/usage/recovery | 57 → 36 | 53 passed, 4 opt-in skipped, 2.8 min | 36 passed, 39.6 s |
+| Historic/reservations plus lane control | 33 → 31 | 32 passed, 1 opt-in skipped, 36.4 s | 31 passed, 27.1 s |
+| **Completed comparison** | **174 → 118** | **about 438.4 s** | **about 150.7 s** |
+| Release boundaries/policies/public portal | 86 → 63 | 77 passed, 9 opt-in skipped, 4.5 min | Corrected rerun capacity-refused |
+
+The three completed cohorts therefore observed **about 287.7 seconds (4.8 runner-minutes) less work**. This is a 15-spec measurement, not a full-cutA or full-P11 saving. Minute summaries are rounded to tenths; shared-host load and cold compilation can vary. The final `AEON_PW_PROCESSES.wall_ms` belongs to report merging, so it is excluded. The 79 removed registrations comprise 67 active profiles and 12 previously opt-in artifact copies; no new skip is introduced.
+
+The first boundaries after-run found `ReferenceError: SHOTS is not defined` in the surviving desktop/phone header case (60 passed, 2 skipped, 1 failed). Its original constant was restored in `54c46dbf1`, without changing an assertion. The complete six-spec rerun was then refused with exit 3. That failed run is excluded from successful timing comparisons.
+
+The bounded retry period ended after 585 seconds of capacity waits. Browser refusals included `remote busy: 2/2 remote runs (CI pool 0/4)` and finally `mbp2606 not available (night/level protocol); wait or rely on PR CI`. Static returned exit 3: `remote paused: mbp2606 not GREEN (night protocol, OPS host watch); not falling back to a heavy local run; retry later or rely on PR CI`. No local browser or heavy static fallback ran.
+
+The current handoff is **pct 95, BLOCKED-REMOTE-CAPACITY**. Hosted CI must run the full corrected cohort: `aeon-635.spec.ts`, `policies-rules.spec.ts`, `portal-public.spec.ts`, `portal-roadmap.spec.ts`, `release-switches.spec.ts`, and `release-update-notice.spec.ts`, plus `ci-static --merge-main`. Neither a successful corrected run nor static success is claimed. The latest origin/main was fetched and merged again before handoff; it was already contained in the branch.
 
 ## Earlier replacement proof
 
@@ -82,4 +98,4 @@ That round's five affected specs measured 66 passed, 2 failed / 68 cases in a ro
 
 `delivery-flow-modes.unit.test.ts` also adds a production `useDeliveryFlow` subscription-lifetime case with mounted components, an injected clock and counted reads/sources. Its runtime execution and negative control remain unproven, so both original `delivery-tab-switch` browser donors remain. The first-round status-motion runtime suite passed four cases in 158 ms after a permitted small fallback. These historical results do not stand in for this round's affected-set execution.
 
-No product behavior, contract, migration, permissions, CI activation flags, required checks or visual authority changes. Retired Journey features remain closed. No push, deployment or model review gate is part of this worker round.
+No product behavior, contract, migration, permissions, CI activation flags, required checks or visual authority changes. Retired Journey features remain closed. No origin push, deployment or model review gate is part of this worker round; approved remote test entry points use temporary test refs only.
