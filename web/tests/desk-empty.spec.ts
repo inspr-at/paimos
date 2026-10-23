@@ -4,6 +4,7 @@
 // source still reads as all clear; both theme pictures show; a narrow phone scrolls sideways.
 // AEON-1631: a desk that did not answer shows the all-clear art while the badge counts items.
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test'
+import { writeFile } from 'node:fs/promises'
 import { expectStableControls } from './helpers/stable'
 import { fixtures, mockWork } from './work-fixtures'
 
@@ -29,17 +30,19 @@ async function mockEmptyDesk(page: Page, theme: 'light' | 'dark', withItem = fal
   return reads
 }
 
-// AEON-1477: a transient failure must never replace good rows, and feedback
-// must occupy its existing slot in both themes and at phone/tablet/desk widths.
+// AEON-1477: a transient failure must never replace good rows or move controls.
+// AEON-1616 (R18): empty phone-only rows must not bury the first item or empty state.
+// Extend these existing cases: the normal desktop gap and zero movement elsewhere, including failures.
 for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
   test(`AEON-1477 refresh failures keep the items and hint geometry ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     const goodAt = new Date('2026-10-17T13:58:00Z')
     await page.clock.setFixedTime(goodAt)
     await mockEmptyDesk(page, theme, true)
-    let failure = 0, reads = 0
+    let failure = 0, reads = 0, empty = false
     await page.route(url => url.pathname === '/api/decision-desk/projection', route => {
       reads++
+      if (empty) return route.fulfill({ json: { items: [], counts: { open: 0, held: 0, chores: 0 }, has_more: false, as_of: goodAt.toISOString() } })
       return failure ? route.fulfill({ status: failure, json: { error: 'Unavailable' } }) : route.fallback()
     })
     await page.goto('/decision-desk')
@@ -58,7 +61,27 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
       await expect(page.getByTestId('desk-empty')).toHaveCount(0)
     }
     await documentFonts(page)
-    const anchors = { open: page.getByTestId('desk-tab-open'), decided: page.getByTestId('desk-tab-decided'), row, slot: page.getByTestId('desk-refresh-slot') }
+    const spacing = async () => {
+      const geometry = await page.evaluate(() => {
+        const tabs = document.querySelector('[role="radiogroup"][aria-label="Show"]')!.getBoundingClientRect()
+        const list = document.querySelector('[data-testid="desk-list"]')!.getBoundingClientRect()
+        const bar = document.querySelector('.dp-bar')!
+        const controls = ['#desk-title', '[data-testid="desk-notice"]', '[data-testid="desk-tab-open"]', '[data-testid="desk-tab-decided"]'].map(selector => {
+          const r = document.querySelector(selector)!.getBoundingClientRect()
+          return { selector, x: r.x, y: r.y, width: r.width, height: r.height }
+        })
+        return { gap: list.top - tabs.bottom, token: parseFloat(getComputedStyle(bar).marginBottom), list: { x: list.x, y: list.y, width: list.width }, controls }
+      })
+      // Written before the assertion so a negative-control run retains the old spacing and unaffected controls too.
+      await writeFile(testInfo.outputPath(`AEON-1616-measured-${width}-${theme}.md`), JSON.stringify({ width, theme, ...geometry }) + '\n')
+      expect(geometry.token, 'the list has a positive desktop spacing token').toBeGreaterThan(0)
+      expect(geometry.gap, 'the first card or empty frame follows the tabs at the desktop gap').toBeGreaterThanOrEqual(0)
+      expect(geometry.gap, 'no hidden filter or refresh line before the first card or empty frame').toBeLessThanOrEqual(geometry.token)
+      return geometry
+    }
+    const filled = await spacing()
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1616-items-${width}-${theme}.png`) })
+    const anchors = { heading: page.getByRole('heading', { level: 1, name: 'Decision Desk' }), tabs: page.getByRole('radiogroup', { name: 'Show' }), open: page.getByTestId('desk-tab-open'), decided: page.getByTestId('desk-tab-decided'), row, slot: page.getByTestId('desk-refresh-slot') }
     const before = await Promise.all(Object.values(anchors).map(control => control.boundingBox()))
     await expectStableControls({ controls: anchors, scrollAreas: { page: page.locator('html'), list }, interactions: [
       { name: 'one 429 keeps the row without a hint', run: async () => { await refresh(429); await expect(hint).toHaveCount(0) } },
@@ -96,17 +119,38 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     ].map(interaction => ({ ...interaction, run: async () => {
       await interaction.run()
       expect(await Promise.all(Object.values(anchors).map(control => control.boundingBox()))).toEqual(before)
+      expect(await spacing()).toEqual(filled)
     } })) })
     // The brief asks for zero pixels, beyond the shared guard's ±0.5 px limit.
     expect(await Promise.all(Object.values(anchors).map(control => control.boundingBox()))).toEqual(before)
+
+    // A genuinely empty desk uses the same first-card slot; the title and tabs remain exactly where they were.
+    await refresh(0)
+    const fixed = { heading: anchors.heading, tabs: anchors.tabs, open: anchors.open, decided: anchors.decided, slot: anchors.slot }
+    const fixedAt = await Promise.all(Object.values(fixed).map(control => control.boundingBox()))
+    await expectStableControls({ controls: fixed, scrollAreas: { page: page.locator('html') }, interactions: [{ name: 'last item leaves an empty desk in the same slot', run: async () => {
+      empty = true
+      const beforeRead = reads
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+      await expect.poll(() => reads).toBeGreaterThan(beforeRead)
+      await expect(list).toHaveAttribute('aria-busy', 'false')
+      await expect(page.getByTestId('desk-clear')).toHaveAttribute('data-state', 'clear')
+      await expect(page.getByTestId('desk-empty')).toHaveText('Nothing waits for you')
+      expect(await Promise.all(Object.values(fixed).map(control => control.boundingBox()))).toEqual(fixedAt)
+    } }] })
+    const cleared = await spacing()
+    expect(cleared).toEqual(filled)
+    expect((await box(page.getByTestId('desk-clear'))).y, 'the empty state begins inside the same card hairline').toBe(await list.evaluate(element => element.getBoundingClientRect().y + element.clientTop))
+    await onePicture(page, theme)
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1616-empty-${width}-${theme}.png`) })
+    await writeFile(testInfo.outputPath(`AEON-1616-layout-${width}-${theme}.md`), JSON.stringify({ width, theme, filled, cleared, movement: 0 }) + '\n')
   })
 }
 
 async function documentFonts(page: Page) { await page.evaluate(() => document.fonts.ready.then(() => undefined)) }
 
-// AEON-1477 fix round 4 (Tick): the stamp filter is back beside the tabs (main's place). On a wide row the hint takes
-// that row's free right end; on a narrow one it keeps its reserved line under the tabs, the filter the line after it.
-// Risk: switching Open ↔ Decided moves the list because the filter or the hint adds a line on one tab only.
+// AEON-1477 / AEON-1616 (Tick): wide rows keep their inline filter and hint; narrow rows show the stamp line
+// only on Decided and overlay refresh feedback. Switching tabs never moves the title, tabs or round action.
 async function mockFailingDesk(page: Page) {
   await page.clock.setFixedTime(new Date('2026-10-17T13:58:00Z'))
   await mockEmptyDesk(page, 'light', true)
@@ -136,12 +180,15 @@ async function mockFailingDesk(page: Page) {
 async function box(locator: Locator) { return (await locator.boundingBox())! }
 
 for (const width of [1440, 1024, 390]) {
-  test(`AEON-1477 Open and Decided start the list at the same y at ${width}, with and without the hint`, async ({ page }, testInfo) => {
+  test(`AEON-1477 Open and Decided keep controls still at ${width}, with and without the hint`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     const { failTwice } = await mockFailingDesk(page)
     const list = page.getByTestId('desk-list'), row = page.getByTestId('desk-row-u:accounts-1477'), hint = page.getByTestId('desk-refresh-hint')
     const tabs = page.getByRole('radiogroup', { name: 'Show' }), stamps = page.getByRole('radiogroup', { name: 'Stamp' }), slot = page.getByTestId('desk-refresh-slot')
     const wide = width >= 1024
+    const controls = { heading: page.getByRole('heading', { level: 1, name: 'Decision Desk' }), tabs, open: page.getByTestId('desk-tab-open'), decided: page.getByTestId('desk-tab-decided') }
+    const controlsAt = await Promise.all(Object.values(controls).map(control => control.boundingBox()))
+    const unchanged = async () => expect(await Promise.all(Object.values(controls).map(control => control.boundingBox()))).toEqual(controlsAt)
     const crop = async (name: string) => page.screenshot({ path: testInfo.outputPath(`AEON-1477-fix4-${name}-${width}.png`), clip: { x: 0, y: 0, width, height: Math.min(900, (await box(list)).y + 180) } })
     const sweep = async (label: string, hinted: boolean) => {
       const listAt = (await box(list)).y, rowAt = (await box(row)).y
@@ -149,22 +196,26 @@ for (const width of [1440, 1024, 390]) {
       await page.getByTestId('desk-tab-decided').click()
       await expect(stamps).toBeVisible()
       await expect(page.getByTestId('desk-empty')).toBeVisible()
-      expect((await box(list)).y, `${width} ${label}: Decided starts the list where Open did`).toBe(listAt)
+      await unchanged()
       const t = await box(tabs), f = await box(stamps), s = await box(slot)
       if (wide) {
+        expect((await box(list)).y, `${width} ${label}: the inline filter adds no height`).toBe(listAt)
         expect(Math.abs(f.y + f.height / 2 - (t.y + t.height / 2)), `${width} ${label}: the filter sits on the tabs' line`).toBeLessThanOrEqual(0.5)
         expect(f.x, `${width} ${label}: the filter follows the tabs`).toBeGreaterThanOrEqual(t.x + t.width + 10)
         expect(s.x, `${width} ${label}: the hint slot follows the filter`).toBeGreaterThanOrEqual(f.x + f.width)
         expect(s.y, `${width} ${label}: the hint slot is the row's own height`).toBeGreaterThanOrEqual(t.y - 0.5)
         expect(s.y + s.height).toBeLessThanOrEqual(t.y + t.height + 0.5)
       } else {
-        expect(s.y, `${width} ${label}: the hint line sits under the tabs`).toBeGreaterThanOrEqual(t.y + t.height)
-        expect(f.y, `${width} ${label}: the filter takes the line after the hint`).toBeGreaterThanOrEqual(s.y + s.height)
+        const gap = await page.locator('.dp-bar').evaluate(bar => parseFloat(getComputedStyle(bar).rowGap))
+        expect(f.y, `${width} ${label}: the visible filter follows the tabs without an empty hint line`).toBe(t.y + t.height + gap)
+        expect((await box(list)).y, `${width} ${label}: only the visible filter adds a line`).toBe(listAt + gap + f.height)
+        expect(s.y, `${width} ${label}: feedback is overlaid below the controls`).toBeGreaterThan(t.y + t.height)
       }
       if (hinted) {
         const h = await box(hint)
         if (wide) expect(Math.abs(h.x + h.width - (s.x + s.width)), `${width}: the hint is right-aligned at the row's end`).toBeLessThanOrEqual(0.5)
-        expect(h.y, `${width}: the hint fits its slot`).toBeGreaterThanOrEqual(s.y - 0.5)
+        if (wide) expect(h.y, `${width}: the hint fits its slot`).toBeGreaterThanOrEqual(s.y - 0.5)
+        else expect(h.y + h.height, `${width}: the overlay grows upward above the footer`).toBe(s.y + s.height)
         expect(h.y + h.height).toBeLessThanOrEqual(s.y + s.height + 0.5)
         // A fine pointer keeps the hover/focus reveal: nothing points at the hint here.
         await expect(hint.locator('.refresh-retry')).toHaveCSS('opacity', '0')
@@ -172,6 +223,7 @@ for (const width of [1440, 1024, 390]) {
       }
       await page.getByTestId('desk-tab-open').click()
       await expect(stamps).toBeHidden()
+      await unchanged()
       expect((await box(list)).y, `${width} ${label}: back on Open the list is where it was`).toBe(listAt)
       expect((await box(row)).y).toBe(rowAt)
       return listAt

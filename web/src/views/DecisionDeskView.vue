@@ -631,14 +631,16 @@ watch(owner, () => {
 // reset invalidates the frozen source; can() reacts to the completed refresh.
 const stopAccess = onAccessRevalidate({ reset: resetDesk })
 // On a row too narrow for its label the arrow shows alone (AEON-1448); on a fine pointer its name then also comes as a tip.
-const tabRow = ref<HTMLElement>(), oneByOne = ref<HTMLButtonElement>(), arrowTip = ref(false)
+const tabRow = ref<HTMLElement>(), oneByOne = ref<HTMLButtonElement>(), arrowTip = ref(false), narrowTabRow = ref(false)
 let finePointer: MediaQueryList | undefined
 function readArrowTip() { const label = oneByOne.value?.querySelector('.label'); arrowTip.value = !!label && getComputedStyle(label).display === 'none' && !!finePointer?.matches }
+function readTabRow() { narrowTabRow.value = !!tabRow.value && tabRow.value.getBoundingClientRect().width < 910; readArrowTip() }
 watch(oneByOne, readArrowTip, { flush: 'post' })
 let rowSize: ResizeObserver | undefined
 onMounted(() => {
   finePointer = matchMedia('(pointer: fine)'); finePointer.addEventListener('change', readArrowTip)
-  rowSize = new ResizeObserver(readArrowTip); if (tabRow.value) rowSize.observe(tabRow.value)
+  readTabRow()
+  rowSize = new ResizeObserver(readTabRow); if (tabRow.value) rowSize.observe(tabRow.value)
 })
 onBeforeUnmount(() => { rowSize?.disconnect(); finePointer?.removeEventListener('change', readArrowTip) })
 // How the round ended: after the last decision the desk returns to where it was opened (AEON-1339).
@@ -715,11 +717,14 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
           <button type="button" role="radio" :aria-checked="filter === 'open'" data-testid="desk-tab-open" @click="filter = 'open'">Open<span class="n">{{ openCountLabel }}</span></button>
           <button type="button" role="radio" :aria-checked="filter === 'decided'" data-testid="desk-tab-decided" @click="filter = 'decided'">Decided<span class="n">{{ decidedCountLabel }}</span></button>
         </div>
-        <div class="refresh-slot" data-testid="desk-refresh-slot">
-          <p v-if="refreshHint" class="refresh-hint" :class="{ escalated: refreshEscalated }" role="status" data-testid="desk-refresh-hint"><span class="refresh-copy"><AppIcon name="refresh" :size="12" /><span>{{ refreshEscalated ? `The desk hasn't refreshed since ${lastGoodTime}` : `Refresh failed\u00a0· retrying\u00a0· showing ${lastGoodTime}` }}</span>&nbsp;<span class="refresh-retry" :class="{ shown: refreshEscalated }"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="refresh">Try again</button></span></span></p>
-          <p v-else-if="stale" class="refresh-hint" role="status" data-testid="desk-stale"><span class="refresh-copy"><AppIcon name="history" :size="12" /><span>{{ failedWords.stale(lastGoodTime) }}</span>&nbsp;<span class="refresh-retry shown"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="tryAgain">{{ failedWords.retry }}</button></span></span></p>
-        </div>
-        <!-- On Open the stamp filter keeps its box unseen, so switching tabs moves nothing below the row (AEON-1477). -->
+        <!-- A narrow row sends feedback above the footer, outside the container's fixed-position containing block. -->
+        <Teleport to="#app" :disabled="!narrowTabRow">
+          <div class="refresh-slot" :class="{ floating: narrowTabRow }" data-testid="desk-refresh-slot">
+            <p v-if="refreshHint" class="refresh-hint" :class="{ escalated: refreshEscalated }" role="status" data-testid="desk-refresh-hint"><span class="refresh-copy"><AppIcon name="refresh" :size="12" /><span>{{ refreshEscalated ? `The desk hasn't refreshed since ${lastGoodTime}` : `Refresh failed\u00a0· retrying\u00a0· showing ${lastGoodTime}` }}</span>&nbsp;<span class="refresh-retry" :class="{ shown: refreshEscalated }"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="refresh">Try again</button></span></span></p>
+            <p v-else-if="stale" class="refresh-hint" role="status" data-testid="desk-stale"><span class="refresh-copy"><AppIcon name="history" :size="12" /><span>{{ failedWords.stale(lastGoodTime) }}</span>&nbsp;<span class="refresh-retry shown"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="tryAgain">{{ failedWords.retry }}</button></span></span></p>
+          </div>
+        </Teleport>
+        <!-- Wide rows retain the inline filter's box; narrow rows only take a filter line on Decided (AEON-1616). -->
         <div class="seg dec-filter" :class="{ reserved: filter !== 'decided' }" role="radiogroup" aria-label="Stamp" :aria-hidden="filter !== 'decided' || undefined" :inert="filter !== 'decided' || undefined">
           <button v-for="option in ([['', 'All'], ['once', 'Once'], ['always', 'Always'], ['requirement', 'Requirement'], ['doctrine', 'Doctrine'], ['approvals', 'Approvals']] as const)" :key="option[0]" type="button" role="radio" :aria-checked="outcomeFilter === option[0]" @click="outcomeFilter = option[0]">{{ option[1] }}</button>
         </div>
@@ -839,8 +844,8 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
 .deciding .desk-notice, .deciding .dp-tabrow, .deciding .scope-line, .deciding .trim-pages, .deciding .queue, .deciding .arrival-line { visibility: hidden; }
 /* AEON-1448 (Tick): one tab row at every width: the tabs at its start, "Answer one by one" at its end. On a narrow row
    the Decided stamp filter takes a line of its own; the button keeps the first, so it never wraps or adds height. */
-.dp-tabrow { container: desk-tabs / inline-size; }
-.dp-bar { display: grid; grid-template-columns: max-content minmax(0, max-content) minmax(0, 1fr) max-content; align-items: center; gap: 10px 14px; margin-bottom: 14px; }
+.dp-tabrow { --desk-list-gap: 14px; container: desk-tabs / inline-size; }
+.dp-bar { display: grid; grid-template-columns: max-content minmax(0, max-content) minmax(0, 1fr) max-content; align-items: center; gap: 10px 14px; margin-bottom: var(--desk-list-gap); }
 .dp-bar .view-tabs { grid-area: 1 / 1; }
 .dp-bar .view-tabs button { white-space: nowrap; }
 /* AEON-1477 (Tick): on a wide row the hint takes the row's free end, right-aligned before the round action. Its slot
@@ -855,6 +860,10 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
 .refresh-retry { white-space: nowrap; opacity: 0; }
 .refresh-retry.shown, .refresh-hint:hover .refresh-retry, .refresh-hint:focus-within .refresh-retry { opacity: 1; }
 .refresh-hint .linkish { color: inherit; font-weight: inherit; }
+/* AEON-1616: phone feedback overlays the page above its footer instead of reserving an empty grid row.
+   The empty slot cannot intercept a tap; a warning grows upward without moving the list or the tabs. */
+.refresh-slot.floating { position: fixed; z-index: 19; inset: auto 16px calc(var(--footer-h) + 14px + env(safe-area-inset-bottom)); min-height: 40px; pointer-events: none; }
+.floating .refresh-hint { width: 100%; padding: 10px 14px; border-radius: var(--radius-s); background: var(--surface-raised); box-shadow: var(--shadow-pop); line-height: 20px; text-align: left; pointer-events: auto; }
 /* Touch has no hover to reveal it: Try again shows with the hint, on a 44 × 44 box that adds no line height. */
 @media (pointer: coarse) {
   .refresh-retry { opacity: 1; }
@@ -874,12 +883,11 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
 .dp-bar .dec-filter::-webkit-scrollbar { display: none; }
 .dp-bar .dec-filter button { flex: none; white-space: nowrap; }
 /* 910 px: a 960 px window with a classic gutter wraps; 1024 keeps one row, where the filter and the hint fit.
-   Below it the hint owns a reserved line under the tabs and the filter the line after it. */
+   Below it only Decided needs a second line. Open goes straight from the tabs to its list or empty state. */
 @container desk-tabs (max-width: 909.98px) {
   .dp-bar { grid-template-columns: max-content minmax(0, 1fr); }
-  .refresh-slot { grid-area: 2 / 1 / auto / -1; align-self: auto; min-height: 40px; display: grid; align-items: center; }
-  .refresh-hint { position: static; min-height: 0; display: block; line-height: 20px; text-align: left; }
-  .dp-bar .dec-filter { grid-area: 3 / 1 / auto / -1; }
+  .dp-bar .dec-filter { grid-area: 2 / 1 / auto / -1; }
+  .dp-bar .dec-filter.reserved { display: none; }
 }
 /* Below about 420 px the view tabs and the round action give up a little padding so the label still clears the tabs.
    The stamp filter is unchanged: on a phone it keeps scrolling (AEON-1339). */

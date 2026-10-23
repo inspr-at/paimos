@@ -8994,11 +8994,11 @@
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1406 empty desk states keep the card still 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided start the list at the same y at 1024, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided keep controls still at 1024, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided start the list at the same y at 1440, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided keep controls still at 1440, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided start the list at the same y at 390, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided keep controls still at 390, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 a genuinely failed first load never claims an empty desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
