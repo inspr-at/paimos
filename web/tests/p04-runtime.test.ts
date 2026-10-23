@@ -317,6 +317,11 @@ async function deliveredWidth(mutation?: Mutation, target: 'root' | 'body' = 'ro
     app.env.media('(min-width: 1280px)', true)
     await flush()
     assert.equal(app.state.paint.value, false, 'a late wide-media callback cannot revive it')
+    observer.deliver([{ target: app.env.document.documentElement, borderBoxSize: [{ inlineSize: 1600 }], contentRect: { width: 1600 } }])
+    await flush()
+    assert.equal(app.requests.length, 2, 'a fresh wide root sample starts the current graph again')
+    await app.answer(1, 'Wide')
+    assert.equal(app.state.paint.value, true)
   } finally { app.stop() }
 }
 test('P04 header: a held-delivery narrow root sample wins over stale media and geometry', async () => {

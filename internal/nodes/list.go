@@ -1582,6 +1582,8 @@ func listSQL(q listQuery, anchor any) (string, []any) {
     ` + assigneeJoin + pageWorker + `
     -- Keep parent/ancestor reads dependent on their selected ID. With stale
     -- tenant statistics, a join can otherwise rescan all nodes per page row.
+    -- Composite bounds keep the lookup in an ID range even when the planner
+    -- prefers a tenant index whose other columns precede the ID.
     LEFT JOIN LATERAL (
         SELECT id,parent_id,kind_id,key,title FROM nodes
         WHERE tenant_id=n.tenant_id AND id=n.parent_id AND deleted_at IS NULL
