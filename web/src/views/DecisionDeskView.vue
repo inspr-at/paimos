@@ -118,6 +118,13 @@ let capabilityGeneration = 0
 let currentRead: DeskRead | undefined
 let hydratedProjection: DeskProjection | undefined, hydration: Promise<void> | undefined
 const lastGoodAt = ref<number | null>(null), hydrationFailures = ref(0), hydrationFailedSince = ref<number | null>(null)
+// AEON-1700: the store's failed projection reads, kept until a hydration adopts a good read. A projection that answers
+// clears the store's count before its rows are read; the Desk is up to date again only once they are.
+const outageFailures = ref(0), outageSince = ref<number | null>(null)
+watch(() => [desk.failures, desk.failedSince] as const, ([count, since]) => {
+  outageFailures.value = Math.max(outageFailures.value, count)
+  if (since !== null) outageSince.value = Math.min(outageSince.value ?? since, since)
+}, { flush: 'sync', immediate: true })
 // AEON-1631: good rows kept from this visit while a later read missed the canonical desk, and the automatic retries' phase.
 const stale = ref(false), retryPhase = ref<DeskRetryPhase>('idle')
 const linkError = ref(''), revoked = ref(new Set<string>()), settledSteps = ref(new Set<string>()), pendingSteps = ref(new Set<string>())
@@ -341,9 +348,9 @@ async function tryAgain() {
   else autoRetry.reset()
 }
 function allowed(item: DeskItem) { return person.value && decisionPermission(item, sources, can, adapters) }
-const refreshFailures = computed(() => Math.max(desk.failures, hydrationFailures.value))
+const refreshFailures = computed(() => Math.max(desk.failures, outageFailures.value, hydrationFailures.value))
 const refreshHint = computed(() => {
-  const since = [desk.failedSince, hydrationFailedSince.value].filter((at): at is number => at !== null)
+  const since = [desk.failedSince, outageSince.value, hydrationFailedSince.value].filter((at): at is number => at !== null)
   return deskRefreshNotice(refreshFailures.value, since.length ? Math.min(...since) : null, lastGoodAt.value, now.value)
 })
 // AEON-1700 (Tick UI spec v1): one sync line for the whole Desk: the last good read, a read or a live change under
@@ -464,6 +471,8 @@ async function hydrate(projection: DeskProjection): Promise<void> {
       applyRead(result); stale.value = false
       hydratedProjection = projection
       lastGoodAt.value = Date.now(); hydrationFailures.value = 0; hydrationFailedSince.value = null
+      // This adopted read ends the outage; a projection read that failed after it still counts.
+      outageFailures.value = desk.failures; outageSince.value = desk.failedSince
       noteArrivals()
       followLink()
       void readTickets(result.items.filter(item => !item.decided).slice(0, 300))
@@ -666,7 +675,7 @@ function resetDesk() {
   trimCursors.value = {}; nextKeyTrims.value = {}
   currentRead = undefined
   hydratedProjection = undefined; hydration = undefined
-  lastGoodAt.value = null; hydrationFailures.value = 0; hydrationFailedSince.value = null
+  lastGoodAt.value = null; hydrationFailures.value = 0; hydrationFailedSince.value = null; outageFailures.value = 0; outageSince.value = null
   phoneVerification.value = undefined; capabilityError.value = ''; stepupMethod.value = 'Passkey or sign-in'
   warnings.value = []; unanswered.value = []; more.value = { open: false, answered: false }; loading.value = false
   stale.value = false; autoRetry.reset(); seenOpen = null

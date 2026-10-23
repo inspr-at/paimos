@@ -767,6 +767,53 @@ async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: numb
   expect(await boxes(rows), 'the line settles without moving the rows').toEqual(rowsAt)
   expect(await heard(), '§5: the kept rows spoke once, and their recovery once').toEqual(['Couldn’t check the Desk. Trying again.', 'The Desk is up to date again.'])
 
+  // §5 after an outage: recovery is said only once a read has listed the rows. A projection that answers while its rows
+  // are still being read, and then a partial read that keeps the stale rows, say nothing.
+  const outage = await recordAnnouncements(page), couldNot = 'Couldn’t check the Desk. Trying again.'
+  let rowsGate: Promise<void> | undefined, rowReads = 0
+  await page.route(url => url.pathname === '/api/approvals', async route => { rowReads++; if (rowsGate) await rowsGate; return route.fallback() })
+  mode = 'fail'
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const before = reads
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect.poll(() => reads).toBe(before + 1)
+    await expect(list).toHaveAttribute('aria-busy', 'false')
+  }
+  await page.clock.runFor(400)
+  await expect(sync).toHaveAttribute('data-state', 'quiet')
+  expect(await outage(), 'two failed reads spoke once').toEqual([couldNot])
+  let releaseRows!: () => void
+  rowsGate = new Promise<void>(resolve => { releaseRows = resolve })
+  mode = 'partial'
+  const answeredAt = reads, rowsFrom = rowReads
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect.poll(() => reads).toBe(answeredAt + 1)
+  await expect.poll(() => rowReads, 'the rows are being read, held at the barrier').toBeGreaterThan(rowsFrom)
+  // The projection answered, so the store counts no failure, while the list is still busy reading its rows.
+  expect(await page.evaluate(async () => {
+    // @ts-expect-error Vite resolves browser source URLs.
+    const { useDecisionDesk } = await import('/src/stores/decisionDesk.ts')
+    const desk = useDecisionDesk()
+    return { failures: desk.failures as number, loading: desk.loading as boolean }
+  })).toEqual({ failures: 0, loading: false })
+  await expect(list).toHaveAttribute('aria-busy', 'true')
+  expect(await outage(), 'no recovery while the rows are still being read').toEqual([couldNot])
+  rowsGate = undefined; releaseRows()
+  await expect(list).toHaveAttribute('aria-busy', 'false')
+  await page.clock.runFor(400)
+  await expect(sync).toHaveAttribute('data-state', 'quiet')
+  await expect(first).toBeVisible(); await expect(second).toBeVisible()
+  expect(await outage(), 'a partial read keeps the stale rows and says nothing').toEqual([couldNot])
+  // The stale rows' 3 s retry reads them all: that confirmed read is the recovery, said once.
+  mode = 'good'
+  const recoverAt = reads
+  await page.clock.runFor(2600)
+  await expect.poll(() => reads, 'the stale retry reads the Desk').toBeGreaterThan(recoverAt)
+  await expect(list).toHaveAttribute('aria-busy', 'false')
+  await page.clock.runFor(400)
+  await expect(sync).toHaveAttribute('data-state', 'just')
+  expect(await outage(), 'recovery once, after the full read').toEqual([couldNot, 'The Desk is up to date again.'])
+
   // AEON-1700 §7 on the paused clock: the line counts down to the poll's own timer, a check holds "Checking now…" for
   // 400 ms, and a 60 s idle run (two polls, every tick) says nothing to a screen reader.
   const quietRun = await recordAnnouncements(page)
