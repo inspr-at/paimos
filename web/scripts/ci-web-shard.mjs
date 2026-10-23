@@ -117,10 +117,21 @@ function specSubsets(specs, limit) {
   return found
 }
 
+function subsetBound(subsets, weight, upper = false) {
+  let left = 0, right = subsets.length
+  while (left < right) {
+    const middle = Math.floor((left + right) / 2), value = subsets[middle].weightSeconds
+    if (upper ? value <= weight : value < weight) left = middle + 1
+    else right = middle
+  }
+  return left
+}
+
 // Pairwise swaps stop at a local peak. When two branches each add a small
 // gated spec, exchanging up to three specs a side can still lower the
 // descending shard weights. Spec weights themselves do not change.
 function lowerMakespan(shards, passes) {
+  if (shards.length < 2) return
   const descending = values => values.slice().sort((left, right) => right - left)
   const lower = (next, current) => {
     for (let i = 0; i < next.length; i++) {
@@ -135,13 +146,24 @@ function lowerMakespan(shards, passes) {
     // A pass never mutates its shards until the best exchange is chosen.
     // Build and weigh each subset once, rather than for every partner shard.
     const subsets = shards.map(shard => specSubsets(shard.specs, shard.specs.length > 12 ? 2 : 3)
-      .map(specs => ({ specs, weightSeconds: specSum(specs) })))
+      .map((specs, order) => ({ specs, weightSeconds: specSum(specs), order })))
+    const byWeight = subsets.map(sets => sets.slice().sort((left, right) => left.weightSeconds - right.weightSeconds || left.order - right.order))
     let best = null
     for (let i = 0; i < shards.length; i++) {
       for (let j = i + 1; j < shards.length; j++) {
         const pairMaximum = Math.max(shards[i].weightSeconds, shards[j].weightSeconds)
+        const difference = shards[i].weightSeconds - shards[j].weightSeconds
+        const minimumDelta = Math.min(0, difference), maximumDelta = Math.max(0, difference)
+        // Include boundary rounding, then apply the exact comparison below.
+        const margin = 1e-9 + 4 * Number.EPSILON * pairMaximum
         for (const give of subsets[i]) {
-          for (const take of subsets[j]) {
+          // A lower pair maximum needs delta strictly between zero and the
+          // pair's load difference. Index that weight window instead of
+          // scanning the Cartesian product, retaining the original tie order.
+          const first = subsetBound(byWeight[j], give.weightSeconds - maximumDelta - margin)
+          const last = subsetBound(byWeight[j], give.weightSeconds - minimumDelta + margin, true)
+          const candidates = byWeight[j].slice(first, last).sort((left, right) => left.order - right.order)
+          for (const take of candidates) {
             const delta = give.weightSeconds - take.weightSeconds
             const nextI = shards[i].weightSeconds - delta
             const nextJ = shards[j].weightSeconds + delta

@@ -11,6 +11,7 @@ import { resolve, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerHooks } from 'node:module'
 import { validate, key, select, fullGateTests } from '../../scripts/test-tiers/core.mjs'
+import { browserBatches } from '../../scripts/test-tiers/web-batches.mjs'
 
 // The planner assertions concern browser gates. Collect every browser case
 // natively once, and use declared unit identities for the unrelated unit lane.
@@ -259,30 +260,21 @@ test('native browser selectors cover reconciled essentials and every collected f
   const tiers=new Map(reconciled.map(row=>[key(row),row.tier]))
   const declared=new Map(manifest.tests.filter(row=>row.kind==='browser').map(row=>[key(row),row]))
   for(const row of reconciled) assert.equal(row.tier,declared.get(key(row))?.tier??'NIGHTLY',key(row))
-  const groups=loadWebPolicy().groups
+  const policy=loadWebPolicy(), groups=new Map(policy.groups.map(group=>[group.id,group]))
   const byFile=new Map()
   for(const row of all) {
     if(!byFile.has(row.file)) byFile.set(row.file,[])
     byFile.get(row.file).push(row)
   }
-  // Groups with exactly the same launch policy can share a native list.
-  // Every group and mode still checks its own complete registration identities;
-  // only identical combined requests are reused across modes.
+  // Exercise the production runner's compatible policy batches, including its
+  // screenshot-directory union and one-worker override. Every owning group
+  // and mode still checks its complete registration identities independently.
   const nativeSelections=new Map()
   for(const mode of ['essential','full','all']) {
     let total=0
-    const batches=new Map()
-    for(const group of groups) {
-      const included=row=>mode==='all'||tiers.get(key(row))==='ESSENTIAL'||(mode==='full'&&tiers.get(key(row))==='GATED-FULL')
-      const rows=group.specs.flatMap(spec=>byFile.get(spec.file)??[]).filter(included)
-      if(!rows.length) continue
-      const policy=JSON.stringify([group.config,group.flags,group.project,group.env,group.hostedOnly])
-      if(!batches.has(policy)) batches.set(policy,{group,rows:[],groups:[]})
-      const batch=batches.get(policy)
-      batch.rows.push(...rows)
-      batch.groups.push({group,rows})
-    }
-    for(const {group,rows,groups:members} of batches.values()) {
+    const included=row=>mode==='all'||tiers.get(key(row))==='ESSENTIAL'||(mode==='full'&&tiers.get(key(row))==='GATED-FULL')
+    for(const group of browserBatches(all.filter(included),policy)) {
+      const rows=group.rows
       const list=resolve(evidence,`regression-${mode}-${group.id}.txt`)
       const selectors=browserList(rows,all).join('\n')+'\n'
       writeFileSync(list,selectors)
@@ -300,9 +292,11 @@ test('native browser selectors cover reconciled essentials and every collected f
         if(!listedByFile.has(row.file)) listedByFile.set(row.file,[])
         listedByFile.get(row.file).push(row)
       }
-      for(const member of members) {
-        const selected=member.group.specs.flatMap(spec=>listedByFile.get(spec.file)??[])
-        assert.deepEqual(selected.map(row=>`${row.id}:${row.project}`).sort(),member.rows.map(row=>`${row.id}:${row.project}`).sort(),`${mode}: ${member.group.id}`)
+      for(const id of group.groups) {
+        const member=groups.get(id)
+        const expected=member.specs.flatMap(spec=>byFile.get(spec.file)??[]).filter(included)
+        const selected=member.specs.flatMap(spec=>listedByFile.get(spec.file)??[])
+        assert.deepEqual(selected.map(row=>`${row.id}:${row.project}`).sort(),expected.map(row=>`${row.id}:${row.project}`).sort(),`${mode}: ${id}`)
       }
       total+=listed.length
     }
