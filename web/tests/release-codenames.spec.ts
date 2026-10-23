@@ -21,13 +21,18 @@ async function open(page: Page, version?: string, now?: number) {
   const history = presentedHistory(now)
   Object.assign(history.releases.find(r => r.state === 'reserved')!, { release_sequence: 54, codename: 'Bold Booster' })
   await mockReleases(page, history)
+  // Navigation can finish before the lazy sheet and its history request do.
+  // Start the visibility checks after the response, as in releases.spec.ts.
+  const historyReady = page.waitForResponse(response => response.ok() && new URL(response.url()).pathname === '/api/releases')
   await page.goto(`/releases/${version ?? history.releases[0].version}`)
+  await historyReady
   await expect(sheet(page)).toBeVisible()
   return history
 }
 
 test('the marketing name leads every row; codename and Pretty version are both visible', async ({ page }) => {
   const history = await open(page)
+  await expect(options(page)).toHaveCount(history.releases.length)
   // Newest: the name leads, a presented theme is the subtitle.
   const newest = options(page).nth(0)
   await expect(newest.locator('.rn-name')).toHaveText(CODENAMES[5])
