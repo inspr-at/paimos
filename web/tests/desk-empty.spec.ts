@@ -163,8 +163,11 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
             const { effectScope } = await import('/node_modules/.vite/deps/vue.js')
             // @ts-expect-error Vite resolves browser source URLs.
             const { useFooterSummary } = await import('/src/lib/footerSummary.ts')
+            // @ts-expect-error Vite resolves browser source URLs.
+            const { useDecisionDesk } = await import('/src/stores/decisionDesk.ts')
+            const desk = useDecisionDesk()
             const scope = effectScope()
-            scope.run(() => useFooterSummary(() => null, () => ({ updatedAt, paused: true })))
+            scope.run(() => useFooterSummary(() => null, () => ({ updatedAt, paused: desk.failures > 0 })))
             Object.assign(window, { deskPhoneNoticeStop: () => scope.stop() })
           }, goodAt.getTime())
           await expect(notice).toHaveText('Updates paused · retrying')
