@@ -15334,7 +15334,7 @@
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"a sideways strip is assessed as it stands; a control under a vertical scroller’s edge waits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"a top-layer modal escapes its page clipping while its own scroller still rejects oversized children","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"a top-layer modal escapes its page clipping while its own scroller still rejects oversized children","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"known fixture responses and decorative labelled versions are filtered precisely","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15488,167 +15488,167 @@
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"view menu: rename, duplicate, default on the next visit, share, copy link and delete with undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/visual-reference-guard.spec.ts","name":"visual comparison rejects a changed control and never creates a missing reference","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual-reference-guard.spec.ts","name":"visual comparison rejects a changed control and never creates a missing reference","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/access.spec.ts","name":"V-access-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/access.spec.ts","name":"V-access-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/access.spec.ts","name":"V-access-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/access.spec.ts","name":"V-access-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/access.spec.ts","name":"V-access-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/access.spec.ts","name":"V-access-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/access.spec.ts","name":"V-access-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/access.spec.ts","name":"V-access-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-1024-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-1024-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-1024-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-1024-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/agent-rules.spec.ts","name":"V-agent-rules-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/agent-rules.spec.ts","name":"V-agent-rules-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/agent-rules.spec.ts","name":"V-agent-rules-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/agent-rules.spec.ts","name":"V-agent-rules-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/agent-rules.spec.ts","name":"V-agent-rules-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/agent-rules.spec.ts","name":"V-agent-rules-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/agent-rules.spec.ts","name":"V-agent-rules-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/agent-rules.spec.ts","name":"V-agent-rules-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-1024-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-1024-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-1024-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-1024-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/capacity.spec.ts","name":"V-capacity-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/capacity.spec.ts","name":"V-capacity-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/capacity.spec.ts","name":"V-capacity-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/capacity.spec.ts","name":"V-capacity-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/capacity.spec.ts","name":"V-capacity-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/capacity.spec.ts","name":"V-capacity-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/capacity.spec.ts","name":"V-capacity-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/capacity.spec.ts","name":"V-capacity-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-1024-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-1024-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-1024-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-1024-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/delivery-numbers.spec.ts","name":"V-delivery-numbers-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/delivery-numbers.spec.ts","name":"V-delivery-numbers-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/delivery-numbers.spec.ts","name":"V-delivery-numbers-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/delivery-numbers.spec.ts","name":"V-delivery-numbers-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/delivery-numbers.spec.ts","name":"V-delivery-numbers-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/delivery-numbers.spec.ts","name":"V-delivery-numbers-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/delivery-numbers.spec.ts","name":"V-delivery-numbers-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/delivery-numbers.spec.ts","name":"V-delivery-numbers-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/goals.spec.ts","name":"V-goals-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/goals.spec.ts","name":"V-goals-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/goals.spec.ts","name":"V-goals-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/goals.spec.ts","name":"V-goals-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/goals.spec.ts","name":"V-goals-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/goals.spec.ts","name":"V-goals-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/goals.spec.ts","name":"V-goals-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/goals.spec.ts","name":"V-goals-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/hours.spec.ts","name":"V-hours-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/hours.spec.ts","name":"V-hours-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/hours.spec.ts","name":"V-hours-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/hours.spec.ts","name":"V-hours-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/hours.spec.ts","name":"V-hours-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/hours.spec.ts","name":"V-hours-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/hours.spec.ts","name":"V-hours-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/hours.spec.ts","name":"V-hours-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/knowledge.spec.ts","name":"V-knowledge-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/knowledge.spec.ts","name":"V-knowledge-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/knowledge.spec.ts","name":"V-knowledge-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/knowledge.spec.ts","name":"V-knowledge-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/knowledge.spec.ts","name":"V-knowledge-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/knowledge.spec.ts","name":"V-knowledge-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/knowledge.spec.ts","name":"V-knowledge-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/knowledge.spec.ts","name":"V-knowledge-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/models.spec.ts","name":"V-models-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/models.spec.ts","name":"V-models-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/models.spec.ts","name":"V-models-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/models.spec.ts","name":"V-models-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/models.spec.ts","name":"V-models-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/models.spec.ts","name":"V-models-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/models.spec.ts","name":"V-models-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/models.spec.ts","name":"V-models-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/projects.spec.ts","name":"V-projects-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/projects.spec.ts","name":"V-projects-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/projects.spec.ts","name":"V-projects-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/projects.spec.ts","name":"V-projects-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/projects.spec.ts","name":"V-projects-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/projects.spec.ts","name":"V-projects-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/projects.spec.ts","name":"V-projects-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/projects.spec.ts","name":"V-projects-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/public-quote.spec.ts","name":"V-public-quote-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/public-quote.spec.ts","name":"V-public-quote-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/public-quote.spec.ts","name":"V-public-quote-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/public-quote.spec.ts","name":"V-public-quote-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/public-quote.spec.ts","name":"V-public-quote-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/public-quote.spec.ts","name":"V-public-quote-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/public-quote.spec.ts","name":"V-public-quote-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/public-quote.spec.ts","name":"V-public-quote-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-1024-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-1024-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-1024-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-1024-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/start-agent.spec.ts","name":"V-start-agent-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/start-agent.spec.ts","name":"V-start-agent-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/start-agent.spec.ts","name":"V-start-agent-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/start-agent.spec.ts","name":"V-start-agent-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/start-agent.spec.ts","name":"V-start-agent-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/start-agent.spec.ts","name":"V-start-agent-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/start-agent.spec.ts","name":"V-start-agent-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/start-agent.spec.ts","name":"V-start-agent-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/ticket-workspace.spec.ts","name":"V-ticket-workspace-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/ticket-workspace.spec.ts","name":"V-ticket-workspace-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/ticket-workspace.spec.ts","name":"V-ticket-workspace-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/ticket-workspace.spec.ts","name":"V-ticket-workspace-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/ticket-workspace.spec.ts","name":"V-ticket-workspace-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/ticket-workspace.spec.ts","name":"V-ticket-workspace-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/ticket-workspace.spec.ts","name":"V-ticket-workspace-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/ticket-workspace.spec.ts","name":"V-ticket-workspace-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/tickets.spec.ts","name":"V-tickets-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/tickets.spec.ts","name":"V-tickets-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/tickets.spec.ts","name":"V-tickets-1440-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/tickets.spec.ts","name":"V-tickets-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/tickets.spec.ts","name":"V-tickets-390-dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/tickets.spec.ts","name":"V-tickets-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/visual/tickets.spec.ts","name":"V-tickets-390-light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/visual/tickets.spec.ts","name":"V-tickets-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"a 2051-event access history shows its newest revocation and accurately reports the bounded window","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

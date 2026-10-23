@@ -1355,10 +1355,18 @@ test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 860s and eight
     const lowerBound=full.overheadSeconds+workSeconds/count
     assert.ok(lowerBound>800,`${count} shards could meet 800s; measured lower bound ${lowerBound.toFixed(3)}s`)
   }
-  const previous=webShardPlan(gate,policy,{mode:'full',maximum:20})
+  // AEON-1674 stages replacement journeys alongside every original case.
+  // Keep the prior twenty-shard proof on the frozen pre-prune catalogue;
+  // the enlarged current gate must still pass the unchanged full budget.
+  const beforePrune=new Set(JSON.parse(readFileSync(new URL('../test-prune/baseline.json',import.meta.url))).catalogue.map(key))
+  const previous=webShardPlan(gate.filter(row=>beforePrune.has(key(row))),policy,{mode:'full',maximum:20})
   assert.equal(previous.shards.length,20)
   assert.equal(previous.fitsBudget,true)
   assert.ok(previous.projectedMaxSeconds>800,`twenty-shard main must miss 800s, got ${previous.projectedMaxSeconds.toFixed(3)}s`)
+  const enlarged=webShardPlan(gate,policy,{mode:'full',maximum:20})
+  assert.equal(enlarged.shards.length,20)
+  assert.equal(enlarged.fitsBudget,false)
+  assert.throws(()=>assertWebShardBudget(enlarged),/over the 900s budget/)
   const narrow=webShardPlan(gate,policy,{mode:'full',maximum:18})
   assert.equal(narrow.shards.length,18)
   assert.equal(narrow.budgetSeconds,900)

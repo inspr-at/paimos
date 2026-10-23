@@ -1,5 +1,10 @@
 {
   "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 40,
+    "selectedTests": 4,
+    "source": "AEON-1674 initial scheduling estimate; comparisons remain unproven until references are approved."
+  },
   "spec": {
     "file": "tests/visual/public-quote.spec.ts",
     "listedTests": 4,

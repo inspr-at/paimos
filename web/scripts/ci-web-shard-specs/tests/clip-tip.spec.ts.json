@@ -13,8 +13,9 @@
         "median": 2.006,
         "min": 1.024
       },
-      "seconds": 185.614,
-      "selectedTests": 72
+      "estimateSource": "AEON-1674: retain 185.614s measured for 72 original cases; add 3 staged cases at the measured owner mean. Estimate, not a new runtime measurement.",
+      "seconds": 193.347917,
+      "selectedTests": 75
     },
     "weightSeconds": 89.470907,
     "weightSource": "tierTiming:37377299349"
