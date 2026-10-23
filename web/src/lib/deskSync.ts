@@ -23,8 +23,8 @@ export interface DeskSyncInput {
   /** The earliest scheduled poll and a pending automatic retry; null when none is scheduled. */
   pollAt: number | null; retryAt: number | null
 }
-/** Visible words; a number sits in a slot that reserves "59". `short` is the ≤ 520 px form. */
-export type DeskSyncPart = { text: string; short?: string } | { n: number }
+/** Visible words. A bare count reserves "59". A countdown (`unit`) keeps the number and that unit in one box. `short` is the ≤ 520 px form. */
+export type DeskSyncPart = { text: string; short?: string } | { n: number; unit?: string }
 export interface DeskSyncLine {
   state: DeskSyncState; health: DeskSyncHealth
   icon: 'dot' | 'refresh' | 'alert' | 'cloud-off' | null
@@ -56,7 +56,8 @@ function ago(at: number, now: number): Ago {
 }
 
 const t = (text: string, short?: string): DeskSyncPart => short === undefined ? { text } : { text, short }
-const n = (value: number): DeskSyncPart => ({ n: value })
+// `unit` rides in the number's box (the width of "59" plus that unit), start-aligned, so spare width follows the unit.
+const n = (value: number, unit?: string): DeskSyncPart => unit === undefined ? { n: value } : { n: value, unit }
 // The separator keeps to the word before it, so a wrapped line never starts with "·".
 const SEP = t('\u00a0· ')
 // The one app language is English (AEON-1609); German is catalog input for AEON-1610, impersonal.
@@ -64,10 +65,10 @@ export const DESK_SYNC_COPY = {
   en: {
     live: 'Live',
     checked: (a: Ago) => a.kind === 'just' ? [t('checked just now')] : a.kind === 'at' ? [t(`checked at ${a.clock}`)] : [t('checked '), n(a.n), t(a.kind === 's' ? ' s ago' : ' min ago')],
-    next: (s: number) => [t('next check in ', 'next in '), n(s), t(' s')],
+    next: (s: number) => [t('next check in ', 'next in '), n(s, ' s')],
     checking: 'Checking now…', change: 'Change arrived · updating…', retrying: 'Checking again…',
     // ≤ 520 px the two long phrases shorten as "next in" does, so a phone keeps the line on one line (CI's sans is wide).
-    quiet: (s: number | null, shown: string) => [t('Couldn’t check'), ...(s === null ? [] : [SEP, t('trying again in ', 'retry in '), n(s), t(' s')]), ...(shown ? [SEP, t(`showing ${shown}`)] : [])],
+    quiet: (s: number | null, shown: string) => [t('Couldn’t check'), ...(s === null ? [] : [SEP, t('trying again in ', 'retry in '), n(s, ' s')]), ...(shown ? [SEP, t(`showing ${shown}`)] : [])],
     escalated: (shown: string) => [t(`Not updated since ${shown}`)],
     offline: (shown: string) => [t('Offline'), ...(shown ? [SEP, t(`showing ${shown}`)] : []), SEP, t('checks resume when you’re back', 'resumes when online')],
     tryAgain: 'Try again',
@@ -86,9 +87,9 @@ export const DESK_SYNC_COPY = {
   de: {
     live: 'Live',
     checked: (a: Ago) => a.kind === 'just' ? [t('gerade geprüft')] : a.kind === 'at' ? [t(`um ${a.clock} geprüft`)] : [t('vor '), n(a.n), t(a.kind === 's' ? ' s geprüft' : ' min geprüft')],
-    next: (s: number) => [t('nächste Prüfung in ', 'nächste in '), n(s), t(' s')],
+    next: (s: number) => [t('nächste Prüfung in ', 'nächste in '), n(s, ' s')],
     checking: 'Wird geprüft…', change: 'Änderung eingetroffen · wird aktualisiert…', retrying: 'Erneuter Versuch…',
-    quiet: (s: number | null, shown: string) => [t('Prüfung fehlgeschlagen'), ...(s === null ? [] : [SEP, t('neuer Versuch in ', 'erneut in '), n(s), t(' s')]), ...(shown ? [SEP, t(`Stand ${shown}`)] : [])],
+    quiet: (s: number | null, shown: string) => [t('Prüfung fehlgeschlagen'), ...(s === null ? [] : [SEP, t('neuer Versuch in ', 'erneut in '), n(s, ' s')]), ...(shown ? [SEP, t(`Stand ${shown}`)] : [])],
     escalated: (shown: string) => [t(`Seit ${shown} nicht aktualisiert`)],
     offline: (shown: string) => [t('Offline'), ...(shown ? [SEP, t(`Stand ${shown}`)] : []), SEP, t('Prüfung startet wieder, sobald online', 'weiter, sobald online')],
     tryAgain: 'Erneut versuchen',

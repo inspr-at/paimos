@@ -35,6 +35,73 @@ async function mockEmptyDesk(page: Page, theme: 'light' | 'dark', withItem = fal
 // that move the line or anything around it; a screen reader hearing every tick; a Try again too small to tap.
 const syncLine = (page: Page) => page.getByTestId('desk-sync')
 const syncWords = (page: Page) => syncLine(page).locator('.sync-words')
+type CountdownRow = { shown: string | null; space: number; gap: number; width: number }
+// The gap after "in" is one ordinary space at 1 s, 9 s and 59 s. The live sentence is measured too.
+async function expectCountdownGap(page: Page, step: string) {
+  const measured = await syncLine(page).evaluate(line => {
+    const empty: CountdownRow[] = []
+    const slot = line.querySelector('.sync-count') as HTMLElement | null
+    const inner = slot?.querySelector(':scope > span') as HTMLElement | null
+    const prev = slot?.previousSibling
+    if (!slot || !inner || !prev || prev.nodeType !== Node.TEXT_NODE) return { error: 'countdown slot is not in place', rows: empty }
+    const text = prev.textContent ?? ''
+    const at = text.lastIndexOf('in ')
+    if (at < 0 || at !== text.length - 3) return { error: `countdown does not follow "in ": ${JSON.stringify(text)}`, rows: empty }
+    const range = document.createRange()
+    const read = (): CountdownRow => {
+      range.setStart(prev, at)
+      range.setEnd(prev, at + 2)
+      const inEnd = range.getBoundingClientRect().right
+      range.setStart(prev, at + 2)
+      range.setEnd(prev, at + 3)
+      const space = range.getBoundingClientRect().width
+      const number = inner.getBoundingClientRect()
+      return { shown: inner.textContent, space, gap: number.left - inEnd, width: slot.getBoundingClientRect().width }
+    }
+    const saved = inner.textContent
+    const rows = [read()]
+    for (const sample of ['1 s', '9 s', '59 s']) { inner.textContent = sample; rows.push(read()) }
+    inner.textContent = saved
+    return { error: '', rows }
+  })
+  expect(measured.error, `${step}: ${measured.error}`).toBe('')
+  const rows = measured.rows
+  expect(new Set(rows.map(row => row.width.toFixed(2))).size, `${step}: "1 s", "9 s" and "59 s" share one box (${rows.map(row => row.width).join(', ')})`).toBe(1)
+  for (const row of rows) expect(Math.abs(row.gap - row.space), `${step}: gap after "in" before "${row.shown}" is ${row.gap} px, one space is ${row.space} px`).toBeLessThanOrEqual(0.5)
+  return rows
+}
+type GlyphSample = { error: string; glyph: number; markW: number; icon: string | null; state: string | null; text: string }
+// First glyph of the line, so a reserved icon slot keeps "checked …" and "Checking now…" on one x.
+async function syncGlyph(page: Page): Promise<GlyphSample> {
+  return syncLine(page).evaluate(line => {
+    const blank: GlyphSample = { error: '', glyph: 0, markW: 0, icon: null, state: line.getAttribute('data-state'), text: '' }
+    const words = line.querySelector('.sync-words')
+    const mark = line.querySelector('.sync-mark') as HTMLElement | null
+    if (!words || !mark) return { ...blank, error: 'icon slot missing' }
+    const range = document.createRange()
+    let found = false
+    for (let node: ChildNode | null = words.firstChild; node; node = node.nextSibling) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent ?? ''
+        for (let i = 0; i < text.length; i++) {
+          const ch = text[i]!
+          if (ch === '\u00a0' || ch.trim() === '') continue
+          range.setStart(node, i)
+          range.setEnd(node, i + 1)
+          found = true
+          break
+        }
+      } else if (node instanceof HTMLElement && node.classList.contains('sync-n')) {
+        const inner = node.querySelector('span')?.firstChild
+        if (inner) { range.setStart(inner, 0); range.setEnd(inner, 1); found = true }
+      }
+      if (found) break
+    }
+    if (!found) return { ...blank, error: 'no glyph' }
+    const box = mark.getBoundingClientRect()
+    return { error: '', glyph: range.getBoundingClientRect().x, markW: box.width, icon: mark.getAttribute('data-icon'), state: line.getAttribute('data-state'), text: words.textContent ?? '' }
+  })
+}
 async function oneSyncLine(page: Page, step: string) {
   await expect(syncLine(page), `${step}: exactly one sync line`).toHaveCount(1)
   for (const old of ['desk-refresh-hint', 'desk-stale', 'desk-refresh-slot']) await expect(page.getByTestId(old), `${step}: ${old} is gone`).toHaveCount(0)
@@ -144,6 +211,17 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await expect(sync).toHaveAttribute('data-state', 'just')
     await expect(words).toHaveText(phone ? 'checked just now · next in 30 s' : 'checked just now · next check in 30 s')
     await oneSyncLine(page, 'items')
+    // At 390 the line is left-aligned, so the first glyph stays put once every state reserves the icon slot.
+    const glyphs: Array<GlyphSample & { step: string }> = []
+    const sameGlyph = async (step: string) => {
+      if (width !== 390) return
+      const sample = await syncGlyph(page)
+      expect(sample.error, `${step}: ${sample.error}`).toBe('')
+      expect(sample.markW, `${step}: the icon slot is 12 px`).toBeCloseTo(12, 0)
+      glyphs.push({ ...sample, step })
+      expect(Math.abs(sample.glyph - glyphs[0]!.glyph), `${step}: text starts at ${sample.glyph.toFixed(2)} px; "${glyphs[0]!.text}" starts at ${glyphs[0]!.glyph.toFixed(2)} px`).toBeLessThanOrEqual(0.5)
+    }
+    await sameGlyph('just')
     const spacing = async () => {
       const geometry = await page.evaluate(() => {
         const tabs = document.querySelector('[role="radiogroup"][aria-label="Show"]')!.getBoundingClientRect()
@@ -191,6 +269,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
         await expect(sync).toHaveClass(/\bwarn\b/)
         await expect(sync.getByRole('button', { name: 'Try again' })).toHaveCount(0)
         expect(await contrast(words), 'warn words are at least 4.5:1').toBeGreaterThanOrEqual(4.5)
+        await expectCountdownGap(page, `quiet ${width} ${theme}`)
         await page.screenshot({ path: testInfo.outputPath(`AEON-1700-quiet-${width}-${theme}.png`) })
       } },
       { name: 'the outage escalates after sixty seconds', run: async () => {
@@ -214,6 +293,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
         await expect(sync).toHaveAttribute('data-state', 'offline')
         await expect(words).toHaveText(`Offline · showing ${await clockOf(page, goodAt.getTime() + 60_001)} · ${phone ? 'resumes when online' : 'checks resume when you’re back'}`)
         await expect(sync).not.toHaveClass(/\bwarn\b/)
+        await sameGlyph('offline')
         await page.screenshot({ path: testInfo.outputPath(`AEON-1700-offline-${width}-${theme}.png`) })
         const beforeRead = reads
         await page.context().setOffline(false)
@@ -230,6 +310,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
       } },
     ].map(interaction => ({ ...interaction, run: async () => {
       await interaction.run()
+      await sameGlyph(interaction.name)
       expect(await Promise.all(Object.values(anchors).map(control => control.boundingBox()))).toEqual(before)
       expect(await spacing()).toEqual(filled)
     } })) })
@@ -268,8 +349,10 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     expect((await box(page.getByTestId('desk-clear'))).y, 'the empty state begins inside the same card hairline').toBe(await list.evaluate(element => element.getBoundingClientRect().y + element.clientTop))
     await expect(sync, 'the empty card settles to the normal line').toHaveAttribute('data-state', 'just')
     expect(await contrast(words), 'the card line is at least 4.5:1').toBeGreaterThanOrEqual(4.5)
+    const gaps = await expectCountdownGap(page, `empty ${width} ${theme}`)
     await onePicture(page, theme)
     await page.screenshot({ path: testInfo.outputPath(`AEON-1700-empty-${width}-${theme}.png`) })
+    await writeFile(testInfo.outputPath(`AEON-1700-fix2-empty-${width}-${theme}.json`), JSON.stringify({ gaps, glyphs }) + '\n')
     await writeFile(testInfo.outputPath(`AEON-1616-layout-${width}-${theme}.md`), JSON.stringify({ width, theme, filled, cleared, movement: 0 }) + '\n')
   })
 }
@@ -555,6 +638,16 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
 // It runs inside the AEON-1406 cases (same widths and themes), so the file keeps its pinned case count (AEON-1619).
 const accountRow = (n: number) => ({ id: `accounts-${n}`, kind: 'account_matrix', revision: 1, title: `Confirm the shared agent accounts ${n}`, created_at: '2026-10-21T17:00:00Z', held: false, can_decide: true, href: '/settings/accounts', source: '/api/settings/accounts' })
 async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: number, theme: 'light' | 'dark') {
+  const glyphs: Array<GlyphSample & { step: string }> = []
+  const sameGlyph = async (step: string) => {
+    if (width !== 390) return
+    const sample = await syncGlyph(page)
+    expect(sample.error, `${step}: ${sample.error}`).toBe('')
+    expect(sample.markW, `${step}: the icon slot is 12 px`).toBeCloseTo(12, 0)
+    glyphs.push({ ...sample, step })
+    expect(Math.abs(sample.glyph - glyphs[0]!.glyph), `${step}: text starts at ${sample.glyph.toFixed(2)} px; "${glyphs[0]!.step}" starts at ${glyphs[0]!.glyph.toFixed(2)} px`).toBeLessThanOrEqual(0.5)
+  }
+  let countdown: CountdownRow[] = []
   // Time stands still unless the test moves it: every retry below happens at a known instant.
   const at = new Date('2026-10-21T17:47:00Z')
   await page.clock.install({ time: at })
@@ -640,6 +733,7 @@ async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: numb
   await page.clock.runFor(400)
   await oneSyncLine(page, 'stale rows')
   await expect(sync).toHaveAttribute('data-state', 'quiet')
+  await sameGlyph('quiet')
   // The 3 s retry is the next read, from its own timer.
   await expect(words).toHaveText(`Couldn’t check · ${phone ? 'retry' : 'trying again'} in 3 s · showing ${await clockOf(page, at.getTime())}`)
   await expect(first).toBeVisible(); await expect(second).toBeVisible()
@@ -672,10 +766,12 @@ async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: numb
   await expect(list).toHaveAttribute('aria-busy', 'false')
   await expect(sync).toHaveAttribute('data-state', 'checking')
   await expect(words).toHaveText('Checking now…')
+  await sameGlyph('checking')
   await page.clock.runFor(400)
   await expect(sync).toHaveAttribute('data-state', 'just')
   await page.clock.runFor(11_600)
   await expect(words).toHaveText(phone ? 'checked 12 s ago · next in 18 s' : 'checked 12 s ago · next check in 18 s')
+  await sameGlyph('normal')
   await page.screenshot({ path: testInfo.outputPath(`AEON-1700-normal-${width}-${theme}.png`) })
   // The number slots reserve "59": the same width for 9, 12 and 59, so a tick never shifts the words.
   const slots = await sync.locator('.sync-n').evaluateAll(numbers => numbers.map(number => {
@@ -688,6 +784,7 @@ async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: numb
   const wordsAt = await box(words)
   await page.clock.runFor(9_000)
   await expect(words).toHaveText(phone ? 'checked 21 s ago · next in 9 s' : 'checked 21 s ago · next check in 9 s')
+  countdown = await expectCountdownGap(page, `countdown ${width} ${theme}`)
   expect(await box(words), '"18 s" → "9 s" keeps the text box').toEqual(wordsAt)
   await page.clock.runFor(60_000 - (await page.evaluate(() => Date.now()) - idleFrom))
   expect(reads - idleReads, 'two polls ran in the idle minute').toBeGreaterThanOrEqual(2)
@@ -700,6 +797,7 @@ async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: numb
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(sync).toHaveAttribute('data-state', 'checking')
+  await sameGlyph('checking-spin')
   const icon = sync.locator('.sync-icon')
   expect(await icon.evaluate(element => element.getAnimations().length), 'reduced motion: no turn').toBe(0)
   await page.emulateMedia({ reducedMotion: 'no-preference' })
@@ -725,15 +823,25 @@ async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: numb
   })
   await expect(sync.getByTestId('desk-sync-dot')).toBeVisible()
   await expect(words).toHaveText(phone ? /^checked just now\s·\snext in \d+ s$/ : /^Live\s·\schecked just now\s·\snext check in \d+ s$/)
+  await expect(sync).toHaveAttribute('data-state', /^(just|normal)$/)
+  await sameGlyph('live')
   await page.clock.runFor(3_000)
   await expect(list).toHaveAttribute('aria-busy', 'false')
   await page.clock.runFor(400)
   expect(await pulses(), 'the catch-up pulses nothing').toBe(0)
   await expect(sync).toHaveAttribute('data-state', 'just')
+  // Past the 10 s "just now" window, still inside the 30 s poll, so the connected line is the normal state.
+  await page.clock.runFor(11_000)
+  await expect(sync).toHaveAttribute('data-state', 'normal')
+  await expect(sync.getByTestId('desk-sync-dot')).toBeVisible()
+  await sameGlyph('live-normal')
+  // Evidence only: the pinned visual fixture keeps the stream shut. This shot is the connected normal line.
+  if (theme === 'light' && (width === 1440 || width === 390)) await page.screenshot({ path: testInfo.outputPath(`AEON-1700-live-${width}-light.png`) })
   const liveReads = reads
   await page.evaluate(() => (window as unknown as { fixtureQuietStreams: { emit(type: string, data: string, id: number): void } }).fixtureQuietStreams.emit('question.asked', '{}', 9001))
   await expect(sync).toHaveAttribute('data-state', 'change')
   await expect(words).toHaveText('Change arrived · updating…')
+  await sameGlyph('change')
   expect(await pulses(), 'one live event, one pulse').toBe(1)
   await page.screenshot({ path: testInfo.outputPath(`AEON-1700-change-${width}-${theme}.png`) })
   await page.clock.runFor(3_000)
@@ -752,7 +860,9 @@ async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: numb
   await page.clock.runFor(400)
   await page.evaluate(() => (window as unknown as { deskLiveStop(): void }).deskLiveStop())
   await expect(sync.getByTestId('desk-sync-dot'), 'without the stream "Live" and its dot drop').toHaveCount(0)
+  await sameGlyph('stream-shut')
   // The second recorder took over at the idle run: since then (idle minute, checking, live run) nothing spoke.
   expect(await quietRun(), 'no announcement in the idle, checking and live runs').toEqual([])
+  await writeFile(testInfo.outputPath(`AEON-1700-fix2-measure-${width}-${theme}.json`), JSON.stringify({ glyphs, countdown }) + '\n')
 }
 

@@ -86,7 +86,7 @@ describe('Decision Desk empty state', () => {
     const at = Date.UTC(2026, 9, 23, 13, 58, 0)
     const idle: DeskSyncInput = { now: at + 12_000, checkedAt: at, busy: false, change: false, failures: 0, notice: null, stale: false, retry: 'idle',
       online: true, visible: true, live: true, pollAt: at + 30_000, retryAt: null }
-    const words = (line: DeskSyncLine, short = false) => line.parts.map(part => 'n' in part ? String(part.n) : short ? part.short ?? part.text : part.text).join('').replace(/\u00a0/g, ' ')
+    const words = (line: DeskSyncLine, short = false) => line.parts.map(part => 'n' in part ? `${part.n}${part.unit ?? ''}` : short ? part.short ?? part.text : part.text).join('').replace(/\u00a0/g, ' ')
     const line = (over: Partial<DeskSyncInput> = {}, lang: 'en' | 'de' = 'en') => deskSyncLine({ ...idle, ...over }, lang)
     const shown = deskClock(at)
     expect(words(line())).toBe('Live · checked 12 s ago · next check in 18 s')
@@ -105,8 +105,8 @@ describe('Decision Desk empty state', () => {
     expect(words(line({ live: false }))).toBe('checked 12 s ago · next check in 18 s')
     expect(words(line({ visible: false }))).toBe('Live · checked 12 s ago')
     expect(words(line({ pollAt: null }))).toBe('Live · checked 12 s ago')
-    // A number sits in a slot of its own, so the CSS can reserve "59" for it in every state that counts.
-    expect(line().parts.filter(part => 'n' in part)).toEqual([{ n: 12 }, { n: 18 }])
+    // The checked count reserves "59" on its own. The countdown keeps its unit in the same slot, so the box can reserve "59 s".
+    expect(line().parts.filter(part => 'n' in part)).toEqual([{ n: 12 }, { n: 18, unit: ' s' }])
     expect(line({ busy: true })).toMatchObject({ state: 'checking', icon: 'refresh', spin: true })
     expect(words(line({ busy: true }))).toBe('Checking now…')
     expect(words(line({ busy: true }, 'de'))).toBe('Wird geprüft…')
@@ -118,6 +118,7 @@ describe('Decision Desk empty state', () => {
     expect(words(line({ failures: 1 }, 'de'))).toBe('Erneuter Versuch…')
     const quiet = { failures: 2, notice: 'quiet', now: at + 20_000 } as const
     expect(line(quiet)).toMatchObject({ state: 'quiet', health: 'quiet', icon: 'alert', warn: true, retry: false })
+    expect(line(quiet).parts.filter(part => 'n' in part)).toEqual([{ n: 10, unit: ' s' }])
     expect(words(line(quiet))).toBe(`Couldn’t check · trying again in 10 s · showing ${shown}`)
     expect(words(line(quiet, 'de'))).toBe(`Prüfung fehlgeschlagen · neuer Versuch in 10 s · Stand ${shown}`)
     expect(words(line(quiet), true), '≤ 520').toBe(`Couldn’t check · retry in 10 s · showing ${shown}`)

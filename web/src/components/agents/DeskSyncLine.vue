@@ -37,8 +37,8 @@ watch(() => props.pulse, () => {
 <template>
   <p class="desk-sync" :class="{ warn: line.warn }" :data-state="line.state" data-testid="desk-sync">
     <span class="sync-text" tabindex="0" :data-tip="line.tip || undefined">
-      <span v-if="line.icon" ref="mark" class="sync-mark"><span v-if="line.icon === 'dot'" class="sync-dot" role="img" :aria-label="words.live" data-testid="desk-sync-dot" /><AppIcon v-else class="sync-icon" :class="{ spin: deskSyncMotion({ reducedMotion: reduced, spin: line.spin }).spin }" :name="line.icon" :size="12" /></span>
-      <span class="sync-words" aria-hidden="true"><template v-for="(part, index) in line.parts" :key="index"><span v-if="'n' in part" class="sync-n"><span>{{ part.n }}</span></span><template v-else>{{ short && part.short !== undefined ? part.short : part.text }}</template></template></span>
+      <span ref="mark" class="sync-mark" :data-icon="line.icon ?? 'none'"><span v-if="line.icon === 'dot'" class="sync-dot" role="img" :aria-label="words.live" data-testid="desk-sync-dot" /><AppIcon v-else-if="line.icon" class="sync-icon" :class="{ spin: deskSyncMotion({ reducedMotion: reduced, spin: line.spin }).spin }" :name="line.icon" :size="12" /></span>
+      <span class="sync-words" aria-hidden="true"><template v-for="(part, index) in line.parts" :key="index"><span v-if="'n' in part" class="sync-n" :class="{ 'sync-count': !!part.unit }"><span>{{ part.n }}{{ part.unit ?? '' }}</span></span><template v-else>{{ short && part.short !== undefined ? part.short : part.text }}</template></template></span>
       <span class="sr-only">{{ line.sentence }}</span>
     </span>
     <template v-if="line.retry"><span class="sync-sep" aria-hidden="true">·</span><button type="button" class="sync-retry" :disabled="busy" data-testid="desk-sync-retry" @click="emit('retry')">{{ words.tryAgain }}</button></template>
@@ -51,10 +51,14 @@ watch(() => props.pulse, () => {
 /* Inline flow: the icon belongs to the first line, so a line that must wrap (a narrow free end) keeps them together. */
 .sync-text { min-width: 0; border-radius: 4px; outline: none; text-wrap: balance; }
 .sync-text:focus-visible { box-shadow: var(--focus-ring); }
-/* A number slot reserves "59" (an invisible layer under it), so 9 s → 10 s and 3 min → 59 min never shift the words. */
-.sync-n { display: inline-grid; justify-items: end; }
+/* A bare count reserves "59", end-aligned, so 9 → 10 and 3 min → 59 min never shift the words after it.
+   A countdown keeps the number and its unit in one box the width of "59 s", start-aligned: the gap after
+   "in" stays one space at 1, 9 and 59, and spare width trails the "s" (quiet at the end of the line). */
+.sync-n { display: inline-grid; justify-items: end; white-space: nowrap; }
 .sync-n::before { content: '59'; visibility: hidden; }
 .sync-n::before, .sync-n > span { grid-area: 1 / 1; }
+.sync-count { justify-items: start; }
+.sync-count::before { content: '59 s'; }
 .sync-icon { display: block; color: var(--ink-3); }
 .warn .sync-icon { color: inherit; }
 .warn { color: var(--warn-ink); }
