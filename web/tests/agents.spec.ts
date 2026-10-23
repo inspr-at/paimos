@@ -803,7 +803,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await expect(lastActivity).toHaveText('Ran Inbox triage 1 · 30 min ago')
   expect(await lastActivity.evaluate(cell => cell.scrollWidth <= cell.clientWidth)).toBe(true)
   await section.locator('.budget-unknown').first().hover()
-  await expect(page.getByRole('tooltip')).toHaveText('Not available yet')
+  await expect(page.locator('.tooltip:popover-open')).toHaveText('Not available yet')
   const amy = items.find(item => item.display_name === 'Amy')!
   await section.hover()
   const stableRows = await controlStability(page, { amy: section.locator(`[data-assistant="${amy.principal_id}"] .assistant-open`), scout: section.locator('.assistant-row').nth(1).locator('.assistant-open') }, { tolerance: 0 })
@@ -892,7 +892,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await expect(pause).toHaveAttribute('data-tip', 'Pause and resume for this assistant are not available yet.')
   await expect(pause).toHaveAccessibleDescription('Pause and resume for this assistant are not available yet.')
   await pause.hover()
-  await expect(page.getByRole('tooltip')).toHaveText('Pause and resume for this assistant are not available yet.')
+  await expect(page.locator('.tooltip:popover-open')).toHaveText('Pause and resume for this assistant are not available yet.')
   await page.getByRole('menuitem', { name: 'Edit policy', exact: true }).click()
   await expect(details.getByRole('heading', { name: 'Budget', exact: true })).toBeVisible()
   const budget = details.getByRole('textbox', { name: 'Per week', exact: true })

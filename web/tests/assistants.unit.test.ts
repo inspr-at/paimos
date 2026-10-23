@@ -50,7 +50,7 @@ it('assistant facts retain the specified status order, exact budget words and in
   for (const field of ['last-column', 'budget-unknown', 'routines-column', 'adapter-column']) {
     expect(unknown).toMatch(new RegExp(`class="${field}"[^>]*title="Not available yet"[^>]*>—</span>`))
   }
-  expect(unknown).toContain('class="assistant-approvals"><span title="Not available yet" data-tip="Not available yet">—</span>')
+  expect(unknown).toMatch(/class="assistant-approvals"[^>]*><span title="Not available yet" data-tip="Not available yet"[^>]*>—<\/span>/)
   expect(unknown).not.toContain('>Unavailable<')
   const empty = await render([])
   expect(empty).toContain('assistants glass-card')

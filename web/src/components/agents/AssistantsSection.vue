@@ -40,6 +40,10 @@ function activityLine(item: Assistant) {
   const activity = factsOf(item).lastActivity
   return activity ? `${activity.text} · ${relativeTime(activity.at, { now: props.now, long: true })}` : '—'
 }
+function openCell(item: Assistant, event: MouseEvent) {
+  const button = (event.currentTarget as HTMLElement).closest('.assistant-row')?.querySelector<HTMLButtonElement>('.assistant-open')
+  if (button) emit('open', item.principal_id, button)
+}
 function glance(item: Assistant) {
   const budget = item.policy.weekly_budget
   return [item.policy.allowed_projects.length ? item.policy.allowed_projects.map(id => props.projectNames?.[id] ?? id).join(', ') : words.noProjects, words.asks.toLowerCase(), `${assistantMoney(budget.amount, budget.unit)} ${words.week}`].join(' · ')
@@ -82,7 +86,7 @@ function adapterLine(item: Assistant) {
             <span v-clip-tip class="routines-column" :title="factsOf(item).routines === null ? words.notAvailableYet : undefined" :data-tip="factsOf(item).routines === null ? words.notAvailableYet : undefined">{{ routineLine(item) }}</span>
             <span v-clip-tip class="adapter-column" :title="factsOf(item).adapter ? adapterLine(item) : words.notAvailableYet" :data-tip="factsOf(item).adapter ? undefined : words.notAvailableYet">{{ adapterLine(item) }}</span>
           </button>
-          <span class="assistant-approvals"><RouterLink v-if="approvalsOf(item)" :to="assistantDeskLink(item.principal_id)" @click.stop>{{ words.toApprove(approvalsOf(item)!) }}</RouterLink><span v-else :title="approvalsOf(item) === null ? words.notAvailableYet : undefined" :data-tip="approvalsOf(item) === null ? words.notAvailableYet : undefined" @click="emit('open', item.principal_id, $event.currentTarget as HTMLElement)">—</span></span>
+          <span class="assistant-approvals"><RouterLink v-if="approvalsOf(item)" :to="assistantDeskLink(item.principal_id)" @click.stop>{{ words.toApprove(approvalsOf(item)!) }}</RouterLink><span v-else :title="approvalsOf(item) === null ? words.notAvailableYet : undefined" :data-tip="approvalsOf(item) === null ? words.notAvailableYet : undefined" @click="openCell(item, $event)">—</span></span>
         </div>
       </div>
       <button v-if="!expanded && items.length > 5" type="button" class="assistant-show-all" @click="showAll">{{ words.showAll(items.length) }}<AppIcon name="chevron" :size="14" /></button>
