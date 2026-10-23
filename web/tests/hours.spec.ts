@@ -121,7 +121,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
   // AEON-1687: the complete seven-day grid must fit its own container on a
   // phone, rather than concealing a wider table in a horizontal scroller.
   const measurements = []
-  for (const width of [390, 520, 560, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  for (const width of [390, 320, 520, 560, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 900 })
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     await page.evaluate(() => document.fonts.ready)
@@ -129,6 +129,31 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     expect(dayFont.renderedFamilies, `${width} ${theme}: day values render in the bundled font`).toEqual(['JetBrains Mono'])
     const scroll = page.getByRole('region', { name: 'Weekly hours', exact: true })
     await scroll.focus()
+    // AEON-1699 fix1: the focused region's outline also paints the header's
+    // top edge. Checking only the table borders would miss the teal rule.
+    const headerEdge = await scroll.evaluate(element => {
+      const probe = document.createElement('span')
+      probe.style.borderTop = '1px solid var(--line)'
+      element.append(probe)
+      const neutral = getComputedStyle(probe).borderTopColor
+      probe.remove()
+      const style = getComputedStyle(element)
+      return { neutral, outline: { width: parseFloat(style.outlineWidth), color: style.outlineColor },
+        shadow: style.boxShadow,
+        borders: [element, ...element.querySelectorAll('thead, thead tr, thead th')].map(edge => {
+          const style = getComputedStyle(edge)
+          return { width: parseFloat(style.borderTopWidth), color: style.borderTopColor }
+        }) }
+    })
+    for (const border of headerEdge.borders.filter(border => border.width > 0)) {
+      expect(border.color, `${width} ${theme}: header top border uses the neutral line token`).toBe(headerEdge.neutral)
+      expect(border.width, `${width} ${theme}: header top border is a hairline`).toBe(1)
+    }
+    if (headerEdge.outline.width > 0) {
+      expect(headerEdge.outline.color, `${width} ${theme}: focused header top edge uses the neutral line token`).toBe(headerEdge.neutral)
+      expect(headerEdge.outline.width, `${width} ${theme}: focus outline is a hairline`).toBe(1)
+    }
+    expect(headerEdge.shadow, `${width} ${theme}: no accent shadow around the header`).toBe('none')
     const dimensions = await scroll.evaluate(element => ({
       overflow: element.scrollWidth - element.clientWidth, width: element.clientWidth,
       descendants: Array.from(element.querySelectorAll('*')).flatMap(child => {
@@ -141,13 +166,81 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
       }),
     }))
     expect(dimensions.overflow, `${width} ${theme}: 0 px horizontal overflow; ${JSON.stringify(dimensions)}`).toBe(0)
+    // AEON-1699: a fitting table can still press its text against the card.
+    // Measure the actual ink, including keys and totals, before row geometry
+    // so the AEON-1691 negative control fails specifically on the inset.
+    const phoneGrid = width <= 520 ? await scroll.evaluate(element => {
+      const bounds = element.getBoundingClientRect()
+      const ink = Array.from(element.querySelectorAll('tbody .ticket-chip, tfoot th, .c-day, tbody .c-total, tfoot .c-total')).map(cell => {
+        const range = document.createRange(); range.selectNodeContents(cell)
+        const text = range.getBoundingClientRect()
+        return { value: cell.textContent?.trim(), width: text.width, height: text.height,
+          left: text.left - bounds.left, right: bounds.right - text.right }
+      })
+      const headers = Array.from(element.querySelectorAll('thead .c-day')).map(cell => cell.getBoundingClientRect().toJSON())
+      const rows = Array.from(element.querySelectorAll('tbody tr, tfoot tr')).map(row => {
+        const key = row.querySelector('.c-ticket')!.getBoundingClientRect()
+        const total = row.querySelector('.c-total')!.getBoundingClientRect()
+        const days = Array.from(row.querySelectorAll('.c-day')).map(cell => cell.getBoundingClientRect().toJSON())
+        const link = row.querySelector('a.ticket-chip')
+        const box = row.getBoundingClientRect()
+        return { height: box.height, key: key.toJSON(), total: total.toJSON(), days,
+          // Both lines, including the row's outer padding, activate one link.
+          taps: link ? [key.top + key.height / 2, days[0].top + days[0].height / 2].flatMap(y =>
+            [box.left + 1, box.right - 1].map(x => link.contains(document.elementFromPoint(x, y)))) : [] }
+      })
+      const today = Array.from(element.querySelectorAll('.c-day.today')).map(cell => getComputedStyle(cell).backgroundColor)
+      const weekend = Array.from(element.querySelectorAll('.c-day.weekend:not(.today)')).map(cell => getComputedStyle(cell).backgroundColor)
+      const headerLabels = Array.from(element.querySelectorAll('thead .c-ticket, thead .c-total')).map(cell => cell.getBoundingClientRect().width)
+      return { ink, headers, rows, today, weekend, headerLabels,
+        documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth }
+    }) : null
+    if (phoneGrid) {
+      expect(phoneGrid.ink.every(text => text.width > 0 && text.height > 0), 'phone ink has positive-size Range boxes').toBe(true)
+      for (const text of phoneGrid.ink) {
+        expect(text.left, `${width} ${theme}: ${text.value} left inner inset ≥ 12 px`).toBeGreaterThanOrEqual(12)
+        expect(text.right, `${width} ${theme}: ${text.value} right inner inset ≥ 12 px`).toBeGreaterThanOrEqual(12)
+      }
+      expect(phoneGrid.documentOverflow, `${width} ${theme}: no document horizontal overflow`).toBe(0)
+      expect(phoneGrid.headerLabels, 'Ticket and Total occupy no visible header column').toEqual([1, 1])
+      expect(phoneGrid.headers).toHaveLength(7)
+      expect(phoneGrid.rows).toHaveLength(4)
+      for (const row of phoneGrid.rows) {
+        expect(row.height, 'each two-line row is at least 44 px tall').toBeGreaterThanOrEqual(44)
+        expect(row.key.top, 'key and total share the first line').toBe(row.total.top)
+        expect(row.days).toHaveLength(7)
+        for (const [i, day] of row.days.entries()) {
+          expect(day.top, 'day values sit below the key and total').toBeGreaterThanOrEqual(Math.max(row.key.bottom, row.total.bottom))
+          expect(day.x, 'day columns line up with their headers').toBe(phoneGrid.headers[i].x)
+          expect(day.width, 'day columns keep the header width').toBe(phoneGrid.headers[i].width)
+        }
+        expect(row.taps.every(Boolean), `both lines of a ticket row share its link target: ${JSON.stringify(row)}`).toBe(true)
+      }
+      expect(phoneGrid.rows.flatMap(row => row.taps)).toHaveLength(12)
+      expect(phoneGrid.today).toHaveLength(5)
+      expect(new Set(phoneGrid.today).size, 'today keeps one full cell tint').toBe(1)
+      expect(phoneGrid.weekend).toHaveLength(10)
+      expect(new Set(phoneGrid.weekend).size, 'weekend shading stays consistent').toBe(1)
+      expect(phoneGrid.today[0], 'today stays distinct from weekends').not.toBe(phoneGrid.weekend[0])
+      expect(phoneGrid.today[0]).not.toBe('rgba(0, 0, 0, 0)')
+      expect(phoneGrid.weekend[0]).not.toBe('rgba(0, 0, 0, 0)')
+      await expect(rows.first().getByRole('rowheader')).toContainText('PHAROS-11')
+      await expect(rows.first().getByRole('cell')).toHaveCount(8)
+      await expect(rows.first().getByRole('cell').last()).toHaveAccessibleName('Total 106:30')
+    }
     const controls = { navigation: page.getByRole('group', { name: 'Week', exact: true }),
       person: page.getByRole('button', { name: 'Hours of You. Choose a person or agent' }),
-      row: rows.first(), grid: scroll }
+      row: rows.first(), ticket: rows.first().getByRole('link'), grid: scroll }
     const boxes = await Promise.all(Object.values(controls).map(control => control.boundingBox()))
     await expectStableControls({ controls, scrollAreas: { grid: scroll }, interactions: [
       { name: 'read the last day with the keyboard', run: async () => { await scroll.press('ArrowRight') } },
       { name: 'return to the first day', run: async () => { await scroll.press('ArrowLeft') } },
+      { name: 'focus the ticket without moving its two-line row', run: async () => {
+        await controls.ticket.focus()
+        await expect(controls.ticket).toBeFocused()
+        if (phoneGrid) expect(await rows.first().evaluate(row => getComputedStyle(row).boxShadow), 'the whole row shows keyboard focus').not.toBe('none')
+      } },
+      { name: 'return focus to the grid', run: async () => { await scroll.focus() } },
     ] })
     const dayCells = await grid(page).locator('.c-day').evaluateAll(cells => cells.map(cell => {
       const style = getComputedStyle(cell), range = document.createRange()
@@ -164,7 +257,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
       `${width} ${theme}: every day value has at least 1 px slack`).toEqual([])
     // At 521–600px the Total cell can fit while its text spills into Sunday.
     // Check the text edges against the padded content box in every grid row.
-    const totalCells = await grid(page).locator('.c-total').evaluateAll(cells => cells.map(cell => {
+    const totalCells = await grid(page).locator(width <= 520 ? 'tbody .c-total, tfoot .c-total' : '.c-total').evaluateAll(cells => cells.map(cell => {
       const style = getComputedStyle(cell), box = cell.getBoundingClientRect(), range = document.createRange()
       range.selectNodeContents(cell)
       const text = range.getBoundingClientRect()
@@ -172,7 +265,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
         content: { left: box.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
           right: box.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight) } }
     }))
-    expect(totalCells).toHaveLength(5) // Header, all three tickets and the grand total.
+    expect(totalCells).toHaveLength(width <= 520 ? 4 : 5) // Phone totals share the key line; the header is screen-reader only.
     expect(totalCells.some(cell => cell.value === '168:00'), 'Total includes the widest weekly clock').toBe(true)
     expect(totalCells.every(cell => cell.text.width > 0 && cell.text.height > 0), `${width} ${theme}: Total text boxes have positive size`).toBe(true)
     expect(totalCells.filter(cell => cell.text.left < cell.content.left - 0.5 || cell.text.right > cell.content.right + 0.5),
@@ -181,9 +274,9 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
       `${width} ${theme}: every Total has at least 1 px slack`).toEqual([])
     // Measure actual text, including both lines of the header. Cell boxes can
     // fit perfectly while the adjacent time values still read as one number.
-    const textRows = await grid(page).locator('tr').evaluateAll(rows => rows.map(row => {
+    const textRows = await grid(page).locator('tr').evaluateAll((rows, phone) => rows.map(row => {
       const header = row.parentElement?.tagName === 'THEAD'
-      const cells = Array.from(row.querySelectorAll('.c-day, .c-total'))
+      const cells = Array.from(row.querySelectorAll(phone ? '.c-day' : '.c-day, .c-total'))
       const text = cells.map(cell => {
         const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT)
         const rects: DOMRect[] = []
@@ -199,12 +292,12 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
       })
       return { label: row.querySelector('th')?.textContent?.trim(), header, text,
         gaps: text.slice(1).map((next, i) => next.left - text[i].right) }
-    }))
+    }), width <= 520)
     expect(textRows).toHaveLength(5) // Header, all three tickets and per-day totals.
     for (const row of textRows) {
-      expect(row.text).toHaveLength(8)
+      expect(row.text).toHaveLength(width <= 520 ? 7 : 8)
       expect(row.text.every(text => text.visible), `${width} ${theme}: ${row.label} has positive text boxes`).toBe(true)
-      expect(row.gaps).toHaveLength(7)
+      expect(row.gaps).toHaveLength(width <= 520 ? 6 : 7)
       for (const [i, gap] of row.gaps.entries()) {
         expect(gap, `${width} ${theme}: ${row.label}, ${row.text[i].value} → ${row.text[i + 1].value}`).toBeGreaterThanOrEqual(6)
       }
@@ -229,23 +322,24 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     })
     if (width > 520) expect(unchangedWideLayout.fixedTotals, `${width} ${theme}: Total keeps its position, size and font`).toEqual(unchangedWideLayout.previousTotals)
     if (width >= 1024) expect(unchangedWideLayout.fixed, `${width} ${theme}: 0 px change from the pre-fix layout`).toEqual(unchangedWideLayout.previous)
-    measurements.push({ width, theme, dayFont, dayCells, textRows, totalCells, unchangedWideLayout })
+    measurements.push({ width, theme, headerEdge, dayFont, dayCells, phoneGrid, textRows, totalCells, unchangedWideLayout })
     const crowdedTickets = await grid(page).locator('tbody th').evaluateAll(cells => cells.flatMap(cell => {
       const chip = cell.querySelector('.ticket-chip')!, edge = chip.getBoundingClientRect().right
-      const range = document.createRange(); range.selectNodeContents(cell.nextElementSibling!)
+      const neighbour = window.matchMedia('(max-width: 520px)').matches ? cell.parentElement!.querySelector('.c-total')! : cell.nextElementSibling!
+      const range = document.createRange(); range.selectNodeContents(neighbour)
       const gap = range.getBoundingClientRect().left - edge
       return edge > cell.getBoundingClientRect().right || gap < 6 ? [{ ticket: chip.textContent, gap }] : []
     }))
-    expect(crowdedTickets, 'ticket names stay inside their column, clear of the first day').toEqual([])
+    expect(crowdedTickets, 'ticket names stay inside their column, clear of the next value').toEqual([])
     expect(await Promise.all(Object.values(controls).map(control => control.boundingBox())), 'week controls and rows move by 0 px').toEqual(boxes)
     const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
     expect(layout, `${width} ${theme}: week descendants fit without clipping or overlap`).toEqual([])
     const axe = await new AxeBuilder({ page }).include('.biz-page')
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
     expect(axe.violations, `${width} ${theme}: Hours WCAG A/AA`).toEqual([])
-    await page.screenshot({ path: info.outputPath(`AEON-1687-hours-${width}-${theme}.png`) })
+    await page.screenshot({ path: info.outputPath(`AEON-1699-hours-${width}-${theme}-fix3.png`) })
   }
-  await writeFile(info.outputPath('AEON-1687-hours-checks.md'), JSON.stringify(measurements, null, 2))
+  await writeFile(info.outputPath('AEON-1699-hours-checks.json'), JSON.stringify(measurements, null, 2))
   expect(errors).toEqual([])
 })
 
