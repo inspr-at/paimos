@@ -2,9 +2,9 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "round-2-reference-preparation",
+  "status": "fix2-ci-metadata-verified-reference-authority-blocked",
   "cuts": false,
-  "note": "Round 2 executes per-area authority and runtime counterexamples, and prepares only quality-clean references. All original cases and tiers remain; initial Tick reference review, AEON-1670 attachment identity, verified availability and CI materialization are round 3 work before cuts.",
+  "note": "Fix2 resolves the six CI metadata failures without removing or demoting any original case. The full browser gate still fails honestly for unapproved references and the approved product deferrals; no assertion, axe rule or image comparison was weakened or skipped. Tick reference approval, permanent attachment identity, availability and CI materialization remain coordinator-owned prerequisites.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -2985,7 +2985,7 @@
     }
   },
   "firstReferenceSet": {
-    "status": "pending-final-head-capture-and-Tick-review",
+    "status": "captured-pending-Tick-review",
     "checkpoints": 60,
     "states": [
       "projects",
@@ -3041,9 +3041,106 @@
       }
     ],
     "sourcePolicy": "Capture every bundle member from the final committed HEAD through remote-spec.sh; verify member SHA-256 and tar digest; record exact paths/digests in the ignored final status and ticket note. No PNGs committed.",
-    "runner": "Use LEAD remote-spec.sh. Its current implementation has only the mbp2606 browser lane; agm2 browser support is not exposed. Never bypass the entry point or host guard."
+    "runner": "Use LEAD remote-spec.sh. Its current implementation has only the mbp2606 browser lane; agm2 browser support is not exposed. Never bypass the entry point or host guard.",
+    "captureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+    "directory": "web/test-results/AEON-1674-refs-2e6c7938e",
+    "archiveSHA256": "be40ec98f08210083ec0cbe9eab355bb86954b1086eeae4dad32dcd80ab280b5",
+    "manifestSHA256": "224f8360903dfde1270beefcc3b66ba22ff065f33b8bbceee7afd0aefa748ac7",
+    "baselineBundleSHA256": "ea0d8ff721d5f59475e9432b65d475076ab00610a68405bf67c03275deaedb2a"
   },
   "unprovenStaticFiles": [
+    "scripts/test-tiers/test-tiers.test.mjs",
     "web/scripts/ci-web-shard.test.mjs"
-  ]
+  ],
+  "fix2": {
+    "review": "review-ci891-0306.out",
+    "reportedCIHead": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+    "implementationSHA": "89cd3ba54cbb12d009d657da96bf871ca13e0328",
+    "mergedMain": "ffe6d2dd4",
+    "resolved": [
+      "Append exactly the eight staged P02 journeys to the current slow-owner inventory, retaining every existing browser/Go case, launch policy and historical timing.",
+      "Retain measured costs in the three split owners and charge added cases explicitly at the measured owner mean; mark the additions as estimates.",
+      "Supply nightly timing for all eighteen visual owners and the comparison negative guard, explicitly identified as scheduling estimates.",
+      "Promote the eighty new visual checkpoints and two new browser infrastructure guards from GATED-FULL to ESSENTIAL through the canonical writer, preserving all existing native identities and original tiers.",
+      "Preserve the historical twenty-shard success proof on the frozen pre-prune catalogue; prove the enlarged current twenty-shard plan is refused while every current case fits the unchanged twenty-two-shard 860s target and 900s guard."
+    ],
+    "metadataRegression": {
+      "passed": 8,
+      "failed": 0,
+      "command": "node --test --test-name-pattern='AEON-1024|AEON-1667|serial tier weights|AEON-1325 nightly|AEON-1558 nightly|three-tier manifests allow' scripts/test-tiers/test-tiers.test.mjs",
+      "log": "web/test-results/AEON-1674-fix2/metadata-fixed.log"
+    },
+    "counterexample": {
+      "source": "The 25 affected metadata/assertion files from 2e6c7938, on an uncommitted scratch branch; all original files restored and scratch branch deleted. No negative commit.",
+      "intendedFailures": 6,
+      "unchangedSafetyTestsPassed": 2,
+      "log": "web/test-results/AEON-1674-fix2/metadata-2e6c7938.log"
+    },
+    "pruneLedger": {
+      "passed": 1,
+      "failed": 0,
+      "command": "node --test web/tests/test-prune-ledger.test.ts"
+    },
+    "referenceTransport": {
+      "passed": 1,
+      "failed": 0,
+      "command": "node --test web/tests/visual-baselines.test.ts"
+    },
+    "browserGuards": {
+      "runner": "LEAD remote-spec.sh (the entry point currently exposes mbp2606 Chromium, not a CI-equivalent Linux browser lane)",
+      "specs": [
+        "tests/ui-audit-rules.spec.ts",
+        "tests/visual-reference-guard.spec.ts"
+      ],
+      "passed": 11,
+      "failed": 0,
+      "reportedSeconds": 4.6,
+      "evidence": "web/test-results/AEON-1674-fix2-browser"
+    },
+    "unpinnedCheckpoint": {
+      "runner": "LEAD remote-spec.sh",
+      "checkpoint": "V-projects-390-light",
+      "exitCode": 1,
+      "error": "Unpinned visual reference: V-projects-390-light",
+      "qualityFindings": 0,
+      "evidence": "web/test-results/AEON-1674-fix2-unpinned",
+      "result": "Expected authority refusal, never counted as a passing image comparison."
+    },
+    "static": {
+      "runner": "LEAD ci-static-remote.sh",
+      "exitCode": 3,
+      "result": "INCOMPLETE",
+      "refusal": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job"
+    },
+    "otherReportedInitialFailures": {
+      "jobs": [
+        "120176439445",
+        "120176439398",
+        "120176439408",
+        "120176439469"
+      ],
+      "result": "Read each full shard log: no final non-visual FAIL browser outcome for the reported Lead panel, Agents split, performance and status-icon first-attempt failures. No unrelated test or product code changed."
+    },
+    "invariants": [
+      "All 1090 original P02 cases retain their original tiers.",
+      "No cuts, demotions, skipped tests, reference approvals, production changes, origin pushes, deployments, review gates or other model calls.",
+      "P01 frozen baseline and historical replay evidence remain unchanged.",
+      "No Go packages or Vitest implementation changed in this fix; no Go or Vitest rerun is claimed."
+    ],
+    "outsideWriteSet": [
+      {
+        "file": "scripts/ci/slow-owner-baseline.json",
+        "why": "Append the eight new P02 cases required by the strict current split inventory; all prior rows and policies remain."
+      },
+      {
+        "file": "scripts/test-tiers/test-tiers.test.mjs",
+        "why": "Keep the prior catalogue budget proof and add the current catalogue overflow proof without loosening any scheduling limit."
+      }
+    ],
+    "remaining": [
+      "Tick has not approved the initial reference bundle; AEON-1670 permanent attachment identity, availability verification and CI materialization are absent. The visual cases remain real failures until those authorities exist.",
+      "Keep Goals deferred to AEON-1621/AEON-1625, Session Chat/Hours/Capacity to AEON-1687, and Ticket workspace findings at AEON-1674 for coordinator product-owner routing, per the approved round-2 decisions.",
+      "The complete static suite remains unproven at this head because the approved entry point refused under the night protocol; no local heavy fallback or origin push is performed."
+    ]
+  }
 }
