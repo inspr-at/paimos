@@ -68,7 +68,9 @@ it('assistant partial approval links expose explanations to the shared tooltip',
   // Risk: native titles leave keyboard users without the partial-list warning.
   for (const partial of [true, false]) {
     const { html, id } = await renderApprovalViews(partial)
-    const links = [...html.matchAll(/<a\b[^>]*>/g)].map(match => match[0]).filter(tag => tag.includes(`href="/decision-desk?assistant=${id}"`))
+    const row = html.match(/<span class="assistant-approvals"[^>]*>([\s\S]*?)<\/span>/)?.[1] ?? ''
+    const next = html.match(/<section class="assistant-block"[^>]*><h3[^>]*>Next<\/h3>([\s\S]*?)<\/section>/)?.[1] ?? ''
+    const links = [row, next].flatMap(part => [...part.matchAll(/<a\b[^>]*>/g)].map(match => match[0]).filter(tag => tag.includes(`href="/decision-desk?assistant=${id}"`)))
     expect(links).toHaveLength(2) // The row link and the panel's Next link.
     for (const link of links) {
       if (partial) {
