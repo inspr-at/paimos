@@ -121,7 +121,7 @@ func checkOutwardActionLifecycle(t *testing.T) {
 	if w = f.do(f.personA, "", "POST", path, `{"decision":"approved"}`); w.Code != 400 {
 		t.Fatalf("missing reason: %d %s", w.Code, w.Body.String())
 	}
-	otherProject := insertNode(t, f.db.Admin, f.tenantA, "project", "OTHER-ACTION", "Other project")
+	otherProject := insertNode(t, f.db.Admin, f.tenantA, "project", "OTH-1", "Other project")
 	if w = f.do(f.personA, "", "POST", "/api/projects/"+otherProject+"/action-approvals/"+a.ID+"/decision", `{"decision":"approved","reason":"Wrong project on screen"}`); w.Code != 404 {
 		t.Fatalf("decision crossed its project identity: %d %s", w.Code, w.Body.String())
 	}
@@ -134,6 +134,9 @@ func checkOutwardActionLifecycle(t *testing.T) {
 	}
 	if err := authz.RequirePattern(authz.BindPool(tenant.WithPrincipal(ctx, lead), f.db.App), "POST /api/projects/{projectId}/action-approvals/{approvalId}/decision", authz.Scope{ProjectID: project}); err != nil {
 		t.Fatalf("project lead cannot reach action adapter: %v", err)
+	}
+	if err := authz.RequirePattern(authz.BindPool(tenant.WithPrincipal(ctx, lead), f.db.App), "POST /api/approvals/{approvalId}/decision", authz.Scope{}); !errors.Is(err, authz.ErrForbidden) {
+		t.Fatalf("existing general decision authorization changed: %v", err)
 	}
 	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenantA, func(tx pgx.Tx) error {
 		can, err := CanNotify(ctx, tx, lead, a.ID)
@@ -179,7 +182,7 @@ func checkOutwardActionLifecycle(t *testing.T) {
 	if w = f.do(f.personA, "", "POST", requestPath, actionJSON(t, in)); w.Code != 403 || !strings.Contains(w.Body.String(), "only an agent") {
 		t.Fatalf("person proposed action: %d %s", w.Code, w.Body.String())
 	}
-	foreignProject := insertNode(t, f.db.Admin, f.tenantB, "project", "FOREIGN", "Foreign")
+	foreignProject := insertNode(t, f.db.Admin, f.tenantB, "project", "FOREIGN-1", "Foreign")
 	if w = f.do(f.agentA, f.wide, "POST", "/api/projects/"+foreignProject+"/action-requests", actionJSON(t, in)); w.Code != 404 {
 		t.Fatalf("foreign tenant request: %d %s", w.Code, w.Body.String())
 	}
