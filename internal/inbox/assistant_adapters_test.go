@@ -389,7 +389,7 @@ func testAssistantAdapterValidationWithoutWriteFences(t *testing.T) {
 			wantMessages := 0
 			if tc.status >= 400 {
 				failure := mustJSON[map[string]any](t, response.Body.Bytes())
-				if failure["error"] != tc.state {
+				if failure["code"] != tc.state {
 					t.Fatalf("test-send failed for the wrong reason: %s", response.Body)
 				}
 			} else {
