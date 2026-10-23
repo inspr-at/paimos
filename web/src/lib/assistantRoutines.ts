@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { Kind, WorkNode } from './api'
+import { getRoutineAgentResult, getRoutineRun, listRoutineRuns, type Kind, type WorkNode } from './api'
 import { assistantRequest, type AssistantRoutine, type AssistantFacts } from './assistants'
 import { assistantCopy } from './assistantsCopy'
 import { isKnowledgeType } from './knowledge'
@@ -13,7 +13,6 @@ export interface OwnedAssistantRoutine {
   lastActivity?: AssistantFacts['lastActivity']
 }
 interface AgentOwner { owner_principal_id: string }
-interface AgentResult { run_id: string; status: 'succeeded' | 'failed'; node_id?: string }
 
 // D exposes an owner read per visible definition, not an owner-filtered list.
 // Bound discovery to two 100-row UUID pages, six reads at a time. History is
@@ -46,21 +45,20 @@ export async function readAssistantRoutines(owners: Set<string>, projectKey: (id
     while (cursor < Math.min(rows.length, 20)) {
       const row = rows[cursor++]!
       try {
-        const page = checkedRuns(await assistantRequest<unknown>(`/recurrences/${encodeURIComponent(row.wire.id)}/runs?limit=1`, 'GET', undefined, signal))
-        if (page.items.length > 1) throw new Error(words.invalidResponse)
+        const page = checkedRuns(await listRoutineRuns(row.wire.id, undefined, signal))
+        if (page.items.length > 20) throw new Error(words.invalidResponse)
         const latest = page.items[0]
         if (!latest) { row.view.lastState = words.noRoutineRuns; continue }
         if (latest.owner_principal_id !== row.owner) { row.view.lastState = words.otherRoutineOwner; continue }
         const runId = latest.id
-        const base = `/recurrences/${encodeURIComponent(row.wire.id)}/runs/${encodeURIComponent(runId)}`
-        const detail = checkedDetail(await assistantRequest<unknown>(base, 'GET', undefined, signal), runId)
+        const detail = checkedDetail(await getRoutineRun(row.wire.id, runId, signal), runId)
         // Grants can change owners; frozen historical work must never be
         // attributed to the routine's current assistant without this check.
         if (detail.run.owner_principal_id !== row.owner) continue
         row.view.lastState = runTitle(detail.run, now)
         row.activity = { at: detail.run.created_at, kind: 'runs', text: words.routineRun(row.view.name, row.view.lastState), href: `/agents/routines?routine=${encodeURIComponent(row.wire.id)}&run=${encodeURIComponent(runId)}` }
         if (['running', 'done', 'failed'].includes(detail.run.state)) row.lastActivity = { at: detail.run.updated_at, text: words.routineRun(row.view.name, row.view.lastState) }
-        const result = await assistantRequest<AgentResult | null>(`${base}/agent-result`, 'GET', undefined, signal)
+        const result = await getRoutineAgentResult(row.wire.id, runId, signal)
         if (!result?.node_id || result.run_id !== runId || result.status !== 'succeeded') continue
         const node = await assistantRequest<WorkNode>(`/nodes/${encodeURIComponent(result.node_id)}`, 'GET', undefined, signal)
         kinds ??= assistantRequest<{ items: Kind[] }>('/kinds', 'GET', undefined, signal)
