@@ -112,7 +112,12 @@ test('AEON-1697 manual Expert Live proof from harness records', async ({ browser
         await expect(moment.locator('.idle')).not.toContainText('Builder')
         const momentText = await page.getByTestId('flow-moment-head').textContent()
         expect(momentText).toContain(width === 1440 ? 'Builder on “Being built · round 2”' : 'Builder: „Wird gebaut · Runde 2“')
-        await expect(host.locator('[data-step]')).toHaveCount(21)
+        // A phone can combine the two adjacent tiny historical attempts into
+        // the existing +N cluster. All 21 steps must still be represented.
+        const clusters = await host.locator('[data-cluster]').evaluateAll(groups => groups.map(group => Number(group.querySelector('.ln-clut')!.textContent!.slice(1))))
+        const barCount = await host.locator('[data-step]').count()
+        expect(barCount + clusters.reduce((sum, count) => sum + count, 0)).toBe(21)
+        if (width === 1440) { expect(barCount).toBe(21); expect(clusters).toEqual([]) }
         const geometry = await host.evaluate(host => {
           const box = (element: Element) => { const r = element.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height } }
           const lane = box(host.querySelector('.ln-lane[data-lane="build"]')!)
@@ -163,7 +168,7 @@ test('AEON-1697 manual Expert Live proof from harness records', async ({ browser
         expect(avatar.x).toBeCloseTo(avatar.playheadX, 4)
         const rowYs = [...new Set(bars.map(bar => Math.round(bar.y * 2) / 2))].sort((a, b) => a - b)
         const avatarRow = rowYs.indexOf(Math.round(bars.find(bar => bar.key === currentKey)!.y * 2) / 2) + 1
-        const record = { width, theme, steps: bars.length, rows: geometry.rows, laneHeight: lane.h, openSteps: answer.steps.filter(step => step.ended_at == null).length, momentText, avatarRow, avatar, currentKey, overlappingBars: overlaps.length, sameRowTimeOverlaps: timeOverlaps.length, labels, labelsOutsideOwnBar: outside.length, geometry }
+        const record = { width, theme, steps: answer.steps.length, bars: bars.length, clusters, rows: geometry.rows, laneHeight: lane.h, openSteps: answer.steps.filter(step => step.ended_at == null).length, momentText, avatarRow, avatar, currentKey, overlappingBars: overlaps.length, sameRowTimeOverlaps: timeOverlaps.length, labels, labelsOutsideOwnBar: outside.length, geometry }
         measured.push(record)
         const output = info.outputPath('aeon-1697/checks-r2.json')
         writeFileSync(output, JSON.stringify(measured, null, 2))
