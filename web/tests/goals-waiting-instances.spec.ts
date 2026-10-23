@@ -300,6 +300,20 @@ test('connect opens a top-level confirmation and a single-use callback clears th
   await expect(page.getByRole('alert')).toContainText('Return and connect again')
   expect(mock.reads.cookie).toBe(false)
   expect(exchanges).toBe(1)
+  // Malformed credential bodies must never quote any bearer in the UI error.
+  await page.route(`${SIBLING}/api/decision-desk/connections/exchange`, route => {
+    const headers = { 'access-control-allow-origin': route.request().headers().origin, 'access-control-allow-methods': 'POST', 'access-control-allow-headers': 'Content-Type' }
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers })
+    return route.fulfill({ headers, contentType: 'application/json', body: `{"token":"${token}",broken` })
+  })
+  const failure = await page.evaluate(async ({ origin, code, state }) => {
+    // @ts-expect-error Vite serves the actual credential response boundary.
+    const { exchangeInstance } = await import('/src/lib/instanceConnect.ts')
+    try { await exchangeInstance({ tag: 'pma', origin }, code, state, 'v'.repeat(43)); return '' }
+    catch (error) { return (error as Error).message }
+  }, { origin: SIBLING, code, state })
+  expect(failure).toBe('Connection could not be completed.')
+  expect(failure).not.toContain(token)
 })
 
 for (const width of [1440, 1024, 390] as const) {
