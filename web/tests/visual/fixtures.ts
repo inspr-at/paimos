@@ -160,6 +160,10 @@ export const sessionChatUnavailable: VisualSetup = async (page, _profile, theme)
 
 export const decisionDesk: VisualSetup = async (page, profile, theme) => {
   await work(page, theme)
+  // After mockWork, so QuietStream is installed. Held shut: no onopen, no catch-up read, no live event during the shot.
+  await page.addInitScript(() => {
+    ;(window as unknown as { fixtureQuietStreams?: { holdOpen(): void } }).fixtureQuietStreams?.holdOpen()
+  })
   const world = await mockDecisionDesk(page, { theme, long: true, phone: true })
   await visualChrome(page, fixtures(), NOW, { agents: false })
   world.projectionTime = NOW
@@ -168,7 +172,11 @@ export const decisionDesk: VisualSetup = async (page, profile, theme) => {
   world.questions[0]!.input.context = `${LONG}.\n\n${LONG}.`
   for (const question of world.questions) { question.created_at = new Date(NOW - 120_000).toISOString(); question.updated_at = question.created_at }
   await page.goto('/decision-desk')
+  // A row can appear before the refresh has finished hydrating its sources.
+  // The glass memo must capture the settled desk behind it, not that indicator.
+  await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
   await page.getByTestId('desk-row-q:question-1').click()
+  await expect(page.locator('.sheet-shape path')).toHaveAttribute('d', /^M/)
   await expect(page.getByTestId('stamp-doctrine')).toBeDisabled()
   await expect(page.getByTestId('desk-choices')).toBeVisible()
   await page.getByTestId('stamp-doctrine').scrollIntoViewIfNeeded()
@@ -184,6 +192,17 @@ export const decisionDesk: VisualSetup = async (page, profile, theme) => {
     await expect(page.getByTestId('stamp-words-doctrine')).toHaveText('Not available: the agent named no rule.')
     await expect(page.locator('.tooltip')).toHaveCount(0)
   } else await expect(page.locator('.tooltip')).toHaveText(reason)
+  // The shot waits out the ≥ 400 ms "Checking now…" hold. The frozen clock and reduced motion then keep the line still.
+  const sync = page.getByTestId('desk-sync')
+  const syncWords = sync.locator('.sync-words')
+  await expect(sync).toHaveAttribute('data-state', /^(just|normal)$/)
+  await expect(syncWords).not.toHaveText(/Checking now|Checking again|updating/)
+  const text = await syncWords.innerText()
+  const now = await page.evaluate(() => Date.now())
+  expect(await page.evaluate(() => Date.now()), 'frozen clock').toBe(now)
+  expect(await syncWords.innerText(), 'sync line text is fixed while the clock is frozen').toBe(text)
+  const moving = await sync.locator('.sync-mark, .sync-icon').evaluateAll(elements => elements.reduce((count, element) => count + element.getAnimations().length, 0))
+  expect(moving, 'reduced motion: the dot and the refresh icon are at rest').toBe(0)
 }
 
 export const access: VisualSetup = async (page, _profile, theme) => {

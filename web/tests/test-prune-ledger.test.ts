@@ -36,7 +36,7 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   const summary = checkRepository()
   assert.deepEqual(summary, { browserCases: 5318, specs: 378, core: 29, protectedRisks: 647,
     driftCases: 455, candidateGroups: 31, candidateCases: 155, visualCases: 80,
-    visualApproval: 'awaiting-set-3', phase: json('scripts/test-prune/risk-ledger.json').phase, cuts: false })
+    visualApproval: 'approved', phase: json('scripts/test-prune/risk-ledger.json').phase, cuts: false })
   const original = {
     baseline,
     ledger: json('scripts/test-prune/risk-ledger.json'),
@@ -177,6 +177,8 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   // and deferred Goals/quality fixes must never block that cut.
   const areaCut = structuredClone(original)
   areaCut.visual.comparison.mode = 'blocking'
+  for (const state of areaCut.visual.states) if (state.id !== 'agents')
+    for (const checkpoint of state.checkpoints) checkpoint.reference = { attachmentMember: null, sha256: null }
   const areaRisk = areaCut.ledger.risks.find((row: { source: { file: string } }) => row.source.file === 'tests/agents-phone-rows.spec.ts')
   assert.deepEqual(areaRisk.destinations, ['visual:agents'])
   const removedKey = areaRisk.currentKeys[0]
@@ -222,8 +224,21 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   assert.throws(() => validateLedger({ ...frozen, sourceHash: () => '0'.repeat(64), p01: true }), /Frozen launch-policy changed/)
   frozen.currentWeb.defaultNewTier = 'ESSENTIAL'
   assert.throws(() => validateLedger({ ...frozen, sourceHash: frozenHash, p01: true }), /P01 changed catalogue selection\/tagging\/timing policy/)
+  const reportOnly = structuredClone(original.visual)
+  reportOnly.comparison.mode = 'report-only'
+  for (const state of reportOnly.states) for (const checkpoint of state.checkpoints)
+    checkpoint.reference = { attachmentMember: null, sha256: null }
+  assert.throws(() => validateVisual(reportOnly, { cuts: true, stateIds: ['goals'] }), /Protected visual cuts stay closed/)
+  assert.throws(() => validateVisual(reportOnly, { cuts: true, checkpointIds: ['V-projects-390-light'] }), /Protected visual cuts stay closed/)
   assert.throws(() => validateVisual(original.visual, { cuts: true, stateIds: ['goals'] }), /Protected visual cuts stay closed/)
   assert.throws(() => validateVisual(original.visual, { cuts: true, checkpointIds: ['V-projects-390-light'] }), /Protected visual cuts stay closed/)
+  // Preserve the per-checkpoint approval and deferral proof independently of
+  // the live report-only switch while cross-machine renderer proof is pending.
+  const approvedBlocking = structuredClone(original.visual)
+  approvedBlocking.comparison.mode = 'blocking'
+  assert.throws(() => validateVisual(approvedBlocking, { cuts: true, stateIds: ['goals'] }),
+    { message: 'Deferred visual reference: V-goals-390-light (AEON-1621, AEON-1625)' })
+  assert.equal(validateVisual(approvedBlocking, { cuts: true, checkpointIds: ['V-projects-390-light'] }), 80)
   const missingCheckpoint = structuredClone(original.visual)
   missingCheckpoint.states[0].checkpoints.pop()
   assert.throws(() => validateVisual(missingCheckpoint), /Missing\/duplicate visual checkpoint/)

@@ -2,18 +2,31 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { dirname, relative } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { expect, type Browser, type Page, type TestInfo } from '@playwright/test'
+import { test as base, expect, type Browser, type Page, type TestInfo } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { readBaselineBundle, referenceGate } from '../../../scripts/test-prune/visual-baselines.mjs'
 import { visualReportOnly, visualCheckResult } from '../../../scripts/test-prune/check.mjs'
-import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, rendererIdentity, verifyFontAssets, sampleRenderedFont } from '../../../scripts/test-prune/visual-renderer.mjs'
+import { assertVisualContainer, assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, captureVisual, rendererIdentity, verifyFontAssets, installRendererFonts, sampleRenderedFont } from '../../../scripts/test-prune/visual-renderer.mjs'
 import { domAudit } from '../ui-audit-rules'
+import { visualProbe } from '../../../scripts/test-prune/visual-probe.mjs'
 
-const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8'))
-// The common browser setup now provisions P02's renderer for every spec.
-export { test } from '@playwright/test'
+const manifest = captureVisual(JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8')))
+// Only tests/visual imports this fixture. Fontconfig belongs to this browser's
+// child environment, never the worker, dev server or another spec's browser.
+export const test = base.extend({
+  launchOptions: [async ({ launchOptions }, use, workerInfo) => {
+    // This infrastructure refusal stays outside report-only result handling.
+    // Native Linux/macOS browsers must never diff against CI container pixels.
+    assertVisualContainer(manifest)
+    const probe = visualProbe(manifest)
+    const fontconfig = installRendererFonts(manifest, join(workerInfo.project.outputDir, `visual-fontconfig-${workerInfo.workerIndex}`))
+    const args = [...manifest.renderer.browser.args, ...(probe?.args ?? [])]
+    await use({ ...launchOptions, args, env: { ...process.env, ...launchOptions.env,
+      FONTCONFIG_FILE: fontconfig, XDG_CACHE_HOME: join(dirname(fontconfig), 'cache') } })
+  }, { scope: 'worker' }],
+})
 const captureSHA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: fileURLToPath(new URL('../../../', import.meta.url)), encoding: 'utf8' }).trim()
 const sourceSpec = (info: TestInfo) => relative(fileURLToPath(new URL('../../', import.meta.url)), info.file).replaceAll('\\', '/')
 export type Profile = 'phone' | 'tablet' | 'desktop'
@@ -37,12 +50,14 @@ export function visualCases(id: string): Checkpoint[] {
 
 export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoint, setup: VisualSetup, { visual = manifest } = {}) {
   if (captureEnabled(visual)) return runVisual(browser, info, checkpoint, setup, visual)
+  const deferred = referenceGate(visual, checkpoint.id).mode === 'deferred'
+  const resultPolicy = deferred ? { ...visual, comparison: { ...visual.comparison, mode: 'report-only' } } : visual
   // A guard can exercise the same ID repeatedly. Never carry an earlier
   // quality/comparison result into a later failed setup in that test.
   writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify({ id: checkpoint.id, sourceSpec: sourceSpec(info), captureSHA,
     requirementsRun: false, baselineCompared: false, pngSHA256: null,
     quality: { status: 'pending' }, comparison: { status: 'not run' } }))
-  const result = await visualCheckResult(visual, () => runVisual(browser, info, checkpoint, setup, visual))
+  const result = await visualCheckResult(resultPolicy, () => runVisual(browser, info, checkpoint, setup, visual))
   if (result.status === 'failed') {
     const path = info.outputPath(`${checkpoint.id}.md`)
     const previous = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}
@@ -58,8 +73,10 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
 
 async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoint, setup: VisualSetup, visual: typeof manifest) {
     const capture = captureEnabled(visual)
-    const reportOnly = visualReportOnly(visual) && !capture
+    const probe = visualProbe(visual)
+    if (probe && !probe.checkpoints.includes(checkpoint.id)) throw new Error(`Checkpoint is outside the raster probe: ${checkpoint.id}`)
     const gate = await reportReference(info, checkpoint, visual, capture)
+    const reportOnly = !capture && (visualReportOnly(visual) || gate.mode === 'deferred')
     // Report-only checks all states. Explicit deferrals apply again when the
     // reviewed set-3 comparison policy becomes blocking.
     if (!reportOnly && (gate.mode === 'deferred' || gate.status === 'needs-re-capture') && !(capture && visual.capture.states.includes(gate.state))) {
@@ -68,8 +85,13 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
       return
     }
     if (capture && !visual.capture.states.includes(gate.state)) throw new Error(`State is outside the manual capture set: ${gate.state}`)
-    const renderer = rendererIdentity(visual, browser.version(), { browserOptions: info.project.use })
-    if (capture || gate.mode === 'compare') assertRenderer(renderer, visual.renderer, { capture })
+    const browserOptions = { ...info.project.use, launchOptions: { ...info.project.use.launchOptions,
+      args: [...visual.renderer.browser.args, ...(probe?.args ?? [])] } }
+    const expectedRenderer = probe ? { ...visual.renderer, browser: { ...visual.renderer.browser,
+      args: [...visual.renderer.browser.args, ...probe.args] } } : visual.renderer
+    const renderer = rendererIdentity(visual, browser.version(), { browserOptions,
+      fontconfigFile: join(info.project.outputDir, `visual-fontconfig-${info.workerIndex}`, 'fonts.conf') })
+    assertRenderer(renderer, expectedRenderer, { capture })
     const viewport = visual.profiles[checkpoint.profile]
     const context = await browser.newContext({ viewport, deviceScaleFactor: visual.renderer.deviceScaleFactor,
       colorScheme: checkpoint.theme, reducedMotion: visual.renderer.reducedMotion,
@@ -110,7 +132,9 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
       const fonts = await fontEvidence(page, gate.state)
       await sampleClock('before-capture')
       console.log(`${checkpoint.id}: font guard ok; computed body: ${fonts.body.computedFamily}; resolved: ${fonts.body.renderedFamilies.join(', ')}; profile faces loaded: ${fonts.profile.length}`)
-      const png = capture || reportOnly || gate.mode === 'compare' ? await page.screenshot({ path: info.outputPath(`${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }) : null
+      const settled = capture || reportOnly || gate.mode === 'compare' ? await settleVisualCapture(page) : null
+      const png = settled?.png ?? null
+      if (png) writeFileSync(info.outputPath(`${checkpoint.id}.png`), png)
       const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
       const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
       const violations = axe.violations.map(row => ({ id: row.id, impact: row.impact, nodes: row.nodes.map(node => node.target) }))
@@ -121,13 +145,16 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
       const unexpectedErrors = errors.filter(error => !expectedReads.some(row =>
         error.startsWith(`Failed to load resource: the server responded with a status of ${row.status} `) && error.endsWith(row.path)))
       const report = { id: checkpoint.id, sourceSpec: sourceSpec(info), owner: checkpoint.owner, fixture: checkpoint.fixture,
-        captureSHA, pngSHA256: png ? createHash('sha256').update(png).digest('hex') : null, baselineCompared: false,
+        captureSHA, captureRun: process.env.GITHUB_RUN_ID ?? null,
+        pngSHA256: png ? createHash('sha256').update(png).digest('hex') : null, baselineCompared: false,
         reference: gate, viewport, theme: checkpoint.theme, renderer, fonts, clock, requirementsRun: true,
-        quality: { status: 'pending' }, comparison: { status: 'not run' },
-        captureMode: capture, layout, axe: violations, console: unexpectedErrors, responses: unexpectedResponses, expectedReads }
+        quality: { status: 'pending' }, comparison: { status: gate.mode === 'deferred' && !visualReportOnly(visual) ? 'not run: deferred reference' : 'not run' },
+        captureMode: capture && !probe, ...(probe ? { diagnosticProbe: { setting: probe.id, args: renderer.browser.args,
+          repeatIndex: info.repeatEachIndex } } : {}), layout, axe: violations, console: unexpectedErrors, responses: unexpectedResponses, expectedReads }
+      Object.assign(report, { captureSettling: settled?.evidence ?? null })
       const saveReport = () => writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify(report, null, 2))
       saveReport()
-      report.quality = await visualCheckResult(capture ? { ...visual, comparison: { ...visual.comparison, mode: 'blocking' } } : visual, async () => {
+      report.quality = await visualCheckResult({ ...visual, comparison: { ...visual.comparison, mode: reportOnly ? 'report-only' : 'blocking' } }, async () => {
         expect(expectedReads, 'declared fixture refusal must be observed exactly once').toEqual(expectedResponses.map(({ path, status }: { path: string; status: number }) => ({ path, status })))
         expect(unexpectedErrors, 'unexpected console/page failure').toEqual([])
         expect(unexpectedResponses, 'unexpected failed HTTP reads').toEqual([])
@@ -136,8 +163,9 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
         await sampleClock('before-comparison')
         assertClockEvidence(clock, policy)
       })
-      if (!capture && (reportOnly || gate.mode === 'compare')) {
-        await compareVisualReference(page, info, checkpoint, { renderer, visual })
+      if (!capture && (visualReportOnly(visual) || gate.mode === 'compare')) {
+        if (!png) throw new Error(`Visual comparison has no settled capture: ${checkpoint.id}`)
+        await compareVisualReference(page, info, checkpoint, { renderer, visual, png })
         report.comparison = JSON.parse(readFileSync(info.outputPath(`${checkpoint.id}-comparison.md`), 'utf8'))
         report.baselineCompared = ['matched', 'different'].includes(report.comparison.status)
       }
@@ -153,6 +181,48 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
     } finally { await context.close() }
 }
 
+// A single screenshot can sample the rounded glass/outline while Chromium is
+// repainting after focus, scrolling or an observer-driven layout. Finish finite
+// transitions, then require three consecutive byte-identical whole viewports.
+// This is bounded readiness, with no pixel tolerance, crop, mask or reference.
+// The separate same-commit captures still have to agree before any pin is usable.
+export async function settleVisualCapture(page: Page) {
+  const paint = await page.evaluate(async () => {
+    const animations = document.getAnimations()
+    if (animations.length > 512) throw new Error('Visual animation readiness exceeds its bound')
+    const finite = animations.filter(animation => {
+      const timing = animation.effect?.getComputedTiming()
+      return animation.playState === 'running' && timing && Number.isFinite(timing.endTime)
+    })
+    for (const animation of finite) {
+      const timing = animation.effect!.getComputedTiming()
+      if (typeof timing.endTime !== 'number' || typeof animation.currentTime !== 'number' || animation.playbackRate <= 0 ||
+        (timing.endTime - animation.currentTime) / animation.playbackRate > 1000)
+        throw new Error('Visual finite transition is not ready within its 1000ms bound')
+    }
+    await Promise.all(finite.map(animation => animation.finished.catch(() => {})))
+    const selectors = ['.rules-dialog .card', '.desk', '.desk-btn', '.sheet-shape path', '.section-link[aria-current="page"]']
+    const surfaces = selectors.flatMap(selector => [...document.querySelectorAll<HTMLElement>(selector)].map(element => {
+      const box = element.getBoundingClientRect(), style = getComputedStyle(element)
+      return { selector, x: box.x, y: box.y, width: box.width, height: box.height, radius: style.borderRadius,
+        focused: element.matches(':focus'), focusVisible: element.matches(':focus-visible'),
+        scrollbar: style.scrollbarColor, path: element.getAttribute('d') }
+    }))
+    return { finiteTransitions: finite.length, surfaces }
+  })
+  let previous: Buffer | undefined, consecutive = 0
+  const samples: string[] = []
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+    const png = await page.screenshot({ animations: 'disabled', caret: 'hide' })
+    samples.push(createHash('sha256').update(png).digest('hex'))
+    consecutive = previous?.equals(png) ? consecutive + 1 : 1
+    if (consecutive === 3) return { png, evidence: { ...paint, samples, consecutive } }
+    previous = png
+  }
+  throw new Error(`Visual viewport did not settle to three byte-identical samples within eight captures: ${samples.join(', ')}`)
+}
+
 async function reportReference(info: TestInfo, checkpoint: { id: string }, visual = manifest, capture = false) {
   const gate = referenceGate(visual, checkpoint.id)
   if (gate.mode === 'report-only') {
@@ -164,7 +234,7 @@ async function reportReference(info: TestInfo, checkpoint: { id: string }, visua
   }
   if (!['compare', 'report-only'].includes(gate.mode)) {
     const pending = capture && visual.capture.states.includes(gate.state)
-    const message = gate.mode === 'deferred' ? `${checkpoint.id}: ${gate.reason}; ${capture && visual.capture.states.includes(gate.state) ? 'manual candidate capture requires quality checks; comparison remains deferred.' : 'product requirement checks not run.'}` :
+    const message = gate.mode === 'deferred' ? `${checkpoint.id}: ${gate.reason}; ${!capture ? 'report-only quality checks required; no blocking reference.' : visual.capture.states.includes(gate.state) ? 'manual candidate capture requires quality checks; comparison remains deferred.' : 'product requirement checks not run.'}` :
       `${checkpoint.id}: awaiting reference (${gate.status}); ${gate.status === 'needs-re-capture' ? pending ? 'manual candidate capture requires quality checks; comparison remains awaiting reference' : 'report only; product requirement checks not run' : 'quality checks required'}. ${gate.reason}`
     info.annotations.push({ type: gate.mode === 'deferred' ? 'deferred' : 'awaiting reference', description: message })
     await info.attach(`${checkpoint.id}-awaiting-reference`, { body: message, contentType: 'text/plain' })
@@ -176,14 +246,15 @@ async function reportReference(info: TestInfo, checkpoint: { id: string }, visua
 // Kept shared with the real checkpoint runner so negative controls exercise
 // the same pinned/awaiting dispatch and pixel comparator as product states.
 export async function compareVisualReference(page: Page, info: TestInfo, checkpoint: { id: string; reference: { attachmentMember: string } },
-  { visual = manifest, baselineFile = process.env.AEON_VISUAL_BASELINE_FILE, timeout, renderer = rendererIdentity(visual, page.context().browser()!.version(), { browserOptions: info.project.use }) }:
-    { visual?: typeof manifest; baselineFile?: string; timeout?: number; renderer?: Record<string, unknown> } = {}) {
+  { visual = manifest, baselineFile = process.env.AEON_VISUAL_BASELINE_FILE, png, renderer = rendererIdentity(visual, page.context().browser()!.version(), { browserOptions: info.project.use,
+    fontconfigFile: join(info.project.outputDir, `visual-fontconfig-${info.workerIndex}`, 'fonts.conf') }) }:
+    { visual?: typeof manifest; baselineFile?: string; png?: Buffer; renderer?: Record<string, unknown> } = {}) {
   const gate = referenceGate(visual, checkpoint.id)
   if (!['compare', 'report-only'].includes(gate.mode)) {
     await reportReference(info, checkpoint, visual)
     return false
   }
-  const comparison: { id: string; status: string; error?: string; rendererMismatch?: string; diffs: string[] } = {
+  const comparison: { id: string; status: string; pngSHA256?: string; error?: string; rendererMismatch?: string; diffs: string[] } = {
     id: checkpoint.id, status: 'unavailable', diffs: [],
   }
   const result = await visualCheckResult(visual, async () => {
@@ -195,9 +266,14 @@ export async function compareVisualReference(page: Page, info: TestInfo, checkpo
     } else assertRenderer(renderer, visual.renderer)
     await fontEvidence(page, gate.state)
     materializeReference(info, checkpoint, { visual, baselineFile })
+    // Compare exactly the viewport produced by the capture path. A second
+    // screenshot after quality checks can choose another rounded-edge raster,
+    // even though the original three samples were byte-identical.
+    const actual = png ?? (await settleVisualCapture(page)).png
+    comparison.pngSHA256 = createHash('sha256').update(actual).digest('hex')
     comparison.status = 'different'
-    await expect(page).toHaveScreenshot(`${checkpoint.id}.png`, { fullPage: false, animations: 'disabled', caret: 'hide',
-      threshold: visual.comparison.threshold, maxDiffPixels: visual.comparison.maxDiffPixels, timeout })
+    expect(actual).toMatchSnapshot(`${checkpoint.id}.png`, {
+      threshold: visual.comparison.threshold, maxDiffPixels: visual.comparison.maxDiffPixels })
     comparison.status = 'matched'
   })
   if (result.status === 'failed') comparison.error = result.error

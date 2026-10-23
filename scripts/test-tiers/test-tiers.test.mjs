@@ -1234,7 +1234,7 @@ test('AEON-1334 the full gate runs the recorded drift cases, not their files, an
   }
   assert.ok(siblings>500,`unrecorded nightly siblings ${siblings}`)
   const policy=loadWebPolicy()
-  const browser=rows=>rows.filter(row=>row.kind==='browser')
+  const browser=rows=>rows.filter(row=>row.kind==='browser'&&row.executionJob!=='visual-comparison')
   const established=webShardPlan(browser(replayRows.filter(row=>row.tier==='ESSENTIAL'||row.tier==='GATED-FULL')),policy,{mode:'full'})
   const plan=webShardPlan(browser(full),policy,{mode:'full'})
   assert.deepEqual(plan.shards,fullWebShards)
@@ -1248,7 +1248,7 @@ test('AEON-1334 the full gate runs the recorded drift cases, not their files, an
 
 test('AEON-1451 the full web layout and the essential gate stay inside the shard budget',()=>{
   const policy=loadWebPolicy()
-  const browser=rows=>rows.filter(row=>row.kind==='browser')
+  const browser=rows=>rows.filter(row=>row.kind==='browser'&&row.executionJob!=='visual-comparison')
   const full=webShardPlan(browser(fullGateTests(replayRows)),policy,{mode:'full'})
   assert.equal(full.timeoutSeconds,1200)
   assert.equal(full.budgetSeconds,900)
@@ -1294,7 +1294,7 @@ test('AEON-1453 sixteen full web shards stay over the budget',()=>{
   // worst projection, and retain every case within budget at the full gate,
   // including main's Goals, group-figures and seven desk-tab browser cases.
   const policy=loadWebPolicy()
-  const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
+  const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser'&&row.executionJob!=='visual-comparison')
   const sixteen=webShardPlan(gate,policy,{mode:'full',maximum:16})
   assert.equal(sixteen.shards.length,16)
   assert.equal(sixteen.fitsBudget,false)
@@ -1317,7 +1317,7 @@ test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 860s and eight
   // timing, the original 860s target and the 900s guard. Live projected
   // seconds remain unpinned (AEON-1483).
   const policy=loadWebPolicy()
-  const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
+  const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser'&&row.executionJob!=='visual-comparison')
   const matrix='tests/account-use-matrix.spec.ts'
   const harness='tests/aeon-1502-approve-harness.spec.ts'
   const matrixCase='the pairing review never claims nowhere from a partial read of contexts'
@@ -1353,7 +1353,9 @@ test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 860s and eight
   // catalogue. Retain that recorded population and its complete launch policy;
   // the live gate above still has to keep every case below the same 860s target.
   const frozen=JSON.parse(readFileSync(new URL('../test-prune/baseline.json',import.meta.url)))
-  const historicalGate=fullGateTests(frozen.catalogue).filter(row=>row.kind==='browser')
+  // These frozen counterexamples predate the container split. Retain their
+  // combined population; only the live gate routes visuals to their own job.
+  const historicalGate=fullGateTests(frozen.catalogue).filter(row=>row.kind==='browser').map(({executionJob,...row})=>row)
   const historicalFull=assertFullGate(historicalGate,frozen.launchPolicy)
   const weights=tierWeights(frozen.launchPolicy,historicalGate)
   const workSeconds=[...new Set(historicalGate.map(row=>row.file))].reduce((sum,file)=>sum+weights[file],0)
@@ -1388,7 +1390,7 @@ test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 860s and eight
     if(!target) { target={...group,specs:[]}; stagedPolicy.groups.push(target) }
     target.specs.push(...specs)
   }
-  const stagedGate=fullGateTests([...frozen.catalogue,...additions]).filter(row=>row.kind==='browser')
+  const stagedGate=fullGateTests([...frozen.catalogue,...additions]).filter(row=>row.kind==='browser').map(({executionJob,...row})=>row)
   const enlarged=webShardPlan(stagedGate,stagedPolicy,{mode:'full',maximum:20})
   assert.equal(enlarged.shards.length,20)
   assert.equal(enlarged.fitsBudget,false)
@@ -1553,7 +1555,7 @@ const shardBudgetFixture=(entries,maximum)=>{
 
 test('AEON-1483 live web shards keep budget, once-only assignment and determinism',()=>{
   const policy=loadWebPolicy()
-  const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
+  const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser'&&row.executionJob!=='visual-comparison')
   const full=assertWebShardInvariants(gate,policy,{mode:'full'})
   assert.deepEqual(full.shards,fullWebShards)
   assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
@@ -2532,7 +2534,7 @@ test('serial tier weights rebalance the full browser shards without changing ful
     {event:'merge_group',paths:['web/tests/clip-tip.spec.ts'],webImports:graph},
     {event:'push'}, {event:'workflow_dispatch'}, {event:'schedule'},
   ]) {
-    const selected=select(rows,options).tests.filter(row=>row.kind==='browser')
+    const selected=select(rows,options).tests.filter(row=>row.kind==='browser'&&row.executionJob!=='visual-comparison')
     const weights=tierWeights(manifest,selected)
     const count=['schedule','workflow_dispatch'].includes(options.event)?nightlyWebShardPlan(selected,manifest).shards.length:fullWebShardCount
     const bins=Array.from({length:count},(_,i)=>shard(selected,i+1,count,weights))
@@ -2555,7 +2557,12 @@ test('AEON-1325 nightly shards retain every browser case and require every plann
   assert.match(setup,/id: nightly-browser-plan\n        run: node scripts\/test-tiers\/cli.mjs nightly-web-plan/)
   assert.match(job,/run web --all --shard \$\{\{ matrix.shard \}\}\/\$\{\{ strategy.job-total \}\}/)
   const rows=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests
-  const selected=select(rows,{event:'schedule'}).tests.filter(row=>row.kind==='browser')
+  const selected=select(rows,{event:'schedule'}).tests.filter(row=>row.kind==='browser'&&row.executionJob!=='visual-comparison')
+  const visuals=select(rows,{event:'schedule'}).tests.filter(row=>row.executionJob==='visual-comparison')
+  assert.ok(visuals.length>0)
+  assert.ok(visuals.every(row=>row.file.startsWith('tests/visual/')))
+  assert.match(workflow,/run web --all --visual --job visual-comparison/)
+  assert.match(workflow,/needs: \[nightly-web-setup, nightly-web-shard, visual-comparison\]/)
   const policy=loadWebPolicy()
   const declared=new Set(policy.groups.flatMap(group=>group.specs.map(spec=>spec.file)))
   for(const file of Object.keys(policy.nightlyTiming.files)) assert.ok(declared.has(file),`stale nightly timing: ${file}`)
@@ -2565,7 +2572,7 @@ test('AEON-1325 nightly shards retain every browser case and require every plann
   t.after(()=>rmSync(resolve(output,'..'),{recursive:true,force:true}))
   writeFileSync(output,'previous=value\n')
   const logs=[]
-  assert.equal(await tierRunnerMain(['nightly-web-plan'],{inventory:{tests:selected},env:{GITHUB_OUTPUT:output},log:value=>logs.push(value)}),0)
+  assert.equal(await tierRunnerMain(['nightly-web-plan'],{inventory:{tests:[...selected,...visuals]},env:{GITHUB_OUTPUT:output},log:value=>logs.push(value)}),0)
   assert.deepEqual(JSON.parse(logs[0]),sizing)
   assert.equal(readFileSync(output,'utf8'),`previous=value\nshards=${JSON.stringify(indices)}\n`)
   const weights=nightlyWeights(policy,selected)
@@ -2588,11 +2595,16 @@ test('AEON-1325 nightly shards retain every browser case and require every plann
   const jobs=indices.map(index=>({name:`nightly-web-shard (${index})`,status:'completed',conclusion:'success',
     started_at:'2026-10-13T01:00:00Z',completed_at:'2026-10-13T01:10:00Z'}))
   const reports=bins.map((bin,i)=>reportCases(bin,bin.map(row=>({key:key(row),status:'passed',started:true})),600,`web-shard-${i+1}`))
-  const complete=aggregate(reports,jobs)
+  const visualJob={name:'visual-comparison',status:'completed',conclusion:'success',started_at:'2026-10-13T01:00:00Z',completed_at:'2026-10-13T01:01:00Z'}
+  const visualReport=reportCases(visuals,visuals.map(row=>({key:key(row),status:'passed',started:true})),60,'visual-comparison')
+  const complete=aggregate([...reports,visualReport],[...jobs,visualJob])
   assert.equal(complete.coverage,'reported')
-  assert.equal(complete.measured.webRunnerMinutes,indices.length*10)
-  assert.equal(Object.values(complete.classes).reduce((sum,tier)=>sum+tier.passed,0),selected.length)
-  const missing=aggregate(reports.slice(0,-1),jobs)
+  assert.equal(complete.measured.webRunnerMinutes,indices.length*10+1)
+  assert.equal(Object.values(complete.classes).reduce((sum,tier)=>sum+tier.passed,0),selected.length+visuals.length)
+  assert.deepEqual([...bins.flat(),...visuals].map(key).sort(),select(rows,{event:'schedule'}).tests.filter(row=>row.kind==='browser').map(key).sort())
+  const missingVisual=aggregate(reports,[...jobs,visualJob])
+  assert.deepEqual(missingVisual.missingEvidence,['visual-comparison'])
+  const missing=aggregate([...reports.slice(0,-1),visualReport],[...jobs,visualJob])
   assert.equal(missing.coverage,'incomplete')
   assert.deepEqual(missing.missingEvidence,[`web-shard-${indices.length}`])
 })
@@ -2601,7 +2613,7 @@ test('AEON-1325 nightly shards retain every browser case and require every plann
 // through a fixed catalogue budget. Keep the real catalogue and a packing edge.
 test('AEON-1558 nightly planning fits an extra 60-second spec and grows for indivisible files',()=>{
   const rows=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests
-  const selected=select(rows,{event:'schedule'}).tests.filter(row=>row.kind==='browser')
+  const selected=select(rows,{event:'schedule'}).tests.filter(row=>row.kind==='browser'&&row.executionJob!=='visual-comparison')
   const policy=loadWebPolicy(),file='tests/synthetic-nightly-headroom.spec.ts'
   const extra={...selected[0],file,name:'extra minute',occurrence:undefined}
   policy.groups[0].specs.push({file,weightSeconds:60,listedTests:1,tierTiming:{seconds:60,selectedTests:1}})
@@ -2692,6 +2704,13 @@ test('unit measurement artifacts are required for every executed shard and legac
   assert.deepEqual(exact.classes,{})
   assert.deepEqual(exact.missingEvidence,[])
   assert.match(exact.caseScope,/no tier passes are claimed/)
+  const visual={kind:'browser',file:'tests/visual/projects.spec.ts',name:'synthetic visual',tier:'ESSENTIAL'}
+  const visualReport=reportCases([visual],[{key:key(visual),status:'passed',started:true}],1,'visual-comparison')
+  const withVisual=aggregate([visualReport],[job('web-unit (1)'),job('web-shard (1)'),job('visual-comparison')],{lane:'spec-only'})
+  assert.equal(withVisual.classes.ESSENTIAL.passed,1)
+  assert.deepEqual(withVisual.missingEvidence,[])
+  assert.match(withVisual.caseScope,/dedicated visual job reports its actual tier cases/)
+
   assert.deepEqual(aggregate([], [job('web-unit (1)'),job('web-shard (1)')],{lane:'full'}).missingEvidence,['web-unit-1','web-shard-1'])
 })
 
@@ -2862,7 +2881,7 @@ test('nightly runs every tier and fixed gate; PR/MQ aggregates and compatibility
   for(const command of ['run go --all --shard','run web --all --unit','run web --all --shard'])assert.ok(nightly.includes(command))
   for(const id of ['go-static','go-timing','migration-compat','e2e','release-check'])assert.ok(nightly.includes(`  nightly-${id}:`))
   assert.match(ci,/  go:\n\s+if: always\(\)\n\s+needs: \[ci-plan, go-test, go-static, go-timing, tree-reuse, cache-prime\]/)
-  assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[ci-plan, web-catalogue, web-setup, web-unit, web-shard, tree-reuse, cache-prime\]/)
+  assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[ci-plan, web-catalogue, web-setup, web-unit, web-shard, visual-comparison, tree-reuse, cache-prime\]/)
   assert.match(ci,/  migration-compat:\n\s+permissions:/)
   assert.doesNotMatch(ci,/ci-flake-guard\.mjs --kind/)
 })
@@ -3463,7 +3482,7 @@ test('AEON-1389 PR 684 diff plans more web shards within budget without losing s
   const loads=planned.webShardSizing.projections.map(bin=>bin.seconds).sort((a,b)=>a-b)
   const middle=Math.floor(loads.length/2),median=loads.length%2?loads[middle]:(loads[middle-1]+loads[middle])/2
   assert.ok(loads.at(-1)/median<=1.25,'concept-v2 longest/median bound')
-  const selected=select(tests,{event:'pull_request',paths:fixture.paths,webImports:graph}).tests.filter(row=>row.kind==='browser')
+  const selected=select(tests,{event:'pull_request',paths:fixture.paths,webImports:graph}).tests.filter(row=>row.kind==='browser'&&row.executionJob!=='visual-comparison')
   const weights=tierWeights(policy,selected)
   const assigned=planned.webShards.flatMap(index=>shard(selected,index,planned.webShards.length,weights))
   assert.deepEqual(assigned.map(key).sort(),selected.map(key).sort(),'every selected registration executes once')

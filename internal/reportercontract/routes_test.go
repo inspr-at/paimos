@@ -42,6 +42,7 @@ func TestReporterRoutesDeclareHeaderBeforeAuthentication(t *testing.T) {
 		{"approvals get", "GET", "/api/approvals/00000000-0000-4000-8000-000000000001", reportercontract.Approvals, approvals.New(nil).Mount},
 		{"approvals propose", "POST", "/api/approvals", reportercontract.Approvals, approvals.New(nil).Mount},
 		{"approvals decision", "POST", "/api/approvals/00000000-0000-4000-8000-000000000001/decision", reportercontract.Approvals, approvals.New(nil).Mount},
+		{"outward action decision", "POST", "/api/projects/00000000-0000-4000-8000-000000000002/action-approvals/00000000-0000-4000-8000-000000000001/decision", reportercontract.Approvals, approvals.New(nil).Mount},
 		{"approvals revoke", "POST", "/api/approvals/00000000-0000-4000-8000-000000000001/revoke", reportercontract.Approvals, approvals.New(nil).Mount},
 		{"me", "GET", "/api/me", reportercontract.Me, (&auth.Module{}).Mount},
 		{"harness status", "GET", "/api/projects/00000000-0000-4000-8000-000000000001/harness-sessions/00000000-0000-4000-8000-000000000002", reportercontract.HarnessSession, harness.New(nil).Mount},

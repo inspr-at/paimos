@@ -27,7 +27,7 @@
     "path": ".github/workflows/ci.yml"
   },
   "jobs": {
-    "total_count": 49,
+    "total_count": 50,
     "jobs": [
       {
         "name": "tier-measurements / pr-tree-v1:123:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:cccccccccccccccccccccccccccccccccccccccc:dddddddddddddddddddddddddddddddddddddddd",
@@ -793,6 +793,24 @@
         "status": "completed",
         "conclusion": "skipped",
         "steps": []
+      },
+      {
+        "name": "visual-comparison",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Run every visual case without retries",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Confirm full visual tier execution",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
       }
     ]
   },

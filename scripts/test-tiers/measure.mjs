@@ -102,9 +102,9 @@ export function aggregate(reports,jobs,{runId,attempt,sha,reusedFrom,lane,layout
   // The static layout (PR-only affected lane) schedules no Go shards, timing
   // or browser shards; unit evidence is still required and reported.
   const expectedSkip=job=>!job.name.startsWith('nightly-')&&
-    (lane==='docs-only'||lane==='spec-only'&&/^go-/.test(job.name)||layout==='static'&&/^(?:go-test|go-timing|web-shard)(?: \(\d+\))?$/.test(job.name))
+    (lane==='docs-only'||lane==='spec-only'&&/^go-/.test(job.name)||layout==='static'&&/^(?:go-test|go-timing|web-shard|visual-comparison)(?: \(\d+\))?$/.test(job.name))
   const required=jobs.filter(job=>
-    /^(?:nightly-)?(?:go-test|web-unit|web-shard)(?: \(\d+\))?$|^nightly-web-setup$|^(?:nightly-)?go-timing$/.test(job.name)&&
+    /^(?:nightly-)?(?:go-test|web-unit|web-shard)(?: \(\d+\))?$|^visual-comparison$|^nightly-web-setup$|^(?:nightly-)?go-timing$/.test(job.name)&&
     !(job.conclusion==='skipped'&&expectedSkip(job))&&
     !(lane==='spec-only'&&/^web-(?:unit|shard)(?: \(\d+\))?$/.test(job.name)))
   const evidenceName=name=>name.replace(/^nightly-/,'').replace(/^web-setup$/,'web-unit').replace(/ \((\d+)\)$/,'-$1')
@@ -131,13 +131,13 @@ export function aggregate(reports,jobs,{runId,attempt,sha,reusedFrom,lane,layout
     upstreamFailures.length?'upstream jobs did not succeed':missingEvidence.length?'missing case evidence':
       incompleteEvidence.length?'interrupted or incomplete case evidence':undefined
   const runners=jobs.map(job=>({name:job.name,status:job.status,conclusion:job.conclusion,runnerMinutes:jobMinutes(job),...jobPhases(job)}))
-  const minutes=prefix=>runners.filter(job=>new RegExp(`^(?:nightly-)?${prefix}(?:-| |$)`).test(job.name)).reduce((sum,job)=>sum+(job.runnerMinutes??0),0)
+  const minutes=prefix=>runners.filter(job=>new RegExp(`^(?:nightly-)?${prefix}(?:-| |$)`).test(job.name)||prefix==='web'&&job.name==='visual-comparison').reduce((sum,job)=>sum+(job.runnerMinutes??0),0)
   return {version:1,runId,attempt,sha,classes,reports,notes,flakeLedger,flakeCounts:Object.fromEntries(flakeCounts),jobs:runners,missingEvidence,excludedEvidence,incompleteEvidence,upstreamFailures,skippedJobs,coverageReason,
     reusedFrom,
     coverage:missingEvidence.length||upstreamFailures.length||incompleteEvidence.length||excludedEvidence.length?'incomplete':reusedFrom!==undefined?'reused':lane==='spec-only'?'untiered':'reported',
     baselines:{goRunnerMinutes:22.5,webRunnerMinutes:42.17},
     measured:{goRunnerMinutes:minutes('go'),webRunnerMinutes:minutes('web'),sharedPlanningRunnerMinutes:minutes('ci-plan')+minutes('tier-plan')},
-    caseScope:reusedFrom!==undefined&&freshTiming?`Only freshly executed timing guard cases are counted; verified full PR run ${reusedFrom} supplies skipped tier execution. Current runner minutes include guards and proof overhead.`:reusedFrom!==undefined?`No tier tests executed in this run; verified full merge-group run ${reusedFrom} supplies execution evidence. Current runner minutes include reuse/cache overhead.`:lane==='spec-only'?'Spec-only: native unit checks and exact changed specs execute without tier case accounting; runner costs are reported, no tier passes are claimed.':'Top-level Go Test/Fuzz including isolated timing, and web unit/UI registrations selected by tiers; fixed static, release and e2e gates retain separate runner costs.'}
+    caseScope:reusedFrom!==undefined&&freshTiming?`Only freshly executed timing guard cases are counted; verified full PR run ${reusedFrom} supplies skipped tier execution. Current runner minutes include guards and proof overhead.`:reusedFrom!==undefined?`No tier tests executed in this run; verified full merge-group run ${reusedFrom} supplies execution evidence. Current runner minutes include reuse/cache overhead.`:lane==='spec-only'&&reports.some(report=>report.job==='visual-comparison')?'Spec-only: ordinary native unit checks and exact changed specs are untiered; the dedicated visual job reports its actual tier cases and runner costs.':lane==='spec-only'?'Spec-only: native unit checks and exact changed specs execute without tier case accounting; runner costs are reported, no tier passes are claimed.':'Top-level Go Test/Fuzz including isolated timing, and web unit/UI registrations selected by tiers; fixed static, release and e2e gates retain separate runner costs.'}
 }
 
 export function readReports(directory) {
@@ -146,7 +146,7 @@ export function readReports(directory) {
   for(const entry of readdirSync(directory,{withFileTypes:true})) {
     const path=resolve(directory,entry.name)
     if(entry.isDirectory()) reports.push(...readReports(path))
-    else if(/^(?:go-test-\d+|go-timing|web-unit(?:-\d+)?|web-shard-\d+)-measurement\.json$/.test(entry.name)) reports.push(JSON.parse(readFileSync(path,'utf8')))
+    else if(/^(?:go-test-\d+|go-timing|web-unit(?:-\d+)?|web-shard-\d+|visual-comparison)-measurement\.json$/.test(entry.name)) reports.push(JSON.parse(readFileSync(path,'utf8')))
   }
   return reports
 }

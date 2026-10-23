@@ -3,6 +3,7 @@ package releaseworkflow
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -428,8 +430,14 @@ func mergeGroupInventory(t *testing.T, w map[string]any) []string {
 	for id, value := range treeMap(w["jobs"]) {
 		j := treeMap(value)
 		if id == "visual-reference-capture" {
-			if j["if"] != "github.event_name == 'workflow_dispatch' && inputs.visual_capture == true" || j["needs"] != nil || j["continue-on-error"] != nil {
+			if j["if"] != "github.event_name == 'workflow_dispatch' && (inputs.visual_capture == true || inputs.visual_probe != '')" || j["needs"] != nil || j["continue-on-error"] != nil {
 				t.Fatal("visual capture must remain an independent, blocking manual job, excluded from queue execution evidence")
+			}
+			continue
+		}
+		if id == "visual-probe-summary" {
+			if j["if"] != "always() && github.event_name == 'workflow_dispatch' && inputs.visual_probe != ''" || j["needs"] != "visual-reference-capture" || j["continue-on-error"] != nil {
+				t.Fatal("probe summary must run after all manual matrix members, including failed members; it is never queue execution evidence")
 			}
 			continue
 		}
@@ -657,46 +665,28 @@ func normalizeAEON1674VisualReferences(t *testing.T, id string, job map[string]a
 		}
 		pack["run"] = `tar -cf "$RUNNER_TEMP/web-runtime.tar" web/node_modules web/dist`
 	case "web-shard":
+		// AEON-1692 moves all visual work to the required container job.
+		// Prove the new owner before projecting the ordinary hosted shard.
+		checkAEON1692VisualJob(t)
 		normalizeAEON1674RendererFonts(t, job)
-		// Round 12 reports every checkpoint even after partial shard failure.
-		// Verify this addition before projecting onto immutable pre-visual pins.
-		reportName := "Report every visual checkpoint and preserve comparison failures"
-		report := reuseStep(t, job, reportName)
-		if !reflect.DeepEqual(report, map[string]any{
-			"name": reportName,
-			"if":   "always()",
-			"run":  "node scripts/test-prune/visual-baselines.mjs report web/test-results >> \"$GITHUB_STEP_SUMMARY\"",
-		}) {
-			t.Fatal("every visual checkpoint must be reported after shard execution, including failure")
+		if job["runs-on"] != "ubuntu-latest" {
+			t.Fatal("ordinary browser shards must keep their hosted route")
 		}
-		steps := reuseSteps(job)
-		var retained []any
-		for i, value := range steps {
-			if treeMap(value)["name"] == reportName {
-				if i == 0 || treeMap(steps[i-1])["name"] != "Run selected UI cases without retries" {
-					t.Fatal("visual checkpoint report must follow the actual shard run")
-				}
-				continue
+		for key := range treeMap(job["env"]) {
+			if strings.HasPrefix(key, "AEON_VISUAL_") {
+				t.Fatal("ordinary browser shards must not own visual renderer policy")
 			}
-			retained = append(retained, value)
 		}
-		if len(retained) != len(steps)-1 {
-			t.Fatal("visual checkpoint report must run exactly once")
+		for _, value := range reuseSteps(job) {
+			if strings.Contains(fmt.Sprint(treeMap(value)["run"]), "visual-baselines.mjs") {
+				t.Fatal("visual transport and reporting belong to the dedicated container job")
+			}
 		}
-		job["steps"] = retained
-		name = "Verify visual reference transport before comparison"
-		command = "verify"
-		previous = "Install Chromium system dependencies"
-		next = "Download affected browser execution plan"
-		env := treeMap(job["env"])
-		if job["runs-on"] != "ubuntu-latest" || env["AEON_VISUAL_RUNNER"] != "ubuntu-24.04" {
-			t.Fatal("visual comparison must retain hosted routing and its runtime-verified Linux renderer")
+		if !reflect.DeepEqual(job["permissions"], map[string]any{"contents": "read"}) {
+			t.Fatal("ordinary browser shards must retain read-only authority")
 		}
-		delete(env, "AEON_VISUAL_RUNNER")
-		if env["AEON_VISUAL_BASELINE_FILE"] != "${{ github.workspace }}/tmp/visual-baselines/baseline.json" {
-			t.Fatal("every browser shard must compare against the verified transported baseline")
-		}
-		delete(env, "AEON_VISUAL_BASELINE_FILE")
+		delete(job, "permissions")
+		return
 	default:
 		return
 	}
@@ -731,6 +721,82 @@ func normalizeAEON1674VisualReferences(t *testing.T, id string, job map[string]a
 		t.Fatal("missing blocking visual reference transport")
 	}
 	job["steps"] = append(append([]any{}, steps[:found]...), steps[found+1:]...)
+}
+
+// The added execution owner is required by web and by exact-SHA reuse. Check
+// its actual commands and immutable image before adapting old workflow pins.
+func checkAEON1692VisualJob(t *testing.T) {
+	t.Helper()
+	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
+	comparison, capture := treeMap(jobs["visual-comparison"]), treeMap(jobs["visual-reference-capture"])
+	body, err := os.ReadFile(filepath.Join(root(t), "scripts/test-prune/visual-manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var visual map[string]any
+	if err := json.Unmarshal(body, &visual); err != nil {
+		t.Fatal(err)
+	}
+	container := treeMap(treeMap(visual["renderer"])["container"])
+	image := fmt.Sprint(container["image"]) + "@" + fmt.Sprint(container["digest"])
+	for _, job := range []map[string]any{comparison, capture} {
+		if treeMap(job["container"])["image"] != image || treeMap(job["env"])["AEON_VISUAL_CONTAINER_DIGEST"] != container["digest"] {
+			t.Fatal("capture and comparison must use the same manifest-pinned container digest")
+		}
+	}
+	if !containsNeed(treeMap(jobs["web"])["needs"], "visual-comparison") || comparison["continue-on-error"] != nil ||
+		reuseStep(t, comparison, "Run every visual case without retries")["run"] != "node scripts/test-tiers/cli.mjs run web --full --visual --job visual-comparison" ||
+		reuseStep(t, comparison, "Confirm full visual tier execution")["run"] != "node scripts/test-tiers/check-full.mjs" {
+		t.Fatal("visual comparison must remain a required, fully executed gate")
+	}
+	if reuseStep(t, comparison, "Report every visual checkpoint and preserve comparison failures")["if"] != "always()" ||
+		reuseStep(t, comparison, "Verify visual reference transport before comparison")["run"] != "node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines\ncat tmp/visual-baselines/reference-gates.md >> \"$GITHUB_STEP_SUMMARY\"\n" {
+		t.Fatal("the dedicated job must verify transport and retain every checkpoint report")
+	}
+}
+
+// Check the visual gate, then remove only its proven additions from the
+// historical aggregate projection. All pre-existing execution remains pinned.
+func normalizeAEON1692VisualGate(t *testing.T, id string, job map[string]any) {
+	t.Helper()
+	if id != "web" {
+		return
+	}
+	checkAEON1692VisualJob(t)
+	if !containsNeed(job["needs"], "visual-comparison") {
+		t.Fatal("web must depend on visual-comparison")
+	}
+	var needs []any
+	for _, value := range anySlice(job["needs"]) {
+		if value != "visual-comparison" {
+			needs = append(needs, value)
+		}
+	}
+	job["needs"] = needs
+	for _, value := range reuseSteps(job) {
+		step := treeMap(value)
+		env := treeMap(step["env"])
+		if env["VISUAL_COMPARISON"] == nil {
+			continue
+		}
+		if env["VISUAL_COMPARISON"] != "${{ needs.visual-comparison.result }}" {
+			t.Fatal("wrong visual result source")
+		}
+		delete(env, "VISUAL_COMPARISON")
+		run := fmt.Sprint(step["run"])
+		if strings.Count(run, `test "$WEB_SHARD" =`) != strings.Count(run, `test "$VISUAL_COMPARISON" =`) {
+			t.Fatal("visual gate must follow every ordinary browser execution obligation")
+		}
+		run = strings.ReplaceAll(run, `; test "$VISUAL_COMPARISON" = success`, "")
+		var lines []string
+		for _, line := range strings.Split(run, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), `test "$VISUAL_COMPARISON" =`) {
+				continue
+			}
+			lines = append(lines, line)
+		}
+		step["run"] = strings.Join(lines, "\n")
+	}
 }
 
 // Renderer fonts belong to tests/visual's browser fixture. Job-wide provisioning
@@ -940,6 +1006,7 @@ func normalizeConsolidatedOutputs(j map[string]any) {
 // pins. Commands and historical fixtures remain byte-for-byte checked.
 func normalizeEffectiveLane(t *testing.T, id string, value map[string]any) {
 	t.Helper()
+	normalizeAEON1692VisualGate(t, id, value)
 	if id != "ci-plan" && !containsNeed(value["needs"], "tier-plan") {
 		normalizeConsolidatedPlanning(t, id, value)
 	}
@@ -1155,6 +1222,104 @@ func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
 }
 
 func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
+	// AEON-1692: a container mount has different ownership and a different path
+	// from checkout's host path. Exercise the actual workflow bootstrap against
+	// Git's ownership check before any visual policy can read baseline history.
+	t.Run("visual-container-git-ownership", func(t *testing.T) {
+		for _, owner := range []struct{ workflow, job string }{
+			{"ci.yml", "visual-reference-capture"},
+			{"ci.yml", "visual-comparison"},
+			{"nightly-full.yml", "visual-comparison"},
+		} {
+			t.Run(owner.workflow+"/"+owner.job, func(t *testing.T) {
+				job := treeMap(treeMap(treeWorkflow(t, owner.workflow)["jobs"])[owner.job])
+				ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+				defer cancel()
+				dir, err := filepath.EvalSymlinks(t.TempDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+				checkout, other := filepath.Join(dir, "container checkout"), filepath.Join(dir, "unrelated")
+				env := append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+filepath.Join(dir, "gitconfig"),
+					"GIT_TEST_ASSUME_DIFFERENT_OWNER=1", "GITHUB_WORKSPACE="+filepath.Join(dir, "host checkout"),
+					"GITHUB_ENV="+filepath.Join(dir, "github-env"), "RUNNER_TEMP="+filepath.Join(dir, "container temp"))
+				run := func(cwd, input, program string, args ...string) (string, error) {
+					cmd := exec.CommandContext(ctx, program, args...)
+					cmd.Dir, cmd.Env, cmd.Stdin = cwd, env, strings.NewReader(input)
+					out, err := cmd.CombinedOutput()
+					return string(out), err
+				}
+				for _, path := range []string{checkout, other} {
+					if out, err := run(dir, "", "git", "init", "--quiet", path); err != nil {
+						t.Fatalf("initialize fixture: %v\n%s", err, out)
+					}
+				}
+				const payload = "baseline history fixture\n"
+				object, err := run(checkout, payload, "git", "-c", "safe.directory="+checkout, "hash-object", "-w", "--stdin")
+				if err != nil {
+					t.Fatalf("write fixture object: %v\n%s", err, object)
+				}
+				object = strings.TrimSpace(object)
+				if out, err := run(checkout, "", "git", "show", object); err == nil || !strings.Contains(out, "detected dubious ownership") {
+					t.Fatalf("negative control must reject the mounted checkout for ownership: %v\n%s", err, out)
+				}
+				trust := reuseStep(t, job, "Trust the visual container checkout")
+				steps := reuseSteps(job)
+				if len(steps) < 3 || !strings.HasPrefix(fmt.Sprint(treeMap(steps[0])["uses"]), "actions/checkout@") ||
+					treeMap(steps[1])["name"] != trust["name"] || len(trust) != 2 {
+					t.Fatal("container checkout trust must run unconditionally immediately after checkout")
+				}
+				if out, err := run(checkout, "", "bash", "-euo", "pipefail", "-c", fmt.Sprint(trust["run"])); err != nil {
+					t.Fatalf("container checkout bootstrap: %v\n%s", err, out)
+				}
+				if out, err := run(checkout, "", "git", "show", object); err != nil || out != payload {
+					t.Fatalf("container Git history read: %v\n%s", err, out)
+				}
+				if out, err := run(checkout, "", "git", "config", "--global", "--get-all", "safe.directory"); err != nil || strings.TrimSpace(out) != checkout {
+					t.Fatalf("trust must name only the actual container checkout: %v\n%s", err, out)
+				}
+				if out, err := run(other, "", "git", "rev-parse", "--show-toplevel"); err == nil || !strings.Contains(out, "detected dubious ownership") {
+					t.Fatalf("an unrelated repository must remain untrusted: %v\n%s", err, out)
+				}
+				if owner.job == "visual-comparison" {
+					// Download actions and shell steps must share a container path.
+					// Replay the actual restore command against a real tar fixture.
+					if treeMap(job["env"])["AEON_VISUAL_BASELINE_FILE"] != nil {
+						t.Fatal("baseline path must be resolved inside the container, not in host expressions")
+					}
+					download := reuseStep(t, job, "Download shared web runtime")
+					path := fmt.Sprint(treeMap(download["with"])["path"])
+					if filepath.IsAbs(path) || strings.Contains(path, "$") || strings.HasPrefix(filepath.Clean(path), "..") {
+						t.Fatalf("runtime download must stay inside the checkout: %s", path)
+					}
+					baselineDir := filepath.Join("tmp", "visual-baselines")
+					fixture := filepath.Join(dir, "runtime", baselineDir)
+					for _, path := range []string{fixture, filepath.Join(checkout, path)} {
+						if err := os.MkdirAll(path, 0o700); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := os.WriteFile(filepath.Join(fixture, "baseline.json"), []byte(payload), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if out, err := run(checkout, "", "tar", "-cf", filepath.Join(path, "web-runtime.tar"), "-C", filepath.Join(dir, "runtime"), baselineDir); err != nil {
+						t.Fatalf("pack runtime fixture: %v\n%s", err, out)
+					}
+					restore := reuseStep(t, job, "Restore web runtime")
+					if out, err := run(checkout, "", "bash", "-euo", "pipefail", "-c", fmt.Sprint(restore["run"])); err != nil {
+						t.Fatalf("restore runtime inside container: %v\n%s", err, out)
+					}
+					baselinePath := filepath.Join(checkout, baselineDir, "baseline.json")
+					if body, err := os.ReadFile(filepath.Join(dir, "github-env")); err != nil || string(body) != "AEON_VISUAL_BASELINE_FILE="+baselinePath+"\n" {
+						t.Fatalf("browser baseline path must use the container mount: %v\n%s", err, body)
+					}
+					if body, err := os.ReadFile(baselinePath); err != nil || string(body) != payload {
+						t.Fatalf("browser baseline must be the restored runtime member: %v\n%s", err, body)
+					}
+				}
+			})
+		}
+	})
 	// Pin the accepted c72eb506 classification/full-execution configuration.
 	// Keep that historical fixture and the original AEON-681 tier fixture.
 	// Seven tier-adapted execution jobs use the additive merge-main pins (e2e-run

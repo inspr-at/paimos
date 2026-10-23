@@ -355,6 +355,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	// AEON-280: delivery deadlines and the attempt cap; one runner across
 	// processes through an advisory lock.
 	startWorker(func() { inbox.NewSweeper(pool).Run(workerCtx) })
+	startWorker(func() { approvals.NewActionExpiryWorker(pool, inbox.RecordActionOutcomeTx).Run(workerCtx) })
 	// AEON-288: one daily pass nominates method learnings. It never accepts them.
 	startWorker(func() { knowledge.NewTagger(pool).Run(workerCtx) })
 	publication, err := releasehistory.EmbeddedPublication()
@@ -398,6 +399,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	}
 	phoneMod := phoneapprovals.New(pool, pairingMod, cfg.PublicURL, cfg.LinkKey, vapid)
 	phoneMod.DeskPush = decisiondesk.PushSource{}
+	phoneMod.ActionOutcome = inbox.RecordActionOutcomeTx
 	stepupMod := stepup.New(pool, phoneMod, cfg.PublicURL)
 	stepupMod.RecordResultsTx = inbox.RecordResults
 	stepupMod.Reauthenticate = authMod.BeginStepUp
@@ -538,7 +540,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			engineadmission.New(pool, engineadmission.AppReader{App: reviewApp}),
 			runMod,
 			agentruns.NewDaemonWait(pool),
-			approvals.New(pool),
+			approvals.New(pool, inbox.RecordActionOutcomeTx),
 			assistants.New(pool),
 			phoneMod,
 			stepupMod,

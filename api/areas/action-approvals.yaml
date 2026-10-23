@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/approvals
+paths:
+  /projects/{projectId}/action-requests:
+    post:
+      operationId: requestOutwardAction
+      description: "An agent requests one exact outward effect for itself in a live project. Requires approvals.request in that project. Replays of the same idempotency key return the original request; changed facts conflict. Pending requests use the existing approval, Decision Desk, phone and notification paths. Human secrets, tokens or manual steps are refused and audited. No action executes here and no general permission is granted."
+      security: [{agentKey: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/OutwardActionWrite'}}}}
+      responses:
+        '201': {description: "Recorded pending or refused request, or identical replay", content: {application/json: {schema: {$ref: '#/components/schemas/OutwardActionRequest'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/action-requests/{requestId}:
+    get:
+      operationId: getOutwardActionRequest
+      description: "Requires current project approvals.read. Agents read only their own requests. Includes the immutable exact effect, decision reason and live outcome-delivery receipt. Decide through the existing approval or phone route, with a nonempty reason; only person sessions with project approvals.decide and approvals.decide_high can decide. Expiry records its reason and notification automatically."
+      security: [{session: []}, {agentKey: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}, {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: "Request and current outcome", content: {application/json: {schema: {$ref: '#/components/schemas/OutwardActionRequest'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /action-request-kinds:
+    get:
+      operationId: listOutwardActionKinds
+      description: "Tenant configuration with defaults for deploy, trade, money, secrets, production_change and external_message. All kinds require high-risk person approval. Requires settings.read; at most 64 overrides plus the defaults."
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: "Effective tenant kinds", content: {application/json: {schema: {type: array, maxItems: 70, items: {$ref: '#/components/schemas/OutwardActionKind'}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/action-approvals/{approvalId}/decision:
+    post:
+      operationId: decideOutwardActionApproval
+      description: "Project-scoped adapter to the existing approval decision transaction. Accepts only outward-action approvals whose immutable project matches this path. Requires a person session with project approvals.decide and approvals.decide_high, and a nonempty reason. The Desk uses this route; existing general approval authorization is unchanged. Phone decisions keep their existing passkey route."
+      security: [{session: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}, {name: approvalId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ApprovalDecisionWrite'}}}}
+      responses:
+        '200': {description: "Recorded native approval decision", content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /action-request-kinds/{kind}:
+    put:
+      operationId: configureOutwardActionKind
+      description: "A person with workspace settings.manage creates or updates a tenant kind. Disabling a kind prevents new requests and approval of pending requests. Existing requests retain their original facts. Revision zero selects a default without an override or creates a custom kind. Conflicting revisions fail without overwriting."
+      security: [{session: []}]
+      parameters: [{name: kind, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_]{0,47}$'}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [label, enabled, revision]
+              properties:
+                label: {type: string, minLength: 1, maxLength: 120}
+                enabled: {type: boolean}
+                revision: {type: integer, minimum: 0}
+      responses:
+        '200': {description: "Saved tenant kind", content: {application/json: {schema: {$ref: '#/components/schemas/OutwardActionKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    OutwardActionWrite:
+      allOf: [{$ref: '#/components/schemas/OutwardActionFacts'}]
+      unevaluatedProperties: false
+    OutwardActionFacts:
+      type: object
+      required: [idempotency_key, kind, what, why, exact_effect, reversibility, human_input, expires_at]
+      properties:
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+        kind: {type: string, pattern: '^[a-z][a-z0-9_]{0,47}$'}
+        what: {type: string, minLength: 1, maxLength: 500}
+        why: {type: string, minLength: 1, maxLength: 2000}
+        exact_effect: {type: string, minLength: 1, maxLength: 4000, description: "Exact target and effect including amount, destination or revision where relevant; no credential values. Changes require a new request."}
+        reversibility: {type: string, enum: [reversible, partial, irreversible]}
+        reversal_plan: {type: string, maxLength: 2000, description: "Required for reversible and partial actions."}
+        human_input: {type: string, enum: [none, secrets, tokens, manual_steps], description: "Declare any requested human input. Anything except none is refused; recognizable requests in text are refused as well. Never include a secret value."}
+        expires_at: {type: string, format: date-time, description: "After the database clock and within 24 hours."}
+    OutwardActionRequest:
+      allOf:
+        - {$ref: '#/components/schemas/OutwardActionFacts'}
+        - type: object
+          required: [id, project_id, agent_principal_id, request_digest_sha256, state, reason, requested_at]
+          properties:
+            id: {type: string, format: uuid}
+            project_id: {type: string, format: uuid}
+            agent_principal_id: {type: string, format: uuid}
+            approval_id: {type: [string, 'null'], format: uuid}
+            request_digest_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+            state: {type: string, enum: [pending, approved, denied, expired, refused]}
+            reason: {type: string}
+            requested_at: {type: string, format: date-time}
+            resolved_at: {type: [string, 'null'], format: date-time}
+            decided_by_principal_id: {type: [string, 'null'], format: uuid}
+            outcome_receipt:
+              type: object
+              required: [message_id, state, failure_reason]
+              properties:
+                message_id: {type: string, format: uuid}
+                state: {type: string, enum: [queued, handed_off, failed]}
+                handed_off_at: {type: [string, 'null'], format: date-time}
+                failure_reason: {type: string}
+    OutwardActionKind:
+      type: object
+      required: [kind, label, enabled, revision]
+      properties:
+        kind: {type: string}
+        label: {type: string}
+        enabled: {type: boolean}
+        revision: {type: integer, minimum: 0}

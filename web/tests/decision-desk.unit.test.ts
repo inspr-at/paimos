@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { answerFor, arrivals, CUSTOM_ANSWER, deskLinkItem, deskListKey, draftFor, macPlatform, newRound, outcomeUnavailable, submitModifier, type DeskDraft, type DeskProjection } from '../src/lib/decisionDesk'
 import { commitDesk, emptySources, loadDesk, loadMoreQuestions, readQuestions, questionItem, approvalItem, actionItem, nativeTierAdapter, ruleItem, type DeskRead, type Question } from '../src/lib/decisionDeskApi'
+import type { Approval } from '../src/lib/agents'
 
 const question = (): Question => ({ id: 'q1', project_id: 'project', revision: 1, state: 'open', suggested_outcome: 'once', suggestion_reason: 'ticket_default',
   input: { request_id: 'request', question: 'Which index?', options: [{ id: 'a', title: 'Partial', description: 'Smaller', answer: 'Use the partial index.' }], meanwhile: 'parked' }, askers: [], pending: [], created_at: '', updated_at: '' })
@@ -394,7 +395,14 @@ it('rechecks current outdated doctrine before publication and sends no request',
   expect(refreshed.choices.find(choice => choice.id === 'dismiss')?.unavailable).toBeUndefined()
 })
 it('warns when the approvals read reaches its 200-row cap', async () => {
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url.includes('/approvals?') ? Array.from({ length: 200 }, (_, at) => ({ id: `a-${at}`, resource_kind: 'tenant', proposed_at: '', expires_at: '', decision: null })) : { items: [], has_more: false }))))
+  const now = Date.now()
+  const approvals: Approval[] = Array.from({ length: 200 }, (_, at) => ({
+    id: `a-${at}`, agent_principal_id: 'agent', scope: 'nodes.read', resource_kind: 'tenant', rationale: 'Read workspace nodes.',
+    proposed_at: new Date(now).toISOString(), expires_at: new Date(now + 60_000).toISOString(), decision: null,
+  }))
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.includes('/approvals?') ? approvals : { items: [], has_more: false })))
   const result = await loadDesk()
   expect(result.warnings).toContain('Approvals may be incomplete: the source limit is 200 requests.')
+  expect(result.items.filter(item => item.kind === 'approval').map(item => item.id)).toEqual(approvals.map(approval => `a:${approval.id}`))
+  expect([...result.sources.approvals.values()]).toEqual(approvals)
 })

@@ -308,7 +308,10 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 // message. ProjectID scopes its sent event when an internal service knows the
 // project; ordinary principal messages keep their existing node-less event.
 type Acceptance struct {
-	laneReportedAt       time.Time
+	laneReportedAt time.Time
+	// MessageID lets an internal caller bind its durable outcome before the
+	// first event append. Empty preserves the ordinary generated identity.
+	MessageID            string
 	LaneStatus           *LaneStatus
 	RecipientPrincipalID string
 	RecipientSessionID   *string
@@ -330,20 +333,51 @@ type Acceptance struct {
 // roll back the caller's transaction. Terminal failure notices intentionally
 // use their separate receipt-free path so failures cannot recurse.
 func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acceptance) (Message, error) {
+	return acceptMessageWith(ctx, tx, p, in, func(c events.Change) (int64, error) {
+		event, err := events.Append(ctx, tx, p, c)
+		return event.ID, err
+	})
+}
+
+// System outcomes reuse the same acceptance writes and delivery semantics with
+// the established metadata-only system event writer for project-only callers.
+func acceptMessageWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acceptance, appendEvent func(events.Change) (int64, error)) (Message, error) {
 	if in.Body == "" || len(in.Body) > maxBodyRunes*utf8.UTFMax || strings.ContainsRune(in.Body, 0) || utf8.RuneCountInString(in.Body) > maxBodyRunes {
 		return Message{}, badRequest("invalid body")
 	}
 	if in.IdempotencyKey == "" || len(in.IdempotencyKey) > maxKeyRunes*utf8.UTFMax || strings.ContainsRune(in.IdempotencyKey, 0) || utf8.RuneCountInString(in.IdempotencyKey) > maxKeyRunes {
 		return Message{}, badRequest("invalid idempotency_key")
 	}
-	var id string
-	if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
-		return Message{}, err
+	var target receiptTarget
+	if in.RecipientSessionID == nil {
+		// Freeze direct pull delivery mode before appending events. Replacing or
+		// disabling a target must not turn an already queued pull into a push.
+		var targetID string
+		var version int
+		err := tx.QueryRow(ctx, `SELECT t.id::text,t.version,t.adapter,t.address FROM inbox_message_targets t
+ WHERE t.principal_id=$1::uuid AND t.target_kind='pull'
+ AND (t.enabled OR NOT EXISTS(SELECT 1 FROM inbox_message_targets active WHERE active.principal_id=t.principal_id AND active.enabled))
+ ORDER BY t.enabled DESC,t.created_at DESC,t.id LIMIT 1 FOR KEY SHARE OF t`, in.RecipientPrincipalID).Scan(&targetID, &version, &target.Adapter, &target.Address)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return Message{}, err
+		}
+		if err == nil {
+			target.ID, target.Version = &targetID, &version
+			target.internal = true
+		}
+	}
+	id := in.MessageID
+	if id == "" {
+		if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
+			return Message{}, err
+		}
+	} else if _, ok := parseUUID(id); !ok {
+		return Message{}, badRequest("invalid internal message identity")
 	}
 	if err := recordLaneStatusTx(ctx, tx, p, in.SenderSessionID, in.LaneStatus, id, in.laneReportedAt); err != nil {
 		return Message{}, err
 	}
-	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: in.ProjectID, Type: "inbox.sent", After: messageMeta{
+	eventID, err := appendEvent(events.Change{NodeID: in.ProjectID, Type: "inbox.sent", After: messageMeta{
 		ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: in.RecipientPrincipalID,
 		ReplyToID: in.ReplyToID, IdempotencyKey: in.IdempotencyKey, ExpiresAt: in.ExpiresAt,
 	}})
@@ -355,14 +389,15 @@ func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acce
 		sent_event_id, body, idempotency_key, expires_at,recipient_session_id,sender_session_id,sender_label,lane_status)
 		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9,$10::uuid,$11::uuid,$12,$13::jsonb)
 		RETURNING `+messageCols,
-		p.TenantID, id, p.ID, in.RecipientPrincipalID, in.ReplyToID, ev.ID, in.Body, in.IdempotencyKey, in.ExpiresAt, in.RecipientSessionID, in.SenderSessionID, in.SenderLabel, lanePayload(in.LaneStatus)))
+		p.TenantID, id, p.ID, in.RecipientPrincipalID, in.ReplyToID, eventID, in.Body, in.IdempotencyKey, in.ExpiresAt, in.RecipientSessionID, in.SenderSessionID, in.SenderLabel, lanePayload(in.LaneStatus)))
 	if err != nil {
 		return Message{}, mapWrite(err)
 	}
-	if err := enqueueWakes(ctx, tx, p, out); err != nil {
+	appendChange := func(c events.Change) error { _, err := appendEvent(c); return err }
+	if err := enqueueWakesWith(ctx, tx, p.TenantID, out, appendChange); err != nil {
 		return Message{}, err
 	}
-	if err := insertReceipt(ctx, tx, p, out.ID, "queued", receiptTarget{}, "", ""); err != nil {
+	if err := insertReceiptWith(ctx, tx, p, out.ID, "queued", target, "", "", appendChange); err != nil {
 		return Message{}, err
 	}
 	return out, nil
@@ -399,7 +434,12 @@ func enqueueWakesWith(ctx context.Context, tx pgx.Tx, tenantID string, msg Messa
 	// and compatible with target writers' NO KEY UPDATE locks.
 	rows, err := tx.Query(ctx, `SELECT id::text FROM inbox_delivery_targets
 		WHERE principal_id = $1::uuid AND kind = 'webhook' AND enabled
-		ORDER BY id`, msg.RecipientPrincipalID)
+		AND NOT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND messaging_only IS TRUE)
+		AND NOT EXISTS(SELECT 1 FROM inbox_message_targets WHERE principal_id=$1::uuid AND target_kind='pull' AND enabled)
+		AND NOT EXISTS(SELECT 1 FROM inbox_message_deliveries d JOIN inbox_message_targets t
+		 ON t.tenant_id=d.tenant_id AND t.id=COALESCE(d.effective_target_id,d.target_id)
+		 WHERE d.message_id=$2::uuid AND t.target_kind='pull')
+		ORDER BY id`, msg.RecipientPrincipalID, msg.ID)
 	if err != nil {
 		return err
 	}

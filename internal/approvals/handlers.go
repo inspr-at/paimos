@@ -206,6 +206,9 @@ func parseLimit(raw string) (int, error) {
 }
 
 func validateProposal(in *proposal) error {
+	if hasActionScope(in.Scope) {
+		return fail(http.StatusBadRequest, "outward actions require the action-requests route with exact effect facts")
+	}
 	in.Rationale = strings.TrimSpace(in.Rationale)
 	if in.Rationale == "" || utf8.RuneCountInString(in.Rationale) > 8000 || strings.ContainsRune(in.Rationale, 0) {
 		return fail(http.StatusBadRequest, "rationale is required")

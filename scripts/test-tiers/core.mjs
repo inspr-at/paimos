@@ -40,6 +40,7 @@ export function validate(manifest, discovered, knownFlaky, { strict = false, war
       !/^tests\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_.-]+\.(?:spec|test)\.ts$/.test(row.file??'')) throw new Error(`Invalid test owner: ${key(row)}`)
     if(row.occurrence!==undefined && (!Number.isInteger(row.occurrence)||row.occurrence<1)) throw new Error(`Invalid occurrence: ${key(row)}`)
     if(row.lane!==undefined&&(row.kind!=='go'||row.lane!=='timing'))throw new Error(`Invalid execution lane: ${key(row)}`)
+    if(row.executionJob!==undefined&&(row.kind!=='browser'||row.executionJob!=='visual-comparison'||!row.file.startsWith('tests/visual/')))throw new Error(`Invalid execution job: ${key(row)}`)
     if (declared.has(key(row))) throw new Error(`Duplicate manifest entry: ${key(row)}`)
     if (row.tier === 'ESSENTIAL' && flaky.has(key(row))) throw new Error(`Known-flaky case cannot be ESSENTIAL: ${key(row)} (${flaky.get(key(row))})`)
     declared.set(key(row), row)
@@ -683,7 +684,7 @@ export const fullWebShards = Array.from({ length: fullWebShardCount }, (_, index
 // weights and whole-file packing. Leave two minutes under the 16-minute budget.
 // The tier runner supports at most 64 shards; indivisible files fail loudly.
 export function nightlyWebShardPlan(rows, policy) {
-  const selected = rows.filter(row => row.kind === 'browser')
+  const selected = rows.filter(row => row.kind === 'browser' && row.executionJob !== 'visual-comparison')
   const files = [...new Set(selected.map(row => row.file))]
   if (!files.length) throw new Error('Nightly browser catalogue must not be empty')
   for (const file of files) if (!policy.nightlyTiming?.files?.[file]) throw new Error(`Missing nightly timing: ${file}`)
@@ -726,7 +727,7 @@ export function webShardPlan(rows, policy, { mode = 'essential', timeoutSeconds 
   if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0 || !Number.isFinite(headroom) || headroom < 0 || headroom >= 1 ||
       !Number.isFinite(overheadSeconds) || overheadSeconds < 0 || !Number.isInteger(minimum) || minimum < 1 ||
       !Number.isInteger(maximum) || maximum < minimum || maximum > 64) throw new Error('Invalid web shard budget')
-  const selected = rows.filter(row => row.kind === 'browser')
+  const selected = rows.filter(row => row.kind === 'browser' && row.executionJob !== 'visual-comparison')
   const weights = tierWeights(policy, selected)
   const files = new Set(selected.map(row => row.file))
   for (const file of files) if (!Number.isFinite(weights[file]) || weights[file] <= 0) throw new Error(`Missing web shard weight: ${file}`)

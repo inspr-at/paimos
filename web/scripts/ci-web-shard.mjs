@@ -41,6 +41,7 @@ export function validateManifest(manifest) {
     }
     if (typeof group.env !== 'object' || group.env === null || Object.values(group.env).some(v => typeof v !== 'string')) throw new Error(`Invalid env in ${group.id}`)
     if (group.gate !== undefined && typeof group.gate !== 'boolean') throw new Error(`Invalid gate in ${group.id}`)
+    if (group.executionJob !== undefined && group.executionJob !== 'visual-comparison') throw new Error(`Invalid execution job in ${group.id}`)
     if (typeof group.hostedOnly !== 'boolean' || !Array.isArray(group.specs) || !group.specs.length) throw new Error(`Invalid specs/policy in ${group.id}`)
     for (const spec of group.specs) {
       if (!specPath.test(spec.file ?? '')) throw new Error(`Invalid spec path: ${spec.file}`)
@@ -96,7 +97,7 @@ export function loadManifest(path = manifestPath) {
 // longest shard. File names break weight ties, and the lowest shard index
 // breaks load ties; manifest order cannot change assignment.
 // Groups with gate:false are declared (so drift is still caught) but only run with all:true.
-export const gatedGroups = (manifest, all = false) => manifest.groups.filter(group => all || group.gate !== false)
+export const gatedGroups = (manifest, all = false) => manifest.groups.filter(group => !group.executionJob && (all || group.gate !== false))
 
 const specSum = specs => specs.reduce((total, spec) => total + spec.weightSeconds, 0)
 
@@ -323,8 +324,9 @@ export function checkCoverage(manifest, shards, expectedSpecs, { all = false } =
   for (const file of required) if (!assigned.has(file)) throw new Error(`Spec missing from shards: ${file}`)
   for (const file of expected) if (!declared.has(file) && !excluded.has(file)) throw new Error(`Spec missing from manifest: ${file}`)
   for (const file of [...declared, ...excluded]) if (!expected.has(file)) throw new Error(`Stale manifest spec: ${file}`)
-  const ungated = declared.size - required.size
-  return { specs: assigned.size, shards: shards.length, ...(ungated ? { ungated } : {}), ...(excluded.size ? { excluded: excluded.size } : {}) }
+  const dedicated = manifest.groups.filter(group => group.executionJob).reduce((count, group) => count + group.specs.length, 0)
+  const ungated = declared.size - required.size - dedicated
+  return { specs: assigned.size, shards: shards.length, ...(ungated ? { ungated } : {}), ...(dedicated ? { dedicated } : {}), ...(excluded.size ? { excluded: excluded.size } : {}) }
 }
 
 export function retryCount(env) {
