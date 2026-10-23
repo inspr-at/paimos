@@ -89,6 +89,7 @@ export const useAssistants = defineStore('assistants', () => {
       const result = await saveAssistantPolicy(id, revision, policy)
       if (who !== owner.value || epoch !== generation) return false
       if (result.principal_id !== id) throw new Error(assistantCopy().invalidResponse)
+      if ((items.value.find(row => row.principal_id === id)?.revision ?? 0) > result.revision) return false
       invalidate(); adopt({ ...item, ...result })
       await loadHistory()
       return true
@@ -102,6 +103,7 @@ export const useAssistants = defineStore('assistants', () => {
       const result = await disconnectAssistant(id)
       if (who !== owner.value || epoch !== generation) return false
       if (result.principal_id !== id) throw new Error(assistantCopy().invalidResponse)
+      if ((items.value.find(row => row.principal_id === id)?.revision ?? 0) > result.revision) return false
       invalidate(); adopt(result); await loadHistory()
       return true
     } finally { if (who === owner.value && epoch === generation) busy.value[id] = false }
@@ -159,7 +161,8 @@ export const useAssistants = defineStore('assistants', () => {
       if (who !== owner.value || epoch !== generation) return false
       if (updated.id !== id) throw new Error(assistantCopy().invalidResponse)
       const current = ownedRoutines.value.find(row => row.wire.id === id && row.owner === assistantId)
-      if (current && updated.revision >= current.wire.revision) { current.wire = updated; current.view = { ...current.view, ...presentAssistantRoutine(updated) } }
+      if (!current || updated.revision < current.wire.revision) return false
+      current.wire = updated; current.view = { ...current.view, ...presentAssistantRoutine(updated) }
       return true
     } finally { if (who === owner.value && epoch === generation) busy.value[key] = false }
   }
