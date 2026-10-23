@@ -37,6 +37,11 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 
 // Mount registers the approval routes on mux.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/projects/{projectId}/action-requests", m.handleRequestAction)
+	mux.HandleFunc("POST /api/projects/{projectId}/action-approvals/{approvalId}/decision", reportercontract.WithHeader(reportercontract.Approvals, m.handleDecideAction))
+	mux.HandleFunc("GET /api/projects/{projectId}/action-requests/{requestId}", m.handleGetAction)
+	mux.HandleFunc("GET /api/action-request-kinds", m.handleActionKinds)
+	mux.HandleFunc("PUT /api/action-request-kinds/{kind}", m.handlePutActionKind)
 	mux.HandleFunc("GET /api/approvals", reportercontract.WithHeader(reportercontract.Approvals, m.handleList))
 	mux.HandleFunc("GET /api/approvals/{approvalId}", reportercontract.WithHeader(reportercontract.Approvals, m.handleGet))
 	mux.HandleFunc("POST /api/approvals", reportercontract.WithHeader(reportercontract.Approvals, m.handlePropose))

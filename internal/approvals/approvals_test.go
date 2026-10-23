@@ -23,6 +23,8 @@ import (
 )
 
 func TestGetApprovalKeepsNativeSourceAndHistoryVisibility(t *testing.T) {
+	t.Run("exact outward action lifecycle and authorization", checkOutwardActionLifecycle)
+	t.Run("outward decisions recheck authority under the fence", checkOutwardActionAccessFence)
 	f := newFixture(t)
 	w := f.do(f.agentA, f.wide, "POST", "/api/approvals", proposalJSON("nodes.read", "node", &f.nodeA, nil))
 	if w.Code != 201 {

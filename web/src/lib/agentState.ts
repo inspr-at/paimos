@@ -244,6 +244,7 @@ const SCOPES: Record<string, string> = {
   'nodes.write': 'Change tickets', 'work_orders.write': 'Change work orders', 'work_orders.read': 'Read work orders', 'stage.deploy': 'Deploy a stage',
 }
 export function scopeLabel(scope: string) {
+  if (scope.startsWith('approvals.request.outward_')) return 'Approve the exact outward action described below'
   if (SCOPES[scope]) return SCOPES[scope]
   const [resource, ...rest] = scope.split('.')
   const verb = rest.join(' ').replace(/_/g, ' ')

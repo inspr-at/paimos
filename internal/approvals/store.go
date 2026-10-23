@@ -196,6 +196,9 @@ func (m *Module) decideVerified(ctx context.Context, p tenant.Principal, id, dec
 		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
 			return err
 		}
+		if err := actionDecisionFence(ctx, tx, id, p.TenantID); err != nil {
+			return err
+		}
 		before, expired, err := lockRequest(ctx, tx, id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fail(http.StatusNotFound, "approval not found")
@@ -227,6 +230,10 @@ func (m *Module) decideVerified(ctx context.Context, p tenant.Principal, id, dec
 			if err := verify(tx, before); err != nil {
 				return err
 			}
+		}
+		if hasActionScope(before.Scope) {
+			out, err = m.decideActionTx(ctx, tx, p, before, decision, reason)
+			return err
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO approval_decisions (
@@ -550,6 +557,9 @@ func Review(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Appr
 
 // CanDecide applies the same live actor and permission policy used by decision writes.
 func CanDecide(ctx context.Context, tx pgx.Tx, p tenant.Principal, a Approval) error {
+	if hasActionScope(a.Scope) {
+		return canDecideAction(ctx, tx, p, a)
+	}
 	if consent.Scope(a.Scope) && (p.Kind != tenant.Person || p.KeyID != "" || p.AuthKeyID != "" || p.KeyCreatorID != "") {
 		return fail(http.StatusForbidden, "native consent requires a person session")
 	}

@@ -308,7 +308,10 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 // message. ProjectID scopes its sent event when an internal service knows the
 // project; ordinary principal messages keep their existing node-less event.
 type Acceptance struct {
-	laneReportedAt       time.Time
+	laneReportedAt time.Time
+	// MessageID lets an internal caller bind its durable outcome before the
+	// first event append. Empty preserves the ordinary generated identity.
+	MessageID            string
 	LaneStatus           *LaneStatus
 	RecipientPrincipalID string
 	RecipientSessionID   *string
@@ -336,9 +339,13 @@ func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acce
 	if in.IdempotencyKey == "" || len(in.IdempotencyKey) > maxKeyRunes*utf8.UTFMax || strings.ContainsRune(in.IdempotencyKey, 0) || utf8.RuneCountInString(in.IdempotencyKey) > maxKeyRunes {
 		return Message{}, badRequest("invalid idempotency_key")
 	}
-	var id string
-	if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
-		return Message{}, err
+	id := in.MessageID
+	if id == "" {
+		if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
+			return Message{}, err
+		}
+	} else if _, ok := parseUUID(id); !ok {
+		return Message{}, badRequest("invalid internal message identity")
 	}
 	if err := recordLaneStatusTx(ctx, tx, p, in.SenderSessionID, in.LaneStatus, id, in.laneReportedAt); err != nil {
 		return Message{}, err

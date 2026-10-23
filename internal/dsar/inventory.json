@@ -114,6 +114,51 @@
     {
       "classification": "metadata",
       "columns": {
+        "enabled": "metadata",
+        "kind": "metadata",
+        "label": "review",
+        "revision": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "action_approval_kinds"
+    },
+    {
+      "classification": "review",
+      "columns": {
+        "agent_principal_id": "personal",
+        "approval_id": "metadata",
+        "decided_by_principal_id": "personal",
+        "exact_effect": "review",
+        "expires_at": "metadata",
+        "human_input": "metadata",
+        "id": "metadata",
+        "idempotency_key": "review",
+        "kind": "metadata",
+        "outcome_message_id": "metadata",
+        "project_id": "metadata",
+        "reason": "review",
+        "request_digest_sha256": "metadata",
+        "requested_at": "metadata",
+        "resolved_at": "metadata",
+        "reversal_plan": "review",
+        "reversibility": "metadata",
+        "state": "metadata",
+        "tenant_id": "metadata",
+        "what": "review",
+        "why": "review"
+      },
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "agent_principal_id"
+      },
+      "table": "action_approval_requests"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
         "capability": "metadata",
         "since": "metadata"
       },

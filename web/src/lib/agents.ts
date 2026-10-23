@@ -129,7 +129,10 @@ export const setAccountState = (id: string, state: AgentAccount['state']) => req
 // Person-only Remove: the account leaves the lists; its runs and history stay (AEON-402).
 export const archiveAccount = (id: string) => request<AgentAccount>(`/agent-accounts/${enc(id)}/archive`, 'POST')
 export const listApprovals = () => request<Approval[]>('/approvals?limit=200')
-export const decideApproval = (id: string, decision: 'approved' | 'denied', reason: string) => request<Approval>(`/approvals/${enc(id)}/decision`, 'POST', { decision, reason })
+export const decideApproval = (id: string, decision: 'approved' | 'denied', reason: string, source?: Pick<Approval, 'scope' | 'resource_kind' | 'resource_id'>) => {
+  const project = source?.scope.startsWith('approvals.request.outward_') && source.resource_kind === 'node' ? source.resource_id : undefined
+  return request<Approval>(project ? `/projects/${enc(project)}/action-approvals/${enc(id)}/decision` : `/approvals/${enc(id)}/decision`, 'POST', { decision, reason })
+}
 export const revokeApproval = (id: string) => request<Approval>(`/approvals/${enc(id)}/revoke`, 'POST')
 export const listModels = () => request<ModelProfile[]>('/models')
 export const listTargets = (projectId: string) => request<MessageTarget[]>(`/projects/${enc(projectId)}/message-targets`)

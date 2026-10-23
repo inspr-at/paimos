@@ -54,12 +54,13 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source,ti
  AND ($2='' OR $2='question' AND q.node_id=$3::uuid)
 ), approvals(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
  SELECT r.id,'approval'::text,coalesce(n.project_id,wn.project_id),1::bigint,
- CASE WHEN r.scope LIKE '%.routine\_%' ESCAPE '\' THEN 'Routine action approval' ELSE 'Approval · '||r.scope END,r.proposed_at,r.expires_at,
+ CASE WHEN r.scope LIKE 'approvals.request.outward\_%' ESCAPE '\' THEN 'Outward action approval' WHEN r.scope LIKE '%.routine\_%' ESCAPE '\' THEN 'Routine action approval' ELSE 'Approval · '||r.scope END,r.proposed_at,r.expires_at,
  (n.id IS NOT NULL AND n.deleted_at IS NULL AND coalesce(n.state,'') NOT IN ('done','delivered','cancelled','canceled','closed')
   AND (nw.node_id IS NULL OR nw.status NOT IN ('done','cancelled'))
   AND (nk.slug IN ('ticket','task','epic','work_order') OR nk.field_schema->>'issue_family'='true'))
  OR (ar.id IS NOT NULL AND ar.status='waiting' AND aw.status NOT IN ('done','cancelled'))
- OR (rr.id IS NOT NULL AND rr.status='waiting' AND rw.status NOT IN ('done','cancelled') AND rn.deleted_at IS NULL) AS held,
+ OR (rr.id IS NOT NULL AND rr.status='waiting' AND rw.status NOT IN ('done','cancelled') AND rn.deleted_at IS NULL)
+ OR (r.scope LIKE 'approvals.request.outward\_%' ESCAPE '\') AS held,
  '/agents?needs=a:'||r.id,NULL::text
  FROM approval_requests r
  LEFT JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.resource_id AND r.resource_kind='node'
@@ -74,6 +75,7 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source,ti
  LEFT JOIN nodes project ON project.tenant_id=r.tenant_id AND project.id=coalesce(n.project_id,wn.project_id)
  WHERE r.tenant_id=$1 AND r.expires_at>(SELECT at FROM clock)
  AND NOT EXISTS(SELECT 1 FROM approval_decisions d WHERE d.tenant_id=r.tenant_id AND d.request_id=r.id)
+ AND NOT EXISTS(SELECT 1 FROM action_approval_requests a WHERE a.tenant_id=r.tenant_id AND a.approval_id=r.id AND a.state<>'pending')
  AND ($2='' OR $2='approval' AND r.id=$3::uuid)
  AND (r.resource_kind='tenant' OR r.resource_kind='node' AND n.id IS NOT NULL AND n.deleted_at IS NULL
       OR r.resource_kind='run' AND ar.id IS NOT NULL AND wn.deleted_at IS NULL)
@@ -216,7 +218,8 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
  CASE WHEN held AND kind IN ('approval','stepup') THEN expires_at ELSE created_at END AS order_at
  FROM (
  SELECT * FROM questions WHERE project_id=ANY($5::uuid[]) AND (NOT $16 OR project_id=ANY($20::uuid[]))
- UNION ALL SELECT * FROM approvals WHERE (project_id=ANY($6::uuid[]) OR project_id IS NULL AND $8) AND (NOT $16 OR $19)
+ UNION ALL SELECT * FROM approvals WHERE (project_id=ANY($6::uuid[]) OR project_id IS NULL AND $8) AND (NOT $16 OR $19
+  OR project_id=ANY($30::uuid[]) AND EXISTS(SELECT 1 FROM action_approval_requests a WHERE a.tenant_id=$1 AND a.approval_id=approvals.id AND a.state='pending'))
  UNION ALL SELECT * FROM held_requests WHERE project_id=ANY($7::uuid[])
  AND NOT EXISTS(SELECT 1 FROM desk_askers a JOIN desk_questions q ON q.tenant_id=a.tenant_id AND q.node_id=a.question_id
   WHERE a.tenant_id=$1 AND a.source_request_id=held_requests.id AND q.project_id=ANY($5::uuid[]))
@@ -265,7 +268,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}, "harness.control": {}, "harness.read": {}, "knowledge.read": {}, "nodes.read": {}, "nodes.write": {}}
+	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "approvals.decide": {}, "inbox.manage": {}, "harness.control": {}, "harness.read": {}, "knowledge.read": {}, "nodes.read": {}, "nodes.write": {}}
 	stepupPermissions := map[string][]string{}
 	for _, permission := range stepup.TargetPermissions() {
 		stepupPermissions[permission] = []string{}
@@ -350,7 +353,13 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource, lessonSource, personCandidatesJSON, definitionSource).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw, &personCandidates)
+	actionDeciders := []string{}
+	for _, project := range projects["approvals.decide"] {
+		if check("approvals.decide_high", project) {
+			actionDeciders = append(actionDeciders, project)
+		}
+	}
+	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource, lessonSource, personCandidatesJSON, definitionSource, actionDeciders).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw, &personCandidates)
 	if err != nil {
 		return page, err
 	}

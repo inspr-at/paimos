@@ -354,6 +354,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	// AEON-280: delivery deadlines and the attempt cap; one runner across
 	// processes through an advisory lock.
 	startWorker(func() { inbox.NewSweeper(pool).Run(workerCtx) })
+	startWorker(func() { approvals.NewActionExpiryWorker(pool).Run(workerCtx) })
 	// AEON-288: one daily pass nominates method learnings. It never accepts them.
 	startWorker(func() { knowledge.NewTagger(pool).Run(workerCtx) })
 	publication, err := releasehistory.EmbeddedPublication()
