@@ -1181,7 +1181,15 @@ jobs:
         env:
           TIER_REPORT: tmp/test-tiers/visual-comparison-measurement.json
         run: node scripts/test-tiers/check-full.mjs
-      - name: Preserve visual traces, screenshots and tier measurements
+      - name: Preserve visual tier measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-comparison-tier-measurements
+          path: tmp/test-tiers/
+          if-no-files-found: error
+          retention-days: 8
+      - name: Preserve visual traces and screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -1189,7 +1197,6 @@ jobs:
           path: |
             web/test-results/
             web/playwright-report/
-            tmp/test-tiers/
           if-no-files-found: error
           retention-days: 7
 

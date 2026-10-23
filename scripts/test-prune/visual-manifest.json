@@ -3850,7 +3850,7 @@
       },
       "installer": "node scripts/test-prune/visual-renderer.mjs install-fonts",
       "asset": "scripts/test-prune/visual-fonts.conf",
-      "sha256": "5a5c74ed5fa9933f83ee65c73287309884ef00d08a1093373cd4f6319dc1eca1"
+      "sha256": "eeefc2c3ae1028798f3dbe73980ee68a814e98cbca0804a0ce576fed439f4faf"
     },
     "container": {
       "image": "mcr.microsoft.com/playwright:v1.64.1-noble",

@@ -221,6 +221,7 @@ test('visual references require approval, immutable attachment bytes and every e
     const fontconfig = installRendererFonts(manifest, installDirectory, { run: (command, args, options) => {
       calls.push(command)
       assert.equal(options.env.FONTCONFIG_FILE, join(installDirectory, 'fonts.conf'))
+      assert.equal(options.env.XDG_CACHE_HOME, join(installDirectory, 'cache'))
       assert.equal(process.env.FONTCONFIG_FILE, fontconfigBefore)
       return command === 'fc-match' ? manifest.renderer.fontconfig.aliases[args[1].slice(':family='.length)] : Buffer.alloc(0)
     } })

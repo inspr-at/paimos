@@ -680,7 +680,7 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 						continue
 					}
 					values[name] = "skipped"
-					if lane == "full" || lane == "spec-only" && (name == "WEB_CATALOGUE" || name == "WEB_SETUP" || name == "WEB_UNIT" || name == "WEB_SHARD") {
+					if lane == "full" || lane == "spec-only" && (name == "WEB_CATALOGUE" || name == "WEB_SETUP" || name == "WEB_UNIT" || name == "WEB_SHARD" || name == "VISUAL_COMPARISON") {
 						values[name] = "success"
 					}
 				}
@@ -851,8 +851,8 @@ func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
 			rejected: []map[string]string{{"GO_TEST": "success"}, {"GO_TEST": "failure"}, {"GO_TIMING": "success"}, {"GO_STATIC": "skipped"}, {"GO_STATIC": "failure"}, {"GITHUB_EVENT_NAME": "merge_group"}, {"GITHUB_EVENT_NAME": "push"}, {"CI_LANE": "spec-only"}, {"TIER_LAYOUT": "bogus"}, {"TIER_LAYOUT": ""}, {"TIER_PLAN": "failure"}},
 		},
 		"web": {
-			accepted: map[string]string{"WEB_CATALOGUE": "success", "WEB_SETUP": "success", "WEB_UNIT": "success", "WEB_SHARD": "skipped"},
-			rejected: []map[string]string{{"WEB_CATALOGUE": "failure"}, {"WEB_CATALOGUE": "cancelled"}, {"WEB_CATALOGUE": "skipped"}, {"WEB_CATALOGUE": ""}, {"WEB_SHARD": "success"}, {"WEB_SHARD": "failure"}, {"WEB_UNIT": "skipped"}, {"WEB_UNIT": "failure"}, {"WEB_SETUP": "skipped"}, {"GITHUB_EVENT_NAME": "merge_group"}, {"TIER_LAYOUT": "bogus"}, {"TIER_LAYOUT": ""}},
+			accepted: map[string]string{"WEB_CATALOGUE": "success", "WEB_SETUP": "success", "WEB_UNIT": "success", "WEB_SHARD": "skipped", "VISUAL_COMPARISON": "skipped"},
+			rejected: []map[string]string{{"WEB_CATALOGUE": "failure"}, {"WEB_CATALOGUE": "cancelled"}, {"WEB_CATALOGUE": "skipped"}, {"WEB_CATALOGUE": ""}, {"WEB_SHARD": "success"}, {"WEB_SHARD": "failure"}, {"VISUAL_COMPARISON": "success"}, {"VISUAL_COMPARISON": "failure"}, {"VISUAL_COMPARISON": "cancelled"}, {"WEB_UNIT": "skipped"}, {"WEB_UNIT": "failure"}, {"WEB_SETUP": "skipped"}, {"GITHUB_EVENT_NAME": "merge_group"}, {"TIER_LAYOUT": "bogus"}, {"TIER_LAYOUT": ""}},
 		},
 		"e2e": {
 			accepted: map[string]string{"CHECK_RESULT": "skipped"},
@@ -941,7 +941,7 @@ func TestAggregateScenariosIgnoreAmbientImpactKillSwitch(t *testing.T) {
 	spec := map[string]string{
 		"CI_LANE": "spec-only", "CI_PLAN": "success", "REUSE": "none", "REUSE_PROOF": "skipped",
 		"SOURCE_RUN": "", "CACHE_PRIME": "skipped", "TIER_PLAN": "success", "TIER_LAYOUT": "full",
-		"WEB_CATALOGUE": "success", "WEB_SETUP": "success", "WEB_UNIT": "success", "WEB_SHARD": "success",
+		"WEB_CATALOGUE": "success", "WEB_SETUP": "success", "WEB_UNIT": "success", "WEB_SHARD": "success", "VISUAL_COMPARISON": "success",
 	}
 	webSteps := mapping(jobs["web"])["steps"].([]any)
 	if err := run("web", len(webSteps)-1, spec); err != nil {

@@ -659,11 +659,12 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			scope := mapping(steps[0])
 			body, _ := scope["run"].(string)
 			if len(scope) != 3 || scope["name"] != "Validate browser execution scope" || strings.TrimSpace(body) == "" || !reflect.DeepEqual(mapping(scope["env"]), map[string]any{
-				"BROWSER_SCOPE": "${{ needs.ci-plan.outputs.browser_scope || 'gated-full' }}",
-				"TIER_MODE":     "${{ needs.ci-plan.outputs.mode }}",
-				"TIER_LAYOUT":   "${{ needs.ci-plan.outputs.layout }}",
-				"CI_LANE":       "${{ needs.ci-plan.outputs.lane }}",
-				"WEB_SHARD":     "${{ needs.web-shard.result }}",
+				"BROWSER_SCOPE":     "${{ needs.ci-plan.outputs.browser_scope || 'gated-full' }}",
+				"TIER_MODE":         "${{ needs.ci-plan.outputs.mode }}",
+				"TIER_LAYOUT":       "${{ needs.ci-plan.outputs.layout }}",
+				"CI_LANE":           "${{ needs.ci-plan.outputs.lane }}",
+				"WEB_SHARD":         "${{ needs.web-shard.result }}",
+				"VISUAL_COMPARISON": "${{ needs.visual-comparison.result }}",
 			}) {
 				return fmt.Errorf("web must validate browser execution scope unconditionally before proof revalidation")
 			}
@@ -708,7 +709,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if job["if"] != "always()" {
 				return fmt.Errorf("web must report failures even when its dependencies fail: %v", job["if"])
 			}
-			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-catalogue", "web-setup", "web-unit", "web-shard", "tree-reuse", "cache-prime"}) {
+			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-catalogue", "web-setup", "web-unit", "web-shard", "visual-comparison", "tree-reuse", "cache-prime"}) {
 				return fmt.Errorf("web must gate setup, every unit shard, every UI shard and the strict catalogue: %v", job["needs"])
 			}
 		} else {

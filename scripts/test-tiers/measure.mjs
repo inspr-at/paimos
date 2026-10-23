@@ -131,7 +131,7 @@ export function aggregate(reports,jobs,{runId,attempt,sha,reusedFrom,lane,layout
     upstreamFailures.length?'upstream jobs did not succeed':missingEvidence.length?'missing case evidence':
       incompleteEvidence.length?'interrupted or incomplete case evidence':undefined
   const runners=jobs.map(job=>({name:job.name,status:job.status,conclusion:job.conclusion,runnerMinutes:jobMinutes(job),...jobPhases(job)}))
-  const minutes=prefix=>runners.filter(job=>new RegExp(`^(?:nightly-)?${prefix}(?:-| |$)`).test(job.name)).reduce((sum,job)=>sum+(job.runnerMinutes??0),0)
+  const minutes=prefix=>runners.filter(job=>new RegExp(`^(?:nightly-)?${prefix}(?:-| |$)`).test(job.name)||prefix==='web'&&job.name==='visual-comparison').reduce((sum,job)=>sum+(job.runnerMinutes??0),0)
   return {version:1,runId,attempt,sha,classes,reports,notes,flakeLedger,flakeCounts:Object.fromEntries(flakeCounts),jobs:runners,missingEvidence,excludedEvidence,incompleteEvidence,upstreamFailures,skippedJobs,coverageReason,
     reusedFrom,
     coverage:missingEvidence.length||upstreamFailures.length||incompleteEvidence.length||excludedEvidence.length?'incomplete':reusedFrom!==undefined?'reused':lane==='spec-only'?'untiered':'reported',

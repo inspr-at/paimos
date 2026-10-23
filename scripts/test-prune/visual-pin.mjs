@@ -157,7 +157,7 @@ export function publicationCommands(directory, candidate, planDirectory = direct
     '#!/usr/bin/env bash',
     'set -euo pipefail',
     '# LEAD only, after Tick approves these exact bytes. A pre-existing tag/release must stop this flow.',
-    `node scripts/test-prune/visual-pin.mjs verify-plan ${q(planDirectory)}`,
+    `node scripts/test-prune/visual-pin.mjs verify-plan ${q(planDirectory)} ${q(join(planDirectory, 'tick-approval.json'))}`,
     `gh release create test-references-3 --repo inspr-at/paimos --target ${candidate.captureSHA} --prerelease --title 'Visual reference set 3' --notes 'Tick-approved reference set 3; AEON-1670 approval record; immutable assets.' ${files.map(q).join(' ')}`,
     ...files.slice(0, 2).map(path => `/Users/markus/.aeon/lead/aeon/pm --instance ppm --agent-name aeon-lead-claude --json attach AEON-1670 ${q(path)}`),
     '# Record returned attachment IDs, then use an actual Tick receipt (captureSHA, archiveSHA256, approvedAt, evidence, checkpoints).',
@@ -221,6 +221,11 @@ async function main() {
       const pinned = JSON.parse(boundedFile(join(directory, 'visual-manifest.dry-run.json')))
       need(pinned.approval.dryRun === true && pinned.baselineAuthority.source.sha256 === candidate.archive.sha256, 'Invalid dry-run pin plan')
       verifyReferenceArchive(boundedFile(join(archiveDirectory, candidate.archive.name), 64 * 1024 * 1024), detached, pinned)
+      if (argument) {
+        const approval = JSON.parse(boundedFile(argument))
+        need(approval.dryRun !== true && approval.evidence !== 'DRY RUN ONLY; no product approval', 'Publication requires a real Tick receipt')
+        pinManifest(visual, candidate, detached, approval, {}, { dryRun: true, identityProof })
+      }
       console.log('Container identity proof and original publication archive verified; no publication or activation performed.')
       return
     }

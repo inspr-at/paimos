@@ -297,8 +297,9 @@ export function checkCoverage(manifest, shards, expectedSpecs, { all = false } =
   for (const file of required) if (!assigned.has(file)) throw new Error(`Spec missing from shards: ${file}`)
   for (const file of expected) if (!declared.has(file) && !excluded.has(file)) throw new Error(`Spec missing from manifest: ${file}`)
   for (const file of [...declared, ...excluded]) if (!expected.has(file)) throw new Error(`Stale manifest spec: ${file}`)
-  const ungated = declared.size - required.size
-  return { specs: assigned.size, shards: shards.length, ...(ungated ? { ungated } : {}), ...(excluded.size ? { excluded: excluded.size } : {}) }
+  const dedicated = manifest.groups.filter(group => group.executionJob).reduce((count, group) => count + group.specs.length, 0)
+  const ungated = declared.size - required.size - dedicated
+  return { specs: assigned.size, shards: shards.length, ...(ungated ? { ungated } : {}), ...(dedicated ? { dedicated } : {}), ...(excluded.size ? { excluded: excluded.size } : {}) }
 }
 
 export function retryCount(env) {

@@ -579,9 +579,10 @@ test('every PR full-suite job and every full execution marker remains mandatory'
     else job(f, name).conclusion = 'skipped';
     assert.throws(() => prFacts(f), /incomplete suite/, name);
   }
-  for (const name of requiredJobs.filter(n => /^(go-test|web-unit|web-shard) \(/.test(n))) {
-    const f = prFixture(); job(f, name).steps = job(f, name).steps.filter(s => s.name !== 'Confirm full tier execution');
-    assert.throws(() => prFacts(f), /full tier execution evidence/, name);
+  for (const name of requiredJobs.filter(n => /^(go-test|web-unit|web-shard) \(/.test(n) || n === 'visual-comparison')) {
+    const marker = name === 'visual-comparison' ? 'Confirm full visual tier execution' : 'Confirm full tier execution';
+    const f = prFixture(); job(f, name).steps = job(f, name).steps.filter(s => s.name !== marker);
+    assert.throws(() => prFacts(f), /full (?:tier|visual) execution evidence/, name);
   }
 });
 

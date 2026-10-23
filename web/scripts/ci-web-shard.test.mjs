@@ -310,7 +310,7 @@ test('real manifest covers every non-excluded UI spec once for 1, 12, 24 and 256
   assert.ok(!expected.includes('e2e/smoke.spec.ts'))
   for (const count of [1, 12, 24, 256]) {
     assert.deepEqual(checkCoverage(manifest, balanceShards(manifest, count, { all: true }), expected, { all: true }), {
-      specs: expected.length - manifest.exclusions.length, shards: count,
+      specs: expected.length - manifest.exclusions.length - 19, shards: count, dedicated: 19,
       ...(manifest.exclusions.length ? { excluded: manifest.exclusions.length } : {}),
     })
   }
@@ -363,7 +363,7 @@ test('runner is hosted-only, runs groups sequentially, retains failure and stops
     return { code: calls.length === 1 ? 1 : 0 }
   }
   assert.equal(await main(['1/1'], { manifest, env, run, out: () => {} }), 1)
-  assert.equal(calls.length, manifest.groups.filter(g => g.gate !== false).length)
+  assert.equal(calls.length, manifest.groups.filter(g => g.gate !== false && !g.executionJob).length)
   assert.equal(calls.find(call => call.options.env.AEON_DESK_SHOTS).options.env.AEON_DESK_SHOTS, '/tmp/runner/aeon-desk-shots')
   let interruptedCalls = 0
   assert.equal(await main(['1/1'], { env, out: () => {}, run: async () => { interruptedCalls++; return { code: 143 } } }), 143)
@@ -747,7 +747,7 @@ test('runtime reconciliation leaves new specs ungated, drops removed specs and r
   // The real manifest keeps main's gates and any additional branch specs.
   const out = []
   assert.equal(await main(['--check', '--shards', '12'], { out: s => out.push(s), env: {} }), 0)
-  const declared = loadManifest().groups.filter(group => group.gate !== false).flatMap(group => group.specs)
+  const declared = loadManifest().groups.filter(group => group.gate !== false && !group.executionJob).flatMap(group => group.specs)
   assert.equal(JSON.parse(out.pop()).specs, declared.length)
 })
 

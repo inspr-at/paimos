@@ -102,7 +102,7 @@ export function installRendererFonts(visual, directory, { run = execFileSync } =
   const bytes = readFileSync(new URL('../../' + visual.renderer.fontconfig.asset, import.meta.url))
   need(createHash('sha256').update(bytes).digest('hex') === visual.renderer.fontconfig.sha256, 'fontconfig file SHA-256')
   writeFileSync(path, bytes)
-  const env = { ...process.env, FONTCONFIG_FILE: path }
+  const env = { ...process.env, FONTCONFIG_FILE: path, XDG_CACHE_HOME: join(output, 'cache') }
   run('fc-cache', ['-f'], { env, timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] })
   for (const [alias, family] of Object.entries(visual.renderer.fontconfig.aliases)) {
     // A bare pattern parses the hyphen in system-ui as a size separator.

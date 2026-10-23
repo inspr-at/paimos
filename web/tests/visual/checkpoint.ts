@@ -17,10 +17,11 @@ const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts
 export const test = base.extend({
   launchOptions: [async ({ launchOptions }, use, workerInfo) => {
     // This infrastructure refusal stays outside report-only result handling.
-    // Native agm2/macOS browsers must never diff against CI container pixels.
+    // Native Linux/macOS browsers must never diff against CI container pixels.
     assertVisualContainer(manifest)
     const fontconfig = installRendererFonts(manifest, join(workerInfo.project.outputDir, `visual-fontconfig-${workerInfo.workerIndex}`))
-    await use({ ...launchOptions, env: { ...process.env, ...launchOptions.env, FONTCONFIG_FILE: fontconfig } })
+    await use({ ...launchOptions, env: { ...process.env, ...launchOptions.env,
+      FONTCONFIG_FILE: fontconfig, XDG_CACHE_HOME: join(dirname(fontconfig), 'cache') } })
   }, { scope: 'worker' }],
 })
 const captureSHA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: fileURLToPath(new URL('../../../', import.meta.url)), encoding: 'utf8' }).trim()
