@@ -200,7 +200,10 @@ func testAssistantAdapterRoundTrip(t *testing.T) {
 	// preserving sender attribution and the original thread/reply relationship.
 	reply, _ := json.Marshal(compatSend{To: w.admin.ID, Body: "assistant scoped reply", Key: "adapter-inbound", ReplyTo: &queued.MessageID, Level: "simple"})
 	messagePath := "/api/projects/" + project + "/messages"
-	post(readOnly, messagePath, string(reply), 403)
+	denied := mustJSON[map[string]any](t, post(readOnly, messagePath, string(reply), 403))
+	if denied["reason_code"] != "missing_key_scope" || denied["scope"] != "inbox.send" {
+		t.Fatalf("inbound negative failed for the wrong reason: %v", denied)
+	}
 	inbound := mustJSON[CompatMessage](t, post(key, messagePath, string(reply), 201))
 	if inbound.SenderPrincipalID != w.agent.ID || inbound.RecipientPrincipalID != w.admin.ID || inbound.ReplyTo == nil || *inbound.ReplyTo != queued.MessageID {
 		t.Fatal("inbound reply bypassed principal/key attribution")
