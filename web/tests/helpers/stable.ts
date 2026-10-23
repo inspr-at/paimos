@@ -49,13 +49,18 @@ export async function expectStableControls({ controls, interactions, scrollAreas
       expect(extra, `${step}: ${name} horizontal overflow`).toBeLessThanOrEqual(1)
     }
   }
-  const baseline = new Map<string, Awaited<ReturnType<typeof box>>>()
-  for (const [name, locator] of Object.entries(controls)) baseline.set(name, await box(locator, name))
+  // Settle the named controls together. Serial double-frame waits multiplied
+  // Hours' 12 layouts into 300 frame waits and exhausted its 30-second budget.
+  // Every control still waits for fonts/animations and keeps the same checks.
+  const measure = async () => new Map(await Promise.all(Object.entries(controls).map(async ([name, locator]) =>
+    [name, await box(locator, name)] as const)))
+  const baseline = await measure()
   await overflow('initial')
   for (const interaction of interactions) {
     await interaction.run()
-    for (const [name, locator] of Object.entries(controls)) {
-      const current = await box(locator, name), before = baseline.get(name)!
+    const samples = await measure()
+    for (const [name, current] of samples) {
+      const before = baseline.get(name)!
       for (const axis of ['x', 'y', 'width', 'height'] as const) {
         expect(Math.abs(current[axis] - before[axis]), `${interaction.name}: ${name}.${axis} (${before[axis]} → ${current[axis]})`).toBeLessThanOrEqual(tolerance)
       }

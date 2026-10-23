@@ -142,7 +142,8 @@ function go() {
 .rf.none { display: block; color: var(--ink-3); }
 .od-note { display: flex; gap: 8px; margin-top: 18px; padding: 10px 12px; border-radius: 10px; background: var(--surface-sunken); font-size: 12px; line-height: 1.5; color: var(--ink-2); }
 .od-note > :first-child { flex: none; margin-top: 2px; color: var(--ink-3); }
-.od-go-label { font-variant-numeric: tabular-nums; }
+/* Keep tabular counts independent of their neighbouring spaces and letters. */
+.od-go-label { font-variant-numeric: tabular-nums; font-kerning: none; }
 @container (max-width: 480px) { .rf { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 @media (pointer: coarse) {
   .od-l { min-height: 44px; }

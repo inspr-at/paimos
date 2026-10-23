@@ -320,7 +320,8 @@ defineExpose({
 </template>
 <style scoped>
 .wind-down { display: inline-flex; align-items: center; flex: none; }
-.go-by { font-variant-numeric: tabular-nums; }
+/* Tabular advances still allow kerning with the colon and surrounding text. */
+.go-by { font-variant-numeric: tabular-nums; font-kerning: none; }
 .go-by.hidden { visibility: hidden; }
 .submit-keys { display: inline-flex; gap: 2px; align-items: center; flex: none; }
 .wd-btn { color: var(--ink-2); }
