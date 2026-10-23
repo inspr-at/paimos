@@ -14,20 +14,32 @@ export interface StableOptions {
 async function box(locator: Locator, name = 'control') {
   await expect(locator).toHaveCount(1)
   await expect(locator).toBeVisible()
-  const sample = await locator.evaluate(async element => {
-    await document.fonts.ready
-    await Promise.all(element.getAnimations({ subtree: true })
-      .filter(animation => animation.effect?.getTiming().iterations !== Infinity)
-      .map(animation => animation.finished.catch(() => {})))
-    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-    const rect = element.getBoundingClientRect()
-    let x = rect.x, y = rect.y
-    for (let current: Element | null = element; current; current = current.parentElement) {
-      if (current !== element) { x += current.scrollLeft; y += current.scrollTop }
-      if (getComputedStyle(current).position === 'fixed') break
-    }
-    return { x, y, width: rect.width, height: rect.height }
-  })
+  const sample = { x: 0, y: 0, width: 0, height: 0 }
+  await expect.poll(async () => {
+    const settled = await locator.evaluate(async element => {
+      await document.fonts.ready
+      await Promise.all(element.getAnimations({ subtree: true })
+        .filter(animation => animation.effect?.getTiming().iterations !== Infinity)
+        .map(animation => animation.finished.catch(() => {})))
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      // TicketTable can still be fitting columns or sampling its card after
+      // fonts and two frames. Read readiness and geometry in the same frame,
+      // on initial load and after interactions such as a full-page reload.
+      for (let current: Element | null = element; current; current = current.parentElement) {
+        if (current.getAttribute('data-columns-settled') === '0' || current.getAttribute('data-card-width-settled') === '0') return null
+      }
+      const rect = element.getBoundingClientRect()
+      let x = rect.x, y = rect.y
+      for (let current: Element | null = element; current; current = current.parentElement) {
+        if (current !== element) { x += current.scrollLeft; y += current.scrollTop }
+        if (getComputedStyle(current).position === 'fixed') break
+      }
+      return { x, y, width: rect.width, height: rect.height }
+    })
+    if (!settled) return false
+    Object.assign(sample, settled)
+    return true
+  }, { message: `wait for settled control layout (${name})` }).toBe(true)
   expect(sample.width, `sampled control width must be positive (${name})`).toBeGreaterThan(0)
   expect(sample.height, `sampled control height must be positive (${name})`).toBeGreaterThan(0)
   return sample
