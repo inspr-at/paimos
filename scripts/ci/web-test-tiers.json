@@ -17510,6 +17510,8 @@
     ,
     {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"readSibling > rejects a sibling body over 64000 bytes even when Content-Length is smaller","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"reports a refused remote revocation as a failed disconnect","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"treats 429 as unreachable instead of ending the connection","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > chooses reading, all clear, a silent source or the scope line, and nothing while rows are listed","tier":"ESSENTIAL"}

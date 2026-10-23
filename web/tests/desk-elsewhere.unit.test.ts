@@ -9,7 +9,7 @@ const harness = vi.hoisted(() => ({
 }))
 vi.mock('../src/stores/session', () => ({ useSession: () => harness }))
 vi.mock('../src/lib/api', () => ({ api: harness.api }))
-const { parseSummary, readSibling, ConnectionEnded } = await import('../src/lib/deskElsewhere')
+const { parseSummary, readSibling, revokeSibling, ConnectionEnded } = await import('../src/lib/deskElsewhere')
 afterEach(() => { harness.identity = null; harness.api.mockReset(); vi.unstubAllGlobals() })
 
 const pma = { tag: 'pma', origin: 'https://pma.example' }
@@ -87,4 +87,13 @@ it('exchanges the history code in a credential-free POST and receives the bearer
     method: 'POST', credentials: 'omit', mode: 'cors', cache: 'no-store', redirect: 'error', referrerPolicy: 'no-referrer',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: 'history-code', state: 'state', code_verifier: 'verifier' }),
   }))
+})
+
+it('reports a refused remote revocation as a failed disconnect', async () => {
+  const fetch = vi.fn(async () => new Response(null, { status: 401 }))
+  vi.stubGlobal('fetch', fetch)
+  await expect(revokeSibling(pma, 'browser-only-test-grant')).rejects.toThrow('could not be ended')
+  expect(fetch).toHaveBeenCalledWith('https://pma.example/api/decision-desk/owner-summary', expect.objectContaining({ method: 'DELETE', credentials: 'omit', cache: 'no-store', redirect: 'error', referrerPolicy: 'no-referrer' }))
+  fetch.mockImplementation(async () => new Response(null, { status: 204 }))
+  await expect(revokeSibling(pma, 'browser-only-test-grant')).resolves.toBeUndefined()
 })

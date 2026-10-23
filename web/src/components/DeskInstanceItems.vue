@@ -81,10 +81,10 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
         <AppIcon :name="kindIcon(line.kind)" :size="14" />
         <template v-if="variant === 'goals'">
           <span v-clip-tip class="instance-title">{{ line.title }}</span>
-          <span v-clip-tip class="instance-project">{{ line.projectKey }}</span>
+          <span v-clip-tip :tabindex="line.projectKey ? 0 : undefined" class="instance-project">{{ line.projectKey }}</span>
           <time v-if="line.createdAt" :datetime="line.createdAt">{{ relativeTime(line.createdAt, { now: Date.parse(read.summary!.asOf) }) }}</time>
         </template>
-        <span v-else class="instance-body"><span v-clip-tip class="instance-title">{{ line.title }}</span><small><span v-clip-tip class="instance-project">{{ line.projectKey }}</span><span v-if="variant === 'preview'" class="instance-tag">{{ read.tag }}</span><time v-if="line.createdAt" :datetime="line.createdAt">{{ relativeTime(line.createdAt, { now: Date.parse(read.summary!.asOf) }) }}</time></small></span>
+        <span v-else class="instance-body"><span v-clip-tip class="instance-title">{{ line.title }}</span><small><span v-clip-tip :tabindex="line.projectKey ? 0 : undefined" class="instance-project">{{ line.projectKey }}</span><span v-if="variant === 'preview'" class="instance-tag">{{ read.tag }}</span><time v-if="line.createdAt" :datetime="line.createdAt">{{ relativeTime(line.createdAt, { now: Date.parse(read.summary!.asOf) }) }}</time></small></span>
         <span class="instance-decide"><span v-if="variant === 'desk'" class="decide-words">{{ text(`Decide on ${read.tag}`, `Auf ${read.tag} entscheiden`) }}</span><AppIcon name="external" :size="13" /></span>
       </a>
       <p v-if="variant === 'desk' && read.allItems && (read.summary?.open ?? 0) > lines.length" class="instance-asof">{{ text(`${lines.length} of ${read.summary!.open} shown. The rest are on the home Desk.`, `${lines.length} von ${read.summary!.open} angezeigt. Weitere Einträge stehen auf dem eigenen Desk.`) }}</p>

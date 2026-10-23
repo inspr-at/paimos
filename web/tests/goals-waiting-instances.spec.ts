@@ -130,6 +130,8 @@ for (const width of [1440, 1024, 390] as const) {
     await expect(page.getByTestId('desk-sync').locator('.sync-text')).toHaveAttribute('data-tip', /pma: checked/)
     await expect(page.getByTestId('instance-pma').locator('.instance-item')).toHaveCount(2)
     await expect(page.getByTestId('instance-pma').getByRole('button')).toHaveCount(0)
+    await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
+    await expect(page.locator('.source-warnings')).toHaveCount(0)
     await shot(page, info, `desk-${width}-light`)
     await page.emulateMedia({ colorScheme: 'dark' }); await shot(page, info, `desk-${width}-dark`)
     await page.emulateMedia({ colorScheme: 'light' })
@@ -222,6 +224,14 @@ test('phone status and project keys expose their full copy with text spacing', a
   await expect(project).toHaveAttribute('data-tip', projectKey)
   await expect(project).toHaveAttribute('data-clip-tip', '')
   await expect(project).toHaveAttribute('tabindex', '0')
+  await project.focus(); await expect(project).toBeFocused()
+  await expect(page.locator('.tooltip')).toHaveText(projectKey)
+  await page.keyboard.press('Escape')
+  await project.dispatchEvent('pointerdown', { pointerType: 'touch', pointerId: 7, button: 0, isPrimary: true })
+  await page.clock.fastForward(501)
+  await expect(page.locator('.tooltip')).toHaveText(projectKey)
+  await project.dispatchEvent('pointerup', { pointerType: 'touch', pointerId: 7, button: 0, isPrimary: true })
+  await page.keyboard.press('Escape')
   await page.addStyleTag({ content: '.instance-copy { line-height: 2 !important; letter-spacing: .12em !important; word-spacing: .16em !important; }' })
   mock.set('down'); await page.clock.fastForward(30_000)
   const copy = row.locator('.instance-copy')
@@ -309,11 +319,15 @@ for (const width of [1440, 1024, 390] as const) {
     })
     await expect(switchAccount).toHaveCSS('color', linkColor)
     const connect = page.getByRole('button', { name: 'Connect', exact: true }), cancel = page.getByRole('button', { name: 'Cancel', exact: true })
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme }); await shot(page, info, `confirm-${width}-${theme}`)
+    }
+    await page.emulateMedia({ colorScheme: 'light' })
     await expectStableControls({ controls: { connect, cancel, switchAccount }, scrollAreas: { card: page.locator('.connect-card') }, interactions: [
       { name: 'failed connect preserves actions', run: async () => { await connect.click(); await expect(page.getByRole('alert')).toBeVisible() } },
     ] })
-    await shot(page, info, `confirm-${width}-light`)
-    await page.emulateMedia({ colorScheme: 'dark' }); await shot(page, info, `confirm-${width}-dark`)
+    await shot(page, info, `confirm-error-${width}-light`)
+    await page.emulateMedia({ colorScheme: 'dark' }); await shot(page, info, `confirm-error-${width}-dark`)
     await cancel.click(); await expect(page.getByText('Nothing was shared.')).toBeVisible()
     expect(writes).toBe(1)
   })
@@ -431,10 +445,21 @@ test('Desk coverage matrix, header tooltip and preview evidence in both themes',
     { name: 'here-0-there-unreachable', local: 0, lines: 0, sibling: 'down' as const },
     { name: 'all-0', local: 0, lines: 0, sibling: 'ok' as const },
   ]) {
-    await mockDecisionDesk(page, { emptyDesk: true })
-    // The Desk's source fixtures are registered last to retain the matrix totals.
-    await mockBand(page, scenario)
+    const mock = await mockBand(page, scenario)
+    const home = await mockDecisionDesk(page, { emptyDesk: scenario.local === 0 })
+    home.projectionTime = NOW
+    home.approval.expires_at = iso(NOW + HOUR)
+    if (scenario.local) {
+      home.approval.decision = 'approved'; home.rule.state = 'proposed'
+      home.questions[0].input.source_request_id = home.action.id
+      home.action.reply_obligation = 'closed'
+    } else {
+      await page.route(/\/api\/decision-desk\/projection/, route => route.fulfill({ json: { items: [], counts: { open: 0, held: 0, chores: 0 }, has_more: false, as_of: iso(NOW) } }))
+    }
+    await mock.mount()
     await page.goto('/decision-desk')
+    await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
+    await expect(page.locator('.source-warnings')).toHaveCount(0)
     const remote = page.getByTestId('instance-pma')
     if (scenario.sibling === 'down') {
       await expect(remote).toContainText("couldn't be reached")
@@ -453,7 +478,7 @@ test('Desk coverage matrix, header tooltip and preview evidence in both themes',
       await expect(deskPlace).toHaveAttribute('data-tip', /3 wait for you · 2 here · 1 on pma/)
       for (const theme of ['light', 'dark'] as const) {
         await page.emulateMedia({ colorScheme: theme })
-        await deskPlace.hover()
+        await deskPlace.focus()
         await expect(page.locator('.tooltip')).toContainText('2 here')
         await shot(page, info, `header-tooltip-1440-${theme}`)
         await page.mouse.move(0, 0)

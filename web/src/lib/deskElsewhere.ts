@@ -111,5 +111,5 @@ export async function revokeSibling(sibling: DeskSibling, token: string, signal?
     method: 'DELETE', credentials: 'omit', mode: 'cors', cache: 'no-store', redirect: 'error', referrerPolicy: 'no-referrer',
     headers: { Authorization: `Bearer ${token}` }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   })
-  if (response.status !== 204 && response.status !== 401) throw new Error('The connection could not be ended on its home instance.')
+  if (response.status !== 204) throw new Error('The connection could not be ended on its home instance.')
 }
