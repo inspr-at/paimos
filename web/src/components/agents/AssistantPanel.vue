@@ -12,6 +12,7 @@ import { confirmAction } from '../../lib/confirm'
 import { relativeTime } from '../../lib/work'
 import { useVisualViewport } from '../../lib/visualViewport'
 import { shortcutTyping } from '../../lib/shortcuts'
+import { vClipTip } from '../../directives/clipTip'
 import type { PanelLayout } from '../../lib/leadPanel'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
@@ -124,7 +125,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 <template>
   <aside ref="root" class="session-panel assistant-panel" :class="{ docked, sheet, full: layout === 'full', wide: layout === 'wide' }" :aria-label="words.details" tabindex="-1" @keydown="panelKey">
     <header class="assistant-panel-head">
-      <div class="assistant-panel-title"><HarnessMark :harness="item.vendor" :size="16" /><h2>{{ item.display_name }}<small>{{ vendor }}</small></h2><button v-if="sidebarAvailable" type="button" class="icon-btn flat assistant-layout" :aria-label="words.sessionsList" :aria-pressed="layout === 'side'" @click="emit('layout', layout === 'side' ? 'wide' : 'side')"><AppIcon :name="layout === 'side' ? 'layout-focus' : 'layout-list'" /></button><button type="button" class="icon-btn flat assistant-layout" :aria-label="words.fullScreen" :aria-pressed="layout === 'full'" @click="emit('layout', layout === 'full' ? 'side' : 'full')"><AppIcon :name="layout === 'full' ? 'collapse' : 'expand'" /></button><button type="button" class="icon-btn flat assistant-close" :aria-label="words.close" aria-keyshortcuts="Escape" @click="emit('close')"><AppIcon name="close" /></button></div>
+      <div class="assistant-panel-title"><HarnessMark :harness="item.vendor" :size="16" /><h2><span v-clip-tip class="assistant-title-name">{{ item.display_name }}</span><small>{{ vendor }}</small></h2><button v-if="sidebarAvailable" type="button" class="icon-btn flat assistant-layout" :aria-label="words.sessionsList" :aria-pressed="layout === 'side'" @click="emit('layout', layout === 'side' ? 'wide' : 'side')"><AppIcon :name="layout === 'side' ? 'layout-focus' : 'layout-list'" /></button><button type="button" class="icon-btn flat assistant-layout" :aria-label="words.fullScreen" :aria-pressed="layout === 'full'" @click="emit('layout', layout === 'full' ? 'side' : 'full')"><AppIcon :name="layout === 'full' ? 'collapse' : 'expand'" /></button><button type="button" class="icon-btn flat assistant-close" :aria-label="words.close" aria-keyshortcuts="Escape" @click="emit('close')"><AppIcon name="close" /></button></div>
       <p class="panel-status" :class="{ down: status === 'down' }"><AppIcon :name="ASSISTANT_STATUS_ICON[status]" />{{ statusWord }}</p>
       <p class="panel-status-line">{{ statusLine }}</p>
       <div class="assistant-actions"><span v-if="!assistantCapabilities.pause" class="unavailable-action">{{ words.pauseUnavailable }}</span><button v-if="mayEdit" type="button" class="icon-btn flat" :aria-label="words.more" aria-haspopup="menu" :aria-expanded="!!menuAnchor" @click="menuAnchor = menuAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon name="more" /></button></div>
@@ -176,6 +177,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .assistant-panel-title { display: flex; align-items: flex-start; gap: 8px; min-height: 44px; }
 .assistant-panel-title > :deep(svg) { margin-top: 4px; width: 16px; height: 16px; }
 h2 { margin: 0; min-width: 0; flex: 1; overflow-wrap: anywhere; font-size: 18px; font-weight: 650; }
+.assistant-title-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 h2 small { display: block; margin-top: 4px; font-size: 12px; font-weight: 400; color: var(--ink-2); }
 .assistant-close { flex: none; }
 .panel-status { display: flex; align-items: center; gap: 7px; margin: 10px 0 4px; font-size: 13px; font-weight: 600; }
