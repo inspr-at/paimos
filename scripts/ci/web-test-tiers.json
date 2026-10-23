@@ -15504,6 +15504,8 @@
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"view menu: rename, duplicate, default on the next visit, share, copy link and delete with undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/visual-reference-guard.spec.ts","name":"P02 Agents permission requests load successfully and retain explicit error recovery","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/visual-reference-guard.spec.ts","name":"P02 Session Chat fixture binds its chat reads and native refusal to the displayed session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/visual-reference-guard.spec.ts","name":"visual comparison rejects a changed control and never creates a missing reference","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

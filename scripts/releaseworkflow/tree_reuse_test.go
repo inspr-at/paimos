@@ -662,10 +662,9 @@ func normalizeAEON1674VisualReferences(t *testing.T, id string, job map[string]a
 		previous = "Install Chromium system dependencies"
 		next = "Download affected browser execution plan"
 		env := treeMap(job["env"])
-		if job["runs-on"] != "ubuntu-24.04" || env["AEON_VISUAL_RUNNER"] != "ubuntu-24.04" {
-			t.Fatal("visual comparison must retain its exact reviewed hosted Linux renderer")
+		if job["runs-on"] != "ubuntu-latest" || env["AEON_VISUAL_RUNNER"] != "ubuntu-24.04" {
+			t.Fatal("visual comparison must retain hosted routing and its runtime-verified Linux renderer")
 		}
-		job["runs-on"] = "ubuntu-latest"
 		delete(env, "AEON_VISUAL_RUNNER")
 		if env["AEON_VISUAL_BASELINE_FILE"] != "${{ github.workspace }}/tmp/visual-baselines/baseline.json" {
 			t.Fatal("every browser shard must compare against the verified transported baseline")

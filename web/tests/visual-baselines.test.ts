@@ -146,10 +146,18 @@ test('visual references require approval, immutable attachment bytes and every e
   const captureJob = workflow.slice(workflow.indexOf('\n  visual-reference-capture:'), workflow.indexOf('\n  # Read-only proof.'))
   const compareJob = workflow.slice(workflow.indexOf('\n  web-shard:'), workflow.indexOf('\n  # Preserve the ruleset'))
   assert.match(captureJob, /if: github.event_name == 'workflow_dispatch' && inputs.visual_capture == true/)
+  assert.match(captureJob, /runs-on: ubuntu-24\.04/)
+  assert.doesNotMatch(captureJob, /\n    (needs|strategy|continue-on-error):/)
+  assert.match(compareJob, /runs-on: ubuntu-latest/)
+  assert.doesNotMatch(compareJob, /AEON_VISUAL_CAPTURE/)
   for (const job of [captureJob, compareJob]) {
-    assert.match(job, /runs-on: ubuntu-24\.04/)
     assert.match(job, /AEON_VISUAL_RUNNER: ubuntu-24\.04/)
   }
+  const changedImage = structuredClone(actual)
+  changedImage.runner.imageOS = 'different-image'
+  assert.throws(() => assertRenderer(changedImage, renderer), /renderer differs from reference: runner/)
+  changedImage.runner = { ...actual.runner, imageVersion: 'different-version' }
+  assert.throws(() => assertRenderer(changedImage, renderer), /renderer differs from reference: runner/)
   assert.match(captureJob, /retention-days: 7/)
   assert.doesNotMatch(captureJob, /contents: write|gh release|visual-baselines\.mjs/)
   const steps = parseWorkflow(workflow).get('visual-reference-capture')

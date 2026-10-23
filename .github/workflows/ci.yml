@@ -35,8 +35,8 @@ env:
 jobs:
   visual-reference-capture:
     if: github.event_name == 'workflow_dispatch' && inputs.visual_capture == true
-    # Keep this identical to ci.yml web-shard. ImageOS and ImageVersion become
-    # part of the candidate manifest and must be pinned after Tick's review.
+    # The manual capture uses a fixed image; ordinary shards keep their hosted
+    # route. Comparison validates the actual ImageOS and reviewed ImageVersion.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -992,7 +992,7 @@ jobs:
   web-shard:
     if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only' && (github.event_name != 'pull_request' || needs.ci-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.web-setup.result == 'success'
     needs: [ci-plan, web-setup, tree-reuse, apt-bundle]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
@@ -1005,6 +1005,8 @@ jobs:
       # Mocked UI specs. The e2e job is the backend-required shard.
       AEON_REQUIRE_BACKEND: 'off'
       AEON_VISUAL_BASELINE_FILE: ${{ github.workspace }}/tmp/visual-baselines/baseline.json
+      # Renderer identity is checked against ImageOS and ImageVersion at runtime;
+      # a hosted image change must fail comparison until its reference is reviewed.
       AEON_VISUAL_RUNNER: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

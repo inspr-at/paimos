@@ -83,9 +83,14 @@ export const agents: VisualSetup = async (page, _profile, theme) => {
   // This reference depicts a successful lead read. Missing action projections
   // remain covered separately by the lead-panel refusal test.
   await healthyLead(page)
+  const permissionRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/approvals' && response.request().method() === 'GET')
   await page.goto('/agents')
+  const permissions = await permissionRead
+  expect(permissions.status(), 'The Agents reference requires a successful permission-request read').toBe(200)
+  expect(await permissions.json()).toEqual(data.approvals)
   await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible()
   await expect(page.locator('.sessions [data-row]').first()).toBeVisible()
+  await expect(page.getByRole('alert').filter({ hasText: 'Permission requests could not be loaded:' })).toHaveCount(0)
   const lead = page.locator(`[data-row="s:${data.sessions[0]!.id}"]`)
   await lead.locator('.history-toggle').click()
   await expect(page.locator(`[data-row="s:${data.sessions[6]!.id}"]`)).toBeVisible()

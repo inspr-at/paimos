@@ -6,8 +6,45 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { test, expect, type Page, type Response } from '@playwright/test'
-import { sessionChat, sessionChatUnavailable } from './visual/fixtures'
+import { agents, NOW, sessionChat, sessionChatUnavailable } from './visual/fixtures'
 import { checkVisual, compareVisualReference, visualCases, prepareVisualFonts, renderedFonts } from './visual/checkpoint'
+import { visualChrome } from './visual/chrome-fixture'
+import { fixtures, mockWork } from './work-fixtures'
+
+// Risk: a healthy Agents reference accidentally depicts an unmocked permission
+// service, or hiding that banner also hides a real load failure and its retry.
+test('P02 Agents permission requests load successfully and retain explicit error recovery', async ({ page }) => {
+  await page.clock.setFixedTime(new Date(NOW))
+  await mockWork(page, fixtures(), { admin: true })
+  // Exercise chrome without the shared agents handler, which also serves this
+  // endpoint. Otherwise its fallback could conceal a missing chrome mock.
+  await visualChrome(page, fixtures(), NOW, { agents: false })
+  await page.goto('/')
+  const chromeRead = await page.evaluate(async () => {
+    const response = await fetch('/api/approvals?limit=200')
+    return { status: response.status, body: await response.json() }
+  })
+  expect(chromeRead).toEqual({ status: 200, body: [] })
+  await agents(page, 'desktop', 'light')
+  let fail = true
+  await page.route(url => url.pathname === '/api/approvals', route => {
+    if (route.request().method() !== 'GET' || !fail) return route.fallback()
+    return route.fulfill({ status: 503, json: { error: 'Permission service unavailable' } })
+  })
+  const failedRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/approvals')
+  await page.reload()
+  expect((await failedRead).status()).toBe(503)
+  const error = page.getByRole('alert').filter({ hasText: 'Permission requests could not be loaded:' })
+  await expect(error).toContainText('Permission service unavailable')
+  await expect(error).toContainText('(503)')
+  await expect(page.locator('.sessions [data-row]').first()).toBeVisible()
+  fail = false
+  const recoveredRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/approvals')
+  await error.getByRole('button', { name: 'Try again' }).click()
+  expect((await recoveredRead).status()).toBe(200)
+  await expect(error).toHaveCount(0)
+  await expect(page.locator('.sessions [data-row]').first()).toBeVisible()
+})
 
 test('visual comparison rejects a changed control and never creates a missing reference', async ({ page, browser }, info) => {
   expect(info.config.updateSnapshots).toBe('none')

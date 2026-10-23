@@ -23,6 +23,7 @@ export async function visualChrome(page: Page, data: Fixtures, now: number, opti
     const request = route.request(), path = new URL(request.url()).pathname
     if (request.method() !== 'GET') return route.fallback()
     const json = (body: unknown) => route.fulfill({ json: body })
+    if (path === '/api/approvals') return json([])
     if (path === '/api/models' && options.models !== false || path === '/api/me/host-labels') return json([])
     if (path === '/api/quote-profiles') return json([])
     if (path === '/api/work-kinds') return json({ items: [], next_cursor: null })
