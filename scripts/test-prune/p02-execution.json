@@ -2142,7 +2142,8 @@
     "vitest:tests/tooltip-focus.unit.test.ts:P02 an eight-pixel hold reveals at 500 ms and suppresses only its own compatibility click",
     "vitest:tests/tooltip-focus.unit.test.ts:P02 focused disclosure follows a changed record and discards a disconnected anchor and late observer",
     "vitest:tests/ui-audit-rules.unit.test.ts:P02 audit exceptions require the exact fixture, HTTP outcome and decorative accessible counterpart",
-    "browser:tests/visual-reference-guard.spec.ts:P02 Session Chat fixture binds its chat reads and native refusal to the displayed session"
+    "browser:tests/visual-reference-guard.spec.ts:P02 Session Chat fixture binds its chat reads and native refusal to the displayed session",
+    "browser:tests/visual-reference-guard.spec.ts:P02 Delivery phone capture includes its heading and on-target headline in both themes"
   ],
   "deliberatelyRetainedRisks": [
     "All 1090 original case identities and their tiers, including historical drift aliases.",
@@ -3985,5 +3986,26 @@
       "fullHostedCIResultClaimed": false
     },
     "scopeRestorationAuthority": "Current user request to execute round-6 P02 stays test-only; restores earlier P02-added product hooks and their new coupled assertions. No baseline assertion or registration is removed."
+  },
+  "round9": {
+    "scope": "Pins only and the specified Delivery phone capture correction. No protected cuts; P03–P11 start after P02 merges.",
+    "sourceCaptureSHA": "6fea542010b4c699dadadd74529fdaf7a1ef4c9a",
+    "captureRun": "39912019882",
+    "referenceSet": "test-references-2",
+    "archiveSHA256": "3c53666ddd810275cef073191449bebe20e73d6c0b162de4fe65f441a20e4511",
+    "comparisonCheckpoints": 70,
+    "deferredCheckpoints": {
+      "goals": 4,
+      "ticket-workspace": 4,
+      "delivery-numbers-390": 2
+    },
+    "transportOnlyMembers": [
+      "V-delivery-numbers-390-light.png",
+      "V-delivery-numbers-390-dark.png"
+    ],
+    "rendererImageVersion": "20261012.334.1",
+    "captureFix": "The phone Delivery heading scrolls into view with block start, then main scrolls by the measured heading offset minus app-header height. The complete on-target headline must be inside the viewport. Desktop capture setup is unchanged.",
+    "guard": "browser:tests/visual-reference-guard.spec.ts:P02 Delivery phone capture includes its heading and on-target headline in both themes",
+    "validation": "In progress; final evidence recorded before handoff."
   }
 }

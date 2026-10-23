@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGates, referenceReport, materializeBaseline } from '../../scripts/test-prune/visual-baselines.mjs'
-import { packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
+import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGate, referenceGates, referenceReport, materializeBaseline } from '../../scripts/test-prune/visual-baselines.mjs'
+import { collectCandidates, packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
 
 import { assertRenderer, assertFontEvidence, verifyFontAssets, captureEnabled, rendererIdentity } from '../../scripts/test-prune/visual-renderer.mjs'
 import { parseWorkflow } from '../../scripts/ci-static.mjs'
@@ -22,6 +22,10 @@ test('visual references require approval, immutable attachment bytes and every e
   visual.renderer.runner.imageVersion = 'synthetic-image'
   for (const state of visual.states) {
     delete state.referenceStatus; delete state.deferredUntil; delete state.deferredReason
+    delete state.approval
+    for (const checkpoint of state.checkpoints) {
+      delete checkpoint.referenceStatus; delete checkpoint.deferredUntil; delete checkpoint.deferredReason
+    }
   }
   visual.approval = { reviewer: 'Tick', status: 'approved', approvedAt: 'synthetic-proof', evidence: 'Synthetic fixture, never a product approval' }
   Object.assign(visual.baselineAuthority, { status: 'approved' })
@@ -60,6 +64,13 @@ test('visual references require approval, immutable attachment bytes and every e
   mirrored.approval = structuredClone(manifest.history[0].approval)
   mirrored.baselineAuthority = structuredClone(manifest.history[0].baselineAuthority)
   mirrored.renderer.runner.imageVersion = 'synthetic-image'
+  for (const state of mirrored.states) {
+    delete state.approval
+    for (const checkpoint of state.checkpoints) {
+      delete checkpoint.referenceStatus; delete checkpoint.deferredUntil; delete checkpoint.deferredReason
+      checkpoint.reference = { attachmentMember: null, sha256: null }
+    }
+  }
   for (const historical of manifest.history[0].states) Object.assign(mirrored.states.find((state: { id: string }) => state.id === historical.id), structuredClone(historical))
   const approved = mirrored.states.filter((state: { approval?: { decision: string } }) => state.approval?.decision === 'ok-to-pin')
   const approvedFiles = approved.flatMap((state: { checkpoints: { id: string; reference: { attachmentMember: string; sha256: string } }[] }) => state.checkpoints.map(checkpoint => {
@@ -109,14 +120,24 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.throws(() => verifyReferenceArchive(Buffer.alloc(0), detached, mirrored, noExtraction), /archive size mismatch/)
 
   const gates = referenceGates(manifest)
-  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').length, 0)
-  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'awaiting-reference').length, 16)
-  assert.deepEqual(gates.filter((gate: { mode: string }) => gate.mode === 'deferred').map((gate: { state: string }) => gate.state), ['goals', 'ticket-workspace'])
+  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').reduce((sum, gate) => sum + gate.checkpoints, 0), 70)
+  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'awaiting-reference').length, 0)
+  assert.deepEqual(gates.filter((gate: { mode: string }) => gate.mode === 'deferred').map((gate: { state: string }) => gate.state), ['goals', 'delivery-numbers', 'ticket-workspace'])
+  assert.deepEqual(gates.find(gate => gate.state === 'delivery-numbers' && gate.mode === 'compare')?.checkpointIds,
+    ['V-delivery-numbers-1440-light', 'V-delivery-numbers-1440-dark'])
+  assert.deepEqual(gates.find(gate => gate.state === 'delivery-numbers' && gate.mode === 'deferred')?.checkpointIds,
+    ['V-delivery-numbers-390-light', 'V-delivery-numbers-390-dark'])
   assert.match(referenceReport(manifest).markdown, /deferred until AEON-1621 and AEON-1625/)
   assert.equal(manifest.history[0].states.flatMap((state: { checkpoints: unknown[] }) => state.checkpoints).length, 30)
   const noDownload = mkdtempSync(join(tmpdir(), 'aeon-1674-no-authority-'))
   try {
-    assert.equal(materializeBaseline(noDownload, manifest, { download: true, run: () => assert.fail('Historical assets must not be downloaded') }), null)
+    const awaiting = structuredClone(manifest)
+    awaiting.approval = { states: [], checkpoints: [] }
+    for (const state of awaiting.states) {
+      delete state.approval
+      for (const checkpoint of state.checkpoints) checkpoint.reference = { attachmentMember: null, sha256: null }
+    }
+    assert.equal(materializeBaseline(noDownload, awaiting, { download: true, run: () => assert.fail('Historical assets must not be downloaded') }), null)
   } finally { rmSync(noDownload, { recursive: true, force: true }) }
   const lostPin = structuredClone(mirrored)
   lostPin.states.find((state: { id: string }) => state.id === 'projects').checkpoints[0].reference.sha256 = null
@@ -243,6 +264,15 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.throws(() => packCandidates(fallback, manifest), /Visual font guard/)
   const directory = mkdtempSync(join(tmpdir(), 'aeon-1674-candidate-'))
   try {
+    const captureDirectory = join(directory, 'captures')
+    mkdirSync(captureDirectory)
+    const phoneRecords = records.filter(record => record.quality.id.startsWith('V-delivery-numbers-390-'))
+    for (const record of phoneRecords) {
+      writeFileSync(join(captureDirectory, `${record.quality.id}.md`), JSON.stringify({ ...record.quality, reference: { mode: 'deferred' } }))
+      writeFileSync(join(captureDirectory, `${record.quality.id}.png`), record.png)
+    }
+    writeFileSync(join(captureDirectory, 'V-goals-390-light.md'), JSON.stringify({ reference: { mode: 'deferred' }, requirementsRun: false }))
+    assert.equal(collectCandidates(captureDirectory).length, 2, 'Manual capture keeps deferred phone candidates; ordinary deferred reports have no PNG')
     const output = join(directory, 'artifact')
     const candidate = writeCandidateArchive(records, manifest, output)
     assert.equal(candidate.status, 'pending-Tick-review')
@@ -265,12 +295,53 @@ test('visual references require approval, immutable attachment bytes and every e
     for (const state of pinned.states) {
       delete state.approval
       for (const checkpoint of state.checkpoints) {
+        delete checkpoint.referenceStatus; delete checkpoint.deferredUntil; delete checkpoint.deferredReason
         const member = candidate.members.find((member: { id: string }) => member.id === checkpoint.id)
         if (member) checkpoint.reference = { attachmentMember: member.attachmentMember, sha256: member.sha256 }
       }
     }
     const archive = readFileSync(join(output, candidate.archive.name))
     assert.equal(verifyReferenceArchive(archive, detached, pinned).references.size, 72)
+    // Risk: a byte-identical 72-capture archive is mistaken for approval of
+    // rejected phone crops. Verify every byte, expose only the approved 70,
+    // and keep the approved desktop half of this state independently usable.
+    const subset = structuredClone(pinned)
+    const rejected = ['V-delivery-numbers-390-light', 'V-delivery-numbers-390-dark']
+    subset.approval.states = subset.approval.states.filter((id: string) => id !== 'delivery-numbers')
+    subset.approval.checkpoints = candidate.members.filter(member => !rejected.includes(member.id)).map(member => member.id)
+    subset.baselineAuthority.source.unapprovedMembers = candidate.members.filter(member => rejected.includes(member.id))
+    const delivery = subset.states.find((state: { id: string }) => state.id === 'delivery-numbers')
+    for (const checkpoint of delivery.checkpoints) if (rejected.includes(checkpoint.id)) {
+      checkpoint.reference = { attachmentMember: null, sha256: null }
+      Object.assign(checkpoint, { referenceStatus: 'deferred', deferredUntil: ['AEON-1674'], deferredReason: 'Synthetic phone crop changes requested' })
+    }
+    const verified = verifyReferenceArchive(archive, detached, subset)
+    assert.equal(verified.references.size, 70)
+    for (const id of rejected) {
+      assert.equal(verified.references.has(`${id}.png`), false)
+      assert.equal(referenceGate(subset, id).mode, 'deferred')
+    }
+    assert.equal(referenceGate(subset, 'V-delivery-numbers-1440-light').mode, 'compare')
+    assert.equal(verifyBaselineBundle(verified.baseline, subset, { checkpointIds: ['V-delivery-numbers-1440-light'] }).size, 70)
+    assert.throws(() => verifyBaselineBundle(verified.baseline, subset, { stateIds: ['delivery-numbers'] }), /Deferred visual reference: V-delivery-numbers-390-light/)
+    const missingDesktop = structuredClone(subset)
+    missingDesktop.states.find((state: { id: string }) => state.id === 'delivery-numbers').checkpoints[2].reference.sha256 = null
+    assert.throws(() => referenceGates(missingDesktop), { message: 'Unpinned visual reference: V-delivery-numbers-1440-light' })
+    const wronglyPinned = structuredClone(subset)
+    wronglyPinned.states.find((state: { id: string }) => state.id === 'delivery-numbers').checkpoints[0].reference = candidate.members.find(member => member.id === rejected[0])
+    assert.throws(() => referenceGates(wronglyPinned), /deferred reference is pinned/)
+    const changedExcluded = JSON.parse(verified.baseline.toString())
+    changedExcluded.files.find((file: { name: string }) => file.name === `${rejected[0]}.png`).base64 = Buffer.concat([png, Buffer.from('changed')]).toString('base64')
+    const changedExcludedBytes = Buffer.from(JSON.stringify(changedExcluded))
+    const repinnedTransport = structuredClone(subset)
+    repinnedTransport.baselineAuthority.source.baselineBundle.sha256 = hash(changedExcludedBytes)
+    assert.throws(() => verifyBaselineBundle(changedExcludedBytes, repinnedTransport), { message: `Visual baseline member SHA-256 mismatch: ${rejected[0]}.png` })
+    const duplicatedExcluded = JSON.parse(verified.baseline.toString())
+    duplicatedExcluded.files[duplicatedExcluded.files.findIndex((file: { name: string }) => file.name === `${rejected[1]}.png`)] =
+      duplicatedExcluded.files.find((file: { name: string }) => file.name === `${rejected[0]}.png`)
+    const duplicatedBytes = Buffer.from(JSON.stringify(duplicatedExcluded))
+    repinnedTransport.baselineAuthority.source.baselineBundle.sha256 = hash(duplicatedBytes)
+    assert.throws(() => verifyBaselineBundle(duplicatedBytes, repinnedTransport), { message: 'Unknown or duplicate visual baseline member' })
     const tampered = Buffer.from(archive); tampered[600] ^= 1
     assert.throws(() => verifyReferenceArchive(tampered, detached, pinned, noExtraction), /archive SHA-256 mismatch/)
   } finally { rmSync(directory, { recursive: true, force: true }) }

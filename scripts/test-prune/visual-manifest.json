@@ -4,31 +4,178 @@
   "source": "AEON-1668 section 8 and Tick addendum (2026-10-22)",
   "approval": {
     "reviewer": "Tick",
-    "status": "pending-linux-capture",
-    "approvedAt": null,
-    "evidence": "LEAD-M AEON-1674 round-8 brief (2026-10-23); Linux renderer/font and sixteen-state capture corrections",
-    "states": [],
-    "scope": "No current comparison authority and no cuts. Linux capture requires Tick review, LEAD publication as test-references-2, and explicit pins in the next round."
+    "status": "approved",
+    "approvedAt": "2026-10-23",
+    "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+    "states": [
+      "projects",
+      "tickets",
+      "agents",
+      "session-chat",
+      "decision-desk",
+      "account-use-matrix",
+      "models",
+      "access",
+      "knowledge",
+      "hours",
+      "quote-editor",
+      "public-quote",
+      "start-agent",
+      "agent-rules",
+      "capacity"
+    ],
+    "checkpoints": [
+      "V-projects-390-light",
+      "V-projects-390-dark",
+      "V-projects-1440-light",
+      "V-projects-1440-dark",
+      "V-tickets-390-light",
+      "V-tickets-390-dark",
+      "V-tickets-1440-light",
+      "V-tickets-1440-dark",
+      "V-agents-390-light",
+      "V-agents-390-dark",
+      "V-agents-1024-light",
+      "V-agents-1024-dark",
+      "V-agents-1440-light",
+      "V-agents-1440-dark",
+      "V-session-chat-390-light",
+      "V-session-chat-390-dark",
+      "V-session-chat-1440-light",
+      "V-session-chat-1440-dark",
+      "V-decision-desk-390-light",
+      "V-decision-desk-390-dark",
+      "V-decision-desk-1024-light",
+      "V-decision-desk-1024-dark",
+      "V-decision-desk-1440-light",
+      "V-decision-desk-1440-dark",
+      "V-account-use-matrix-390-light",
+      "V-account-use-matrix-390-dark",
+      "V-account-use-matrix-1024-light",
+      "V-account-use-matrix-1024-dark",
+      "V-account-use-matrix-1440-light",
+      "V-account-use-matrix-1440-dark",
+      "V-models-390-light",
+      "V-models-390-dark",
+      "V-models-1440-light",
+      "V-models-1440-dark",
+      "V-access-390-light",
+      "V-access-390-dark",
+      "V-access-1440-light",
+      "V-access-1440-dark",
+      "V-knowledge-390-light",
+      "V-knowledge-390-dark",
+      "V-knowledge-1440-light",
+      "V-knowledge-1440-dark",
+      "V-delivery-numbers-1440-light",
+      "V-delivery-numbers-1440-dark",
+      "V-hours-390-light",
+      "V-hours-390-dark",
+      "V-hours-1440-light",
+      "V-hours-1440-dark",
+      "V-quote-editor-390-light",
+      "V-quote-editor-390-dark",
+      "V-quote-editor-1024-light",
+      "V-quote-editor-1024-dark",
+      "V-quote-editor-1440-light",
+      "V-quote-editor-1440-dark",
+      "V-public-quote-390-light",
+      "V-public-quote-390-dark",
+      "V-public-quote-1440-light",
+      "V-public-quote-1440-dark",
+      "V-start-agent-390-light",
+      "V-start-agent-390-dark",
+      "V-start-agent-1440-light",
+      "V-start-agent-1440-dark",
+      "V-agent-rules-390-light",
+      "V-agent-rules-390-dark",
+      "V-agent-rules-1440-light",
+      "V-agent-rules-1440-dark",
+      "V-capacity-390-light",
+      "V-capacity-390-dark",
+      "V-capacity-1440-light",
+      "V-capacity-1440-dark"
+    ],
+    "sourceCaptureSHA": "6fea542010b4c699dadadd74529fdaf7a1ef4c9a",
+    "captureRun": "39912019882",
+    "recordedBy": "LEAD-M",
+    "scope": "Exactly 70 checkpoints are comparison authority. Delivery 390 light/dark are explicitly deferred; Goals and Ticket Workspace remain deferred. No protected cuts are authorized in P02; P03–P11 own their subsequent cut rounds."
   },
   "baselineAuthority": {
-    "status": "pending-linux-capture",
+    "status": "approved",
     "source": {
       "kind": "existing-ppm-ticket-attachment",
       "ticket": "AEON-1670",
       "instance": "PPM / INSPR",
-      "attachmentId": null,
-      "sha256": null
+      "attachmentId": "9d4055fd-5c9f-4383-b46a-1eb39e99c9da",
+      "name": "AEON-1674-linux-6fea542010.tar",
+      "bytes": 36823040,
+      "sha256": "3c53666ddd810275cef073191449bebe20e73d6c0b162de4fe65f441a20e4511",
+      "format": "tar",
+      "captureSHA": "6fea542010b4c699dadadd74529fdaf7a1ef4c9a",
+      "captureRun": "39912019882",
+      "manifest": {
+        "attachmentId": "7a3d7b74-c973-4333-89bb-39708c2a245d",
+        "name": "AEON-1674-linux-6fea542010.tar.manifest.json",
+        "bytes": 44954,
+        "sha256": "dfb4ad0c42e8fb6b714ed3a44e164a145e99785dfba8c8e3f1346d214538af12"
+      },
+      "baselineBundle": {
+        "attachmentMember": "baseline.json",
+        "sha256": "d463a91a35a273ab041d4f333889d19d4d420b7c715f549630c3baa96cb9b939"
+      },
+      "archiveManifest": {
+        "attachmentMember": "manifest.json",
+        "sha256": "855e3f92303f4cc275d2eea8436a4a7b8477900ef42fd9b565a9bec34c71d227"
+      },
+      "unapprovedMembers": [
+        {
+          "id": "V-delivery-numbers-390-light",
+          "attachmentMember": "V-delivery-numbers-390-light.png",
+          "sha256": "17312744d399a608b51eb16e0fb9c45e1ef605fac4c57452d9fa3abe31e57076"
+        },
+        {
+          "id": "V-delivery-numbers-390-dark",
+          "attachmentMember": "V-delivery-numbers-390-dark.png",
+          "sha256": "a15f0f5aca9f62ea113dcbe3b7d67a3ebf875c6eb0c7759bf4196a1cb4e4ea51"
+        }
+      ],
+      "unapprovedMemberPolicy": "Digest verification only. These rejected capture bytes never enter the comparison reference map. Checkpoint deferrals and the exact approval list govern authority.",
+      "mirror": {
+        "kind": "github-prerelease",
+        "repository": "inspr-at/paimos",
+        "tag": "test-references-2",
+        "releaseURL": "https://github.com/inspr-at/paimos/releases/tag/test-references-2",
+        "archive": {
+          "name": "AEON-1674-linux-6fea542010.tar",
+          "url": "https://github.com/inspr-at/paimos/releases/download/test-references-2/AEON-1674-linux-6fea542010.tar"
+        },
+        "manifest": {
+          "name": "AEON-1674-linux-6fea542010.tar.manifest.json",
+          "url": "https://github.com/inspr-at/paimos/releases/download/test-references-2/AEON-1674-linux-6fea542010.tar.manifest.json"
+        },
+        "authority": "Read-only transport of byte-identical AEON-1670 attachments. The archive contains 72 captures; only the 70 explicitly approved checkpoints are comparison authority."
+      }
     },
     "retention": {
-      "policy": "Retain a newly approved Linux reference permanently after review; expiring capture artifacts are never authority.",
-      "availability": "No active reference. The prior macOS archive and all its pins are recorded in history only.",
-      "verifiedAt": null
+      "policy": "Retain the immutable reference archive and detached manifest permanently for this visual set; loss or changed bytes fail closed and require a newly reviewed set.",
+      "availability": "AEON-1670 attachments are mirrored byte-for-byte as named test-references-2 prerelease assets. Built-in CI contents:read downloads and verifies both assets before tar reads; all 72 transport members are checked, and only 70 approved PNGs are exposed for comparison. The macOS set remains history only.",
+      "verifiedAt": "2026-10-23T06:47:54.936437+00:00",
+      "verificationScope": "LEAD round-9 publication attestation plus authenticated local GitHub download and digest verification; hosted CI remains to run after coordinator push.",
+      "ciVerifiedAt": null
     },
     "onMissing": "fail",
     "onExpired": "fail",
     "onDigestMismatch": "fail",
     "automaticRewrite": false,
-    "currentRunMayBeReference": false
+    "currentRunMayBeReference": false,
+    "ciMaterialization": {
+      "status": "implemented-awaiting-hosted-ci",
+      "transport": "source.mirror; built-in GITHUB_TOKEN, contents:read only",
+      "entrypoint": "node scripts/test-prune/visual-baselines.mjs download tmp/visual-baselines",
+      "consumerVerification": "node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines",
+      "workflow": "web-setup downloads and verifies; web-runtime transports the original assets; each web-shard verifies again before comparison."
+    }
   },
   "profiles": {
     "phone": {
@@ -85,8 +232,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-projects-390-light.png",
+            "sha256": "2fa66284535f811b1dbadbc782a7d6bcbbdbc5e7a8307a7475159f1235ad4c04"
           }
         },
         {
@@ -94,8 +241,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-projects-390-dark.png",
+            "sha256": "9e286dfc9b6d0579e6290464da9cf15f0a29cc2c4f1877d3783ebc32b4fcfb84"
           }
         },
         {
@@ -103,8 +250,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-projects-1440-light.png",
+            "sha256": "4625f1b868482183e1042167c7b50fd6d71c779dfa60fabb5116321dc14c2b9f"
           }
         },
         {
@@ -112,16 +259,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-projects-1440-dark.png",
+            "sha256": "f9964229029e35283917081553634154302bdf8e63b4a39cb51b3752d9db4656"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "awaiting-linux-reference",
-        "reason": "Prior macOS approval remains in history; hosted Linux capture needs fresh review.",
-        "evidence": "LEAD-M AEON-1674 round-6 brief"
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -143,8 +291,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-tickets-390-light.png",
+            "sha256": "296f3429d8c1c3652a0095cab4efd911574594f611e10587aca40be48a17ac51"
           }
         },
         {
@@ -152,8 +300,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-tickets-390-dark.png",
+            "sha256": "711e7bce3f1efb5a5b99b59bcf8c705987169f04b21d55f33e1bb160299562c0"
           }
         },
         {
@@ -161,8 +309,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-tickets-1440-light.png",
+            "sha256": "76f45d04be5559a17040a20f3652be82e569b9aa74d11a5c9baa7c6e4d0cbdd4"
           }
         },
         {
@@ -170,18 +318,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-tickets-1440-dark.png",
+            "sha256": "678eda52f244ae55b679d71cadf53d6f2ac16d41458e0db9fd45f462b20425da"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "changes-requested",
+        "decision": "ok-to-pin",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "reason": "AEON-1688 is on main. Included in the round-8 sixteen-state Linux capture; awaiting Tick review.",
-        "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -266,8 +413,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agents-390-light.png",
+            "sha256": "0fcfb101810a0f740f35b9ff7f358c5ed2033e8b22c054c0deef352f6919a8d9"
           }
         },
         {
@@ -275,8 +422,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agents-390-dark.png",
+            "sha256": "121124231afe2458de165a76d8f40845c152abdcf91ce95bbb7a7084b6deb052"
           }
         },
         {
@@ -284,8 +431,8 @@
           "profile": "tablet",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agents-1024-light.png",
+            "sha256": "409609da9542d0cbf0bb4f7677f9365080d3731a0a4eeac753f47a60049355e3"
           }
         },
         {
@@ -293,8 +440,8 @@
           "profile": "tablet",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agents-1024-dark.png",
+            "sha256": "ec0d8cdfd27ef8881d5c834f567ff21701841185412aa4020f48e7ee574c9540"
           }
         },
         {
@@ -302,8 +449,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agents-1440-light.png",
+            "sha256": "3885f1fe8baf6604009e25ec9565f1af1465064755e4edf2115b36721b12f697"
           }
         },
         {
@@ -311,18 +458,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agents-1440-dark.png",
+            "sha256": "b7fb5aee0cc2ec172c29f684056778c12c1f8aa96bd81102cd9d9db260456682"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "changes-requested",
+        "decision": "ok-to-pin",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "reason": "AEON-1688 is on main. Included in the round-8 sixteen-state Linux capture; awaiting Tick review.",
-        "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -344,8 +490,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-session-chat-390-light.png",
+            "sha256": "745824d66d8551380fbe08ef9501c51733783a010ff45b02ee0ad33b009beabc"
           }
         },
         {
@@ -353,8 +499,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-session-chat-390-dark.png",
+            "sha256": "37073b641cccda32ddf640019a7d4d908b3caed32067b59032c45a89968909ae"
           }
         },
         {
@@ -362,8 +508,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-session-chat-1440-light.png",
+            "sha256": "1786d67aa8e0933ac4299b97154c97b795481d194d0b7c0f957ba45757133e41"
           }
         },
         {
@@ -371,16 +517,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-session-chat-1440-dark.png",
+            "sha256": "897acaa7a7843ae2712fe185966b4f9d3b35d915fa17b66570f2b2665b77e24a"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "awaiting-linux-reference",
-        "reason": "AEON-1687 is on main. Included in the manual Linux capture set; awaiting Tick review of the hosted capture.",
-        "evidence": "LEAD-M AEON-1674 round-6 brief"
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       },
       "expectedResponses": [
         {
@@ -410,8 +557,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-decision-desk-390-light.png",
+            "sha256": "acd508e3dc0633f0386b8a99d7a25915f7bbeb0ac4d73abd37aab62be4175785"
           }
         },
         {
@@ -419,8 +566,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-decision-desk-390-dark.png",
+            "sha256": "0ef706609a32d8eb0ca5c1edb900c17c36c9385179ce6f534677fae75782e22e"
           }
         },
         {
@@ -428,8 +575,8 @@
           "profile": "tablet",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-decision-desk-1024-light.png",
+            "sha256": "64d8882b641eab1969b5a0c79a3e9c14d40c60eb382bf0a0fbaaca11ae25e521"
           }
         },
         {
@@ -437,8 +584,8 @@
           "profile": "tablet",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-decision-desk-1024-dark.png",
+            "sha256": "a278dbfc41b8e0d4adfac4969a3d785a359119d5f2b33f4d2907a2533446bd2a"
           }
         },
         {
@@ -446,8 +593,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-decision-desk-1440-light.png",
+            "sha256": "0a0581be5450dcd29915c928cb90594f148a3d20fedfe626939b7a78b3b4a9db"
           }
         },
         {
@@ -455,18 +602,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-decision-desk-1440-dark.png",
+            "sha256": "7cd6e344a7f66b0915d6139ad233bbb9a6883ef15d919c22edf281732ceaf360"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "changes-requested",
+        "decision": "ok-to-pin",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "reason": "AEON-1688 is on main. Included in the round-8 sixteen-state Linux capture; awaiting Tick review.",
-        "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -489,8 +635,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-account-use-matrix-390-light.png",
+            "sha256": "d766314a3e62db86a31a7141fc73b4ecb564018e62a3bcfb8fde3e7171ee4e8a"
           }
         },
         {
@@ -498,8 +644,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-account-use-matrix-390-dark.png",
+            "sha256": "c431842b740244501a78e3c7091ebd0b8b5aea011a4068d082c29a56247cd2cc"
           }
         },
         {
@@ -507,8 +653,8 @@
           "profile": "tablet",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-account-use-matrix-1024-light.png",
+            "sha256": "e8ce18d4ec5700770a8007b511ac68805af6a623f996b3a0c8d293fe40c79831"
           }
         },
         {
@@ -516,8 +662,8 @@
           "profile": "tablet",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-account-use-matrix-1024-dark.png",
+            "sha256": "0cbba35916de3af644d4f64b7a3238d51d90ea8e5dc5fd3119646611ffb4a652"
           }
         },
         {
@@ -525,8 +671,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-account-use-matrix-1440-light.png",
+            "sha256": "e5bdccc5faf328a91d4a341f30df161f99c81bdeeff8d780f97bd332e57e679c"
           }
         },
         {
@@ -534,18 +680,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-account-use-matrix-1440-dark.png",
+            "sha256": "6efccd126575a7b6c5c2fe8b8b333d42de8fd324c3efe3799c7a78abf3df6444"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "changes-requested",
+        "decision": "ok-to-pin",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "reason": "AEON-1688 is on main. Included in the round-8 sixteen-state Linux capture; awaiting Tick review.",
-        "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -567,8 +712,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-models-390-light.png",
+            "sha256": "3c6a484b4c889106f829279e9ae135de193d5bbe910b8212409c8726d4543c23"
           }
         },
         {
@@ -576,8 +721,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-models-390-dark.png",
+            "sha256": "f55801af4c180b8623bfed02feb95326dda5ae1e1255513fde6d1c1b651cbd0c"
           }
         },
         {
@@ -585,8 +730,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-models-1440-light.png",
+            "sha256": "33ea533dcf31337201759c3c80739bb9a6b5bb96f211d1ef9afda4423e9978a3"
           }
         },
         {
@@ -594,18 +739,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-models-1440-dark.png",
+            "sha256": "03469a29911e410c8300c7096ff46f8d5da0318d46bf155afcf713d5a4c3dbfa"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "changes-requested",
+        "decision": "ok-to-pin",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "reason": "AEON-1688 is on main. Included in the round-8 sixteen-state Linux capture; awaiting Tick review.",
-        "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -627,8 +771,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-access-390-light.png",
+            "sha256": "97713adc30e1ca92eb978a31836313602381e6e7c17e7c2f59f4e28a2bae5cba"
           }
         },
         {
@@ -636,8 +780,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-access-390-dark.png",
+            "sha256": "39248a48200154bbb10ce7e194e33b8fd4ed8df6ef1a121db570c559acc959f4"
           }
         },
         {
@@ -645,8 +789,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-access-1440-light.png",
+            "sha256": "ee99983e80cfa5b5926618566e7370c78acf784ef7a0ffe475aa37ce0527bf92"
           }
         },
         {
@@ -654,16 +798,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-access-1440-dark.png",
+            "sha256": "83b81f7c688d8cb973c7edac8a0ab905ca17c82f2882b3e23546524fe6a0de66"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "awaiting-linux-reference",
-        "reason": "Prior macOS approval remains in history; hosted Linux capture needs fresh review.",
-        "evidence": "LEAD-M AEON-1674 round-6 brief"
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -685,8 +830,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-knowledge-390-light.png",
+            "sha256": "7aab11274677fdc8f729664d7bcae85d876213584076d82c295bf96690763bf0"
           }
         },
         {
@@ -694,8 +839,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-knowledge-390-dark.png",
+            "sha256": "eb54a83cdfb84ec6673bdf5c1f181838113216ec642efc5c17fea76d3c916712"
           }
         },
         {
@@ -703,8 +848,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-knowledge-1440-light.png",
+            "sha256": "470d45ced54f7593853b6dbc5dd8d64cb907ee15eb30c942ed219ffc69a817c1"
           }
         },
         {
@@ -712,16 +857,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-knowledge-1440-dark.png",
+            "sha256": "1ed516b9e2edbd006135c686c2cab9952b151417aa3eaba27185bfac62af0732"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "awaiting-linux-reference",
-        "reason": "Prior macOS approval remains in history; hosted Linux capture needs fresh review.",
-        "evidence": "LEAD-M AEON-1674 round-6 brief"
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -745,7 +891,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1674"
+          ],
+          "deferredReason": "Tick requested changes to the 390px Delivery capture: scroll the Delivery heading below the app header and show the on-target headline. These two old captures are transport evidence only; a fresh capture and Tick approval are required before they can become references."
         },
         {
           "id": "V-delivery-numbers-390-dark",
@@ -754,15 +905,20 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1674"
+          ],
+          "deferredReason": "Tick requested changes to the 390px Delivery capture: scroll the Delivery heading below the app header and show the on-target headline. These two old captures are transport evidence only; a fresh capture and Tick approval are required before they can become references."
         },
         {
           "id": "V-delivery-numbers-1440-light",
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-delivery-numbers-1440-light.png",
+            "sha256": "d343061ed1e1446007bc2f0ccb10f6f8f6b3c2d74a6eaee0433a11dd5a9cd103"
           }
         },
         {
@@ -770,18 +926,18 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-delivery-numbers-1440-dark.png",
+            "sha256": "4d2444245bf45602691656bd1db45f904282b3739e019e25983a64ced8d13af2"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "changes-requested",
+        "decision": "partially-approved",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "reason": "AEON-1688 is on main. Included in the round-8 sixteen-state Linux capture; awaiting Tick review.",
-        "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+        "reason": "Tick requested changes to the 390px Delivery capture: scroll the Delivery heading below the app header and show the on-target headline. These two old captures are transport evidence only; a fresh capture and Tick approval are required before they can become references."
       }
     },
     {
@@ -803,8 +959,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-hours-390-light.png",
+            "sha256": "b61b1e447bd42b8e91f42e5e3de08be85e2cb0fd4185fd84075562d997d74e8f"
           }
         },
         {
@@ -812,8 +968,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-hours-390-dark.png",
+            "sha256": "5a273380e0a050ce10540e764682f4d87367a317bec327cb4cc124e18018cdfe"
           }
         },
         {
@@ -821,8 +977,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-hours-1440-light.png",
+            "sha256": "e5b1f427dc4e04f8508ebe0be0f196e0db29e11f8c4ae35f6808bc2a6672b6e1"
           }
         },
         {
@@ -830,16 +986,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-hours-1440-dark.png",
+            "sha256": "6a475cd2370de7df8673d70347e834a1231e98a95b8074a57c8297909d8115c0"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "awaiting-linux-reference",
-        "reason": "AEON-1687 is on main. Included in the manual Linux capture set; awaiting Tick review of the hosted capture.",
-        "evidence": "LEAD-M AEON-1674 round-6 brief"
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -862,8 +1019,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-quote-editor-390-light.png",
+            "sha256": "fe118cc78496b99c10e5563d47c84f4750c7322dcec51192b1472102a27cde32"
           }
         },
         {
@@ -871,8 +1028,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-quote-editor-390-dark.png",
+            "sha256": "86bd94769bb39683eae196f444817411bf134091f4a2cb0f90d660f73af98e65"
           }
         },
         {
@@ -880,8 +1037,8 @@
           "profile": "tablet",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-quote-editor-1024-light.png",
+            "sha256": "011f03a80e3d9f590ebed7c00f8c6228fc171a85dc91ca9995b9e240223e8a8c"
           }
         },
         {
@@ -889,8 +1046,8 @@
           "profile": "tablet",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-quote-editor-1024-dark.png",
+            "sha256": "57d1c24a2ffc1a6b23744878db29edb7bb3cd4f61bcdaf9713272a1579477562"
           }
         },
         {
@@ -898,8 +1055,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-quote-editor-1440-light.png",
+            "sha256": "1322262fa77a24db996990ef1bb002fa23ace8151f6496e5796a6b3bfc420637"
           }
         },
         {
@@ -907,16 +1064,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-quote-editor-1440-dark.png",
+            "sha256": "d37417b2b163f10886f075610c18ac06136a7dadc628d7e98ddd448c72781c9f"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "awaiting-linux-reference",
-        "reason": "Prior macOS approval remains in history; hosted Linux capture needs fresh review.",
-        "evidence": "LEAD-M AEON-1674 round-6 brief"
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -938,8 +1096,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-public-quote-390-light.png",
+            "sha256": "be6210b61e83cee1b7adcedf7bb1875a02985d211fe9b1d2cc20b320abf1647e"
           }
         },
         {
@@ -947,8 +1105,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-public-quote-390-dark.png",
+            "sha256": "effddc7fe2dda9257758aa1233402b4203d16c2fdb5091c6c9acea49508a2093"
           }
         },
         {
@@ -956,8 +1114,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-public-quote-1440-light.png",
+            "sha256": "ab8ada66010d02ca1409a4e8bcf2b3ebffcb43118e7a272fc01dbb4228e37227"
           }
         },
         {
@@ -965,16 +1123,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-public-quote-1440-dark.png",
+            "sha256": "85a3f1e309f2ebf0ba60fb981c196067305ee50eea10859749ba95487693bd66"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "awaiting-linux-reference",
-        "reason": "Prior macOS approval remains in history; hosted Linux capture needs fresh review.",
-        "evidence": "LEAD-M AEON-1674 round-6 brief"
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -996,8 +1155,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-start-agent-390-light.png",
+            "sha256": "f54807e522950631eb619febb547688e6ec141f761b946a1b8e3d199a60d264e"
           }
         },
         {
@@ -1005,8 +1164,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-start-agent-390-dark.png",
+            "sha256": "575774aad370b11cfe54f3628eea6e39d8d05e65519dfdfa1f130305e87332b9"
           }
         },
         {
@@ -1014,8 +1173,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-start-agent-1440-light.png",
+            "sha256": "54845c9b72af98373de89efb4d361e4c217aa6581be28436286c43063188a185"
           }
         },
         {
@@ -1023,16 +1182,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-start-agent-1440-dark.png",
+            "sha256": "33cb559b446f104bb76ad8b8a33650b2e4a277588186aac9eb19163b966e3069"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "awaiting-linux-reference",
-        "reason": "Prior macOS approval remains in history; hosted Linux capture needs fresh review.",
-        "evidence": "LEAD-M AEON-1674 round-6 brief"
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -1054,8 +1214,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agent-rules-390-light.png",
+            "sha256": "55502b45d2b879cd4b5c4d7982d930ad494fa940301eb61417a07760061892a6"
           }
         },
         {
@@ -1063,8 +1223,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agent-rules-390-dark.png",
+            "sha256": "9c407e75a426b9883fe283c509e55c5ce3c360c17ea72a17cda06feb153ed444"
           }
         },
         {
@@ -1072,8 +1232,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agent-rules-1440-light.png",
+            "sha256": "f5d270617736519e4d982ff8ca01cf49e0d3273002822a20fa5ba37f815915e7"
           }
         },
         {
@@ -1081,16 +1241,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agent-rules-1440-dark.png",
+            "sha256": "073d618886607e1ba42924807c550c57b1a1cba82063b71baf457dd641297d96"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "awaiting-linux-reference",
-        "reason": "Prior macOS approval remains in history; hosted Linux capture needs fresh review.",
-        "evidence": "LEAD-M AEON-1674 round-6 brief"
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -1112,8 +1273,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-capacity-390-light.png",
+            "sha256": "47f33ca8cc634dd61b31f5eb92be0eded994d439753fde9eb13dc43aa973af78"
           }
         },
         {
@@ -1121,8 +1282,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-capacity-390-dark.png",
+            "sha256": "c55aa765b5060649364a2b8395e80c667a789d62f568d3224e55ca8769c245f9"
           }
         },
         {
@@ -1130,8 +1291,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-capacity-1440-light.png",
+            "sha256": "d1fa127f96e0ae46b5c0dd1790bc1910403fce4824ddec8225ed82d6ae300d57"
           }
         },
         {
@@ -1139,16 +1300,17 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-capacity-1440-dark.png",
+            "sha256": "efc6c54704ca1d617ff117ac6afb2c1a09e65d153f28cc74234c2bfb7cdf6545"
           }
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "awaiting-linux-reference",
-        "reason": "AEON-1687 is on main. Included in the manual Linux capture set; awaiting Tick review of the hosted capture.",
-        "evidence": "LEAD-M AEON-1674 round-6 brief"
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
       }
     },
     {
@@ -1692,7 +1854,7 @@
     "runner": {
       "label": "ubuntu-24.04",
       "imageOS": "ubuntu24",
-      "imageVersion": null,
+      "imageVersion": "20261012.334.1",
       "platform": "linux",
       "arch": "x64"
     },

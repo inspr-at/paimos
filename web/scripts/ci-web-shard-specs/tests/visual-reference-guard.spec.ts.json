@@ -1,14 +1,14 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 20,
-    "selectedTests": 5,
-    "source": "AEON-1674 initial scheduling estimate; comparisons remain unproven until references are approved."
+    "seconds": 24,
+    "selectedTests": 6,
+    "source": "AEON-1674 scheduling estimate: five existing guards plus the two-theme Delivery phone crop regression; hosted comparison evidence remains separate."
   },
   "spec": {
     "file": "tests/visual-reference-guard.spec.ts",
-    "listedTests": 5,
-    "weightSeconds": 20,
+    "listedTests": 6,
+    "weightSeconds": 24,
     "weightSource": "AEON-1674-initial-estimate"
   }
 }

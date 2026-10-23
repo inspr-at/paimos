@@ -73,7 +73,7 @@ export function collectCandidates(directory) {
       else if (entry.isFile() && /^V-[a-z0-9-]+\.md$/.test(entry.name)) {
         need(statSync(child).size <= 256 * 1024, 'Oversized quality report')
         const quality = JSON.parse(readFileSync(child, 'utf8'))
-        if (quality.reference?.mode === 'deferred') continue
+        if (quality.reference?.mode === 'deferred' && quality.captureMode !== true) continue
         const pngPath = join(path, entry.name.replace(/\.md$/, '.png'))
         need(statSync(pngPath).size <= MAX_PNG, 'Oversized review PNG')
         records.push({ quality, png: readFileSync(pngPath) })

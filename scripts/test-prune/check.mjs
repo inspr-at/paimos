@@ -57,7 +57,7 @@ function currentAnchors(source, baseline) {
   return (matches.length ? matches : candidates).map(identity)
 }
 
-export function validateVisual(visual, { cuts = false, stateIds = visual.states?.map(state => state.id) } = {}) {
+export function validateVisual(visual, { cuts = false, stateIds = visual.states?.map(state => state.id), checkpointIds } = {}) {
   need(visual.version === 1, 'Invalid visual manifest version')
   const expected = ['projects', 'tickets', 'goals', 'agents', 'session-chat', 'decision-desk',
     'account-use-matrix', 'models', 'access', 'knowledge', 'delivery-numbers', 'hours',
@@ -69,6 +69,10 @@ export function validateVisual(visual, { cuts = false, stateIds = visual.states?
   need(Array.isArray(stateIds) && new Set(stateIds).size === stateIds.length &&
     stateIds.every(id => expected.includes(id)), 'Unknown/duplicate required visual state')
   const required = new Set(cuts ? stateIds : [])
+  if (checkpointIds !== undefined) need(Array.isArray(checkpointIds) && new Set(checkpointIds).size === checkpointIds.length &&
+    checkpointIds.every(id => visual.states.some(state => state.checkpoints?.some(checkpoint => checkpoint.id === id))),
+  'Unknown/duplicate required visual checkpoint')
+  const requiredCheckpoints = new Set(cuts ? checkpointIds : [])
   const checkpoints = new Set()
   for (const state of visual.states) {
     const profiles = tablet.has(state.id) ? ['phone', 'tablet', 'desktop'] : ['phone', 'desktop']
@@ -84,8 +88,13 @@ export function validateVisual(visual, { cuts = false, stateIds = visual.states?
     for (const checkpoint of state.checkpoints) {
       need(!checkpoints.has(checkpoint.id) && checkpoint.id === `V-${state.id}-${visual.profiles[checkpoint.profile]?.width}-${checkpoint.theme}`, `Invalid visual checkpoint: ${checkpoint.id}`)
       checkpoints.add(checkpoint.id)
-      if (required.has(state.id)) {
-        need(state.referenceStatus !== 'deferred', `Deferred visual reference: ${checkpoint.id} (${state.deferredUntil?.join(', ')})`)
+      if (checkpoint.referenceStatus !== undefined) need(checkpoint.referenceStatus === 'deferred' &&
+        checkpoint.deferredUntil?.length > 0 && checkpoint.deferredUntil.every(ticket => /^AEON-\d+$/.test(ticket)) &&
+        text(checkpoint.deferredReason) && !checkpoint.reference?.attachmentMember && !checkpoint.reference?.sha256,
+      `Missing checkpoint deferral authority or deferred reference is pinned: ${checkpoint.id}`)
+      if (checkpointIds === undefined ? required.has(state.id) : requiredCheckpoints.has(checkpoint.id)) {
+        const deferred = checkpoint.referenceStatus === 'deferred' ? checkpoint : state
+        need(deferred.referenceStatus !== 'deferred', `Deferred visual reference: ${checkpoint.id} (${deferred.deferredUntil?.join(', ')})`)
         need(checkpoint.reference?.attachmentMember === `${checkpoint.id}.png` && digest(checkpoint.reference.sha256), `Unpinned visual reference: ${checkpoint.id}`)
       }
     }
@@ -119,7 +128,7 @@ export function validateVisual(visual, { cuts = false, stateIds = visual.states?
     authority.automaticRewrite === false && authority.currentRunMayBeReference === false, 'Visual baseline failures must fail closed')
   need(authority.source?.kind === 'existing-ppm-ticket-attachment' && authority.source.ticket === 'AEON-1670' &&
     text(authority.retention?.policy) && text(authority.retention.availability), 'Missing baseline retention/availability authority')
-  if (required.size > 0) {
+  if (checkpointIds === undefined ? required.size > 0 : requiredCheckpoints.size > 0) {
     need(visual.approval?.reviewer === 'Tick' && visual.approval.status === 'approved' &&
       text(visual.approval.evidence) && text(visual.approval.approvedAt), 'Cuts require Tick approval of visual fixtures and references')
     need(authority.status === 'approved' && text(authority.source.attachmentId) && digest(authority.source.sha256) &&

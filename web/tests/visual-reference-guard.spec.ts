@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { test, expect, type Page, type Response } from '@playwright/test'
-import { agents, capacity, publicQuote, NOW, sessionChat, sessionChatUnavailable } from './visual/fixtures'
+import { agents, capacity, deliveryNumbers, publicQuote, NOW, sessionChat, sessionChatUnavailable } from './visual/fixtures'
 import { checkVisual, compareVisualReference, visualCases, prepareVisualFonts, renderedFonts, fontEvidence } from './visual/checkpoint'
 import { visualChrome } from './visual/chrome-fixture'
 import { fixtures, mockWork } from './work-fixtures'
@@ -97,6 +97,24 @@ test('visual comparison rejects a changed control and never creates a missing re
     .rejects.toThrow(/Screenshot comparison failed|pixels.*different/)
   await expect(compareVisualReference(page, info, checkpoint, { visual, baselineFile: info.outputPath('absent-bundle.json'), renderer: { ...renderer, locale: 'de-DE' } }))
     .rejects.toThrow('renderer differs from reference: locale')
+  // A partial state must materialize its approved checkpoint without requiring
+  // the deferred phone pins, even though a whole-state cut would reject them.
+  const mixed = structuredClone(visual)
+  const delivery = mixed.states.find((state: { id: string }) => state.id === 'delivery-numbers')
+  const deliveryPNG = await page.screenshot()
+  const desktopFiles = delivery.checkpoints.filter((checkpoint: { profile: string }) => checkpoint.profile === 'desktop')
+    .map((checkpoint: { id: string; reference: unknown }) => {
+      checkpoint.reference = { attachmentMember: `${checkpoint.id}.png`, sha256: hash(deliveryPNG) }
+      return { name: `${checkpoint.id}.png`, base64: deliveryPNG.toString('base64') }
+    })
+  mixed.approval.checkpoints = [...project.checkpoints, ...delivery.checkpoints.filter((checkpoint: { profile: string }) => checkpoint.profile === 'desktop')]
+    .map((checkpoint: { id: string }) => checkpoint.id)
+  const mixedBytes = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), renderer, files: [...files, ...desktopFiles] }))
+  mixed.baselineAuthority.source.sha256 = hash(mixedBytes)
+  const mixedFile = info.outputPath('synthetic-mixed-bundle.json')
+  writeFileSync(mixedFile, mixedBytes)
+  expect(await compareVisualReference(page, info, delivery.checkpoints[2], { visual: mixed, baselineFile: mixedFile, renderer })).toBe(true)
+  expect(await compareVisualReference(page, info, delivery.checkpoints[0], { visual: mixed, baselineFile: info.outputPath('absent-bundle.json'), renderer })).toBe(false)
   // Awaiting states retain strict quality checks without PNG captures.
   const qualityDocument = '<html lang="en"><head><title>Synthetic quality control</title><style>body { font-family: var(--font, system-ui); } button, input { font: inherit; } button { min-width: 80px; height: 44px; }</style></head><body><main><button>Continue</button></main></body></html>'
   const setupQuality = async (qualityPage: Page) => {
@@ -107,12 +125,12 @@ test('visual comparison rejects a changed control and never creates a missing re
   }
   const pending = visualCases('tickets')[0]!
   expect(await compareVisualReference(page, info, pending, { visual, baselineFile: info.outputPath('absent-bundle.json') })).toBe(false)
-  await checkVisual(browser, info, pending, setupQuality)
+  await checkVisual(browser, info, pending, setupQuality, { visual })
   const report = JSON.parse(readFileSync(info.outputPath(`${pending.id}.md`), 'utf8'))
   expect(report).toMatchObject({ baselineCompared: false, pngSHA256: null, requirementsRun: true,
     reference: { mode: 'awaiting-reference' }, layout: [], axe: [], console: [], responses: [], fonts: { body: { renderedFamilies: ['Inter Variable'] }, painted: expect.arrayContaining([{ family: 'Inter Variable', custom: process.platform !== 'linux' }]) } })
   expect(existsSync(info.outputPath(`${pending.id}.png`))).toBe(false)
-  for (const id of ['goals', 'ticket-workspace']) {
+  for (const id of ['goals', 'ticket-workspace', 'delivery-numbers']) {
     const deferred = visualCases(id)[0]!
     // The setup must never run; an unbuilt product is neither inspected nor
     // failed, and its explicit until/reason report is attached to the test.
@@ -125,7 +143,7 @@ test('visual comparison rejects a changed control and never creates a missing re
   await expect(checkVisual(browser, info, visualCases('hours')[0]!, async qualityPage => {
     await setupQuality(qualityPage)
     await qualityPage.evaluate(() => console.error('Synthetic quality failure must still block an awaiting state'))
-  })).rejects.toThrow(/unexpected console\/page failure/)
+  }, { visual })).rejects.toThrow(/unexpected console\/page failure/)
   await setupQuality(page)
   await prepareVisualFonts(page, String(info.project.use.baseURL))
   expect(await renderedFonts(page)).toEqual([{ family: 'Inter Variable', custom: process.platform !== 'linux' }])
@@ -154,8 +172,36 @@ test('visual comparison rejects a changed control and never creates a missing re
   await expect(checkVisual(browser, info, pending, async qualityPage => {
     await setupQuality(qualityPage)
     await qualityPage.addStyleTag({ content: 'body, body * { font-family: "JetBrains Mono" !important; }' })
-  })).rejects.toThrow(/body text must resolve to Inter/)
+  }, { visual })).rejects.toThrow(/body text must resolve to Inter/)
 
+})
+
+// Risk: the phone's page-flow panel remains below project chrome, so a capture
+// omits the on-target headline even though the off-screen summary is visible.
+test('P02 Delivery phone capture includes its heading and on-target headline in both themes', async ({ browser }, info) => {
+  const positions: unknown[] = []
+  for (const theme of ['light', 'dark'] as const) {
+    const context = await browser.newContext({ baseURL: info.project.use.baseURL, viewport: { width: 390, height: 844 },
+      colorScheme: theme, reducedMotion: 'reduce', deviceScaleFactor: 1, hasTouch: true })
+    try {
+      const page = await context.newPage()
+      await page.clock.setFixedTime(new Date(NOW))
+      await prepareVisualFonts(page, String(info.project.use.baseURL))
+      await deliveryNumbers(page, 'phone', theme)
+      await fontEvidence(page, 'delivery-numbers')
+      const heading = page.getByRole('heading', { name: 'Delivery', exact: true })
+      const headline = page.getByTestId('delivery-summary').locator('.big')
+      await expect(heading).toBeInViewport({ ratio: 1 })
+      await expect(headline).toHaveText(/\d+ of 13 numbers are on target\./)
+      await expect(headline).toBeInViewport({ ratio: 1 })
+      const top = await heading.evaluate(element => element.getBoundingClientRect().top)
+      const headerHeight = await page.locator('.app-header').evaluate(element => element.getBoundingClientRect().height)
+      expect(Math.abs(top - headerHeight), 'Delivery starts immediately below the app header').toBeLessThanOrEqual(0.5)
+      positions.push({ heading: await heading.boundingBox(), headline: await headline.boundingBox() })
+      await page.screenshot({ path: info.outputPath(`delivery-numbers-390-${theme}.png`), animations: 'disabled', caret: 'hide' })
+    } finally { await context.close() }
+  }
+  expect(positions[1], 'both themes depict the same phone crop').toEqual(positions[0])
 })
 
 // Risk: optional native/chat reads escape the fixture to a backend 404, so

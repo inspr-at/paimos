@@ -15506,6 +15506,8 @@
     ,
     {"kind":"browser","file":"tests/visual-reference-guard.spec.ts","name":"P02 Agents permission requests load successfully and retain explicit error recovery","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/visual-reference-guard.spec.ts","name":"P02 Delivery phone capture includes its heading and on-target headline in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/visual-reference-guard.spec.ts","name":"P02 Session Chat fixture binds its chat reads and native refusal to the displayed session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/visual-reference-guard.spec.ts","name":"P02 capacity reference keeps the same open popover and scroll across themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

@@ -14,26 +14,42 @@ const MAX_PNG = 4 * 1024 * 1024
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
 const need = (condition, message) => { if (!condition) throw new Error(message) }
 
-// A reviewed attachment can pin one area while other areas await their own
-// product/design work. Every member of each pinned state is still mandatory.
-const pinnedStates = visual => visual.states.filter(state => state.checkpoints.some(checkpoint =>
-  checkpoint.reference?.attachmentMember || checkpoint.reference?.sha256)).map(state => state.id)
+const hasPin = checkpoint => checkpoint.reference?.attachmentMember || checkpoint.reference?.sha256
+const pinnedCheckpoints = visual => visual.states.flatMap(state => state.checkpoints.filter(hasPin))
+const selection = (visual, options) => options.stateIds ? { stateIds: options.stateIds } :
+  { checkpointIds: options.checkpointIds ?? pinnedCheckpoints(visual).map(checkpoint => checkpoint.id) }
+
+// Rejected captures remain digest-checked transport evidence. They never enter
+// the returned reference map, even though the immutable bundle contains them.
+function transportMembers(visual) {
+  const pinned = pinnedCheckpoints(visual).map(checkpoint => ({ id: checkpoint.id, ...checkpoint.reference }))
+  const unapproved = visual.baselineAuthority.source.format === 'tar' ? visual.baselineAuthority.source.unapprovedMembers ?? [] : []
+  need(Array.isArray(unapproved) && unapproved.length <= 80, 'Invalid unapproved visual transport inventory')
+  for (const member of unapproved) {
+    const checkpoint = visual.states.flatMap(state => state.checkpoints).find(checkpoint => checkpoint.id === member.id)
+    need(checkpoint?.referenceStatus === 'deferred' && !hasPin(checkpoint) && member.attachmentMember === `${member.id}.png` &&
+      /^[a-f0-9]{64}$/.test(member.sha256 ?? ''), 'Unapproved visual transport member must be explicitly deferred and unpinned')
+  }
+  const members = [...pinned, ...unapproved]
+  need(new Set(members.map(member => member.id)).size === members.length, 'Duplicate visual transport member')
+  return members
+}
 
 // AEON-1670 remains the approval record. The GitHub prerelease is only a
 // read-only transport for the same pinned bytes, never a browser-generated input.
-export function readBaselineBundle(path, visual, { stateIds = pinnedStates(visual) } = {}) {
-  validateVisual(visual, { cuts: true, stateIds })
-  need(stateIds.length > 0, 'Missing approved visual reference states')
+export function readBaselineBundle(path, visual, options = {}) {
+  validateVisual(visual, { cuts: true, ...selection(visual, options) })
+  need(pinnedCheckpoints(visual).length > 0, 'Missing approved visual reference states')
   need(typeof path === 'string' && path.length > 0, 'Missing approved visual baseline attachment (AEON_VISUAL_BASELINE_FILE)')
   let stat
   try { stat = statSync(path) } catch { throw new Error('Approved visual baseline attachment is missing or unreadable') }
   need(stat.isFile() && stat.size > 0 && stat.size <= MAX_BUNDLE, 'Visual baseline bundle exceeds 48 MiB')
-  return verifyBaselineBundle(readFileSync(path), visual, { stateIds })
+  return verifyBaselineBundle(readFileSync(path), visual, options)
 }
 
-export function verifyBaselineBundle(bytes, visual, { stateIds = pinnedStates(visual) } = {}) {
-  validateVisual(visual, { cuts: true, stateIds })
-  need(stateIds.length > 0, 'Missing approved visual reference states')
+export function verifyBaselineBundle(bytes, visual, options = {}) {
+  validateVisual(visual, { cuts: true, ...selection(visual, options) })
+  need(pinnedCheckpoints(visual).length > 0, 'Missing approved visual reference states')
   need(bytes.length > 0 && bytes.length <= MAX_BUNDLE, 'Visual baseline bundle exceeds 48 MiB')
   const source = visual.baselineAuthority.source
   const expectedDigest = source.format === 'tar' ? source.baselineBundle?.sha256 : source.sha256
@@ -42,51 +58,71 @@ export function verifyBaselineBundle(bytes, visual, { stateIds = pinnedStates(vi
   need(bundle.version === 1 && /^[a-f0-9]{40}$/.test(bundle.captureSHA ?? ''), 'Invalid visual baseline bundle provenance')
   assertRenderer(bundle.renderer, visual.renderer)
   if (source.format === 'tar') need(bundle.captureSHA === source.captureSHA, 'Visual baseline capture SHA mismatch')
-  const pinned = pinnedStates(visual)
-  validateVisual(visual, { cuts: true, stateIds: pinned })
-  const expected = new Map(visual.states.filter(state => pinned.includes(state.id)).flatMap(state =>
-    state.checkpoints.map(checkpoint => [checkpoint.reference.attachmentMember, checkpoint.reference.sha256])))
+  referenceGates(visual)
+  const pinned = new Set(pinnedCheckpoints(visual).map(checkpoint => checkpoint.reference.attachmentMember))
+  const expected = new Map(transportMembers(visual).map(member => [member.attachmentMember, member.sha256]))
   need(Array.isArray(bundle.files) && bundle.files.length === expected.size,
     `Visual baseline bundle must contain exactly ${expected.size} pinned references`)
   const files = new Map()
+  const seen = new Set()
   for (const file of bundle.files) {
-    need(typeof file.name === 'string' && /^V-[a-z0-9-]+\.png$/.test(file.name) && expected.has(file.name) && !files.has(file.name), 'Unknown or duplicate visual baseline member')
+    need(typeof file.name === 'string' && /^V-[a-z0-9-]+\.png$/.test(file.name) && expected.has(file.name) && !seen.has(file.name), 'Unknown or duplicate visual baseline member')
+    seen.add(file.name)
     need(typeof file.base64 === 'string' && file.base64.length <= Math.ceil(MAX_PNG / 3) * 4, 'Invalid or oversized visual baseline PNG')
     const png = Buffer.from(file.base64, 'base64')
     need(png.toString('base64') === file.base64, 'Invalid visual baseline base64')
     need(png.length > 24 && png.length <= MAX_PNG && png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])), 'Visual baseline member is not a bounded PNG')
     need(sha256(png) === expected.get(file.name), `Visual baseline member SHA-256 mismatch: ${file.name}`)
-    files.set(file.name, png)
+    if (pinned.has(file.name)) files.set(file.name, png)
   }
   return files
 }
 
-// Partial pins or a missing pin on a declared approved state must fail closed,
-// rather than silently changing that state's gate to "awaiting reference".
+// State approvals still require every checkpoint. A checkpoint-level approval
+// list allows a reviewed subset while explicit deferrals remain report-only.
 export function referenceGates(visual) {
   validateVisual(visual)
-  return visual.states.map(state => {
-    const approved = visual.approval.states?.includes(state.id) || state.approval?.decision === 'ok-to-pin' ||
-      state.checkpoints.some(checkpoint => checkpoint.reference?.attachmentMember || checkpoint.reference?.sha256)
-    if (approved) validateVisual(visual, { cuts: true, stateIds: [state.id] })
-    return { state: state.id, checkpoints: state.checkpoints.length, mode: approved ? 'compare' : state.referenceStatus === 'deferred' ? 'deferred' : 'awaiting-reference',
-      status: approved ? 'approved' : state.referenceStatus === 'deferred' ? 'deferred' : 'changes-requested',
-      reason: approved ? 'Tick-approved, digest-pinned reference' : state.referenceStatus === 'deferred' ? `deferred until ${state.deferredUntil.join(' and ')}: ${state.deferredReason}` :
-        state.approval?.reason ?? 'Changes requested; awaiting AEON-1688 and the next reviewed reference round' }
+  const declared = visual.approval.checkpoints
+  if (declared !== undefined) need(Array.isArray(declared) && new Set(declared).size === declared.length &&
+    declared.every(id => visual.states.some(state => state.checkpoints.some(checkpoint => checkpoint.id === id))),
+  'Unknown/duplicate approved visual checkpoint')
+  return visual.states.flatMap(state => {
+    const wholeState = visual.approval.states?.includes(state.id) || state.approval?.decision === 'ok-to-pin' ||
+      (declared === undefined && state.checkpoints.some(hasPin))
+    const groups = new Map()
+    for (const checkpoint of state.checkpoints) {
+      if (declared !== undefined && hasPin(checkpoint)) need(declared.includes(checkpoint.id), `Visual reference is outside the approved checkpoint list: ${checkpoint.id}`)
+      const approved = wholeState || declared?.includes(checkpoint.id) || hasPin(checkpoint)
+      if (approved) validateVisual(visual, { cuts: true, checkpointIds: [checkpoint.id] })
+      const deferral = checkpoint.referenceStatus === 'deferred' ? checkpoint : state
+      const deferred = deferral.referenceStatus === 'deferred'
+      const mode = approved ? 'compare' : deferred ? 'deferred' : 'awaiting-reference'
+      const reason = approved ? 'Tick-approved, digest-pinned reference' : deferred ? `deferred until ${deferral.deferredUntil.join(' and ')}: ${deferral.deferredReason}` :
+        state.approval?.reason ?? 'Changes requested; awaiting the next reviewed reference round'
+      const key = `${mode}:${reason}`
+      if (!groups.has(key)) groups.set(key, { state: state.id, checkpoints: 0, checkpointIds: [], mode,
+        status: approved ? 'approved' : deferred ? 'deferred' : 'changes-requested', reason })
+      const group = groups.get(key)
+      group.checkpoints++
+      group.checkpointIds.push(checkpoint.id)
+    }
+    return [...groups.values()]
   })
 }
 
 export function referenceGate(visual, checkpointId) {
   const state = visual.states.find(state => state.checkpoints.some(checkpoint => checkpoint.id === checkpointId))
   need(state, `Unknown visual checkpoint: ${checkpointId}`)
-  return referenceGates(visual).find(gate => gate.state === state.id)
+  return referenceGates(visual).find(gate => gate.checkpointIds.includes(checkpointId))
 }
 
 export function referenceReport(visual) {
   const gates = referenceGates(visual)
-  return { gates, markdown: ['Visual reference gates (deferred states report only; other states require quality checks).', '',
+  const labels = gate => gate.checkpoints === visual.states.find(state => state.id === gate.state).checkpoints.length ? gate.state :
+    `${gate.state} (${gate.checkpointIds.map(id => id.replace(`V-${gate.state}-`, '')).join(', ')})`
+  return { gates, markdown: ['Visual reference gates (deferred checkpoints report only in ordinary CI; comparisons require quality checks).', '',
     '| State | Checkpoints | Reference gate |', '| --- | ---: | --- |',
-    ...gates.map(gate => `| ${gate.state} | ${gate.checkpoints} | ${gate.mode === 'deferred' ? gate.reason : gate.mode === 'compare' ? 'strict image comparison + quality' :
+    ...gates.map(gate => `| ${labels(gate)} | ${gate.checkpoints} | ${gate.mode === 'deferred' ? gate.reason : gate.mode === 'compare' ? 'strict image comparison + quality' :
       `awaiting reference (${gate.status}); quality required — ${gate.reason}`} |`), ''].join('\n') }
 }
 
@@ -114,21 +150,22 @@ export function verifyReferenceArchive(archive, detachedBytes, visual, { tar = e
   const detached = JSON.parse(detachedBytes)
   assertRenderer(detached.renderer, visual.renderer)
   const gates = referenceGates(visual)
-  const approved = gates.filter(gate => gate.mode === 'compare').map(gate => gate.state)
+  const approved = gates.filter(gate => gate.mode === 'compare').flatMap(gate => gate.checkpointIds)
+  const membersExpected = transportMembers(visual)
+  const capturedStates = visual.states.filter(state => state.checkpoints.some(checkpoint => membersExpected.some(member => member.id === checkpoint.id))).map(state => state.id)
   need(detached.version === 1 && detached.captureSHA === source.captureSHA &&
     detached.archive?.sha256 === source.sha256 && detached.archive.bytes === archive.length &&
     detached.manifestSHA256 === source.archiveManifest.sha256 &&
     detached.baselineBundle?.member === source.baselineBundle.attachmentMember &&
     detached.baselineBundle.sha256 === source.baselineBundle.sha256 &&
-    JSON.stringify([...detached.states].sort()) === JSON.stringify([...approved].sort()), 'Visual detached manifest authority mismatch')
-  const pinned = visual.states.filter(state => approved.includes(state.id)).flatMap(state => state.checkpoints.map(checkpoint =>
-    ({ id: checkpoint.id, attachmentMember: checkpoint.reference.attachmentMember, sha256: checkpoint.reference.sha256 })))
+    Array.isArray(detached.states) && JSON.stringify([...detached.states].sort()) === JSON.stringify([...capturedStates].sort()), 'Visual detached manifest authority mismatch')
+  need(approved.length > 0, 'Missing approved visual reference states')
   const sorted = rows => [...rows].sort((a, b) => a.id.localeCompare(b.id))
-  need(JSON.stringify(sorted(detached.members)) === JSON.stringify(sorted(pinned)), 'Visual detached manifest reference pins mismatch')
-  need(Array.isArray(detached.payload) && detached.payload.length === pinned.length * 2 + 1,
+  need(Array.isArray(detached.members) && JSON.stringify(sorted(detached.members)) === JSON.stringify(sorted(membersExpected)), 'Visual detached manifest reference pins mismatch')
+  need(Array.isArray(detached.payload) && detached.payload.length === membersExpected.length * 2 + 1,
     'Visual detached manifest payload count mismatch')
   const expected = new Map(detached.payload.map(row => [row.name, row]))
-  const expectedNames = new Set(['baseline.json', ...pinned.flatMap(row => [row.attachmentMember, `quality/${row.id}.json`])])
+  const expectedNames = new Set(['baseline.json', ...membersExpected.flatMap(row => [row.attachmentMember, `quality/${row.id}.json`])])
   need(expected.size === expectedNames.size && [...expected.keys()].every(name => expectedNames.has(name)),
     'Unsafe or duplicate visual archive member')
   const readTar = (args, maxBuffer) => {

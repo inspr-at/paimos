@@ -228,7 +228,7 @@ export const models: VisualSetup = async (page, _profile, theme) => {
   await expect(page.locator('.app-header')).toBeVisible()
 }
 
-export const deliveryNumbers: VisualSetup = async (page, _profile, theme) => {
+export const deliveryNumbers: VisualSetup = async (page, profile, theme) => {
   await work(page, theme)
   await mockDelivery(page, () => ({ status: 200, body: deliveryMetrics() }))
   await mockFlow(page, { empty: true })
@@ -236,6 +236,22 @@ export const deliveryNumbers: VisualSetup = async (page, _profile, theme) => {
   await expect(page.getByTestId('delivery-summary')).toBeVisible()
   await page.locator('main').evaluate(panel => panel.scrollTo({ top: 0, left: 0, behavior: 'instant' }))
   await expect(page.locator('main')).toHaveJSProperty('scrollTop', 0)
+  if (profile === 'phone') {
+    await page.evaluate(() => document.fonts.ready)
+    const heading = page.getByRole('heading', { name: 'Delivery', exact: true })
+    await heading.evaluate(element => {
+      element.scrollIntoView({ block: 'start', behavior: 'instant' })
+      const header = document.querySelector('.app-header')!
+      // main owns page-flow scrolling on phones. Correct scrollIntoView's
+      // scroll-padding offset so the heading starts just below the app header.
+      document.querySelector('main')!.scrollBy({
+        top: element.getBoundingClientRect().top - header.getBoundingClientRect().height, behavior: 'instant',
+      })
+    })
+    await expect(heading).toBeInViewport({ ratio: 1 })
+    await expect(page.getByTestId('delivery-summary').locator('.big')).toHaveText(/\d+ of 13 numbers are on target\./)
+    await expect(page.getByTestId('delivery-summary').locator('.big')).toBeInViewport({ ratio: 1 })
+  }
 }
 
 export const hours: VisualSetup = async (page, _profile, theme) => {
