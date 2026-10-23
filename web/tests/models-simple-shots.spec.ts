@@ -25,6 +25,7 @@ for (const size of sizes) for (const theme of ['light', 'dark']) {
     await page.goto('/settings/models')
     await expect(page.locator('[data-unavailable]').first()).toBeVisible()
     await page.evaluate(() => document.fonts.ready)
+    await page.getByRole('button', { name: 'For everyone', exact: true }).click()
     const header = page.locator('.app-header'), trigger = page.locator('[data-pick="design"]')
     await trigger.scrollIntoViewIfNeeded()
     const before = await header.boundingBox()

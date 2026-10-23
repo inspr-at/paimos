@@ -102,6 +102,20 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
     ] })
     await capture('lead-panel-off')
     expect(mocked.state.calls.filter(c => c.method === 'POST' || c.method === 'PUT')).toEqual([])
+
+    // AEON-1688: a missing actions projection keeps the no-lead error state and names recovery.
+    await page.unrouteAll({ behavior: 'wait' })
+    mocked = await mockLeadFlow(page, { lead: 'none', launchEnabled: true, personActions: false })
+    await page.goto('/agents')
+    const unavailable = page.locator('.sessions .row.nolead[data-project="PHAROS"]')
+    await expect(unavailable.locator('.nl-note')).toHaveText("Couldn't load lead actions. Reload to try again.")
+    await expect(unavailable.getByRole('button', { name: /^Start a/ })).toHaveCount(0)
+    const header = page.locator('.app-header'), bounds = await header.boundingBox()
+    await expectStableControls({ controls: { header, row: unavailable }, interactions: [
+      { name: 'read the unavailable actions without moving the list', run: async () => { await unavailable.hover() } },
+    ] })
+    expect(await header.boundingBox(), 'error copy moves navigation by 0 px').toEqual(bounds)
+    await capture('AEON-1688/agents')
   })
 }
 
