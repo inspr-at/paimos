@@ -411,6 +411,10 @@ test('AEON-1683: phone timeline edge handles resize and the brush and playhead r
   expect(panned).not.toBe(later)
   expect(minuteOf(panned?.split('–')[1] ?? null) - minuteOf(panned)).toBe(span)
   await expect(clock(page)).toHaveText('At 20:25 (now)')
+  await overview(page).focus()
+  await guard.check(() => page.keyboard.press('ArrowRight'))
+  expect(await windowText(page)).not.toBe(panned)
+  await expect(clock(page)).toHaveText('At 20:25 (now)')
   // The distinct playhead target moves the time rather than resizing the brush.
   await drag(await center(page, '[data-testid="flow-overview"] [data-part="ovph"]'), -36)
   expect(minuteOf(await clock(page).textContent())).toBeLessThan(20 * 60 + 25)
