@@ -747,6 +747,7 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .c-day { width: auto; padding: 0 1px 0 0 !important; font-size: 10.5px; }
   .d-date { font-size: 10.5px; }
   .c-total { width: 44px; padding-left: 2px; padding-right: 6px !important; font-size: 11.5px; }
+  .week-grid thead .c-day { padding-right: 5px !important; }
   /* Preserve the Total inset over base cell padding at every compact width. */
   .week-grid .c-total { padding-left: 2px; }
   .day-group { padding: 0 12px 8px; }
@@ -765,6 +766,5 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .week-grid .ticket-chip { padding: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--ink); }
   .week-grid .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
   .week-grid .c-day { font-size: 11px; }
-  .week-grid thead .c-day { padding-right: 5px !important; }
 }
 </style>
