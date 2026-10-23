@@ -505,6 +505,20 @@
   "validation": {
     "ledger": "passed",
     "manifests": "passed",
-    "remoteStatic": "not-yet-attempted"
+    "remoteStatic": {
+      "entryPoint": "ci-static-remote.sh",
+      "result": "exit 3 / incomplete",
+      "message": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job"
+    },
+    "ledgerRegression": "passed: web/tests/test-prune-ledger.test.ts (1 case)",
+    "postMerge": {
+      "commit": "03d91976e4c18b6a071d231e815c647d6038c4b4",
+      "main": "396567da01c9b7cf80d59661368d960bcbf88a17",
+      "runtimeCases": 75,
+      "wallSeconds": 5.938,
+      "result": "75 focused runtime cases passed; typed helper cleanup rechecked in its three affected suites; ledger and canonical manifests passed"
+    },
+    "ownership": "New test/helper sources are already covered by the S9 web/tests/** slice; no ownership rule was changed.",
+    "sharedFiles": "Only 22 ESSENTIAL web-test-tier rows and the P09 runtime destination/evidence entries were added; browser tiers, shard records, budgets, protected risk rows and immutable baseline files stay unchanged."
   }
 }

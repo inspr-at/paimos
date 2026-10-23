@@ -26,6 +26,10 @@ const mounts: ReturnType<typeof mountRuntime>[] = []
 afterEach(() => { for (const app of mounts.splice(0)) app.unmount(); vi.useRealTimers(); vi.unstubAllGlobals() })
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 async function flush() { for (let i = 0; i < 20; i++) await Promise.resolve(); await nextTick() }
+interface PhoneState {
+  reason: string; decide: (decision: 'approved' | 'denied') => void
+  outcome: string; pending: boolean; error: string; review: phone.PhoneReview | null
+}
 function setup(expiresIn = 3600_000) {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-01T10:00:00Z'))
   session.identity.principal.id = 'A'
@@ -43,7 +47,7 @@ function setup(expiresIn = 3600_000) {
     return Response.json(current)
   }))
   const app = mountRuntime(view); mounts.push(app)
-  return { current, calls, get, state: app.instance.$.setupState as Record<string, any> }
+  return { current, calls, get, state: (app.instance.$ as unknown as { setupState: PhoneState }).setupState }
 }
 
 it('requires an explicit choice and a fresh proof before posting the exact reviewed request, hash and reason', async () => {
@@ -98,5 +102,5 @@ it('aborts a held passkey after a person change and never posts or displays A’
   proof.resolve(credential); await flush()
   expect(calls.filter(call => call.path.endsWith('/decision'))).toEqual([])
   expect(state.reason).toBe(''); expect(state.outcome).toBe(''); expect(state.error).toBe('')
-  expect(state.review.request_hash).toBe('b'.repeat(64))
+  expect(state.review!.request_hash).toBe('b'.repeat(64))
 })

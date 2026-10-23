@@ -7,7 +7,7 @@ import * as attach from '../src/lib/attachWatch'
 import { attachCopy } from '../src/lib/attachCopy'
 import { useIdentityScope } from '../src/lib/useIdentityScope'
 import { clientComponent, mountRuntime } from './helpers/runtime-component'
-import type { AttachReview, AttachQueueRow } from '../src/lib/attachWatch'
+import type { AttachReview, AttachQueueRow, LocalAuthComputer } from '../src/lib/attachWatch'
 
 vi.mock('../src/stores/session', () => ({ useSession: () => identity }))
 vi.mock('../src/lib/authz', () => ({ onAccessRevalidate: () => () => {} }))
@@ -38,12 +38,17 @@ function review(id = 'request-A', patch: Partial<AttachReview> = {}): AttachRevi
     snapshot: { platform: 'darwin', computer_id: 'computer', project_id: 'project', ticket_id: 'ticket', host: 'Paired Mac', harness: 'codex', transcript: '/fixture/session.jsonl', file_id: '1:234',
       process: { pid: 4812, uid: 501, started: new Date(now).toISOString(), executable: '/fixture/codex', cwd: '/fixture/project' } }, ...patch }
 }
+interface AttachState {
+  show: (review: AttachReview) => void; submit: () => void; close: () => void; request: (save?: boolean) => Promise<void>
+  choice: string; canSubmit: boolean; review: AttachReview | null; error: string
+  saved: string | null; canPickLocal: boolean; canSave: boolean; notice: string; savedUnavailable: boolean; blocked: string[]; computers: LocalAuthComputer[]; busy: boolean
+}
 function mount(component = approval, props: Record<string, unknown> = {}) {
   identity.identity = { tenant: { id: 'tenant' }, principal: { id: 'A', kind: 'person' } }; permissions.manage = true
   vi.stubGlobal('navigator', { platform: 'MacIntel' })
   getNode.mockImplementation(async (id: string) => ({ id, key: id.toUpperCase(), title: `${id} name` }))
   const app = mountRuntime(component, { now, ...props }); mounts.push(app)
-  return { ...app, state: app.instance.$.setupState as Record<string, any> }
+  return { ...app, state: (app.instance.$ as unknown as { setupState: AttachState }).setupState }
 }
 
 it('discards a pending attach list after a person change even when its transport ignores abort', async () => {
@@ -76,7 +81,7 @@ it('waits for labels and an explicit choice, then writes both digests for the di
   const accepted = review('request-A', { state: 'approved' }); held.resolve(accepted); await flush()
   expect(changed).toHaveBeenCalledWith(accepted, false)
   expect(afterWrite).toHaveBeenCalledTimes(1)
-  expect(state.review.state).toBe('approved')
+  expect(state.review!.state).toBe('approved')
 })
 
 it('drops a held approval body on person change, including refresh and parent notifications', async () => {
@@ -111,7 +116,7 @@ it('refuses unsupported local confirmation, revoked authority and failed writes 
   state.show(review()); await flush(); state.choice = 'allow'
   action.mockRejectedValue(new Error('Approval refused'))
   state.submit(); await flush()
-  expect(state.error).toBe('Approval refused'); expect(state.review.state).toBe('pending')
+  expect(state.error).toBe('Approval refused'); expect(state.review!.state).toBe('pending')
   expect(changed).not.toHaveBeenCalled(); expect(afterWrite).not.toHaveBeenCalled()
   action.mockClear(); permissions.manage = false; await nextTick(); state.submit()
   expect(action).not.toHaveBeenCalled(); expect(state.review).toBeNull()

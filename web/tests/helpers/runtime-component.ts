@@ -17,7 +17,7 @@ export function clientComponent(source: URL, imports: Record<string, unknown>, r
     if (Object.hasOwn(imports, id)) return imports[id]
     throw new Error(`Unexpected component dependency: ${id}`)
   }, exports)
-  if (!renderTemplate) exports.default!.render = () => null
+  if (!renderTemplate) Object.assign(exports.default!, { render: () => null })
   return exports.default!
 }
 
