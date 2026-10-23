@@ -271,17 +271,19 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.deepEqual(candidateVisual.renderer, prepared)
   validateVisual(candidateVisual)
   assert.deepEqual(candidateVisual.baselineAuthority, manifest.baselineAuthority)
-  assert.throws(() => preparedRenderer(manifest, 'agm2-baseline'), /OPS-pinned CPU identity/)
+  const [fixedSetting, fixedPolicy] = Object.entries(manifest.rendererPreparation.settings).find(([, setting]) => setting.machine && setting.browserArgs.length === 1)!
+  const fixedLabel = fixedPolicy.machine.runnerLabel
+  assert.throws(() => preparedRenderer(manifest, fixedSetting), /OPS-pinned CPU identity/)
   const machineVisual = structuredClone(manifest)
-  machineVisual.renderer.machine = { runnerLabel: 'agm2', cpuModel: cpu.model, cpuFlagsSHA256: cpu.flagsSHA256 }
-  assertMachine(machineVisual, { env: { AEON_VISUAL_RUNNER: 'agm2' }, cpu })
+  machineVisual.renderer.machine = { runnerLabel: fixedLabel, cpuModel: cpu.model, cpuFlagsSHA256: cpu.flagsSHA256 }
+  assertMachine(machineVisual, { env: { AEON_VISUAL_RUNNER: fixedLabel }, cpu })
   const fixedIdentity = rendererIdentity(machineVisual, manifest.renderer.browser.version, { ...identityOptions,
-    env: { ...environment, AEON_VISUAL_RUNNER: 'agm2' } })
+    env: { ...environment, AEON_VISUAL_RUNNER: fixedLabel } })
   assertRenderer(fixedIdentity, machineVisual.renderer)
   assert.throws(() => assertRenderer({ ...fixedIdentity, machine: { ...fixedIdentity.machine, cpuModel: 'Other CPU' } }, machineVisual.renderer), /renderer differs from reference: machine/)
   for (const options of [{ env: { AEON_VISUAL_RUNNER: 'ubuntu-latest' }, cpu },
-    { env: { AEON_VISUAL_RUNNER: 'agm2' }, cpu: { ...cpu, model: 'Other CPU' } },
-    { env: { AEON_VISUAL_RUNNER: 'agm2' }, cpu: { ...cpu, flagsSHA256: 'f'.repeat(64) } }])
+    { env: { AEON_VISUAL_RUNNER: fixedLabel }, cpu: { ...cpu, model: 'Other CPU' } },
+    { env: { AEON_VISUAL_RUNNER: fixedLabel }, cpu: { ...cpu, flagsSHA256: 'f'.repeat(64) } }])
     assert.throws(() => assertMachine(machineVisual, options), /fixed machine CPU\/flags or runner label/)
   assertVisualContainer(manifest, identityOptions)
   for (const options of [{ ...identityOptions, env: {} }, { ...identityOptions, env: { AEON_VISUAL_CONTAINER_DIGEST: 'sha256:' + '0'.repeat(64) } },
@@ -607,7 +609,11 @@ test('visual references require approval, immutable attachment bytes and every e
     const probeSteps = captureJob.split('\n      - ')
     const normalCaptureSteps = probeSteps.filter(step => /^name: (Capture the same|Download Tick|Prove non-deferred|Rehearse blocking)/.test(step))
     assert.equal(normalCaptureSteps.length, 4)
-    assert.ok(normalCaptureSteps.every(step => step.includes("\n        if: inputs.visual_probe == ''")))
+    for (const step of normalCaptureSteps) {
+      const condition = step.startsWith('name: Capture the same') ? "inputs.visual_probe == ''" :
+        "inputs.visual_probe == '' && inputs.visual_renderer == 'baseline'"
+      assert.ok(step.includes(`\n        if: ${condition}\n`))
+    }
     const probeStep = probeSteps.find(step => step.includes('visual-probe.mjs web/test-results/raster-probe'))
     assert.ok(probeStep.includes("\n        if: inputs.visual_probe != ''\n"))
     assert.ok(probeStep.includes('VISUAL_PROBE_CHECKPOINTS: ${{ inputs.visual_probe }}'))
