@@ -91,6 +91,18 @@ test('visual comparison rejects a changed control and never creates a missing re
     document.body.append(hidden)
   })
   expect(await renderedFonts(page)).toEqual([{ family: 'JetBrains Mono', custom: true }])
+  // The production Latin subset lacks these picker placeholder glyphs. Keep
+  // the real text intact and require custom-font provenance for both the
+  // native placeholder and ordinary painted text on every host.
+  await page.evaluate(() => {
+    const label = document.createElement('label')
+    label.textContent = 'Model ←→ '
+    const input = document.createElement('input')
+    input.placeholder = 'Type to filter · ←→ level'
+    label.append(input)
+    document.querySelector('main')!.append(label)
+  })
+  expect(await renderedFonts(page)).toEqual([{ family: 'JetBrains Mono', custom: true }])
   await page.addStyleTag({ content: 'button { font-family: Arial !important; }' })
   await expect(page.getByRole('button')).toHaveCSS('font-family', 'Arial')
   await expect(renderedFonts(page)).rejects.toThrow(/System-font fallback/)
