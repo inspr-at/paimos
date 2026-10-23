@@ -302,17 +302,16 @@ test('AEON-1683: phone timeline edge handles resize and the brush and playhead r
   expect(later?.split('–')[1]?.trim()).toBe(end?.split('–')[1]?.trim())
   expect(minuteOf(later)).toBeGreaterThan(minuteOf(end))
   // Moving the brush pans the window while keeping its span and the chosen time.
-  // Edge drags leave fractional minutes, whose independently rounded labels
-  // can differ by a minute after panning. Use an exact one-hour window for
-  // the displayed-minute oracle; both resize assertions above remain exact.
-  await guard.check(() => page.getByTestId('flow-bar').getByRole('radio', { name: '1 h' }).click())
-  const panStart = await windowText(page)
-  const span = minuteOf(panStart?.split('–')[1] ?? null) - minuteOf(panStart)
-  expect(span).toBe(60)
+  // Edge drags leave fractional minutes. Compare the unrounded SVG span:
+  // independently rounded endpoint labels can differ by a minute after a pan.
+  const brush = overview(page).locator('.ln-brush')
+  const brushSpan = () => brush.evaluate(el => (el as SVGRectElement).width.baseVal.value)
+  const span = await brushSpan()
+  expect(span).toBeGreaterThan(0)
   await drag(await center(page, '[data-testid="flow-overview"] .ln-brush'), 24)
   const panned = await windowText(page)
-  expect(panned).not.toBe(panStart)
-  expect(minuteOf(panned?.split('–')[1] ?? null) - minuteOf(panned)).toBe(span)
+  expect(panned).not.toBe(later)
+  expect(await brushSpan()).toBe(span)
   await expect(clock(page)).toHaveText('At 20:25 (now)')
   await overview(page).focus()
   await guard.check(() => page.keyboard.press('ArrowRight'))
