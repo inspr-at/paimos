@@ -4,11 +4,14 @@
 // keys or a follow tick move the time when they should move only the window.
 import { expect, it } from 'vitest'
 import {
-  CHAR_W, createTimeline, fitAll, fitLabel, following, followTick, keyInput, laneFrame, laneModel, laneRows, panBy, placeIncidentCaption, placeLane, placeOverviewTargets, resetTimeline, ROW_CAP, rowPieces, setTime, timeLabel, wheelInput, zoomPreset, zoomTo,
+  CHAR_W, createTimeline, criticalPath, fitAll, fitLabel, following, followTick, keyInput, laneFrame, laneModel, laneRows, panBy, placeIncidentCaption, placeLane, placeOverviewTargets, placeRowAvatar, resetTimeline, ROW_CAP, rowPieces, setTime, stepAt, timeLabel, wheelInput, zoomPreset, zoomTo,
   type FlowData, type FlowRun, type FlowStep, type Lane, type LaneSet, type OverviewHit,
 } from '../src/lib/deliveryFlow'
 import { exampleLive, EXAMPLE_NOW } from './delivery-flow-example-fixtures'
 import { hintParts, flowText } from '../src/lib/deliveryFlowText'
+import { liveData, recordedRuns } from '../src/lib/deliveryFlowData'
+import { liveHarnessFlow } from './delivery-flow-live-fixtures'
+import { currentStep, momentOf } from '../src/lib/deliveryFlowModes'
 
 const words = (en: string) => ({ en, de: en })
 const step = (start: number, end: number, lane: Lane = 'ops', kind: FlowStep['kind'] = 'work'): FlowStep => ({ start, end, lane, kind, expert: words(`s${start}`), simple: words(`s${start}`) })
@@ -41,6 +44,65 @@ it('rows are reserved once per data set: each step takes the first free row and 
 })
 
 it('ten concurrent builders take ten rows; above twelve a lane folds into "+N more" until a person expands it', () => {
+  // AEON-1697: the wave-A intervals, including open current attempts,
+  // must survive the API projection → Live → packing path, not just fake steps.
+  const answer = liveHarnessFlow()
+  const live = liveData(recordedRuns(answer, { extendOpen: true }))!
+  expect(live.sets[0]!.runs).toHaveLength(10)
+  const [recorded] = laneModel(live)
+  expect(recorded!.items).toHaveLength(21)
+  expect(recorded!.rows.build).toBe(10)
+  expect(new Set(recorded!.items.map(item => item.row)).size).toBe(10)
+  expect(overlaps(recorded!)).toEqual([])
+  expect(laneRows(recorded!, 'build', false)).toEqual({ bars: 10, fold: null, total: 10 })
+  expect(laneRows(recorded!, 'build', true)).toEqual({ bars: 10, fold: null, total: 10 })
+  // An unfinished current step cannot end before the playhead while the headline
+  // still calls it running. The moment and avatar must point at that open step.
+  expect(answer.steps.filter(step => step.ended_at == null).map(step => [answer.items.find(item => item.id === step.item_id)!.ref, step.round])).toEqual([
+    ['AEON-1674', 2], ['AEON-1682', 2], ['AEON-1676', 3], ['AEON-1678', 3], ['AEON-1683', 2],
+  ])
+  for (const item of answer.items) {
+    const open = answer.steps.find(step => step.item_id === item.id && step.ended_at == null)
+    expect(item.current_step_id).toBe(open?.id ?? null)
+  }
+  const now = live.now!, main = recorded!.main
+  const current = currentStep(main, now)!
+  expect(main.tag).toBe('1674')
+  expect(current.facts).toMatchObject({ id: main.facts!.currentStepId, open: true, round: 2 })
+  expect(current.end).toBeGreaterThan(now)
+  const avatarStep = stepAt(criticalPath(main), now)!
+  expect(avatarStep).toBe(current)
+  const avatarItem = recorded!.items.find(item => item.step === avatarStep)!
+  expect(avatarItem).toMatchObject({ run: main, lane: 'build', row: 4 })
+  // AEON-1698: the 16 px stacked rows must contain the avatar's whole box,
+  // centred on its own bar, rather than painting it on row 4's 1678/r3 bar.
+  // Stage widths are the live 1440 and 390 px frames after page padding.
+  for (const width of [1342, 336]) {
+    const { x0, x1 } = laneFrame(width), [from, to] = live.range
+    const X = (m: number) => x0 + (m - from) / (to - from) * (x1 - x0)
+    const rowH = 16, laneY = 98, rowTop = laneY + avatarItem.row * rowH
+    const avatar = placeRowAvatar(rowTop + 2, rowH - 3, rowH)
+    expect(avatar.y).toBe(rowTop + 2 + (rowH - 3) / 2)
+    expect(avatar.h).toBeLessThanOrEqual(rowH - 2)
+    expect(avatar.y - avatar.h / 2).toBeGreaterThanOrEqual(rowTop)
+    expect(avatar.y + avatar.h / 2).toBeLessThanOrEqual(rowTop + rowH)
+    const box = { x: X(now) - 11 * avatar.scale, y: avatar.y - avatar.h / 2, w: 33 * avatar.scale, h: avatar.h }
+    for (let row = 0; row < recorded!.rows.build!; row++) {
+      const pieces = rowPieces(recorded!.items.filter(item => item.lane === 'build' && item.row === row), X, x0, x1)
+      for (const piece of pieces) {
+        if (piece.kind === 'step' ? piece.item === avatarItem : piece.items.includes(avatarItem)) continue
+        const barY = laneY + row * rowH + (piece.kind === 'cluster' ? 4 : 2)
+        const barH = rowH - (piece.kind === 'cluster' ? 7 : 3)
+        const across = Math.min(box.x + box.w, piece.x + piece.w) - Math.max(box.x, piece.x)
+        const down = Math.min(box.y + box.h, barY + barH) - Math.max(box.y, barY)
+        expect(across > 0 && down > 0, `${width}px avatar overlaps row ${row + 1}`).toBe(false)
+      }
+    }
+  }
+  const moment = momentOf({ data: live, sets: [recorded!], T: now, selected: null, level: 'expert', lang: 'en', text: flowText('en') })
+  expect(moment.lines.find(line => line.lane === 'build')).toMatchObject({ who: 'Builder', kind: 'work', label: '1674 · Build r2 · gpt-6.1-sol', more: 4 })
+  expect(moment.sentence).toBe('Builder on “Being built · round 2”; LEAD, OPS, Reviewer, CI & queue are idle; nothing waiting on you.')
+  expect(moment.idle).not.toContain('Builder')
   const builders = (n: number) => Array.from({ length: n }, (_, k) => step(10 + k, 60 + k, 'build'))
   const lanes = (steps: FlowStep[]): FlowData => { const d = data(steps); d.sets[0]!.lanes = ['build', 'ci']; return d }
   const [ten] = laneModel(lanes(builders(10)))
@@ -85,19 +147,54 @@ it('a live update grows lanes below the pointer only: nothing above it moves unt
 })
 
 it('a label falls back from tag and text, to the text, to the duration, to an ellipsis that keeps "since"', () => {
-  const base = { tag: '126', text: 'Fix being checked', pad: 6 }
-  expect(fitLabel({ ...base, room: 400 })).toBe('126 · Fix being checked')
+  // AEON-1698 changes tagged bars deliberately: the key is dropped last. These
+  // fallbacks still apply to a single-run bar, which has no tag to preserve.
+  const base = { text: 'Fix being checked', pad: 6 }
+  expect(fitLabel({ ...base, tag: '126', room: 400 })).toBe('126 · Fix being checked')
   expect(fitLabel({ ...base, room: 120 })).toBe('Fix being checked')
   expect(fitLabel({ ...base, text: 'Waiting for a reviewer', duration: '14 min', pad: 16, room: 70 })).toBe('14 min')
   // A cut wait keeps "since" when the text no longer fits. 160 px holds
   // "14 min · since 19:36" (140 px) and must not fall back to "14 min".
-  expect(fitLabel({ ...base, tag: '983–986', text: 'Waiting for a reviewer', since: ' · since 19:36', duration: '14 min', pad: 16, room: 160 })).toBe('14 min · since 19:36')
+  expect(fitLabel({ ...base, text: 'Waiting for a reviewer', since: ' · since 19:36', duration: '14 min', pad: 16, room: 160 })).toBe('14 min · since 19:36')
   expect(fitLabel({ ...base, text: 'Fixing the notes', since: ' · since 18:33', duration: '18 min', pad: 16, room: 160 })).toBe('18 min · since 18:33')
   expect(fitLabel({ ...base, text: 'Waiting for a reviewer', since: ' · since 19:36', duration: '14 min', pad: 16, room: 100 })).toBe('')
-  const cut = fitLabel({ ...base, text: 'Being built, a bit longer than usual', since: ' · since 19:47', room: 200 })
+  const cut = fitLabel({ ...base, tag: '126', text: 'Being built, a bit longer than usual', since: ' · since 19:47', room: 200 })
   expect(cut).toMatch(/^126 · Being.*… · since 19:47$/)
   expect(cut.length * 5.9 + 6).toBeLessThan(200)
   expect(fitLabel({ ...base, room: 40 })).toBe('')
+  const answer = liveHarnessFlow()
+  const run = recordedRuns(answer, { extendOpen: true }).runs.find(run => run.tag === '1676')!
+  const text = run.steps.find(step => step.facts?.round === 3)!.expert.en
+  expect(text).toBe('Build r3 · gpt-6.1-sol')
+  const input = { tag: run.tag, text, pad: 6 }
+  // At the old row-1 width the description fitted alone and hid the run key.
+  expect(fitLabel({ ...input, room: 160 })).toMatch(/^1676 · /)
+  expect(fitLabel({ ...input, room: 110 })).toBe('1676 · Build r3…')
+  expect(fitLabel({ ...input, room: 75 })).toBe('1676 · Bu…')
+  expect(fitLabel({ ...input, room: 40 })).toBe('1676')
+  const keyRoom = input.tag.length * CHAR_W
+  expect(fitLabel({ ...input, room: keyRoom })).toBe('1676')
+  expect(fitLabel({ ...input, room: keyRoom - 0.5 })).toBe('')
+  // Every rendered label still fits, and even clipped waits identify their run.
+  for (const tag of ['1676', '983–986']) for (const since of ['', ' · since 19:36']) for (const room of [30, 40, 75, 100, 140, 160, 400]) {
+    const label = fitLabel({ tag, text, since, duration: '14 min', pad: 16, room })
+    if (!label) continue
+    expect(label.startsWith(tag)).toBe(true)
+    if (label === tag) expect(label.length * CHAR_W).toBeLessThanOrEqual(room)
+    else expect(label.length * CHAR_W + 16 + 6).toBeLessThan(room)
+  }
+  expect(fitLabel({ tag: '983–986', text: 'Waiting for a reviewer', since: ' · since 19:36', duration: '14 min', pad: 16, room: 160 })).toBe('983–986 · since 19:36')
+  // The live Linux render painted "1678 · Build r3…" 0.68 px beyond its
+  // 107.32 px bar. A wider measured face must trim further, retaining the key.
+  const ink = (value: string) => value.length * 6.5 + 4
+  const measured = fitLabel({ ...input, tag: '1678', room: 107.32, textWidth: ink })
+  expect(measured).toBe('1678 · Build…')
+  expect(ink(measured) + input.pad + 6).toBeLessThan(107.32)
+  expect(fitLabel({ ...input, room: ink(input.tag), textWidth: ink })).toBe('1676')
+  expect(fitLabel({ ...input, room: ink(input.tag) - 0.5, textWidth: ink })).toBe('')
+  const german = fitLabel({ ...input, text: 'Wartet auf die ausführliche technische Überprüfung', since: ' · seit 19:36', room: 160, textWidth: ink })
+  expect(german).toMatch(/^1676 .* · seit 19:36$/)
+  expect(ink(german) + input.pad + 6).toBeLessThan(160)
 })
 
 it('panning an incident onto the right edge keeps its caption inside a 320 px frame', () => {
@@ -168,6 +265,33 @@ it('slivers in a row merge into one "+N" cluster; a lone sliver stays a step', (
   expect(rowPieces(row, (m: number) => m * 40, 0, 4000).every(p => p.kind === 'step')).toBe(true)
   // Steps outside the window are left out.
   expect(rowPieces(row, X, 50, 100)).toHaveLength(1)
+  // The live phone's row 3 formerly put +2 against 1682. It now includes that
+  // attempt as +3, while all 21 original intervals remain represented.
+  const live = liveData(recordedRuns(liveHarnessFlow(), { extendOpen: true }))!
+  const [set] = laneModel(live)
+  const { x0, x1 } = laneFrame(336), [from, to] = live.range
+  const phoneX = (m: number) => x0 + (m - from) / (to - from) * (x1 - x0)
+  let represented = 0
+  for (let row = 0; row < set!.rows.build!; row++) {
+    const pieces = rowPieces(set!.items.filter(item => item.lane === 'build' && item.row === row), phoneX, x0, x1)
+    represented += pieces.reduce((n, piece) => n + (piece.kind === 'cluster' ? piece.items.length : 1), 0)
+    for (let k = 1; k < pieces.length; k++) expect(pieces[k]!.x - pieces[k - 1]!.x - pieces[k - 1]!.w, `390px live row ${row + 1} gap`).toBeGreaterThanOrEqual(2)
+    if (row === 2) {
+      expect(pieces.map(piece => piece.kind)).toEqual(['step', 'cluster'])
+      const cluster = pieces[1]!
+      expect(cluster.kind === 'cluster' && cluster.items.map(item => [item.run.tag, item.step.facts?.round])).toEqual([['1676', 2], ['1678', 2], ['1682', 2]])
+    }
+  }
+  expect(represented).toBe(21)
+  // A minimum-width pill takes the next piece if it would leave less than 2 px,
+  // then checks again with the newly extended end. Exactly 2 px stays separate.
+  const chain = [step(0, 1), step(2, 3), step(27, 40), step(41, 42), step(45, 60)].map(step => ({ step }))
+  const merged = rowPieces(chain, m => m, 0, 400)
+  expect(merged.map(piece => piece.kind)).toEqual(['cluster', 'step'])
+  expect(merged[0]).toMatchObject({ items: chain.slice(0, 4), x: 0, w: 42, from: 0, to: 42 })
+  const edge = rowPieces([step(0, 1), step(2, 3), step(28, 40)].map(step => ({ step })), m => m, 0, 400)
+  expect(edge.map(piece => piece.kind)).toEqual(['cluster', 'step'])
+  expect(edge[1]!.x - edge[0]!.x - edge[0]!.w).toBe(2)
 })
 
 it('Live opens at 45 min with now at 65 % (20 on a phone) and presets zoom around now while following', () => {
