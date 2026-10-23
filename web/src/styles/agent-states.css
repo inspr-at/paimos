@@ -6,12 +6,13 @@
 .agent-state-surface {
   opacity: var(--agent-state-opacity, 1);
 }
-.agent-indicator-art, .live-bot, .agent-state-label { opacity: var(--agent-state-opacity, 1); }
+/* Dim the artwork, keeping state words at the theme ink's text contrast. */
+.agent-indicator-art, .live-bot, .agent-state-label > .agent-state-mark { opacity: var(--agent-state-opacity, 1); }
 .agent-indicator-art { filter: saturate(var(--agent-state-saturation, 1)); }
 .live-bot .agent-indicator-art,
 .agent-state-surface .live-bot,
 .agent-state-surface .agent-indicator-art,
-.agent-state-surface .agent-state-label { opacity: 1; }
+.agent-state-surface .agent-state-label > .agent-state-mark { opacity: 1; }
 .agent-indicator-art:not(.working) *, .live-bot:not(.working) * { animation: none !important; }
 
 .agent-indicator-art { --signal: var(--agent-state-color, var(--agent-working)); }
