@@ -146,7 +146,7 @@ const scopeProjectName = computed(() => {
 })
 const scopePlace = computed(() => scopeProjectName.value || (scopeProject.value ? 'this project' : ''))
 const scopeCopy = computed(() => {
-  if (assistantScopePresent.value) return assistantCopy().deskScope
+  if (assistantScopePresent.value) return scopeAssistant.value ? assistantCopy().deskScope : assistantCopy().invalidAssistantFilter
   const place = scopePlace.value
   if (scopeKind.value === 'lesson' && place) return `Showing lessons in ${place}.`
   if (scopeKind.value === 'lesson') return 'Showing lessons.'

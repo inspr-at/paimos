@@ -95,5 +95,6 @@ export function assistantCopy(language: DisplayLanguage = displayLanguage()) {
     more: de ? 'Weitere Assistentenaktionen' : 'More assistant actions',
     sessionsList: de ? 'Sitzungsliste' : 'Sessions list', fullScreen: de ? 'Vollbild' : 'Full screen',
     deskScope: de ? 'Anfragen dieses Assistenten werden angezeigt.' : 'Showing items from this assistant.',
+    invalidAssistantFilter: de ? 'Ungültiger Assistentenfilter. Mit „Alle anzeigen“ wird die Ansicht zurückgesetzt.' : 'Invalid assistant filter. Choose Show all to reset this view.',
   }
 }

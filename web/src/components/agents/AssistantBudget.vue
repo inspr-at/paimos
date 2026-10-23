@@ -7,7 +7,7 @@ const props = defineProps<{ policy: AssistantPolicy; facts: AssistantFacts; dail
 const words = assistantCopy()
 const percent = computed(() => budgetPercent(props.policy, props.facts))
 const amount = computed(() => props.facts.spend ? words.weekAmount(assistantMoney(props.facts.spend.amount, props.policy.weekly_budget.unit, true), assistantMoney(props.policy.weekly_budget.amount, props.policy.weekly_budget.unit)) : words.unavailable)
-const dailyMax = computed(() => Math.max(1, ...(props.facts.spend?.daily.map(day => Number(day.amount)) ?? [])))
+const dailyMax = computed(() => Math.max(0, ...(props.facts.spend?.daily.map(day => Number(day.amount)) ?? [])) || 1)
 </script>
 <template>
   <div class="assistant-budget" :class="{ warn: percent !== null && percent >= 80, detailed: daily }">

@@ -27,7 +27,8 @@ list other assistants.
 
 Assistant approval links use `/decision-desk?assistant=<principal-id>`. The
 existing Desk applies this additional filter to its asking-principal identities
-and removes it with Show all. Invalid identifiers produce an empty scoped view.
+and removes it with Show all. Invalid identifiers fail closed and show an invalid
+filter message; source failures remain visible.
 This does not add any decision controls to the assistant panel.
 
 At this revision, assistant adapter/receipt reads (AEON-1702), action requests

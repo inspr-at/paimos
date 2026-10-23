@@ -190,7 +190,7 @@ test('an approval from an agent with no session and no address shows its name', 
   await expect.poll(() => page.locator('.desk-row').count()).toBeGreaterThan(1)
   await page.goto('/decision-desk?assistant=invalid')
   await expect(page.locator('.desk-row')).toHaveCount(0)
-  await expect(page.getByTestId('desk-empty')).toContainText('Nothing in this view is waiting.')
+  await expect(page.getByTestId('desk-scope')).toContainText('Invalid assistant filter.')
 })
 
 test('an approval without agent_name falls back to the short agent id', async ({ page }) => {

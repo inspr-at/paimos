@@ -139,7 +139,7 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
   .folded-facts, .row-budget, .assistant-glance { display: none; }
   .phone-facts { display: block; font-size: 12px; white-space: nowrap; }
   .assistant-approvals:has(a) { display: block; position: absolute; right: 12px; bottom: 1px; }
-  .assistant-approvals a { min-height: 38px; }
+  .assistant-approvals a { min-height: 44px; }
   .assistant-open { display: block; padding: 0; border-radius: var(--radius); }
   .assistant-empty { flex-direction: column; align-items: flex-start; gap: 10px; padding: 12px; }
   .assistant-empty .btn { min-height: 44px; }
