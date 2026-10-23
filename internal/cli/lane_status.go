@@ -61,16 +61,16 @@ func (rt *runtime) tellLaneStatus(address, project, senderSession, recipientSess
 	if len(key) > 128 || strings.ContainsRune(key, 0) {
 		return usagef("invalid --idempotency-key")
 	}
-	status := inbox.LaneStatus{TargetNodeID: "00000000-0000-4000-8000-000000000001", Done: f.done, Blocker: f.blocker, BlockerOwner: f.owner, Next: f.next}
+	if strings.TrimSpace(f.done) == "" || strings.TrimSpace(f.next) == "" || (strings.TrimSpace(f.blocker) == "") != (strings.TrimSpace(f.owner) == "") {
+		return usagef("status requires --done, --next and an owner for each blocker")
+	}
+	status := inbox.LaneStatus{Done: f.done, Blocker: f.blocker, BlockerOwner: f.owner, Next: f.next}
 	if f.eta != "unknown" {
 		eta, err := time.Parse(time.RFC3339, f.eta)
 		if err != nil {
 			return usagef("--eta must be RFC3339 or unknown")
 		}
 		status.ETA = &eta
-	}
-	if err := status.Validate(); err != nil {
-		return usagef("%s", err)
 	}
 	path := "/api/inbox/messages"
 	if principalInbox {
@@ -104,6 +104,9 @@ func (rt *runtime) tellLaneStatus(address, project, senderSession, recipientSess
 	status.TargetNodeID, err = rt.laneTarget(f.target)
 	if err != nil {
 		return err
+	}
+	if err := status.Validate(); err != nil {
+		return usagef("%s", err)
 	}
 	if key == "" {
 		key, err = newUUIDv4()
@@ -171,8 +174,11 @@ func (rt *runtime) laneQueryCommand(name string, defaultMinutes int) *Command {
 				return usagef("--session must be a UUID")
 			}
 			if after != "" {
+				if len(after) != 73 {
+					return usagef("invalid --after cursor")
+				}
 				parts := strings.Split(after, "/")
-				if len(after) != 73 || len(parts) != 2 || !validUUID(parts[0]) || !validUUID(parts[1]) {
+				if len(parts) != 2 || !validUUID(parts[0]) || !validUUID(parts[1]) {
 					return usagef("invalid --after cursor")
 				}
 			}

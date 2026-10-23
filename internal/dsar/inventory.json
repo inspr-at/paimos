@@ -1117,7 +1117,7 @@
         "message_id": "metadata",
         "reported_at": "personal",
         "sender_principal_id": "personal",
-        "session_id": "metadata",
+        "session_id": "personal",
         "target_node_id": "metadata",
         "tenant_id": "metadata"
       },

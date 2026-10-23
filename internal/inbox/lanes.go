@@ -276,6 +276,7 @@ func readLanesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, q laneQuery
  SELECT l.session_id,l.target_node_id FROM inbox_lane_statuses l
  UNION
  SELECT s.id,s.ticket_node_id FROM harness_sessions s WHERE s.ticket_node_id IS NOT NULL
+ AND NOT EXISTS (SELECT 1 FROM inbox_lane_statuses reported WHERE reported.session_id=s.id)
  )
  SELECT s.id::text,n.id::text,s.agent_principal_id::text,coalesce(s.display_label,p.name),
  l.message_id::text,i.lane_status,l.reported_at,s.created_at

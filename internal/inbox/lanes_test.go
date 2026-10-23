@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -218,7 +220,7 @@ func testLaneStatusInboxDay(t *testing.T) {
 		}
 	}
 	// Force failure after the projection update, proving both writes roll back.
-	if _, err := w.db.Admin.Exec(t.Context(), `CREATE FUNCTION lane_reject_message() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.lane_status IS NOT NULL THEN RAISE EXCEPTION 'injected message failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER lane_reject BEFORE INSERT ON inbox_messages FOR EACH ROW EXECUTE FUNCTION lane_reject_message()`); err != nil {
+	if _, err := w.db.Admin.Exec(t.Context(), `CREATE FUNCTION lane_reject_message() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.lane_status IS NOT NULL THEN RAISE EXCEPTION 'injected message failure' USING ERRCODE='XX000'; END IF; RETURN NEW; END $$; CREATE TRIGGER lane_reject BEFORE INSERT ON inbox_messages FOR EACH ROW EXECUTE FUNCTION lane_reject_message()`); err != nil {
 		t.Fatal(err)
 	}
 	if status, body = report("/api/inbox/messages", "rollback", first, goalStatus); status != 500 {
@@ -249,5 +251,92 @@ func testLaneStatusInboxDay(t *testing.T) {
 	var payload []byte
 	if err := w.db.Admin.QueryRow(t.Context(), `SELECT lane_status FROM inbox_messages WHERE id=$1`, latest.ID).Scan(&payload); err != nil || !json.Valid(payload) {
 		t.Fatal("durable status history missing", err)
+	}
+}
+
+// Admission completes before the barrier. The final write must consult the
+// current role permissions under the access-change fence after revocation.
+func testLaneStatusFinalWriteAuthority(t *testing.T) {
+	for _, permission := range []string{"inbox.send", "nodes.read"} {
+		t.Run(permission, func(t *testing.T) {
+			w, m, project, _ := messagingWorld(t)
+			w.agent.Scopes = []string{"inbox.send", "nodes.read"}
+			token := insertKey(t, w.db, w.agent, w.agent.Scopes, "revoked-status-synthetic")
+			session := messageTestSession(t, w, project, w.agent, "Revoked lane")
+			var target string
+			if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
+ SELECT $1,id,'MSG-3','Revoked target',$2 FROM node_kinds WHERE slug='work' RETURNING id::text`, w.agent.TenantID, project).Scan(&target)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var pause atomic.Bool
+			admitted, resume := make(chan struct{}), make(chan struct{})
+			var release sync.Once
+			t.Cleanup(func() { release.Do(func() { close(resume) }) })
+			mux := http.NewServeMux()
+			m.base.Mount(mux)
+			srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+				r = r.WithContext(tenant.WithPrincipal(r.Context(), w.agent))
+				if pause.Load() && r.Method == "POST" {
+					r.Body = &messagingAdmissionBody{ReadCloser: r.Body, pause: func() {
+						close(admitted)
+						select {
+						case <-resume:
+						case <-r.Context().Done():
+						}
+					}}
+				}
+				mux.ServeHTTP(rw, r)
+			}))
+			t.Cleanup(srv.Close)
+			in := map[string]any{"kind": "status", "sender_session_id": session, "recipient_principal_id": w.sender.ID, "idempotency_key": "baseline", "lane_status": LaneStatus{TargetNodeID: target, Done: "valid control", Next: "next"}}
+			status, body := compatPostAuth(t, srv, w.agent, "/api/inbox/messages", in, token)
+			if status != 201 {
+				t.Fatalf("valid report before revocation %d %s", status, body)
+			}
+			baseline := mustJSON[Message](t, body)
+			in["idempotency_key"] = "revoked"
+			pause.Store(true)
+			type result struct {
+				status int
+				body   []byte
+			}
+			done := make(chan result, 1)
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
+			go func() {
+				status, body := compatPostAuth(t, srv, w.agent, "/api/inbox/messages", in, token)
+				done <- result{status, body}
+			}()
+			select {
+			case <-admitted:
+			case <-ctx.Done():
+				t.Fatal("send did not complete admission")
+			}
+			if err := db.InTenant(dbtest.Seed(ctx), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(ctx, db.TenantFenceSQL); err != nil {
+					return err
+				}
+				_, err := tx.Exec(ctx, `DELETE FROM role_permissions rp USING roles r
+ WHERE rp.tenant_id=r.tenant_id AND rp.role_id=r.id AND r.key='member' AND rp.permission=$1`, permission)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			release.Do(func() { close(resume) })
+			got := dbtest.Await(t, ctx, done)
+			if got.status != 403 {
+				t.Fatalf("revoked %s returned %d: %s", permission, got.status, got.body)
+			}
+			var latest string
+			var count int
+			if err := w.db.Admin.QueryRow(t.Context(), `SELECT message_id::text FROM inbox_lane_statuses WHERE session_id=$1 AND target_node_id=$2`, session, target).Scan(&latest); err != nil || latest != baseline.ID {
+				t.Fatalf("revoked report changed latest status: %s %v", latest, err)
+			}
+			if err := w.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM inbox_messages WHERE sender_principal_id=$1 AND idempotency_key='revoked'`, w.agent.ID).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("revoked status committed: %d %v", count, err)
+			}
+		})
 	}
 }
