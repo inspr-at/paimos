@@ -42,21 +42,34 @@ async function expectCountdownGap(page: Page, step: string) {
     const empty: CountdownRow[] = []
     const slot = line.querySelector('.sync-count') as HTMLElement | null
     const inner = slot?.querySelector(':scope > span') as HTMLElement | null
-    const prev = slot?.previousSibling
-    if (!slot || !inner || !prev || prev.nodeType !== Node.TEXT_NODE) return { error: 'countdown slot is not in place', rows: empty }
-    const text = prev.textContent ?? ''
-    const at = text.lastIndexOf('in ')
-    if (at < 0 || at !== text.length - 3) return { error: `countdown does not follow "in ": ${JSON.stringify(text)}`, rows: empty }
+    const digit = inner?.firstChild
+    if (!slot || !inner || !digit) return { error: 'countdown slot is not in place', rows: empty }
+    // Vue may leave an empty text node between the phrase and the box. The last real text before the box is "…in ".
+    const words = slot.parentElement
+    let phrase: Text | null = null
+    if (words) {
+      const walker = document.createTreeWalker(words, NodeFilter.SHOW_TEXT)
+      let node: Node | null
+      while ((node = walker.nextNode())) {
+        if (slot.contains(node)) break
+        if ((node.textContent ?? '') !== '') phrase = node as Text
+      }
+    }
+    const lead = phrase?.textContent ?? ''
+    if (!phrase || !lead.endsWith('in ')) return { error: `countdown does not follow "in ": ${JSON.stringify(lead)}`, rows: empty }
+    const at = lead.length - 3
     const range = document.createRange()
     const read = (): CountdownRow => {
-      range.setStart(prev, at)
-      range.setEnd(prev, at + 2)
+      range.setStart(phrase, at)
+      range.setEnd(phrase, at + 2)
       const inEnd = range.getBoundingClientRect().right
-      range.setStart(prev, at + 2)
-      range.setEnd(prev, at + 3)
+      range.setStart(phrase, at + 2)
+      range.setEnd(phrase, at + 3)
       const space = range.getBoundingClientRect().width
-      const number = inner.getBoundingClientRect()
-      return { shown: inner.textContent, space, gap: number.left - inEnd, width: slot.getBoundingClientRect().width }
+      range.setStart(digit, 0)
+      range.setEnd(digit, 1)
+      const number = range.getBoundingClientRect().left
+      return { shown: inner.textContent, space, gap: number - inEnd, width: slot.getBoundingClientRect().width }
     }
     const saved = inner.textContent
     const rows = [read()]
