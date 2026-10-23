@@ -163,7 +163,8 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
         assertClockEvidence(clock, policy)
       })
       if (!capture && (visualReportOnly(visual) || gate.mode === 'compare')) {
-        await compareVisualReference(page, info, checkpoint, { renderer, visual })
+        if (!png) throw new Error(`Visual comparison has no settled capture: ${checkpoint.id}`)
+        await compareVisualReference(page, info, checkpoint, { renderer, visual, png })
         report.comparison = JSON.parse(readFileSync(info.outputPath(`${checkpoint.id}-comparison.md`), 'utf8'))
         report.baselineCompared = ['matched', 'different'].includes(report.comparison.status)
       }
@@ -244,15 +245,15 @@ async function reportReference(info: TestInfo, checkpoint: { id: string }, visua
 // Kept shared with the real checkpoint runner so negative controls exercise
 // the same pinned/awaiting dispatch and pixel comparator as product states.
 export async function compareVisualReference(page: Page, info: TestInfo, checkpoint: { id: string; reference: { attachmentMember: string } },
-  { visual = manifest, baselineFile = process.env.AEON_VISUAL_BASELINE_FILE, timeout, renderer = rendererIdentity(visual, page.context().browser()!.version(), { browserOptions: info.project.use,
+  { visual = manifest, baselineFile = process.env.AEON_VISUAL_BASELINE_FILE, png, renderer = rendererIdentity(visual, page.context().browser()!.version(), { browserOptions: info.project.use,
     fontconfigFile: join(info.project.outputDir, `visual-fontconfig-${info.workerIndex}`, 'fonts.conf') }) }:
-    { visual?: typeof manifest; baselineFile?: string; timeout?: number; renderer?: Record<string, unknown> } = {}) {
+    { visual?: typeof manifest; baselineFile?: string; png?: Buffer; renderer?: Record<string, unknown> } = {}) {
   const gate = referenceGate(visual, checkpoint.id)
   if (!['compare', 'report-only'].includes(gate.mode)) {
     await reportReference(info, checkpoint, visual)
     return false
   }
-  const comparison: { id: string; status: string; error?: string; rendererMismatch?: string; diffs: string[] } = {
+  const comparison: { id: string; status: string; pngSHA256?: string; error?: string; rendererMismatch?: string; diffs: string[] } = {
     id: checkpoint.id, status: 'unavailable', diffs: [],
   }
   const result = await visualCheckResult(visual, async () => {
@@ -264,9 +265,14 @@ export async function compareVisualReference(page: Page, info: TestInfo, checkpo
     } else assertRenderer(renderer, visual.renderer)
     await fontEvidence(page, gate.state)
     materializeReference(info, checkpoint, { visual, baselineFile })
+    // Compare exactly the viewport produced by the capture path. A second
+    // screenshot after quality checks can choose another rounded-edge raster,
+    // even though the original three samples were byte-identical.
+    const actual = png ?? (await settleVisualCapture(page)).png
+    comparison.pngSHA256 = createHash('sha256').update(actual).digest('hex')
     comparison.status = 'different'
-    await expect(page).toHaveScreenshot(`${checkpoint.id}.png`, { fullPage: false, animations: 'disabled', caret: 'hide',
-      threshold: visual.comparison.threshold, maxDiffPixels: visual.comparison.maxDiffPixels, timeout })
+    expect(actual).toMatchSnapshot(`${checkpoint.id}.png`, {
+      threshold: visual.comparison.threshold, maxDiffPixels: visual.comparison.maxDiffPixels })
     comparison.status = 'matched'
   })
   if (result.status === 'failed') comparison.error = result.error

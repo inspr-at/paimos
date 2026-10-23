@@ -124,21 +124,25 @@ test('visual comparison rejects a changed control and never creates a missing re
   const baselineFile = info.outputPath('synthetic-pinned-bundle.json')
   writeFileSync(baselineFile, bundle)
   const checkpoint = project.checkpoints[0]
-  expect(await compareVisualReference(page, info, checkpoint, { visual, baselineFile, renderer })).toBe(true)
+  // Capture and comparison must use the same image, even when a later paint
+  // changes. A new standalone comparison must still reject that changed page.
   await page.getByRole('button').evaluate(element => { element.style.background = 'rgb(0, 0, 220)' })
-  await expect(compareVisualReference(page, info, checkpoint, { visual, baselineFile, renderer, timeout: 1500 }))
+  expect(await compareVisualReference(page, info, checkpoint, { visual, baselineFile, renderer, png })).toBe(true)
+  expect(JSON.parse(readFileSync(info.outputPath(`${checkpoint.id}-comparison.md`), 'utf8')))
+    .toMatchObject({ status: 'matched', pngSHA256: hash(png) })
+  await expect(compareVisualReference(page, info, checkpoint, { visual, baselineFile, renderer }))
     .rejects.toThrow(/Screenshot comparison failed|pixels.*different/)
   // The exact same differing pixels remain visible as evidence in report-only
   // mode, then reject again when only the mode field changes back to blocking.
   const reporting = structuredClone(visual)
   reporting.history = [] // Synthetic bytes, never the real set-2 history.
   reporting.comparison.mode = 'report-only'
-  expect(await compareVisualReference(page, info, checkpoint, { visual: reporting, baselineFile, renderer: { ...renderer, locale: 'de-DE' }, timeout: 1500 })).toBe(false)
+  expect(await compareVisualReference(page, info, checkpoint, { visual: reporting, baselineFile, renderer: { ...renderer, locale: 'de-DE' } })).toBe(false)
   expect(JSON.parse(readFileSync(info.outputPath(`${checkpoint.id}-comparison.md`), 'utf8')))
     .toMatchObject({ status: 'different', rendererMismatch: expect.stringContaining('renderer differs from reference: locale'),
       error: expect.stringMatching(/Screenshot comparison failed|pixels.*different/) })
   reporting.comparison.mode = 'blocking'
-  await expect(compareVisualReference(page, info, checkpoint, { visual: reporting, baselineFile, renderer, timeout: 1500 }))
+  await expect(compareVisualReference(page, info, checkpoint, { visual: reporting, baselineFile, renderer }))
     .rejects.toThrow(/Screenshot comparison failed|pixels.*different/)
   await expect(compareVisualReference(page, info, checkpoint, { visual, baselineFile: info.outputPath('absent-bundle.json'), renderer: { ...renderer, locale: 'de-DE' } }))
     .rejects.toThrow('renderer differs from reference: locale')
