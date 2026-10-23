@@ -41,10 +41,12 @@ owned routines, rechecking the run's frozen owner before attributing it to an
 assistant. The bounded history window stays explicit. Production dispatch remains
 closed under D's policy/budget guard; this UI does not enable it.
 
-Assistant adapter/receipt reads (AEON-1702) and action requests (AEON-1703) have not
-merged. Their capabilities stay closed instead of fabricating health, spend or
-approvals. Assistant-wide pause/resume, approvers and reset weekday likewise stay
-unavailable while their APIs are absent. No sample values appear in product code.
+Adapter/receipt metrics (AEON-1702) have no connected reader here. Outward action
+requests (AEON-1703) use the existing Decision Desk and its project-scoped person
+decision route. This section has no connected per-assistant approval-history
+reader, so health, spend and approval facts remain unknown. Assistant-wide
+pause/resume, approvers and reset weekday likewise stay unavailable while their
+APIs are absent. No sample values appear in product code.
 EN/DE strings are kept in the assistant catalog and follow the shared app language.
 
 The section uses the Sessions card style, with its heading and the page layout

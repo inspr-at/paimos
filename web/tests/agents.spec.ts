@@ -791,8 +791,8 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   expect(positions.capacity).toBeLessThanOrEqual(positions.assistants.top)
   expect(positions.assistants.bottom).toBeLessThanOrEqual(positions.sessions)
   await expect(page.locator(`[data-row="s:${session(5)}"]`)).toHaveCount(0)
-  // B/C have not merged: health, spend and approvals stay unknown. D's owned
-  // routines below come from its merged, revisioned API fixtures.
+  // Health/spend and the section's per-assistant approval reader are not
+  // connected: those facts stay unknown. Owned routines use D's revisioned API.
   await expect(section.locator('.assistant-state').first()).toHaveText('Status unavailable')
   await expect(section.locator('.budget-unknown')).toHaveCount(2)
   for (const selector of ['.budget-unknown', '.assistant-approvals > span', '.adapter-column']) {
