@@ -561,7 +561,7 @@ test.describe('touch targets', () => {
 // test. Eight screenshot matrices in one test exhausted its 180-second CI limit
 // and then the shard's 20-minute limit; every assertion and limit stays intact.
 const readStatesTitle = 'AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart'
-for (const width of [1440, 390]) for (const theme of ['light'] as const) {
+for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
 test(width === 1440 && theme === 'light' ? readStatesTitle : `${readStatesTitle} (${width} ${theme})`, async ({ page }, info) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width, height: 1000 })

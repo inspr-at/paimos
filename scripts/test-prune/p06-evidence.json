@@ -17,9 +17,9 @@
     "auditBefore": 756,
     "baselineBefore": 757,
     "beforeRound": 773,
-    "currentAfter": 643,
+    "currentAfter": 649,
     "plannedCeiling": 29,
-    "removed": 130,
+    "removed": 124,
     "demoted": 0,
     "upstreamGrowthSinceBaseline": [
       {
@@ -39,10 +39,10 @@
       }
     ],
     "affectedBefore": 398,
-    "affectedAfter": 268
+    "affectedAfter": 274
   },
   "cuts": {
-    "profileDuplicates": 118,
+    "profileDuplicates": 112,
     "provenRuntimeTransfers": 12,
     "bySpec": [
       {"file":"tests/agent-rules-ticks.spec.ts","before":13,"after":4,"removed":9,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
@@ -50,7 +50,7 @@
       {"file":"tests/provenance.spec.ts","before":13,"after":4,"removed":9,"unchangedRetainedAssertions":true,"captureOwnershipChanged":true},
       {"file":"tests/lead-remove.spec.ts","before":7,"after":3,"removed":4,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
       {"file":"tests/lead-start.spec.ts","before":7,"after":3,"removed":4,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
-      {"file":"tests/aeon-1209-agents-head.spec.ts","before":35,"after":21,"removed":14,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/aeon-1209-agents-head.spec.ts","before":35,"after":27,"removed":8,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
       {"file":"tests/aeon-1210-agents-tree.spec.ts","before":19,"after":13,"removed":6,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
       {"file":"tests/aeon-1211-agents-rows.spec.ts","before":40,"after":23,"removed":17,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
       {"file":"tests/aeon-1213-agents-split.spec.ts","before":15,"after":12,"removed":3,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
@@ -100,12 +100,6 @@
       {"source":"browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 1440 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-start.spec.ts","nativeKeys":["browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 390 light","browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 1440 light"]}]},
       {"source":"browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-start.spec.ts","nativeKeys":["browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 390 light","browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 1440 light"]}]},
       {"source":"browser:tests/aeon-1209-agents-head.spec.ts:1024: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:1440: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover","browser:tests/aeon-1209-agents-head.spec.ts:390: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover"]}]},
-      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (1024 dark)","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart","browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (390 light)"]}]},
-      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (1024 light)","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart","browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (390 light)"]}]},
-      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (1440 dark)","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart","browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (390 light)"]}]},
-      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (390 dark)","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart","browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (390 light)"]}]},
-      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (400 dark)","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart","browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (390 light)"]}]},
-      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (400 light)","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart","browser:tests/aeon-1209-agents-head.spec.ts:AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (390 light)"]}]},
       {"source":"browser:tests/aeon-1209-agents-head.spec.ts:dark 1440: head order, the capacity row and no Desk panel","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:light 1440: head order, the capacity row and no Desk panel"]}]},
       {"source":"browser:tests/aeon-1209-agents-head.spec.ts:dark: hovering a unit shows its − / + in place, wide and tight","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:light: hovering a unit shows its − / + in place, wide and tight"]}]},
       {"source":"browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1024 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1440 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state","browser:tests/aeon-1209-agents-head.spec.ts:design gate at 390 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state"]}]},
@@ -370,6 +364,7 @@
     ]
   },
   "keptOnPurpose": [
+    "Fix round 3 restores all eight AEON-1336 G7 viewport/theme identities as ESSENTIAL, with their complete state sequence and limits unchanged; the existing all-profile regression remains authoritative.",
     "All protected native identities and historical fallback rows, including whole-file anchors, are unchanged.",
     "Native keyboard/platform submission, real touch targets, stationary controls, pairing/adoption person confirmation, Stop pending until worker confirmation, pointer/tree holds, pace conflicts and scoped Undo remain in their current browser owners.",
     "Unique or incompletely replaced assertions stay: upstream reset wording/source behavior, import/publish/conflict journeys, selected tablet/long-name geometry, and mixed loops containing protected cases. Full P06 consolidation to 29 cases is a later round."
@@ -515,7 +510,7 @@
   },
   "browserRunnerTimeChangeSeconds": null,
   "remaining": [
-    "Remote execution/native catalogue verification for 18 affected specs (213 cases) awaits capacity or hosted CI; six specs (55 cases) passed on mbp2606.",
+    "Remote execution/native catalogue verification for 18 affected specs (219 current cases after restoring G7) awaits capacity or hosted CI; six specs (55 cases) passed in the cut-A attempt.",
     "The required same-host browser before/after runner-time delta is unmeasured: before runs were refused. No runtime saving is claimed.",
     "Static checks run in hosted CI as explicitly assigned by the cut-A brief. Protected cuts wait for P02 and verified replacement lineage."
   ],
@@ -524,6 +519,10 @@
     "existingRules": "Existing web/tests/** S9 and scripts/** S7 ownership."
   },
   "outsideWriteSet": [
+    {
+      "path": "scripts/test-tiers/drift-obligations.json",
+      "reason": "Fix the reported AEON-1334 CI failure by refreshing only the current NIGHTLY drift-file count after the authorized cuts; preserve every historical case, obligation and selection rule."
+    },
     {
       "path": "docs/features/test-prune-ledger.md",
       "reason": "Update the existing ledger feature documentation to reflect authorized unprotected cut-A progress and remaining P02/runtime proof."
@@ -540,5 +539,44 @@
   },
   "implementationCommit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
   "finalMergedMain": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
-  "finalMainMergeResult": "Fetched newest origin/main immediately before completion; already up to date."
+  "finalMainMergeResult": "Fetched newest origin/main immediately before completion; already up to date.",
+  "fixRound3": {
+    "recordedAt": "2026-10-23T10:00:46.122277+00:00",
+    "baseCommit": "0c9518050",
+    "findingsSource": "review-ci905-1154.out",
+    "g7": {
+      "restoredCases": 6,
+      "retainedCases": 8,
+      "tier": "ESSENTIAL",
+      "viewports": [
+        1440,
+        1024,
+        400,
+        390
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "assertionsAndLimitsUnchanged": true,
+      "regressionCommand": "node --test --test-name-pattern 'bounded G7 read-state' scripts/test-tiers/browser-areas.test.mjs",
+      "baselineResult": "fails on 0c9518050 for the six exact missing profile identities",
+      "fixedResult": "passes; all eight cases remain selected for PR and merge-group scenarios"
+    },
+    "driftCost": {
+      "previousNightlyCasesInDriftFiles": 1524,
+      "currentNightlyCasesInDriftFiles": 1509,
+      "fullExtraNightlyCases": 502,
+      "baselineResult": "the unchanged corpus-replay current-cost assertion fails on 0c9518050 (1524 !== 1509), reproduced separately without running the historical replay locally",
+      "fixedResult": "the same exact current-cost and full-extra-cost equalities pass against the catalogue",
+      "historicalObligationsAndSelectorUnchanged": true
+    },
+    "localVerification": {
+      "defaultLedger": "passed",
+      "ledgerRegression": "passed (1 test)",
+      "canonicalManifests": "passed (--write then --check)",
+      "scopeAndCounts": "passed: 124 cut identities, 773 -> 649 P06 cases, 398 -> 274 affected cases; protected lineage and unrelated rows/tiers unchanged"
+    },
+    "remoteVerification": "pending committed HEAD; approved entry points only"
+  }
 }
