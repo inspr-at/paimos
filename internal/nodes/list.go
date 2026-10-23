@@ -1584,7 +1584,9 @@ func listSQL(q listQuery, anchor any) (string, []any) {
     -- tenant statistics, a join can otherwise rescan all nodes per page row.
     LEFT JOIN LATERAL (
         SELECT id,parent_id,kind_id,key,title FROM nodes
-        WHERE tenant_id=n.tenant_id AND id=n.parent_id AND deleted_at IS NULL OFFSET 0
+        WHERE tenant_id=n.tenant_id AND id=n.parent_id AND deleted_at IS NULL
+            AND (tenant_id,id)>=(n.tenant_id,n.parent_id)
+            AND (tenant_id,id)<=(n.tenant_id,n.parent_id) OFFSET 0
     ) par ON true
     LEFT JOIN node_kinds pk ON pk.id=par.kind_id
     LEFT JOIN LATERAL (
@@ -1593,7 +1595,9 @@ func listSQL(q listQuery, anchor any) (string, []any) {
             UNION ALL SELECT a.id,a.parent_id,a.kind_id,a.key,a.title,anc.depth+1
             FROM ancestors anc CROSS JOIN LATERAL (
                 SELECT id,parent_id,kind_id,key,title FROM nodes
-                WHERE tenant_id=n.tenant_id AND id=anc.parent_id AND deleted_at IS NULL OFFSET 0
+                WHERE tenant_id=n.tenant_id AND id=anc.parent_id AND deleted_at IS NULL
+                    AND (tenant_id,id)>=(n.tenant_id,anc.parent_id)
+                    AND (tenant_id,id)<=(n.tenant_id,anc.parent_id) OFFSET 0
             ) a
         ) SELECT a.id,a.key,a.title FROM ancestors a JOIN node_kinds ak ON ak.id=a.kind_id WHERE ak.slug='project' ORDER BY a.depth LIMIT 1
     ) project ON true
@@ -1605,7 +1609,9 @@ func listSQL(q listQuery, anchor any) (string, []any) {
                 JOIN node_kinds uk ON uk.id=up.kind_id AND uk.slug NOT IN ('work','epic','project')
                 CROSS JOIN LATERAL (
                     SELECT id,parent_id,kind_id,key,title FROM nodes
-                    WHERE tenant_id=n.tenant_id AND id=up.parent_id AND deleted_at IS NULL OFFSET 0
+                    WHERE tenant_id=n.tenant_id AND id=up.parent_id AND deleted_at IS NULL
+                        AND (tenant_id,id)>=(n.tenant_id,up.parent_id)
+                        AND (tenant_id,id)<=(n.tenant_id,up.parent_id) OFFSET 0
                 ) a
             WHERE up.depth<32
         ) SELECT u.id,u.key,u.title FROM up u JOIN node_kinds ek ON ek.id=u.kind_id WHERE ek.slug IN ('epic','work') ORDER BY u.depth LIMIT 1
