@@ -901,6 +901,27 @@
     {
       "classification": "personal",
       "columns": {
+        "created_at": "personal",
+        "expires_at": "metadata",
+        "id": "metadata",
+        "instance_tag": "metadata",
+        "last_used_at": "personal",
+        "origin": "personal",
+        "principal_id": "personal",
+        "revoked_at": "metadata",
+        "state_hash": "secret",
+        "tenant_id": "metadata",
+        "token_hash": "secret"
+      },
+      "locator": {
+        "person_column": "principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "desk_instance_connections"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "summarised_at": "personal"
       },
       "locator": {

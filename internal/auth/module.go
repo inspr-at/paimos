@@ -46,9 +46,6 @@ type Module struct {
 	// only when it has handled the request. Ordinary sessions/keys keep their
 	// existing path; no protected route becomes public.
 	Delegated func(http.ResponseWriter, *http.Request, http.Handler) bool
-	// deskPeekOrigins are the sibling origins whose owner-summary reads may
-	// carry the peek cookie (AEON-1495, desk_peek.go).
-	deskPeekOrigins []string
 
 	mu        sync.Mutex
 	provider  *oidc.Provider
@@ -162,7 +159,7 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 		case credStale:
 			// Public responses can be cached. A Set-Cookie there would store
 			// the session clear next to the page. Auth handlers clear their own.
-			if !publicRequest(r) && !m.deskPeekOnly(r) {
+			if !publicRequest(r) {
 				m.clearSessionCookie(w)
 			}
 		case credSession:
@@ -980,10 +977,6 @@ func (m *Module) authenticate(r *http.Request) (tenant.Principal, credKind, erro
 		return p, credAgent, nil
 	}
 	c, err := r.Cookie(sessionCookieName)
-	if err != nil && m.deskPeekRequest(r) {
-		// A sibling's cross-site summary read carries only the peek copy.
-		c, err = r.Cookie(deskPeekCookieName)
-	}
 	if err != nil {
 		return tenant.Principal{}, credNone, nil
 	}

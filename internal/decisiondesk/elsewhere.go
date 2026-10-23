@@ -19,14 +19,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// AEON-1495: Waiting on you across instances (owner only), the asker on each
-// Desk line and the person's upcoming steps (Coming).
-//
-// Trust contexts: no server ever reads another instance. This instance tells
-// its workspace owner which siblings exist (deployment configuration) and
-// answers the owner's own summary read from a sibling's page in the owner's
-// browser. Nothing from a sibling is stored or logged here, agents and keys
-// never see a sibling, and the summary carries first lines only.
+// AEON-1709: browser-only instance connections. Each home instance serves only
+// the connected person's first lines; no server reads another instance.
 
 // AskedBy names the principal who asked (the source principal).
 type AskedBy struct {
@@ -44,15 +38,12 @@ type UpcomingStep struct {
 	Label     string `json:"label"`
 }
 
-// PeekIssuer copies the owner's browser session into the cross-site summary
-// cookie, or clears it (auth.Module.IssueDeskPeek).
-type PeekIssuer interface {
-	IssueDeskPeek(w http.ResponseWriter, r *http.Request, owner bool)
-}
-
-// WithInstances names this instance and its siblings.
-func (m *Module) WithInstances(instances config.Instances, peek PeekIssuer) *Module {
-	m.instances, m.peek = instances, peek
+// WithInstances names this instance and its configured siblings.
+func (m *Module) WithInstances(instances config.Instances, publicOrigin ...string) *Module {
+	m.instances = instances
+	if len(publicOrigin) > 0 {
+		m.publicOrigin = strings.TrimRight(publicOrigin[0], "/")
+	}
 	return m
 }
 
@@ -152,20 +143,7 @@ func upcomingTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]UpcomingS
 	return steps, rows.Err()
 }
 
-func workspaceOwnerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (bool, error) {
-	if p.Kind != tenant.Person || p.KeyCreatorID != "" {
-		return false, nil
-	}
-	var owner bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM role_bindings b
-	 JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
-	 JOIN principals person ON person.tenant_id=b.tenant_id AND person.id=b.principal_id AND person.kind='person' AND person.status='active'
-	 WHERE b.tenant_id=$1 AND b.principal_id=$2 AND b.scope_type='workspace' AND r.key='owner')`, p.TenantID, p.ID).Scan(&owner)
-	return owner, err
-}
-
-// Instances is this instance's tag and, for the workspace owner only, the
-// sibling instances the owner's browser may read.
+// Instances lists the configured siblings for any active signed-in person.
 type Instances struct {
 	Here     string           `json:"here"`
 	Siblings []config.Sibling `json:"siblings"`
@@ -177,21 +155,11 @@ func browserPerson(w http.ResponseWriter, r *http.Request) (tenant.Principal, bo
 		httpapi.WriteError(w, 401, "authentication required")
 		return p, false
 	}
-	if p.Kind != tenant.Person || p.KeyCreatorID != "" || !p.BrowserSession || r.Header.Get("Authorization") != "" {
+	if p.Kind != tenant.Person || p.KeyCreatorID != "" || p.AuthKeyID != "" || p.KeyID != "" || !p.BrowserSession || r.Header.Get("Authorization") != "" {
 		httpapi.WriteError(w, 403, "a signed-in person is required")
 		return p, false
 	}
 	return p, true
-}
-
-func (m *Module) ownerTx(ctx context.Context, p tenant.Principal) (bool, error) {
-	var owner bool
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		var err error
-		owner, err = workspaceOwnerTx(ctx, tx, p)
-		return err
-	})
-	return owner, err
 }
 
 func (m *Module) listInstances(w http.ResponseWriter, r *http.Request) {
@@ -200,25 +168,23 @@ func (m *Module) listInstances(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	out := Instances{Here: m.instances.Here, Siblings: []config.Sibling{}}
-	owner := false
-	if len(m.instances.Siblings) > 0 {
-		var err error
-		if owner, err = m.ownerTx(r.Context(), p); err != nil {
-			httpapi.WriteInternalError(w, r, "decision_desk", err, "instances could not be read")
-			return
-		}
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	err := db.InTenantReadSnapshot(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		return authz.RequireTx(ctx, tx, p, "profile.read", authz.Scope{AnyProject: true})
+	})
+	if err != nil {
+		connectionError(w, r, err)
+		return
 	}
-	if owner {
-		out.Siblings = slices.Clone(m.instances.Siblings)
+	siblings := slices.Clone(m.instances.Siblings)
+	if siblings == nil {
+		siblings = []config.Sibling{}
 	}
-	if m.peek != nil {
-		m.peek.IssueDeskPeek(w, r, owner)
-	}
-	httpapi.WriteJSON(w, 200, out)
+	httpapi.WriteJSON(w, 200, Instances{Here: m.instances.Here, Siblings: siblings})
 }
 
-// OwnerSummary is the owner's first lines, read by a sibling's page.
+// OwnerSummary retains the wire name; its contents belong to the connected person.
 type OwnerSummary struct {
 	Instance string        `json:"instance"`
 	Items    []SummaryItem `json:"items"`
@@ -232,45 +198,53 @@ type OwnerSummary struct {
 
 // SummaryItem is one first line: no context, findings, options or answers.
 type SummaryItem struct {
-	ID         string `json:"id"`
-	Kind       string `json:"kind"`
-	ProjectKey string `json:"project_key,omitempty"`
-	Title      string `json:"title"`
-	AskedBy    string `json:"asked_by,omitempty"`
-	Held       bool   `json:"held"`
-	Href       string `json:"href"`
+	CreatedAt  time.Time `json:"created_at"`
+	ID         string    `json:"id"`
+	Kind       string    `json:"kind"`
+	ProjectKey string    `json:"project_key,omitempty"`
+	Title      string    `json:"title"`
+	AskedBy    string    `json:"asked_by,omitempty"`
+	Held       bool      `json:"held"`
+	Href       string    `json:"href"`
 }
 
-var errNotOwner = errors.New("not the workspace owner")
-
 func (m *Module) ownerSummary(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Add("Vary", "Origin")
-	if origin := r.Header.Get("Origin"); origin != "" && len(r.Header.Values("Origin")) == 1 && slices.Contains(m.instances.Origins(), origin) {
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
+	if !m.summaryOrigin(w, r) {
+		return
 	}
-	p, ok := browserPerson(w, r)
+	p, hash, ok := summaryCredential(r)
 	if !ok {
+		httpapi.WriteError(w, 401, "summary connection required")
 		return
 	}
-	if len(m.instances.Siblings) == 0 {
-		httpapi.WriteError(w, 404, "this instance has no sibling instances")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	// The parsed identity has no authority until the exact hash, origin, expiry
+	// and live person permission are verified inside this transaction.
+	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(r.Context(), p), 8*time.Second)
 	defer cancel()
-	out := OwnerSummary{Instance: m.instances.Here, Items: []SummaryItem{}}
-	err := db.InTenantReadSnapshot(db.AllProjects(ctx, "decision desk: the owner's own summary for a sibling instance"), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
+	ctx = db.WithAdditionalTenantGuard(ctx, func(ctx context.Context, tx pgx.Tx, tid string) error {
+		if err := db.LockTenant(ctx, tx, tid); err != nil {
 			return err
 		}
-		owner, err := workspaceOwnerTx(ctx, tx, p)
+		var id string
+		err := tx.QueryRow(ctx, `SELECT c.id::text FROM desk_instance_connections c
+   JOIN principals p ON p.tenant_id=c.tenant_id AND p.id=c.principal_id AND p.kind='person' AND p.status='active'
+   WHERE c.tenant_id=$1 AND c.principal_id=$2 AND c.token_hash=$3 AND c.origin=$4 AND c.revoked_at IS NULL AND c.expires_at>clock_timestamp()`, p.TenantID, p.ID, hash, r.Header.Get("Origin")).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errConnectionEnded
+		}
 		if err != nil {
 			return err
 		}
-		if !owner {
-			return errNotOwner
+		if err = authz.RequireTx(ctx, tx, p, "profile.read", authz.Scope{AnyProject: true}); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE desk_instance_connections SET last_used_at=now() WHERE tenant_id=$1 AND id=$2`, tid, id)
+		return err
+	})
+	out := OwnerSummary{Instance: m.instances.Here, Items: []SummaryItem{}}
+	err := db.InTenantReadSnapshot(db.AllProjects(ctx, "decision desk: connected person summary reauthorized per source"), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
+			return err
 		}
 		page, err := ReadTx(ctx, tx, p, maxSummaryItems, nil, m.routineRuntime)
 		if err != nil {
@@ -292,7 +266,7 @@ func (m *Module) ownerSummary(w http.ResponseWriter, r *http.Request) {
 			out.Upcoming = &upcoming[0]
 		}
 		for _, item := range page.Items {
-			line := SummaryItem{ID: item.ID, Kind: item.Kind, ProjectKey: keys[item.ProjectID], Title: clip(item.Title, maxSummaryTitle), Held: item.Held, Href: item.Href}
+			line := SummaryItem{ID: item.ID, Kind: item.Kind, ProjectKey: keys[item.ProjectID], Title: clip(item.Title, maxSummaryTitle), CreatedAt: item.CreatedAt, Held: item.Held, Href: item.Href}
 			if item.AskedBy != nil {
 				line.AskedBy = item.AskedBy.Name
 			}
@@ -303,8 +277,8 @@ func (m *Module) ownerSummary(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
-	if errors.Is(err, errNotOwner) {
-		httpapi.WriteError(w, 403, "only the workspace owner reads this summary")
+	if errors.Is(err, errConnectionEnded) || errors.Is(err, authz.ErrForbidden) {
+		httpapi.WriteError(w, 401, "connection ended")
 		return
 	}
 	if errors.Is(err, ErrCoverage) || errors.Is(err, ErrPersonStepCoverage) {

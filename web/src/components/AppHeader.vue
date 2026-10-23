@@ -111,7 +111,7 @@ const businessCrumbs = computed(() => {
 const profilesPage = computed(() => route.path.startsWith('/settings/business/profiles'))
 const settingsSection = computed(() => route.path.startsWith('/settings') ? SETTINGS_SECTIONS.find(section => section.id === (profilesPage.value ? 'business' : sectionOf(route.params.section))) ?? null : null)
 const placeLabel = (id: PlaceId) => id === 'desk' ? `Decision Desk, ${desk.count === null ? 'count unavailable' : `${desk.count} open`}` : undefined
-const deskTip = computed(() => `${desk.error || (desk.count === null ? 'Reading Decision Desk' : `${desk.count} open in Decision Desk`)}${shortcutHint('places.desk') ? ` · ${shortcutHint('places.desk')}` : ''}`)
+const deskTip = computed(() => `${desk.error || desk.countTip}${shortcutHint('places.desk') ? ` · ${shortcutHint('places.desk')}` : ''}`)
 const deskBadge = computed(() => desk.count === null ? '?' : desk.count > 99 ? '99+' : String(desk.count))
 
 watch(command, value => { if (value?.command.name === 'palette') { consume(); palette.value?.open() } })

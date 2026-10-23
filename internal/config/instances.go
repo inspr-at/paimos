@@ -9,10 +9,8 @@ import (
 	"strings"
 )
 
-// Instances names this deployment and its sibling PAIMOS instances for the
-// owner's Waiting on you across instances (AEON-1495). Deployment-owned: no
-// tenant or request can add a sibling. No credential is configured here; the
-// owner's browser reads each sibling with the owner's own session there.
+// Instances names this deployment and its configured siblings. Connections
+// belong to people; browser-held credentials never cross server boundaries.
 type Instances struct {
 	// Here is this instance's short tag (AEON_INSTANCE_TAG, e.g. "ppm").
 	Here string

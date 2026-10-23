@@ -7,11 +7,13 @@ import { deskReadAborted, loadDeskProjection, type DeskProjection } from '../lib
 import { onProjectionWake } from '../lib/agents'
 import { getDoctrineInbox } from '../lib/doctrine'
 import { readDoctrineProjects } from '../lib/decisionDeskApi'
+import { useDeskConnections } from './deskConnections'
 
 // The badge uses the server's total, never session presence or a loaded page.
 const wakeWindow = 3000
 export const useDecisionDesk = defineStore('decisionDesk', () => {
   const session = useSession()
+  const connections = useDeskConnections()
   const owner = computed(() => session.identity?.principal.kind === 'person' ? `${session.identity.tenant.id}:${session.identity.principal.id}` : '')
   const projection = ref<DeskProjection | null>(null), error = ref(''), loading = ref(false)
   const failures = ref(0), failedSince = ref<number | null>(null), refreshedAt = ref<number | null>(null)
@@ -66,6 +68,7 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
   }
   function refresh(): Promise<boolean> {
     if (!owner.value || !session.authenticationCurrent()) return Promise.resolve(false)
+    void connections.refresh()
     if (flight) return flight
     const identity = owner.value, turn = generation
     // A read that starts now covers every live event so far.
@@ -115,5 +118,9 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
   const stopAccess = onAccessRevalidate({ reset: invalidate, refresh: () => { void refresh() } })
   const stopWakes = onProjectionWake(requestRefresh)
   onScopeDispose(() => { stopWakes(); stopAccess(); invalidate() })
-  return { projection, error, loading, failures, failedSince, refreshedAt, refresh, refreshPastCancel, cancelRefresh, invalidate, ruleProjects, ruleProjectError, resolveRuleProjects, count: computed(() => projection.value?.counts.open ?? null) }
+  const hereCount = computed(() => projection.value?.counts.open ?? null)
+  const count = computed(() => hereCount.value === null ? null : hereCount.value + connections.count)
+  const countTip = computed(() => [hereCount.value === null ? 'Reading here' : `${hereCount.value} here`, ...connections.breakdown, ...(connections.discovery === 'unknown' ? ['Other instances could not be read'] : [])].join(' · '))
+  const allClear = computed(() => hereCount.value === 0 && connections.allClear)
+  return { projection, error, loading, failures, failedSince, refreshedAt, refresh, refreshPastCancel, cancelRefresh, invalidate, ruleProjects, ruleProjectError, resolveRuleProjects, hereCount, count, countTip, allClear }
 })

@@ -1,15 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-// Waiting on you (AEON-1457 decision 3): the person's live Decision Desk items, from
-// the same projection as the header badge (and its count). A warm full tint, never an
-// edge bar. AEON-1495 (approved design aeon-1494, decision 2): each line is instance
-// tag · key · question · asked by · Open. For the workspace owner the band also shows
-// the questions waiting on the sibling instances, read by this browser with the
-// owner's own session there (lib/deskElsewhere): this instance first, held first
-// within each; the count says "4 · 1 on pma"; a sibling that cannot be read is one
-// quiet line in the same slot. Coming names the person's next upcoming step. The band
-// paints once the sibling reads settle, so arriving lines never push the goals.
-// Phone: the count, the first question with its tag, "N more · 1 on pma", Open Desk.
+// One canonical local projection plus the shared browser connection store.
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -17,16 +8,17 @@ import { vClipTip } from '../../lib/clipTip'
 import { useDecisionDesk } from '../../stores/decisionDesk'
 import { useProjects } from '../../stores/projects'
 import { deskItemID, deskLinkOut, deskListKey, type DeskProjectionItem } from '../../lib/decisionDesk'
-import { ELSEWHERE_LINES, useDeskElsewhere } from '../../lib/deskElsewhere'
+import { useDeskConnections } from '../../stores/deskConnections'
+import DeskInstanceItems from '../DeskInstanceItems.vue'
 import type { Goal } from '../../lib/goals'
 
 defineProps<{ goals: readonly Goal[] }>()
 const desk = useDecisionDesk(), projects = useProjects()
-const elsewhere = useDeskElsewhere()
+const elsewhere = useDeskConnections()
 const heldFirst = <T extends { held: boolean }>(list: readonly T[]) => [...list.filter(item => item.held), ...list.filter(item => !item.held)]
 // Tags show only when there is more than one instance to tell apart.
-const multi = computed(() => elsewhere.reads.value.length > 0)
-const here = computed(() => elsewhere.here.value)
+const multi = computed(() => elsewhere.reads.length > 0)
+const here = computed(() => elsewhere.here)
 const items = computed(() => heldFirst(desk.projection?.items ?? []))
 const rows = computed(() => items.value.slice(0, 3).map((item: DeskProjectionItem) => {
   const project = item.project_id ? projects.byId(item.project_id) : undefined
@@ -37,26 +29,14 @@ const rows = computed(() => items.value.slice(0, 3).map((item: DeskProjectionIte
     to: deskLinkOut(item) || { path: '/decision-desk', query: { item: deskItemID(item) } },
   }
 }))
-const away = computed(() => elsewhere.reads.value.map(read => ({
-  tag: read.tag, state: read.state, open: read.summary?.open ?? 0, shown: read.shown,
-  lines: heldFirst(read.summary?.lines ?? []).slice(0, ELSEWHERE_LINES),
-})))
-const unknown = computed(() => elsewhere.discovery.value === 'unknown')
-const awayOpen = computed(() => away.value.reduce((sum, read) => sum + (read.state === 'ok' ? read.open : 0), 0))
-const split = computed(() => away.value.filter(read => read.state === 'ok' && read.open > 0).map(read => `${read.open} on ${read.tag}`).join(' · '))
-const hereCount = computed(() => desk.count)
-const count = computed(() => hereCount.value === null ? null : hereCount.value + awayOpen.value)
-// "N more" counts everything after the first line shown on a phone.
-const more = computed(() => {
-  const total = count.value ?? 0
-  if (total < 2) return ''
-  const first = (hereCount.value ?? 0) > 0 ? null : away.value.find(read => read.lines.length)?.tag
-  const rest = away.value.map(read => ({ tag: read.tag, n: read.state === 'ok' ? read.open - (read.tag === first ? 1 : 0) : 0 })).filter(read => read.n > 0)
-  return [`${total - 1} more`, ...rest.map(read => `${read.n} on ${read.tag}`)].join(' · ')
-})
+const unknown = computed(() => elsewhere.discovery === 'unknown')
+const split = computed(() => elsewhere.reads.filter(r => r.summary).map(r => `${r.summary!.open} on ${r.tag}`).join(' · '))
+const hereCount = computed(() => desk.hereCount)
+const count = computed(() => desk.count)
+const more = computed(() => (hereCount.value ?? 0) > rows.value.length ? `${(hereCount.value ?? 0) - rows.value.length} more here` : '')
 const coming = computed(() => desk.projection?.upcoming?.[0])
 const comingLabel = computed(() => coming.value ? `${coming.value.label}${coming.value.ticket_key ? ` (${coming.value.ticket_key})` : ''}` : '')
-const reading = computed(() => hereCount.value === null || !elsewhere.settled.value)
+const reading = computed(() => hereCount.value === null)
 </script>
 
 <template>
@@ -70,7 +50,7 @@ const reading = computed(() => hereCount.value === null || !elsewhere.settled.va
   <section v-else-if="reading" class="waiting is-empty is-reading" aria-label="Waiting on you" aria-busy="true">
     <div class="waiting-head"><span class="w-ic"><AppIcon name="person-wait" :size="15" /></span><span class="w-line"><span class="skeleton" /></span></div>
   </section>
-  <section v-else-if="count === 0 && !unknown && !away.some(read => read.state !== 'ok')" class="waiting is-empty is-clear" aria-label="Waiting on you">
+  <section v-else-if="desk.allClear" class="waiting is-empty is-clear" aria-label="Waiting on you">
     <div class="waiting-head">
       <span class="w-ic"><AppIcon name="check" :size="15" /></span>
       <span class="w-line"><span>Nothing waits on you</span><span v-if="coming" v-clip-tip class="coming"><b>Coming</b> · {{ comingLabel }}</span></span>
@@ -80,7 +60,7 @@ const reading = computed(() => hereCount.value === null || !elsewhere.settled.va
   <section v-else class="waiting" aria-label="Waiting on you">
     <div class="waiting-head">
       <span class="w-ic"><AppIcon name="person-wait" :size="15" /></span>
-      <span class="waiting-title">Waiting on you<span class="n-badge mono" :aria-label="`${count} open`">{{ count }}</span><span v-if="split" class="w-split">· {{ split }}</span></span>
+      <span class="waiting-title">Waiting on you<span class="n-badge mono" :aria-label="`${count} open`" :data-tip="desk.countTip">{{ count }}</span><span v-if="split" class="w-split">· {{ split }}</span></span>
       <RouterLink class="btn sm waiting-open" to="/decision-desk">Open Desk<AppIcon name="arrow" :size="13" /></RouterLink>
     </div>
     <ul class="waiting-list">
@@ -95,36 +75,13 @@ const reading = computed(() => hereCount.value === null || !elsewhere.settled.va
           <span class="wopen">Open</span>
         </RouterLink>
       </li>
-      <template v-for="read in away" :key="read.tag">
-        <template v-if="read.state === 'ok'">
-          <li v-for="line in read.lines" :key="`${read.tag}:${line.id}`">
-            <a class="waiting-item" :href="line.url" target="_blank" rel="noopener noreferrer" :aria-label="`${read.tag}, ${line.projectKey}: ${line.title}${line.askedBy ? `. Asked by ${line.askedBy}` : ''}. Open in the ${read.tag} Desk, in a new tab`">
-              <span class="wtag mono" :data-tip="`On ${read.tag}`">{{ read.tag }}</span>
-              <span v-clip-tip class="wkey mono">{{ line.projectKey }}</span>
-              <span class="wline"><span v-clip-tip class="wq">{{ line.title }}</span><span v-if="line.askedBy" class="wby">· asked by {{ line.askedBy }}</span></span>
-              <span class="wopen">Open<AppIcon name="external" :size="12" /></span>
-            </a>
-          </li>
-        </template>
-        <template v-else>
-          <li v-for="slot in Math.max(read.shown, 1)" :key="`${read.tag}:${slot}`" class="w-err-li">
-            <div v-if="slot === 1" class="waiting-item w-err" role="status" :data-state="read.state" :data-tip="read.state === 'error' ? `Sign in on ${read.tag} and open Goals there once; then this browser can read it.` : undefined">
-              <span class="wtag mono">{{ read.tag }}</span>
-              <span class="werr">
-                <template v-if="read.state === 'reading'">Reading…</template>
-                <template v-else>couldn’t be read<span aria-hidden="true">·</span><button type="button" class="w-retry" @click="elsewhere.retry(read.tag)">Try again</button></template>
-              </span>
-            </div>
-            <div v-else class="waiting-item w-hold" aria-hidden="true" />
-          </li>
-        </template>
-      </template>
       <li v-if="unknown" class="w-coverage">
         <div class="waiting-item w-err" role="status">
           <span class="werr">Other instances couldn’t be read<span aria-hidden="true">·</span><button type="button" class="w-retry" @click="elsewhere.refresh()">Try again</button></span>
         </div>
       </li>
     </ul>
+    <DeskInstanceItems v-for="read in elsewhere.reads" :key="read.tag" :read="read" variant="goals" />
     <RouterLink v-if="more" class="w-more" to="/decision-desk">{{ more }}</RouterLink>
     <p v-if="coming" v-clip-tip class="coming"><b>Coming</b> · {{ comingLabel }}</p>
   </section>

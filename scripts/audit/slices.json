@@ -106,7 +106,8 @@
         "internal/agentaccounts/probe_batch.go",
         "internal/agentaccounts/probe_batch_test.go",
         "internal/db/migrations/1359_delivery_admission_publisher.sql",
-        "internal/assistants/**"
+        "internal/assistants/**",
+        "internal/db/migrations/1450_desk_instance_connections.sql"
       ],
       "exclude": [
         "internal/db/migrations/1333_models_v2_migration.sql",
@@ -383,7 +384,9 @@
         "internal/routineactions/pr.go",
         "internal/routineactions/evidence/evidence.go",
         "internal/routineactions/pipeline.go",
-        "internal/routineactions/pr_test.go"
+        "internal/routineactions/pr_test.go",
+        "internal/decisiondesk/connections.go",
+        "internal/decisiondesk/connections_test.go"
       ]
     },
     {
@@ -462,7 +465,10 @@
         "web/src/components/settings/ProjectDefinitionsSettings.vue",
         "web/src/components/ViewSwitch.vue",
         "web/src/components/ViewDefaultMenu.vue",
-        "web/src/components/settings/WorkspaceDefinitionsSettings.vue"
+        "web/src/components/settings/WorkspaceDefinitionsSettings.vue",
+        "web/src/components/DeskInstanceItems.vue",
+        "web/src/components/settings/InstanceConnections.vue",
+        "web/src/views/InstanceConnectView.vue"
       ]
     },
     {
@@ -507,7 +513,10 @@
         "web/tests/view-switch.unit.test.ts",
         "web/tests/view-switch.spec.ts",
         "web/tests/definitions-p3.spec.ts",
-        "web/src/components/work/PhoneTicketToolbar.vue"
+        "web/src/components/work/PhoneTicketToolbar.vue",
+        "web/src/lib/instanceConnect.ts",
+        "web/src/stores/deskConnections.ts",
+        "web/tests/desk-connections.unit.test.ts"
       ],
       "exclude": [
         "web/src/views/**",

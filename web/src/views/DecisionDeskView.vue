@@ -24,6 +24,9 @@ import { useSession } from '../stores/session'
 import { useAgents } from '../stores/agents'
 import type { KeyTrimCursors } from '../lib/keyTrim'
 import { useDecisionDesk } from '../stores/decisionDesk'
+import { useDeskConnections } from '../stores/deskConnections'
+import DeskInstanceItems from '../components/DeskInstanceItems.vue'
+const elsewhere = useDeskConnections()
 import { revokeApproval } from '../lib/agents'
 import { getRun } from '../lib/agentRows'
 import { undoKnowledge } from '../lib/knowledge'
@@ -784,7 +787,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
       </div>
       <div v-else-if="clearFrame" class="all-clear" :class="{ reading: emptyState === 'reading' }" :data-state="emptyState" data-testid="desk-clear">
         <span class="art" aria-hidden="true"><template v-if="emptyState !== 'reading'"><img class="light" :src="deskLight" alt="" width="840" height="560" decoding="async" loading="lazy"><img class="dark" :src="deskDark" alt="" width="840" height="560" decoding="async" loading="lazy"></template></span>
-        <p class="line" :data-testid="emptyState === 'reading' ? undefined : 'desk-empty'"><template v-if="emptyState !== 'reading'"><AppIcon name="check" :size="16" />Nothing waits for you</template></p>
+        <p class="line" :data-testid="emptyState === 'reading' ? undefined : 'desk-empty'"><template v-if="emptyState !== 'reading'"><AppIcon name="check" :size="16" />{{ desk.allClear ? 'Nothing waits for you' : 'Nothing waits here · other instances are shown below' }}</template></p>
         <p class="quiet" role="status" data-testid="desk-unanswered"><template v-if="emptyState === 'incomplete'"><AppIcon name="clock" :size="14" /><span>{{ unansweredLine }}</span><span class="sep" aria-hidden="true">·</span><button type="button" class="linkish" :disabled="loading" @click="refresh">Try again</button></template></p>
         <p v-if="emptyState === 'reading'" class="reading-note" role="status">Reading the desk…</p>
       </div>
@@ -847,6 +850,10 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
     <p v-if="opened && fresh.length" class="arrival-line" role="status">{{ fresh.length }} new item{{ fresh.length === 1 ? '' : 's' }} waiting for the next round.</p>
     <DecisionDeskMemo v-if="opened" :key="`${owner}:${memoRound}`" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :pending-rule-ids="items.filter(row => row.kind === 'rule' && !row.decided).map(row => row.id.slice(2))" :allowed="allowed" :decide="decide" :stepup-method="stepupMethod" :can-revoke="canRevoke" :revoke="revoke" :edit-rule="editRule" :undo="undoLesson" :who="who" :ticket="ticketOf" :run-pending="runPending" :change="changeId || undefined" @recorded="recorded" @close="closed" />
     <DoctrineProposalDialog v-if="ruleEdit" :key="owner" :source="ruleEdit.source" :file="ruleEdit.file" :rule="ruleEdit.rule" :draft="ruleEdit.draft" @close="ruleEdit = undefined" @saved="editedRule" />
+    <div v-if="filter === 'open'" class="desk-instances">
+      <DeskInstanceItems v-for="read in elsewhere.reads" :key="read.tag" :read="read" />
+      <p v-if="elsewhere.discovery === 'unknown'">Other instances could not be read. <button type="button" class="linkish" @click="elsewhere.refresh(true)">Try again</button></p>
+    </div>
   </main>
 </template>
 

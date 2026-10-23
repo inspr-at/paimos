@@ -59,7 +59,7 @@ paths:
     get:
       operationId: decisionDeskInstances
       security: [{session: []}]
-      description: "AEON-1495. Signed-in browser person only (no agent keys). Names this instance's tag and, for the workspace owner only, the deployment-configured sibling instances whose Desk the owner's browser may read with the owner's own session there. For the owner it also refreshes the owner's summary cookie, a copy of the current session scoped to /api/decision-desk/owner-summary (SameSite=None, HttpOnly, Secure); for anyone else it clears that cookie. Nothing is stored about a sibling."
+      description: "AEON-1709. Any active signed-in browser person (no agent keys) can discover deployment-configured siblings. No credential is issued by discovery. Each connection needs confirmation on its home instance."
       responses:
         '200': {description: "This instance and the owner's siblings", content: {application/json: {schema: {$ref: '#/components/schemas/DecisionDeskInstances'}}}}
         '401': {$ref: '#/components/responses/Error'}
@@ -68,16 +68,70 @@ paths:
   /decision-desk/owner-summary:
     get:
       operationId: decisionDeskOwnerSummary
-      security: [{session: []}]
-      description: "AEON-1495. The workspace owner's own first Desk lines, read from a sibling instance's page in the owner's browser. Workspace owner only, browser session only, GET only; agent keys are refused. A sibling's cross-site read authenticates with the owner's summary cookie only for this route and only from a configured sibling origin, which alone receives Access-Control-Allow-Origin with credentials. At most five lines in Desk order (held first), first lines only (project key, title, asker name, held, app link); no context, findings, options or answers. Plus open and held counts and the first upcoming person step. 404 when this instance has no siblings."
+      security: [{deskSummary: []}]
+      description: "AEON-1709. The route name is retained for compatibility. Accepts ONLY a read-only person-summary bearer credential, never cookies or agent keys. Origin must be an exact configured sibling and match the connection. Reads the connected person's own current Desk, rechecking active status and source visibility. At most five first lines, exact counts, as-of, and first upcoming step. Credentials expire after 90 days or explicit revocation. No decision authority."
       responses:
-        '200': {description: "The owner's summary", content: {application/json: {schema: {$ref: '#/components/schemas/DecisionDeskOwnerSummary'}}}}
+        '200': {description: "The connected person's summary", content: {application/json: {schema: {$ref: '#/components/schemas/DecisionDeskOwnerSummary'}}}}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
-        '404': {$ref: '#/components/responses/Error'}
-        '422': {description: "Decision Desk coverage exceeds its bounds", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '422': {$ref: '#/components/responses/Error'}
         '500': {$ref: '#/components/responses/Error'}
+    options:
+      operationId: decisionDeskSummaryPreflight
+      security: []
+      description: "Allows only GET with Authorization from one exact configured sibling origin. No Access-Control-Allow-Credentials."
+      responses:
+        '204': {description: "Configured sibling may read with Authorization"}
+        '403': {$ref: '#/components/responses/Error'}
+  /decision-desk/connections:
+    get:
+      operationId: decisionDeskConnections
+      security: [{session: []}]
+      description: "Active browser person only. Lists their own issued connections, newest first, bounded to 100 active connections. Never returns credential values or hashes. Expired and revoked grants are omitted."
+      responses:
+        '200': {description: "Personal issued connections", content: {application/json: {schema: {type: object, required: [connections], properties: {connections: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DecisionDeskConnection'}}}}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: decisionDeskConnect
+      security: [{session: []}]
+      description: "Explicit same-origin confirmation by an active browser person, never an agent key. Exact configured sibling origin and random single-use state required. Atomically consumes state and issues a hashed-at-rest, revocable, read-only grant for 90 days. Response returns a fixed /instances/connected address on that sibling with the credential ONLY in its fragment. The credential is never sent to the sibling server. At most 100 active connections per person."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [origin, state]
+              additionalProperties: false
+              properties:
+                origin: {type: string, maxLength: 300}
+                state: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+      responses:
+        '201': {description: "Browser-only return address", content: {application/json: {schema: {type: object, required: [redirect_url], properties: {redirect_url: {type: string, maxLength: 2048}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: "State already consumed or active connection limit reached", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /decision-desk/connections/{id}:
+    delete:
+      operationId: decisionDeskDisconnect
+      security: [{session: []}]
+      description: "Revokes only the signed-in person's own connection, with authorization rechecked inside the final write transaction. Idempotent."
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: "Connection ended"}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+
 components:
+  securitySchemes:
+    deskSummary:
+      type: http
+      scheme: bearer
+      description: "Read-only person summary capability. Valid only on the cross-instance summary route, bound to a configured sibling origin."
   schemas:
     DecisionDeskItem:
       type: object
@@ -147,7 +201,7 @@ components:
       required: [here, siblings]
       properties:
         here: {type: string, description: "This instance's tag; empty when none is configured."}
-        siblings: {type: array, maxItems: 4, items: {$ref: '#/components/schemas/DecisionDeskSibling'}, description: "Empty unless the reader is the workspace owner."}
+        siblings: {type: array, maxItems: 4, items: {$ref: '#/components/schemas/DecisionDeskSibling'}, description: "Configured siblings, available to every active signed-in person."}
     DecisionDeskOwnerSummaryItem:
       type: object
       required: [id, kind, title, held, href]
@@ -157,6 +211,7 @@ components:
         project_key: {type: string}
         title: {type: string, maxLength: 200}
         asked_by: {type: string}
+        created_at: {type: string, format: date-time}
         held: {type: boolean}
         href: {type: string, description: "App path on the answering instance, starting with a single slash."}
     DecisionDeskOwnerSummary:
@@ -173,3 +228,13 @@ components:
             held: {type: integer, minimum: 0}
         upcoming: {$ref: '#/components/schemas/DecisionDeskUpcomingStep'}
         as_of: {type: string, format: date-time}
+    DecisionDeskConnection:
+      type: object
+      required: [id, origin, instance, created_at, expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        origin: {type: string}
+        instance: {type: string}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        last_used_at: {type: string, format: date-time}

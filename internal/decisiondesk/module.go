@@ -102,7 +102,7 @@ type Module struct {
 	pool           *pgxpool.Pool
 	routineRuntime recurrences.ExecutionRuntimeReader
 	instances      config.Instances
-	peek           PeekIssuer
+	publicOrigin   string
 }
 
 func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
@@ -116,6 +116,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/decision-desk/projection", m.projection)
 	mux.HandleFunc("GET /api/decision-desk/instances", m.listInstances)
 	mux.HandleFunc("GET /api/decision-desk/owner-summary", m.ownerSummary)
+	mux.HandleFunc("OPTIONS /api/decision-desk/owner-summary", m.summaryPreflight)
+	mux.HandleFunc("GET /api/decision-desk/connections", m.listConnections)
+	mux.HandleFunc("POST /api/decision-desk/connections", m.connectInstance)
+	mux.HandleFunc("DELETE /api/decision-desk/connections/{id}", m.revokeConnection)
 }
 
 func (m *Module) projection(w http.ResponseWriter, r *http.Request) {

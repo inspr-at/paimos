@@ -8626,17 +8626,21 @@
     ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"the bar opens a stepped chart in place; one global range; the signal row and its stall rule; nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"a person who is not the owner never reads a sibling and sees no instance tags","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"confirmation shows the account, keeps actions stable and Cancel shares nothing at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"an unreadable sibling is one quiet line in the same slot; Try again reads it in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"confirmation shows the account, keeps actions stable and Cancel shares nothing at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"the owner sees this instance first, then the sibling, with tags, askers and Coming at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"connect opens a top-level confirmation and a single-use callback clears the fragment before rendering","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"the owner sees this instance first, then the sibling, with tags, askers and Coming at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"every signed-in person can connect and unknown or disconnected coverage never claims an empty Desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"two sibling lines keep the goals controls still when a refresh fails and recovers","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"shared sibling counts, exact home links and stable Goals controls at 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"unknown coverage is not an empty desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"shared sibling counts, exact home links and stable Goals controls at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"shared sibling counts, exact home links and stable Goals controls at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"unreachable results remain dated, ended results disappear, and connection states keep the same row","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/graph-canvas.spec.ts","name":"a glimpse renderer takes its host size when its engine loads after the first resize pass","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -17450,17 +17454,23 @@
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"the paused step and configured check progress are shown without inventing a completed step","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"connects with one browser-bound single-use state and accepts a credential only in the configured sibling callback","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"notifies each newly observed sibling item once with the existing opt-in and opens its home instance","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"refuses unconfigured, expired and other-person callback states without adopting a credential","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"retains dated unreachable results, clears ended results and drops late reads after disconnect and person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"shares one read, consolidated counts and home links across Goals, preview and tab title","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-connections.unit.test.ts","name":"treats undiscovered, disconnected and unreachable siblings as incomplete, and retries failed discovery","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"parseSummary > keeps first lines and resolves links inside the sibling only","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"parseSummary > refuses another instance, bad counts and unbounded lists","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"readSibling > rejects a sibling body over 64000 bytes even when Content-Length is smaller","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"useDeskElsewhere > keeps a failed instance list unknown and reads it again on refresh","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"useDeskElsewhere > keeps the shown line count when a later sibling refresh fails","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"useDeskElsewhere > treats a confirmed empty sibling list as known","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > chooses reading, all clear, a silent source or the scope line, and nothing while rows are listed","tier":"ESSENTIAL"}
     ,

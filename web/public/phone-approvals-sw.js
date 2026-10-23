@@ -3,7 +3,10 @@
 const uuid = '[\\da-f]{8}(-[\\da-f]{4}){3}-[\\da-f]{12}'
 const phonePath = new RegExp(`^/phone-approvals/(approval|attach|stepup)/${uuid}$`, 'i')
 const deskPath = new RegExp(`^/decision-desk(?:\\?item=(?:[qam]:)?${uuid})?$`, 'i')
-const safePath = value => typeof value === 'string' && (phonePath.test(value) || deskPath.test(value)) ? value : '/agents'
+// Browser-originated sibling notices hand off through a fragment. The app
+// validates the current person and exact configured sibling before navigating.
+const siblingPath = value => value.length <= 2048 && /^\/instances\/open#instance=[a-z][a-z0-9-]{0,15}&url=[^#\s]+&owner=[^#\s]+$/.test(value)
+const safePath = value => typeof value === 'string' && (phonePath.test(value) || deskPath.test(value) || siblingPath(value)) ? value : '/agents'
 self.addEventListener('push', event => {
   let value = {}
   try { value = event.data.json() ?? {} } catch { /* Invalid messages show a generic notification. */ }
