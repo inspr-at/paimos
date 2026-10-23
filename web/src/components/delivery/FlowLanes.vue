@@ -267,7 +267,7 @@ function stepPiece(item: LaneItem, x: number, y: number, w: number, h: number, s
   const since = cut ? ` · ${props.text.since} ${at(s.start)}` : ''
   const icon = s.kind === 'wait' ? 'clock' : s.kind === 'rework' ? 'refresh' : null
   const pad = icon ? 16 : 6
-  const label = h >= 12 ? fitLabel({ tag: set.multi ? run.tag : undefined, text: words(s), since, duration: icon ? minutesText(s.end - s.start) : undefined, room, pad }) : ''
+  const label = h >= 12 ? fitLabel({ tag: set.multi ? run.tag : undefined, text: words(s), since, duration: icon ? minutesText(s.end - s.start) : undefined, room, pad, textWidth }) : ''
   return {
     key: `${si}:${run.id}:${run.steps.indexOf(s)}`, kind: 'step', item, x, y, w, h, rects, label, labelX: lx + pad,
     icon: icon && room > 14 && h >= 12 ? icon : null, iconX: lx + 4, textCls: `fl-t ${s.kind}${fut ? ' fut' : ''}`,

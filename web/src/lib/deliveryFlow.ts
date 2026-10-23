@@ -202,15 +202,24 @@ export function tickStep(span: number, px: number, every = 90): number {
 // ---------- Segment labels ----------
 /** Average advance of the 11 px label font; the mock measures the same way. */
 export const CHAR_W = 5.9
-export interface LabelInput { tag?: string; text: string; since?: string; duration?: string; room: number; pad: number }
+export interface LabelInput { tag?: string; text: string; since?: string; duration?: string; room: number; pad: number; textWidth?: (value: string) => number }
 /**
  * A multi-run bar keeps its complete run tag: shorten the description first,
  * then show just the tag. Keep "since" while it fits beside the tag. Untagged
  * bars fall back to text, duration and clipped text, always keeping "since".
  * Both paths keep the label inside the bar's existing padding.
  */
-export function fitLabel({ tag, text, since = '', duration, room, pad }: LabelInput): string {
-  const fits = (value: string) => value.length * CHAR_W + pad + 6 < room
+export function fitLabel({ tag, text, since = '', duration, room, pad, textWidth }: LabelInput): string {
+  const fits = (value: string) => (textWidth ? textWidth(value) : value.length * CHAR_W) + pad + 6 < room
+  const clipped = (prefix: string, suffix: string, minimum: number): string => {
+    let low = 0, high = Math.max(0, text.length - 1)
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2)
+      if (fits(`${prefix}${text.slice(0, mid).trimEnd()}…${suffix}`)) low = mid
+      else high = mid - 1
+    }
+    return low >= minimum ? `${prefix}${text.slice(0, low).trimEnd()}…${suffix}` : ''
+  }
   if (tag) {
     // AEON-1698: a shorter label must still identify its run. Never fall back to
     // description/duration alone, or clip a key into a different-looking key.
@@ -220,20 +229,14 @@ export function fitLabel({ tag, text, since = '', duration, room, pad }: LabelIn
     const suffix = fits(tag + since) ? since : ''
     const base = `${tag} · ${text}`
     if (fits(base + suffix)) return base + suffix
-    const keep = Math.ceil((room - pad - 6) / CHAR_W) - 1 - tag.length - 3 - 1 - suffix.length
-    if (keep > 0) return `${tag} · ${text.slice(0, keep).trimEnd()}…${suffix}`
-    return fits(tag + suffix) ? tag + suffix : ''
+    return clipped(`${tag} · `, suffix, 1) || (fits(tag + suffix) ? tag + suffix : '')
   }
   const base = text + since
   const durationLabel = duration ? `${duration}${since}` : ''
   const candidate = [base, durationLabel].filter(Boolean).find(fits)
   if (candidate) return candidate
   if (room <= 46) return ''
-  const source = text
-  const keep = Math.floor((room - pad - 8 - since.length * CHAR_W) / CHAR_W) - 1
-  if (keep > 4) return `${source.slice(0, keep).trimEnd()}…${since}`
-  if (since) return ''
-  return `${source.slice(0, Math.max(3, Math.floor((room - pad - 8) / CHAR_W) - 1)).trimEnd()}…`
+  return clipped('', since, since ? 5 : 3)
 }
 
 /** Plot frame for a lanes stage: actor names sit left of x0, the plot ends at x1. */

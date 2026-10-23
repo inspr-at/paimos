@@ -157,6 +157,12 @@ it('a label falls back from tag and text, to the text, to the duration, to an el
     expect(label.length * CHAR_W + 16 + 6).toBeLessThan(room)
   }
   expect(fitLabel({ tag: '983–986', text: 'Waiting for a reviewer', since: ' · since 19:36', duration: '14 min', pad: 16, room: 160 })).toBe('983–986 · since 19:36')
+  // The live Linux render painted "1678 · Build r3…" 0.68 px beyond its
+  // 107.32 px bar. A wider measured face must trim further, retaining the key.
+  const ink = (value: string) => value.length * 6.5 + 4
+  const measured = fitLabel({ ...input, tag: '1678', room: 107.32, textWidth: ink })
+  expect(measured).toBe('1678 · Build…')
+  expect(ink(measured) + input.pad + 6).toBeLessThan(107.32)
 })
 
 it('panning an incident onto the right edge keeps its caption inside a 320 px frame', () => {
