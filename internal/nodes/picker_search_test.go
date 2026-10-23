@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -102,9 +103,11 @@ func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
 	query.Q = "PICK"
 	query.Limit = 30
 	querySQL, queryArgs := listSQL(query, nil)
-	err = db.InTenant(tenant.WithPrincipal(t.Context(), p), appPool, p.TenantID, func(tx pgx.Tx) error {
+	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(t.Context(), p), eta.AggregateReadTimeout)
+	defer cancel()
+	err = db.InTenant(ctx, appPool, p.TenantID, func(tx pgx.Tx) error {
 		var raw []byte
-		if err := tx.QueryRow(t.Context(), "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+querySQL, queryArgs...).Scan(&raw); err != nil {
+		if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+querySQL, queryArgs...).Scan(&raw); err != nil {
 			return err
 		}
 		var documents []map[string]any
