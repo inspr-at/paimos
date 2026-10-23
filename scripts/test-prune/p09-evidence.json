@@ -2,8 +2,22 @@
   "version": 1,
   "ticket": "AEON-1681",
   "package": "P09",
-  "status": "cut-a-implemented",
-  "blockers": [],
+  "status": "cut-a-implemented-awaiting-remote-evidence",
+  "blockers": [
+    {
+      "kind": "remote-browser-capacity",
+      "entryPoint": "remote-spec.sh",
+      "result": "34 post-commit attempts refused with exit 3 within the bounded retry window",
+      "refusals": [
+        "remote busy: 2/2 remote runs (CI pool 0/4)",
+        "remote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI"
+      ],
+      "unproven": [
+        "The 132 retained cases in the 12 changed specs have no fresh after-run.",
+        "Before/after runner-time change cannot be measured without a successful after-run."
+      ]
+    }
+  ],
   "browser": {
     "beforeCases": 420,
     "afterCases": 326,
@@ -13,7 +27,8 @@
     "runnerSecondsBefore": 342,
     "runnerSecondsAfter": null,
     "measuredRunnerSecondsDelta": null,
-    "measurementStatus": "baseline passed on mbp2606: 94 cases in 1.9m plus 132 cases in 3.8m; retained runs pending"
+    "measurementStatus": "Before: 226 cases passed on mbp2606, reported 5.7m across the same two six-spec batches. After: unmeasured; 34 capacity refusals. No time saving claimed.",
+    "runnerScope": "The 12 changed specs: 226 -> 132 cases. The other 194 unchanged P09 cases were not included in this timing observation."
   },
   "runtime": {
     "newCases": 22,
@@ -516,9 +531,24 @@
     "ledgerRegression": "passed: web/tests/test-prune-ledger.test.ts (1 case)",
     "manifests": "passed: canonical writer --write and --check",
     "nativeCollection": "passed: 226 -> 132 cases in 12 changed owners; no new identity or protected removal",
-    "static": "Hosted CI only per cut-A brief; not run locally",
+    "static": "Deferred to GitHub-hosted PR CI, as the cut-A brief requires. No local/remote full ci-static or model review gate was run.",
     "sharedFiles": "Only 94 removed P09 browser tier/post-gate rows, the 12 actual native listedTests counts and P09 ledger/evidence entries changed. Two existing policy assertions/fixtures were maintained for the approved catalogue change; all historical timing values, gate and launch policies stay intact.",
-    "tierPolicy": "Targeted AEON-1619 timing fixture passed; full rerun pending after correcting the current-catalogue coupling."
+    "tierPolicy": "passed: 364 tests; historical measurement fixture retains every pinned value/assertion",
+    "webShardPolicy": "passed: 33 tests, including actual lesson/empty-Desk declaration counts",
+    "canonicalManifest": "passed",
+    "postMerge": {
+      "implementationCommit": "901e3d972ac4b7752ab8285a340a28a35354e7b3",
+      "main": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
+      "mergeResult": "up to date",
+      "ledger": "passed",
+      "ledgerRegression": "passed",
+      "canonicalManifests": "passed",
+      "finalMain": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
+      "finalMergeResult": "up to date immediately before handover"
+    },
+    "ownershipAudit": "passed: 34 tests",
+    "browser": "Before: all 226 cases passed; after: remote-spec.sh exit 3, both groups refused (132 retained cases unproven).",
+    "runtime": "passed: 25 cases in the three runtime suites used by the five logical browser removals; five targeted negative controls and the historical timing control failed by assertion as intended."
   },
   "previousRound": {
     "status": "blocked-before-cuts",
@@ -838,7 +868,6 @@
         "group": "runtime-replacement",
         "destination": "runtime:desk-tab.test.ts",
         "nativeKeys": [
-          "node:tests/desk-tab.test.ts:a rise in a visible tab pops the dot once in six frames, then stops",
           "node:tests/desk-tab.test.ts:reduced motion changes only the number: no frames, no notice"
         ]
       },
@@ -1363,8 +1392,7 @@
         "group": "runtime-replacement",
         "destination": "runtime:decision-desk-fix3.unit.test.ts",
         "nativeKeys": [
-          "vitest:tests/decision-desk-fix3.unit.test.ts:hydrates and approves a first tier request with native revision zero",
-          "vitest:tests/decision-desk-fix3.unit.test.ts:hydrates and declines a first tier request with native revision zero"
+          "vitest:tests/decision-desk-fix3.unit.test.ts:hydrates and approves a first tier request with native revision zero"
         ]
       },
       {
@@ -1372,7 +1400,6 @@
         "group": "runtime-replacement",
         "destination": "runtime:decision-desk-fix3.unit.test.ts",
         "nativeKeys": [
-          "vitest:tests/decision-desk-fix3.unit.test.ts:hydrates and approves a first tier request with native revision zero",
           "vitest:tests/decision-desk-fix3.unit.test.ts:hydrates and declines a first tier request with native revision zero"
         ]
       },
@@ -1617,8 +1644,7 @@
         "group": "runtime-replacement",
         "destination": "runtime:outcome-proposals.unit.test.ts",
         "nativeKeys": [
-          "vitest:tests/outcome-proposals.unit.test.ts:does not request or render proposals for an agent principal",
-          "vitest:tests/outcome-proposals.unit.test.ts:reports empty only after successful reads and preserves an honest failure"
+          "vitest:tests/outcome-proposals.unit.test.ts:does not request or render proposals for an agent principal"
         ]
       },
       {
@@ -1626,7 +1652,6 @@
         "group": "runtime-replacement",
         "destination": "runtime:outcome-proposals.unit.test.ts",
         "nativeKeys": [
-          "vitest:tests/outcome-proposals.unit.test.ts:does not request or render proposals for an agent principal",
           "vitest:tests/outcome-proposals.unit.test.ts:reports empty only after successful reads and preserves an honest failure"
         ]
       },
@@ -1902,7 +1927,7 @@
         "source": "remote-spec.sh stdout: 132 passed (3.8m); AEON_PW_PROCESSES wall_ms=78981; rc=0"
       }
     ],
-    "measurementStatus": "baseline passed on mbp2606: 94 cases in 1.9m plus 132 cases in 3.8m; retained runs pending",
+    "measurementStatus": "Before: 226 cases passed on mbp2606, reported 5.7m across the same two six-spec batches. After: unmeasured; 34 capacity refusals. No time saving claimed.",
     "extraIterationReduction": [
       {
         "file": "tests/decision-desk-project.spec.ts",
@@ -1942,6 +1967,81 @@
         "reason": "Update the exact approved current lesson and empty-Desk counts to 14 and 10 while preserving their gate and launch-budget checks."
       }
     ],
-    "sourceRecords": "All 12 per-spec source records now declare their actual native listedTests. Historical tierTiming/nightlyTiming values, source provenance, launch flags/config/project, gate and hosted-only ownership are preserved."
+    "sourceRecords": "All 12 per-spec source records now declare their actual native listedTests. Historical tierTiming/nightlyTiming values, source provenance, launch flags/config/project, gate and hosted-only ownership are preserved.",
+    "policyValidation": [
+      {
+        "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+        "exitCode": 0,
+        "wallSeconds": 134.492,
+        "log": "web/test-results/p09-cutA/tier-policy-final.log"
+      },
+      {
+        "command": "node --test web/scripts/ci-web-shard.test.mjs",
+        "exitCode": 0,
+        "wallSeconds": 105.229,
+        "log": "web/test-results/p09-cutA/web-shard-policy.log"
+      }
+    ],
+    "measurementScope": {
+      "specs": 12,
+      "beforeCases": 226,
+      "afterCases": 132,
+      "unchangedPackageCases": 194,
+      "profile": "mbp2606; remote-spec.sh; REMOTE_ONLY=1; one headless Playwright worker; same two six-spec batches",
+      "timeBasis": "Native Playwright summaries rounded to 0.1 minute; not process-supervisor wall_ms or remote refusal latency."
+    },
+    "remoteAfterAttempts": {
+      "count": 34,
+      "allExitCode": 3,
+      "finalAttemptByGroup": {
+        "1": {
+          "phase": "after",
+          "group": "1",
+          "host": "mbp2606",
+          "remoteOnly": true,
+          "commit": "901e3d972ac4b7752ab8285a340a28a35354e7b3",
+          "specs": [
+            "tests/aeon-1473-desk-tab.spec.ts",
+            "tests/decision-desk-fix2.spec.ts",
+            "tests/decision-desk-fix3.spec.ts",
+            "tests/decision-desk-project.spec.ts",
+            "tests/outcome-proposals.spec.ts",
+            "tests/attach-security.spec.ts"
+          ],
+          "entryPoint": "remote-spec.sh",
+          "exitCode": 3,
+          "entryPointWallSeconds": 0.175,
+          "log": "web/test-results/p09-cutA/after-group1-attempt17.log",
+          "resultTail": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n"
+        },
+        "2": {
+          "phase": "after",
+          "group": "2",
+          "host": "mbp2606",
+          "remoteOnly": true,
+          "commit": "901e3d972ac4b7752ab8285a340a28a35354e7b3",
+          "specs": [
+            "tests/attach-discoverable.spec.ts",
+            "tests/attach-watch.spec.ts",
+            "tests/decision-desk-lessons.spec.ts",
+            "tests/doctrine-inbox.spec.ts",
+            "tests/desk-empty.spec.ts",
+            "tests/aeon-1632-desk-links-peek.spec.ts"
+          ],
+          "entryPoint": "remote-spec.sh",
+          "exitCode": 3,
+          "entryPointWallSeconds": 0.181,
+          "log": "web/test-results/p09-cutA/after-group2-attempt17.log",
+          "resultTail": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n"
+        }
+      },
+      "result": "bounded retry window exhausted; coordinator/hosted CI handover"
+    },
+    "retainedExecution": {
+      "status": "pending-remote-capacity",
+      "cases": 132,
+      "note": "The retained identities were included in the 226 passing baseline cases and all retained expectation expressions are unchanged. A fresh candidate run is still required.",
+      "productionSourcesUnchangedFromBaseline": true
+    }
   }
 }

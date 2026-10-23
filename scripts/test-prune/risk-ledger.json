@@ -1778,7 +1778,7 @@
   "packageEvidence": {
     "P09": {
       "ticket": "AEON-1681",
-      "status": "cut-a-implemented",
+      "status": "cut-a-implemented-awaiting-remote-evidence",
       "evidence": "scripts/test-prune/p09-evidence.json",
       "before": 420,
       "current": 326,
@@ -1892,7 +1892,8 @@
         "protectedAfterP02": [
           "tests/decision-desk.spec.ts (60 cases; candidate-group anchor)",
           "tests/decision-text.spec.ts (22 cases; drift anchors)"
-        ]
+        ],
+        "validation": "Default ledger, ledger regression, canonical manifests, 364 tier-policy, 33 shard-policy, 34 audit and 25 targeted runtime cases pass. Both before batches pass (226 cases, reported 5.7m); 132 after cases and timing change await remote capacity after 34 exit-3 refusals. Full static belongs to hosted CI."
       }
     }
   }
