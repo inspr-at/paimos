@@ -181,6 +181,16 @@ test('an approval from an agent with no session and no address shows its name', 
   await expect(page.getByTestId('desk-line')).toContainText(/Harbor Clerk waits for this\. Expires in \d+ min/)
   await expect(page.getByRole('dialog')).not.toContainText(`Agent ${principal.slice(0, 8)}`)
   await expect(facts.getByText('Across the whole workspace', { exact: true })).toHaveCount(1)
+  await page.goto(`/decision-desk?assistant=${principal}`)
+  await expect(page.getByTestId('desk-scope')).toContainText('Showing items from this assistant.')
+  await expect(page.locator('.desk-row')).toHaveCount(1)
+  await expect(page.getByTestId(`desk-row-a:${data.approvals[0].id}`)).toBeVisible()
+  await page.getByTestId('desk-scope').getByRole('link', { name: 'Show all', exact: true }).click()
+  await expect(page).toHaveURL('/decision-desk')
+  await expect.poll(() => page.locator('.desk-row').count()).toBeGreaterThan(1)
+  await page.goto('/decision-desk?assistant=invalid')
+  await expect(page.locator('.desk-row')).toHaveCount(0)
+  await expect(page.getByTestId('desk-empty')).toContainText('Nothing in this view is waiting.')
 })
 
 test('an approval without agent_name falls back to the short agent id', async ({ page }) => {

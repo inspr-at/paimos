@@ -25,6 +25,11 @@ uses the existing atomic identity-disable/key-revocation endpoint. Agents can
 read their own policy through the self-policy endpoint; they cannot edit it or
 list other assistants.
 
+Assistant approval links use `/decision-desk?assistant=<principal-id>`. The
+existing Desk applies this additional filter to its asking-principal identities
+and removes it with Show all. Invalid identifiers produce an empty scoped view.
+This does not add any decision controls to the assistant panel.
+
 At this revision, assistant adapter/receipt reads (AEON-1702), action requests
 (AEON-1703) and owned routines (AEON-1704) have not merged. Their capabilities are
 closed: the five tabs show explicit unavailable states instead of fabricated

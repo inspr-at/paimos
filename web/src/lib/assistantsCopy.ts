@@ -94,5 +94,6 @@ export function assistantCopy(language: DisplayLanguage = displayLanguage()) {
     connectVendor: (vendor: string) => de ? `${vendor} verbinden, um zu starten` : `Connect ${vendor} to start`,
     more: de ? 'Weitere Assistentenaktionen' : 'More assistant actions',
     sessionsList: de ? 'Sitzungsliste' : 'Sessions list', fullScreen: de ? 'Vollbild' : 'Full screen',
+    deskScope: de ? 'Anfragen dieses Assistenten werden angezeigt.' : 'Showing items from this assistant.',
   }
 }
