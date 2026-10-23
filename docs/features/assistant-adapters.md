@@ -37,6 +37,10 @@ independently; compare their timestamps to determine which happened most
 recently. A dry-run does not establish delivery health. Health and delivery
 results commit together, so a failed completion cannot record a success.
 
+List results include disabled historical versions. `enabled` identifies the
+binding used for new messages; each version's health describes attempts made
+against that version's endpoint. A replacement starts with no delivery history.
+
 ## Webhook protocol and receipts
 
 The Grok JSON payload and its existing Bearer authentication header are
