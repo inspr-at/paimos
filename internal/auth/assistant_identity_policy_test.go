@@ -14,8 +14,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/assistants"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -28,15 +30,12 @@ import (
 )
 
 // Included in the existing ESSENTIAL TestMessagingAssistantProvisioningBounds:
-// risk: policy metadata replaces Amy's live principal, changes her authority,
-// leaks across tenants, admits agent writes, or accepts a stale policy edit.
+// risk: an upgrade or policy metadata replaces Amy's live principal or key,
+// changes her scopes/expiry, leaks across tenants, admits agent writes, or
+// accepts a stale policy edit. Provision Amy before migration 1430, using the
+// same messaging lifecycle as the released CLI, then exercise the upgraded API.
 func testAssistantIdentityPolicy(t *testing.T) {
-	m, owner, now := assistantFixture(t)
-	expires := now.AddDate(0, 0, 7)
-	amy, err := m.messagingAssistant(t.Context(), owner, "create", "", assistantInput{Name: "Amy", ExpiresAt: &expires})
-	if err != nil {
-		t.Fatal(err)
-	}
+	m, owner, now, amy := assistantUpgradeFixture(t)
 	policyModule := assistants.New(m.pool)
 	server := &httpapi.Server{Pool: m.pool, Modules: []httpapi.Module{policyModule, authz.New(m.pool)}}
 	productionAuth, err := Attach(server, Config{Env: "dev", SessionKey: bytes.Repeat([]byte{3}, 32)})
@@ -119,10 +118,28 @@ func testAssistantIdentityPolicy(t *testing.T) {
 	}
 	path := "/api/assistants/" + amy.PrincipalID
 	legacy := decodeAssistant(call("GET", path, ownerSession, nil, 200))
-	if legacy.PrincipalID != amy.PrincipalID || legacy.Kind != "assistant" || legacy.PrincipalKind != "agent" || legacy.OwnerPersonID != owner.ID || legacy.Revision != 0 || !reflect.DeepEqual(legacy.Policy, assistants.DefaultPolicy()) {
+	wantDefault := assistants.Policy{
+		AllowedProjects: []string{}, AllowedScopes: []string{"inbox.read", "inbox.receipt", "inbox.send"},
+		WeeklyBudget: assistants.Budget{Amount: "0", Unit: "USD"}, OutwardActionRule: "approval_required",
+		NeverAskPersonForSecretsOrManualSteps: true,
+	}
+	if legacy.PrincipalID != amy.PrincipalID || legacy.Kind != "assistant" || legacy.PrincipalKind != "agent" || legacy.OwnerPersonID != owner.ID || legacy.Revision != 0 || !reflect.DeepEqual(legacy.Policy, wantDefault) {
 		t.Fatal("legacy identity/default policy differs")
 	}
-	call("GET", path+"/policy", amy.Token, nil, 200)
+	var defaultSnapshot assistants.Snapshot
+	if json.Unmarshal(call("GET", path+"/policy", amy.Token, nil, 200), &defaultSnapshot) != nil || defaultSnapshot.PrincipalID != amy.PrincipalID || !reflect.DeepEqual(defaultSnapshot.Policy, wantDefault) {
+		t.Fatal("pre-upgrade key did not read its safe default policy")
+	}
+	t.Setenv("AEON_URL", srv.URL)
+	t.Setenv("AEON_API_KEY", amy.Token)
+	var defaultOut, defaultErrors bytes.Buffer
+	if code := cli.Run([]string{"aeon", "agents", "assistant", "policy", "show", amy.PrincipalID}, strings.NewReader(""), &defaultOut, &defaultErrors); code != 0 {
+		t.Fatalf("default policy CLI failed (code %d)", code)
+	}
+	var cliDefault assistants.Snapshot
+	if json.Unmarshal(defaultOut.Bytes(), &cliDefault) != nil || !reflect.DeepEqual(cliDefault, defaultSnapshot) {
+		t.Fatal("CLI did not read Amy's safe migrated default policy")
+	}
 	call("GET", path+"/policy", "", nil, 401)
 	policy := assistants.DefaultPolicy()
 	policy.WeeklyBudget = assistants.Budget{Amount: "12.500001", Unit: "EUR"}
@@ -138,14 +155,12 @@ func testAssistantIdentityPolicy(t *testing.T) {
 	call("GET", path+"/policy", amy.Token, nil, 200)
 	// The real CLI reads Amy and her exact policy through this same production
 	// HTTP/auth stack, using only a synthetic fixture session in its temp dir.
-	t.Setenv("AEON_URL", srv.URL)
-	t.Setenv("AEON_API_KEY", amy.Token)
 	sessionFile := filepath.Join(t.TempDir(), "synthetic-person-session")
 	if err := os.WriteFile(sessionFile, []byte(ownerSession), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"list"}, {"show", amy.PrincipalID}, {"policy", "show", amy.PrincipalID}} {
-		argv := append([]string{"aeon", "assistant"}, args...)
+	for _, args := range [][]string{{"assistant", "list"}, {"assistant", "show", amy.PrincipalID}, {"assistant", "policy", "show", amy.PrincipalID}, {"agents", "assistant", "policy", "show", amy.PrincipalID}} {
+		argv := append([]string{"aeon"}, args...)
 		argv = append(argv, "--session-cookie-file", sessionFile, "--json")
 		var stdout, stderr bytes.Buffer
 		if code := cli.Run(argv, strings.NewReader(""), &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), amy.PrincipalID) || !strings.Contains(stdout.String(), "12.500001") {
@@ -153,7 +168,7 @@ func testAssistantIdentityPolicy(t *testing.T) {
 		}
 	}
 	var ownPolicy, ownErrors bytes.Buffer
-	if code := cli.Run([]string{"aeon", "assistant", "policy", "show", amy.PrincipalID}, strings.NewReader(""), &ownPolicy, &ownErrors); code != 0 || !strings.Contains(ownPolicy.String(), "12.500001") {
+	if code := cli.Run([]string{"aeon", "agents", "assistant", "policy", "show", amy.PrincipalID}, strings.NewReader(""), &ownPolicy, &ownErrors); code != 0 || !strings.Contains(ownPolicy.String(), "12.500001") {
 		t.Fatalf("own-policy CLI failed (code %d)", code)
 	}
 	newBody := map[string]any{"display_name": "Helper", "vendor": "grok", "owner_person_id": owner.ID, "policy": policy}
@@ -168,6 +183,16 @@ func testAssistantIdentityPolicy(t *testing.T) {
 		}
 		if roles != 0 || keys != 0 {
 			t.Fatal("policy granted a role or created credentials")
+		}
+		var unchanged bool
+		if err := tx.QueryRow(t.Context(), `SELECT count(*)=1 AND bool_and(id=$2::uuid
+ AND scopes=$3::text[] AND expires_at=$4 AND created_by_principal_id=$5::uuid
+ AND person_owner_required AND NOT full_access AND revoked_at IS NULL)
+ FROM agent_keys WHERE principal_id=$1::uuid`, amy.PrincipalID, amy.ID, amy.Scopes, amy.ExpiresAt, owner.ID).Scan(&unchanged); err != nil {
+			return err
+		}
+		if !unchanged {
+			t.Fatal("linking changed Amy's key, scopes, expiry or owner")
 		}
 		return nil
 	})
@@ -328,12 +353,24 @@ func testAssistantIdentityPolicy(t *testing.T) {
 		t.Fatal("metadata update changed identity or lost revision")
 	}
 	call("PATCH", path, ownerSession, map[string]any{"expected_revision": 2, "display_name": "Stale Amy"}, 409)
-	// Disable revokes the same pre-link key, with one audit and no resurrection.
+	// The existing rotation route still uses the original principal after policy
+	// linking. It replaces only credentials and leaves the configured policy alone.
+	expires := now.Add(30 * 24 * time.Hour)
+	var rotated agentKeyCreatedJSON
+	if json.Unmarshal(call("POST", "/api/agents/assistants/"+amy.PrincipalID+"/rotate", ownerSession, map[string]any{"expires_at": expires}, 201), &rotated) != nil || rotated.PrincipalID != amy.PrincipalID || rotated.ID == amy.ID || !slices.Equal(rotated.Scopes, amy.Scopes) || rotated.ExpiresAt == nil || !rotated.ExpiresAt.Equal(expires) {
+		t.Fatal("policy linking broke messaging assistant rotation")
+	}
+	call("GET", path+"/policy", amy.Token, nil, 401)
+	var afterRotation assistants.Snapshot
+	if json.Unmarshal(call("GET", path+"/policy", rotated.Token, nil, 200), &afterRotation) != nil || afterRotation.Revision != renamed.Revision || !reflect.DeepEqual(afterRotation.Policy, policy) {
+		t.Fatal("rotation changed policy or failed to authenticate the replacement key")
+	}
+	// Disable revokes both keys, with one audit and no resurrection.
 	disabled := decodeAssistant(call("POST", path+"/disable", ownerSession, nil, 200))
 	if disabled.Status != "deactivated" || disabled.PrincipalID != amy.PrincipalID {
 		t.Fatal("disable changed identity or left it active")
 	}
-	call("GET", path+"/policy", amy.Token, nil, 401)
+	call("GET", path+"/policy", rotated.Token, nil, 401)
 	again := decodeAssistant(call("POST", path+"/disable", ownerSession, nil, 200))
 	if again.Revision != disabled.Revision {
 		t.Fatal("repeated disable changed revision")
@@ -341,7 +378,7 @@ func testAssistantIdentityPolicy(t *testing.T) {
 	seed(owner.TenantID, func(tx pgx.Tx) error {
 		var revoked bool
 		var count int
-		if err := tx.QueryRow(t.Context(), `SELECT revoked_at IS NOT NULL FROM agent_keys WHERE id=$1`, amy.ID).Scan(&revoked); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT count(*)=2 AND bool_and(revoked_at IS NOT NULL) FROM agent_keys WHERE principal_id=$1`, amy.PrincipalID).Scan(&revoked); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='assistant.disabled' AND after->>'principal_id'=$1`, amy.PrincipalID).Scan(&count); err != nil {
@@ -352,4 +389,79 @@ func testAssistantIdentityPolicy(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func assistantUpgradeFixture(t *testing.T) (*Module, tenant.Principal, time.Time, keyRecord) {
+	t.Helper()
+	d, err := dbtest.NewUnmigrated(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	m := &Module{pool: d.App, inTenant: db.InTenant}
+	m.AssistantNoticeTx = func(context.Context, pgx.Tx, string, string, string, string) error { return nil }
+	owner := tenant.Principal{Kind: tenant.Person, Name: "Owner"}
+	ctx := dbtest.Seed(t.Context())
+	var now time.Time
+	var amy keyRecord
+	var principalBefore, keyBefore []byte
+	// The migration runner gets the same plain context as production. Only
+	// fixture transactions opt into seeded visibility; FORCE RLS stays enabled.
+	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+		if name != "1430_assistant_identity_policy.sql" {
+			return nil
+		}
+		if err := db.InTenant(ctx, d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('assistant-upgrade','Assistant upgrade') RETURNING id::text`).Scan(&owner.TenantID)
+		}); err != nil {
+			return err
+		}
+		if err := db.InTenant(ctx, d.App, owner.TenantID, func(tx pgx.Tx) error {
+			if err := tx.QueryRow(ctx, `SELECT date_trunc('second',now())`).Scan(&now); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Owner',ARRAY['super_admin']) RETURNING id::text`, owner.TenantID).Scan(&owner.ID); err != nil {
+				return err
+			}
+			return dbtest.BindLegacyTx(ctx, tx, owner.TenantID, owner.ID)
+		}); err != nil {
+			return err
+		}
+		m.assistantNow = func() time.Time { return now }
+		expires := now.Add(30 * 24 * time.Hour)
+		var err error
+		amy, err = m.messagingAssistant(t.Context(), owner, "create", "", assistantInput{Name: "Amy", ExpiresAt: &expires})
+		if err != nil {
+			return err
+		}
+		return db.InTenant(ctx, d.App, owner.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT to_jsonb(p),to_jsonb(k) FROM principals p JOIN agent_keys k
+ ON k.tenant_id=p.tenant_id AND k.principal_id=p.id WHERE p.id=$1 AND k.id=$2`, amy.PrincipalID, amy.ID).Scan(&principalBefore, &keyBefore)
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if amy.PrincipalID == "" || len(principalBefore) == 0 || len(keyBefore) == 0 {
+		t.Fatal("pre-upgrade messaging assistant fixture did not run")
+	}
+	if err := db.InTenant(ctx, d.App, owner.TenantID, func(tx pgx.Tx) error {
+		var unchanged bool
+		if err := tx.QueryRow(ctx, `SELECT (to_jsonb(p)-'agent_class')=$3::jsonb AND p.agent_class IS NULL
+ AND to_jsonb(k)=$4::jsonb FROM principals p JOIN agent_keys k
+ ON k.tenant_id=p.tenant_id AND k.principal_id=p.id WHERE p.id=$1 AND k.id=$2`, amy.PrincipalID, amy.ID, principalBefore, keyBefore).Scan(&unchanged); err != nil {
+			return err
+		}
+		if !unchanged {
+			return fmt.Errorf("assistant migration changed the existing principal or credential row")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return m, owner, now, amy
 }

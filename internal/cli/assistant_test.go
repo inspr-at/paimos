@@ -79,22 +79,24 @@ func testAssistantIdentityPolicyCLI(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"list", "--limit", "1"}, "GET /api/assistants?limit=1"},
-		{[]string{"list", "--after", id}, "GET /api/assistants?after=" + id},
-		{[]string{"show", id}, "GET /api/assistants/" + id},
-		{[]string{"create", "--name", "Amy", "--vendor", "grok", "--owner", owner, "--principal", id, "--policy-file", "-"}, "POST /api/assistants"},
-		{[]string{"policy", "show", id}, "GET /api/assistants/" + id + "/policy"},
-		{[]string{"policy", "set", id, "--expected-revision", "7", "--policy-file", "-"}, "PUT /api/assistants/" + id + "/policy"},
-		{[]string{"update", id, "--expected-revision", "7", "--name", "Amy"}, "PATCH /api/assistants/" + id},
-		{[]string{"disable", id}, "POST /api/assistants/" + id + "/disable"},
+		{[]string{"assistant", "list", "--limit", "1"}, "GET /api/assistants?limit=1"},
+		{[]string{"assistant", "list", "--after", id}, "GET /api/assistants?after=" + id},
+		{[]string{"assistant", "show", id}, "GET /api/assistants/" + id},
+		{[]string{"assistant", "create", "--name", "Amy", "--vendor", "grok", "--owner", owner, "--principal", id, "--policy-file", "-"}, "POST /api/assistants"},
+		{[]string{"assistant", "policy", "show", id}, "GET /api/assistants/" + id + "/policy"},
+		{[]string{"assistant", "policy", "set", id, "--expected-revision", "7", "--policy-file", "-"}, "PUT /api/assistants/" + id + "/policy"},
+		{[]string{"agents", "assistant", "policy", "show", id}, "GET /api/assistants/" + id + "/policy"},
+		{[]string{"agents", "assistant", "policy", "set", id, "--expected-revision", "7", "--policy-file", "-"}, "PUT /api/assistants/" + id + "/policy"},
+		{[]string{"assistant", "update", id, "--expected-revision", "7", "--name", "Amy"}, "PATCH /api/assistants/" + id},
+		{[]string{"assistant", "disable", id}, "POST /api/assistants/" + id + "/disable"},
 	} {
-		args := append([]string{"aeon", "assistant"}, tc.args...)
+		args := append([]string{"aeon"}, tc.args...)
 		args = append(args, "--session-cookie-file", sessionFile, "--json")
 		code, out, errOut := runCLI(args, string(policyJSON))
 		if code != 0 || !strings.Contains(out, "Amy") || strings.Contains(out+errOut, cookie) || seen[len(seen)-1] != tc.want {
 			t.Fatalf("assistant CLI %s failed (code %d)", tc.args[0], code)
 		}
-		if tc.args[0] == "list" && !strings.Contains(out, "next_cursor") {
+		if tc.args[1] == "list" && !strings.Contains(out, "next_cursor") {
 			t.Fatal("CLI hid pagination")
 		}
 	}
@@ -106,8 +108,17 @@ func testAssistantIdentityPolicyCLI(t *testing.T) {
 			t.Fatal("invalid CLI input reached API")
 		}
 	}
+	if code, _, _ := runCLI([]string{"aeon", "agents", "assistant", "policy", "set", id, "--policy-file", "-", "--session-cookie-file", sessionFile}, string(policyJSON)); code != 2 || len(seen) != before {
+		t.Fatal("invalid nested policy input reached API")
+	}
 	fail = true
-	if code, out, _ := runCLI([]string{"aeon", "assistant", "policy", "set", id, "--expected-revision", "7", "--policy-file", "-", "--session-cookie-file", sessionFile}, string(policyJSON)); code == 0 || strings.Contains(out, "Amy") {
-		t.Fatal("failed policy write reported success")
+	for _, prefix := range [][]string{{"aeon", "assistant"}, {"aeon", "agents", "assistant"}} {
+		args := append(prefix, "policy", "set", id, "--expected-revision", "7", "--policy-file", "-", "--session-cookie-file", sessionFile)
+		if code, out, _ := runCLI(args, string(policyJSON)); code == 0 || strings.Contains(out, "Amy") {
+			t.Fatal("failed policy write reported success")
+		}
+	}
+	if code, out, _ := runCLI([]string{"aeon", "agents", "assistant", "policy", "set", "--help"}, ""); code != 0 || !strings.Contains(out, "agents assistant policy set") || !strings.Contains(out, "--session-cookie-file") {
+		t.Fatal("nested policy help lost its command path or person authentication")
 	}
 }

@@ -5,7 +5,7 @@ paths:
     get:
       operationId: listAssistants
       summary: List hosted assistant principals
-      description: "Person-only, requires members.read. Includes existing messaging-only identities with a conservative default policy. A policy is configuration, not a grant of project or key authority."
+      description: "Person-only, requires members.read. Includes existing messaging-only identities with their original principal ID, keys, scopes and expiry. Their default policy permits no projects or spend, requires outward-action approval and forbids asking people for secrets or manual steps. A policy is configuration, not a grant of project or key authority."
       parameters:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
         - {name: after, in: query, schema: {type: string, format: uuid}}
@@ -24,7 +24,7 @@ paths:
     post:
       operationId: createAssistant
       summary: Create or link a hosted assistant identity and policy
-      description: "Person owner only, requires live workspace agents.create and keys.manage. Creates an agent principal in the assistant class with the existing messaging-only restriction and no key or role grant. An optional principal_id links an existing messaging-only identity owned by the same person, preserving its keys, inbox and status. The owner must be the caller’s active canonical person in this tenant."
+      description: "Person owner only, requires live workspace agents.create and keys.manage. Creates an agent principal in the assistant class with the existing messaging-only restriction and no key or role grant. An optional principal_id links an existing messaging-only identity owned by the same person, preserving its principal ID, keys, scopes, expiry, inbox and status. The existing messaging assistant create, rotate and revoke lifecycle remains available. The owner must be the caller’s active canonical person in this tenant."
       requestBody:
         required: true
         content:
@@ -110,7 +110,7 @@ paths:
     get:
       operationId: getAssistantPolicy
       summary: Read an assistant policy
-      description: "A person needs members.read. An agent needs live inbox.read and may read only its own assistant policy. This exact new read route is available to messaging-only identities; every existing route keeps its authorization."
+      description: "A person needs members.read. An agent needs live inbox.read and may read only its own assistant policy. This exact new read route is available to messaging-only identities; every existing route keeps its authorization. Policy does not depend on host reachability; sleeping hosts may pull work between runs."
       responses:
         "200":
           description: "Policy with principal status and revision."

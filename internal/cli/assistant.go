@@ -16,7 +16,7 @@ import (
 func (rt *runtime) cmdAssistant() *Command {
 	root := &Command{Name: "assistant", Short: "Hosted assistant identities and policies", Use: "assistant <list|show|create|update|disable|policy>",
 		Long: "Writes require an existing person session (--session-cookie-file). Policies do not grant keys, roles or project access. Existing messaging credentials stay on agents assistant create|rotate|revoke.",
-		subs: []*Command{rt.cmdAssistantList(), rt.cmdAssistantShow(), rt.cmdAssistantCreate(), rt.cmdAssistantUpdate(), rt.cmdAssistantDisable(), rt.cmdAssistantPolicy()}}
+		subs: []*Command{rt.cmdAssistantList(), rt.cmdAssistantShow(), rt.cmdAssistantCreate(), rt.cmdAssistantUpdate(), rt.cmdAssistantDisable(), rt.cmdAssistantPolicy("assistant")}}
 	rt.assistantSessions(root)
 	return root
 }
@@ -193,15 +193,15 @@ func (rt *runtime) cmdAssistantDisable() *Command {
 	}}
 }
 
-func (rt *runtime) cmdAssistantPolicy() *Command {
+func (rt *runtime) cmdAssistantPolicy(prefix string) *Command {
 	var file, revision string
-	show := &Command{Name: "show", Short: "Read a policy (an assistant may read its own)", Use: "assistant policy show PRINCIPAL-ID", minArgs: 1, maxArgs: 1, run: func(args []string) error {
+	show := &Command{Name: "show", Short: "Read a policy (an assistant may read its own)", Use: prefix + " policy show PRINCIPAL-ID", minArgs: 1, maxArgs: 1, run: func(args []string) error {
 		if !validUUID(args[0]) {
 			return usagef("principal-id must be a UUID")
 		}
 		return rt.assistantRequest("GET", "/api/assistants/"+args[0]+"/policy", nil)
 	}}
-	set := &Command{Name: "set", Short: "Replace a policy at a known revision", Use: "assistant policy set PRINCIPAL-ID --expected-revision N --policy-file PATH|-", minArgs: 1, maxArgs: 1,
+	set := &Command{Name: "set", Short: "Replace a policy at a known revision", Use: prefix + " policy set PRINCIPAL-ID --expected-revision N --policy-file PATH|-", minArgs: 1, maxArgs: 1,
 		addFlags: func(fs *flagSet) {
 			fs.string(&file, "policy-file", 0, "AssistantPolicy JSON file, or - for stdin")
 			fs.string(&revision, "expected-revision", 0, "revision returned by show")
@@ -219,5 +219,5 @@ func (rt *runtime) cmdAssistantPolicy() *Command {
 			}
 			return rt.assistantRequest("PUT", "/api/assistants/"+args[0]+"/policy", map[string]any{"expected_revision": n, "policy": policy})
 		}}
-	return &Command{Name: "policy", Short: "Read or replace a per-assistant policy", Use: "assistant policy <show|set>", subs: []*Command{show, set}}
+	return &Command{Name: "policy", Short: "Read or replace a per-assistant policy", Use: prefix + " policy <show|set>", subs: []*Command{show, set}}
 }

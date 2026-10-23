@@ -57,6 +57,8 @@ type Assistant struct {
 // routine wiring. Mutation callers hold the tenant fence in the same transaction
 // so a concurrent policy edit cannot invalidate an earlier authorization read.
 // HTTP authorization is separate; callers retain live key/role and status checks.
+// Policy applies independently of host reachability, including sleeping hosts
+// that pull work between runs; principal status is not an online/offline signal.
 type PolicyReader interface {
 	ReadPolicyTx(ctx context.Context, tx pgx.Tx, tenantID, principalID string) (Snapshot, error)
 }
