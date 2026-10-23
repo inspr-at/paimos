@@ -12802,9 +12802,9 @@
     ,
     {"kind":"browser","file":"tests/quote-public-page.spec.ts","name":"the customer sees the sender, the facts and the frozen document in its language, and accepts exactly what is shown","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/quote-public.spec.ts","name":"expired but readable document has no acceptance form","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quote-public.spec.ts","name":"expired but readable document has no acceptance form","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/quote-public.spec.ts","name":"scoped document renders read-only and acceptance submits displayed digest","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quote-public.spec.ts","name":"scoped document renders read-only and acceptance submits displayed digest","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/quote-save-state.spec.ts","name":"a copy without changes, or from another version’s draft, is never offered; a matching one is","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12904,17 +12904,17 @@
     ,
     {"kind":"browser","file":"tests/quotes-tab.spec.ts","name":"without a sender the dialog says what to set up first and creates nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/quotes/parity-flow.spec.ts","name":"customer → quote → inspector save → issue → public acceptance race → receipt","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quotes/parity-flow.spec.ts","name":"customer → quote → inspector save → issue → public acceptance race → receipt","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"AEON-1682: emitted multipage receipt preserves Unicode marks, fixed evidence and unclipped A4 text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"print entry keeps inline marks and accepted receipt evidence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"print entry keeps inline marks and accepted receipt evidence","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"the emitted A4 PDF wraps long marked prose across pages without clipping","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"the emitted A4 PDF wraps long marked prose across pages without clipping","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"the final printed page QR decodes to the exact customer URL","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"the final printed page QR decodes to the exact customer URL","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/quotes/two-user-presence.spec.ts","name":"two editors see named presence, server expiry removes an anchor, and print hides overlays","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quotes/two-user-presence.spec.ts","name":"two editors see named presence, server expiry removes an anchor, and print hides overlays","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/record-ownership.spec.ts","name":"S8-001: accepted discard clears description and comment drafts before opening B","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
