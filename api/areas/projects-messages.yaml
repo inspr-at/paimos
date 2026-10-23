@@ -90,7 +90,5 @@ components:
         - type: object
           required: [created_at, human_resolution_outcome]
           properties:
-            sender_project_id: {type: string, format: uuid, description: "Bound sender session's project, present for cross-project messages"}
-            sender_project: {type: string, description: "Bound sender session's project key, present for cross-project messages"}
             created_at: {type: string, format: date-time}
             human_resolution_outcome: {type: [string, 'null'], enum: [resolved, dismissed, null]}
