@@ -244,10 +244,16 @@ export const ticketWorkspace: VisualSetup = async (page, _profile, theme) => {
   await page.goto('/p/PHAROS/PHAROS-11')
   const ticket = page.getByRole('complementary', { name: 'Ticket details' })
   await expect(ticket.locator('.attachments')).toBeVisible()
-  const check = ticket.getByRole('checkbox').first()
-  await expect(check, 'Tick fixture prerequisite: focusable checklist in the ticket workspace').toBeEnabled()
-  await check.focus()
-  await expect(check).toBeFocused()
+  // Tick 2026-10-23: the checklist stays read-only. Its attachment preview is
+  // the approved keyboard-focus checkpoint, using the real button and ring.
+  const preview = ticket.locator('.attachments').getByRole('button', { name: /^Open / }).first()
+  await expect(preview).toBeVisible()
+  await page.keyboard.press('Tab')
+  await preview.focus()
+  await expect(preview).toBeFocused()
+  await expect(preview).toHaveJSProperty('tagName', 'BUTTON')
+  await expect(preview).toBeEnabled()
+  expect(await preview.evaluate(element => element.matches(':focus-visible'))).toBe(true)
   await expect(ticket.locator('.ws-composer')).toBeVisible()
 }
 

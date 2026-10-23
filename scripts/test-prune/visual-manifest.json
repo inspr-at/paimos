@@ -222,7 +222,13 @@
       "fixturesByProfile": {
         "phone": "Simple; 56 px rows; candy bar frozen by reduced motion",
         "desktop": "Expert; one goal expanded; pace badges; a late Lands with \"at this pace\"; numbered steps with stage tracks; waits marker"
-      }
+      },
+      "referenceStatus": "deferred",
+      "deferredUntil": [
+        "AEON-1621",
+        "AEON-1625"
+      ],
+      "deferredReason": "Tick 2026-10-23: exclude every Goals checkpoint from the first pinned set; review against the v6 canvas after both product packages land."
     },
     {
       "id": "agents",
@@ -345,7 +351,12 @@
             "sha256": null
           }
         }
-      ]
+      ],
+      "referenceStatus": "deferred",
+      "deferredUntil": [
+        "AEON-1687"
+      ],
+      "deferredReason": "Exclude from the first reference bundle until AEON-1687 is on main and the strict layout, axe, console and HTTP checks pass."
     },
     {
       "id": "decision-desk",
@@ -747,7 +758,12 @@
             "sha256": null
           }
         }
-      ]
+      ],
+      "referenceStatus": "deferred",
+      "deferredUntil": [
+        "AEON-1687"
+      ],
+      "deferredReason": "Exclude from the first reference bundle until AEON-1687 is on main and the strict layout, axe, console and HTTP checks pass."
     },
     {
       "id": "quote-editor",
@@ -1026,13 +1042,18 @@
             "sha256": null
           }
         }
-      ]
+      ],
+      "referenceStatus": "deferred",
+      "deferredUntil": [
+        "AEON-1687"
+      ],
+      "deferredReason": "Exclude from the first reference bundle until AEON-1687 is on main and the strict layout, axe, console and HTTP checks pass."
     },
     {
       "id": "ticket-workspace",
       "label": "Ticket workspace",
       "owner": "tests/visual/ticket-workspace.spec.ts",
-      "fixture": "Long title and key; properties panel; attachment strip with one preview; checklist with the focus ring; chat dock open",
+      "fixture": "Long title and key; properties panel; attachment strip with one preview and its focus ring; read-only checklist; chat dock open",
       "profiles": [
         "phone",
         "desktop"

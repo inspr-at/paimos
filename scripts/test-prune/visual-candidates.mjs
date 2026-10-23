@@ -13,10 +13,11 @@ const MAX_PNG = 4 * 1024 * 1024
 // manifest nor lets a browser use its current capture as an approved reference.
 export function packCandidates(records, visual) {
   validateVisual(visual)
-  const expected = visual.states.flatMap(state => state.checkpoints.map(checkpoint => ({
+  const states = visual.states.filter(state => state.referenceStatus !== 'deferred')
+  const expected = states.flatMap(state => state.checkpoints.map(checkpoint => ({
     ...checkpoint, owner: state.owner, fixture: state.fixturesByProfile?.[checkpoint.profile] ?? state.fixture,
   })))
-  need(Array.isArray(records) && records.length === 80, 'Review bundle needs all 80 quality-checked captures')
+  need(Array.isArray(records) && records.length === expected.length, `Review bundle needs all ${expected.length} quality-checked captures from the non-deferred states`)
   const byId = new Map()
   for (const record of records) {
     need(record?.quality && !byId.has(record.quality.id), 'Duplicate or missing capture identity')
@@ -46,7 +47,12 @@ export function packCandidates(records, visual) {
   }
   const bytes = Buffer.from(JSON.stringify({ version: 1, captureSHA, files }) + '\n')
   need(bytes.length <= 48 * 1024 * 1024, 'Review bundle exceeds 48 MiB')
-  return { bytes, review: { status: 'pending-Tick-review', captureSHA, sha256: hash(bytes), members } }
+  return { bytes, review: { status: 'pending-Tick-review', captureSHA, sha256: hash(bytes),
+    states: states.map(state => state.id),
+    deferred: visual.states.filter(state => state.referenceStatus === 'deferred').map(state => ({
+      id: state.id, checkpoints: state.checkpoints.map(checkpoint => checkpoint.id),
+      until: state.deferredUntil, reason: state.deferredReason,
+    })), members } }
 }
 
 export function collectCandidates(directory) {

@@ -75,7 +75,9 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
 
 export function materializeReference(info: TestInfo, checkpoint: { id: string; reference: { attachmentMember: string } }) {
   if (info.config.updateSnapshots !== 'none') throw new Error('Visual baseline rewriting is forbidden; use the reviewed attachment')
-  const references = readBaselineBundle(process.env.AEON_VISUAL_BASELINE_FILE, manifest)
+  const state = manifest.states.find((state: { checkpoints: { id: string }[] }) => state.checkpoints.some(row => row.id === checkpoint.id))
+  if (!state) throw new Error(`Unknown visual checkpoint: ${checkpoint.id}`)
+  const references = readBaselineBundle(process.env.AEON_VISUAL_BASELINE_FILE, manifest, { stateIds: [state.id] })
   const reference = references.get(checkpoint.reference.attachmentMember)
   if (!reference) throw new Error(`Missing approved visual reference: ${checkpoint.id}`)
   const path = info.snapshotPath(`${checkpoint.id}.png`)

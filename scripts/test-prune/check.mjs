@@ -56,7 +56,7 @@ function currentAnchors(source, baseline) {
   return (matches.length ? matches : candidates).map(identity)
 }
 
-export function validateVisual(visual, { cuts = false } = {}) {
+export function validateVisual(visual, { cuts = false, stateIds = visual.states?.map(state => state.id) } = {}) {
   need(visual.version === 1, 'Invalid visual manifest version')
   const expected = ['projects', 'tickets', 'goals', 'agents', 'session-chat', 'decision-desk',
     'account-use-matrix', 'models', 'access', 'knowledge', 'delivery-numbers', 'hours',
@@ -65,6 +65,9 @@ export function validateVisual(visual, { cuts = false } = {}) {
   need(same(visual.states?.map(row => row.id), expected), 'Visual state list must contain the exact 18 Tick-adjusted section-8 states')
   need(same(visual.profiles, { phone: { width: 390, height: 844 }, tablet: { width: 1024, height: 768 }, desktop: { width: 1440, height: 900 } }), 'Visual viewport matrix changed')
   need(same(visual.themes, ['light', 'dark']), 'Both visual themes are required')
+  need(Array.isArray(stateIds) && new Set(stateIds).size === stateIds.length &&
+    stateIds.every(id => expected.includes(id)), 'Unknown/duplicate required visual state')
+  const required = new Set(cuts ? stateIds : [])
   const checkpoints = new Set()
   for (const state of visual.states) {
     const profiles = tablet.has(state.id) ? ['phone', 'tablet', 'desktop'] : ['phone', 'desktop']
@@ -72,12 +75,18 @@ export function validateVisual(visual, { cuts = false } = {}) {
     need(same(state.profiles, profiles) && same(state.themes, visual.themes), `Unexpected visual matrix: ${state.id}`)
     if (state.id === 'goals') need(same(Object.keys(state.fixturesByProfile ?? {}).sort(), [...profiles].sort()) &&
       profiles.every(profile => text(state.fixturesByProfile[profile])), 'Missing Goals fixtures by profile')
+    if (state.referenceStatus !== undefined) need(state.referenceStatus === 'deferred' &&
+      state.deferredUntil?.length > 0 && state.deferredUntil.every(ticket => /^AEON-\d+$/.test(ticket)) &&
+      text(state.deferredReason), `Missing visual deferral authority: ${state.id}`)
     const expectedCases = profiles.flatMap(profile => visual.themes.map(theme => `V-${state.id}-${visual.profiles[profile].width}-${theme}`))
     need(same(state.checkpoints?.map(row => row.id), expectedCases), `Missing/duplicate visual checkpoint: ${state.id}`)
     for (const checkpoint of state.checkpoints) {
       need(!checkpoints.has(checkpoint.id) && checkpoint.id === `V-${state.id}-${visual.profiles[checkpoint.profile]?.width}-${checkpoint.theme}`, `Invalid visual checkpoint: ${checkpoint.id}`)
       checkpoints.add(checkpoint.id)
-      if (cuts) need(text(checkpoint.reference?.attachmentMember) && digest(checkpoint.reference.sha256), `Unpinned visual reference: ${checkpoint.id}`)
+      if (required.has(state.id)) {
+        need(state.referenceStatus !== 'deferred', `Deferred visual reference: ${checkpoint.id} (${state.deferredUntil?.join(', ')})`)
+        need(checkpoint.reference?.attachmentMember === `${checkpoint.id}.png` && digest(checkpoint.reference.sha256), `Unpinned visual reference: ${checkpoint.id}`)
+      }
     }
   }
   need(checkpoints.size === 80, 'Visual budget must be exactly 80 checkpoints')
@@ -92,7 +101,7 @@ export function validateVisual(visual, { cuts = false } = {}) {
     authority.automaticRewrite === false && authority.currentRunMayBeReference === false, 'Visual baseline failures must fail closed')
   need(authority.source?.kind === 'existing-ppm-ticket-attachment' && authority.source.ticket === 'AEON-1670' &&
     text(authority.retention?.policy) && text(authority.retention.availability), 'Missing baseline retention/availability authority')
-  if (cuts) {
+  if (required.size > 0) {
     need(visual.approval?.reviewer === 'Tick' && visual.approval.status === 'approved' &&
       text(visual.approval.evidence) && text(visual.approval.approvedAt), 'Cuts require Tick approval of visual fixtures and references')
     need(authority.status === 'approved' && text(authority.source.attachmentId) && digest(authority.source.sha256) &&
@@ -151,6 +160,12 @@ export function validateLedger({ baseline, ledger, visual, currentWeb, currentGo
     need(ledger.core.filter(row => row.owner === core.owner).length <= specs.get(core.owner.slice(4)).after, `Core exceeds owner's budget: ${core.id}`)
   }
   const required = requiredRisks(baseline)
+  const requiredVisualStates = new Set()
+  const requireVisualDestination = destination => {
+    if (destination.kind === 'visual') requiredVisualStates.add(destination.state)
+    if (destination.kind === 'approved-retirement') for (const id of destination.survivingDestinations)
+      requireVisualDestination(destinations.get(id))
+  }
   need(risks.size === required.length, 'Missing/extra protected risk lineage rows')
   for (const obligation of required) {
     const risk = risks.get(obligation.id)
@@ -162,6 +177,7 @@ export function validateLedger({ baseline, ledger, visual, currentWeb, currentGo
     if (anchors.some(changed)) for (const id of risk.destinations) {
       const replacement = destinations.get(id)
       need(replacement.verification.status === 'verified' && text(replacement.verification.evidence), `Removed risk has no verified destination: ${risk.id} -> ${id}`)
+      requireVisualDestination(replacement)
       if (replacement.kind !== 'approved-retirement' && replacement.kind !== 'visual') need(
         replacement.verification.nativeKeys?.length > 0 && replacement.verification.nativeKeys.every(key => current.has(key)),
         `Replacement native identity missing: ${risk.id} -> ${id}`)
@@ -180,7 +196,9 @@ export function validateLedger({ baseline, ledger, visual, currentWeb, currentGo
       need(same(current.get(key), row), `P01 changed an existing catalogue row: ${key}`)
     }
   }
-  const visualCases = validateVisual(visual, { cuts })
+  // Only the visual destinations protecting changed risks need reviewed
+  // references. A deferred or unpinned area cannot block an unrelated cut.
+  const visualCases = validateVisual(visual, { cuts, stateIds: [...requiredVisualStates] })
   for (const pin of baseline.sourcePins) if (pin.category === 'historical-evidence' ||
     p01 && ['launch-policy', 'launch-record', 'selector-policy', 'browser-source', 'current-obligations'].includes(pin.category))
     need(sourceHash(pin.path) === pin.sha256, `Frozen ${pin.category} changed: ${pin.path}`)

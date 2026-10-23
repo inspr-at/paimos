@@ -58,7 +58,7 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   // Risk: pruning the old tours before Tick's replacement fixtures are encoded
   // would lose the central workspace/start surfaces and Goals profile coverage.
   for (const [id, fixture] of [
-    ['ticket-workspace', 'Long title and key; properties panel; attachment strip with one preview; checklist with the focus ring; chat dock open'],
+    ['ticket-workspace', 'Long title and key; properties panel; attachment strip with one preview and its focus ring; read-only checklist; chat dock open'],
     ['start-agent', 'Run once mode; task filled; "Create a ticket in a project"; read-only; folded "Runs on …" row with a capacity warning'],
   ]) {
     const state = original.visual.states.find((row: { id: string }) => row.id === id)
@@ -73,6 +73,9 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
     assert.equal(destination?.risk, fixture)
   }
   const goals = original.visual.states.find((row: { id: string }) => row.id === 'goals')
+  assert.equal(goals.referenceStatus, 'deferred')
+  assert.deepEqual(goals.deferredUntil, ['AEON-1621', 'AEON-1625'])
+  assert.match(goals.deferredReason, /v6 canvas/)
   assert.deepEqual(goals.fixturesByProfile, {
     phone: 'Simple; 56 px rows; candy bar frozen by reduced motion',
     desktop: 'Expert; one goal expanded; pace badges; a late Lands with "at this pace"; numbered steps with stage tracks; waits marker',
@@ -150,6 +153,43 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   assert.notEqual(protectedRow.tier, 'NIGHTLY', 'The demotion counterexample must start in the full gate')
   protectedRow.tier = 'NIGHTLY'
   assert.throws(() => validateLedger({ ...demoted, sourceHash }), /Removed risk has no verified destination/)
+
+  // A real protected Agents identity isolates per-area authority. Its reference
+  // set must be complete, reviewed and available; unrelated pending Projects
+  // and deferred Goals/quality fixes must never block that cut.
+  const areaCut = structuredClone(original)
+  const areaRisk = areaCut.ledger.risks.find((row: { source: { file: string } }) => row.source.file === 'tests/agents-phone-rows.spec.ts')
+  assert.deepEqual(areaRisk.destinations, ['visual:agents'])
+  const removedKey = areaRisk.currentKeys[0]
+  areaCut.currentWeb.tests = areaCut.currentWeb.tests.filter((row: Parameters<typeof key>[0]) => key(row) !== removedKey)
+  const impactedDestinations = new Set(areaCut.ledger.risks.filter((row: { currentKeys: string[] }) => row.currentKeys.includes(removedKey))
+    .flatMap((row: { destinations: string[] }) => row.destinations))
+  assert.deepEqual([...impactedDestinations], ['visual:agents'])
+  for (const destination of areaCut.ledger.destinations) if (impactedDestinations.has(destination.id))
+    destination.verification = { status: 'verified', evidence: 'Synthetic authority counterexample, never a product approval' }
+  areaCut.visual.approval = { reviewer: 'Tick', status: 'approved', approvedAt: 'synthetic-proof', evidence: 'Synthetic proof only' }
+  areaCut.visual.baselineAuthority.status = 'approved'
+  Object.assign(areaCut.visual.baselineAuthority.source, { attachmentId: 'synthetic-only', sha256: 'a'.repeat(64) })
+  areaCut.visual.baselineAuthority.retention.verifiedAt = 'synthetic-proof'
+  const area = areaCut.visual.states.find((row: { id: string }) => row.id === 'agents')
+  for (const checkpoint of area.checkpoints) checkpoint.reference = { attachmentMember: `${checkpoint.id}.png`, sha256: 'b'.repeat(64) }
+  assert.equal(validateLedger({ ...areaCut, sourceHash }).cuts, true,
+    'A pinned Agents cut passes while unrelated Projects is unpinned and Goals is deferred')
+  assert.throws(() => validateLedger({ ...areaCut, sourceHash, p01: true }), /P01 cannot remove or demote/)
+  const unpinnedArea = structuredClone(areaCut)
+  unpinnedArea.visual.states.find((row: { id: string }) => row.id === 'agents').checkpoints[1].reference.sha256 = null
+  assert.throws(() => validateLedger({ ...unpinnedArea, sourceHash }), { message: 'Unpinned visual reference: V-agents-390-dark' })
+  const deferredArea = structuredClone(areaCut)
+  Object.assign(deferredArea.visual.states.find((row: { id: string }) => row.id === 'agents'), {
+    referenceStatus: 'deferred', deferredUntil: ['AEON-1687'], deferredReason: 'Synthetic required-area refusal',
+  })
+  assert.throws(() => validateLedger({ ...deferredArea, sourceHash }), { message: 'Deferred visual reference: V-agents-390-light (AEON-1687)' })
+  const unapprovedArea = structuredClone(areaCut)
+  unapprovedArea.visual.approval.status = 'pending'
+  assert.throws(() => validateLedger({ ...unapprovedArea, sourceHash }), /Cuts require Tick approval/)
+  const unavailableArea = structuredClone(areaCut)
+  unavailableArea.visual.baselineAuthority.retention.verifiedAt = null
+  assert.throws(() => validateLedger({ ...unavailableArea, sourceHash }), /approved, pinned and available/)
   assert.throws(() => validateLedger({ ...original, sourceHash: () => '0'.repeat(64) }), /Frozen historical-evidence changed/)
   // Snapshot enforcement is explicit: future assertion additions and refreshed
   // timings must not be blocked by P01's one-time no-execution-change check.
