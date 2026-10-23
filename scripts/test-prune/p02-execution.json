@@ -4,7 +4,7 @@
   "package": "P02",
   "status": "round5-mirror-materialization-and-state-gates-implemented",
   "cuts": false,
-  "note": "Round 5 replaces the missing hosted PPM read path with the byte-identical GitHub prerelease test-references-1 transport. The AEON-1670 attachments remain Tick approval authority. Setup verifies the archive and detached manifest before any tar reads, then validates the internal manifest, exact members, baseline and all 30 PNG pins; browser shards re-verify the original assets. Seven states/30 checkpoints compare strictly plus quality; six changes-requested states/30 checkpoints and five deferred states/20 checkpoints run quality and report awaiting reference without failing for missing approval alone. No changed-state recapture, cuts, tier changes, push, deploy or model/review gates. Validation results are recorded in round5.",
+  "note": "Round 5 complete: byte-identical GitHub prerelease transport, digest verification before tar reads, per-shard re-verification, strict comparison + quality for seven approved states/30 checkpoints, explicit awaiting-reference + quality for six changes-requested states/30 checkpoints and five deferred states/20 checkpoints. Actual mirror verification passed; archive tamper, wrong digests, missing bytes, lost-pin refusal, changed pinned image, nonblocking awaiting dispatch and preserved quality-failure controls all passed. Remote affected browser set: 29 passed in 16.0s; final complete-runner guard: 2 passed in 4.9s. Node transport, ledger and five workflow-classification tests passed. Static remains hosted CI per the brief; no hosted result is claimed. All approved pins/attachment identities and every original registration retained. No cuts, tier changes, product reference recaptures, origin push, deployment or review/model calls.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -3646,15 +3646,16 @@
       "tamperedDetachedManifest": "passed; SHA-256 mismatch before tar can be invoked",
       "wrongManifestDigest": "passed; SHA-256 mismatch before tar can be invoked",
       "approvedStateMissingPin": "passed; Unpinned visual reference, never awaiting",
-      "pinnedImageChanged": "passed remotely at 22ed0ec12; shared product comparator accepts identical pinned bytes and rejects changed pixels",
-      "awaitingStateNeverBlocks": "passed remotely at 22ed0ec12 for changes-requested and deferred comparator dispatch with a missing bundle; full quality-only runner control added for final validation",
-      "missingAsset": "passed: CLI exits 1 with clear missing/unreadable archive error and creates no baseline"
+      "pinnedImageChanged": "passed remotely: identical synthetic pinned image passes the shared product comparator; changed pixels reject with Screenshot comparison failed",
+      "awaitingStateNeverBlocks": "passed remotely for changes-requested and deferred states with a missing bundle; the complete checkpoint runner reports awaiting reference, runs clean quality checks, passes and creates no PNG",
+      "missingAsset": "passed: CLI exits 1 with clear missing/unreadable archive error and creates no baseline",
+      "awaitingQualityFailureStillBlocks": "passed remotely: complete awaiting checkpoint runner rejects an injected console error for the intended unexpected console/page failure"
     },
     "tests": {
       "transport": "passed: node --experimental-strip-types --test web/tests/visual-baselines.test.ts",
       "ledger": "passed: node --experimental-strip-types --test web/tests/test-prune-ledger.test.ts",
       "browser": {
-        "sourceSHA": "22ed0ec12",
+        "sourceSHA": "22ed0ec1289dbc884b08e8e56d1e6998a9ad7ab3",
         "entrypoint": "remote-spec.sh",
         "selection": [
           "tests/visual-reference-guard.spec.ts",
@@ -3665,7 +3666,19 @@
         "wallSeconds": 16.0,
         "evidenceDirectory": "web/test-results/AEON-1674-r5-browser"
       },
-      "workflowClassifications": "passed: five focused ci-static registry/drift behavior tests; all static commands remain registered"
+      "workflowClassifications": "passed: five focused ci-static registry/drift behavior tests; all static commands remain registered",
+      "finalCheckpointQuality": {
+        "sourceSHA": "4c1587abce33547321d0f3f507a97cc813a9a458",
+        "entrypoint": "remote-spec.sh",
+        "selection": [
+          "tests/visual-reference-guard.spec.ts"
+        ],
+        "passed": 2,
+        "failed": 0,
+        "wallSeconds": 4.9,
+        "evidenceDirectory": "web/test-results/AEON-1674-r5-checkpoint-quality",
+        "scope": "Full runner awaiting dispatch + quality preservation; synthetic pinned comparison; missing baseline guard; legacy Session Chat fixture contract."
+      }
     },
     "static": {
       "status": "hosted-CI-pending",
@@ -3682,6 +3695,19 @@
     "noModelOrReviewGateCalls": true,
     "sharedRegistryRows": [
       "scripts/ci/static-checks.json: classify the new hosted reference download, extend the existing runtime packing command and update only the browser-shard run-inventory digest"
-    ]
+    ],
+    "invariants": {
+      "all80CheckpointIdentitiesUnchanged": true,
+      "all30ApprovedPinsUnchanged": true,
+      "permanentAttachmentIdentityAndDigestsUnchanged": true,
+      "originalCasesRemovedOrDemoted": 0,
+      "cuts": false,
+      "tierChanges": false,
+      "recapturedChangesRequestedStates": false,
+      "newCredentialsCreated": false,
+      "modelOrReviewGateCalls": false
+    },
+    "handoffPercent": 100,
+    "remainingInRound5": []
   }
 }
