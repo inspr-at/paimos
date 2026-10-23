@@ -23,9 +23,11 @@ import (
 )
 
 type Module struct {
-	pool             *pgxpool.Pool
-	executionRuntime ExecutionRuntimeReader
-	actionEvaluator  ActionEvaluatorTx
+	pool              *pgxpool.Pool
+	agentBudget       AgentBudgetTx
+	agentResultWriter AgentResultWriteTx
+	executionRuntime  ExecutionRuntimeReader
+	actionEvaluator   ActionEvaluatorTx
 	// now is an injected database-clock substitute for deterministic tests only.
 	now     func(context.Context, pgx.Tx) (time.Time, error)
 	history []Publication
@@ -52,6 +54,10 @@ func (m *Module) WithHistory(publications []Publication) *Module {
 }
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountTemplates(mux)
+	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/agent-owner", m.getAgentOwner)
+	mux.HandleFunc("PUT /api/recurrences/{recurrenceId}/agent-owner", m.setAgentOwner)
+	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/runs/{runId}/agent-result", m.completeAgentResult)
+	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/runs/{runId}/agent-result", m.getAgentResult)
 	mux.HandleFunc("GET /api/routine-guardrails", m.getDraftGuardrails)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/runs", m.listRuns)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/runs/{runId}", m.getRun)

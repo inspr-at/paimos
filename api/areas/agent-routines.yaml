@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/recurrences
+paths:
+  /recurrences/{recurrenceId}/agent-owner:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getRoutineAgentOwner
+      description: 'Read the optional person-granted agent owner and result destination of a visible project routine. Existing person-owned routines return null. This grants no execution authority.'
+      responses:
+        '200': {description: 'Agent ownership or null', content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/RoutineAgentOwner'}, {type: 'null'}]}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: setRoutineAgentOwner
+      description: 'An interactive canonical person with current recurrence management and destination authority grants an active same-tenant agent ownership at expected_revision. Requires a project-scoped definition in the output project with no native assignment or queue_each. The canonical definition owner remains the accountable person; this separate grant names the agent owner. Pauses the routine, increments its revision and creates no run. Existing routine editing, resume and consent rules apply. Edits invalidate the grant until renewed. No keys, roles, policy or approval bypass is created.'
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/RoutineAgentOwnerInput'}}}
+      responses:
+        '200': {description: 'Saved agent ownership', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineAgentOwner'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: 'Stale revision or incompatible routine'}
+  /recurrences/{recurrenceId}/runs/{runId}/agent-result:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getRoutineAgentResult
+      description: 'Read the stored result receipt and agent-reported cost with the ordinary routine history visibility checks. A dispatched run without a terminal result returns null.'
+      responses:
+        '200': {description: 'Stored result or null', content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/RoutineAgentResult'}, {type: 'null'}]}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: completeRoutineAgentResult
+      description: 'Only the dispatched agent owner can submit a bounded terminal result. Live person grant, owner authority, definition identity and result destination are rechecked under the final tenant/tree fence. The configured result becomes one ordinary ticket comment, new ticket or proposed Knowledge entry. Exact retries return the same receipt; changed results conflict. Cost is agent-reported micro-USD, never independently measured billing. An omitted cost remains unknown. No completion status, acceptance, outward action, merge or deployment is authorized.'
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/RoutineAgentResultInput'}}}
+      responses:
+        '200': {description: 'Durable terminal result', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineAgentResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: 'Changed definition, revoked dispatch or conflicting result'}
+components:
+  schemas:
+    RoutineAgentDestination:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [ticket_comment, new_ticket, knowledge]}
+        ticket_id: {type: string, format: uuid, description: 'Required only for ticket_comment; the ticket must remain in the routine output project.'}
+    RoutineAgentOwnerInput:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, owner_principal_id, destination]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        owner_principal_id: {type: string, format: uuid}
+        destination: {$ref: '#/components/schemas/RoutineAgentDestination'}
+    RoutineAgentOwner:
+      type: object
+      required: [owner_principal_id, destination, granted_by_principal_id, definition_digest]
+      properties:
+        owner_principal_id: {type: string, format: uuid}
+        destination: {$ref: '#/components/schemas/RoutineAgentDestination'}
+        granted_by_principal_id: {type: string, format: uuid}
+        definition_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+    RoutineAgentResultInput:
+      type: object
+      additionalProperties: false
+      required: [status, body]
+      properties:
+        status: {type: string, enum: [succeeded, failed]}
+        title: {type: string, maxLength: 512, description: 'Required for a successful new ticket or Knowledge entry.'}
+        body: {type: string, minLength: 1, maxLength: 65536}
+        cost_microusd: {type: integer, minimum: 0, maximum: 1000000000000, description: 'Agent-reported cost; absent means unknown.'}
+    RoutineAgentResult:
+      type: object
+      required: [run_id, status, request_digest]
+      properties:
+        run_id: {type: string, format: uuid}
+        status: {type: string, enum: [succeeded, failed]}
+        request_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        node_id: {type: string, format: uuid}
+        cost_microusd: {type: integer, minimum: 0}
