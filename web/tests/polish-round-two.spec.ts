@@ -24,7 +24,7 @@ for (const theme of ['light', 'dark'] as const) {
       return text.left < box.left + 1 || text.right > box.right - 1
     }).map(cell => cell.textContent))
     expect(collisions).toEqual([])
-    const scroll = page.getByRole('region', { name: 'Weekly hours, scroll for all days' })
+    const scroll = page.getByRole('region', { name: 'Weekly hours', exact: true })
     await scroll.focus()
     for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight')
     await expect.poll(() => scroll.evaluate(el => el.scrollLeft)).toBeGreaterThan(0)

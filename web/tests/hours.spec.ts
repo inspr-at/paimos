@@ -81,17 +81,22 @@ test('open periods older than a year appear in the home waiting count and week b
 
 test('the week grid sums per ticket and day with exact amounts', async ({ page }, info) => {
   const errors = watchErrors(page)
-  await setup(page)
+  const { data } = await setup(page)
+  // A five-character day value exposes clipping that shorter durations miss.
+  const longDay = data.entries.find(entry => entry.id === 'e-1')!
+  longDay.duration_seconds = 10.5 * 3600
+  longDay.ended_at = new Date(Date.parse(longDay.started_at) + longDay.duration_seconds * 1000).toISOString()
+  longDay.amount = '997.5000'
   await openWeek(page)
-  await expect(page.getByText('Week 39 · 21–27 Sep 2026 · 8h 30m logged')).toBeVisible()
+  await expect(page.getByText('Week 39 · 21–27 Sep 2026 · 17h logged')).toBeVisible()
   const rows = grid(page).locator('tbody tr')
   await expect(rows).toHaveCount(3)
   await expect(rows.first()).toContainText('PHAROS-11')
-  await expect(rows.first().locator('td')).toHaveText(['2:00', '3:30', '·', '·', '·', '·', '·', '5:30'])
-  await expect(grid(page).locator('tfoot td')).toHaveText(['2:00', '3:30', '1:30', '1:30', '·', '·', '·', '8:30'])
+  await expect(rows.first().locator('td')).toHaveText(['10:30', '3:30', '·', '·', '·', '·', '·', '14:00'])
+  await expect(grid(page).locator('tfoot td')).toHaveText(['10:30', '3:30', '1:30', '1:30', '·', '·', '·', '17:00'])
   await expect(grid(page).locator('thead th.today')).toContainText('Thu')
-  // 5.5h × 95 + 1.5h × 95 + 1.5h × 85, exactly.
-  await expect(page.locator('.week-foot')).toContainText('792.50 EUR')
+  // 14h × 95 + 1.5h × 95 + 1.5h × 85, exactly.
+  await expect(page.locator('.week-foot')).toContainText('1,600.00 EUR')
   await expect(page.locator('.period-chip')).toHaveText('21–27 Sep 2026')
   const entries = page.getByRole('region', { name: 'Entries' })
   await expect(entries.getByText('Thu 24')).toBeVisible()
@@ -103,7 +108,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     await page.setViewportSize({ width, height: 900 })
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     await page.evaluate(() => document.fonts.ready)
-    const scroll = page.getByRole('region', { name: 'Weekly hours, scroll for all days' })
+    const scroll = page.getByRole('region', { name: 'Weekly hours', exact: true })
     await scroll.focus()
     const controls = { navigation: page.getByRole('group', { name: 'Week', exact: true }),
       person: page.getByRole('button', { name: 'Hours of You. Choose a person or agent' }),
@@ -114,6 +119,16 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
       { name: 'return to the first day', run: async () => { await scroll.press('ArrowLeft') } },
     ] })
     expect(await scroll.evaluate(element => element.scrollWidth - element.clientWidth), 'week grid has 0 px horizontal overflow').toBe(0)
+    const dayCells = await grid(page).locator('.c-day').evaluateAll(cells => cells.map(cell => {
+      const style = getComputedStyle(cell), range = document.createRange()
+      range.selectNodeContents(cell)
+      return { text: cell.textContent, scrollWidth: cell.scrollWidth, clientWidth: cell.clientWidth,
+        textWidth: range.getBoundingClientRect().width,
+        contentWidth: cell.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) }
+    }))
+    expect(dayCells.some(cell => cell.text === '10:30'), 'the grid includes a five-character day value').toBe(true)
+    expect(dayCells.filter(cell => cell.scrollWidth > cell.clientWidth), `${width} ${theme}: every day value fits its cell`).toEqual([])
+    expect(dayCells.filter(cell => cell.textWidth > cell.contentWidth + 0.5), `${width} ${theme}: day text stays inside the content box`).toEqual([])
     const crowdedTickets = await grid(page).locator('tbody th').evaluateAll(cells => cells.flatMap(cell => {
       const chip = cell.querySelector('.ticket-chip')!, edge = chip.getBoundingClientRect().right
       return edge > cell.getBoundingClientRect().right ? [chip.textContent] : []

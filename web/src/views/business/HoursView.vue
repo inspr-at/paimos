@@ -508,7 +508,7 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
 
         <div v-if="weekState === 'loading'" class="grid-skeleton" aria-hidden="true"><span v-for="i in 4" :key="i" class="skeleton" /></div>
         <p v-else-if="weekState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />{{ weekError }} <button type="button" class="btn sm" @click="loadWeek">Try again</button></p>
-        <div v-else class="grid-scroll" tabindex="0" role="region" aria-label="Weekly hours, scroll for all days" @keydown.left.stop @keydown.right.stop>
+        <div v-else class="grid-scroll" tabindex="0" role="region" aria-label="Weekly hours" @keydown.left.stop @keydown.right.stop>
           <table class="week-grid" aria-label="Hours per ticket and day">
             <thead>
               <tr>
