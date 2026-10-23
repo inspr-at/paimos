@@ -132,7 +132,7 @@ export async function prepareVisualFonts(page: Page, baseURL: string) {
   const url = new URL('/src/assets/fonts/jetbrains.woff2', baseURL).href
   await page.addStyleTag({ content: `@font-face { font-family: 'JetBrains Mono'; src: url('${url}') format('woff2'); font-weight: 100 800; font-display: block; }
     :root { --font: 'JetBrains Mono'; --serif: 'JetBrains Mono'; --mono: 'JetBrains Mono'; }
-    *, *::before, *::after { font-family: 'JetBrains Mono' !important; }` })
+    *, *::before, *::after, *::placeholder, *::file-selector-button { font-family: 'JetBrains Mono' !important; }` })
   await page.evaluate(async () => {
     const loaded = await document.fonts.load('14px "JetBrains Mono"')
     if (!loaded.length || loaded.some(face => face.status !== 'loaded')) throw new Error('Self-hosted visual font did not load')
@@ -141,6 +141,9 @@ export async function prepareVisualFonts(page: Page, baseURL: string) {
 }
 
 export async function renderedFonts(page: Page) {
+  // CDP reports fonts from the painted layout. Await rendering after the last
+  // style interaction, including the deliberate fallback negative control.
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
   const client = await page.context().newCDPSession(page)
   try {
     await client.send('DOM.enable'); await client.send('CSS.enable')
@@ -151,8 +154,10 @@ export async function renderedFonts(page: Page) {
     for (const nodeId of nodeIds) {
       const { fonts } = await client.send('CSS.getPlatformFontsForNode', { nodeId })
       for (const font of fonts) if (font.glyphCount > 0) {
-        if (!font.isCustomFont || font.familyName !== 'JetBrains Mono')
-          throw new Error(`System-font fallback in visual checkpoint: ${font.familyName}`)
+        if (!font.isCustomFont || font.familyName !== 'JetBrains Mono') {
+          const { node } = await client.send('DOM.describeNode', { nodeId, depth: 0 })
+          throw new Error(`System-font fallback in visual checkpoint: ${font.familyName} at ${node.nodeName}`)
+        }
         rendered.set(font.familyName, { family: font.familyName, custom: font.isCustomFont })
       }
     }

@@ -108,6 +108,10 @@ export function validateVisual(visual, { cuts = false, stateIds = visual.states?
     digest(renderer.fonts[0].sha256), 'Missing deterministic hosted visual renderer policy')
   need(visual.comparison?.threshold === 0 && visual.comparison.maxDiffPixels === 0 && text(visual.comparison.justification),
     'Visual comparison requires exact pixels with a documented tolerance policy')
+  need(visual.capture?.workflow === '.github/workflows/ci.yml' && visual.capture.event === 'workflow_dispatch' &&
+    visual.capture.input === 'visual_capture' && visual.capture.job === 'visual-reference-capture' && visual.capture.retentionDays === 7 &&
+    same(visual.capture.states, ['projects', 'access', 'knowledge', 'public-quote', 'agent-rules', 'start-agent',
+      'quote-editor', 'session-chat', 'hours', 'capacity']), 'Manual visual capture must retain the exact ten-state review scope')
   const authority = visual.baselineAuthority
   need(authority?.onMissing === 'fail' && authority.onExpired === 'fail' && authority.onDigestMismatch === 'fail' &&
     authority.automaticRewrite === false && authority.currentRunMayBeReference === false, 'Visual baseline failures must fail closed')

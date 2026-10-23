@@ -9,6 +9,7 @@ import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, refer
 import { packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
 
 import { assertRenderer, captureEnabled, rendererIdentity } from '../../scripts/test-prune/visual-renderer.mjs'
+import { parseWorkflow } from '../../scripts/ci-static.mjs'
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const manifest = JSON.parse(readFileSync(new URL('../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
@@ -138,6 +139,21 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.throws(() => captureEnabled(manifest, { AEON_VISUAL_CAPTURE: '1', GITHUB_EVENT_NAME: 'pull_request' }), /only by the manual/)
   assert.throws(() => captureEnabled(manifest, { AEON_VISUAL_CAPTURE: '1', GITHUB_EVENT_NAME: 'push' }), /only by the manual/)
   assert.equal(captureEnabled(manifest, { AEON_VISUAL_CAPTURE: '1', GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_WORKFLOW: 'CI', GITHUB_JOB: 'visual-reference-capture' }), true)
+  const changedBrowser = rendererIdentity(manifest, manifest.renderer.browser.version, { env: { AEON_VISUAL_RUNNER: 'ubuntu-24.04', ImageOS: 'ubuntu24', ImageVersion: 'synthetic-image' },
+    platform: 'linux', arch: 'x64', browserOptions: { browserName: 'chromium', headless: true, launchOptions: { args: [] } } })
+  assert.throws(() => assertRenderer(changedBrowser, renderer), /renderer differs from reference: browser/)
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+  const captureJob = workflow.slice(workflow.indexOf('\n  visual-reference-capture:'), workflow.indexOf('\n  # Read-only proof.'))
+  const compareJob = workflow.slice(workflow.indexOf('\n  web-shard:'), workflow.indexOf('\n  # Preserve the ruleset'))
+  assert.match(captureJob, /if: github.event_name == 'workflow_dispatch' && inputs.visual_capture == true/)
+  for (const job of [captureJob, compareJob]) {
+    assert.match(job, /runs-on: ubuntu-24\.04/)
+    assert.match(job, /AEON_VISUAL_RUNNER: ubuntu-24\.04/)
+  }
+  assert.match(captureJob, /retention-days: 7/)
+  assert.doesNotMatch(captureJob, /contents: write|gh release|visual-baselines\.mjs/)
+  const steps = parseWorkflow(workflow).get('visual-reference-capture')
+  assert.ok(steps.some((step: { run?: string }) => step.run?.includes('visual-candidates.mjs web/test-results/capture-run web/test-results/linux-candidate')))
 
   // One pinned area does not need reference bytes from unrelated pending or
   // deferred states. The required state's own missing member still rejects.
