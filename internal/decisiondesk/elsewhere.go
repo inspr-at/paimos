@@ -242,7 +242,11 @@ func (m *Module) ownerSummary(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	out := OwnerSummary{Instance: m.instances.Here, Items: []SummaryItem{}}
-	err := db.InTenantReadSnapshot(db.AllProjects(ctx, "decision desk: connected person summary reauthorized per source"), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	// READ COMMITTED is deliberate: visibility setup can precede a wait for the
+	// access fence. A repeatable-read snapshot taken before that wait could
+	// retain a revoked grant or role. Under the fence every authority query sees
+	// current committed rows; ReadTx obtains items and counts in one statement.
+	err := db.InTenant(db.AllProjects(ctx, "decision desk: connected person summary reauthorized per source"), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
 			return err
 		}

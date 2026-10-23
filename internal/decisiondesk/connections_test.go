@@ -3,6 +3,7 @@ package decisiondesk
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"net/http"
@@ -14,7 +15,9 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 // Risk: a sibling credential broadens a person's live Desk visibility, leaks
@@ -79,7 +82,7 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 			t.Fatalf("list: %d", list.Code)
 		}
 		for _, c := range rows.Connections {
-			if c.CreatedAt.Format(time.RFC3339) == fragment.Get("created_at") && c.ExpiresAt.Format(time.RFC3339) == fragment.Get("expires_at") {
+			if c.CreatedAt.UTC().Format(time.RFC3339) == fragment.Get("created_at") && c.ExpiresAt.UTC().Format(time.RFC3339) == fragment.Get("expires_at") {
 				return fragment.Get("token"), c.ID
 			}
 		}
@@ -157,8 +160,19 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 		t.Fatalf("expired grant: %d", w.Code)
 	}
 	token, _ = issue(member, strings.Repeat("e", 43))
-	f.exec(t, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, member.TenantID, member.ID)
-	if w = request(tenant.Principal{}, "GET", "/api/decision-desk/owner-summary", nil, sibling.Origin, token); w.Code != 401 {
+	// Commit an access change exactly between initial visibility setup and the
+	// handler's fence. This proves a pre-fence repeatable-read snapshot cannot
+	// keep old authority alive, without sleeps or a wall-clock interleaving.
+	ctx := db.WithTenantGuard(t.Context(), func(ctx context.Context, tx pgx.Tx, tid string) error {
+		_, err := f.d.Admin.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, tid, member.ID)
+		return err
+	})
+	r := httptest.NewRequest("GET", "/api/decision-desk/owner-summary", nil).WithContext(ctx)
+	r.Header.Set("Origin", sibling.Origin)
+	r.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	if w.Code != 401 {
 		t.Fatalf("permission loss: %d", w.Code)
 	}
 }

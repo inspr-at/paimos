@@ -10,7 +10,7 @@ CREATE TABLE desk_instance_connections (
     token_hash bytea NOT NULL,
     state_hash bytea NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
-    expires_at timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+    expires_at timestamptz NOT NULL DEFAULT (now() + interval '2160 hours'),
     last_used_at timestamptz,
     revoked_at timestamptz,
     PRIMARY KEY (tenant_id, id),
