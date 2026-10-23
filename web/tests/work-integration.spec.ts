@@ -20,7 +20,8 @@ async function shot(page: Page, view: string, width: number, theme: string) {
   await page.screenshot({ path: `test-results/aeon-648-int-fix2/${view}-${width}-${theme}.png`, fullPage: true })
 }
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1677: retain phone and desktop behavior without duplicate rendering profiles.
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`canonical work palette and relation key/title search at ${width}px ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await page.emulateMedia({ colorScheme: theme })

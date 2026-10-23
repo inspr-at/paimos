@@ -6,6 +6,7 @@
   },
   "spec": {
     "file": "tests/work-vocabulary.spec.ts",
+    "listedTests": 8,
     "tierTiming": {
       "caseSeconds": {
         "max": 16.401,

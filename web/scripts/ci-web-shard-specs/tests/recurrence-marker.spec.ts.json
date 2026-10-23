@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/recurrence-marker.spec.ts",
-    "listedTests": 37,
+    "listedTests": 24,
     "tierTiming": {
       "caseSeconds": {
         "max": 13.4,

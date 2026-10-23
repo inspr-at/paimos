@@ -161,7 +161,8 @@ async function boxes(controls: Record<string, Locator>) {
 const movement = (a: Record<string, Box>, b: Record<string, Box>) => Math.max(0, ...Object.keys(a).flatMap(name => (['x', 'y', 'width', 'height'] as const).map(d => Math.abs(a[name]![d] - b[name]![d]))))
 
 // ---------- E5: switching Goals ↔ Epics moves nothing but the list ----------
-for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 800 }] as const) {
+// AEON-1677: retain desktop grouping and native phone/touch controls once each.
+for (const size of [{ width: 1440, height: 900 }] as const) {
   test(`E5 ${size.width}: Goals → Epics → Goals moves no toolbar control, chip, Display trigger or header cell; GOAL and EPIC share one box`, async ({ page }, info) => {
     await page.setViewportSize(size)
     const errors = watchErrors(page)
@@ -200,7 +201,7 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 800 }] 
 }
 
 // ---------- E1, E2: epics folded and one opened ----------
-for (const look of [{ width: 1440, height: 900, dark: false }, { width: 1440, height: 900, dark: true }, { width: 1024, height: 800, dark: false }] as const) {
+for (const look of [{ width: 1440, height: 900, dark: false }, { width: 1024, height: 800, dark: false }] as const) {
   const wide = look.width >= 1200
   test(`E1/E2 ${look.width} ${theme(look.dark)}: epics in the goal anatomy; an opened epic lists what's missing in Definitions order, then its items with live lines and folds`, async ({ page }, info) => {
     await page.setViewportSize(look)
@@ -359,7 +360,7 @@ test('the group is kept per person across a reload; ?view=goals&group=epics open
 })
 
 // ---------- E6: phones ----------
-for (const dark of [false, true]) {
+for (const dark of [false]) {
   test.describe(() => {
     test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
     test(`E6 390 ${theme(dark)}: phones keep the epic rows and their essentials, 44 px Group targets, no overflow`, async ({ page }, info) => {

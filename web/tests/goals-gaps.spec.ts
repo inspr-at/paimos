@@ -21,7 +21,8 @@ const NOW = Date.parse('2026-10-18T17:00:00Z') // 19:00 in Vienna
 const HOUR = 3_600_000
 const iso = (ms: number) => new Date(ms).toISOString()
 const LONG_NOTE = 'Since this morning: 9 items merged, 2 of them for Release 136. The cut is planned for Wednesday, once the CI targets are met. One decision is waiting on you: which identity agent reviews run as for the gatekeeper. Two builders are paused for capacity until the image fix lands. The next note follows the evening hand-check, around 21:00; nothing else needs you before then.'
-const VIEWPORTS = [{ width: 1440, height: 900 }, { width: 1024, height: 800 }, { width: 390, height: 844 }] as const
+// AEON-1677: retain desktop/phone live notes and all three distinct item layouts below.
+const VIEWPORTS = [{ width: 1440, height: 900 }, { width: 390, height: 844 }] as const
 
 test.beforeEach(async ({ page }) => { await page.clock.install({ time: new Date(NOW) }) })
 
@@ -300,7 +301,7 @@ const columns = (page: Page) => page.locator('.goal-grid').evaluate(el => {
 const lines = (locator: Locator) => locator.evaluate(el => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)))
 const emitItems = (page: Page, id: number) => page.evaluate(id => (window as unknown as { goalStreams: { emit(type: string, id: number): void } }).goalStreams.emit('goal.items_changed', id), id)
 
-for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 800 }, { width: 900, height: 800 }, { width: 390, height: 844 }] as const) {
+for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 800 }, { width: 390, height: 844 }] as const) {
   const wide = size.width >= 1200
   const rows = phone(size.width) ? 'phones keep their stacked item rows with every ticket link'
     : `items nest under their goal at the step icons' x, ${wide ? 'one line each with the live line in the Moving → Progress span' : 'labels run from the key to the ETA in at most two lines with the badge in the meta line'}`

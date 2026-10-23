@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/goals-gaps.spec.ts",
-    "listedTests": 6,
+    "listedTests": 7,
     "weightSeconds": 13.317073,
     "weightSource": "unmeasured-test-rate"
   }

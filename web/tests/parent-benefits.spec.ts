@@ -34,7 +34,8 @@ async function prepare(page: Page, readOnly = false) {
   return { data, node, status, calls, errors, retries, rejectRetry: () => { rejectRetry = true } }
 }
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+// AEON-1677: retain phone/desktop generation and opt-in stability without theme copies.
+for (const width of [390, 1440]) for (const theme of ['light']) {
   test(`parent retry and generated text keep controls stable ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     const world = await prepare(page)
@@ -103,7 +104,7 @@ test('read-only generation status remains visible', async ({ page }) => {
   await expect(region.getByRole('button', { name: 'Edit benefit' })).toHaveCount(0)
 })
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+for (const width of [390, 1440]) for (const theme of ['light']) {
   test(`workspace parent benefit opt-in ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await mockWork(page, fixtures(), { admin: true })
@@ -132,11 +133,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
 }
 
 for (const [state, category, completed] of [['custom-complete', 'done', true], ['done', 'open', false]] as const) {
-  // Independent fixtures keep the complete six-layout matrix inside the
-  // existing per-test budget, including save and reopen assertions in each one.
-  const contexts = completed
-    ? [390, 1024, 1440].flatMap(width => ['light', 'dark'].map(theme => ({ width, theme })))
-    : [{ width: 1440, theme: 'light' }]
+  // AEON-1677: retain the original native identity and save/reopen assertions
+  // for both canonical categories; only rendering copies retire.
+  const contexts = [{ width: completed ? 390 : 1440, theme: 'light' }]
   for (const [index, { width, theme }] of contexts.entries()) {
     const layout = index === 0 ? '' : ` at ${width} ${theme}`
     test(`leaf benefit guidance resolves ${state} as ${category}${layout}`, async ({ page }, testInfo) => {

@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/routines-tab.spec.ts",
-    "listedTests": 11,
+    "listedTests": 12,
     "tierTiming": {
       "caseSeconds": {
         "max": 4.632,

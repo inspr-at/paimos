@@ -6,6 +6,7 @@
   },
   "spec": {
     "file": "tests/work-parent-releases.spec.ts",
+    "listedTests": 2,
     "tierTiming": {
       "caseSeconds": {
         "max": 14.371,

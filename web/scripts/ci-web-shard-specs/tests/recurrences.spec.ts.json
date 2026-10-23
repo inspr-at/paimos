@@ -6,6 +6,7 @@
   },
   "spec": {
     "file": "tests/recurrences.spec.ts",
+    "listedTests": 13,
     "tierTiming": {
       "caseSeconds": {
         "max": 23.297,

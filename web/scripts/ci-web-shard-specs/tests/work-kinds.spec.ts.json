@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/work-kinds.spec.ts",
-    "listedTests": 22,
+    "listedTests": 19,
     "tierTiming": {
       "caseSeconds": {
         "max": 4.633,
