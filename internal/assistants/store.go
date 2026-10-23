@@ -52,21 +52,46 @@ func getTx(ctx context.Context, tx pgx.Tx, tenantID, principalID string) (Assist
 }
 
 func (m *Module) ReadPolicy(ctx context.Context, tenantID, principalID string) (Snapshot, error) {
-	if !uuid.MatchString(tenantID) || !uuid.MatchString(principalID) {
-		return Snapshot{}, ErrNotFound
-	}
-	if p, ok := tenant.PrincipalFrom(ctx); ok && !strings.EqualFold(p.TenantID, tenantID) {
-		return Snapshot{}, authz.ErrForbidden
+	if err := policyReadInput(ctx, tenantID, principalID); err != nil {
+		return Snapshot{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	var out Assistant
+	var out Snapshot
 	err := db.InTenantReadSnapshot(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		var err error
-		out, err = getTx(ctx, tx, tenantID, principalID)
+		out, err = m.ReadPolicyTx(ctx, tx, tenantID, principalID)
 		return err
 	})
-	return out.Snapshot, err
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return out, nil
+}
+
+// ReadPolicyTx reads the policy in the caller's existing tenant transaction.
+// The caller owns the tenant fence when this policy authorizes a mutation.
+func (m *Module) ReadPolicyTx(ctx context.Context, tx pgx.Tx, tenantID, principalID string) (Snapshot, error) {
+	if err := policyReadInput(ctx, tenantID, principalID); err != nil {
+		return Snapshot{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, err := getTx(ctx, tx, tenantID, principalID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return out.Snapshot, nil
+}
+
+func policyReadInput(ctx context.Context, tenantID, principalID string) error {
+	if !uuid.MatchString(tenantID) || !uuid.MatchString(principalID) {
+		return ErrNotFound
+	}
+	if p, ok := tenant.PrincipalFrom(ctx); ok && !strings.EqualFold(p.TenantID, tenantID) {
+		return authz.ErrForbidden
+	}
+	return nil
 }
 
 func readAuthority(ctx context.Context, tx pgx.Tx, p tenant.Principal, policyOnly bool, principalID string) error {

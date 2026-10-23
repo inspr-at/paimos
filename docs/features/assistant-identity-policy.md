@@ -52,9 +52,12 @@ use an already available session via `--session-cookie-file`; no new credential
 is requested. Agent self-policy reads use the existing scoped key. List output
 includes `next_cursor` when another page is available; pass it as `--after`.
 
-`assistants.PolicyReader.ReadPolicy(ctx, tenantID, principalID)` returns the
-policy together with principal ID, owner, status and revision for trusted
-server components. Callers must reject inactive principals and retain existing
-authorization. Adapters, outward-action approval enforcement, budget accounting,
+`assistants.PolicyReader.ReadPolicyTx(ctx, tx, tenantID, principalID)` returns
+policy together with principal ID, owner, status and revision in the caller's
+existing tenant transaction. Mutation callers hold the tenant fence so policy
+edits cannot race their final authorization. `Module.ReadPolicy` also provides
+an independent bounded snapshot for read-only callers. Callers must reject
+inactive principals and retain existing authorization. Adapters,
+outward-action approval enforcement, budget accounting,
 Routine ownership and lead delegation are separate AEON-754 slices; this change
 persists their policy inputs without claiming enforcement in those paths.

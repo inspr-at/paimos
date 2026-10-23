@@ -222,20 +222,35 @@ func testAssistantIdentityPolicy(t *testing.T) {
 	call("PATCH", path, ownerSession, map[string]any{"expected_revision": 2, "owner_person_id": owner.ID}, 400)
 	call("GET", "/api/assistants?limit=101", ownerSession, nil, 400)
 	// Each page exposes truncation with a cursor and never repeats a row.
-	var page struct {
+	type assistantPage struct {
 		Assistants []assistants.Assistant `json:"assistants"`
 		NextCursor string                 `json:"next_cursor"`
 	}
+	var page assistantPage
 	if json.Unmarshal(call("GET", "/api/assistants?limit=1", ownerSession, nil, 200), &page) != nil || len(page.Assistants) != 1 || page.NextCursor == "" {
 		t.Fatal("first page missing cursor")
 	}
-	first := page.Assistants[0].PrincipalID
-	if json.Unmarshal(call("GET", "/api/assistants?limit=1&after="+page.NextCursor, ownerSession, nil, 200), &page) != nil || len(page.Assistants) != 1 || page.Assistants[0].PrincipalID == first || page.NextCursor != "" {
+	first, cursor := page.Assistants[0].PrincipalID, page.NextCursor
+	page = assistantPage{}
+	if json.Unmarshal(call("GET", "/api/assistants?limit=1&after="+cursor, ownerSession, nil, 200), &page) != nil || len(page.Assistants) != 1 || page.Assistants[0].PrincipalID == first || page.NextCursor != "" {
 		t.Fatal("keyset page repeated or hid truncation")
 	}
 	read, err := policyModule.ReadPolicy(tenant.WithPrincipal(t.Context(), owner), owner.TenantID, amy.PrincipalID)
 	if err != nil || read.Revision != 2 || !reflect.DeepEqual(read.Policy, policy) {
 		t.Fatal("PolicyReader differs from API")
+	}
+	policyCtx := tenant.WithPrincipal(t.Context(), owner)
+	if err := db.InTenant(policyCtx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		current, err := policyModule.ReadPolicyTx(policyCtx, tx, owner.TenantID, amy.PrincipalID)
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(current, read) {
+			t.Fatal("transactional PolicyReader differs from API")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	// A separate tenant has its own person, assistant and project. Real RLS,
 	// not a forged principal TenantID, proves the cross-tenant negatives.

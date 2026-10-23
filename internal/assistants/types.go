@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/jackc/pgx/v5"
 )
 
 var ErrNotFound = errors.New("assistant not found")
@@ -53,10 +54,11 @@ type Assistant struct {
 }
 
 // PolicyReader is the tenant-explicit in-process seam for adapter, approval and
-// routine wiring. Callers are trusted server components; HTTP authorization is
-// separate. Status must be active and the existing key/role checks still apply.
+// routine wiring. Mutation callers hold the tenant fence in the same transaction
+// so a concurrent policy edit cannot invalidate an earlier authorization read.
+// HTTP authorization is separate; callers retain live key/role and status checks.
 type PolicyReader interface {
-	ReadPolicy(ctx context.Context, tenantID, principalID string) (Snapshot, error)
+	ReadPolicyTx(ctx context.Context, tx pgx.Tx, tenantID, principalID string) (Snapshot, error)
 }
 
 func DefaultPolicy() Policy {
