@@ -312,6 +312,10 @@ function menuKeys(event: KeyboardEvent) {
   .titlebar.compact .history { padding-right: 0; border-right: 0; margin-right: 0; }
   .titlebar.compact .icon-btn.sm, .titlebar.compact .btn.sm, .titlebar.compact .save-btn, .titlebar.compact :deep(.btn.sm) { height: 40px; min-width: 40px; border-radius: 12px; }
   .titlebar.compact .pdf, .titlebar.compact .pane-btn, .titlebar.compact .save-btn, .titlebar.compact :deep(.compact.picker), .titlebar.compact :deep(.compact.frozen-profile) { width: 40px; height: 40px; }
+  .titlebar.compact :is(.pdf, .chevron, .pane-btn, .sidebar, [aria-label="More actions"]) { border-color: transparent; background: transparent; box-shadow: none; color: var(--ink-2); }
+  .titlebar.compact :is(.pdf, .chevron, .pane-btn, .sidebar, [aria-label="More actions"]):active { transform: none; }
+  .titlebar.compact :is(.pane-btn, .sidebar)[aria-pressed="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+  @media (hover: hover) { .titlebar.compact :is(.pdf, .chevron, .pane-btn, .sidebar, [aria-label="More actions"]):not([aria-pressed="true"]):hover { background: var(--row-hover); } }
   .titlebar.compact :deep(.compact.frozen-profile) { display: inline-flex; align-items: center; }
   .titlebar.compact .save-btn { position: relative; }
   .titlebar.compact .save-btn::before { content: ''; position: absolute; top: 50%; left: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }

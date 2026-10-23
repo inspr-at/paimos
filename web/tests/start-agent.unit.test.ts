@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
-import { launchState, staleGrantRejection, startAgent, type WorkOrder } from '../src/lib/startAgent'
+import { launchState, staleGrantRejection, startAgent, startAgentCopy, type WorkOrder } from '../src/lib/startAgent'
 import { APIError } from '../src/lib/api'
 import type { AgentRun } from '../src/lib/agents'
 import type { AgentRunRow } from '../src/lib/agentRows'
 import { createPinia, setActivePinia } from 'pinia'
+import { reactive } from 'vue'
 import { useAgents } from '../src/stores/agents'
 import { resetPositions } from '../src/lib/position'
 import { wired } from './wire-fixtures'
@@ -59,6 +60,38 @@ function backend(options: { existing?: WorkOrder[]; runs?: AgentRun[]; failPatch
 afterEach(() => vi.unstubAllGlobals())
 
 describe('work-order launch', () => {
+  it('binds a one-off retry to its exact context, instruction and restriction', async () => {
+    const sent: { path: string; body: Record<string, unknown> }[] = []
+    let lose = true
+    vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body))
+      sent.push({ path, body })
+      if (lose) { lose = false; throw new TypeError('lost response after commit') }
+      return new Response(JSON.stringify({ ...queued, id: body.request_id, run_once: true, instruction: body.instruction, repository_mutation_allowed: body.repository_mutation_allowed }), { status: 201 })
+    }))
+    const chosen = { ...selection, ticket: { ...ticket, updated_at: '2026-10-22T08:00:00Z' }, runOnce: { requestId: 'once-request', instruction: '  Inspect exactly this.\n', repositoryMutationAllowed: false }, isCurrent: () => true }
+    await expect(startAgent(chosen, admission())).rejects.toThrow('No connection')
+    const result = await startAgent(chosen, admission())
+    expect(result.run).toMatchObject({ id: 'once-request', run_once: true, instruction: '  Inspect exactly this.\n', repository_mutation_allowed: false })
+    expect(sent).toEqual([sent[0], sent[0]])
+    expect(sent[0]).toEqual({ path: '/api/nodes/ticket/run-once', body: { request_id: 'once-request', expected_updated_at: '2026-10-22T08:00:00Z', instruction: '  Inspect exactly this.\n', repository_mutation_allowed: false, agent_principal_id: 'agent', model_profile_id: 'model' } })
+  })
+  it('drops an old one-off response after the context or person changes', async () => {
+    let answer!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { answer = resolve })))
+    let current = true
+    const page = { run: vi.fn(), runs: vi.fn() }
+    const pending = startAgent({ ...selection, runOnce: { requestId: 'once', instruction: 'Inspect', repositoryMutationAllowed: false }, isCurrent: () => current }, page)
+    current = false
+    answer(new Response(JSON.stringify(queued), { status: 201 }))
+    await expect(pending).rejects.toThrow('context or person changed')
+    expect(page.run).not.toHaveBeenCalled()
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+  })
+  it('does not reuse a one-off run for an ordinary ticket start', async () => {
+    backend({ existing: [order], runs: [{ ...queued, run_once: true, instruction: 'Another task', repository_mutation_allowed: false }] })
+    await expect(startAgent(selection, admission())).rejects.toThrow('already has an active run')
+  })
   it('rejects a freshly read parent or unknown shape before any work-order write', async () => {
     for (const is_leaf of [false, undefined]) {
       const calls = backend()
@@ -142,28 +175,31 @@ describe('Start Agent leaf selection', () => {
     const queueAdd = vi.fn(async (_project: string, id: string) => ({ node_id: id }))
     const fetchCatalog = vi.fn(async () => ({ catalog: { hosts: [] }, gap: null, message: '' }))
     let resetAccess = () => {}
+    const loadProjects = vi.fn(async () => {})
+    const session = reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } } })
     const choice = { hostId: 'host', harness: 'codex', accountId: 'account', modelKey: 'model', profileId: 'profile' }
     const made = setupSource('components/agents/StartAgentDialog.vue', {}, {
       '../../lib/api': { listNodes },
       '../../lib/authz': { can: () => true, onAccessRevalidate: ({ reset }: { reset: () => void }) => { resetAccess = reset; return () => {} } },
-      '../../stores/session': { useSession: () => ({ identity: { principal: { kind: 'person' } } }) },
+      '../../stores/session': { useSession: () => session },
+      '../../stores/projects': { useProjects: () => ({ projects: [{ id: 'project', nodeUpdatedAt: 'fresh-revision' }], load: loadProjects, error: '' }) },
       '../../lib/agents': { listPins: async () => [], putPin, deletePin: vi.fn(), message: (e: Error) => e.message },
       '../../lib/agentRows': {},
       '../../lib/accountCascade': {
         ...Cascade,
         fetchAccountCatalog: fetchCatalog,
         fillDefaults: () => ({ ...choice }),
-        presentCascade: () => ({ agentId: 'agent', profileId: 'profile', efforts: [{ value: 'profile' }], models: [{ value: 'model' }], accounts: [{ value: 'account' }], requested: {} }),
+        presentCascade: () => ({ agentId: 'agent', profileId: 'profile', efforts: [{ value: 'profile' }], models: [{ value: 'model' }], accounts: [{ value: 'account' }], requested: {}, status: { tone: 'neutral', label: 'Available', detail: '' } }),
       },
       '../../lib/position': { writeMark: () => 0, wroteSince: () => false },
-      '../../lib/startAgent': { launchState, staleGrantRejection, startAgent: launch },
+      '../../lib/startAgent': { launchState, staleGrantRejection, startAgent: launch, startAgentCopy },
       '../../stores/agents': { useAgents: () => ({ runs: {}, admitRun: vi.fn(), admitRuns: vi.fn(), afterWrite: vi.fn() }) },
       '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
       '../../lib/lead': { LEAD_WORDS, canLaunchLead, leadLaunchReason, readLead },
       '../../stores/workQueue': { useWorkQueue: () => ({ add: queueAdd, busy: false }) },
     })
     stops.push(made.stop)
-    return { state: made.state, listNodes, launch, putPin, readLead, queueAdd, fetchCatalog, resetAccess: () => resetAccess() }
+    return { state: made.state, listNodes, launch, putPin, session, loadProjects, readLead, queueAdd, fetchCatalog, resetAccess: () => resetAccess() }
   }
   it('queries canonical leaves on every page and excludes parents and unknown shapes from mixed results', async () => {
     const { state, listNodes } = dialogSetup()
@@ -213,6 +249,53 @@ describe('Start Agent leaf selection', () => {
     await state.submit()
     expect(putPin).not.toHaveBeenCalled()
     expect(launch).not.toHaveBeenCalled()
+  })
+  it('keeps failed one-off choices but resets them when context or person changes', async () => {
+    const { state, session, launch, readLead, queueAdd } = dialogSetup()
+    readLead.mockResolvedValue(configured)
+    await state.openOnce({ ...ticket, project }); await flush()
+    expect(readLead).not.toHaveBeenCalled()
+    expect(state.dispatchMode.value).toBe('manual')
+    const warning = [{ label: 'Read-only unavailable', detail: 'This account catalog has no qualified read-only one-off adapter. Refresh it or choose another harness.' }]
+    expect(state.settingsWarning.value).toEqual(warning)
+    expect(state.settingsOpen.value).toBe(true)
+    state.instruction.value = 'Inspect this context'
+    state.mayChangeFiles.value = true
+    await flush()
+    expect(state.settingsWarning.value).toEqual([])
+    expect(state.lastSettingsWarning.value).toEqual(warning)
+    await state.submit()
+    expect(launch).toHaveBeenCalledTimes(1)
+    expect(state.instruction.value).toBe('Inspect this context')
+    expect(state.mayChangeFiles.value).toBe(true)
+    expect(queueAdd).not.toHaveBeenCalled()
+    state.selectTicket({ ...ticket, id: 'other-ticket' }); await flush()
+    expect(state.instruction.value).toBe('')
+    expect(state.mayChangeFiles.value).toBe(false)
+    state.instruction.value = 'Owned by the first person'
+    state.mayChangeFiles.value = true
+    session.identity.principal.id = 'another-person'; await flush()
+    expect(state.visible.value).toBe(false)
+    expect(state.instruction.value).toBe('')
+    expect(state.mayChangeFiles.value).toBe(false)
+    expect(state.ticket.value).toBeNull()
+  })
+  it('refreshes project revisions on every open and keeps a task entered before choosing its project', async () => {
+    const { state, loadProjects, launch } = dialogSetup()
+    await state.openOnce(); await flush()
+    expect(loadProjects).toHaveBeenLastCalledWith(true)
+    state.task.value = 'Inspect project context'
+    state.projectId.value = 'project'
+    state.mayChangeFiles.value = true
+    await state.submit()
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+      ticket: expect.objectContaining({ id: 'project', updated_at: 'fresh-revision' }),
+      runOnce: expect.objectContaining({ task: 'Inspect project context' }),
+    }), expect.any(Object))
+    state.close()
+    await state.openOnce(); await flush()
+    expect(loadProjects).toHaveBeenCalledTimes(2)
+    expect(state.task.value).toBe('')
   })
 
   const project = { id: 'project', key: 'AEON', title: 'Aeon' }

@@ -4,8 +4,8 @@
 // keys or a follow tick move the time when they should move only the window.
 import { expect, it } from 'vitest'
 import {
-  CHAR_W, createTimeline, fitAll, fitLabel, following, followTick, keyInput, laneFrame, laneModel, MAX_ROWS, panBy, placeIncidentCaption, placeOverviewTargets, resetTimeline, rowPieces, setTime, timeLabel, wheelInput, zoomPreset, zoomTo,
-  type FlowData, type FlowRun, type FlowStep, type Lane, type OverviewHit,
+  CHAR_W, createTimeline, fitAll, fitLabel, following, followTick, keyInput, laneFrame, laneModel, laneRows, panBy, placeIncidentCaption, placeLane, placeOverviewTargets, resetTimeline, ROW_CAP, rowPieces, setTime, timeLabel, wheelInput, zoomPreset, zoomTo,
+  type FlowData, type FlowRun, type FlowStep, type Lane, type LaneSet, type OverviewHit,
 } from '../src/lib/deliveryFlow'
 import { exampleLive, EXAMPLE_NOW } from './delivery-flow-example-fixtures'
 import { hintParts, flowText } from '../src/lib/deliveryFlowText'
@@ -17,15 +17,71 @@ const data = (steps: FlowStep[], now: number | null = null): FlowData => {
   return { origin: new Date(2026, 9, 8).getTime(), now, range: [0, 200], play: [10, 190], sets: [{ runs: [run], lanes: ['ops', 'ci'], main: run }] }
 }
 
-it('rows are reserved once per data set: overlaps take the next free row, at most four', () => {
+/** Two steps share a row only one after the other: never two bars on top of each other. */
+function overlaps(set: LaneSet): string[] {
+  const out: string[] = []
+  for (const a of set.items) for (const b of set.items) {
+    if (a === b || a.lane !== b.lane || a.row !== b.row) continue
+    if (a.step.start < b.step.end - 1e-6 && b.step.start < a.step.end - 1e-6) out.push(`${a.lane}:${a.row} ${a.step.start}-${a.step.end} × ${b.step.start}-${b.step.end}`)
+  }
+  return out
+}
+
+it('rows are reserved once per data set: each step takes the first free row and a lane grows to every row it needs', () => {
   const [set] = laneModel(data([step(0, 30), step(10, 20), step(20, 40), step(25, 26), step(25, 27), step(25, 28), step(50, 60), step(0, 5, 'ci')]))
-  expect(set!.rows).toEqual({ ops: MAX_ROWS, ci: 1 })
+  // Five overlap at 25: the fifth gets a fifth row instead of stacking in the fourth (AEON-1656).
+  expect(set!.rows).toEqual({ ops: 5, ci: 1 })
   const rowOf = (start: number, end: number) => set!.items.find(i => i.step.start === start && i.step.end === end)!.row
-  expect([rowOf(0, 30), rowOf(10, 20), rowOf(20, 40), rowOf(25, 26), rowOf(25, 27), rowOf(25, 28), rowOf(50, 60)]).toEqual([0, 1, 1, 2, 3, 3, 0])
+  expect([rowOf(0, 30), rowOf(10, 20), rowOf(20, 40), rowOf(25, 26), rowOf(25, 27), rowOf(25, 28), rowOf(50, 60)]).toEqual([0, 1, 1, 2, 3, 4, 0])
+  expect(overlaps(set!)).toEqual([])
   // The example keeps its six lanes; the model does not depend on the window.
   const example = laneModel(exampleLive())[0]!
   expect(example.lanes).toEqual(['you', 'lead', 'ops', 'review', 'build', 'ci'])
-  expect(Object.values(example.rows).every(rows => rows >= 1 && rows <= MAX_ROWS)).toBe(true)
+  expect(overlaps(example)).toEqual([])
+})
+
+it('ten concurrent builders take ten rows; above twelve a lane folds into "+N more" until a person expands it', () => {
+  const builders = (n: number) => Array.from({ length: n }, (_, k) => step(10 + k, 60 + k, 'build'))
+  const lanes = (steps: FlowStep[]): FlowData => { const d = data(steps); d.sets[0]!.lanes = ['build', 'ci']; return d }
+  const [ten] = laneModel(lanes(builders(10)))
+  expect(ten!.rows.build).toBe(10)
+  expect(new Set(ten!.items.map(i => i.row))).toEqual(new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]))
+  expect(overlaps(ten!)).toEqual([])
+  expect(laneRows(ten!, 'build', false)).toEqual({ bars: 10, fold: null, total: 10 })
+  // Exactly at the cap every row still shows.
+  const [twelve] = laneModel(lanes(builders(ROW_CAP)))
+  expect(laneRows(twelve!, 'build', false)).toEqual({ bars: ROW_CAP, fold: null, total: ROW_CAP })
+  // Sixteen: eleven rows of bars and one "+5 more" row; expanded, all sixteen and a "fewer" row.
+  const [sixteen] = laneModel(lanes([...builders(16), step(70, 80, 'build')]))
+  expect(sixteen!.rows.build).toBe(16)
+  expect(overlaps(sixteen!)).toEqual([])
+  const folded = laneRows(sixteen!, 'build', false)
+  expect([folded.bars, folded.total, folded.fold?.kind]).toEqual([ROW_CAP - 1, ROW_CAP, 'more'])
+  expect(folded.fold!.hidden.map(i => i.row)).toEqual([11, 12, 13, 14, 15])
+  const open = laneRows(sixteen!, 'build', true)
+  expect([open.bars, open.total, open.fold?.kind, open.fold?.hidden.length]).toEqual([16, 17, 'fewer', 0])
+  // A lane within the cap ignores the expansion.
+  expect(laneRows(sixteen!, 'ci', true)).toEqual({ bars: 1, fold: null, total: 1 })
+})
+
+it('a live update grows lanes below the pointer only: nothing above it moves until the pointer has left', () => {
+  const rowH = 20, gaps = 4
+  // Without a pointer every lane is its rows tall, at the cursor.
+  expect(placeLane({ y: 18, h: 44, rowH }, 3, 18, rowH, gaps, null)).toEqual({ y: 18, h: 64, rowH })
+  // A lane that ended above the pointer keeps its height and fits a new row inside.
+  const above = placeLane({ y: 18, h: 44, rowH }, 3, 18, rowH, gaps, 200)
+  expect(above.y).toBe(18)
+  expect(above.h).toBe(44)
+  expect(above.rowH * 3 + gaps).toBeCloseTo(44)
+  // Fewer rows above the pointer: rows return to full height inside the same lane.
+  expect(placeLane({ y: 18, h: 44, rowH: 13.33 }, 1, 18, rowH, gaps, 200)).toEqual({ y: 18, h: 44, rowH })
+  // The lane under the pointer keeps its top and row height and grows downward.
+  expect(placeLane({ y: 62, h: 44, rowH }, 4, 62, rowH, gaps, 70)).toEqual({ y: 62, h: 84, rowH })
+  // A lane below the pointer follows at its natural height.
+  expect(placeLane({ y: 106, h: 24, rowH }, 2, 146, rowH, gaps, 70)).toEqual({ y: 146, h: 44, rowH })
+  // A lane drawn for the first time, or one whose top has moved, is placed naturally.
+  expect(placeLane(undefined, 2, 18, rowH, gaps, 200)).toEqual({ y: 18, h: 44, rowH })
+  expect(placeLane({ y: 30, h: 44, rowH }, 3, 18, rowH, gaps, 200)).toEqual({ y: 18, h: 64, rowH })
 })
 
 it('a label falls back from tag and text, to the text, to the duration, to an ellipsis that keeps "since"', () => {

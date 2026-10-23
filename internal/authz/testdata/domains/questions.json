@@ -66,8 +66,10 @@
     "GET /api/projects/{projectId}/questions": "questions.read",
     "GET /api/questions/{questionId}": "questions.read",
     "GET /api/questions/{questionId}/status": "questions.read",
+    "GET /api/settings/question-reminders": "settings.read|settings.manage",
     "POST /api/projects/{projectId}/questions": "questions.ask",
-    "POST /api/questions/{questionId}/decision": "questions.decide"
+    "POST /api/questions/{questionId}/decision": "questions.decide",
+    "PUT /api/settings/question-reminders": "settings.manage"
   },
   "words": {
     "resources": {

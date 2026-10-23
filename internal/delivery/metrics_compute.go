@@ -538,10 +538,20 @@ func computeMetricsFor(in metricInput, now time.Time, windows []int) []Metric {
 	reviewTime, changes := []metricPoint{}, []metricPoint{}
 	var reviewCovered *time.Time
 	reported := map[string]bool{}
+	firstReviews := map[string]metricMark{}
 	for _, mark := range in.Marks {
-		if mark.Kind != "review" || mark.Started == nil {
+		if mark.Kind != "review" || mark.Started == nil || mark.At.After(now) {
 			continue
 		}
+		key := "key/" + mark.Key
+		if mark.Head != "" {
+			key = "head/" + mark.Head
+		}
+		if old, ok := firstReviews[key]; !ok || mark.At.Before(old.At) || mark.At.Equal(old.At) && mark.Key < old.Key {
+			firstReviews[key] = mark
+		}
+	}
+	for _, mark := range firstReviews {
 		if mark.Head != "" {
 			reported[mark.Head] = true
 		}
@@ -577,12 +587,12 @@ func computeMetricsFor(in metricInput, now time.Time, windows []int) []Metric {
 		}
 		changes = append(changes, metricPoint{at: *verdict, value: boolValue(outcome == "failure")})
 	}
-	reviewPartial := "Counts only reviews that post the aeon/review commit status or are reported through POST …/delivery/metrics/facts; gates that run elsewhere and are not reported are missing."
-	reviewNone := "No review verdict was seen in the last 30 days: no aeon/review status and no reported review."
-	out = append(out, build(metricSpec{number: 7, key: "review_time", label: "Review time", unit: "minutes", source: "aeon/review commit status (GitHub App status events) and reported reviews",
-		def:       "Per reviewed head: review requested (aeon/review pending, or the reported start) → first verdict.",
+	reviewPartial := "Counts authenticated harness review submissions, reviews that post the aeon/review commit status, and reports through POST …/delivery/metrics/facts; gates that run elsewhere and are not reported are missing."
+	reviewNone := "No authenticated harness review, aeon/review status or reported review was seen in the last 30 days."
+	out = append(out, build(metricSpec{number: 7, key: "review_time", label: "Review time", unit: "minutes", source: "Authenticated PAIMOS review runs, aeon/review commit status (GitHub App status events) and reported reviews",
+		def:       "Per reviewed head: review requested (authenticated run creation, aeon/review pending, or the reported start) → first verdict. Duplicate reports and statuses for that head count once.",
 		aggregate: "p50", target: arion(8, "max", "≤ 10 min after Phases 1–2a (WP1.8)"), coverage: reviewCovered, alwaysPartial: true, partialReason: reviewPartial, noDataReason: reviewNone, readFrom: in.ReadFrom}, reviewTime))
-	out = append(out, build(metricSpec{number: 7, key: "review_changes_share", label: "Share of “changes” verdicts", unit: "percent", source: "aeon/review commit status (GitHub App status events) and reported reviews",
+	out = append(out, build(metricSpec{number: 7, key: "review_changes_share", label: "Share of “changes” verdicts", unit: "percent", source: "Authenticated PAIMOS review runs, aeon/review commit status (GitHub App status events) and reported reviews",
 		def:       "Share of first verdicts per head that asked for changes (aeon/review failure, or a reported “changes”).",
 		aggregate: "share", target: arion(25, "max", "≤ 40 % after Phases 1–2a (WP1.8)"), coverage: reviewCovered, alwaysPartial: true, partialReason: reviewPartial, noDataReason: reviewNone, readFrom: in.ReadFrom}, changes))
 
@@ -604,8 +614,8 @@ func computeMetricsFor(in metricInput, now time.Time, windows []int) []Metric {
 	out = append(out, build(metricSpec{number: 8, key: "merge_rounds_model_share", label: "Merge rounds solved by a model", unit: "percent", source: "Merge rounds reported through POST …/delivery/metrics/facts (kind merge_round)",
 		def:       "Share of merge rounds (a PR conflicting with a moved main) that needed a model instead of the scripted merge. PAIMOS cannot see merge rounds itself; it counts what the merge tooling reports.",
 		aggregate: "share", target: arion(20, "max", "WP1.7"), coverage: roundsCovered, noDataReason: "No merge round has been reported yet.", readFrom: in.ReadFrom}, rounds))
-	release := build(metricSpec{number: 9, key: "release_queue_to_live", label: "Release: merge queue → live", unit: "minutes", source: "Releases reported through POST …/delivery/metrics/facts (kind release)",
-		def:       "Per release: the release PR enters the merge queue → the version is live on the production host, as reported by the release tooling. The wait for a person (W) is inside this time. PAIMOS cannot observe the host itself.",
+	release := build(metricSpec{number: 9, key: "release_queue_to_live", label: "Release: start → live", unit: "minutes", source: "OPS rollout records and releases reported through POST …/delivery/metrics/facts (kind release)",
+		def:       "Per release: the recorded start (OPS cut_at or reported release PR queue entry) → the version is confirmed live on the production host. The wait for a person (W) is inside this time. PAIMOS cannot observe the host itself.",
 		aggregate: "p50", target: arion(54, "max", "about 61 min + W now, about 54 min + W after Phases 2 and 4; W is the wait for a person"), coverage: releasesCovered, noDataReason: "No release has been reported yet.", readFrom: in.ReadFrom}, releases)
 	facts := releaseFacts(in.Marks, now)
 	release.Releases = &facts

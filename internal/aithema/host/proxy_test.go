@@ -3,8 +3,11 @@
 package host
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +18,11 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/embedding"
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprovider"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"golang.org/x/net/websocket"
 )
@@ -146,6 +153,7 @@ func TestDeprovisionExactScopeIdempotencyAndFutureRefusal(t *testing.T) {
 }
 
 func TestNativeHostEventsCursorAndTenantScope(t *testing.T) {
+	t.Run("idle minute", measureIdleMinute)
 	f := newFixture(t, nil)
 	s := f.session()
 	f.deliver()
@@ -174,6 +182,151 @@ func TestNativeHostEventsCursorAndTenantScope(t *testing.T) {
 	}
 	if ok, err := f.m.DeliverOne(context.Background(), foreign); err != nil || ok {
 		t.Fatal("foreign callback visible")
+	}
+}
+
+// R5/R7: idle optimization must retain outbox/embedding claims and real
+// heartbeats. Execute a 60-second-equivalent schedule against real Postgres;
+// pass counts establish cadence without sleeps or elapsed-time assertions.
+func measureIdleMinute(t *testing.T) {
+	f := newFixture(t, nil)
+	f.session()
+	f.deliver()
+	pool, counts := dbtest.CountedPool(t, f.db.App)
+	f.m.Pool = pool
+	harness.New(pool).Mount(f.mux)
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	lease := "idle-measurement-worker-lease-0000001"
+	w := f.call("POST", base, map[string]any{
+		"agent_principal_id": f.plugin.ID, "harness": "codex", "host": "idle-host",
+		"harness_session_ref": "idle-measurement-session-ref", "worker_lease": lease,
+		"management_mode": "unmanaged", "role": "worker",
+	})
+	if w.Code != 201 {
+		t.Fatalf("idle register: %d %s", w.Code, w.Body)
+	}
+	var session struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &session); err != nil {
+		t.Fatal(err)
+	}
+	f.plugin.Scopes = []string{"harness.worker"}
+	digest := sha256.Sum256([]byte("idle-synthetic-secret-only"))
+	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id)
+		VALUES($1,$2,'idle fixture','idlemeasurement',$3,ARRAY['harness.worker'],$4) RETURNING id::text`,
+		f.p.TenantID, f.plugin.ID, hex.EncodeToString(digest[:]), f.p.ID).Scan(&f.plugin.AuthKeyID); err != nil {
+		t.Fatal(err)
+	}
+	beat := func() {
+		r := httptest.NewRequest("POST", base+"/"+session.ID+"/heartbeat", strings.NewReader(`{"phase":"working","activity":"idle","activity_sequence":1}`))
+		r.Header.Set("X-Aeon-Worker-Lease", lease)
+		r.Header.Set("Authorization", "Bearer aeon_idlemeasurement_idle-synthetic-secret-only")
+		r = r.WithContext(tenant.WithPrincipal(r.Context(), f.plugin))
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatalf("idle heartbeat: %d %s", w.Code, w.Body)
+		}
+	}
+	// Saturate the grace counter and consume initial host projections before
+	// the measured interval; quiet beats must continue advancing liveness.
+	for i := 0; i < 3; i++ {
+		beat()
+	}
+	ctx := db.AllProjects(t.Context(), "idle measurement")
+	if err := f.m.queueHostEvents(ctx, f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		ok, err := f.m.DeliverOne(ctx, f.p.TenantID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			break
+		}
+	}
+	now := time.Now()
+	provider := modelprovider.NewWithConfigClock(pool, bytes.Repeat([]byte{9}, 32), func() time.Time { return now })
+	if _, err := provider.Save(f.ctx(), f.p, modelprovider.Write{Settings: modelprovider.Settings{
+		Enabled: true, BaseURL: f.service.URL, ChatModel: "fixture-chat", EmbeddingModel: "fixture-embed", Features: modelprovider.Features{Embeddings: true},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	// The measured worker is idle: discard only fixture-generated index jobs.
+	if _, err := f.db.Admin.Exec(t.Context(), `DELETE FROM node_embedding_jobs WHERE tenant_id=$1`, f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.m.queueHostEvents(ctx, f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	worker := embedding.NewWorker(pool, nil, embedding.Options{Resolve: provider.Embeddings})
+	counts.Reset()
+	for second := 0; second < 60; second++ {
+		// Match Run's tenant discovery and ten-pass reconciliation too.
+		rows, err := pool.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if second%10 == 0 {
+			if err := f.m.reconcile(ctx, f.p.TenantID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := f.m.queueHostEvents(ctx, f.p.TenantID); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := f.m.DeliverOne(ctx, f.p.TenantID); err != nil || ok {
+			t.Fatalf("idle outbox: %t %v", ok, err)
+		}
+		if second%2 == 0 {
+			if n, err := worker.ProcessOnce(ctx); err != nil || n != 0 {
+				t.Fatalf("idle embedding: %d %v", n, err)
+			}
+		}
+		if second%15 == 0 {
+			beat()
+		}
+		now = now.Add(time.Second)
+	}
+	all, _ := counts.Count(func(string) bool { return true })
+	application, _ := counts.Count(func(sql string) bool {
+		return sql != "begin" && sql != "commit" && sql != "rollback" && !strings.HasPrefix(sql, "savepoint ") && !strings.HasPrefix(sql, "release savepoint ")
+	})
+	cursorCalls, cursorRows := counts.Count(func(sql string) bool { return strings.HasPrefix(sql, "UPDATE aithema_host_sessions SET event_cursor=") })
+	providerReads, _ := counts.Count(func(sql string) bool {
+		return strings.HasPrefix(sql, "SELECT ") && strings.Contains(sql, "FROM workspace_model_provider")
+	})
+	warningCalls, warningRows := counts.Count(func(sql string) bool {
+		return strings.Contains(sql, "UPDATE harness_sessions SET missing_progress_beats=")
+	})
+	outboxClaims, _ := counts.Count(func(sql string) bool { return strings.HasPrefix(sql, "UPDATE aithema_callbacks SET attempts=") })
+	embeddingClaims, _ := counts.Count(func(sql string) bool {
+		return strings.Contains(sql, "UPDATE node_embedding_jobs j") && strings.Contains(sql, "FOR UPDATE SKIP LOCKED")
+	})
+	t.Logf("IDLE-MINUTE: one tenant, one idle host, one idle worker; 60 host passes + 6 reconciliations + 30 embedding passes + 4 heartbeats; SQL=%d, SQL excluding transaction controls=%d, cursor statements/rows=%d/%d, provider reads=%d, warning statements/rows=%d/%d, due outbox claims=%d, embedding claims=%d", all, application, cursorCalls, cursorRows, providerReads, warningCalls, warningRows, outboxClaims, embeddingClaims)
+	if cursorCalls != 0 || cursorRows != 0 {
+		t.Errorf("unchanged high water wrote cursor: calls=%d rows=%d", cursorCalls, cursorRows)
+	}
+	if warningCalls != 0 || warningRows != 0 {
+		t.Errorf("saturated warning counter rewritten: calls=%d rows=%d", warningCalls, warningRows)
+	}
+	if providerReads != 2 {
+		t.Errorf("provider reads=%d, want one load and one version refresh", providerReads)
+	}
+	if outboxClaims != 60 {
+		t.Errorf("due outbox claims=%d, want 60", outboxClaims)
+	}
+	if embeddingClaims != 30 {
+		t.Errorf("due embedding claims=%d, want 30", embeddingClaims)
 	}
 }
 

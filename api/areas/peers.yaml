@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/inbox
+paths:
+  /peers:
+    get:
+      operationId: listPeers
+      description: "Live agent sessions belonging to the caller's canonical person owner on this instance and tenant, across accessible projects with harness.read. Agent keys need an active person creator; a different explicit acting-person context is refused. Sessions without confirmed ownership, stopped or archived sessions and heartbeats older than two minutes are excluded. Idle live sessions are included. No credentials, local references or transport targets are returned. Pages use session UUID keysets; names are exact and may be ambiguous."
+      parameters:
+        - {name: name, in: query, schema: {type: string, minLength: 1, maxLength: 160}, description: "Exact session display name, falling back to the agent principal name"}
+        - {name: session, in: query, schema: {type: string, format: uuid}, description: "Exact session generation"}
+        - {name: project, in: query, schema: {type: string, format: uuid}}
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200':
+          description: "Owner-scoped peer page"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_after]
+                properties:
+                  items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Peer'}}
+                  next_after: {type: [string, 'null'], format: uuid}
+        '400': {description: "Invalid filter"}
+        '403': {description: "Current owner or harness.read authority unavailable"}
+  /peers/{sessionId}/messages:
+    post:
+      operationId: sendPeerMessage
+      description: "Send to an exact live owned peer generation using the durable inbox and existing receipts, without requiring a transport listener. The server derives the recipient and recipient project. The final write transaction rechecks both sessions' canonical owner, current project permissions and exact generation under the shared access-change fence. Agents must supply their own active sender session; people may omit it. Cross-project messages are recorded in the recipient project with the bound sender project and a sender label carrying its project key. Existing threads, held action requests, reply obligations and delivery deadlines apply. No cross-instance lookup or trust-context fallback. Attached volatile sessions are excluded."
+      parameters:
+        - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [body, idempotency_key]
+              properties:
+                body: {type: string, minLength: 1, maxLength: 65536}
+                idempotency_key: {type: string, minLength: 1, maxLength: 128}
+                sender_session_id: {type: string, format: uuid}
+                reply_to: {type: string, format: uuid}
+                thread_id: {type: string, maxLength: 128}
+                expects_reply: {type: boolean, default: false}
+                is_action_request: {type: boolean, default: false}
+                delivery_level: {type: string, enum: [simple, steer], default: simple}
+      responses:
+        '201': {description: "Stored message; acceptance does not confirm delivery", content: {application/json: {schema: {$ref: '#/components/schemas/PeerMessage'}}}}
+        '400': {description: "Invalid message or missing sender session"}
+        '403': {description: "Current send authority unavailable"}
+        '404': {description: "Peer or sender session unavailable in this owner and trust context"}
+        '409': {description: "Session ended or idempotency conflict"}
+components:
+  schemas:
+    Peer:
+      type: object
+      additionalProperties: false
+      required: [session_id, principal_id, name, project_id, project, harness, state, address]
+      properties:
+        session_id: {type: string, format: uuid}
+        principal_id: {type: string, format: uuid}
+        name: {type: string}
+        project_id: {type: string, format: uuid}
+        project: {type: string, description: "Project key"}
+        harness: {type: string}
+        state: {type: string, description: "Session phase and activity"}
+        address: {type: string, pattern: '^session:[0-9a-f-]{36}$', description: "Exact address accepted by aeon tell"}
+    PeerMessage:
+      allOf:
+        - {$ref: '#/components/schemas/ProjectMessage'}
+        - type: object
+          properties:
+            sender_project_id: {type: string, format: uuid, description: "Bound sender session's project, present for cross-project messages"}
+            sender_project: {type: string, description: "Bound sender session's project key, present for cross-project messages"}

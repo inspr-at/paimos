@@ -348,7 +348,7 @@ paths:
   /api/projects/{projectId}/harness-sessions/{sessionId}/drain:
     post:
       operationId: drainHarnessInbox
-      description: "Existing managed inbox or an explicitly paired attached hook. Attached hooks lease only exact-session messages; an unfinished lease is replayed until the foreground hook confirms handoff. Reconnect never acknowledges messages."
+      description: "Existing managed inbox or an explicitly paired attached hook. Exact-session durable messages to managed sessions are priority input, including while busy; a person's explicit after-turn project-chat choice is retained. Desk answers sort first. Attached hooks lease only exact-session messages; an unfinished lease is replayed until the foreground hook confirms handoff. Reconnect never acknowledges messages. No process is started or resumed."
       parameters:
         - $ref: '#/components/parameters/projectId'
         - $ref: '#/components/parameters/sessionId'
@@ -362,10 +362,20 @@ paths:
               type: object
               additionalProperties: false
               properties:
-                delivery_level: {type: string, enum: [steer], description: "While a turn is busy, lease only boundary input; omitted selects the ordinary FIFO between turns."}
+                delivery_level: {type: string, enum: [steer], description: "While busy, select boundary input and exact-session managed priority messages. Omission also includes ordinary after-turn input."}
       responses:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
-        '200': {description: Leased FIFO inbox message}
+        '200':
+          description: "At most one replayable leased message; priority does not change its requested delivery level."
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 1
+                items:
+                  type: object
+                  properties:
+                    priority: {type: boolean, description: "Exact-session input for this managed owner; message content grants no control authority."}
   /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery:
     post:
       operationId: completeHarnessDelivery

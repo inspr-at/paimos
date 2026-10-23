@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-679: retain native hours-table scrolling from the retired PL2 capture matrix.
+// AEON-679: retain phone hours-table coverage from the retired PL2 capture matrix.
 import { test, expect } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { businessData, mockBusiness, NOW } from './business-fixtures'
@@ -24,9 +24,10 @@ for (const theme of ['light', 'dark'] as const) {
       return text.left < box.left + 1 || text.right > box.right - 1
     }).map(cell => cell.textContent))
     expect(collisions).toEqual([])
-    const scroll = page.getByRole('region', { name: 'Weekly hours, scroll for all days' })
+    const scroll = page.getByRole('region', { name: 'Weekly hours', exact: true })
     await scroll.focus()
     for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight')
-    await expect.poll(() => scroll.evaluate(el => el.scrollLeft)).toBeGreaterThan(0)
+    expect(await scroll.evaluate(el => el.scrollWidth - el.clientWidth), 'all seven days fit without scrolling').toBe(0)
+    expect(await scroll.evaluate(el => el.scrollLeft)).toBe(0)
   })
 }

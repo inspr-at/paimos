@@ -103,6 +103,7 @@ func openStore(t *testing.T, path string, now func() time.Time) *Store {
 // Risk: a crash after a possible stdin write but before its correlated ack can
 // make a RAM relay resend an input. The barrier proves the marker existed before
 // the fake transport touched stdin, and recovery never permits another write.
+// Even a restored acknowledgement is historical evidence, not a live replay.
 func TestCrashBeforeNativeAckHoldsInputAndReplaysOnlyMetadata(t *testing.T) {
 	now := time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)
 	clock := func() time.Time { return now }
@@ -162,6 +163,63 @@ func TestCrashBeforeNativeAckHoldsInputAndReplaysOnlyMetadata(t *testing.T) {
 	}
 	if transport.writes.Load() != 1 {
 		t.Fatal("receipt replay wrote native stdin")
+	}
+	for _, stage := range []string{"write_acknowledged", "turn_started", "turn_completed"} {
+		t.Run("restored_"+stage, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "receipts")
+			s := openStore(t, path, clock)
+			b := testBinding()
+			in := testInput(b, now)
+			op, actor := uuid.NewString(), uuid.NewString()
+			transport := &testTransport{identity: nativecontract.NativeIdentity{RuntimeEpoch: b.RuntimeEpoch, ProcessIdentityDigest: strings.Repeat("a", 64)}, now: clock}
+			writer := &InputWriter{Journal: s, Authority: &testAuthority{}, Transport: transport}
+			r, err := writer.Send(t.Context(), actor, op, in)
+			if err != nil || r.State != "write_acknowledged" {
+				t.Fatalf("initial input: %+v %v", r, err)
+			}
+			for i, next := range []string{"turn_started", "turn_completed"} {
+				if r.State == stage {
+					break
+				}
+				r, err = s.Observe(t.Context(), b, op, nativecontract.NativeEvidence{Stage: next, RequestID: in.RequestID, InputID: in.InputID, TurnRef: "fixture-turn", SourceSequence: uint64(i + 2), ObservedAt: now})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if replay, err := writer.Send(t.Context(), actor, op, in); err != nil || !reflect.DeepEqual(replay, r) || transport.writes.Load() != 1 {
+				t.Fatal("live replay changed evidence or repeated input", replay, err)
+			}
+			// Retain a separate input that never reached the possible-I/O marker.
+			pending, pendingOp := testInput(b, now), uuid.NewString()
+			writer.Authority = &testAuthority{denied: true}
+			accepted, err := writer.Send(t.Context(), actor, pendingOp, pending)
+			checkReason(t, err, nativecontract.ReasonPermissionRevoked)
+			if accepted.State != "accepted" || transport.writes.Load() != 1 {
+				t.Fatal("refused input reached native I/O", accepted)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			s = openStore(t, path, clock)
+			// A new writer with the saved identity cannot make restored evidence
+			// a current-owner success, even if the authority stub allows it.
+			writer = &InputWriter{Journal: s, Authority: &testAuthority{}, Transport: transport}
+			replay, err := writer.Send(t.Context(), actor, op, in)
+			checkReason(t, err, nativecontract.ReasonInputOutcomeUnconfirmed)
+			if !reflect.DeepEqual(replay, r) || transport.writes.Load() != 1 {
+				t.Fatal("restored replay changed evidence or repeated input", replay)
+			}
+			if saved, err := s.Get(b, op); err != nil || !reflect.DeepEqual(saved, r) {
+				t.Fatal("restored evidence was lost", saved, err)
+			}
+			first, err := writer.Send(t.Context(), actor, pendingOp, pending)
+			if err != nil || first.State != "write_acknowledged" || transport.writes.Load() != 2 {
+				t.Fatal("authorized first write of unwritten input failed", first, err)
+			}
+			if replay, err := writer.Send(t.Context(), actor, pendingOp, pending); err != nil || !reflect.DeepEqual(replay, first) || transport.writes.Load() != 2 {
+				t.Fatal("first write after reopen was not idempotent", replay, err)
+			}
+		})
 	}
 }
 
@@ -276,6 +334,9 @@ func completedInput(t *testing.T, s *Store, b nativecontract.Binding, now time.T
 	r, err := w.Send(t.Context(), actor, op, in)
 	if err != nil || r.State != "write_acknowledged" {
 		t.Fatalf("input: %+v %v", r, err)
+	}
+	if replay, err := w.Send(t.Context(), actor, op, in); err != nil || replay.State != r.State || tr.writes.Load() != 1 {
+		t.Fatal("confirmed input replay wrote again or lost its receipt", replay, err)
 	}
 	for i, stage := range []string{"turn_started", "turn_completed"} {
 		r, err = s.Observe(t.Context(), b, op, nativecontract.NativeEvidence{Stage: stage, InputID: in.InputID, RequestID: in.RequestID, TurnRef: "opaque-turn", SourceSequence: uint64(i + 2), ObservedAt: now})

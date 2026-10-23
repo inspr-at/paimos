@@ -56,6 +56,8 @@ components:
         queue_target_agent_id: {type: [string, 'null'], format: uuid}
         queue_routed_at: {type: [string, 'null'], format: date-time}
         read_only_review: {type: boolean, description: A pinned review run using a qualified no-tools adapter; repository_mutation_allowed is false.}
+        run_once: {type: boolean, description: 'Person-requested one-off run. This is ordinary managed work, separate from review and pairing verification.'}
+        instruction: {type: string, maxLength: 262144, description: 'Authoritative one-off task text, available only through authorized run content reads. The request text is retained exactly; empty requests use the saved work-order fallback.'}
         verification_error: {type: string, enum: [verification_unavailable], description: Present only for a verification refused before launch.}
         verification_reason: {type: string, enum: [adapter_unsupported, binding_incomplete, local_binding_missing], description: Bounded cause for verification_unavailable; never vendor diagnostics.}
         capacity_override: {type: string, enum: ['', now]}
@@ -413,6 +415,7 @@ components:
       additionalProperties: false
       required: [facts]
       properties:
+        repository: {type: string, maxLength: 200, description: 'Optional captured repository binding; a changed project source refuses the entire report with 409.'}
         facts:
           type: array
           minItems: 1
@@ -1038,6 +1041,24 @@ components:
         - {$ref: '#/components/schemas/HarnessSession'}
         - type: object
           properties:
+            child_counts:
+              description: 'Server counts of visible descendants through legacy and verified cross-project lineage, independent of list pagination. Current counts include live and paused sessions, recently ended sessions for ten minutes, and their ancestors; all counts include stopped history. Counts confer no control authority. Project breakdowns are bounded to 200 projects; omitted_projects reports any remaining projects.'
+              type: object
+              required: [current, all, cross_project, omitted_projects]
+              properties:
+                current: {type: integer, minimum: 0}
+                all: {type: integer, minimum: 0}
+                omitted_projects: {type: integer, minimum: 0}
+                cross_project:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [project_key, current, all]
+                    properties:
+                      project_key: {type: string}
+                      current: {type: integer, minimum: 0}
+                      all: {type: integer, minimum: 0}
             can_reparent: {type: boolean, description: Caller may move this live session or select it as a lead; read-time hint rechecked on writes. Omitted in event snapshots.}
             handed_over_to_id: {type: string, format: uuid, description: Successor coordinator; omitted without a handover.}
             adopted_from_id: {type: string, format: uuid, description: Previous lead from which this child was adopted; omitted after a manual move clears the lineage.}
@@ -1314,6 +1335,21 @@ components:
       type: object
       description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.
       properties:
+        run_once:
+          type: object
+          required: [instruction, repository_mutation_allowed, request_digest]
+          properties:
+            instruction: {type: string, maxLength: 262144}
+            repository_mutation_allowed: {type: boolean}
+            request_digest: {type: string, pattern: '^[a-f0-9]{64}$', description: 'Immutable digest of the selected context and exact request options. Content reads only.'}
+            ticket:
+              type: object
+              description: 'Server-bound launch identity and revision. Successful settlement may close this leaf only while it is unchanged and current status permissions and Done checks pass. Historical runs may omit this binding.'
+              required: [id, state, updated_at]
+              properties:
+                id: {type: string, format: uuid}
+                state: {type: string}
+                updated_at: {type: string, format: date-time}
         preference_of: {type: object, required: [person, source], properties: {person: {type: [string, 'null'], format: uuid}, source: {type: string}}}
         column: {type: string}
         situation: {type: string, enum: [first, fix, stuck, small, review], description: "Models row or selected situation; small is the First build matrix override and review selects the author kind's review order."}
@@ -1697,6 +1733,7 @@ components:
         answer: {$ref: '#/components/schemas/QuestionAnswer'}
         pending: {type: array, items: {$ref: '#/components/schemas/QuestionPending'}}
         outcomes: {type: array, items: {$ref: '#/components/schemas/QuestionOutcomeAvailability'}}
+        reminder: {$ref: '#/components/schemas/QuestionReminder'}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     QuestionAnswer:
@@ -1764,6 +1801,7 @@ components:
       required: [request_id, question, options, meanwhile]
       properties:
         request_id: {type: string, format: uuid}
+        remind_after_seconds: {type: integer, minimum: 0, maximum: 2592000, description: 'Repeat a reminder while unanswered after this interval. Zero disables reminders; omitted uses the workspace default when a fresh question is created. Joining an existing question preserves its reminder schedule.'}
         question: {type: string, minLength: 1, maxLength: 2000}
         context: {type: string, maxLength: 16000}
         findings: {type: string, maxLength: 8000}
@@ -1826,7 +1864,20 @@ components:
         receipt_failure: {type: string}
         picked_up_at: {type: string, format: date-time, description: 'First inbox pickup of this answer. Receipt confirmation remains separate; retries retain the same message and answer identities.'}
         delivery_session_id: {type: string, format: uuid, description: Exact original generation or verified successor.}
+        delivery: {$ref: '#/components/schemas/QuestionDelivery'}
         doctrine_state: {type: string, description: Current referenced proposal state; delivered does not mean the draft is still pending.}
+    QuestionDelivery:
+      type: object
+      description: "Content-free delivery truth for the memo. Dispatch and daemon pickup alone never prove live input delivery. The inbox remains the durable record; related-session FYIs require no action."
+      required: [state, successor]
+      properties:
+        state: {type: string, enum: [decided-grace, sent, seen, inbox, successor, failed]}
+        session_id: {type: string, format: uuid}
+        session_label: {type: string}
+        delivered_at: {type: string, format: date-time, description: "Native write acknowledgement or confirmed managed input handoff; never queue acceptance."}
+        seen_at: {type: string, format: date-time, description: "Correlated native turn evidence or the managed receiver confirmation; not proof of comprehension or completed work."}
+        successor: {type: boolean, description: "True only when routed to a verified successor of the asking session."}
+        failure_reason: {type: string}
     QuestionReuse:
       type: object
       description: Immutable per-asker provenance retained when the answer is later corrected. The active source decision reuse_count increments once per new membership, never on replay or delivery retry.
@@ -1934,7 +1985,7 @@ components:
       required: [kind]
       properties:
         kind: {type: string, enum: [time, event]}
-        rrule: {type: string, maxLength: 256, description: 'Time only. FREQ=DAILY, FREQ=WEEKLY with optional BYDAY=MO,TU,WE,TH,FR,SA,SU, or FREQ=MONTHLY with optional BYMONTHDAY=-31..-1,1..31 and INTERVAL=1,2,3,6 (default 1). Monthly intervals step from the month of start_date. INTERVAL is rejected for DAILY and WEEKLY. Unspecified days derive from start_date. Other RFC 5545 parts are rejected.'}
+        rrule: {type: string, maxLength: 256, description: 'Time only. FREQ=MINUTELY with INTERVAL=1..1440 or FREQ=HOURLY with INTERVAL=1..168 uses elapsed intervals anchored to start_date and time_of_day in timezone, including across DST; the anchor must exist. FREQ=DAILY, FREQ=WEEKLY with optional BYDAY=MO,TU,WE,TH,FR,SA,SU, or FREQ=MONTHLY with optional BYMONTHDAY=-31..-1,1..31 and INTERVAL=1,2,3,6 (default 1) keeps calendar timing. Monthly intervals step from the month of start_date. INTERVAL is rejected for DAILY and WEEKLY. Unspecified days derive from start_date. Other RFC 5545 parts are rejected.'}
         time_of_day: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$', description: Time only; HH:MM wall time.}
         timezone: {type: string, maxLength: 128, description: Time only; IANA timezone or UTC.}
         start_date: {type: string, format: date, description: Time only; defaults to today's date in the selected timezone. Inclusive earliest local date.}

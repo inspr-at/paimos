@@ -450,32 +450,53 @@ func TestNativeControlsPreserveMonotonicAuthorization(t *testing.T) {
 // resume while the original conversation writer is still unconfirmed.
 func TestNativeAfterExitPinsIdentityAndWaitsForObservedExit(t *testing.T) {
 	before := attachObservation{Process: attachwatch.Process{PID: 99, UID: os.Geteuid(), Started: "original"}}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	tick := make(chan time.Time)
-	observed := make(chan struct{})
+	waiting := make(chan struct{})
 	var calls atomic.Int32
 	exited := atomic.Bool{}
 	done := make(chan error, 1)
 	go func() {
-		done <- waitNativeExit(t.Context(), before, func(int) (attachObservation, error) {
-			if calls.Add(1) == 1 {
-				close(observed)
-			}
+		done <- waitNativeExit(ctx, before, func(int) (attachObservation, error) {
+			calls.Add(1)
 			if exited.Load() {
 				return attachObservation{}, errAttachExited
 			}
 			return before, nil
-		}, func() <-chan time.Time { return tick })
+		}, func() <-chan time.Time {
+			// The first live observation has returned. Signalling inside observe
+			// allowed exit to win that read and strand the test's tick sender.
+			close(waiting)
+			return tick
+		})
 	}()
-	<-observed
+	select {
+	case <-waiting:
+	case <-ctx.Done():
+		t.Fatal("exit watcher did not reach the injected wait", ctx.Err())
+	}
 	select {
 	case err := <-done:
 		t.Fatal("resumed before exit", err)
 	default:
 	}
 	exited.Store(true)
-	tick <- time.Now()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	select {
+	case tick <- time.Now():
+	case <-ctx.Done():
+		t.Fatal("exit watcher did not accept the injected tick", ctx.Err())
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("exit watcher did not confirm exit", ctx.Err())
+	}
+	if calls.Load() != 2 {
+		t.Fatal("exit was not confirmed by a second observation", calls.Load())
 	}
 	for _, state := range []string{"reused", "unreadable"} {
 		observe := func(int) (attachObservation, error) {

@@ -2,6 +2,9 @@
 // AEON-1005 (AEON-994 package 5): Delivery › Flow lanes. Risks: zooming, panning or
 // moving the time moves a control or a lane; a click moves the time; the playhead
 // cannot be dragged or stepped; wheel input hijacks the page's vertical scroll.
+// AEON-1656: concurrent builders pile on top of each other in a lane's last row; the axis or
+// the playhead stay at the old height; "+N more" does not expand in place; a live update
+// moves the bar under the pointer.
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
@@ -12,16 +15,17 @@ import { mockFlow, RUN, ZONE } from './delivery-flow-fixtures'
 // The recorded runs are 8 Oct 2026 in Vienna; their clock reads the same everywhere.
 test.use({ timezoneId: ZONE })
 
-async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en' | 'de' } = {}) {
+async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en' | 'de'; burst?: number; live?: boolean } = {}) {
   const work = fixtures()
   work.preferences.theme = { choice: options.theme ?? 'light' }
   work.preferences['delivery:numbers'] = { level: 'simple', window: 7 }
-  await mockWork(page, work)
+  // `live`: hints travel on the real flow EventSource, so a test can push an update.
+  await mockWork(page, work, options.live ? { nativeEvents: true } : {})
   if (options.lang === 'de') { const data = settingsData(); data.profile.locale = 'de-AT'; await mockSettings(page, data) }
   await mockDelivery(page, async () => ({ status: 200, body: deliveryMetrics() }), ['delivery.read'])
   // The recorded runs of release 126 at 20:25 (AEON-1135: Flow never shows sample data), with the
   // one-minute merge of #935 so ops has a "+N" sliver cluster at Fit all.
-  await mockFlow(page, { merge: true })
+  return mockFlow(page, { merge: true, burst: options.burst })
 }
 const lanes = (page: Page) => page.getByTestId('flow-lanes')
 const overview = (page: Page) => page.getByTestId('flow-overview')
@@ -344,3 +348,145 @@ for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'],
     await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-994-p5-lanes/flow-lanes-${width}-${theme}-${lang}.png`) })
   })
 }
+
+// ---------- AEON-1656: lanes grow instead of stacking ----------
+type Box = { x: number; y: number; w: number; h: number }
+/** Lane boxes by lane, every drawn bar of a lane (one box per step), and the frame's own parts, relative to the stage (page scroll does not count). */
+async function stage(page: Page) {
+  return lanes(page).evaluate(host => {
+    const origin = host.getBoundingClientRect()
+    const box = (el: Element) => { const r = el.getBoundingClientRect(); return { x: r.x - origin.x, y: r.y - origin.y, w: r.width, h: r.height } }
+    const laneBoxes: Record<string, { x: number; y: number; w: number; h: number }> = {}
+    for (const el of host.querySelectorAll('.ln-lane')) laneBoxes[el.getAttribute('data-lane')!] = box(el)
+    const bars = Array.from(host.querySelectorAll('[data-step]')).map(g => {
+      const rects = Array.from(g.querySelectorAll('.fl-seg')).map(box)
+      const x = Math.min(...rects.map(r => r.x)), y = Math.min(...rects.map(r => r.y))
+      return { key: g.getAttribute('data-step')!, x, y, w: Math.max(...rects.map(r => r.x + r.w)) - x, h: Math.max(...rects.map(r => r.y + r.h)) - y }
+    })
+    const label = Array.from(host.querySelectorAll('.fl-lab')).map(box)
+    const axis = Array.from(host.querySelectorAll('.fl-axis')).map(box)
+    return { host: box(host), svg: box(host.querySelector(':scope > svg')!), lanes: laneBoxes, bars, label, axis, playhead: box(host.querySelector('.ln-ph')!) }
+  })
+}
+const inside = (bar: Box, lane: Box) => bar.y >= lane.y - 0.5 && bar.y + bar.h <= lane.y + lane.h + 0.5
+/** Pairs of bars drawn on top of each other: more than 2 px overlap both across and down. */
+function stacked(bars: (Box & { key: string })[]): string[] {
+  const out: string[] = []
+  for (let i = 0; i < bars.length; i++) for (let j = i + 1; j < bars.length; j++) {
+    const a = bars[i]!, b = bars[j]!
+    const across = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x), down = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
+    if (across > 2 && down > 2) out.push(`${a.key} × ${b.key}`)
+  }
+  return out
+}
+
+for (const [width, theme] of [[1440, 'light'], [1440, 'dark'], [1024, 'light'], [1024, 'dark'], [390, 'light'], [390, 'dark']] as const) {
+  test(`ten concurrent builders grow the Builder lane at ${width} ${theme}, never one bar on another`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1100 })
+    await setup(page, { theme, burst: 10 })
+    await page.goto('/p/AEON/delivery?view=flow')
+    await expect(lanes(page).locator('.ln-lane')).toHaveCount(6)
+    // Ten builders from 20:00 beside 993's: eleven builders at once, and 991's fix after them, are twelve rows.
+    const s = await stage(page)
+    const build = s.lanes.build!, ci = s.lanes.ci!
+    const builders = s.bars.filter(bar => inside(bar, build) && bar.h > 0)
+    expect(builders.length).toBeGreaterThanOrEqual(11)
+    expect(new Set(builders.map(bar => Math.round(bar.y))).size).toBeGreaterThanOrEqual(11)
+    expect(stacked(builders)).toEqual([])
+    expect(stacked(s.bars.filter(bar => Object.values(s.lanes).some(lane => inside(bar, lane))))).toEqual([])
+    // Twelve rows fit under the cap: no "+N more".
+    await expect(lanes(page).getByTestId('flow-lane-fold')).toHaveCount(0)
+    // Lanes stack without a gap or an overlap, and every bar sits inside a lane.
+    const order = ['you', 'lead', 'ops', 'review', 'build', 'ci'].map(lane => s.lanes[lane]!)
+    for (let i = 1; i < order.length; i++) expect(Math.abs(order[i]!.y - order[i - 1]!.y - order[i - 1]!.h)).toBeLessThanOrEqual(0.5)
+    expect(s.bars.filter(bar => bar.h > 0 && !Object.values(s.lanes).some(lane => inside(bar, lane)))).toEqual([])
+    expect(build.h).toBeGreaterThanOrEqual(12 * 15)
+    // The frame grew with the lanes: the stage, the axis and the playhead end below the last lane.
+    expect(Math.abs(s.host.h - s.svg.h)).toBeLessThanOrEqual(0.5)
+    expect(s.svg.y + s.svg.h).toBeGreaterThan(ci.y + ci.h + 20)
+    for (const tick of s.axis) expect(tick.y).toBeGreaterThanOrEqual(ci.y + ci.h)
+    expect(s.playhead.y + s.playhead.h).toBeGreaterThanOrEqual(ci.y + ci.h)
+    // Each lane label sits in its lane's first row.
+    order.forEach((lane, i) => { const label = s.label[i]!; expect(label.y).toBeGreaterThanOrEqual(lane.y - 0.5); expect(label.y + label.h).toBeLessThanOrEqual(lane.y + Math.min(lane.h, 36) + 0.5) })
+    // Zooming keeps the grown lanes and every control in place.
+    const zoom = page.getByTestId('flow-bar').getByRole('radiogroup', { name: 'Zoom' })
+    const guard = await controlStability(page, { fit: zoom.getByRole('radio', { name: 'Fit all' }), z60: zoom.getByRole('radio', { name: '1 h' }), overview: overview(page), lanes: lanes(page) })
+    await guard.check(() => zoom.getByRole('radio', { name: '1 h' }).click())
+    await guard.check(() => zoom.getByRole('radio', { name: 'Fit all' }).click())
+    guard.done()
+    expect(stacked((await stage(page)).bars.filter(bar => inside(bar, build)))).toEqual([])
+    await guard.check(() => zoom.getByRole('radio', { name: '30 min' }).click())
+    await page.mouse.move(0, 0)
+    await lanes(page).evaluate(el => el.scrollIntoView({ block: 'start' }))
+    await lanes(page).screenshot({ path: info.outputPath(`aeon-1656/flow-lanes-burst-${width}-${theme}.png`) })
+  })
+}
+
+test('above twelve rows a lane folds into "+N more" and expands in place, by pointer or keyboard', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  await setup(page, { burst: 14 })
+  await page.goto('/p/AEON/delivery?view=flow')
+  // Sixteen rows: eleven rows of bars and one "+5 more" row (four builders and 991's fix).
+  const fold = lanes(page).getByTestId('flow-lane-fold')
+  await expect(fold).toHaveCount(1)
+  await expect(fold).toHaveText('+5 more')
+  await expect(fold).toHaveAttribute('aria-expanded', 'false')
+  await expect(fold).toHaveAccessibleName('Builder (agent): +5 more, show every row')
+  const before = await stage(page)
+  const rowH = (before.lanes.build!.h - 4) / 12
+  expect(stacked(before.bars)).toEqual([])
+  const zoom = page.getByTestId('flow-bar').getByRole('radiogroup', { name: 'Zoom' })
+  const guard = await controlStability(page, { fit: zoom.getByRole('radio', { name: 'Fit all' }), follow: page.getByTestId('flow-follow'), overview: overview(page), readout: page.getByTestId('flow-readout') })
+  await guard.check(() => fold.click())
+  await expect(fold).toHaveText('fewer')
+  await expect(fold).toHaveAttribute('aria-expanded', 'true')
+  const open = await stage(page)
+  // In place: the lanes above and the Builder lane's top stay; it grows down by five rows; nothing stacks.
+  for (const lane of ['you', 'lead', 'ops', 'review']) expect(open.lanes[lane]).toEqual(before.lanes[lane])
+  expect(Math.abs(open.lanes.build!.y - before.lanes.build!.y)).toBeLessThanOrEqual(0.5)
+  expect(Math.abs(open.lanes.build!.h - before.lanes.build!.h - 5 * rowH)).toBeLessThanOrEqual(0.5)
+  expect(stacked(open.bars)).toEqual([])
+  expect(open.bars.filter(bar => inside(bar, open.lanes.build!)).length).toBeGreaterThan(before.bars.filter(bar => inside(bar, before.lanes.build!)).length)
+  await lanes(page).screenshot({ path: info.outputPath('aeon-1656/flow-lanes-fold-open-1440-light.png') })
+  // "fewer" folds it back; the keyboard reaches the same control.
+  await guard.check(() => fold.click())
+  await expect(fold).toHaveText('+5 more')
+  expect((await stage(page)).lanes.build).toEqual(before.lanes.build)
+  await fold.focus()
+  await guard.check(() => page.keyboard.press('Enter'))
+  await expect(fold).toHaveAttribute('aria-expanded', 'true')
+  guard.done()
+})
+
+test('a live update grows the Builder lane only once the pointer has left, never under it', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  const flow = await setup(page, { burst: 6, live: true })
+  await page.goto('/p/AEON/delivery?view=flow')
+  await expect(lanes(page).locator('.ln-lane')).toHaveCount(6)
+  const hovered = `[data-step="0:${RUN.c991}:5"]`
+  const barBox = () => lanes(page).locator(`${hovered} .fl-seg`).first().boundingBox()
+  const before = await stage(page)
+  expect(inside(before.bars.find(b => b.key === `0:${RUN.c991}:5`)!, before.lanes.ci!)).toBe(true)
+  const bar = (await barBox())!
+  await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2)
+  // Three more builders arrive while the pointer rests on 991's checks, below the Builder lane.
+  const reads = flow.reads.filter(r => r.includes('/delivery/flow?')).length
+  flow.setBurst(9)
+  flow.hint('delivery.step', RUN.r126)
+  await expect.poll(() => flow.reads.filter(r => r.includes('/delivery/flow?')).length).toBeGreaterThan(reads)
+  await expect.poll(async () => (await stage(page)).bars.filter(b => inside(b, before.lanes.build!)).length).toBeGreaterThan(before.bars.filter(b => inside(b, before.lanes.build!)).length)
+  const during = await stage(page)
+  expect(during.lanes.build).toEqual(before.lanes.build)
+  expect(during.lanes.ci).toEqual(before.lanes.ci)
+  const still = (await barBox())!
+  for (const k of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(still[k] - bar[k]), k).toBeLessThanOrEqual(0.5)
+  expect(stacked(during.bars.filter(b => inside(b, during.lanes.build!)))).toEqual([])
+  // The pointer leaves for the overview, above the lanes: the Builder lane takes its three new rows.
+  const map = (await overview(page).boundingBox())!
+  await page.mouse.move(map.x + map.width / 2, map.y + 4)
+  await expect.poll(async () => (await stage(page)).lanes.build!.h).toBeGreaterThan(before.lanes.build!.h + 2 * 15)
+  const after = await stage(page)
+  expect(after.lanes.review).toEqual(before.lanes.review)
+  expect(after.lanes.ci!.y).toBeGreaterThan(before.lanes.ci!.y)
+  expect(stacked(after.bars)).toEqual([])
+})

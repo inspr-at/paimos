@@ -144,11 +144,11 @@ for (const width of [1600, 390] as const) {
 }
 
 // The actual shared grid as an across-project host; no test-only product route.
-async function mountGroups(page: Page, folded = false) {
+async function mountGroups(page: Page, folded = false, holdCardFrames = false) {
   await mockWork(page, fixtures())
   await page.goto('/p/PHAROS/tickets')
   await expect(page.locator('tr.ticket-row:not(.ghost)').first()).toBeVisible()
-  await page.evaluate(async folded => {
+  await page.evaluate(async ({ folded, holdCardFrames }) => {
     const vuePath = '/node_modules/.vite/deps/vue.js'
     const tablePath = '/src/components/work/TicketTable.vue'
     const listPath = '/src/lib/ticketList.ts'
@@ -206,9 +206,16 @@ async function mountGroups(page: Page, folded = false) {
       'cell-actions': ({ row }: { row: { id: string } }) => h('button', { class: 'btn sm', type: 'button', onClick: () => { state.rowsById.get(row.id).title = 'Angewendet · Rückgängig' } }, 'Anwenden'),
     }) })
     table._context.provides = (document.querySelector('#app') as unknown as { __vue_app__: { _context: { provides: object } } }).__vue_app__._context.provides
+    const requestFrame = window.requestAnimationFrame.bind(window)
+    const cardFrames: FrameRequestCallback[] = []
+    if (holdCardFrames) window.requestAnimationFrame = callback => -cardFrames.push(callback)
+    const releaseCardFrames = () => {
+      window.requestAnimationFrame = requestFrame
+      for (const callback of cardFrames.splice(0)) requestFrame(callback)
+    }
     table.mount(root)
-    Object.assign(window, { tableGroups: { state, copies, loads, widths } })
-  }, folded)
+    Object.assign(window, { tableGroups: { state, copies, loads, widths, cardFrames, releaseCardFrames } })
+  }, { folded, holdCardFrames })
   await expect(page.locator('#table-host .group-row')).toHaveCount(2)
 }
 
@@ -272,10 +279,24 @@ test('AEON-913: host groups select loaded rows, paginate, link across projects a
 
 test('AEON-913: automatic fitting, saved widths and resize controls preserve host columns', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await mountGroups(page, true)
-  const host = page.locator('#table-host')
+  await mountGroups(page, true, true)
+  const host = page.locator('#table-host'), card = host.locator('.table-card')
   const keyWidth = () => host.getByRole('separator', { name: 'Resize Key column' }).getAttribute('aria-valuenow').then(Number)
-  await expect.poll(keyWidth).toBeGreaterThan(118)
+  // AEON-1641. Risk: a completed fit reports settled while card-width samples
+  // can still change Title's remainder. Hold the frames independently of fit
+  // and fonts, then release the sample window without a timing assumption.
+  try {
+    await page.evaluate(() => document.fonts.ready)
+    await expect.poll(keyWidth).toBeGreaterThan(118)
+    await expect(host.locator('.fit-row')).toHaveCount(0)
+    await expect.poll(() => page.evaluate(() => (window as unknown as { tableGroups: { cardFrames: FrameRequestCallback[] } }).tableGroups.cardFrames.length)).toBeGreaterThan(0)
+    await expect(card).toHaveAttribute('data-card-width-settled', '0')
+    await expect(card).toHaveAttribute('data-columns-settled', '0')
+  } finally {
+    await page.evaluate(() => (window as unknown as { tableGroups: { releaseCardFrames: () => void } }).tableGroups.releaseCardFrames())
+  }
+  await expect(card).toHaveAttribute('data-card-width-settled', '1')
+  await expect(card).toHaveAttribute('data-columns-settled', '1')
   const foldedKeyWidth = await keyWidth()
   await host.getByRole('button', { name: 'Expand AEON' }).click()
   expect(await keyWidth()).toBe(foldedKeyWidth)

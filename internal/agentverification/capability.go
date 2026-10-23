@@ -10,6 +10,27 @@ type Capability struct {
 	Reason    string `json:"reason"`
 }
 
+const RunOncePolicyHeader = "X-Aeon-Run-Once-Policy"
+const RunOncePolicy = "run_once_v1"
+
+// ReadOnlyRunFor qualifies ordinary one-off work separately from verification
+// and review. Claude's empty tool inventory, deny hooks, isolated settings and
+// external scratch directory are shared enforcement, not a reviewer grant.
+func ReadOnlyRunFor(harness string) Capability {
+	if harness == "claude" {
+		return Capability{true, "no_tools", ""}
+	}
+	if harness == "grok" {
+		return Capability{false, "unavailable", "Grok's qualified probe does not qualify ordinary one-off work."}
+	}
+	c := For(harness, "", "")
+	if c.Reason == "" {
+		c.Reason = "This harness has no qualified read-only one-off adapter."
+	}
+	c.Supported, c.Policy = false, "unavailable"
+	return c
+}
+
 // For returns qualification, not vendor feature discovery. Changing a false
 // result requires pre-start enforcement evidence, including hooks and inherited
 // tools, while retaining the approved vendor sign-in. Fake protocol success

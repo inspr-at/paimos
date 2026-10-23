@@ -20,6 +20,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/deploytarget"
@@ -191,7 +192,7 @@ func (r *Remote) Identity(ctx context.Context) (string, string, error) {
 
 func (r *Remote) Queued(ctx context.Context) ([]Run, error) {
 	var runs []Run
-	err := r.Client.DoWithHeaders(ctx, "GET", "/api/runs/queued?limit=100", nil, &runs, r.ledgerHeaders(map[string]string{reviewgate.PolicyHeader: reviewgate.Policy, db.RunCapabilityPolicyHeader: db.RunCapabilityPolicy}))
+	err := r.Client.DoWithHeaders(ctx, "GET", "/api/runs/queued?limit=100", nil, &runs, r.ledgerHeaders(map[string]string{agentverification.RunOncePolicyHeader: agentverification.RunOncePolicy, reviewgate.PolicyHeader: reviewgate.Policy, db.RunCapabilityPolicyHeader: db.RunCapabilityPolicy}))
 	return runs, err
 }
 
@@ -507,7 +508,7 @@ func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, 
 	if routine != nil {
 		body["routine"] = routine
 	}
-	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", body, nil, r.ledgerHeaders(map[string]string{reviewgate.PolicyHeader: reviewgate.Policy}))
+	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", body, nil, r.ledgerHeaders(map[string]string{agentverification.RunOncePolicyHeader: agentverification.RunOncePolicy, reviewgate.PolicyHeader: reviewgate.Policy}))
 	return err
 }
 

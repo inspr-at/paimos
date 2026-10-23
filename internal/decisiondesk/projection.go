@@ -210,7 +210,9 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
  FROM person_request_details
 ), visible AS MATERIALIZED (
  SELECT *,(SELECT jsonb_build_object('project_key',project_key,'pending_count',pending_count) FROM definition_changes WHERE id=items.id AND items.kind='definition_change') AS definition_change,
- (SELECT step FROM person_request_details WHERE (step->>'id')::uuid=items.id AND items.kind='action_request') AS person_step,CASE WHEN held AND kind IN ('approval','stepup') THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,
+ (SELECT step FROM person_request_details WHERE (step->>'id')::uuid=items.id AND items.kind='action_request') AS person_step,CASE WHEN held AND kind IN ('approval','stepup') THEN 0
+ WHEN kind='question' AND EXISTS(SELECT 1 FROM desk_question_reminders r WHERE r.tenant_id=$1 AND r.question_id=items.id AND r.last_at IS NOT NULL) THEN 1
+ WHEN held THEN 1 ELSE 2 END AS bucket,
  CASE WHEN held AND kind IN ('approval','stepup') THEN expires_at ELSE created_at END AS order_at
  FROM (
  SELECT * FROM questions WHERE project_id=ANY($5::uuid[]) AND (NOT $16 OR project_id=ANY($20::uuid[]))

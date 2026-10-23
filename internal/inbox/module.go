@@ -33,6 +33,7 @@ type module struct {
 	pool       *pgxpool.Pool
 	heartbeat  time.Duration
 	waitNotify func(context.Context, db.NotificationListener, string, time.Time) error
+	laneClock  func(context.Context, pgx.Tx) (time.Time, error)
 }
 
 // New returns the inbox HTTP module. See the package doc for coordinator wiring.
@@ -59,6 +60,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/inbox/targets", m.handleCreateTarget)
 	mux.HandleFunc("DELETE /api/inbox/targets/{targetId}", m.handleDeleteTarget)
 	mux.HandleFunc("GET /api/inbox/message-status", m.handleMessageStatus)
+	mux.HandleFunc("GET /api/inbox/lanes", m.handleLanes)
 	mux.HandleFunc("GET /api/inbox/feedback-recipient", m.handleFeedbackRecipient)
 	mux.HandleFunc("GET /api/settings/inbox-delivery", m.handleGetDeliverySettings)
 	mux.HandleFunc("PUT /api/settings/inbox-delivery", m.handlePutDeliverySettings)

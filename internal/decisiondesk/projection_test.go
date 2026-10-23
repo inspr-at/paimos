@@ -306,6 +306,30 @@ func (f *fixture) page(t *testing.T, p tenant.Principal, limit int, after *curso
 }
 
 func TestMixedOrderCountsFanInAndKeyset(t *testing.T) {
+	t.Run("unanswered reminder resurfaces once", func(t *testing.T) {
+		f := setup(t)
+		older := f.ask(t, f.project, "carries_on", nil)
+		reminded := f.ask(t, f.project, "carries_on", nil)
+		before := f.page(t, f.person, 100, nil)
+		if len(before.Items) != 2 || before.Items[0].ID != older.ID || before.Items[1].ID != reminded.ID || before.Items[1].Bucket != 2 {
+			t.Fatalf("initial desk order: %+v", before)
+		}
+		f.exec(t, `INSERT INTO desk_reminder_settings(tenant_id,default_after_seconds,time_zone,quiet_start,quiet_end,revision) VALUES($1,7200,'UTC',0,0,1)`, f.person.TenantID)
+		f.exec(t, `UPDATE desk_question_reminders SET next_at=clock_timestamp()-interval '1 second' WHERE question_id=$1`, reminded.ID)
+		dispatcher := questions.New(f.d.App)
+		if _, err := dispatcher.DispatchTenant(t.Context(), f.person.TenantID); err != nil {
+			t.Fatal(err)
+		}
+		after := f.page(t, f.person, 100, nil)
+		if len(after.Items) != 2 || after.Items[0].ID != reminded.ID || after.Items[0].Bucket != 1 || after.Items[0].Revision != reminded.Revision || after.Items[0].Held || after.Counts.Held != 0 {
+			t.Fatalf("reminder duplicated, changed authority or did not resurface: %+v", after)
+		}
+		f.decide(t, reminded, "Proceed")
+		answered := f.page(t, f.person, 100, nil)
+		if len(answered.Items) != 1 || answered.Items[0].ID != older.ID {
+			t.Fatalf("answered reminder remained in Desk: %+v", answered)
+		}
+	})
 	f := setup(t)
 	normal := f.ask(t, f.project, "carries_on", []string{f.ticket})
 	labelOnly := f.ask(t, f.project, "parked", nil)
