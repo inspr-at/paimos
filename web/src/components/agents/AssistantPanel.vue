@@ -18,7 +18,7 @@ import KeyCap from '../KeyCap.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import HarnessMark from './HarnessMark.vue'
 import AssistantBudget from './AssistantBudget.vue'
-const props = defineProps<{ item: Assistant; facts: AssistantFacts; now: number; docked: boolean; sheet: boolean; layout: PanelLayout }>()
+const props = defineProps<{ item: Assistant; facts: AssistantFacts; now: number; docked: boolean; sheet: boolean; layout: PanelLayout; sidebarAvailable: boolean }>()
 const emit = defineEmits<{ close: []; layout: [layout: PanelLayout] }>()
 const store = useAssistants(), session = useSession(), projects = useProjects(), words = assistantCopy()
 const tabs = ['overview', 'approvals', 'routines', 'policy', 'activity'] as const
@@ -40,7 +40,7 @@ const statusLine = computed(() => {
   if (status.value === 'idle') return props.facts.lastActivity ? words.lastActive(relativeTime(props.facts.lastActivity.at, props.now)) : words.notReported
   if (status.value === 'paused') return props.facts.paused ? words.pausedBy(props.facts.paused.by, time(props.facts.paused.at)) : props.facts.spend?.resumes ? words.resumes(props.facts.spend.resumes) : words.budgetReached
   if (status.value === 'setup') return words.connectVendor(vendor.value)
-  if (status.value === 'down') return [props.facts.adapter?.lastReceipt ? words.noReceipt(vendor.value, relativeTime(props.facts.adapter.lastReceipt, props.now)) : words.notReported, props.facts.adapter?.error].filter(Boolean).join(' · ')
+  if (status.value === 'down') return [props.facts.adapter?.lastReceipt ? words.noReceipt(vendor.value, relativeTime(props.facts.adapter.lastReceipt, props.now).replace(/ ago$/, '')) : words.notReported, props.facts.adapter?.error].filter(Boolean).join(' · ')
   return words.statusUnavailable
 })
 const history = computed(() => store.events.filter(event => (event.after?.principal_id ?? event.before?.principal_id) === props.item.principal_id).sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || b.id - a.id))
@@ -52,7 +52,7 @@ const displayPolicy = computed(() => editing.value && draft.value ? draft.value 
 const dirty = computed(() => editing.value && JSON.stringify(draft.value) !== JSON.stringify(original.value?.policy))
 const budgetValid = computed(() => !!draft.value && /^(0|[1-9][0-9]{0,11})(\.[0-9]{1,6})?$/.test(draft.value.weekly_budget.amount))
 const scopeOptions = computed(() => [
-  { label: words.readTickets, scopes: ['nodes.read'] }, { label: words.writeTickets, scopes: ['nodes.write'] },
+  { label: words.readTickets, scopes: ['nodes.read'] }, { label: words.writeTicketsOnly, scopes: ['nodes.write'] },
   { label: words.readKnowledge, scopes: ['knowledge.read'] }, { label: words.writeKnowledge, scopes: ['knowledge.write'] },
   { label: words.readInbox, scopes: ['inbox.read', 'inbox.receipt'] }, { label: words.messagePeople, scopes: ['inbox.send'] },
 ])
@@ -124,7 +124,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 <template>
   <aside ref="root" class="session-panel assistant-panel" :class="{ docked, sheet, full: layout === 'full', wide: layout === 'wide' }" :aria-label="words.details" tabindex="-1" @keydown="panelKey">
     <header class="assistant-panel-head">
-      <div class="assistant-panel-title"><HarnessMark :harness="item.vendor" :size="16" /><h2>{{ item.display_name }}<small>{{ vendor }}</small></h2><button type="button" class="icon-btn flat assistant-close" :aria-label="words.close" @click="emit('close')"><AppIcon name="close" /></button></div>
+      <div class="assistant-panel-title"><HarnessMark :harness="item.vendor" :size="16" /><h2>{{ item.display_name }}<small>{{ vendor }}</small></h2><button v-if="sidebarAvailable" type="button" class="icon-btn flat assistant-layout" :aria-label="words.sessionsList" :aria-pressed="layout === 'side'" @click="emit('layout', layout === 'side' ? 'wide' : 'side')"><AppIcon :name="layout === 'side' ? 'layout-focus' : 'layout-list'" /></button><button type="button" class="icon-btn flat assistant-layout" :aria-label="words.fullScreen" :aria-pressed="layout === 'full'" @click="emit('layout', layout === 'full' ? 'side' : 'full')"><AppIcon :name="layout === 'full' ? 'collapse' : 'expand'" /></button><button type="button" class="icon-btn flat assistant-close" :aria-label="words.close" aria-keyshortcuts="Escape" @click="emit('close')"><AppIcon name="close" /></button></div>
       <p class="panel-status" :class="{ down: status === 'down' }"><AppIcon :name="ASSISTANT_STATUS_ICON[status]" />{{ statusWord }}</p>
       <p class="panel-status-line">{{ statusLine }}</p>
       <div class="assistant-actions"><span v-if="!assistantCapabilities.pause" class="unavailable-action">{{ words.pauseUnavailable }}</span><button v-if="mayEdit" type="button" class="icon-btn flat" :aria-label="words.more" aria-haspopup="menu" :aria-expanded="!!menuAnchor" @click="menuAnchor = menuAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon name="more" /></button></div>
@@ -163,7 +163,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
     </div>
     <footer class="assistant-save-bar">
       <p class="save-feedback" :class="{ 'assistant-error': failed }" role="status">{{ feedback || (editing ? words.draft : '') }}</p>
-      <div v-if="editing && mayEdit" class="save-actions"><button type="button" class="btn" :disabled="pending" @click="cancelEdit">{{ words.cancel }}<KeyCap k="Esc" /></button><button type="button" class="btn primary assistant-save" :disabled="pending || !dirty || !budgetValid" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" @click="save"><span class="save-label"><span>{{ pending ? words.saving : words.save }}</span><span aria-hidden="true">{{ words.saving }}</span></span><KeyCap k="mod" /><KeyCap k="enter" /></button></div>
+      <div v-if="editing && mayEdit" class="save-actions"><button type="button" class="btn" :disabled="pending" @click="cancelEdit">{{ words.cancel }}</button><button type="button" class="btn primary assistant-save" :disabled="pending || !dirty || !budgetValid" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" @click="save"><span class="save-label"><span>{{ pending ? words.saving : words.save }}</span><span aria-hidden="true">{{ words.saving }}</span></span><KeyCap k="mod" /><KeyCap k="enter" /></button></div>
     </footer>
   </aside>
 </template>
@@ -224,5 +224,6 @@ dt { color: var(--ink-2); } dd { margin: 0; overflow-wrap: anywhere; }
   .assistant-panel, .assistant-panel.sheet, .assistant-panel.docked { position: fixed; z-index: 40; inset: var(--vv-top, 0px) 0 auto; width: 100%; height: var(--vv-h, 100dvh); border: 0; border-radius: 0; padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); }
   .assistant-panel-head { padding-inline: 12px; }.assistant-tabs { margin-inline: -4px; }
   .assistant-block, .assistant-activity { padding-inline: 16px; }
+  .assistant-layout { display: none; }
 }
 </style>

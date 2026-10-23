@@ -92,5 +92,6 @@ export function assistantCopy(language: DisplayLanguage = displayLanguage()) {
     pausedBy: (name: string, time: string) => de ? `Pausiert von ${name} um ${time}` : `Paused by ${name} at ${time}`,
     connectVendor: (vendor: string) => de ? `${vendor} verbinden, um zu starten` : `Connect ${vendor} to start`,
     more: de ? 'Weitere Assistentenaktionen' : 'More assistant actions',
+    sessionsList: de ? 'Sitzungsliste' : 'Sessions list', fullScreen: de ? 'Vollbild' : 'Full screen',
   }
 }

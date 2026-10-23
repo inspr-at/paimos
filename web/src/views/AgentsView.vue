@@ -226,7 +226,7 @@ watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, 
 const ticketPeek = inject(TICKET_PEEK, null)
 const ticketPeekOpen = computed(() => !!ticketPeek?.openKey.value)
 const sessionId = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : '')
-const assistantId = computed(() => typeof route.query.assistant === 'string' && /^[0-9a-f-]{36}$/i.test(route.query.assistant) ? route.query.assistant : '')
+const assistantId = computed(() => !sessionId.value && typeof route.query.assistant === 'string' && /^[0-9a-f-]{36}$/i.test(route.query.assistant) ? route.query.assistant : '')
 const selectedAssistant = computed(() => assistants.items.find(item => item.principal_id === assistantId.value))
 const selected = computed(() => [...sessionViews.value, ...sessionHistory.value].find(v => v.session.id === sessionId.value))
 // AEON-1196 r7: the handle is the list's width, never a global panel width.
@@ -325,7 +325,7 @@ async function cycleLayout() {
   const next = nextPreset.value
   if (next === 'list') { await closePanel(); return }
   rememberHandle(next === 'focus' ? FOCUS_WIDTH : workWidth.value - DIVIDER - OVERVIEW_DETAILS)
-  if (!sessionId.value) {
+  if (!sessionId.value && !assistantId.value) {
     const visible = rows().filter(row => row.dataset.row?.startsWith('s:'))
     const row = visible.find(row => row.dataset.row === `s:${lastSession}`) ?? visible.find(row => row.dataset.row === cursor.value) ?? visible[0]
     if (row?.dataset.row) openSession(row.dataset.row.slice(2))
@@ -359,8 +359,14 @@ function moveHandle(width: number) { rememberHandle(width); announce(`List width
 watch(person, (_next, previous) => {
   layoutWrite++; pendingHandle.value = null
   drag = null; dragWidth.value = null; rowAnchor = null; lastSession = ''; openedFromList = false; cursor.value = ''
-  if (previous && sessionId.value) void router.replace({ path: '/agents', query: {} })
+  if (previous && (sessionId.value || assistantId.value)) void router.replace({ path: '/agents', query: {} })
 })
+watch([assistantId, () => !!selectedAssistant.value, canSplit], async ([id, found, fits]) => {
+  if (!id || !found || !fits) return
+  const owner = person.value
+  await nextTick()
+  if (id === assistantId.value && owner === person.value && split.value) ensureWorkTop()
+}, { flush: 'post' })
 watch([sessionId, canSplit, () => agents.loaded], async ([id, fits, loaded], previous) => {
   if (!id || !fits || !loaded) return
   const owner = person.value
@@ -787,7 +793,7 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
           v-if="sessionId && !assistantId && agents.loaded && !ticketPeekOpen" :view="selected" :loading="!selected && (agents.historyState === 'loading' || (agents.historyState === 'ready' && agents.historyMore))" :now="agents.now" :can-write="writable" :control-block="controlBlock" :docked="split || panelOnly" :sheet="!canSplit" :layout="panelLayout" :sidebar-available="canSplit"
           @close="closePanel" @control="control" @review="review" @layout="setPanelLayout" @auto-layout="setPanelLayout($event, false)"
         />
-        <AssistantPanel v-if="selectedAssistant && !ticketPeekOpen" :item="selectedAssistant" :facts="assistants.facts[selectedAssistant.principal_id] ?? unavailableAssistantFacts()" :now="agents.now" :docked="split || panelOnly" :sheet="!canSplit" :layout="panelLayout" @close="closePanel" @layout="setPanelLayout" />
+        <AssistantPanel v-if="selectedAssistant && !ticketPeekOpen" :item="selectedAssistant" :facts="assistants.facts[selectedAssistant.principal_id] ?? unavailableAssistantFacts()" :now="agents.now" :docked="split || panelOnly" :sheet="!canSplit" :layout="panelLayout" :sidebar-available="canSplit" @close="closePanel" @layout="setPanelLayout" />
       </div>
       <p v-if="panelOpen && (localPanelLayout || preferenceSaves.failed.has(`${person}/agents:panel.layout.${smallPanel ? 'phone' : 'large'}`))" class="layout-error" role="status">The panel layout lasts for this visit until it can be saved.</p>
       <p v-if="layoutSaveFailed" class="layout-error" role="status">The layout could not be saved. It lasts for this visit.</p>

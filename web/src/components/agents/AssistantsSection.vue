@@ -131,10 +131,10 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
   .assistants-head { padding-inline: 4px; }
   .assistant-columns { display: none; }
   .assistant-rows { display: grid; gap: 6px; }
-  .assistant-row { height: 64px; display: block; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius); }
-  .assistant-identity { position: absolute; left: 12px; right: 12px; top: 10px; gap: 7px; }
+  .assistant-row { height: 56px; display: block; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius); }
+  .assistant-identity { position: absolute; left: 12px; right: 12px; top: 8px; gap: 7px; }
   .assistant-name { padding-right: 9em; }
-  .assistant-state { position: absolute; right: 12px; top: 12px; max-width: 48%; font-size: 11px; white-space: nowrap; }
+  .assistant-state { position: absolute; right: 12px; top: 10px; max-width: 48%; font-size: 11px; white-space: nowrap; }
   .assistant-state svg { display: none; }
   .folded-facts, .row-budget, .assistant-glance { display: none; }
   .phone-facts { display: block; font-size: 12px; white-space: nowrap; }
@@ -143,5 +143,10 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
   .assistant-open { display: block; padding: 0; border-radius: var(--radius); }
   .assistant-empty { flex-direction: column; align-items: flex-start; gap: 10px; padding: 12px; }
   .assistant-empty .btn { min-height: 44px; }
+}
+@media (max-width: 520px) {
+  .assistant-row { height: 64px; }
+  .assistant-identity { top: 10px; }
+  .assistant-state { top: 12px; }
 }
 </style>

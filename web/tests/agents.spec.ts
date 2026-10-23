@@ -771,7 +771,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await section.hover()
   const stableRows = await controlStability(page, { amy: section.locator(`[data-assistant="${amy.principal_id}"] .assistant-open`), scout: section.locator('.assistant-row').nth(1).locator('.assistant-open') }, { tolerance: 0 })
   await stableRows.check(async () => {
-    amy.display_name = 'Zamy'
+    amy.display_name = 'Zamy'; amy.revision++
     await page.evaluate(() => window.dispatchEvent(new Event('focus')))
     await expect(section.locator('.assistant-name strong').first()).toHaveText('Zamy')
   })
@@ -779,7 +779,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await page.mouse.move(1, 1)
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(section.locator('.assistant-name strong').first()).toHaveText('Scout')
-  amy.display_name = 'Amy'
+  amy.display_name = 'Amy'; amy.revision++
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(section.locator(`[data-assistant="${amy.principal_id}"] strong`)).toHaveText('Amy')
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
@@ -794,6 +794,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await expect(section.locator('.folded-facts').first()).toBeVisible()
   await shot('1024-light-folded')
   await page.setViewportSize({ width: 1440, height: 1000 })
+  const policyRevision = amy.revision
   await section.getByRole('button', { name: 'Amy · Status unavailable', exact: true }).click()
   const details = page.getByRole('complementary', { name: 'Assistant details', exact: true })
   await expect(details).toBeVisible()
@@ -825,7 +826,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await save.click()
   await expect(details.getByRole('status')).toHaveText('Policy saved')
   expect(writes).toHaveLength(1)
-  expect(writes[0]).toMatchObject({ id: amy.principal_id, body: { expected_revision: 1, policy: { weekly_budget: { amount: '15', unit: 'USD' }, outward_action_rule: 'approval_required', never_ask_person_for_secrets_or_manual_steps: true } } })
+  expect(writes[0]).toMatchObject({ id: amy.principal_id, body: { expected_revision: policyRevision, policy: { weekly_budget: { amount: '15', unit: 'USD' }, outward_action_rule: 'approval_required', never_ask_person_for_secrets_or_manual_steps: true } } })
   expect(events).toHaveLength(1)
   await expect(details.locator('.policy-audit')).toContainText(/Changed by .*: Weekly budget: \$10 → \$15/)
   // A conflicting write must retain the draft and never report a successful save.
@@ -835,7 +836,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await save.click()
   await expect(details.getByRole('status')).toContainText('The policy changed while this draft was open')
   await expect(budget).toHaveValue('20')
-  expect(writes.at(-1)?.body.expected_revision).toBe(2)
+  expect(writes.at(-1)?.body.expected_revision).toBe(policyRevision + 1)
   await details.getByRole('button', { name: /^Cancel/ }).click()
   await details.getByRole('button', { name: 'Close assistant details' }).click()
   await expect(details).toHaveCount(0)
@@ -916,4 +917,18 @@ test('zero assistants show the permission-gated existing connect flow without sa
   expect(items).toHaveLength(1)
   expect(items[0]!.policy.allowed_projects).toEqual([])
   expect(items[0]!.policy.weekly_budget.amount).toBe('0')
+  // Even a principal carrying person-only permission names must use its own
+  // self-policy route and never acquire Policy editing controls as an agent.
+  const self = items[0]!, agentRequests: string[] = []
+  page.on('request', request => { if (new URL(request.url()).pathname.startsWith('/api/assistants')) agentRequests.push(new URL(request.url()).pathname) })
+  await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: self.principal_id, name: self.display_name, kind: 'agent', roles: ['admin'] }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
+  await page.reload()
+  const details = page.getByRole('complementary', { name: 'Assistant details' })
+  await expect(details).toBeVisible()
+  await details.getByRole('tab', { name: 'Policy', exact: true }).click()
+  await expect(details).toContainText('Only people with Policy access can change this.')
+  await expect(details.getByRole('textbox')).toHaveCount(0)
+  await expect(details.getByRole('button', { name: 'More assistant actions' })).toHaveCount(0)
+  expect(agentRequests).toContain(`/api/assistants/${self.principal_id}/policy`)
+  expect(agentRequests).not.toContain('/api/assistants')
 })
