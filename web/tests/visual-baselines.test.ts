@@ -419,8 +419,11 @@ test('visual report-only switch records failures and restores blocking without g
   const directory = mkdtempSync(join(tmpdir(), 'aeon-1674-reports-'))
   try {
     const id = 'V-projects-390-light'
-    writeFileSync(join(directory, `${id}.md`), JSON.stringify({ id, requirementsRun: true,
+    writeFileSync(join(directory, `${id}.md`), JSON.stringify({ id, sourceSpec: 'tests/visual/projects.spec.ts', requirementsRun: true,
       quality: { status: 'failed', error: 'synthetic font guard failure' }, comparison: { status: 'different', error: 'synthetic pixel diff', diffs: [`${id}-diff.png`] } }))
+    mkdirSync(join(directory, 'synthetic-guard'))
+    writeFileSync(join(directory, 'synthetic-guard', `${id}.md`), JSON.stringify({ id, sourceSpec: 'tests/visual/reference-guard.spec.ts',
+      quality: { status: 'passed' }, comparison: { status: 'matched' } }))
     const summary = checkpointReport(directory, manifest)
     assert.equal(summary.split('\n').filter(line => line.startsWith('| V-')).length, 80)
     assert.match(summary, /V-projects-390-light.*failed.*different.*synthetic font guard failure/)

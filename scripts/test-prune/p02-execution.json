@@ -2,9 +2,9 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "round12-report-only-validation-in-progress",
+  "status": "round12-report-only-implemented-remote-capacity-handoff",
   "cuts": false,
-  "note": "Round 12: all 80 checkpoints report-only, comparison.mode is the single blocking switch. All set-1/set-2 pins are historical; active pins and protected cuts are zero. Final renderer unchanged. All 72 historical PNGs and payloads verify; the focused transport, switch and ledger unit tests pass. Remote browser and static validation pending; no hosted-green claim, reference capture, new pin, cut, origin push, deployment or review gate.",
+  "note": "Round 12 implements report-only execution for all 80 checkpoints with one comparison.mode switch, no active pins and no protected cuts. Set-1 history and the complete set-2 approval/pin snapshot remain immutable historical evidence; all 72 historical PNG/payload digests verify. Final renderer, clock, fonts and visual-only isolation are unchanged. Actual quality errors, renderer mismatches, comparisons and diff filenames remain visible in every-shard all-80 summaries and evidence; synthetic guard outputs cannot replace owner-spec results. Three focused Node tests and ten affected remote workflow Go tests pass. Browser and full static checks remain unproven after exit-3 capacity/host refusals; coordinator-owned PR #891 CI must confirm green after push. No origin push, deploy, reference capture, new pin, cut or review gate.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -4214,9 +4214,23 @@
       "immutableArchive": "All payloads and 72 historical PNGs verify",
       "history": "Set-1 byte-for-byte JSON unchanged; set-2 approval/baselineAuthority/states snapshot exactly matches round 11",
       "staticInventory": "38 static commands classified",
-      "browser": "pending remote run",
-      "fullStatic": "pending remote run",
-      "hostedCI": "coordinator-owned after push"
-    }
+      "browser": "UNPROVEN: two remote-spec.sh attempts exit 3, remote busy (no free mbp2606 slot: global cap / CI pool / battery). No local browser fallback.",
+      "fullStatic": "UNPROVEN: ci-static-remote.sh exit 3, first remote paused: mbp2606 not GREEN; second remote busy (2 remote runs already active on mbp2606, global cap).",
+      "hostedCI": "coordinator-owned after push",
+      "workflowGo": {
+        "sourceSHA": "b81ae9b49e",
+        "passed": 10,
+        "runner": "agm2-ci",
+        "scope": "ten Test* cases in scripts/releaseworkflow/tree_reuse_test.go; code unchanged after this run"
+      },
+      "syntax": "Both changed visual TypeScript files transpile without syntax diagnostics; no browser launched locally.",
+      "summary": "80 explicit rows; owner-spec binding prevents synthetic guard reports from masking checkpoint failures; bounded streaming file scan."
+    },
+    "outsidePackageHooks": [
+      ".github/workflows/ci.yml: always-run checkpoint summary only",
+      "scripts/ci/static-checks.json: web-shard command inventory digest only",
+      "scripts/ci/web-test-tiers.json: one ESSENTIAL Node switch regression via canonical writer",
+      "scripts/releaseworkflow/tree_reuse_test.go: assert and normalize the summary step against preserved workflow pins"
+    ]
   }
 }

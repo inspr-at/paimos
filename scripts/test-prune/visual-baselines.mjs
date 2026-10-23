@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, opendirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateVisual, visualReportOnly } from './check.mjs'
@@ -150,15 +150,25 @@ export function referenceReport(visual) {
 // Every manifest checkpoint gets a row; an absent result is never a quiet pass.
 export function checkpointReport(directory, visual) {
   const results = new Map()
+  const owners = new Map(visual.states.flatMap(state => state.checkpoints.map(checkpoint => [checkpoint.id, state.owner])))
   if (existsSync(directory)) {
-    const paths = readdirSync(directory, { recursive: true })
-    need(paths.length <= 30_000, 'Visual report file inventory exceeds its bound')
-    for (const path of paths) {
-      const name = path.split(/[\\/]/).at(-1)
-      if (!/^V-[a-z0-9-]+\.md$/.test(name) || name.endsWith('-comparison.md')) continue
-      const bytes = boundedFile(join(directory, path), MAX_MANIFEST, 'Visual checkpoint report')
-      const report = JSON.parse(bytes)
-      if (name === `${report.id}.md`) results.set(report.id, report)
+    const directories = [directory]
+    let entries = 0
+    while (directories.length) {
+      const handle = opendirSync(directories.pop())
+      try {
+        let entry
+        while ((entry = handle.readSync()) !== null) {
+          need(++entries <= 30_000, 'Visual report file inventory exceeds its bound')
+          const path = join(handle.path, entry.name)
+          if (entry.isDirectory()) { directories.push(path); continue }
+          if (!entry.isFile() || !/^V-[a-z0-9-]+\.md$/.test(entry.name) || entry.name.endsWith('-comparison.md')) continue
+          const report = JSON.parse(boundedFile(path, MAX_MANIFEST, 'Visual checkpoint report'))
+          // Guard documents challenge real IDs but cannot replace the owning
+          // product spec's evidence, even if their scan order changes.
+          if (entry.name === `${report.id}.md` && report.sourceSpec === owners.get(report.id)) results.set(report.id, report)
+        }
+      } finally { handle.closeSync() }
     }
   }
   const cell = value => String(value ?? '').replaceAll('|', '\\|').replace(/[\r\n]+/g, ' ').slice(0, 1200)

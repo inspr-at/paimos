@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test as base, expect, type Browser, type Page, type TestInfo } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
@@ -22,6 +22,7 @@ export const test = base.extend({
   }, { scope: 'worker' }],
 })
 const captureSHA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: fileURLToPath(new URL('../../../', import.meta.url)), encoding: 'utf8' }).trim()
+const sourceSpec = (info: TestInfo) => relative(fileURLToPath(new URL('../../', import.meta.url)), info.file).replaceAll('\\', '/')
 export type Profile = 'phone' | 'tablet' | 'desktop'
 export type Theme = 'light' | 'dark'
 export type VisualSetup = (page: Page, profile: Profile, theme: Theme) => Promise<void>
@@ -43,6 +44,11 @@ export function visualCases(id: string): Checkpoint[] {
 
 export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoint, setup: VisualSetup, { visual = manifest } = {}) {
   if (captureEnabled(visual)) return runVisual(browser, info, checkpoint, setup, visual)
+  // A guard can exercise the same ID repeatedly. Never carry an earlier
+  // quality/comparison result into a later failed setup in that test.
+  writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify({ id: checkpoint.id, sourceSpec: sourceSpec(info), captureSHA,
+    requirementsRun: false, baselineCompared: false, pngSHA256: null,
+    quality: { status: 'pending' }, comparison: { status: 'not run' } }))
   const result = await visualCheckResult(visual, () => runVisual(browser, info, checkpoint, setup, visual))
   if (result.status === 'failed') {
     const path = info.outputPath(`${checkpoint.id}.md`)
@@ -64,7 +70,7 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
     // Report-only checks all states. Explicit deferrals apply again when the
     // reviewed set-3 comparison policy becomes blocking.
     if (!reportOnly && (gate.mode === 'deferred' || gate.status === 'needs-re-capture') && !(capture && visual.capture.states.includes(gate.state))) {
-      writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify({ id: checkpoint.id, reference: gate,
+      writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify({ id: checkpoint.id, sourceSpec: sourceSpec(info), reference: gate,
         requirementsRun: false, baselineCompared: false, pngSHA256: null }, null, 2))
       return
     }
@@ -121,7 +127,7 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
       const unexpectedResponses = responses.filter(row => !expected(row.path, row.status))
       const unexpectedErrors = errors.filter(error => !expectedReads.some(row =>
         error.startsWith(`Failed to load resource: the server responded with a status of ${row.status} `) && error.endsWith(row.path)))
-      const report = { id: checkpoint.id, owner: checkpoint.owner, fixture: checkpoint.fixture,
+      const report = { id: checkpoint.id, sourceSpec: sourceSpec(info), owner: checkpoint.owner, fixture: checkpoint.fixture,
         captureSHA, pngSHA256: png ? createHash('sha256').update(png).digest('hex') : null, baselineCompared: false,
         reference: gate, viewport, theme: checkpoint.theme, renderer, fonts, clock, requirementsRun: true,
         quality: { status: 'pending' }, comparison: { status: 'not run' },
