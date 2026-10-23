@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { expect, type Locator, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 // Document position plus nested scroller offsets. window.scrollX/Y already
 // includes document.scrollingElement, so that element's own scroll must not
@@ -56,7 +56,15 @@ export async function controlStability(page: Page, controls: Record<string, Loca
           continue
         }
         for (const dimension of ['x', 'y', 'width', 'height'] as const) {
-          expect(Math.abs(after[name][dimension] - before[name][dimension]), `${name}.${dimension}`).toBeLessThanOrEqual(options.tolerance ?? .5)
+          const delta = Math.abs(after[name][dimension] - before[name][dimension])
+          if (delta > (options.tolerance ?? .5)) {
+            const layout = await controls[name]!.evaluate(el => [el, ...el.querySelectorAll('*')].map(node => {
+              const style = getComputedStyle(node), rect = node.getBoundingClientRect()
+              return { tag: node.tagName, text: node.textContent, width: rect.width, font: style.font, numbers: style.fontVariantNumeric, flex: style.flex, visibility: style.visibility }
+            }))
+            await test.info().attach(`unstable-${name}`, { body: JSON.stringify({ before: before[name], after: after[name], layout }, null, 2), contentType: 'application/json' })
+          }
+          expect(delta, `${name}.${dimension} (${before[name][dimension]} → ${after[name][dimension]})`).toBeLessThanOrEqual(options.tolerance ?? .5)
         }
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 'horizontal overflow').toBeLessThanOrEqual(1)
