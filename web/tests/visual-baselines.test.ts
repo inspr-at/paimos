@@ -20,6 +20,42 @@ import { parseWorkflow } from '../../scripts/ci-static.mjs'
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const manifest = JSON.parse(readFileSync(new URL('../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
+// Tick's set-3 receipt covers these exact 60 checkpoints from run 39975623900.
+// Keep this expectation independent of the manifest's editable approval list.
+const approvedSet3Checkpoints = [
+  'V-projects-390-light', 'V-projects-390-dark', 'V-projects-1440-light', 'V-projects-1440-dark',
+  'V-tickets-390-light', 'V-tickets-390-dark', 'V-tickets-1440-light', 'V-tickets-1440-dark',
+  'V-agents-390-light', 'V-agents-390-dark', 'V-agents-1024-light', 'V-agents-1024-dark', 'V-agents-1440-light', 'V-agents-1440-dark',
+  'V-session-chat-390-light', 'V-session-chat-390-dark', 'V-session-chat-1440-light', 'V-session-chat-1440-dark',
+  'V-account-use-matrix-390-light', 'V-account-use-matrix-390-dark', 'V-account-use-matrix-1024-light', 'V-account-use-matrix-1024-dark', 'V-account-use-matrix-1440-dark',
+  'V-models-390-light', 'V-models-390-dark', 'V-models-1440-light', 'V-models-1440-dark',
+  'V-access-390-light', 'V-access-390-dark', 'V-access-1440-light', 'V-access-1440-dark',
+  'V-knowledge-390-light', 'V-knowledge-390-dark', 'V-knowledge-1440-light', 'V-knowledge-1440-dark',
+  'V-delivery-numbers-390-light', 'V-delivery-numbers-390-dark', 'V-delivery-numbers-1440-light', 'V-delivery-numbers-1440-dark',
+  'V-quote-editor-390-light', 'V-quote-editor-390-dark', 'V-quote-editor-1024-light', 'V-quote-editor-1024-dark', 'V-quote-editor-1440-light', 'V-quote-editor-1440-dark',
+  'V-public-quote-390-light', 'V-public-quote-390-dark', 'V-public-quote-1440-light', 'V-public-quote-1440-dark',
+  'V-start-agent-390-light', 'V-start-agent-390-dark', 'V-start-agent-1440-light', 'V-start-agent-1440-dark',
+  'V-agent-rules-390-light', 'V-agent-rules-1440-light', 'V-agent-rules-1440-dark',
+  'V-capacity-390-light', 'V-capacity-390-dark', 'V-capacity-1440-light', 'V-capacity-1440-dark',
+]
+
+function reportOnlyManifest() {
+  const visual = structuredClone(manifest)
+  visual.comparison.mode = 'report-only'
+  visual.approval = { reviewer: 'Tick', status: 'awaiting-set-3', approvedAt: null,
+    evidence: 'Synthetic preparation fixture; no product approval', states: [], checkpoints: [] }
+  visual.baselineAuthority.status = 'awaiting-set-3'
+  for (const state of visual.states) {
+    delete state.approval
+    for (const checkpoint of state.checkpoints) {
+      checkpoint.reference = { attachmentMember: null, sha256: null }
+      if (checkpoint.referenceStatus !== 'deferred') Object.assign(checkpoint, {
+        referenceStatus: 'needs-re-capture', deferredUntil: ['AEON-1692'], deferredReason: 'Synthetic fixture awaiting set-3 preparation',
+      })
+    }
+  }
+  return visual
+}
 
 test('visual references require approval, immutable attachment bytes and every exact member', async () => {
   // A tiny synthetic PNG is enough for the transport proof. The browser guard
@@ -137,13 +173,49 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.throws(() => verifyReferenceArchive(Buffer.alloc(0), detached, mirrored, noExtraction), /archive size mismatch/)
 
   const gates = referenceGates(manifest)
-  assert.equal(gates.length, 80)
-  assert.ok(gates.every(gate => gate.mode === 'report-only' && gate.status === 'awaiting-re-capture'))
-  assert.equal(gates.filter(gate => gate.historicalReference).length, 72)
-  assert.equal(gates.filter(gate => !gate.historicalReference).length, 8)
-  assert.match(referenceReport(manifest).markdown, /awaiting re-capture under the final renderer/)
-  for (const state of manifest.states) for (const checkpoint of state.checkpoints)
-    assert.deepEqual(checkpoint.reference, { attachmentMember: null, sha256: null })
+  assert.equal(manifest.referenceSet, 3)
+  assert.equal(manifest.comparison.mode, 'blocking')
+  assert.equal(manifest.approval.reviewer, 'Tick')
+  assert.equal(manifest.approval.status, 'approved')
+  assert.deepEqual(manifest.approval.states, [])
+  assert.equal(approvedSet3Checkpoints.length, 60)
+  assert.deepEqual(manifest.approval.checkpoints, approvedSet3Checkpoints)
+  const authority = manifest.baselineAuthority
+  assert.equal(authority.referenceSet, 3)
+  assert.equal(authority.status, 'approved')
+  assert.equal(authority.source.attachmentId, 'c0570f26-fe2d-496a-a2f0-d6c441bfa005')
+  assert.equal(authority.source.manifest.attachmentId, '4347d3b2-536c-4c3b-b735-a53c5bf590d7')
+  assert.equal(authority.source.sha256, '04130acb4361fb62fafcaa1ec4e201f72017383ef9dd12942b728e1e05ca6d64')
+  assert.equal(authority.source.captureRun, '39975623900')
+  assert.equal(authority.source.mirror.tag, 'test-references-3')
+  const compared = gates.filter(gate => gate.mode === 'compare')
+  const deferred = gates.filter(gate => gate.mode === 'deferred')
+  assert.equal(gates.reduce((count, gate) => count + gate.checkpoints, 0), 80)
+  assert.deepEqual(compared.flatMap(gate => gate.checkpointIds), approvedSet3Checkpoints)
+  assert.ok(compared.every(gate => gate.status === 'approved'))
+  assert.equal(deferred.flatMap(gate => gate.checkpointIds).length, 20)
+  assert.ok(deferred.every(gate => gate.status === 'deferred'))
+  assert.equal(compared.length + deferred.length, gates.length)
+  const report = referenceReport(manifest).markdown
+  assert.match(report, /deferred checkpoints report only/)
+  assert.match(report, /strict image comparison \+ quality/)
+  for (const state of manifest.states) for (const checkpoint of state.checkpoints) {
+    const gate = gates.find(gate => gate.checkpointIds.includes(checkpoint.id))!
+    if (approvedSet3Checkpoints.includes(checkpoint.id)) {
+      assert.equal(gate.mode, 'compare')
+      assert.equal(checkpoint.reference.attachmentMember, `${checkpoint.id}.png`)
+      assert.match(checkpoint.reference.sha256, /^[a-f0-9]{64}$/)
+      assert.equal(checkpoint.referenceStatus, undefined)
+    } else {
+      assert.equal(gate.mode, 'deferred')
+      assert.equal(checkpoint.referenceStatus, 'deferred')
+      assert.deepEqual(checkpoint.reference, { attachmentMember: null, sha256: null })
+      assert.ok(checkpoint.deferredUntil.length > 0 && checkpoint.deferredReason.length > 0)
+      assert.equal(gate.reason, `deferred until ${checkpoint.deferredUntil.join(' and ')}: ${checkpoint.deferredReason}`)
+      assert.ok(report.includes(checkpoint.deferredReason))
+    }
+  }
+  assert.ok(manifest.history.every(row => row.status === 'historical-only'))
   assert.equal(manifest.history[0].states.flatMap((state: { checkpoints: unknown[] }) => state.checkpoints).length, 30)
   const linuxHistory = manifest.history.find(row => row.referenceSet === 2)
   assert.equal(linuxHistory.status, 'historical-only')
@@ -365,6 +437,7 @@ test('visual references require approval, immutable attachment bytes and every e
     const detached = readFileSync(join(output, `${candidate.archive.name}.manifest.json`))
     // Risk: a rehearsal or an approval for different capture bytes could
     // activate blocking references, revive history, or lift product deferrals.
+    const preparation = reportOnlyManifest()
     const receipt = { reviewer: 'Tick', status: 'approved', dryRun: true, approvedAt: '2026-10-23T12:00:00Z',
       evidence: 'DRY RUN ONLY; no product approval', captureSHA: candidate.captureSHA, archiveSHA256: candidate.archive.sha256,
       checkpoints: pinCheckpoints(manifest) }
@@ -375,7 +448,8 @@ test('visual references require approval, immutable attachment bytes and every e
       reviewedRunnerArchiveSHA256: manifest.capture.identityProof.reviewedRunnerArchiveSHA256,
       repeat: { byteIdentical: 72, pixelIdentical: 72, checkpoints: identityRows }, runner: { pixelIdentical: 72, checkpoints: identityRows } }
     const options = { dryRun: true, identityProof }
-    assert.throws(() => pinManifest(manifest, candidate, detached, receipt, {}, { dryRun: true }), /60\/60 byte-identical/)
+    assert.throws(() => pinManifest(manifest, candidate, detached, receipt, {}, options), /Set 3 preparation requires the unpinned report-only manifest/)
+    assert.throws(() => pinManifest(preparation, candidate, detached, receipt, {}, { dryRun: true }), /60\/60 byte-identical/)
     const unstable = structuredClone(identityProof); unstable.repeat.checkpoints[0].pixels = 1
     assert.throws(() => assertPinIdentity(unstable, candidate, manifest), /STOP before pinning/)
     const encodingOnly = structuredClone(identityProof); encodingOnly.repeat.checkpoints[0].byteIdentical = false
@@ -383,7 +457,7 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.throws(() => assertPinIdentity({ ...identityProof, pinCheckpoints: identityProof.pinCheckpoints.slice(1) }, candidate, manifest), /STOP before pinning/)
     const wrongArchiveProof = { ...identityProof, archiveSHA256: '0'.repeat(64) }
     assert.throws(() => assertPinIdentity(wrongArchiveProof, candidate, manifest), /STOP before pinning/)
-    const draft = pinManifest(manifest, candidate, detached, receipt, {}, options)
+    const draft = pinManifest(preparation, candidate, detached, receipt, {}, options)
     assert.equal(draft.referenceSet, 3)
     assert.equal(draft.comparison.mode, 'blocking')
     assert.equal(draft.approval.checkpoints.length, 60)
@@ -400,20 +474,22 @@ test('visual references require approval, immutable attachment bytes and every e
     for (const id of deferredIDs) {
       assert.equal(referenceGate(draft, id).mode, 'deferred')
       assert.equal(draft.approval.checkpoints.includes(id), false)
-      assert.throws(() => pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: [...receipt.checkpoints, id] }, {}, options),
+      assert.throws(() => pinManifest(preparation, candidate, detached, { ...receipt, checkpoints: [...receipt.checkpoints, id] }, {}, options),
         /Product deferral|enumerate candidate checkpoint IDs/)
     }
-    assert.throws(() => pinManifest(manifest, candidate, detached, receipt, {}, { identityProof }), /dry-run approval cannot pin/)
+    assert.throws(() => pinManifest(preparation, candidate, detached, receipt, {}, { identityProof }), /dry-run approval cannot pin/)
     const realReceipt = { ...receipt, dryRun: false, evidence: 'Synthetic isolated test receipt' }
-    assert.throws(() => pinManifest(manifest, candidate, detached, realReceipt, {}, { identityProof }), /Real, distinct AEON-1670/)
-    assert.throws(() => pinManifest(manifest, candidate, detached, { ...receipt, archiveSHA256: '0'.repeat(64) }, {}, options), /exact capture and archive bytes/)
-    assert.throws(() => pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: ['V-goals-390-light'] }, {}, options), /enumerate candidate checkpoint IDs/)
-    const partialDraft = pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: receipt.checkpoints.slice(1) }, {}, options)
+    assert.throws(() => pinManifest(preparation, candidate, detached, realReceipt, {}, { identityProof }), /Real, distinct AEON-1670/)
+    assert.throws(() => pinManifest(preparation, candidate, detached, { ...receipt, archiveSHA256: '0'.repeat(64) }, {}, options), /exact capture and archive bytes/)
+    assert.throws(() => pinManifest(preparation, candidate, detached, { ...receipt, checkpoints: ['V-goals-390-light'] }, {}, options), /enumerate candidate checkpoint IDs/)
+    const partialDraft = pinManifest(preparation, candidate, detached, { ...receipt, checkpoints: receipt.checkpoints.slice(1) }, {}, options)
     const partialRefs = verifyReferenceArchive(readFileSync(join(output, candidate.archive.name)), detached, partialDraft).references
     assert.equal(partialRefs.size, 59)
     assert.equal(partialRefs.has(`${receipt.checkpoints[0]}.png`), false)
-    assert.equal(manifest.comparison.mode, 'report-only')
-    assert.equal(manifest.approval.checkpoints.length, 0)
+    assert.equal(preparation.comparison.mode, 'report-only')
+    assert.equal(preparation.approval.checkpoints.length, 0)
+    assert.equal(manifest.comparison.mode, 'blocking')
+    assert.deepEqual(manifest.approval.checkpoints, approvedSet3Checkpoints)
     assert.match(publicationCommands(output, candidate), /gh release create test-references-3.*--prerelease/)
     assert.doesNotMatch(publicationCommands(output, candidate), /--clobber|--latest|release upload/)
     // Independent decoded-pixel proof: counts and boxes must identify exactly
@@ -542,7 +618,7 @@ test('visual references require approval, immutable attachment bytes and every e
     const realAttachments = { archive: '11111111-1111-4111-8111-111111111111', manifest: '22222222-2222-4222-8222-222222222222' }
     // Preserve the receipt regression for a deliberately configured exception;
     // the production selection above permits no runner differences at all.
-    const relookVisual = structuredClone(manifest), relookID = receipt.checkpoints[0]
+    const relookVisual = structuredClone(preparation), relookID = receipt.checkpoints[0]
     relookVisual.capture.identityProof.relookCheckpoints = [relookID]
     const relookRecords = smallRecords.map(record => record.quality.id === relookID ? { ...record, png: blackCorner } : record)
     const relook = proveCaptureIdentity(baseCapture, baseCapture, { ...reviewedCapture, records: relookRecords }, relookVisual)
@@ -552,7 +628,7 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.throws(() => pinManifest(relookVisual, candidate, detached, realReceipt, realAttachments, { identityProof: relook }), /Tick must explicitly re-review/)
     assert.throws(() => pinManifest(relookVisual, candidate, detached, realReceipt, {}, { dryRun: true, identityProof: relook }), /Tick must explicitly re-review/)
     assert.equal(pinManifest(relookVisual, candidate, detached, { ...realReceipt, reReviewedCheckpoints: [relookID] }, realAttachments, { identityProof: relook }).approval.checkpoints.length, 60)
-    assert.throws(() => pinManifest(manifest, candidate, detached, { ...realReceipt, checkpoints: receipt.checkpoints.slice(1) }, realAttachments, { identityProof }), /exactly the stable non-deferred/)
+    assert.throws(() => pinManifest(preparation, candidate, detached, { ...realReceipt, checkpoints: receipt.checkpoints.slice(1) }, realAttachments, { identityProof }), /exactly the stable non-deferred/)
     const differentRecords = smallRecords.map((record, index) => index ? record : { ...record, png: blackCorner })
     const unstableProof = proveCaptureIdentity(baseCapture, { ...baseCapture, records: differentRecords }, reviewedCapture, manifest)
     assert.equal(unstableProof.status, 'STOP-before-pinning')
@@ -634,19 +710,40 @@ test('visual references require approval, immutable attachment bytes and every e
 // Risk: switching visual CI to reports could hide failures or accidentally
 // authorize protected pruning with historical set-1/set-2 approvals.
 test('visual report-only switch records failures and restores blocking without granting historical cut authority', async () => {
+  const reporting = reportOnlyManifest()
+  const reportingGates = referenceGates(reporting)
+  assert.equal(reportingGates.length, 80)
+  assert.ok(reportingGates.every(gate => gate.mode === 'report-only' && gate.status === 'awaiting-re-capture'))
+  assert.equal(reportingGates.filter(gate => gate.historicalReference).length, 72)
+  assert.equal(reportingGates.filter(gate => !gate.historicalReference).length, 8)
+  assert.match(referenceReport(reporting).markdown, /awaiting re-capture under the final renderer/)
   const failure = new Error('synthetic differing pixels')
   const run = async () => { throw failure }
-  assert.deepEqual(await visualCheckResult(manifest, run), { status: 'failed', error: String(failure) })
-  assert.deepEqual(await visualCheckResult(manifest, async () => 'comparison ran'), { status: 'passed', value: 'comparison ran' })
-  const blocking = structuredClone(manifest)
+  assert.deepEqual(await visualCheckResult(reporting, run), { status: 'failed', error: String(failure) })
+  assert.deepEqual(await visualCheckResult(reporting, async () => 'comparison ran'), { status: 'passed', value: 'comparison ran' })
+  const blocking = structuredClone(reporting)
   blocking.comparison.mode = 'blocking'
   await assert.rejects(visualCheckResult(blocking, run), error => error === failure)
   assert.deepEqual(await visualCheckResult(blocking, async () => 'comparison ran'), { status: 'passed', value: 'comparison ran' })
-  assert.throws(() => validateVisual(manifest, { cuts: true, stateIds: ['agents'] }), /Protected visual cuts stay closed/)
+  blocking.comparison.mode = 'report-only'
+  assert.deepEqual(await visualCheckResult(blocking, run), { status: 'failed', error: String(failure) })
+  blocking.comparison.mode = 'blocking'
+  assert.throws(() => validateVisual(reporting, { cuts: true, stateIds: ['agents'] }), /Protected visual cuts stay closed/)
   assert.throws(() => validateVisual(blocking, { cuts: true, stateIds: ['agents'] }), /Unpinned visual reference/)
   const revivedHistory = { ...blocking, ...structuredClone(manifest.history.find(row => row.referenceSet === 2)), comparison: blocking.comparison }
   revivedHistory.approval.status = 'historical-only'
   assert.throws(() => validateVisual(revivedHistory, { cuts: true, stateIds: ['agents'] }), /Cuts require Tick approval/)
+  assert.equal(manifest.comparison.mode, 'blocking')
+  await assert.rejects(visualCheckResult(manifest, run), error => error === failure)
+  assert.equal(validateVisual(manifest, { cuts: true, checkpointIds: approvedSet3Checkpoints }), 80)
+  for (const state of manifest.states) {
+    const unapproved = state.checkpoints.find(checkpoint => !approvedSet3Checkpoints.includes(checkpoint.id))
+    if (!unapproved)
+      assert.equal(validateVisual(manifest, { cuts: true, stateIds: [state.id] }), 80)
+    else
+      assert.throws(() => validateVisual(manifest, { cuts: true, stateIds: [state.id] }),
+        { message: `Deferred visual reference: ${unapproved.id} (${unapproved.deferredUntil.join(', ')})` })
+  }
   const missingMode = structuredClone(manifest)
   delete missingMode.comparison.mode
   assert.throws(() => validateVisual(missingMode), /Missing visual comparison mode/)
@@ -658,12 +755,16 @@ test('visual report-only switch records failures and restores blocking without g
     mkdirSync(join(directory, 'synthetic-guard'))
     writeFileSync(join(directory, 'synthetic-guard', `${id}.md`), JSON.stringify({ id, sourceSpec: 'tests/visual/reference-guard.spec.ts',
       quality: { status: 'passed' }, comparison: { status: 'matched' } }))
-    const summary = checkpointReport(directory, manifest)
+    const summary = checkpointReport(directory, reporting)
     assert.equal(summary.split('\n').filter(line => line.startsWith('| V-')).length, 80)
     assert.match(summary, /V-projects-390-light.*failed.*different.*synthetic font guard failure/)
     assert.match(summary, /V-projects-390-light-diff\.png/)
     assert.match(summary, /V-tickets-390-light.*not run in this shard/)
     assert.match(summary, /awaiting re-capture under the final renderer/)
+    const activatedSummary = checkpointReport(directory, manifest)
+    assert.match(activatedSummary, /comparison.mode=blocking/)
+    assert.match(activatedSummary, /V-projects-390-light.*Tick-approved, digest-pinned reference.*failed.*different/)
+    assert.match(activatedSummary, /V-hours-390-light.*deferred until AEON-1699/)
     assert.equal(checkpointReport(join(directory, 'absent'), manifest).split('\n').filter(line => line.startsWith('| V-')).length, 80)
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })
