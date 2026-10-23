@@ -2,18 +2,18 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "r3-approved-archive-ready-fixtures-await-hosted-ci",
+  "status": "fix3-fixture-contract-proven-reference-and-product-prerequisites-blocked",
   "cuts": false,
-  "note": "Round 3 splits only the seven Tick-approved states from immutable 2e6c7938e captures, preserving all selected PNG and quality-report bytes. Agents now supplies caller-specific lead actions; Delivery preparation scrolls the main panel to its top; Models preparation uses the real Settings route instead of the headerless isolated harness and nearest scrolling. Six changes-requested states are not recaptured. No cuts, demotions or pinning; permanent attachment identity, verified availability and CI materialization remain coordinator-owned next-round prerequisites. Per-area reference authority is unchanged.",
+  "note": "Fix3 corrects the legacy Session Chat fixture with exact session-bound native feature-disabled and chat binding/history/live contracts. The new ESSENTIAL browser regression passes remotely and fails against e775cb75 at the intended native 503 versus backend 404 assertion. All prior assertions, 80 comparisons, source tiers, historical evidence and approved reference bytes remain intact; no cuts, demotions or product changes. CI structured outcomes show all 80 actual failures are visual checkpoints, while the Lead Panel, Agents split, performance and status-icon cases mentioned in the report passed. Reference attachment handoff, verified CI materialization and separately owned product fixes still block completion.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
     "functionalCandidates": 25,
     "visualCandidates": 80,
-    "additionalBrowserGuards": 2,
-    "currentPackageBrowserCases": 1197,
+    "additionalBrowserGuards": 3,
+    "currentPackageBrowserCases": 1198,
     "plannedCeiling": 105,
-    "currentGlobalBrowserCases": 5457,
+    "currentGlobalBrowserCases": 5466,
     "newRuntimeRegressionCases": 14,
     "referenceTransportCases": 1
   },
@@ -30,7 +30,7 @@
     {
       "kind": "quality-finding",
       "state": "session-chat",
-      "reason": "Observed serious axe list failures on ol.thread with separator li children, plus phone-light state-word contrast; native-context and chat-thread capability fixtures also need completion. No accessibility rule was disabled."
+      "reason": "Serious axe list failures in all four profiles and phone-light state-word contrast remain owned by AEON-1687. Fix3 completes the bound chat fixture and models the exact native feature_disabled 503; strict visual console/HTTP checks still reject that refusal, without filtering or an exception. A valid native snapshot would select a different owned-session UI and remove legacy chat, so it cannot stand in for this reference."
     },
     {
       "kind": "quality-finding",
@@ -2163,7 +2163,8 @@
     "vitest:tests/tooltip-focus.unit.test.ts:P02 a pending touch disclosure is cancelled by second contact",
     "vitest:tests/tooltip-focus.unit.test.ts:P02 an eight-pixel hold reveals at 500 ms and suppresses only its own compatibility click",
     "vitest:tests/tooltip-focus.unit.test.ts:P02 focused disclosure follows a changed record and discards a disconnected anchor and late observer",
-    "vitest:tests/ui-audit-rules.unit.test.ts:P02 audit exceptions require the exact fixture, HTTP outcome and decorative accessible counterpart"
+    "vitest:tests/ui-audit-rules.unit.test.ts:P02 audit exceptions require the exact fixture, HTTP outcome and decorative accessible counterpart",
+    "browser:tests/visual-reference-guard.spec.ts:P02 Session Chat fixture binds its chat reads and native refusal to the displayed session"
   ],
   "deliberatelyRetainedRisks": [
     "All 1090 original case identities and their tiers, including historical drift aliases.",
@@ -2263,7 +2264,7 @@
   },
   "sharedRegistrationChanges": {
     "tierWriter": "node scripts/test-tiers/cli.mjs classify --kind web --tier ESSENTIAL --only P02; node scripts/test-tiers/cli.mjs manifests --write",
-    "newBrowserCases": 107,
+    "newBrowserCases": 108,
     "newRuntimeCases": 15,
     "newVisualSources": 18,
     "allMainRegistrationsPreserved": true,
@@ -3299,6 +3300,131 @@
       "deploy": false,
       "reviewGate": false,
       "modelCLICalls": false
+    }
+  },
+  "fix3": {
+    "review": "review-ci891-0405.out",
+    "reportedCIHead": "e775cb7520fa705e03de72b70090fb64c28936e0",
+    "implementationSHA": "ba7c8cbdc",
+    "mergedMain": "a836b2c3f",
+    "validationSHA": "d61e0dd4efc06cd49cdf886e55e633d6eec5788d",
+    "fixtureRegression": {
+      "nativeKey": "browser:tests/visual-reference-guard.spec.ts:P02 Session Chat fixture binds its chat reads and native refusal to the displayed session",
+      "tier": "ESSENTIAL",
+      "passed": 1,
+      "failed": 0,
+      "seconds": 3.0,
+      "runner": "remote-spec.sh / mbp2606 Chromium, one worker",
+      "initialPassOwner": "tests/visual/session-chat.spec.ts",
+      "finalOwner": "tests/visual-reference-guard.spec.ts",
+      "placementReason": "The independent infrastructure guard owns fixture transport proof; the 18 visual sources retain exactly 80 comparison registrations."
+    },
+    "counterexample": {
+      "originalFixture": "e775cb75:web/tests/visual/fixtures.ts",
+      "scratchSHA": "da64faff20e6e997f9eb95a12db178aa39490913",
+      "exitCode": 1,
+      "intendedFailure": "Expected native feature_disabled status 503, received backend status 404",
+      "scratchBranchRemoved": true,
+      "throwawayCommitsOnDeliveryBranch": false,
+      "unchangedRegressionBodySHA256": "c668673a44c186d2b9667b07c586ad9b4c77d6aa3714f11e82133ad9472d9981"
+    },
+    "nodeSuites": {
+      "command": "node --test web/tests/test-prune-ledger.test.ts web/tests/visual-baselines.test.ts",
+      "passed": 2,
+      "failed": 0
+    },
+    "structuredCI": {
+      "run": "39885890240",
+      "failedJobsInspected": 14,
+      "actualFailedCases": 80,
+      "allFailuresAreVisual": true,
+      "otherReportedOwners": {
+        "tests/aeon-1212-lead-panel.spec.ts": {
+          "passed": 56
+        },
+        "tests/aeon-1213-agents-split.spec.ts": {
+          "passed": 15
+        },
+        "tests/performance.spec.ts": {
+          "passed": 2
+        },
+        "tests/status-icons.spec.ts": {
+          "passed": 7
+        }
+      },
+      "evidenceDirectory": "web/test-results/AEON-1674-fix3-ci"
+    },
+    "strictRemoteChecks": {
+      "sourceSHA": "d61e0dd4efc06cd49cdf886e55e633d6eec5788d",
+      "specs": [
+        "tests/visual/projects.spec.ts",
+        "tests/visual/session-chat.spec.ts"
+      ],
+      "exitCode": 1,
+      "failed": 8,
+      "passed": 0,
+      "qualityCleanButUnpinned": [
+        "V-projects-390-light",
+        "V-projects-390-dark",
+        "V-projects-1440-light",
+        "V-projects-1440-dark"
+      ],
+      "sessionChat": [
+        "native-context feature_disabled 503 remains a strict HTTP/console failure",
+        "axe list in all four profiles",
+        "axe color-contrast on .state-word at phone light"
+      ],
+      "evidenceDirectory": "web/test-results/AEON-1674-fix3-strict-checks"
+    },
+    "referenceAuthority": {
+      "ticket": "AEON-1670",
+      "attachmentList": [],
+      "approvedArchiveUnchanged": "2c17e829b380a9d3d357871f0f18ba8c2d6f021b00bb15c74f2884406a436055",
+      "pinsAdded": false,
+      "CIAvailabilityProven": false,
+      "changesRequestedStatesRecaptured": false
+    },
+    "static": {
+      "entryPoint": "ci-static-remote.sh",
+      "exitCode": 3,
+      "reason": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job",
+      "countedAsGreen": false
+    },
+    "go": {
+      "entryPoint": "remote-test.sh",
+      "packages": [
+        "./internal/agentruns",
+        "./internal/reportercontract"
+      ],
+      "status": "passed",
+      "sourceSHA": "d61e0dd4efc06cd49cdf886e55e633d6eec5788d",
+      "packagesPassed": 2,
+      "agentrunsSeconds": 129.212,
+      "reportercontractSeconds": 12.516
+    },
+    "outsideWriteSet": [],
+    "newSources": [],
+    "originalCasesRemovedOrDemoted": 0,
+    "noPushOrDeploy": true,
+    "noModelOrReviewGateCalls": true,
+    "remaining": [
+      "LEAD reference attachment identity and verified availability/CI materialization; attachment list is empty",
+      "AEON-1687 product quality fixes remain open",
+      "AEON-1688 and new approved captures for the six changes-requested states remain pending",
+      "Goals remain deferred under Tick's decision to AEON-1621 / AEON-1625",
+      "Ticket workspace quality findings still need the coordinator's product-owner routing",
+      "Legacy native-context feature_disabled response remains incompatible with strict no-failed-HTTP visual acceptance; no check was relaxed"
+    ],
+    "invariants": {
+      "comparisonRegistrations": 80,
+      "independentVisualOwners": 18,
+      "infrastructureGuardsInOwnSource": 2,
+      "cuts": false,
+      "originalCaseIdentitiesRetained": 1090,
+      "noExistingAssertionRelaxed": true,
+      "retirementOrTierDemotion": false,
+      "originalApprovedArchiveUnchanged": true,
+      "scratchBranchRemoved": true
     }
   }
 }
