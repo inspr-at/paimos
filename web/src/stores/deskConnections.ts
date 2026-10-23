@@ -102,7 +102,8 @@ export const useDeskConnections = defineStore('deskConnections', () => {
     const who = owner.value, turn = generation, signal = abort.signal, baseline = !storageGet(key(tag, '.seen'))
     const valid = () => current(who, turn) && grants.get(tag) === grant && !signal.aborted
     if (!row.summary) patch(tag, { state: 'reading' })
-    const flight = (async () => {
+    let flight!: Promise<void>
+    flight = (async () => {
       try {
         const summary = await readSibling(row, grant.token, signal)
         if (!valid()) return
@@ -121,7 +122,8 @@ export const useDeskConnections = defineStore('deskConnections', () => {
     if (discoveryFlight) return discoveryFlight
     const who = owner.value, turn = generation
     if (!who || !session.authenticationCurrent()) return Promise.resolve()
-    const flight = (async () => {
+    let flight!: Promise<void>
+    flight = (async () => {
       try {
         const instances = await readInstances(abort.signal)
         if (!current(who, turn)) return

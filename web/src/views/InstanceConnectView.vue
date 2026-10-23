@@ -14,6 +14,7 @@ import Avatar from '../components/Avatar.vue'
 const props = defineProps<{ callback?: boolean; openHome?: boolean }>()
 const route = useRoute(), router = useRouter(), session = useSession(), store = useDeskConnections()
 const text = (en: string, de: string) => displayLanguage() === 'de' ? de : en
+const host = (origin: string) => new URL(origin).host
 const sibling = ref<DeskSibling | null>(null), busy = ref(false), result = ref(''), error = ref(''), returnTo = ref('/decision-desk')
 const owner = computed(() => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : '')
 let generation = 0, abort = new AbortController()
@@ -75,7 +76,7 @@ onBeforeUnmount(() => { generation++; abort.abort() })
     <article class="connect-card">
       <h1>{{ sibling ? text(`Show your waiting decisions on ${sibling.tag}?`, `Wartende Entscheidungen auf ${sibling.tag} anzeigen?`) : text('Connect another instance', 'Andere Instanz verbinden') }}</h1>
       <template v-if="sibling && !result">
-        <p>{{ text(`${sibling.tag} (${new URL(sibling.origin).host}) will read what waits for you here: titles, projects and how long each has waited. It can't change anything. The access lives only in that browser, and you can disconnect it any time in Settings › Personal.`, `${sibling.tag} (${new URL(sibling.origin).host}) liest, was hier wartet: Titel, Projekte und wie lange es schon wartet. Ändern kann es nichts. Der Zugriff gilt nur in diesem Browser und lässt sich jederzeit unter Einstellungen › Persönlich trennen.`) }}</p>
+        <p>{{ text(`${sibling.tag} (${host(sibling.origin)}) will read what waits for you here: titles, projects and how long each has waited. It can't change anything. The access lives only in that browser, and you can disconnect it any time in Settings › Personal.`, `${sibling.tag} (${host(sibling.origin)}) liest, was hier wartet: Titel, Projekte und wie lange es schon wartet. Ändern kann es nichts. Der Zugriff gilt nur in diesem Browser und lässt sich jederzeit unter Einstellungen › Persönlich trennen.`) }}</p>
         <div class="connect-account"><Avatar :id="session.identity?.principal.id" :name="account" :size="36" /><span><b>{{ account }}</b><small>{{ email }}</small></span></div>
         <button type="button" class="linkish" :disabled="busy" @click="switchAccount">{{ text('Not you? Switch account', 'Nicht das richtige Konto? Konto wechseln') }}</button>
         <p>{{ text('Ends after 90 days, or when you disconnect.', 'Endet nach 90 Tagen oder beim Trennen.') }}</p>

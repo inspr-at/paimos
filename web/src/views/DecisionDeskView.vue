@@ -180,8 +180,9 @@ const openCountLabel = computed(() => {
   if (reading.value) return ''
   if (!scopeActive.value) return desk.count ?? '?'
   if (state.value !== 'ready' || desk.count === null) return '?'
-  return openItems.value.length
+  return openItems.value.length + elsewhere.count
 })
+const openCountTip = computed(() => scopeActive.value ? [`${openItems.value.length} here`, ...elsewhere.breakdown].join(' · ') : desk.countTip)
 const groupOpenCount = (rows: DeskItem[]) => rows.filter(item => openItems.value.includes(item)).length
 const decidedCountLabel = computed(() => reading.value ? '' : items.value.filter(item => item.decided && (!scopeActive.value || inScope(item))).length)
 const visible = computed(() => items.value.filter(item => inScope(item) && (item.decided === (filter.value === 'decided') || filter.value === 'open' && item.personStep && settledSteps.value.has(item.id)) && (filter.value === 'open' || !outcomeFilter.value
@@ -751,7 +752,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
     <div ref="tabRow" class="dp-tabrow">
       <div class="dp-bar">
         <div class="seg view-tabs" role="radiogroup" aria-label="Show">
-          <button type="button" role="radio" :aria-checked="filter === 'open'" data-testid="desk-tab-open" @click="filter = 'open'">Open<span class="n">{{ openCountLabel }}</span></button>
+          <button type="button" role="radio" :aria-checked="filter === 'open'" :data-tip="openCountTip" data-testid="desk-tab-open" @click="filter = 'open'">Open<span class="n">{{ openCountLabel }}</span></button>
           <button type="button" role="radio" :aria-checked="filter === 'decided'" data-testid="desk-tab-decided" @click="filter = 'decided'">Decided<span class="n">{{ decidedCountLabel }}</span></button>
         </div>
         <!-- A narrow row sends feedback above the footer, outside the container's fixed-position containing block. -->

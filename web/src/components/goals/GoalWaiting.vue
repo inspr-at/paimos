@@ -46,9 +46,11 @@ const reading = computed(() => hereCount.value === null)
       <span class="w-line"><span>Waiting on you couldn’t be read</span></span>
       <button type="button" class="btn sm ghost waiting-open" @click="desk.refresh()">Try again</button>
     </div>
+    <DeskInstanceItems v-for="read in elsewhere.reads" :key="read.tag" :read="read" variant="goals" />
   </section>
   <section v-else-if="reading" class="waiting is-empty is-reading" aria-label="Waiting on you" aria-busy="true">
     <div class="waiting-head"><span class="w-ic"><AppIcon name="person-wait" :size="15" /></span><span class="w-line"><span class="skeleton" /></span></div>
+    <DeskInstanceItems v-for="read in elsewhere.reads" :key="read.tag" :read="read" variant="goals" />
   </section>
   <section v-else-if="desk.allClear" class="waiting is-empty is-clear" aria-label="Waiting on you">
     <div class="waiting-head">
@@ -56,6 +58,7 @@ const reading = computed(() => hereCount.value === null)
       <span class="w-line"><span>Nothing waits on you</span><span v-if="coming" v-clip-tip class="coming"><b>Coming</b> · {{ comingLabel }}</span></span>
       <RouterLink class="btn sm ghost waiting-open" to="/decision-desk">Open Desk</RouterLink>
     </div>
+    <DeskInstanceItems v-for="read in elsewhere.reads" :key="read.tag" :read="read" variant="goals" />
   </section>
   <section v-else class="waiting" aria-label="Waiting on you">
     <div class="waiting-head">

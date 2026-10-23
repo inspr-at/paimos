@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -146,8 +145,7 @@ func (m *Module) connectInstance(w http.ResponseWriter, r *http.Request) {
 		Origin string `json:"origin"`
 		State  string `json:"state"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 2048)
-	decoder := json.NewDecoder(r.Body)
+	decoder := httpapi.NewRequestDecoder(w, r, 2048)
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&in) != nil || decoder.Decode(new(any)) != io.EOF || !connectState.MatchString(in.State) {
 		httpapi.WriteError(w, 400, "invalid connect request")

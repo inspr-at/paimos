@@ -11,6 +11,7 @@ import AppIcon from '../AppIcon.vue'
 
 const store = useDeskConnections(), session = useSession()
 const text = (en: string, de: string) => displayLanguage() === 'de' ? de : en
+const host = (origin: string) => new URL(origin).host
 const issued = ref<IssuedConnection[]>([]), failed = ref(false), busy = ref('')
 const owner = computed(() => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : '')
 let generation = 0, abort = new AbortController()
@@ -42,7 +43,7 @@ onBeforeUnmount(() => { generation++; abort.abort() })
   <SettingsCard :title="text('Other instances', 'Andere Instanzen')" icon="link" anchor="other-instances">
     <template #lead>{{ text('Read your waiting decisions here. Each decision opens on its home instance.', 'Wartende Entscheidungen werden hier angezeigt. Jede Entscheidung öffnet sich auf ihrer eigenen Instanz.') }}</template>
     <div v-for="row in store.reads" :key="row.tag" class="connection-row">
-      <span><b>{{ row.tag }}</b> · {{ new URL(row.origin).host }}<small v-if="row.account">{{ text('connected as', 'verbunden als') }} {{ row.account }} · {{ text('since', 'seit') }} {{ date(row.connectedAt) }}<template v-if="row.summary"> · {{ text('last read', 'zuletzt gelesen') }} {{ date(row.summary.asOf) }}</template></small><small>{{ row.state }}</small></span>
+      <span><b>{{ row.tag }}</b> · {{ host(row.origin) }}<small v-if="row.account">{{ text('connected as', 'verbunden als') }} {{ row.account }} · {{ text('since', 'seit') }} {{ date(row.connectedAt) }}<template v-if="row.summary"> · {{ text('last read', 'zuletzt gelesen') }} {{ date(row.summary.asOf) }}</template></small><small>{{ row.state }}</small></span>
       <button v-if="row.state === 'connecting'" type="button" class="btn sm" @click="store.cancel(row.tag)">{{ text('Cancel', 'Abbrechen') }}</button>
       <button v-else-if="row.state === 'not connected' || row.state === 'ended'" type="button" class="btn sm" @click="store.connect(row.tag)">{{ row.state === 'ended' ? text('Reconnect', 'Neu verbinden') : text('Connect', 'Verbinden') }}</button>
       <button v-else type="button" class="btn sm" @click="disconnect(row.tag)">{{ text('Disconnect', 'Trennen') }}</button>
@@ -53,7 +54,7 @@ onBeforeUnmount(() => { generation++; abort.abort() })
   <SettingsCard :title="text('Connected instances (read your waiting items)', 'Verbundene Instanzen (Wartendes lesen)')" icon="shield" anchor="connected-instances">
     <template #lead>{{ text('Disconnect here to end access from that browser.', 'Durch Trennen endet der Zugriff aus dem verbundenen Browser.') }}</template>
     <div v-for="row in issued" :key="row.id" class="connection-row">
-      <span><b>{{ row.instance }}</b> · {{ new URL(row.origin).host }}<small>{{ text('this browser · connected', 'dieser Browser · verbunden') }} {{ date(row.created_at) }}<template v-if="row.last_used_at"> · {{ text('last used', 'zuletzt verwendet') }} {{ date(row.last_used_at) }}</template></small></span>
+      <span><b>{{ row.instance }}</b> · {{ host(row.origin) }}<small>{{ text('this browser · connected', 'dieser Browser · verbunden') }} {{ date(row.created_at) }}<template v-if="row.last_used_at"> · {{ text('last used', 'zuletzt verwendet') }} {{ date(row.last_used_at) }}</template></small></span>
       <button type="button" class="btn sm" :disabled="!!busy" @click="revoke(row.id)">{{ text('Disconnect', 'Trennen') }}</button>
     </div>
     <p v-if="!issued.length && !failed">{{ text('No active connections.', 'Keine aktiven Verbindungen.') }}</p>
