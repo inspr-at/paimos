@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { collectCandidates, packCandidates, writeCandidateArchive } from './visual-candidates.mjs'
+import { collectCandidates, packCandidates } from './visual-candidates.mjs'
 import { verifyReferenceArchive, referenceGates } from './visual-baselines.mjs'
 import { validateVisual, visualCheckResult } from './check.mjs'
 
@@ -132,7 +132,7 @@ export async function replayCandidates(records, pinned, references, output) {
     passed: results.length, results, negative }
 }
 
-export function publicationCommands(directory, candidate) {
+export function publicationCommands(directory, candidate, planDirectory = directory) {
   const q = value => `'${String(value).replaceAll("'", "'\\''")}'`
   const files = [candidate.archive.name, `${candidate.archive.name}.manifest.json`, `${candidate.archive.name}.sha256`].map(name => join(directory, name))
   return [
@@ -140,7 +140,7 @@ export function publicationCommands(directory, candidate) {
     `gh release create test-references-3 --repo inspr-at/paimos --target ${candidate.captureSHA} --prerelease --title 'Visual reference set 3' --notes 'Tick-approved reference set 3; AEON-1670 approval record; immutable assets.' ${files.map(q).join(' ')}`,
     ...files.slice(0, 2).map(path => `/Users/markus/.aeon/lead/aeon/pm --instance ppm --agent-name aeon-lead-claude --json attach AEON-1670 ${q(path)}`),
     '# Record returned attachment IDs, then use an actual Tick receipt (captureSHA, archiveSHA256, approvedAt, evidence, checkpoints).',
-    `node scripts/test-prune/visual-pin.mjs activate ${q(directory)} tick-set3-approval.json ARCHIVE_ATTACHMENT_UUID MANIFEST_ATTACHMENT_UUID`,
+    `node scripts/test-prune/visual-pin.mjs activate ${q(planDirectory)} ${q(join(planDirectory, 'tick-approval.json'))} ARCHIVE_ATTACHMENT_UUID MANIFEST_ATTACHMENT_UUID`,
     '# Activation is local only. LEAD owns the commit, publication verification, review, merge and CI.',
   ].join('\n') + '\n'
 }
@@ -157,23 +157,36 @@ async function main() {
     const { review } = packCandidates(records, visual)
     need(review.captureSHA === 'ecb819ba898f3fcb944f395388fb2c24a8b7ce83', 'This brief requires the dispatched main capture')
     need(records.every(record => record.quality.quality?.status === 'passed'), 'Every candidate needs a recorded quality pass')
-    mkdirSync(argument, { recursive: false })
-    const archiveDirectory = join(argument, 'publication')
-    const candidate = writeCandidateArchive(records, visual, archiveDirectory)
-    const detached = boundedFile(join(archiveDirectory, `${candidate.archive.name}.manifest.json`))
+    const archiveName = `AEON-1674-linux-${review.captureSHA.slice(0, 10)}.tar`
+    const capturedArchive = join(directory, 'linux-candidate', archiveName)
+    const detached = boundedFile(`${capturedArchive}.manifest.json`), candidate = JSON.parse(detached)
+    need(candidate.archive?.name === archiveName && candidate.baselineBundle?.sha256 === review.sha256 &&
+      JSON.stringify(candidate.members) === JSON.stringify(review.members), 'Original CI archive must contain these exact quality-checked captures')
+    const archive = boundedFile(capturedArchive, 64 * 1024 * 1024)
     const approval = { reviewer: 'Tick', status: 'approved', dryRun: true, approvedAt: new Date().toISOString(),
       evidence: 'DRY RUN ONLY; no product approval', captureSHA: candidate.captureSHA, archiveSHA256: candidate.archive.sha256,
       checkpoints: candidate.members.map(member => member.id) }
     const pinned = pinManifest(visual, candidate, detached, approval, {}, { dryRun: true })
-    const verified = verifyReferenceArchive(boundedFile(join(archiveDirectory, candidate.archive.name), 64 * 1024 * 1024), detached, pinned)
+    const verified = verifyReferenceArchive(archive, detached, pinned)
+    mkdirSync(argument, { recursive: false })
+    const archiveDirectory = join(argument, 'publication')
+    mkdirSync(archiveDirectory)
+    // Preserve the original CI archive bytes, including tar metadata. Tick's
+    // receipt therefore identifies the captured artifact without a repack.
+    writeFileSync(join(archiveDirectory, archiveName), archive, { flag: 'wx' })
+    writeFileSync(join(archiveDirectory, `${archiveName}.manifest.json`), detached, { flag: 'wx' })
+    writeFileSync(join(archiveDirectory, `${archiveName}.sha256`), `${sha256(archive)}  ${archiveName}\n`, { flag: 'wx' })
     const proof = await replayCandidates(records, pinned, verified.references, argument)
     writeFileSync(join(argument, 'visual-manifest.dry-run.json'), JSON.stringify(pinned, null, 2) + '\n', { flag: 'wx' })
     writeFileSync(join(argument, 'proof.json'), JSON.stringify(proof, null, 2) + '\n', { flag: 'wx' })
     writeFileSync(join(argument, 'tick-approval.template.json'), JSON.stringify({ ...approval, status: 'pending-Tick-review', dryRun: false,
-      approvedAt: null, evidence: null, checkpoints: [] }, null, 2) + '\n', { flag: 'wx' })
-    writeFileSync(join(argument, 'lead-commands.sh'), publicationCommands(archiveDirectory, candidate).replace(
-      `activate '${archiveDirectory}'`, `activate '${argument}'`), { flag: 'wx' })
-    console.log(`DRY RUN ONLY: ${proof.passed} blocking matches; one-pixel negative rejected. No live manifest, approval, release or attachment changed.\n${publicationCommands(archiveDirectory, candidate).replace(`activate '${archiveDirectory}'`, `activate '${argument}'`)}`)
+      approvedAt: null, evidence: null, standingConsent: { ticket: 'AEON-1692 item 1',
+        checkpoints: candidate.members.filter(member => member.id.startsWith('V-delivery-numbers-390-')).map(member => member.id),
+        condition: 'Both the 12px header-gap and full on-target-headline viewport assertions passed on the capture SHA; no additional Tick look required.' },
+    }, null, 2) + '\n', { flag: 'wx' })
+    const commands = publicationCommands(archiveDirectory, candidate, argument)
+    writeFileSync(join(argument, 'lead-commands.sh'), commands, { flag: 'wx' })
+    console.log(`DRY RUN ONLY: ${proof.passed} blocking matches; one-pixel negative rejected. No live manifest, approval, release or attachment changed.\n${commands}`)
   } else {
     const archiveDirectory = join(directory, 'publication')
     const names = (await import('node:fs')).readdirSync(archiveDirectory).filter(name => name.endsWith('.tar.manifest.json'))
