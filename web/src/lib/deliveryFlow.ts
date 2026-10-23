@@ -207,7 +207,7 @@ export interface LabelInput { tag?: string; text: string; since?: string; durati
  * A multi-run bar keeps its complete run tag: shorten the description first,
  * then show just the tag. Keep "since" while it fits beside the tag. Untagged
  * bars fall back to text, duration and clipped text, always keeping "since".
- * Both paths keep the label inside the bar's existing padding.
+ * Descriptions keep the existing padding; a bare key can use the whole bar.
  */
 export function fitLabel({ tag, text, since = '', duration, room, pad, textWidth }: LabelInput): string {
   const advance = (value: string) => textWidth ? textWidth(value) : value.length * CHAR_W
@@ -232,7 +232,10 @@ export function fitLabel({ tag, text, since = '', duration, room, pad, textWidth
     if (fits(base + suffix)) return base + suffix
     // A bare key may use the entire bar; the renderer centres it and omits the
     // optional kind icon. Padding must not hide a key that fits by itself.
-    return clipped(`${tag} · `, suffix, 1) || (fits(tag + suffix) ? tag + suffix : advance(tag) <= room ? tag : '')
+    const shortened = clipped(`${tag} · `, suffix, 1)
+    if (shortened) return shortened
+    if (fits(tag + suffix)) return tag + suffix
+    return advance(tag) <= room ? tag : ''
   }
   const base = text + since
   const durationLabel = duration ? `${duration}${since}` : ''

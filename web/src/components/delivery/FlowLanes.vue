@@ -61,20 +61,24 @@ function ensureProbe(): SVGTextElement | null {
   probeText = text
   return text
 }
-function textWidth(value: string): number {
+function textWidth(value: string, weight = 650, outline = CAPTION_INK): number {
   if (!value) return 0
-  const hit = inkCache.get(value)
+  const key = `${weight}:${outline}:${value}`
+  const hit = inkCache.get(key)
   if (hit != null) return hit
   const node = probeText?.isConnected ? probeText : null
   if (!node || typeof node.getComputedTextLength !== 'function') return value.length * CHAR_W
+  node.style.fontWeight = String(weight)
   node.textContent = value
   const measured = node.getComputedTextLength()
   const size = parseFloat(getComputedStyle(node).fontSize)
   if (!(measured > 0) || Math.abs(size - 11) > 0.5) return value.length * CHAR_W
-  const ink = measured + CAPTION_INK
-  inkCache.set(value, ink)
+  const ink = measured + outline
+  inkCache.set(key, ink)
   return ink
 }
+// Bars use 600-weight text without the incident caption's painted outline.
+const labelWidth = (value: string) => textWidth(value, 600, 0)
 
 // ---------- Growth below the pointer (AEON-1656) ----------
 // `drawn` is the geometry last drawn; `pointerY` the clientY of a hovering mouse or pen. While
@@ -268,10 +272,10 @@ function stepPiece(item: LaneItem, x: number, y: number, w: number, h: number, s
   const icon = s.kind === 'wait' ? 'clock' : s.kind === 'rework' ? 'refresh' : null
   const pad = icon ? 16 : 6
   const tag = set.multi ? run.tag : undefined
-  const label = h >= 12 ? fitLabel({ tag, text: words(s), since, duration: icon ? minutesText(s.end - s.start) : undefined, room, pad, textWidth }) : ''
+  const label = h >= 12 ? fitLabel({ tag, text: words(s), since, duration: icon ? minutesText(s.end - s.start) : undefined, room, pad, textWidth: labelWidth }) : ''
   const keyOnly = !!tag && label === tag
   return {
-    key: `${si}:${run.id}:${run.steps.indexOf(s)}`, kind: 'step', item, x, y, w, h, rects, label, labelX: keyOnly ? lx + Math.max(0, (room - textWidth(label)) / 2) : lx + pad,
+    key: `${si}:${run.id}:${run.steps.indexOf(s)}`, kind: 'step', item, x, y, w, h, rects, label, labelX: keyOnly ? lx + Math.max(0, (room - labelWidth(label)) / 2) : lx + pad,
     icon: icon && !keyOnly && room > 14 && h >= 12 ? icon : null, iconX: lx + 4, textCls: `fl-t ${s.kind}${fut ? ' fut' : ''}`,
   }
 }
