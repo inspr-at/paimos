@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 // Module serves /api/kinds, /api/nodes and atomic /api/tags mutations.
@@ -43,6 +44,7 @@ func New(pool *pgxpool.Pool, events Writer) httpapi.Module {
 // Mount registers kind and node routes. Paths are the full /api paths the
 // server mux expects.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/nodes/{nodeId}/run-once", workorders.Endpoint(m.pool, "run.create", false, 201, m.runOnce))
 	mux.HandleFunc("GET /api/settings/work-vocabulary", m.handleGetVocabulary)
 	mux.HandleFunc("PUT /api/settings/work-vocabulary", m.handlePutVocabulary)
 	mux.HandleFunc("GET /api/settings/status-names", m.handleGetStatusNames)

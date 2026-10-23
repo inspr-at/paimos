@@ -85,6 +85,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"nodes/vocabulary.go:handlePutVocabulary":     "tenant:NO KEY UPDATE",
 		"nodes/nodes.go:updateNodeTx":                 "pairing.Lock",
 		"nodes/nodes.go:deleteNode":                   "pairing.Lock",
+		"nodes/run_once.go:runOnce":                   "pairing.Lock",
 		"nodes/portal_publish.go:armPortalModeration": "project.Write",
 		"portal/market.go:manage":                     "pairing.Mutation",
 		"portal/moderate.go:moderate":                 "pairing.Mutation",
