@@ -912,6 +912,12 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await page.emulateMedia({ colorScheme: 'dark' }); await shot('1440-dark-typical')
   expect((await new AxeBuilder({ page }).include('.assistants').withRules(['color-contrast']).analyze()).violations).toEqual([])
   await page.emulateMedia({ colorScheme: 'light' })
+  // Keep the existing compact/phone and policy-edit fixtures short; the long
+  // policy above exercises desktop clamping and its matching captures only.
+  amy.policy.allowed_projects = ['p-aeon', 'p-pharos']; amy.revision++
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(longPolicy).toHaveText('AEON, PHAROS · asks before acting · $10 a week')
+  await expect(longPolicy).not.toHaveAttribute('data-clip-tip')
   await page.setViewportSize({ width: 1024, height: 1000 })
   await expect(section.locator('.last-column').first()).toBeHidden()
   await expect(section.locator('.folded-facts').first()).toBeVisible()
