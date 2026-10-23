@@ -703,9 +703,42 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const viewSwitch = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/view-switch.spec.ts')
   assert.ok(viewSwitch && viewSwitch.listedTests === 7, 'ViewSwitch regressions must remain declared')
   assert.ok(gated.some(spec => spec.file === viewSwitch.file), 'ViewSwitch regressions must remain gated')
+  // AEON-1682 promotes these previously ungated quote boundaries. Preserve the
+  // historical five-minute gate and charge their bounded scheduling estimate
+  // separately, with native discovery proving the complete promoted case set.
+  const quoteNative = real.groups.find(group => group.id === 'quote-native')
+  assert.ok(quoteNative && quoteNative.gate === true, 'Quote native boundaries must remain gated')
+  const quoteFiles = [
+    'tests/quote-editor-core.spec.ts', 'tests/quote-public.spec.ts', 'tests/quotes/parity-flow.spec.ts',
+    'tests/quotes/print-receipt.spec.ts', 'tests/quotes/two-user-presence.spec.ts',
+  ]
+  assert.deepEqual(quoteNative.specs.map(spec => spec.file).sort(), quoteFiles, 'Charge exactly the five newly gated quote files')
+  assert.equal(quoteNative.config, 'playwright.ui.config.ts')
+  assert.equal(quoteNative.project, null)
+  assert.equal(quoteNative.hostedOnly, true)
+  assert.deepEqual(quoteNative.flags, ['--workers=1', '--trace=retain-on-failure'])
+  assert.deepEqual(quoteNative.env, {})
+  const quoteCases = flattenBrowser(JSON.parse(command(process.execPath, ['node_modules/@playwright/test/cli.js', 'test',
+    '-c', quoteNative.config, ...quoteFiles, '--list', '--reporter=json'], { cwd: webRoot })), quoteNative.config)
+  const quoteCatalogue = JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json', import.meta.url), 'utf8')).tests
+    .filter(row => row.kind === 'browser' && quoteFiles.includes(row.file))
+  assert.equal(quoteCases.length, 7, 'Native discovery must retain all seven quote boundary cases')
+  assert.deepEqual(quoteCases.map(key).sort(), quoteCatalogue.map(key).sort(), 'Every native quote boundary must have a tier registration')
+  assert.ok(quoteCatalogue.every(row => row.tier === 'ESSENTIAL' || row.tier === 'GATED-FULL'), 'Every quote boundary must run in the full gate')
+  assert.deepEqual(quoteCatalogue.filter(row => row.tier === 'ESSENTIAL').map(row => [row.file, row.name]), [
+    ['tests/quote-public.spec.ts', 'expired but readable document has no acceptance form'],
+    ['tests/quote-public.spec.ts', 'scoped document renders read-only and acceptance submits displayed digest'],
+    ['tests/quotes/parity-flow.spec.ts', 'customer → quote → inspector save → issue → public acceptance race → receipt'],
+  ], 'Public acceptance, its expired-document refusal and the lifecycle journey must remain essential')
+  for (const spec of quoteNative.specs) {
+    assert.equal(spec.listedTests, quoteCases.filter(row => row.file === spec.file).length, 'Quote declaration must match native discovery')
+    assert.equal(gated.filter(candidate => candidate.file === spec.file).length, 1, 'Each quote boundary file must gate exactly once')
+  }
+  const quoteGrowth = quoteNative.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0)
+  assert.ok(quoteGrowth <= 25, 'Newly gated quote boundaries must retain their bounded scheduling estimate')
   const priorGate = {
     ...real,
-    groups: real.groups.filter(group => group !== attention).map(group => ({
+    groups: real.groups.filter(group => group !== attention && group !== quoteNative).map(group => ({
       ...group,
       specs: group.specs.filter(spec => !deskFiles.has(spec.file) && !panelFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions && spec !== definitionDecisions && spec !== nameWrap && spec !== personSteps && spec !== deskEmpty && spec !== deskTabRow && spec !== viewSwitch).map(spec =>
         spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
@@ -714,9 +747,9 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + panelGrowth + projectDefinitions.weightSeconds + definitionDecisions.weightSeconds + nameWrap.weightSeconds + personSteps.weightSeconds + deskEmpty.weightSeconds + deskTabRow.weightSeconds + viewSwitch.weightSeconds
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + panelGrowth + projectDefinitions.weightSeconds + definitionDecisions.weightSeconds + nameWrap.weightSeconds + personSteps.weightSeconds + deskEmpty.weightSeconds + deskTabRow.weightSeconds + viewSwitch.weightSeconds + quoteGrowth
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision, panel, project Definitions, workspace definition decisions, project name wrap, person-step ownership, empty Desk, Desk tab-row and ViewSwitch specs')
+    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision, panel, project Definitions, workspace definition decisions, project name wrap, person-step ownership, empty Desk, Desk tab-row, ViewSwitch and quote native specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {
