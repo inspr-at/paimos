@@ -199,9 +199,11 @@ test('comments by others or older than 15 minutes cannot be edited', async ({ pa
   await expect(panel(page).getByRole('button', { name: 'Edit comment' })).toHaveCount(0)
 })
 
-test('full page shows the same ticket in two columns; f and Back return to the panel', async ({ page }) => {
+test('full page shows the same ticket in two columns; f and Back return to the panel', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await mockWork(page, fixtures())
+  const data = fixtures()
+  data.nodes.find(node => node.key === 'PHAROS-11')!.body = '## Verwaltete Bereitstellung\n\nDie Verbindung mit Hetzner Cloud ermöglicht eine nachvollziehbare Bereitstellung. Berechtigungen, Wiederholungsversuche und verständliche Fehlermeldungen bleiben auch bei längeren Beschreibungen lesbar.\n\nEine laufende Bereitstellung bleibt dem ursprünglichen Arbeitsauftrag zugeordnet. Änderungen an den Zugangsvoraussetzungen werden vor dem nächsten Schreibzugriff erneut geprüft.'
+  await mockWork(page, data)
   await page.goto('/p/PHAROS/PHAROS-11')
   await expect(panel(page)).toBeVisible()
   await page.keyboard.press('f')
@@ -213,6 +215,17 @@ test('full page shows the same ticket in two columns; f and Back return to the p
   await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('PHAROS-11')
   const measure = await article.locator('.markdown-body').first().evaluate(el => el.getBoundingClientRect().width / parseFloat(getComputedStyle(el).fontSize))
   expect(measure).toBeLessThanOrEqual(46)
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({ colorScheme: theme })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await page.evaluate(() => document.fonts.ready)
+    const readingWidth = await article.locator('.markdown-body').first().evaluate(el => el.getBoundingClientRect().width / parseFloat(getComputedStyle(el).fontSize))
+    expect(readingWidth, `${width} ${theme}: the reading measure stays within 46 em`).toBeLessThanOrEqual(46)
+    await page.screenshot({ path: info.outputPath(`AEON-1699-ticket-full-${width}-${theme}.png`) })
+  }
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
   await page.goBack()
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
   await expect(panel(page)).toBeVisible()

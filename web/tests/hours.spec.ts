@@ -337,9 +337,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     const axe = await new AxeBuilder({ page }).include('.biz-page')
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
     expect(axe.violations, `${width} ${theme}: Hours WCAG A/AA`).toEqual([])
-    if ((width === 390 || width === 1440) && theme === 'light') {
-      await page.screenshot({ path: info.outputPath(`AEON-1699-hours-${width}-${theme}-fix1.png`) })
-    }
+    await page.screenshot({ path: info.outputPath(`AEON-1699-hours-${width}-${theme}-fix3.png`) })
   }
   await writeFile(info.outputPath('AEON-1699-hours-checks.json'), JSON.stringify(measurements, null, 2))
   expect(errors).toEqual([])
