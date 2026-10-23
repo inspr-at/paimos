@@ -147,11 +147,32 @@ export async function renderedFonts(page: Page) {
   const client = await page.context().newCDPSession(page)
   try {
     await client.send('DOM.enable'); await client.send('CSS.enable')
-    const { root } = await client.send('DOM.getDocument')
-    const { nodeIds } = await client.send('DOM.querySelectorAll', { nodeId: root.nodeId, selector: 'body, body *' })
-    if (nodeIds.length > 10_000) throw new Error('Visual font audit exceeds its node bound')
+    await client.send('DOM.getDocument')
+    const { result } = await client.send('Runtime.evaluate', { objectGroup: 'visual-fonts', expression: `
+      Array.from(document.querySelectorAll('body, body *')).filter(el => {
+        const directText = Array.from(el.childNodes).some(node => node.nodeType === 3 && node.textContent.trim());
+        const textControl = ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
+        const generatedText = ['::before', '::after'].some(pseudo => {
+          const content = getComputedStyle(el, pseudo).content;
+          return content && !['none', 'normal', '""'].includes(content);
+        });
+        if (!directText && !textControl && !generatedText) return false;
+        if (!el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
+        const box = el.getBoundingClientRect();
+        if (box.width <= 0 || box.height <= 0 || box.right <= 0 || box.bottom <= 0 || box.left >= innerWidth || box.top >= innerHeight) return false;
+        // Screen-reader copies and opacity-zero tooltips have no painted
+        // glyphs in the checkpoint. Never treat their layout fonts as pixels.
+        const style = getComputedStyle(el);
+        if (box.width <= 1 && box.height <= 1 && style.overflow === 'hidden') return false;
+        return true;
+      })` })
+    if (!result.objectId) throw new Error('Visual font audit could not inspect rendered text')
+    const { result: properties } = await client.send('Runtime.getProperties', { objectId: result.objectId, ownProperties: true })
+    const objects = properties.filter(property => /^\d+$/.test(property.name) && property.value?.objectId)
+    if (objects.length > 10_000) throw new Error('Visual font audit exceeds its node bound')
     const rendered = new Map<string, { family: string; custom: boolean }>()
-    for (const nodeId of nodeIds) {
+    for (const object of objects) {
+      const { nodeId } = await client.send('DOM.requestNode', { objectId: object.value!.objectId! })
       const { fonts } = await client.send('CSS.getPlatformFontsForNode', { nodeId })
       for (const font of fonts) if (font.glyphCount > 0) {
         if (!font.isCustomFont || font.familyName !== 'JetBrains Mono') {
@@ -164,7 +185,10 @@ export async function renderedFonts(page: Page) {
     }
     if (!rendered.size) throw new Error('Visual font audit found no rendered glyphs')
     return [...rendered.values()]
-  } finally { await client.detach() }
+  } finally {
+    await client.send('Runtime.releaseObjectGroup', { objectGroup: 'visual-fonts' }).catch(() => {})
+    await client.detach()
+  }
 }
 
 export function materializeReference(info: TestInfo, checkpoint: { id: string; reference: { attachmentMember: string } },

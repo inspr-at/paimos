@@ -84,6 +84,13 @@ test('visual comparison rejects a changed control and never creates a missing re
   await setupQuality(page)
   await prepareVisualFonts(page, String(info.project.use.baseURL))
   expect(await renderedFonts(page)).toEqual([{ family: 'JetBrains Mono', custom: true }])
+  await page.evaluate(() => {
+    const hidden = document.createElement('span')
+    hidden.textContent = 'Not painted'
+    hidden.style.cssText = 'opacity: 0; font-family: Arial !important'
+    document.body.append(hidden)
+  })
+  expect(await renderedFonts(page)).toEqual([{ family: 'JetBrains Mono', custom: true }])
   await page.addStyleTag({ content: 'button { font-family: Arial !important; }' })
   await expect(page.getByRole('button')).toHaveCSS('font-family', 'Arial')
   await expect(renderedFonts(page)).rejects.toThrow(/System-font fallback/)
