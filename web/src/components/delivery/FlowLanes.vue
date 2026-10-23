@@ -15,7 +15,7 @@ import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import type { DeliveryLanguage } from '../../lib/delivery'
 import {
-  CHAR_W, criticalPath, fitLabel, keyInput, laneFrame, laneRows, minutesText, pick, placeIncidentCaption, placeLane, rowPieces, runEnd, setTime, setWindow, stepAt, tickStep, timeLabel, wheelInput,
+  CHAR_W, criticalPath, fitLabel, keyInput, laneFrame, laneRows, minutesText, pick, placeIncidentCaption, placeLane, placeRowAvatar, rowPieces, runEnd, setTime, setWindow, stepAt, tickStep, timeLabel, wheelInput,
   type FlowData, type FlowLevel, type FlowRun, type FlowStep, type LaneGeo, type LaneItem, type LaneRows, type LaneSet, type Timeline,
 } from '../../lib/deliveryFlow'
 import type { FlowText } from '../../lib/deliveryFlowText'
@@ -298,7 +298,7 @@ const playhead = computed(() => {
 })
 // The avatar of each set's main run, at the playhead, or at its finish line once the target or a recorded end is reached.
 const avatars = computed(() => {
-  const g = geo.value, T = props.timeline.T, out: { key: string; x: number; y: number; tag: string; pill: boolean; waiting: boolean; incident: boolean; done: boolean }[] = []
+  const g = geo.value, T = props.timeline.T, out: { key: string; x: number; y: number; scale: number; stacked: boolean; tag: string; pill: boolean; waiting: boolean; incident: boolean; done: boolean }[] = []
   const xp = g.X(T)
   if (xp < g.x0 - 1 || xp > g.x1 + 1) return out
   props.sets.forEach((set, si) => {
@@ -306,9 +306,11 @@ const avatars = computed(() => {
     if (!s || T < path[0]!.start - 1e-6) return
     const piece = layout.value.pieces.find(p => p.item?.step === s || p.items?.some(i => i.step === s))
     if (!piece) return
+    const lane = layout.value.lanes.find(l => l.set === set && l.lane === s.lane)!
+    const stacked = lane.fold.total > 1, avatar = placeRowAvatar(piece.y, piece.h, lane.rowH)
     const end = runEnd(set.main), done = rel.value && arrived(set.main) && T >= end, inc = set.main.incident
     out.push({
-      key: `${si}`, x: done ? g.X(end) : xp, y: piece.kind === 'cluster' ? piece.y - 1 : piece.y + 1, tag: set.main.tag, pill: !live.value,
+      key: `${si}`, x: done ? g.X(end) : xp, y: stacked ? avatar.y : piece.kind === 'cluster' ? piece.y - 1 : piece.y + 1, scale: avatar.scale, stacked, tag: set.main.tag, pill: !live.value,
       waiting: !done && s.kind === 'wait', incident: !done && !!inc && T >= inc.start && T < inc.end, done,
     })
   })
@@ -459,19 +461,21 @@ defineExpose({ setTime: (m: number) => setTime(props.timeline, m) })
         <text class="fl-nowt" :x="nowX + 4" :y="layout.H - AX - 2">{{ text.now }}</text>
       </g>
       <g v-for="av in avatars" :key="av.key" class="fl-av" :class="{ waiting: av.waiting, incident: av.incident, done: av.done }" :transform="`translate(${av.x},${av.y})`" data-testid="flow-avatar">
-        <g transform="translate(-13,-27) scale(.8)">
-          <path class="av-core" d="m16 8 7 4v8l-7 4-7-4v-8Z" />
-          <path class="av-light" d="m9 12 7 4v8l-7-4Z" />
-          <path class="av-facet" d="m9 12 7 4 7-4M16 16v8" />
-          <rect class="av-box" x="19" y="18" width="10" height="8" rx="1.6" />
-          <path class="av-strap" d="M24 18v8M19 22h10" />
+        <g :transform="av.stacked ? `scale(${av.scale})` : undefined">
+          <g :transform="av.stacked ? 'translate(-19,-17)' : 'translate(-13,-27) scale(.8)'">
+            <path class="av-core" d="m16 8 7 4v8l-7 4-7-4v-8Z" />
+            <path class="av-light" d="m9 12 7 4v8l-7-4Z" />
+            <path class="av-facet" d="m9 12 7 4 7-4M16 16v8" />
+            <rect class="av-box" x="19" y="18" width="10" height="8" rx="1.6" />
+            <path class="av-strap" d="M24 18v8M19 22h10" />
+          </g>
+          <g v-if="av.pill" class="av-pill" :transform="av.stacked ? 'translate(24,-6.5)' : av.y >= 44 ? `translate(${-pillWidth(av.tag) / 2},-42)` : 'translate(14,-30)'">
+            <rect :width="pillWidth(av.tag)" height="13" rx="6.5" />
+            <text :x="pillWidth(av.tag) / 2" y="9.6" text-anchor="middle">{{ av.tag }}</text>
+          </g>
+          <g class="av-inc" :transform="av.stacked ? 'translate(15,0)' : 'translate(11,-24)'"><circle class="av-inc-bg" r="6.2" /><path class="av-inc-h" d="M0-3v3.2M0 2.6v.1" /></g>
+          <g class="av-wait" :transform="av.stacked ? 'translate(15,0)' : 'translate(11,-24)'"><circle class="av-wait-bg" r="6.2" /><path class="av-wait-h" d="M0-3.2V0l2 1.4" /></g>
         </g>
-        <g v-if="av.pill" class="av-pill" :transform="av.y >= 44 ? `translate(${-pillWidth(av.tag) / 2},-42)` : 'translate(14,-30)'">
-          <rect :width="pillWidth(av.tag)" height="13" rx="6.5" />
-          <text :x="pillWidth(av.tag) / 2" y="9.6" text-anchor="middle">{{ av.tag }}</text>
-        </g>
-        <g class="av-inc" transform="translate(11,-24)"><circle class="av-inc-bg" r="6.2" /><path class="av-inc-h" d="M0-3v3.2M0 2.6v.1" /></g>
-        <g class="av-wait" transform="translate(11,-24)"><circle class="av-wait-bg" r="6.2" /><path class="av-wait-h" d="M0-3.2V0l2 1.4" /></g>
       </g>
       <g v-if="playhead" class="ln-phg" data-part="ph" data-testid="flow-playhead">
         <line class="ln-ph" :x1="playhead.x" :x2="playhead.x" y1="10" :y2="layout.H - AX + 2" />

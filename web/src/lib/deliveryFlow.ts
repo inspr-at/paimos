@@ -131,6 +131,12 @@ export function placeLane(prev: LaneGeo | undefined, total: number, y: number, r
   return { y, h: total * prev.rowH + gaps, rowH: prev.rowH }
 }
 
+/** Centre the 20 px avatar artwork on its bar, leaving room inside a stacked row. */
+export function placeRowAvatar(barY: number, barH: number, rowH: number): { y: number; scale: number; h: number } {
+  const scale = Math.max(0, Math.min(0.8, (rowH - 2) / 20))
+  return { y: barY + barH / 2, scale, h: 20 * scale }
+}
+
 /** The steps a run walks through, alongside work left out. */
 export const criticalPath = (run: FlowRun) => run.steps.filter(step => !step.side && !step.after).sort((a, b) => a.start - b.start)
 /** Where the run ends: the end of its last critical step. */
@@ -322,7 +328,11 @@ export function rowPieces<T extends { step: { start: number; end: number } }>(ro
       let j = k
       while (j + 1 < row.length && X(row[j + 1]!.step.start) - X(row[j]!.step.end) < 6 && X(row[j + 1]!.step.end) - X(row[j + 1]!.step.start) < SLIVER_PX) j++
       if (j > k) {
-        const items = row.slice(k, j + 1), ca = X(items[0]!.step.start), cb = X(items[items.length - 1]!.step.end)
+        // A pill is at least 26 px wide. Absorb following pieces until its
+        // painted width leaves a 2 px gap, even when the next step is not tiny.
+        const ca = X(item.step.start)
+        while (j + 1 < row.length && X(row[j + 1]!.step.start) < ca + Math.max(26, X(row[j]!.step.end) - ca) + 2) j++
+        const items = row.slice(k, j + 1), cb = X(items[items.length - 1]!.step.end)
         out.push({ kind: 'cluster', items, x: ca, w: Math.max(26, cb - ca), from: items[0]!.step.start, to: items[items.length - 1]!.step.end })
         k = j + 1
         continue
