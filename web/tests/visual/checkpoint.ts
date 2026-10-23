@@ -139,7 +139,7 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
         captureSHA, captureRun: process.env.GITHUB_RUN_ID ?? null,
         pngSHA256: png ? createHash('sha256').update(png).digest('hex') : null, baselineCompared: false,
         reference: gate, viewport, theme: checkpoint.theme, renderer, fonts, clock, requirementsRun: true,
-        quality: { status: 'pending' }, comparison: { status: 'not run' },
+        quality: { status: 'pending' }, comparison: { status: gate.mode === 'deferred' && !visualReportOnly(visual) ? 'not run: deferred reference' : 'not run' },
         captureMode: capture, layout, axe: violations, console: unexpectedErrors, responses: unexpectedResponses, expectedReads }
       Object.assign(report, { captureSettling: settled?.evidence ?? null })
       const saveReport = () => writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify(report, null, 2))
@@ -185,7 +185,8 @@ export async function settleVisualCapture(page: Page) {
     })
     for (const animation of finite) {
       const timing = animation.effect!.getComputedTiming()
-      if (typeof timing.endTime !== 'number' || typeof animation.currentTime !== 'number' || timing.endTime - animation.currentTime > 1000)
+      if (typeof timing.endTime !== 'number' || typeof animation.currentTime !== 'number' || animation.playbackRate <= 0 ||
+        (timing.endTime - animation.currentTime) / animation.playbackRate > 1000)
         throw new Error('Visual finite transition is not ready within its 1000ms bound')
     }
     await Promise.all(finite.map(animation => animation.finished.catch(() => {})))
@@ -222,7 +223,7 @@ async function reportReference(info: TestInfo, checkpoint: { id: string }, visua
   }
   if (!['compare', 'report-only'].includes(gate.mode)) {
     const pending = capture && visual.capture.states.includes(gate.state)
-    const message = gate.mode === 'deferred' ? `${checkpoint.id}: ${gate.reason}; ${capture && visual.capture.states.includes(gate.state) ? 'manual candidate capture requires quality checks; comparison remains deferred.' : 'product requirement checks not run.'}` :
+    const message = gate.mode === 'deferred' ? `${checkpoint.id}: ${gate.reason}; ${!capture ? 'report-only quality checks required; no blocking reference.' : visual.capture.states.includes(gate.state) ? 'manual candidate capture requires quality checks; comparison remains deferred.' : 'product requirement checks not run.'}` :
       `${checkpoint.id}: awaiting reference (${gate.status}); ${gate.status === 'needs-re-capture' ? pending ? 'manual candidate capture requires quality checks; comparison remains awaiting reference' : 'report only; product requirement checks not run' : 'quality checks required'}. ${gate.reason}`
     info.annotations.push({ type: gate.mode === 'deferred' ? 'deferred' : 'awaiting reference', description: message })
     await info.attach(`${checkpoint.id}-awaiting-reference`, { body: message, contentType: 'text/plain' })
