@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/inbox
+paths:
+  /projects/{projectId}/assistant-adapters:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: listAssistantAdapters
+      summary: List assistant adapters and delivery health
+      description: "Requires inbox.manage in this project. Registry entries belong to the tenant and reference existing encrypted inbox targets. Existing messaging-only assistants owned by the caller appear automatically as implicit pull adapters, using their principal ID as adapter ID and address; project_id is the inspection context, not a new project grant. Endpoint URLs, webhook credentials and message content are never returned. Pagination uses the last returned adapter ID."
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: "A bounded page of adapters."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_after]
+                properties:
+                  items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AssistantAdapter'}}
+                  next_after: {type: [string, 'null'], format: uuid}
+        '400': {description: "Invalid pagination."}
+        '403': {description: "Project inbox.manage required."}
+    post:
+      operationId: createAssistantAdapter
+      summary: Register or replace an assistant delivery binding
+      description: "Person session only, with inbox.manage in this project rechecked in the final fenced write. Binds an existing active agent principal using the existing versioned inbox target. delivery_mode selects push (signed HTTPS webhook) or pull (durable principal inbox, no outbound requests or retries). Grok defaults to pull when endpoint and webhook_secret are omitted; legacy requests supplying endpoint credentials retain push behaviour. Messaging-only assistants remain pull regardless of older webhook registrations. No endpoint or credential is accepted for pull. A replacement disables the previous target for new messages; queued messages retain their original binding. Existing grok_bot_routine targets are migrated automatically, including targets created by older writers. No principal, key, scope or policy is created or changed."
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [vendor, principal_id, address]
+              properties:
+                vendor: {type: string, enum: [grok]}
+                delivery_mode: {type: string, enum: [push, pull], description: "Defaults to pull unless legacy endpoint credentials are supplied. Push requires endpoint and webhook_secret; pull rejects both."}
+                principal_id: {type: string, format: uuid}
+                address: {type: string, maxLength: 73, pattern: '^grok_bot:[a-z][a-z0-9_-]{0,63}$'}
+                endpoint: {type: string, maxLength: 2048, description: "Public HTTPS endpoint. Private, metadata, loopback and redirect destinations are rejected. Stored only in the existing encrypted target."}
+                webhook_secret: {type: string, minLength: 8, maxLength: 512, writeOnly: true, description: "Existing receiver webhook credential. Never an Aeon API key. Encrypted at rest, omitted from messages, events, responses and logs. Grok retains its existing Bearer header and additionally receives an HMAC signature."}
+      responses:
+        '201': {description: "Registered adapter, without endpoint or credentials.", content: {application/json: {schema: {$ref: '#/components/schemas/AssistantAdapter'}}}}
+        '400': {description: "Invalid vendor, endpoint, address or credential."}
+        '403': {description: "Person session and project inbox.manage required."}
+        '404': {description: "Project or active agent principal not found."}
+  /projects/{projectId}/assistant-adapters/{adapterId}:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: adapterId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getAssistantAdapter
+      summary: Read an adapter and mode-specific health
+      description: "Requires inbox.manage in this project. Push health reflects fenced delivery results. Pull health reports last_pull_at and the oldest unacknowledged, unexpired principal-inbox message; age is computed on the server. A missing or stale last_pull_at signals lack of polling, never a failed push. Enabled pull messages wait for pickup and acknowledgement for up to seven days from acceptance, shortened by sender expiry; retention failure is pickup_expired with a clear sender notice. Disabled assistants fail with assistant_disabled and loss of usable inbox keys with assistant_revoked. A successful dry-run does not establish delivery health."
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: "Redacted adapter and delivery health.", content: {application/json: {schema: {$ref: '#/components/schemas/AssistantAdapter'}}}}
+        '403': {description: "Project inbox.manage required."}
+        '404': {description: "No adapter in this tenant and project."}
+  /projects/{projectId}/assistant-adapters/{adapterId}/test-send:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: adapterId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: testAssistantAdapter
+      summary: Preview or queue a test through the durable inbox
+      description: "Person session only, with project inbox.manage; a live send also requires inbox.send. dry_run defaults to true and performs no outbound request or write. A live test queues an ordinary inbox message with its existing delivery receipt; push retries are unchanged and pull waits durably for polling without outbound retries; queued is not a claim of delivery. The selected target ID must still be current when the message commits. Reuse the idempotency key only for identical input. Inbound replies use the assistant's own scoped key with the existing messages API or MCP, never a credential in a message."
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                dry_run: {type: boolean, default: true}
+                body: {type: string, minLength: 1, maxLength: 4096, description: "Required for a live test."}
+                idempotency_key: {type: string, minLength: 1, maxLength: 128, description: "Required for a live test."}
+      responses:
+        '200': {description: "Dry-run validated without sending.", content: {application/json: {schema: {$ref: '#/components/schemas/AssistantAdapterTestResult'}}}}
+        '202': {description: "Test queued; inspect the existing inbox receipt for confirmation.", content: {application/json: {schema: {$ref: '#/components/schemas/AssistantAdapterTestResult'}}}}
+        '400': {description: "Invalid test input."}
+        '403': {description: "Person session or required project permission missing."}
+        '404': {description: "No adapter in this tenant and project."}
+        '409': {description: "Selected target was replaced, or idempotency key reused with different input."}
+components:
+  schemas:
+    AssistantAdapter:
+      type: object
+      required: [id, project_id, principal_id, address, vendor, version, enabled, created_at, last_success_at, last_failure_at, last_failure_code]
+      properties:
+        id: {type: string, format: uuid, description: "Immutable versioned inbox target ID, or the existing principal ID for an implicit messaging-only pull adapter."}
+        project_id: {type: string, format: uuid}
+        principal_id: {type: string, format: uuid}
+        address: {type: string}
+        vendor: {type: string, enum: [grok, generic]}
+        delivery_mode: {type: string, enum: [push, pull]}
+        implicit: {type: boolean, description: "True for an existing owner-bound messaging-only principal; no target registration or owner migration is needed."}
+        last_pull_at: {type: [string, 'null'], format: date-time, description: "Server-observed successful inbox pull, including an empty poll; null until observed. Pull mode only."}
+        oldest_unread_at: {type: [string, 'null'], format: date-time, description: "Oldest unacknowledged, unexpired durable principal-inbox message. Pull mode only."}
+        oldest_unread_age_seconds: {type: [integer, 'null'], minimum: 0, description: "Server-computed unread age; null when there is no unread message or the adapter uses push."}
+        version: {type: integer, minimum: 1}
+        enabled: {type: boolean}
+        created_at: {type: string, format: date-time}
+        last_success_at: {type: [string, 'null'], format: date-time}
+        last_failure_at: {type: [string, 'null'], format: date-time}
+        last_failure_code: {type: [string, 'null'], description: "Controlled failure category only; never the remote response or endpoint."}
+    AssistantAdapterTestResult:
+      type: object
+      required: [adapter_id, dry_run, state]
+      properties:
+        adapter_id: {type: string, format: uuid}
+        dry_run: {type: boolean}
+        state: {type: string, enum: [validated, queued]}
+        message_id: {type: string, format: uuid}
+        receipt_path: {type: string, description: "Existing GET /api/inbox/messages/{messageId}/receipt route."}

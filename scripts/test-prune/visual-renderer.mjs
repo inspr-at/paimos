@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,6 +9,58 @@ import { fileURLToPath } from 'node:url'
 const require = createRequire(new URL('../../web/package.json', import.meta.url))
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const need = (ok, detail) => { if (!ok) throw new Error(`renderer differs from reference: ${detail}`) }
+
+// Read only named, non-secret kernel evidence, with a bound before allocation.
+function kernelText(path, limit) {
+  const fd = openSync(path, 'r')
+  try { const bytes = Buffer.alloc(limit); return bytes.subarray(0, readSync(fd, bytes, 0, limit, 0)).toString('utf8') }
+  finally { closeSync(fd) }
+}
+
+export function cpuEvidence({ platform = process.platform, read = kernelText } = {}) {
+  if (platform !== 'linux') return { model: 'unidentified', flags: [], flagsSHA256: null, bootId: 'unidentified' }
+  const first = read('/proc/cpuinfo', 64 * 1024).split(/\n\s*\n/)[0]
+  const model = first.match(/^model name\s*:\s*(.+)$/m)?.[1]?.trim()
+  const flags = [...new Set((first.match(/^flags\s*:\s*(.+)$/m)?.[1] ?? '').trim().split(/\s+/).filter(Boolean))].sort()
+  const bootId = read('/proc/sys/kernel/random/boot_id', 128).trim()
+  need(model && model.length <= 256 && flags.length > 0 && flags.length <= 512 && flags.every(flag => /^[a-z0-9_]{1,64}$/.test(flag)) &&
+    /^[a-f0-9-]{36}$/.test(bootId), 'missing or invalid Linux CPU model/flags/boot identity')
+  return { model, flags, flagsSHA256: createHash('sha256').update(flags.join(' ')).digest('hex'), bootId }
+}
+
+export function assertMachine(visual, { env = process.env, cpu = cpuEvidence() } = {}) {
+  const machine = visual.renderer.machine
+  if (!machine) return
+  need(machine.runnerLabel === 'agm2' && typeof machine.cpuModel === 'string' && machine.cpuModel !== 'unidentified' &&
+    machine.cpuModel.length > 0 && /^[a-f0-9]{64}$/.test(machine.cpuFlagsSHA256 ?? ''), 'fixed machine has no OPS-pinned CPU identity')
+  need(env.AEON_VISUAL_RUNNER === machine.runnerLabel && cpu.model === machine.cpuModel && cpu.flagsSHA256 === machine.cpuFlagsSHA256,
+    'fixed machine CPU/flags or runner label (comparison on another machine is forbidden)')
+}
+
+// This only constructs a candidate record. No caller can activate references or
+// change the manifest through this function. The active v2 record stays intact.
+export function preparedRenderer(visual, setting) {
+  if (!setting || setting === 'baseline') return structuredClone(visual.renderer)
+  const candidate = visual.rendererPreparation?.settings?.[setting]
+  need(visual.rendererPreparation?.status === 'prepared-only' && candidate && Array.isArray(candidate.browserArgs), 'unknown prepared renderer setting')
+  const renderer = { ...structuredClone(visual.renderer), rasterSetting: setting,
+    browser: { ...structuredClone(visual.renderer.browser), args: [...candidate.browserArgs] } }
+  if (candidate.machine) {
+    renderer.machine = structuredClone(candidate.machine)
+    // Refuse a scheduled agm2 job until OPS supplies real evidence; never learn
+    // a CPU pin from the machine currently performing a comparison.
+    assertMachine({ renderer }, { env: { AEON_VISUAL_RUNNER: 'agm2' },
+      cpu: { model: candidate.machine.cpuModel, flagsSHA256: candidate.machine.cpuFlagsSHA256 } })
+  }
+  return renderer
+}
+
+export function captureVisual(visual, env = process.env) {
+  const setting = env.AEON_VISUAL_RENDERER_SETTING
+  if (!setting || setting === 'baseline') return visual
+  need(captureEnabled(visual, env), 'prepared renderer requires manual capture mode')
+  return { ...visual, renderer: preparedRenderer(visual, setting) }
+}
 
 // Clock policy lives per state: Hours intentionally uses the business fixture's
 // date, while Capacity and its account/catalog fixtures share their own instant.
@@ -28,32 +80,51 @@ export function assertClockEvidence(evidence, clock) {
   `fixture clock changed or missing: ${clock.now}`)
 }
 
-// Read only these non-secret runner metadata fields. ImageVersion is recorded
-// by capture, then pinned by the person-reviewed reference round, never guessed.
+// A hosted image rollout is diagnostic metadata, never container identity.
+export function assertVisualContainer(visual, { env = process.env, platform = process.platform, arch = process.arch } = {}) {
+  if (platform !== 'linux' || arch !== 'x64' || !visual.renderer.container?.digest ||
+      env.AEON_VISUAL_CONTAINER_DIGEST !== visual.renderer.container.digest)
+    throw new Error('visual = CI only: use the digest-pinned Playwright container; missing/wrong AEON_VISUAL_CONTAINER_DIGEST or platform (agm2 native Chromium is not comparable)')
+  assertMachine(visual, { env })
+}
+
 export function rendererIdentity(visual, browserVersion, { env = process.env, platform = process.platform, arch = process.arch,
-  browserOptions = { browserName: 'chromium', headless: true, launchOptions: { args: ['--disable-gpu'] } } } = {}) {
+  fontconfigFile = env.FONTCONFIG_FILE,
+  cpu = cpuEvidence({ platform }),
+  browserOptions = { browserName: 'chromium', headless: true, launchOptions: { args: visual.renderer.browser.args } } } = {}) {
   const browsers = JSON.parse(readFileSync(join(dirname(require.resolve('playwright-core/package.json')), 'browsers.json'), 'utf8')).browsers
   const browser = browsers.find(row => row.name === 'chromium-headless-shell')
   return { ...structuredClone(visual.renderer),
     runner: { label: env.AEON_VISUAL_RUNNER ?? 'unidentified', imageOS: env.ImageOS ?? 'unidentified',
-      imageVersion: env.ImageVersion ?? 'unidentified', platform, arch },
+      imageVersion: env.ImageVersion ?? 'unidentified', platform, arch, name: env.RUNNER_NAME ?? 'unidentified', cpu },
+    ...(visual.renderer.machine ? { machine: { runnerLabel: env.AEON_VISUAL_RUNNER ?? 'unidentified', cpuModel: cpu.model, cpuFlagsSHA256: cpu.flagsSHA256 } } : {}),
+    container: { ...visual.renderer.container, digest: env.AEON_VISUAL_CONTAINER_DIGEST ?? 'unidentified', platform, arch },
     playwright: require('@playwright/test/package.json').version,
     browser: { name: browserOptions.browserName === 'chromium' && !browserOptions.channel && browserOptions.headless !== false ? 'chromium-headless-shell' : 'different-browser',
       revision: browser.revision, version: browserVersion, headless: browserOptions.headless !== false, args: browserOptions.launchOptions?.args ?? [] },
     fonts: visual.renderer.fonts.map(font => ({ ...font, sha256: createHash('sha256')
       .update(readFileSync(new URL(`../../${font.asset}`, import.meta.url))).digest('hex') })),
+    fontconfig: { ...visual.renderer.fontconfig, sha256: fontconfigFile ? createHash('sha256').update(readFileSync(fontconfigFile)).digest('hex') : 'unidentified' },
   }
 }
 
 export function assertRenderer(actual, expected, { capture = false } = {}) {
   need(actual && expected, 'missing renderer identity')
-  // Null is allowed only on an unapproved capture policy. An approved reference
-  // must pin the exact ImageVersion that the hosted capture observed.
-  if (capture) {
+  // Immutable historical archives retain their v1 identity checks. New captures
+  // and comparisons use v2; a v1 archive can never match a v2 renderer.
+  if (expected.version === 1 && capture) {
     need(typeof actual.runner?.imageVersion === 'string' && actual.runner.imageVersion !== 'unidentified', 'missing hosted runner ImageVersion')
     expected = { ...expected, runner: { ...expected.runner, imageVersion: actual.runner.imageVersion } }
-  } else need(typeof expected.runner?.imageVersion === 'string' && expected.runner.imageVersion !== 'unidentified', 'reference has no pinned runner ImageVersion')
-  for (const key of Object.keys(expected)) need(same(actual[key], expected[key]), key)
+  } else if (expected.version === 1) need(typeof expected.runner?.imageVersion === 'string' && expected.runner.imageVersion !== 'unidentified', 'reference has no pinned runner ImageVersion')
+  else {
+    need(/^sha256:[a-f0-9]{64}$/.test(expected.container?.digest ?? ''), 'reference has no pinned container digest')
+    if (actual.container?.digest !== expected.container.digest)
+      throw new Error('visual = CI only: renderer differs from reference: container digest (missing or wrong pinned container)')
+  }
+  for (const key of Object.keys(expected)) {
+    if (expected.version === 2 && key === 'runner') continue
+    need(same(actual[key], expected[key]), key)
+  }
   need(same(Object.keys(actual).sort(), Object.keys(expected).sort()), 'identity fields')
 }
 
@@ -78,13 +149,15 @@ export function installRendererFonts(visual, directory, { run = execFileSync } =
   verifyFontAssets(visual)
   const output = resolve(directory)
   mkdirSync(join(output, 'cache'), { recursive: true })
-  const escape = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;')
   const fontDirectory = fileURLToPath(new URL('../../web/tests/visual/fonts', import.meta.url))
-  const aliases = Object.entries(visual.renderer.fontconfig.aliases)
-    .map(([from, to]) => `<alias binding="strong"><family>${escape(from)}</family><prefer><family>${escape(to)}</family></prefer></alias>`).join('\n')
+  const link = join(output, 'fonts')
+  if (!existsSync(link)) symlinkSync(fontDirectory, link, 'dir')
+  need(realpathSync(link) === realpathSync(fontDirectory), 'private font directory')
   const path = join(output, 'fonts.conf')
-  writeFileSync(path, `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n<fontconfig>\n<dir>${escape(fontDirectory)}</dir>\n<cachedir>${escape(join(output, 'cache'))}</cachedir>\n${aliases}\n</fontconfig>\n`)
-  const env = { ...process.env, FONTCONFIG_FILE: path }
+  const bytes = readFileSync(new URL('../../' + visual.renderer.fontconfig.asset, import.meta.url))
+  need(createHash('sha256').update(bytes).digest('hex') === visual.renderer.fontconfig.sha256, 'fontconfig file SHA-256')
+  writeFileSync(path, bytes)
+  const env = { ...process.env, FONTCONFIG_FILE: path, XDG_CACHE_HOME: join(output, 'cache') }
   run('fc-cache', ['-f'], { env, timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] })
   for (const [alias, family] of Object.entries(visual.renderer.fontconfig.aliases)) {
     // A bare pattern parses the hyphen in system-ui as a size separator.
@@ -157,8 +230,24 @@ export function assertFontEvidence(evidence, state, { platform = 'linux' } = {})
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (process.argv[2] !== 'install-fonts' || process.platform !== 'linux') throw new Error('Usage (Linux only): visual-renderer.mjs install-fonts')
   const visual = JSON.parse(readFileSync(new URL('./visual-manifest.json', import.meta.url), 'utf8'))
-  const path = installRendererFonts(visual, 'tmp/visual-fontconfig')
-  console.log(`FONTCONFIG_FILE=${path}`)
+  if (process.argv[2] === 'cpu-evidence') {
+    const output = resolve(process.argv[3] ?? '')
+    need(output.startsWith(resolve('web/test-results') + '/'), 'CPU evidence must stay under web/test-results')
+    const evidence = { version: 1, runner: process.env.RUNNER_NAME ?? 'unidentified', cpu: cpuEvidence(),
+      slot: process.env.AEON_VISUAL_PROBE_SLOT ?? null, run: process.env.GITHUB_RUN_ID ?? null, attempt: process.env.GITHUB_RUN_ATTEMPT ?? null }
+    mkdirSync(dirname(output), { recursive: true })
+    writeFileSync(output, JSON.stringify(evidence, null, 2) + '\n', { flag: 'wx' })
+    console.log(JSON.stringify(evidence))
+  } else if (process.argv[2] === 'prepare') {
+    const renderer = preparedRenderer(visual, process.argv[3])
+    const output = resolve(process.argv[4] ?? '')
+    need(output.startsWith(resolve('web/test-results') + '/'), 'Prepared renderer must stay under web/test-results')
+    mkdirSync(dirname(output), { recursive: true })
+    writeFileSync(output, JSON.stringify(renderer, null, 2) + '\n', { flag: 'wx' })
+  } else {
+    if (process.argv[2] !== 'install-fonts' || process.platform !== 'linux') throw new Error('Usage: visual-renderer.mjs install-fonts | cpu-evidence OUTPUT | prepare SETTING OUTPUT')
+    const path = installRendererFonts(visual, 'tmp/visual-fontconfig')
+    console.log(`FONTCONFIG_FILE=${path}`)
+  }
 }

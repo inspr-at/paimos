@@ -866,6 +866,33 @@
       "specs": [
       ]
     }
+    ,
+    {
+      "config": "playwright.ui.config.ts"
+      ,
+      "env": {}
+      ,
+      "executionJob": "visual-comparison"
+      ,
+      "flags": [
+        "--workers=1"
+      ]
+      ,
+      "gate": true
+      ,
+      "hostedOnly": true
+      ,
+      "id": "visual-comparison"
+      ,
+      "project": null
+      ,
+      "sourceSteps": [
+        "AEON-1692 digest-pinned required visual job"
+      ]
+      ,
+      "specs": [
+      ]
+    }
   ]
   ,
   "integrationNotes": [

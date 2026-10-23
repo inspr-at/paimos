@@ -112,8 +112,11 @@ test('AEON-1023 browser-only discovery preserves full/catalogue/changed-area dec
   // A full-layout execution through the real runner with native-result
   // fixtures proves batching never drops, duplicates, or changes case identity.
   const beforeKeys = [], executed = []
-  for (let index = 1; index <= fullWebShardCount; index++) {
-    const { before, after } = compare({ full: true, event: 'merge_group', count: fullWebShardCount, index })
+  const executionPlans = [...Array.from({ length: fullWebShardCount }, (_, i) => ({ full: true, event: 'merge_group', count: fullWebShardCount, index: i + 1 })),
+    { full: true, event: 'merge_group', count: 1, index: 1, visual: true }]
+  for (const [index, options] of executionPlans.entries()) {
+    const { before, after } = compare(options)
+    assert.ok(after.tests.every(row => (row.executionJob === 'visual-comparison') === (options.visual === true)))
     beforeKeys.push(...before.tests.map(key))
     const batches = browserBatches(after.tests, policies)
     const chosen = args => {

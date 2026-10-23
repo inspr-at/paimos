@@ -9,7 +9,7 @@ const oid = /^[a-f0-9]{40}$/;
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const positive = value => Number.isSafeInteger(value) && value > 0;
 const ensure = (value, message) => { if (!value) throw new Error(message); };
-const optionalJobs = ['cache-prime', 'tree-reuse', 'apt-bundle', 'visual-reference-capture'];
+const optionalJobs = ['cache-prime', 'tree-reuse', 'apt-bundle', 'visual-reference-capture', 'visual-probe-summary'];
 const mainPushBackoff = [15000, 30000, 45000, 60000];
 const mainPushBudget = 180000;
 const lookupTimeout = 10000;
@@ -22,6 +22,7 @@ export const executionSteps = {
   'go-timing': 'Timing budgets, alone',
   'web-catalogue': 'Require every web case to be classified',
   'web-setup': 'Build web',
+  'visual-comparison': 'Run every visual case without retries',
   'release-check-run': 'Enforce test runner trust boundary',
   'e2e-run': 'Start server and run smoke',
   'migration-compat': 'Previous binary on the candidate schema',
@@ -86,7 +87,7 @@ export async function verifyRun(repository, runID, api, sha) {
 export function verifyJobs(jobs, attempt) {
   ensure(positive(jobs.total_count) && jobs.total_count <= 100 && jobs.jobs?.length === jobs.total_count, 'incomplete job list');
   ensure(jobs.jobs.every(job => job.run_attempt === attempt && job.status === 'completed' && (job.conclusion === 'success' || (optionalJobs.includes(job.name) && job.conclusion === 'skipped') || (job.name === 'apt-bundle' && job.conclusion === 'failure'))), 'incomplete suite');
-  ensure(jobs.jobs.every(job => job.name !== 'visual-reference-capture' || job.conclusion === 'skipped'), 'manual capture must be skipped');
+  ensure(jobs.jobs.every(job => !['visual-reference-capture', 'visual-probe-summary'].includes(job.name) || job.conclusion === 'skipped'), 'manual capture must be skipped');
   // The apt artifact is optional: failed fetches retain network installs, and
   // every test execution below must still have passed. Unknown or duplicate
   // jobs cannot silently change the suite this proof recognizes.
@@ -107,6 +108,10 @@ export function verifyJobs(jobs, attempt) {
     if(/^(go-test|web-unit|web-shard) \(/.test(name)) {
       const full=job.steps?.filter(step=>step.name==='Confirm full tier execution');
       ensure(full?.length===1&&full[0].status==='completed'&&full[0].conclusion==='success','missing full tier execution evidence');
+    }
+    if(name==='visual-comparison') {
+      const full=job.steps?.filter(step=>step.name==='Confirm full visual tier execution');
+      ensure(full?.length===1&&full[0].status==='completed'&&full[0].conclusion==='success','missing full visual execution evidence');
     }
     ensure(!job.steps?.some(step => step.name === 'Reuse the verified merge-group run' && step.conclusion !== 'skipped'), 'reused suite is not execution proof');
   }

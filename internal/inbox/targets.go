@@ -50,7 +50,7 @@ func NewMessaging(pool *pgxpool.Pool, key []byte, options ...func(*messaging)) (
 	if err != nil {
 		return nil, errors.New("messaging encryption unavailable")
 	}
-	m := &messaging{base: newModule(pool), aead: aead}
+	m := &messaging{base: newModule(pool), aead: aead, adapters: newAssistantAdapterRegistry()}
 	for _, option := range options {
 		option(m)
 	}
@@ -71,6 +71,7 @@ type messaging struct {
 	heldReply HeldReplyBridge
 	base      *module
 	aead      cipher.AEAD
+	adapters  assistantAdapterRegistry
 	// databaseClock replaces clock_timestamp() for lease decisions. Production
 	// leaves it nil. Tests set it to simulate an API host ahead of or behind
 	// the database.
@@ -78,6 +79,10 @@ type messaging struct {
 }
 
 func (m *messaging) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/projects/{projectId}/assistant-adapters", m.listAssistantAdapters)
+	mux.HandleFunc("POST /api/projects/{projectId}/assistant-adapters", m.createAssistantAdapter)
+	mux.HandleFunc("GET /api/projects/{projectId}/assistant-adapters/{adapterId}", m.getAssistantAdapter)
+	mux.HandleFunc("POST /api/projects/{projectId}/assistant-adapters/{adapterId}/test-send", m.testAssistantAdapter)
 	mux.HandleFunc("GET /api/peers", m.listPeers)
 	mux.HandleFunc("POST /api/peers/{sessionId}/messages", m.sendPeerMessage)
 	mux.HandleFunc("POST /api/projects/{projectId}/message-targets", m.setTarget)
@@ -185,14 +190,15 @@ func resolveAddress(ctx context.Context, tx pgx.Tx, project, address string) (st
 }
 
 type targetInput struct {
-	Address      string `json:"address"`
-	PrincipalID  string `json:"principal_id,omitempty"`
-	Adapter      string `json:"adapter"`
-	Kind         string `json:"target_kind"`
-	Ref          string `json:"target_ref"`
-	Secret       string `json:"target_secret,omitempty"`
-	MaximumLevel string `json:"maximum_level,omitempty"`
-	Role         string `json:"role,omitempty"`
+	boundPrincipalID string
+	Address          string `json:"address"`
+	PrincipalID      string `json:"principal_id,omitempty"`
+	Adapter          string `json:"adapter"`
+	Kind             string `json:"target_kind"`
+	Ref              string `json:"target_ref"`
+	Secret           string `json:"target_secret,omitempty"`
+	MaximumLevel     string `json:"maximum_level,omitempty"`
+	Role             string `json:"role,omitempty"`
 }
 
 // MessageTarget is the complete public projection; private values cannot be
@@ -238,6 +244,12 @@ func validateCompatTarget(ctx context.Context, in *targetInput) error {
 	}
 	if in.Role == "simple_fallback" && in.MaximumLevel != "simple" {
 		return badRequest("fallback must be simple")
+	}
+	if in.Adapter == "grok_bot_routine" && in.Kind == "pull" {
+		if match[1] != "grok_bot" || in.Ref != "" || in.Secret != "" || in.MaximumLevel != "simple" || in.Role != "primary" {
+			return badRequest("invalid pull target")
+		}
+		return nil
 	}
 	if !utf8.ValidString(in.Ref) || len(in.Ref) == 0 || len(in.Ref) > 4096 || strings.ContainsRune(in.Ref, 0) {
 		return badRequest("invalid target reference")
@@ -324,15 +336,40 @@ func (m *messaging) setTarget(w http.ResponseWriter, r *http.Request) {
 func (m *messaging) storeTarget(ctx context.Context, p tenant.Principal, project string, in targetInput) (MessageTarget, error) {
 	var out MessageTarget
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = m.storeTargetTx(ctx, tx, p, project, in)
+		return err
+	})
+	return out, err
+}
+
+func (m *messaging) storeTargetTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, in targetInput) (MessageTarget, error) {
+	var out MessageTarget
+	err := func() error {
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,54))`, p.TenantID+project+in.Address); err != nil {
 			return err
 		}
-		principalID, err := resolveAddress(ctx, tx, project, in.Address)
-		if err != nil {
-			return err
+		principalID := in.boundPrincipalID
+		if principalID == "" {
+			var err error
+			principalID, err = resolveAddress(ctx, tx, project, in.Address)
+			if err != nil {
+				return err
+			}
+		} else {
+			// The person-only registry can name any existing agent explicitly;
+			// an address that already exists can never change its principal.
+			var prior string
+			err := tx.QueryRow(ctx, `SELECT principal_id::text FROM inbox_message_targets WHERE project_id=$1::uuid AND address=$2 ORDER BY version DESC LIMIT 1`, project, in.Address).Scan(&prior)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if err == nil && prior != principalID {
+				return badRequest("principal does not match address")
+			}
 		}
 		if in.PrincipalID != "" && in.PrincipalID != principalID {
 			return badRequest("principal does not match address")
@@ -369,18 +406,18 @@ func (m *messaging) storeTarget(ctx context.Context, p tenant.Principal, project
 		if err != nil {
 			return err
 		}
+		out, err = scanCompatTarget(tx.QueryRow(ctx, `INSERT INTO inbox_message_targets(tenant_id,id,project_id,principal_id,address,adapter,target_kind,maximum_level,role,version,sealed_target,has_secret) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING `+compatTargetCols, p.TenantID, id, project, principalID, in.Address, in.Adapter, in.Kind, in.MaximumLevel, in.Role, version, sealed, in.Secret != ""))
+		if err != nil {
+			return err
+		}
 		for _, v := range retired {
 			if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.compat_target_disabled", After: v}); err != nil {
 				return err
 			}
 		}
-		out, err = scanCompatTarget(tx.QueryRow(ctx, `INSERT INTO inbox_message_targets(tenant_id,id,project_id,principal_id,address,adapter,target_kind,maximum_level,role,version,sealed_target,has_secret) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING `+compatTargetCols, p.TenantID, id, project, principalID, in.Address, in.Adapter, in.Kind, in.MaximumLevel, in.Role, version, sealed, in.Secret != ""))
-		if err != nil {
-			return err
-		}
 		_, err = events.Append(ctx, tx, p, events.Change{Type: "inbox.compat_target_created", After: out})
 		return err
-	})
+	}()
 	return out, err
 }
 func (m *messaging) getTargets(w http.ResponseWriter, r *http.Request) {
