@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { processStart, validStart } from './playwright-processes.mjs'
 
@@ -21,4 +23,45 @@ export function verifySupervisor(path = suiteLockPath, env = process.env) {
   }
 }
 
-export default function requireSupervisor() { verifySupervisor() }
+// All browser configs call this same preflight: PR/merge-queue shards, nightly,
+// e2e and performance. Reuse P02's assets and aliases without changing CSS or
+// installing fonts on the host. Workers inherit this run's private fontconfig.
+export async function setupBrowserFonts() {
+  if (process.platform !== 'linux') return
+  const { installRendererFonts, sampleRenderedFont, assertBodyFontEvidence } = await import('./test-prune/visual-renderer.mjs')
+  const visual = JSON.parse(readFileSync(new URL('./test-prune/visual-manifest.json', import.meta.url), 'utf8'))
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-playwright-fonts-'))
+  const prior = process.env.FONTCONFIG_FILE
+  let fontconfig
+  const cleanup = () => {
+    if (process.env.FONTCONFIG_FILE === fontconfig) {
+      if (prior === undefined) delete process.env.FONTCONFIG_FILE
+      else process.env.FONTCONFIG_FILE = prior
+    }
+    rmSync(directory, { recursive: true, force: true })
+  }
+  try {
+    fontconfig = installRendererFonts(visual, directory)
+    const { chromium } = createRequire(new URL('../web/package.json', import.meta.url))('@playwright/test')
+    const browser = await chromium.launch({ headless: true, args: ['--disable-gpu'], timeout: 30_000,
+      env: { ...process.env, FONTCONFIG_FILE: fontconfig } })
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(10_000)
+      // Probe the product's actual body stack, rather than trusting the CSS
+      // family name: system-ui can resolve to JetBrains Mono on a Linux image.
+      const tokens = readFileSync(new URL('../web/src/styles/tokens.css', import.meta.url), 'utf8')
+      await page.setContent(`<style>${tokens}\nbody { font-family: var(--font); }</style><p>Proportional body Wiim</p>`)
+      const body = await sampleRenderedFont(page, 'body')
+      assertBodyFontEvidence(body)
+      console.log(`Browser font guard ok; computed body: ${body.computedFamily}; resolved: ${body.renderedFamilies.join(', ')}`)
+    } finally { await browser.close() }
+    process.env.FONTCONFIG_FILE = fontconfig
+    return cleanup
+  } catch (error) { cleanup(); throw error }
+}
+
+export default function requireSupervisor() {
+  verifySupervisor()
+  return setupBrowserFonts()
+}

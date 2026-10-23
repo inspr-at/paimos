@@ -2,25 +2,18 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { dirname, join, relative } from 'node:path'
+import { dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { test as base, expect, type Browser, type Page, type TestInfo } from '@playwright/test'
+import { expect, type Browser, type Page, type TestInfo } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { readBaselineBundle, referenceGate } from '../../../scripts/test-prune/visual-baselines.mjs'
 import { visualReportOnly, visualCheckResult } from '../../../scripts/test-prune/check.mjs'
-import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, rendererIdentity, verifyFontAssets, installRendererFonts } from '../../../scripts/test-prune/visual-renderer.mjs'
+import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, rendererIdentity, verifyFontAssets, sampleRenderedFont } from '../../../scripts/test-prune/visual-renderer.mjs'
 import { domAudit } from '../ui-audit-rules'
 
 const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8'))
-// Only tests/visual imports this fixture. Fontconfig belongs to this browser's
-// child environment, never the worker, dev server or another spec's browser.
-export const test = base.extend({
-  launchOptions: [async ({ launchOptions }, use, workerInfo) => {
-    if (process.platform !== 'linux') return use(launchOptions)
-    const fontconfig = installRendererFonts(manifest, join(workerInfo.project.outputDir, `visual-fontconfig-${workerInfo.workerIndex}`))
-    await use({ ...launchOptions, env: { ...process.env, ...launchOptions.env, FONTCONFIG_FILE: fontconfig } })
-  }, { scope: 'worker' }],
-})
+// The common browser setup now provisions P02's renderer for every spec.
+export { test } from '@playwright/test'
 const captureSHA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: fileURLToPath(new URL('../../../', import.meta.url)), encoding: 'utf8' }).trim()
 const sourceSpec = (info: TestInfo) => relative(fileURLToPath(new URL('../../', import.meta.url)), info.file).replaceAll('\\', '/')
 export type Profile = 'phone' | 'tablet' | 'desktop'
@@ -303,43 +296,15 @@ export async function fontEvidence(page: Page, state: string) {
   await page.evaluate(() => document.fonts.ready)
   const quote = ['public-quote', 'quote-editor'].includes(state)
   if (quote) await page.waitForFunction(() => [...document.fonts].filter(face => face.family.replaceAll('"', '').startsWith('QuoteProfile')).length === 7)
-  const client = await page.context().newCDPSession(page)
-  const sample = async (selector: string) => {
-    const computedFamily = await page.locator(selector).first().evaluate(element => {
-      const probe = document.createElement('span')
-      probe.id = 'visual-font-probe'; probe.textContent = 'Proportional body Wiim'
-      probe.style.cssText = `position:fixed;opacity:0;pointer-events:none;font-family:${getComputedStyle(element).fontFamily}`
-      document.body.append(probe)
-      return getComputedStyle(element).fontFamily.replaceAll('"', '')
-    })
-    try {
-      // Reading computed styles can be the first use of an injected face. Wait
-      // after that read, before resolving its glyphs, even on the Mac lane.
-      await page.evaluate(async () => {
-        const probe = document.getElementById('visual-font-probe')!
-        const style = getComputedStyle(probe)
-        await document.fonts.load(`${style.fontSize} ${style.fontFamily}`)
-        await document.fonts.ready
-        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-      })
-      const { root } = await client.send('DOM.getDocument')
-      const { nodeId } = await client.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#visual-font-probe' })
-      const { fonts } = await client.send('CSS.getPlatformFontsForNode', { nodeId })
-      return { computedFamily, renderedFamilies: [...new Set(fonts.filter(font => font.glyphCount > 0).map(font => font.familyName))].sort() }
-    } finally { await page.locator('#visual-font-probe').evaluate(element => element.remove()) }
-  }
-  try {
-    await client.send('DOM.enable'); await client.send('CSS.enable')
-    const body = await sample('body')
-    const profile = await page.evaluate(() => [...document.fonts].filter(face => face.family.replaceAll('"', '').startsWith('QuoteProfile')).map(face => ({
-      family: face.family.replaceAll('"', ''), role: face.family.endsWith('body') ? 'body' : 'display', weight: face.weight, style: face.style,
-      status: face.status, checked: document.fonts.check(`${face.style} ${face.weight} 14px "${face.family.replaceAll('"', '')}"`),
-    })))
-    const quoteDocument = quote ? { body: await sample('.quote-document'), display: await sample('.quote-document .quote-title') } : undefined
-    const evidence = { body, profile, document: quoteDocument, painted: await renderedFonts(page) }
-    assertFontEvidence(evidence, state, { platform: process.platform })
-    return evidence
-  } finally { await client.detach() }
+  const body = await sampleRenderedFont(page, 'body')
+  const profile = await page.evaluate(() => [...document.fonts].filter(face => face.family.replaceAll('"', '').startsWith('QuoteProfile')).map(face => ({
+    family: face.family.replaceAll('"', ''), role: face.family.endsWith('body') ? 'body' : 'display', weight: face.weight, style: face.style,
+    status: face.status, checked: document.fonts.check(`${face.style} ${face.weight} 14px "${face.family.replaceAll('"', '')}"`),
+  })))
+  const quoteDocument = quote ? { body: await sampleRenderedFont(page, '.quote-document'), display: await sampleRenderedFont(page, '.quote-document .quote-title') } : undefined
+  const evidence = { body, profile, document: quoteDocument, painted: await renderedFonts(page) }
+  assertFontEvidence(evidence, state, { platform: process.platform })
+  return evidence
 }
 
 export function materializeReference(info: TestInfo, checkpoint: { id: string; reference: { attachmentMember: string } },
