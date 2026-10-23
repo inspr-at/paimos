@@ -24394,6 +24394,8 @@
     ,
     {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"pointer movement keeps the complete label owned by keyboard focus","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/ui-audit-rules.unit.test.ts","name":"P02 audit exceptions require the exact fixture, HTTP outcome and decorative accessible counterpart","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/use-identity-scope.unit.test.ts","name":"a permission reset drops runs, and nothing starts while nobody is signed in","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/use-identity-scope.unit.test.ts","name":"a requirement that stops holding ends the runs that needed it","tier":"ESSENTIAL"}

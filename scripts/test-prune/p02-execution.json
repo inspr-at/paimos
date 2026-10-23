@@ -13,18 +13,15 @@
     "additionalBrowserGuards": 2,
     "currentPackageBrowserCases": 1197,
     "plannedCeiling": 105,
-    "currentGlobalBrowserCases": 5442
+    "currentGlobalBrowserCases": 5457,
+    "newRuntimeRegressionCases": 14,
+    "referenceTransportCases": 1
   },
   "blockers": [
     {
       "kind": "product-prerequisite",
       "state": "goals",
-      "reason": "Current Goals lacks the approved v6 Expert/Simple controls, numbered stage tracks and at-this-pace state."
-    },
-    {
-      "kind": "product-prerequisite",
-      "state": "start-agent",
-      "reason": "Current manual Start agent dialog lacks the approved Run once, Task, Create a ticket in a project and Read-only controls."
+      "reason": "Current Goals lacks v6 Expert/Simple controls and stage tracks. Product packages AEON-1621 / AEON-1625 remain prerequisites; AEON-1625 is open and carries the approved Expanded/ExpandedSimple HTML boards."
     },
     {
       "kind": "product-prerequisite",
@@ -37,11 +34,26 @@
     },
     {
       "kind": "replacement-proof",
-      "reason": "Unit conversion equivalence and all individual negative controls remain unverified. ui-audit-rules.unit.test.ts is not implemented; genuine PerformanceObserver/browser geometry coverage stays."
+      "reason": "All 25 focused browser candidates passed across remote runs. Runtime conversion equivalence and all individual negative controls still require execution/review. Pure audit filtering now has a registered runtime test; genuine PerformanceObserver and browser geometry originals stay."
     },
     {
       "kind": "runner",
       "reason": "ci-static-remote.sh exits 3 under the night protocol; changed runtime suites require hosted CI. Remote browser capacity is intermittent."
+    },
+    {
+      "kind": "quality-finding",
+      "state": "session-chat",
+      "reason": "Observed serious axe list failures on ol.thread with separator li children, plus phone-light state-word contrast; native-context and chat-thread capability fixtures also need completion. No accessibility rule was disabled."
+    },
+    {
+      "kind": "quality-finding",
+      "state": "hours",
+      "reason": "Phone week-grid descendants exceed the scroll container by 56 px; strict overflow checks remain in force."
+    },
+    {
+      "kind": "quality-finding",
+      "state": "capacity",
+      "reason": "The selected daily-limit description fails color contrast in both dark profiles; it remains a failure."
     }
   ],
   "measurements": [
@@ -103,6 +115,41 @@
       "failed": 0,
       "runnerWallSecondsRounded": 2.9,
       "result": "Assigned flaky feedback case passed with recipient/delivery barriers."
+    },
+    {
+      "sha": "33f83884d",
+      "selection": [
+        "tests/theme-settings.spec.ts"
+      ],
+      "filter": "P02",
+      "passed": 2,
+      "failed": 0,
+      "runnerWallSecondsRounded": 3.3,
+      "result": "Both staged-save and explicit Discard/current-revision recovery journeys passed."
+    },
+    {
+      "sha": "90bfc5ae1",
+      "selection": [
+        "tests/ui-audit-rules.spec.ts"
+      ],
+      "filter": null,
+      "passed": 10,
+      "failed": 0,
+      "runnerWallSecondsRounded": 3.0,
+      "result": "Includes reserved-action-slot, header-peer-collision and modal-oversized-child negative controls."
+    },
+    {
+      "sha": "48454ef82",
+      "selection": [
+        "tests/nav.spec.ts",
+        "tests/role-picker-layout.spec.ts",
+        "tests/settings-shared.spec.ts"
+      ],
+      "filter": "P02",
+      "passed": 6,
+      "failed": 1,
+      "runnerWallSecondsRounded": 12.3,
+      "result": "Added axe checks passed Role/Settings. Account menu reported only decorative version-coordinate contrast; its existing exact accessible-counterpart exception was restored at 1f4553aa1; rerun pending."
     }
   ],
   "measuredRunnerTimeChange": null,
@@ -2107,12 +2154,119 @@
     "vitest:tests/tooltip-focus.unit.test.ts:P02 a pending touch disclosure is cancelled by scroll",
     "vitest:tests/tooltip-focus.unit.test.ts:P02 a pending touch disclosure is cancelled by second contact",
     "vitest:tests/tooltip-focus.unit.test.ts:P02 an eight-pixel hold reveals at 500 ms and suppresses only its own compatibility click",
-    "vitest:tests/tooltip-focus.unit.test.ts:P02 focused disclosure follows a changed record and discards a disconnected anchor and late observer"
+    "vitest:tests/tooltip-focus.unit.test.ts:P02 focused disclosure follows a changed record and discards a disconnected anchor and late observer",
+    "vitest:tests/ui-audit-rules.unit.test.ts:P02 audit exceptions require the exact fixture, HTTP outcome and decorative accessible counterpart"
   ],
   "deliberatelyRetainedRisks": [
     "All 1090 original case identities and their tiers, including historical drift aliases.",
     "Native focus/touch/scroll/geometry and PerformanceObserver coverage without equivalent proven runtime proof.",
     "Theme revision/pagination/identity permutations until runtime equivalence is executed.",
-    "Every audit/axe tour until all 80 reviewed image comparisons and their quality checks can pass."
-  ]
+    "Every audit/axe tour until all 80 reviewed image comparisons and their quality checks can pass.",
+    "Two explicit additional browser infrastructure guards are counted above the 105 product-case ceiling; no hidden matrix or demotion compensates for them."
+  ],
+  "resolvedPrerequisites": [
+    {
+      "state": "start-agent",
+      "mainCommit": "736de2a1e",
+      "result": "Merged AEON-1512 and captured all four real Run once fixtures with zero layout, axe, console and HTTP findings at b46b4cbff. They stop at unpinned references."
+    }
+  ],
+  "visualEvidence": [
+    {
+      "sourceSHA": "a2edf1987d",
+      "directory": "web/test-results/AEON-1674-visual-full-a",
+      "attemptedCases": 28,
+      "qualityRecords": 28,
+      "qualityClean": 20,
+      "passedImageComparisons": 0
+    },
+    {
+      "sourceSHA": "d899269df",
+      "directory": "web/test-results/AEON-1674-visual-full-b",
+      "attemptedCases": 26,
+      "qualityRecords": 26,
+      "qualityClean": 20,
+      "passedImageComparisons": 0
+    },
+    {
+      "sourceSHA": "e851ba9e2",
+      "directory": "web/test-results/AEON-1674-visual-full-c",
+      "attemptedCases": 26,
+      "qualityRecords": 18,
+      "qualityClean": 8,
+      "passedImageComparisons": 0
+    },
+    {
+      "sourceSHA": "b46b4cbff",
+      "directory": "web/test-results/AEON-1674-visual-final-candidates",
+      "attemptedCases": 24,
+      "qualityRecords": 18,
+      "qualityClean": 16,
+      "passedImageComparisons": 0,
+      "note": "Decision Desk setup found the real disabled explanation differed from the invented fixture copy; its exact expected text was corrected at e4ec81821 before the final recapture."
+    }
+  ],
+  "launchProof": {
+    "selection": "merge_group forceFull",
+    "selectedVisualCases": 80,
+    "ownedVisualLaunchCases": 80,
+    "config": "playwright.ui.config.ts",
+    "selectionFlagsChanged": false,
+    "note": "Verified through the production tier selector and browserBatches policy assembler. Existing case classifications and host/trace policies remain."
+  },
+  "outsidePackageSourceHooks": [
+    {
+      "file": "web/src/components/access/AgentsTab.vue",
+      "reason": "One identity-guarded successful-apply close restores native focus, as proven by two before-fix failing replacement journeys."
+    },
+    {
+      "file": "web/tests/quote-list-fixtures.ts",
+      "reason": "Optional injected clock keeps public-quote dates deterministic in the canonical visual state."
+    },
+    {
+      "file": "web/tests/start-agent-fixtures.ts",
+      "reason": "Optional injected clock freezes Run once catalog timestamps without changing defaults for its owner."
+    },
+    {
+      "file": "web/scripts/ci-web-shard.test.mjs",
+      "reason": "The source-count assertion deliberately accounts for the ten original Theme application cases plus two staged replacements."
+    },
+    {
+      "file": "web/playwright.ui.config.ts",
+      "reason": "Places verified reference PNGs in ignored output and forbids automatic snapshot rewriting."
+    }
+  ],
+  "unprovenRuntimeFiles": [
+    "tests/agent-appearance.unit.test.ts",
+    "tests/agent-indicator.unit.test.ts",
+    "tests/brandMarks.test.ts",
+    "tests/footer-summary.unit.test.ts",
+    "tests/header-menus.test.ts",
+    "tests/tooltip-focus.unit.test.ts",
+    "tests/ui-audit-rules.unit.test.ts",
+    "tests/visual-baselines.test.ts",
+    "tests/test-prune-ledger.test.ts",
+    "scripts/ci-web-shard.test.mjs"
+  ],
+  "captureBundleNegativeControl": {
+    "command": "node scripts/test-prune/visual-candidates.mjs web/test-results/AEON-1674-visual-full-a web/test-results/AEON-1674-incomplete-review-bundle.json",
+    "exit": 1,
+    "expectedError": "Review bundle needs all 80 quality-checked captures",
+    "bundleWritten": false
+  },
+  "sharedRegistrationChanges": {
+    "tierWriter": "node scripts/test-tiers/cli.mjs classify --kind web --tier ESSENTIAL --only P02; node scripts/test-tiers/cli.mjs manifests --write",
+    "newBrowserCases": 107,
+    "newRuntimeCases": 15,
+    "newVisualSources": 18,
+    "allMainRegistrationsPreserved": true,
+    "baselineAndHistoricalEvidenceChanged": false,
+    "existingSourceCountDriftCorrected": [
+      "tests/a11y.spec.ts: 80 -> 82",
+      "tests/dialog-scale.spec.ts: 8 -> 9",
+      "tests/footer-summary.spec.ts: 13 -> 16",
+      "tests/hide-states.spec.ts: unspecified -> 47"
+    ],
+    "sourceOwnership": "Existing scripts/**, web/scripts/**, web/src/** and web/tests/** slice globs cover all additions; no slice registry change."
+  }
 }
