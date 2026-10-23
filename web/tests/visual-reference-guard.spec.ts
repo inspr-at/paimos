@@ -3,13 +3,13 @@
 // broken comparison into a green case. This synthetic document is only a
 // counterexample for the comparator; it cannot supply a product reference.
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { test, expect, type Response } from '@playwright/test'
 import { sessionChat } from './visual/fixtures'
-import { compareVisualReference } from './visual/checkpoint'
+import { checkVisual, compareVisualReference, visualCases } from './visual/checkpoint'
 
-test('visual comparison rejects a changed control and never creates a missing reference', async ({ page }, info) => {
+test('visual comparison rejects a changed control and never creates a missing reference', async ({ page, browser }, info) => {
   expect(info.config.updateSnapshots).toBe('none')
   await page.setContent('<style>body { margin: 0; background: white; } button { width: 160px; height: 44px; background: white; color: black; border: 1px solid black; }</style><button>Review change</button>')
   const reference = info.snapshotPath('synthetic-reference.png')
@@ -47,11 +47,23 @@ test('visual comparison rejects a changed control and never creates a missing re
     .rejects.toThrow(/Screenshot comparison failed|pixels.*different/)
   // Both changes-requested and deferred states bypass only comparison, without
   // reading a missing baseline or creating a reference. Their report is visible.
+  const qualityDocument = '<html lang="en"><head><title>Synthetic quality control</title><style>button { min-width: 80px; height: 44px; }</style></head><body><main><button>Continue</button></main></body></html>'
   for (const id of ['tickets', 'goals']) {
     const pending = visual.states.find((state: { id: string }) => state.id === id).checkpoints[0]
     expect(await compareVisualReference(page, info, pending, { visual, baselineFile: info.outputPath('absent-bundle.json') })).toBe(false)
     expect(info.annotations.some(row => row.type === 'awaiting reference' && row.description?.includes(pending.id))).toBe(true)
+    // Use the complete product runner too, with a synthetic quality-only
+    // document. No changed product state is recaptured for this control.
+    await checkVisual(browser, info, visualCases(id)[0]!, async qualityPage => { await qualityPage.setContent(qualityDocument) })
+    const report = JSON.parse(readFileSync(info.outputPath(`${pending.id}.md`), 'utf8'))
+    expect(report).toMatchObject({ baselineCompared: false, pngSHA256: null,
+      reference: { mode: 'awaiting-reference' }, layout: [], axe: [], console: [], responses: [] })
+    expect(existsSync(info.outputPath(`${pending.id}.png`))).toBe(false)
   }
+  await expect(checkVisual(browser, info, visualCases('hours')[0]!, async qualityPage => {
+    await qualityPage.setContent(qualityDocument)
+    await qualityPage.evaluate(() => console.error('Synthetic quality failure must still block an awaiting state'))
+  })).rejects.toThrow(/unexpected console\/page failure/)
 })
 
 // Risk: optional native/chat reads escape the fixture to a backend 404, so

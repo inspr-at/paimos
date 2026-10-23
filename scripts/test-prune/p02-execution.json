@@ -3646,13 +3646,26 @@
       "tamperedDetachedManifest": "passed; SHA-256 mismatch before tar can be invoked",
       "wrongManifestDigest": "passed; SHA-256 mismatch before tar can be invoked",
       "approvedStateMissingPin": "passed; Unpinned visual reference, never awaiting",
-      "pinnedImageChanged": "implemented; browser validation pending",
-      "awaitingStateNeverBlocks": "implemented for both changes-requested and deferred; browser validation pending"
+      "pinnedImageChanged": "passed remotely at 22ed0ec12; shared product comparator accepts identical pinned bytes and rejects changed pixels",
+      "awaitingStateNeverBlocks": "passed remotely at 22ed0ec12 for changes-requested and deferred comparator dispatch with a missing bundle; full quality-only runner control added for final validation",
+      "missingAsset": "passed: CLI exits 1 with clear missing/unreadable archive error and creates no baseline"
     },
     "tests": {
       "transport": "passed: node --experimental-strip-types --test web/tests/visual-baselines.test.ts",
       "ledger": "passed: node --experimental-strip-types --test web/tests/test-prune-ledger.test.ts",
-      "browser": "pending"
+      "browser": {
+        "sourceSHA": "22ed0ec12",
+        "entrypoint": "remote-spec.sh",
+        "selection": [
+          "tests/visual-reference-guard.spec.ts",
+          "tests/models-simple.spec.ts"
+        ],
+        "passed": 29,
+        "failed": 0,
+        "wallSeconds": 16.0,
+        "evidenceDirectory": "web/test-results/AEON-1674-r5-browser"
+      },
+      "workflowClassifications": "passed: five focused ci-static registry/drift behavior tests; all static commands remain registered"
     },
     "static": {
       "status": "hosted-CI-pending",
@@ -3666,6 +3679,9 @@
     "cuts": false,
     "tierChanges": false,
     "noPushOrDeploy": true,
-    "noModelOrReviewGateCalls": true
+    "noModelOrReviewGateCalls": true,
+    "sharedRegistryRows": [
+      "scripts/ci/static-checks.json: classify the new hosted reference download, extend the existing runtime packing command and update only the browser-shard run-inventory digest"
+    ]
   }
 }
