@@ -2105,5 +2105,210 @@
       "web/src/router.ts",
       "web/tests/settings-routing.unit.test.ts"
     ]
+  },
+  "fix3": {
+    "base": "13b51572194737ea2198dd6f8e0e9babd9764c50",
+    "sourceHead": "88aded7fd566a5b554cfb8e9d8da220e78c33aac",
+    "recordedAt": "2026-10-23T13:54:52.394364+00:00",
+    "blockingFindings": [
+      "picker HTTP 503 from quadratic canonical child probes hidden below Function Scan",
+      "operator hostname in the public test-prune ledger"
+    ],
+    "changes": {
+      "migration": {
+        "number": 1427,
+        "file": "internal/db/migrations/1427_bounded_picker_leaf_flags.sql",
+        "kind": "additive CREATE FUNCTION",
+        "newFunction": "aeon_work_leaf_flags_bounded(uuid[])",
+        "legacyFunctionPreserved": true,
+        "tablesOrColumnsAdded": false,
+        "auditSlice": "S1 via existing internal/db/** ownership"
+      },
+      "picker": "Compute canonical work parents once with hashed membership; keep candidate ID lookups dependent and restore visibility before returning.",
+      "regression": "Retain the two ESSENTIAL cases; inspect actual custom and generic prepared plans, count internal shared buffers, and verify hidden children, duplicate IDs, non-work exclusion and same-transaction visibility restoration.",
+      "ledger": "Replace the operator hostname with a neutral runner description."
+    },
+    "negativeControls": {
+      "picker": {
+        "scratchHead": "e955b71f5137fb1bccb1c3f1dc98f7caad19628d",
+        "productSource": "13b515721",
+        "changedFiles": [
+          "internal/nodes/picker_search_test.go"
+        ],
+        "test": "TestPickerSearchAnswersWithoutWorkAggregates",
+        "sharedBuffers": 16901649,
+        "bufferBudget": 540672,
+        "candidateVisits": 12359,
+        "unchangedVisitBudget": 17392,
+        "expectedFailure": "picker repeated work inside leaf filter: 16901649 shared buffers, budget 540672",
+        "exitCode": 1,
+        "deliveryAncestor": false
+      },
+      "publicNames": {
+        "proofHead": "556c7d351158b610b09a2be60bce94041298ff05",
+        "originalSource": "13b515721",
+        "expectedFailure": "docs/features/test-prune-ledger.md:331: operator host or business name",
+        "exitCode": 1,
+        "fixedGuardPassed": true
+      }
+    },
+    "positiveProof": {
+      "targetedGo": {
+        "sourceHead": "f1a1b37740cebdb137575790f7c49660781fa4ae",
+        "entryPoint": "remote-test.sh",
+        "host": "agm2-ci",
+        "passedRootTests": 2,
+        "failed": 0,
+        "skipped": 0,
+        "customSharedBuffers": 213389,
+        "genericSharedBuffers": 213381,
+        "bufferBudget": 540672,
+        "unchangedVisitBudget": 17392,
+        "candidateVisits": 12359,
+        "packageSeconds": 10.971,
+        "exitCode": 0
+      },
+      "go": {
+        "sourceHead": "88aded7fd566a5b554cfb8e9d8da220e78c33aac",
+        "entryPoint": "remote-test.sh",
+        "host": "agm2-ci",
+        "command": "./internal/nodes ./internal/db ./internal/dsar -exec 'env CI=1' -count=1 -json",
+        "passedRootTests": 350,
+        "failed": 0,
+        "skipped": 0,
+        "packages": [
+          {
+            "package": "internal/nodes",
+            "passedRootTests": 239,
+            "seconds": 235.247
+          },
+          {
+            "package": "internal/db",
+            "passedRootTests": 101,
+            "seconds": 152.972
+          },
+          {
+            "package": "internal/dsar",
+            "passedRootTests": 10,
+            "seconds": 33.107
+          }
+        ],
+        "customSharedBuffers": 231097,
+        "genericSharedBuffers": 230152,
+        "exitCode": 0
+      },
+      "browser": {
+        "proofHead": "556c7d351158b610b09a2be60bce94041298ff05",
+        "entryPoint": "remote-spec.sh",
+        "host": "agm2-ci",
+        "specs": [
+          "tests/ticket-panel.spec.ts",
+          "tests/aeon-974-typefilter.spec.ts"
+        ],
+        "passed": 54,
+        "failed": 0,
+        "skipped": 0,
+        "reportedMinutes": 2.0,
+        "cleanupComplete": true,
+        "artifacts": "web/test-results/aeon-1696-fix3",
+        "temporaryTransport": {
+          "file": "tests/aeon-1696-fix3-runtime-proof.spec.ts",
+          "passedPublicNameTests": 4,
+          "publicNameNegativeControlPassed": true,
+          "failedAt": "supplemental migration tests",
+          "error": "fatal: Not a valid object name refs/tags/v261005070923.0.0:internal/db/migrations",
+          "properLane": "ci-static-locked.sh supplies release tags",
+          "resolvedByProperStaticLane": true
+        }
+      },
+      "runtimeGoTransportAttempt": {
+        "entryPoint": "remote-test.sh",
+        "sourceHead": "88aded7fd566a5b554cfb8e9d8da220e78c33aac",
+        "purpose": "web unit commands only, not Go test execution",
+        "error": "MODULE_NOT_FOUND: browser dependencies are absent from the Go-only runner",
+        "exitCode": 1,
+        "continuation": "Use the browser lane with its dependency cache; full Go acceptance is the separate 350-root run."
+      },
+      "staticAttempts": [
+        {
+          "entryPoint": "ci-static-locked.sh --merge-main",
+          "exitCode": 3,
+          "error": "remote busy (mbp2606 host guard OPS-300); retry later or rely on PR CI"
+        },
+        {
+          "entryPoint": "ci-static-locked.sh --merge-main",
+          "sourceHead": "88aded7fd566a5b554cfb8e9d8da220e78c33aac",
+          "host": "mbp2606",
+          "exitCode": 1,
+          "seconds": 383.26,
+          "passed": 43,
+          "optionalSkipped": 0,
+          "testTiers": {
+            "passed": true,
+            "seconds": 152.7
+          },
+          "webShardSuite": {
+            "passed": true,
+            "seconds": 278.8,
+            "command": "npm run ci:web:shard:test"
+          },
+          "auditTests": {
+            "passed": true,
+            "seconds": 5.38
+          },
+          "migrationTests": {
+            "passed": true,
+            "seconds": 6.95
+          },
+          "migrations": {
+            "passed": true,
+            "seconds": 0.12
+          },
+          "migrationSplitter": {
+            "passed": true,
+            "seconds": 0.67
+          },
+          "migrationProbeTests": {
+            "passed": true,
+            "seconds": 24.34
+          },
+          "typecheck": true,
+          "lint": true,
+          "strictGoAndWebCatalogues": true,
+          "ownershipChecks": true,
+          "remainingTimeout": {
+            "check": "web-shard-spec-tests",
+            "budgetSeconds": 120,
+            "seconds": 120.02,
+            "failedAssertions": 0,
+            "cancelled": 1,
+            "error": "ci-static: web-shard-spec-tests exceeded timeout_seconds=120 after 120.02s (process group termination requested)",
+            "equivalentAssertionProof": "The larger web-shard-tests command passes these same two files plus aeon-681-ci.test.mjs and the shard inventory check.",
+            "sourceOrBudgetChangedInFix3": false,
+            "classification": "Known shared-runner environment item 3; the Tick LEAD note explicitly keeps this duplicate wrapper deadline unchanged and accepts hosted CI proof."
+          }
+        }
+      ]
+    },
+    "constraints": {
+      "nativeRegistrationsAdded": 0,
+      "tierChanges": false,
+      "assertionsLoosened": false,
+      "deadlinesChanged": false,
+      "protectedCuts": false,
+      "tablesOrColumnsAdded": false,
+      "originPush": false,
+      "deployment": false,
+      "reviewGate": false,
+      "otherModelCLI": false,
+      "subagents": false,
+      "temporaryLaunchersInDelivery": false
+    },
+    "status": "verification running",
+    "workerPct": 90,
+    "pending": [
+      "Retained runtime units and default prune ledger check on the browser lane.",
+      "Authoritative hosted static proof of the unchanged 120-second duplicate web-shard-spec-tests wrapper."
+    ]
   }
 }
