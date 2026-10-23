@@ -20578,6 +20578,8 @@
     ,
     {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"retries only idempotent GET transport failures, with bounded exponential jitter","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"stops a pending GET retry while offline and allows a fresh read after reconnect","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"stops after two GET retries, and never retries a 4xx or a write","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/role-picker.unit.test.ts","name":"Enter on a role submits its changed choice once","tier":"NIGHTLY"}
