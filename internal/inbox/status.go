@@ -71,7 +71,7 @@ func (m *module) handleMessageStatus(w http.ResponseWriter, r *http.Request) {
 	items := []MessageStatus{}
 	err := db.InTenant(tenant.WithPrincipal(r.Context(), p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		items = items[:0]
-		rows, err := tx.Query(r.Context(), `SELECT m.cancelled_at IS NOT NULL,m.id::text,r.state,r.failure_reason,m.fetched_at,r.handed_off_at,r.deliver_by,m.content_mode,m.attached_outcome,m.recipient_message_generation::text,d.leased_at,d.shown_at,d.completed_at,d.offer_deadline,(`+personSessionChatSQL+`),r.pickup_stalled_at
+		rows, err := tx.Query(r.Context(), `SELECT m.cancelled_at IS NOT NULL,m.id::text,r.state,r.failure_reason,m.fetched_at,r.handed_off_at,r.deliver_by,m.content_mode,m.attached_outcome,m.recipient_message_generation::text,d.leased_at,d.shown_at,d.completed_at,d.offer_deadline,((`+personSessionChatSQL+`) OR (`+pullInboxMessageSQL+`)),r.pickup_stalled_at
  FROM inbox_messages m JOIN inbox_receipts r ON r.tenant_id=m.tenant_id AND r.message_id=m.id
  LEFT JOIN harness_deliveries d ON d.tenant_id=m.tenant_id AND d.message_id=m.id AND d.mode='attached_hook'
  WHERE m.chat_thread_id IS NULL AND m.id=ANY($1::uuid[]) AND m.sender_principal_id=$2::uuid ORDER BY m.sent_event_id`, ids, p.ID)

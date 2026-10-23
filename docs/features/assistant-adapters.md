@@ -81,6 +81,20 @@ Pull messages have no automatic online-delivery deadline. An explicit sender
 `expires_at` still applies. Existing queued receipts with an old automatic
 deadline remain available until acknowledgement or explicit expiry. Host
 suspension therefore does not turn a durable inbox into a `no_listener` failure.
+Before first pickup the sender sees `status: "sent"` with
+`waiting_for_pickup: true`; polling changes this to `delivered`, and the existing
+acknowledgement changes the receipt to `handed_off`.
+
+Unread and unacknowledged pull messages have a separate seven-day retention
+limit from acceptance, shortened by an explicit sender expiry. This does not
+change the tenant's online delivery deadline or push/session behaviour. At the
+retention limit the receipt fails with `pickup_expired`, and one System notice
+tells the sender **not picked up within 7 days**. Failed messages cannot later
+be pulled or acknowledged. Disabling the assistant principal or its configured
+address fails queued messages on the next sweep (normally within 15 seconds)
+with `assistant_disabled`; revoking or expiring all usable inbox keys uses
+`assistant_revoked`. A rotated key with a usable replacement remains healthy.
+Replacing a configured target retains queued messages' original pull binding.
 
 ## Webhook protocol and receipts
 

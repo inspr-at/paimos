@@ -57,7 +57,7 @@ paths:
     get:
       operationId: getAssistantAdapter
       summary: Read an adapter and mode-specific health
-      description: "Requires inbox.manage in this project. Push health reflects fenced delivery results. Pull health reports last_pull_at and the oldest unacknowledged, unexpired principal-inbox message; age is computed on the server. A missing or stale last_pull_at signals lack of polling, never a failed push. A successful dry-run does not establish delivery health."
+      description: "Requires inbox.manage in this project. Push health reflects fenced delivery results. Pull health reports last_pull_at and the oldest unacknowledged, unexpired principal-inbox message; age is computed on the server. A missing or stale last_pull_at signals lack of polling, never a failed push. Enabled pull messages wait for pickup and acknowledgement for up to seven days from acceptance, shortened by sender expiry; retention failure is pickup_expired with a clear sender notice. Disabled assistants fail with assistant_disabled and loss of usable inbox keys with assistant_revoked. A successful dry-run does not establish delivery health."
       security: [{session: []}, {agentKey: []}]
       responses:
         '200': {description: "Redacted adapter and delivery health.", content: {application/json: {schema: {$ref: '#/components/schemas/AssistantAdapter'}}}}

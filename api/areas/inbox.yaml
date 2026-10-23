@@ -250,14 +250,14 @@ components:
       properties:
         attached: {$ref: '#/components/schemas/AttachedMessageStatus'}
         cancelled: {type: boolean, description: "True when a never-offered session message was cancelled by its sender."}
-        waiting_for_pickup: {type: boolean, description: "True while a durable person-to-session chat message waits for its first pickup. Its sent status remains queued; a missing listener does not fail it."}
+        waiting_for_pickup: {type: boolean, description: "True while durable person-to-session chat or a pull assistant message waits for its first pickup. Its sent status remains queued; a missing listener does not fail it. Enabled pull assistants retain unacknowledged messages for seven days, shortened by explicit sender expiry. Disabled assistants fail with assistant_disabled; loss of all usable inbox keys fails with assistant_revoked; retention fails with pickup_expired and a sender notice saying not picked up within 7 days."}
         pickup_stalled_at: {type: string, format: date-time, description: "First stalled-pickup notice time. Present only while waiting_for_pickup is true; the message remains deliverable."}
         message_id: {type: string, format: uuid}
         status: {type: string, enum: [sent, delivered, read, not_delivered]}
-        reason: {type: string, description: 'Present only for not_delivered: deadline, attempts, session_ended, no_listener or an adapter reason.'}
+        reason: {type: string, description: 'Present only for not_delivered: deadline, attempts, session_ended, no_listener, pickup_expired, assistant_disabled, assistant_revoked or an adapter reason.'}
         delivered_at: {type: [string, 'null'], format: date-time, description: First hand-over to the recipient.}
         read_at: {type: [string, 'null'], format: date-time, description: Receiver confirmation (receipt handed_off_at).}
-        deliver_by: {type: [string, 'null'], format: date-time, description: "The normal delivery deadline; null for messages to people and for messages sent before deadlines existed. Durable person-to-session chat and Desk answers keep waiting through an elapsed pickup deadline; waiting_for_pickup and pickup_stalled_at describe chat pickup."}
+        deliver_by: {type: [string, 'null'], format: date-time, description: "The normal delivery deadline; null for people, pull assistants without explicit sender expiry, and messages sent before deadlines existed. Pull assistant retention is seven days from acceptance, independent of the tenant's online delivery deadlines. Durable person-to-session chat and Desk answers keep waiting through an elapsed pickup deadline; waiting_for_pickup describes first pickup and pickup_stalled_at describes stalled chat pickup."}
     InboxPage:
       type: object
       required: [items, next_after]
@@ -274,14 +274,14 @@ components:
         tenant: {type: string, description: Tenant slug}
         sender_principal_id: {type: string, format: uuid}
         recipient_principal_id: {type: string, format: uuid}
-        target_id: {type: [string, 'null'], format: uuid, description: 'Receiver target, null for direct inbox messages'}
+        target_id: {type: [string, 'null'], format: uuid, description: 'Receiver target; direct pull assistant messages retain their pull target binding when available, otherwise null for direct inbox messages.'}
         target_version: {type: [integer, 'null'], minimum: 1}
         adapter: {type: string, description: 'Receiver adapter, for example grok_bot_routine'}
         address: {type: string}
         effective_level: {type: string, description: Empty for a direct inbox acknowledgement; simple or steer for a managed adapter hand-off}
         state: {type: string, enum: [queued, handed_off, failed]}
         handed_off_at: {type: [string, 'null'], format: date-time, description: 'RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms'}
-        failure_reason: {type: string}
+        failure_reason: {type: string, description: "Terminal failure reason. Pull retention uses pickup_expired (not picked up within 7 days); disabled or revoked assistants use assistant_disabled or assistant_revoked. An enabled assistant waiting for pickup remains queued with an empty failure reason."}
     InboxReceiptResponse:
       oneOf:
         - {$ref: '#/components/schemas/InboxReceipt'}

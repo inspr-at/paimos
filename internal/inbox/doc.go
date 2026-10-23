@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package inbox is AEON's durable principal inbox (AEON-27, migration 0200).
-// Decision Desk replies (AEON-1432) and person-to-session chat (AEON-1487) wait for pickup: no_listener
+// Decision Desk replies (AEON-1432), person-to-session chat (AEON-1487) and
+// enabled pull assistants (AEON-1702) wait for pickup: no_listener
 // and elapsed deadlines leave their delivery and receipt pending. Reads keep
 // sent-event order and replay the same IDs until an idempotent acknowledgement.
 // Ended-session routing and terminal adapter failures retain their semantics.
@@ -61,7 +62,7 @@
 // closed_reason=session_ended, attributed to System. No reply is fabricated.
 //
 // AEON-280 delivery guarantee: a message to an agent is delivered or its
-// sender is told loudly. Except for Desk replies, new queued receipts carry an
+// sender is told loudly. Except for pull assistants, new queued receipts carry an
 // enforced deliver_by (session 5 min, otherwise 30 min, tenant-configurable at /api/settings/inbox-delivery
 // with the adapter attempt cap, default 8). paimos serve runs NewSweeper(pool);
 // a session advisory lock keeps it a single runner. Past the deadline, over
@@ -76,6 +77,21 @@
 // returns only rows bound to that session, without unbound broadcasts.
 // GET /api/inbox/message-status gives the sender sent|delivered|read|
 // not_delivered per message.
+//
+// Pull adapters and messaging-only assistants have no online delivery deadline
+// unless the sender supplies expires_at. An enabled assistant's unacknowledged
+// messages stay readable until pickup and acknowledgement, for at most seven
+// days from acceptance (shortened by explicit sender expiry). The sweeper fails
+// retention with pickup_expired and tells the sender "not picked up within 7
+// days". Disabled principals/addresses fail with assistant_disabled; loss of all
+// usable inbox keys fails with assistant_revoked, without waiting seven days.
+// Rotation with a usable replacement key and target version replacement retain
+// queued messages. Lifecycle/retention are rechecked under the tenant fence and
+// message lock; terminal receipts cannot be resurrected by a later pull or ack.
+// Sender status is sent with waiting_for_pickup until first pickup, then follows
+// existing delivered/read receipts. Pull health is last_pull_at plus oldest
+// unread age; "no pull for N hours" signals polling health, not delivery failure.
+// Push, session and tenant-wide online deadline settings retain their semantics.
 //
 // Routine dispatchers subscribe to aeon_routine_deliveries before scanning.
 // Queue/reroute/retry transactions emit tenant-only hints at commit; claims

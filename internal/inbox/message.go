@@ -336,6 +336,23 @@ func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acce
 	if in.IdempotencyKey == "" || len(in.IdempotencyKey) > maxKeyRunes*utf8.UTFMax || strings.ContainsRune(in.IdempotencyKey, 0) || utf8.RuneCountInString(in.IdempotencyKey) > maxKeyRunes {
 		return Message{}, badRequest("invalid idempotency_key")
 	}
+	var target receiptTarget
+	if in.RecipientSessionID == nil {
+		// Freeze direct pull delivery mode before appending events. Replacing or
+		// disabling a target must not turn an already queued pull into a push.
+		var targetID string
+		var version int
+		err := tx.QueryRow(ctx, `SELECT t.id::text,t.version,t.adapter,t.address FROM inbox_message_targets t
+ WHERE t.principal_id=$1::uuid AND t.target_kind='pull'
+ AND (t.enabled OR NOT EXISTS(SELECT 1 FROM inbox_message_targets active WHERE active.principal_id=t.principal_id AND active.enabled))
+ ORDER BY t.enabled DESC,t.created_at DESC,t.id LIMIT 1 FOR KEY SHARE OF t`, in.RecipientPrincipalID).Scan(&targetID, &version, &target.Adapter, &target.Address)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return Message{}, err
+		}
+		if err == nil {
+			target.ID, target.Version = &targetID, &version
+		}
+	}
 	var id string
 	if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
 		return Message{}, err
@@ -362,7 +379,7 @@ func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acce
 	if err := enqueueWakes(ctx, tx, p, out); err != nil {
 		return Message{}, err
 	}
-	if err := insertReceipt(ctx, tx, p, out.ID, "queued", receiptTarget{}, "", ""); err != nil {
+	if err := insertReceipt(ctx, tx, p, out.ID, "queued", target, "", ""); err != nil {
 		return Message{}, err
 	}
 	return out, nil

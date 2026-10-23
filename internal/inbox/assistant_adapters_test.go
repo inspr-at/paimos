@@ -591,3 +591,169 @@ func testAssistantPullMigration(t *testing.T) {
 		t.Fatalf("rotated Amy key cannot poll: %d", status)
 	}
 }
+
+// Risk: a sleeping pull assistant loses unread work after the online deadline,
+// retention silently lasts forever, or a revoked assistant still looks healthy.
+// One DB-derived clock drives sweep boundaries; no calendar pins or sleeps.
+func testAssistantPickupRetention(t *testing.T) {
+	for _, implicit := range []bool{false, true} {
+		name := "configured pull adapter"
+		if implicit {
+			name = "implicit messaging assistant"
+		}
+		t.Run(name, func(t *testing.T) {
+			w, m, project, _ := messagingWorld(t)
+			server := &httpapi.Server{Pool: w.db.App, Modules: []httpapi.Module{m.base, m}}
+			a, err := auth.Attach(server, auth.Config{Env: "dev", SessionKey: bytes.Repeat([]byte{3}, 32)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			a.AssistantNoticeTx = MessagingAssistantNoticeTx
+			srv := httptest.NewTLSServer(server.Handler())
+			t.Cleanup(srv.Close)
+			owner := receiptSession(t, w, w.admin)
+			request := func(credential, method, path, body string, want int) []byte {
+				t.Helper()
+				status, data := receiptRequest(t, srv, credential, method, path, body)
+				if status != want {
+					t.Fatalf("%s %s: status %d want %d", method, path, status, want)
+				}
+				return data
+			}
+			var now time.Time
+			if err := w.db.Admin.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
+				t.Fatal(err)
+			}
+			now = now.Truncate(time.Microsecond)
+			recipient := w.agent.ID
+			var credential, adapterID string
+			if implicit {
+				var assistant struct {
+					PrincipalID string `json:"principal_id"`
+					Token       string `json:"token"`
+				}
+				data := request(owner, "POST", "/api/agents/assistants", fmt.Sprintf(`{"name":"Amy pickup retention","expires_at":%q}`, now.Add(30*24*time.Hour).Format(time.RFC3339Nano)), 201)
+				if err := json.Unmarshal(data, &assistant); err != nil {
+					t.Fatal(err)
+				}
+				recipient, credential = assistant.PrincipalID, assistant.Token
+			} else {
+				credential = receiptAgentKey(t, w, w.agent, "inbox.read", "inbox.send", "inbox.receipt")
+				body := fmt.Sprintf(`{"vendor":"grok","principal_id":%q,"address":"grok_bot:retention","delivery_mode":"pull"}`, recipient)
+				adapterID = mustJSON[AssistantAdapterConfig](t, request(owner, "POST", "/api/projects/"+project+"/assistant-adapters", body, 201)).ID
+			}
+			sweeper := NewSweeper(w.db.App)
+			sweeper.clock = func() time.Time { return now }
+			sweep := func(want int) {
+				t.Helper()
+				n, err := sweeper.SweepTenant(t.Context(), w.admin.TenantID)
+				if err != nil || n != want {
+					t.Fatalf("sweep failed=%d want=%d err=%v", n, want, err)
+				}
+			}
+			send := func(key string) Message {
+				t.Helper()
+				msg := mustJSON[Message](t, request(owner, "POST", "/api/inbox/messages", sendJSON(recipient, "waiting while host sleeps", key, nil, nil), 201))
+				// Acceptance is stamped by Postgres. Rebase the injected clock on that
+				// exact stamp; every duration below then has a single origin.
+				now = msg.CreatedAt
+				return msg
+			}
+			status := func(id string) MessageStatus {
+				t.Helper()
+				page := mustJSON[struct {
+					Items []MessageStatus `json:"items"`
+				}](t, request(owner, "GET", "/api/inbox/message-status?ids="+id, "", 200))
+				if len(page.Items) != 1 {
+					t.Fatalf("missing sender status for %s", id)
+				}
+				return page.Items[0]
+			}
+			receipt := func(id string) Receipt {
+				t.Helper()
+				return mustJSON[Receipt](t, request(owner, "GET", "/api/inbox/messages/"+id+"/receipt", "", 200))
+			}
+			msg := send("pickup-after-two-hours")
+			if countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM inbox_receipts WHERE message_id=$1 AND deliver_by IS NULL`, msg.ID) != 1 {
+				t.Fatal("pull has an online deadline")
+			}
+			// Old writers may already have attached a 30-minute deadline. It cannot
+			// override the recipient's pull mode after upgrade.
+			if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_receipts SET deliver_by=$2 WHERE message_id=$1`, msg.ID, now.Add(30*time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			now = now.Add(2 * time.Hour)
+			sweep(0)
+			if got := status(msg.ID); got.Status != "sent" || !got.WaitingForPickup || got.Reason != "" {
+				t.Fatalf("sender does not see waiting for pickup: %+v", got)
+			}
+			if got := receipt(msg.ID); got.State != "queued" || got.FailureReason != "" {
+				t.Fatalf("sleeping host failed: %+v", got)
+			}
+			page := mustJSON[Page](t, request(credential, "GET", "/api/inbox/messages?wait_ms=0", "", 200))
+			if len(page.Items) != 1 || page.Items[0].ID != msg.ID {
+				t.Fatalf("next pull lost message: %+v", page)
+			}
+			if got := status(msg.ID); got.Status != "delivered" || got.WaitingForPickup {
+				t.Fatalf("pickup status: %+v", got)
+			}
+			request(credential, "POST", "/api/inbox/messages/"+msg.ID+"/ack", "{}", 200)
+			if got := receipt(msg.ID); got.State != "handed_off" || got.HandedOffAt == nil {
+				t.Fatalf("missing acknowledgement receipt: %+v", got)
+			}
+			retained := send("retention-bound")
+			now = now.Add(time.Duration(pullRetentionDays)*24*time.Hour - time.Microsecond)
+			sweep(0)
+			if got := receipt(retained.ID); got.State != "queued" {
+				t.Fatalf("retention failed early: %+v", got)
+			}
+			now = now.Add(time.Microsecond)
+			sweep(1)
+			if got := receipt(retained.ID); got.State != "failed" || got.FailureReason != ReasonPickupExpired || got.HandedOffAt != nil {
+				t.Fatalf("wrong retention outcome: %+v", got)
+			}
+			if got := status(retained.ID); got.Status != "not_delivered" || got.Reason != ReasonPickupExpired || got.WaitingForPickup {
+				t.Fatalf("wrong expired sender status: %+v", got)
+			}
+			notices := noticesFor(t, w, retained.ID)
+			if len(notices) != 1 || !strings.Contains(notices[""].body, "not picked up within 7 days") {
+				t.Fatalf("retention notice: %+v", notices)
+			}
+			sweep(0)
+			if len(noticesFor(t, w, retained.ID)) != 1 {
+				t.Fatal("duplicate retention notice")
+			}
+			request(credential, "POST", "/api/inbox/messages/"+retained.ID+"/ack", "{}", 409)
+			page = mustJSON[Page](t, request(credential, "GET", "/api/inbox/messages?wait_ms=0", "", 200))
+			if len(page.Items) != 0 {
+				t.Fatalf("expired message resurrected: %+v", page)
+			}
+			revoked := send("revoked-inbox-key")
+			if _, err := w.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET revoked_at=$2 WHERE principal_id=$1`, recipient, now); err != nil {
+				t.Fatal(err)
+			}
+			sweep(1)
+			if got := receipt(revoked.ID); got.State != "failed" || got.FailureReason != ReasonAssistantRevoked {
+				t.Fatalf("revocation waited for a deadline: %+v", got)
+			}
+			if len(noticesFor(t, w, revoked.ID)) != 1 {
+				t.Fatal("missing revocation notice")
+			}
+			disabled := send("disabled-assistant")
+			if implicit {
+				request(owner, "DELETE", "/api/agents/assistants/"+recipient, "", 204)
+			} else {
+				if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_message_targets SET enabled=false WHERE id=$1`, adapterID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			sweep(1)
+			if got := receipt(disabled.ID); got.State != "failed" || got.FailureReason != ReasonAssistantDisabled {
+				t.Fatalf("disable waited for a deadline: %+v", got)
+			}
+			if len(noticesFor(t, w, disabled.ID)) != 1 {
+				t.Fatal("missing disabled notice")
+			}
+		})
+	}
+}
