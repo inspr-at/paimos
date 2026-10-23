@@ -114,12 +114,21 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     await scroll.focus()
     const dimensions = await scroll.evaluate(element => ({
       overflow: element.scrollWidth - element.clientWidth, width: element.clientWidth,
+      descendants: Array.from(element.querySelectorAll('*')).flatMap(child => {
+        const box = child.getBoundingClientRect(), bounds = element.getBoundingClientRect()
+        const range = document.createRange(); range.selectNodeContents(child)
+        const text = range.getBoundingClientRect()
+        return box.right > bounds.right || text.right > bounds.right || child.scrollWidth > child.clientWidth
+          ? [{ tag: child.tagName, class: child.className, right: box.right - bounds.right,
+            textRight: text.right - bounds.right, overflow: child.scrollWidth - child.clientWidth }] : []
+      }),
       cells: Array.from(element.querySelectorAll('th, td')).map(cell => {
         const range = document.createRange(); range.selectNodeContents(cell)
         return { text: cell.textContent, width: cell.getBoundingClientRect().width,
           textWidth: range.getBoundingClientRect().width, font: getComputedStyle(cell).font }
       }),
     }))
+    await page.screenshot({ path: info.outputPath(`AEON-1687-hours-${width}-${theme}.png`) })
     expect(dimensions.overflow, `${width} ${theme}: 0 px horizontal overflow; ${JSON.stringify(dimensions)}`).toBe(0)
     const controls = { navigation: page.getByRole('group', { name: 'Week', exact: true }),
       person: page.getByRole('button', { name: 'Hours of You. Choose a person or agent' }),
