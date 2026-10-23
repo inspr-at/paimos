@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1697: Builder runs reconstructed from harness records on 23 Oct 2026,
-// 08:00–11:00 UTC. Starts: start-queue log; superseded attempts: harness stopped_at.
+// 08:00–11:00 UTC. Starts: start-queue log; closed intervals: harness stopped_at.
 // These are worker intervals, not a captured /delivery/flow API answer. Only
 // Builder work is known; outcomes, estimates and ticket completion are unknown.
-// The last attempt on each unfinished ticket stays open at capture: a harness
-// process stopping is not evidence that its delivery step completed (fix2).
+// Capture-active attempts stay open (fix2): 1674/r2 and the four attempts at the
+// capture boundary. Earlier stopped attempts retain their recorded intervals;
+// an unfinished ticket alone does not establish that its step is still running.
 // No review/CI work is inferred.
 // Public fixture: synthetic record IDs, no principal/session/host/account data,
 // and neutral titles with exactly the original title lengths. Times are intact.
@@ -25,18 +26,18 @@ const runs = [
   [1678, 1, '08:36:33', '09:08:11.730678', 58],
   [1679, 1, '08:37:05', '08:56:45.546593', 71],
   [1680, 1, '08:37:37', '08:58:10.098082', 72],
-  [1681, 1, '08:38:09', null, 76],
+  [1681, 1, '08:38:09', '09:23:31.24244', 76],
   [1682, 1, '08:38:40', '09:11:07.795626', 59],
   [1683, 1, '08:39:11', '09:38:02.910928', 52],
-  [1675, 2, '09:13:44', null, 63],
-  [1679, 2, '09:17:16', null, 71],
-  [1680, 2, '09:19:18', null, 72],
+  [1675, 2, '09:13:44', '09:18:02.036817', 63],
+  [1679, 2, '09:17:16', '09:42:04.028543', 71],
+  [1680, 2, '09:19:18', '09:44:54.366755', 72],
   [1676, 2, '09:23:50', '09:27:16.249815', 52],
   [1674, 2, '09:24:22', null, 91],
   [1678, 2, '09:28:53', '09:32:19.476435', 58],
   [1682, 2, '09:33:25', null, 59],
   [1676, 3, '09:46:57', null, 52],
-  [1677, 2, '09:47:30', null, 59],
+  [1677, 2, '09:47:30', '10:03:09.666841', 59],
   [1678, 3, '09:55:07', null, 58],
   [1683, 2, '09:58:09', null, 52],
 ] as const
@@ -57,7 +58,7 @@ export function liveHarnessFlow(): ApiFlow {
       id: id(ticket), kind: 'change', ref: `AEON-${ticket}`,
       title: 'Recorded change '.repeat(Math.ceil(length / 16)).slice(0, length),
       prs: [], started_at: utc(start), ended_at: null, pct_done: 0,
-      current_step_id: steps.find(step => step.item_id === id(ticket) && step.ended_at == null)!.id,
+      current_step_id: steps.find(step => step.item_id === id(ticket) && step.ended_at == null)?.id ?? null,
       eta: { p50_at: null, p90_at: null, basis: 'none', reason: null },
       target: null, next_human_gate: null, qualification_evidence: null, rollback_class: null,
     })),

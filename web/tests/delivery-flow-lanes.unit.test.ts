@@ -58,9 +58,12 @@ it('ten concurrent builders take ten rows; above twelve a lane folds into "+N mo
   expect(laneRows(recorded!, 'build', true)).toEqual({ bars: 10, fold: null, total: 10 })
   // An unfinished current step cannot end before the playhead while the headline
   // still calls it running. The moment and avatar must point at that open step.
-  expect(answer.steps.filter(step => step.ended_at == null)).toHaveLength(10)
+  expect(answer.steps.filter(step => step.ended_at == null).map(step => [answer.items.find(item => item.id === step.item_id)!.ref, step.round])).toEqual([
+    ['AEON-1674', 2], ['AEON-1682', 2], ['AEON-1676', 3], ['AEON-1678', 3], ['AEON-1683', 2],
+  ])
   for (const item of answer.items) {
-    expect(answer.steps.find(step => step.id === item.current_step_id)).toMatchObject({ item_id: item.id, ended_at: null })
+    const open = answer.steps.find(step => step.item_id === item.id && step.ended_at == null)
+    expect(item.current_step_id).toBe(open?.id ?? null)
   }
   const now = live.now!, main = recorded!.main
   const current = currentStep(main, now)!
@@ -71,7 +74,7 @@ it('ten concurrent builders take ten rows; above twelve a lane folds into "+N mo
   expect(avatarStep).toBe(current)
   expect(recorded!.items.find(item => item.step === avatarStep)).toMatchObject({ run: main, lane: 'build' })
   const moment = momentOf({ data: live, sets: [recorded!], T: now, selected: null, level: 'expert', lang: 'en', text: flowText('en') })
-  expect(moment.lines.find(line => line.lane === 'build')).toMatchObject({ who: 'Builder', kind: 'work', label: '1674 · Build r2 · gpt-6.1-sol', more: 9 })
+  expect(moment.lines.find(line => line.lane === 'build')).toMatchObject({ who: 'Builder', kind: 'work', label: '1674 · Build r2 · gpt-6.1-sol', more: 4 })
   expect(moment.sentence).toContain('Builder on “Being built”')
   expect(moment.idle).not.toContain('Builder')
   const builders = (n: number) => Array.from({ length: n }, (_, k) => step(10 + k, 60 + k, 'build'))
