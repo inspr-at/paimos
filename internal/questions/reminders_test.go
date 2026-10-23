@@ -28,6 +28,9 @@ func reminderLifecycle(t *testing.T) {
 		t.Fatalf("reminder defaults: %d %s", w.Code, w.Body)
 	}
 	settings := map[string]any{"default_after_seconds": 21600, "time_zone": "UTC", "quiet_start": 0, "quiet_end": 0, "expected_revision": 0}
+	if w := request(ctx, f.mux, f.person, "PUT", path, map[string]any{"time_zone": "UTC", "expected_revision": 0}); w.Code != 400 {
+		t.Fatalf("incomplete settings disabled reminders: %d %s", w.Code, w.Body)
+	}
 	for _, p := range []tenant.Principal{f.agent, f.otherAgent} {
 		if w := request(ctx, f.mux, p, "PUT", path, settings); w.Code != 403 || !strings.Contains(w.Body.String(), "person_required") {
 			t.Fatalf("agent changed defaults: %d %s", w.Code, w.Body)
@@ -135,6 +138,7 @@ func reminderLifecycle(t *testing.T) {
 	if _, err := f.d.Admin.Exec(ctx, `DROP TRIGGER reject_reminder_notice ON inbox_messages`); err != nil {
 		t.Fatal(err)
 	}
+	f.advance(deliveryReconcile)
 	f.dispatch(t)
 	if count() != 2 {
 		t.Fatal("retry did not accept the retained interval")
@@ -221,9 +225,27 @@ func reminderCurrentAuthority(t *testing.T) {
 	if w := request(ctx, f.mux, viewer, "PUT", "/api/settings/question-reminders", map[string]any{"default_after_seconds": 0, "time_zone": "UTC", "quiet_start": 0, "quiet_end": 0, "expected_revision": 1}); w.Code != 403 || !strings.Contains(w.Body.String(), "forbidden") {
 		t.Fatalf("reader changed reminder defaults: %d %s", w.Code, w.Body)
 	}
+	// Workspace Owner has an intrinsic permission ceiling. Use a real custom
+	// project role and the current preferred person to test live revocation.
+	var role string
+	if err := f.d.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'reminder_recipient','Reminder recipient') RETURNING id::text`, viewer.TenantID).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.d.Admin.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, viewer.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest(ARRAY['nodes.read','questions.read','questions.decide','inbox.read'])`, viewer.TenantID, role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, viewer.TenantID, viewer.ID, role, f.project); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.d.Admin.Exec(ctx, `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state) VALUES($1,$2,$3,'paused')`, viewer.TenantID, f.project, viewer.ID); err != nil {
+		t.Fatal(err)
+	}
 	q := f.ask(t, input())
 	for _, permission := range []string{"questions.decide", "questions.read", "inbox.read"} {
-		if _, err := f.d.Admin.Exec(ctx, `DELETE FROM role_permissions WHERE tenant_id=$1 AND permission=$2 AND role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='owner')`, f.person.TenantID, permission); err != nil {
+		if _, err := f.d.Admin.Exec(ctx, `DELETE FROM role_permissions WHERE role_id=$1 AND permission=$2`, role, permission); err != nil {
 			t.Fatal(err)
 		}
 		f.advance(2 * time.Hour)
@@ -236,13 +258,45 @@ func reminderCurrentAuthority(t *testing.T) {
 		if accepted != 0 || last != nil || f.count(t, `SELECT count(*) FROM inbox_messages WHERE idempotency_key LIKE 'question-reminder/%'`) != 0 {
 			t.Fatalf("revoked %s still received a reminder", permission)
 		}
-		if _, err := f.d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,id,$2 FROM roles WHERE tenant_id=$1 AND key='owner'`, f.person.TenantID, permission); err != nil {
+		if _, err := f.d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, viewer.TenantID, role, permission); err != nil {
 			t.Fatal(err)
 		}
 	}
 	f.advance(time.Minute)
 	f.dispatch(t)
-	if f.count(t, `SELECT count(*) FROM inbox_messages WHERE idempotency_key LIKE 'question-reminder/%'`) != 1 {
+	if f.count(t, `SELECT count(*) FROM inbox_messages WHERE recipient_principal_id=$1 AND idempotency_key LIKE 'question-reminder/%'`, viewer.ID) != 1 {
 		t.Fatal("restored authority did not recover the single retained interval")
+	}
+}
+
+func reminderFailureFairness(t *testing.T) {
+	f := deliveryFixtureFor(t)
+	ctx := t.Context()
+	if _, err := f.d.Admin.Exec(ctx, `INSERT INTO desk_reminder_settings(tenant_id,default_after_seconds,time_zone,quiet_start,quiet_end,revision) VALUES($1,1,'UTC',0,0,1)`, f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < dispatchBatch; i++ {
+		in := input()
+		in.Question += uid()
+		f.ask(t, in)
+	}
+	f.advance(2 * time.Second)
+	good := f.ask(t, input())
+	f.advance(time.Second)
+	if _, err := f.d.Admin.Exec(ctx, `CREATE FUNCTION reject_poison_reminder() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF NEW.idempotency_key LIKE 'question-reminder/%' AND NEW.idempotency_key NOT LIKE 'question-reminder/`+good.ID+`/%' THEN RAISE EXCEPTION 'injected poison reminder'; END IF; RETURN NEW; END $$;
+ CREATE TRIGGER reject_poison_reminder BEFORE INSERT ON inbox_messages FOR EACH ROW EXECUTE FUNCTION reject_poison_reminder()`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.m.DispatchTenant(ctx, f.person.TenantID); err == nil || !strings.Contains(err.Error(), "injected poison reminder") {
+		t.Fatalf("poison reminders did not return their actual failure: %v", err)
+	}
+	// No clock advance: backoff has yielded the next page to the healthy row.
+	f.dispatch(t)
+	if f.count(t, `SELECT count(*) FROM inbox_messages WHERE idempotency_key=$1`, "question-reminder/"+good.ID+"/1") != 1 {
+		t.Fatal("persistent acceptance failures starved the later healthy reminder")
+	}
+	if f.count(t, `SELECT count(*) FROM desk_question_reminders WHERE question_id<>$1 AND (reminder_count<>0 OR last_at IS NOT NULL)`, good.ID) != 0 {
+		t.Fatal("failed reminders consumed an interval")
 	}
 }

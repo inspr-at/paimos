@@ -90,7 +90,9 @@ outbox, retaining one idle queue transaction per reconciliation. At most 32
 due reminders are checked per tenant pass. Final writes recheck the current
 question, project, active canonical recipient and read/decision/inbox authority
 under tenant/tree/question locks. Reminder acceptance and the interval receipt
-commit atomically. A failed acceptance returns an error and rolls both back.
+commit atomically. A failed acceptance returns an error and rolls both back;
+its next check backs off for 30 seconds without consuming the interval, so a
+page of persistent failures cannot starve later healthy reminders.
 Replicas and retries cannot accept a second notice for that interval. After
 downtime, one reminder is accepted and the next interval starts from acceptance;
 there is no catch-up burst.

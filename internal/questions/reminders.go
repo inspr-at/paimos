@@ -52,17 +52,23 @@ func (m *Module) handleReminderSettings(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var in struct {
-		ReminderSettings
-		ExpectedRevision *int64 `json:"expected_revision"`
+		DefaultAfterSeconds *int    `json:"default_after_seconds"`
+		TimeZone            *string `json:"time_zone"`
+		QuietStart          *int    `json:"quiet_start"`
+		QuietEnd            *int    `json:"quiet_end"`
+		ExpectedRevision    *int64  `json:"expected_revision"`
 	}
 	if r.Method == http.MethodPut {
 		if err := decode(w, r, &in); err != nil {
 			result(w, 0, nil, err)
 			return
 		}
-		_, err := time.LoadLocation(in.TimeZone)
-		if err != nil || in.TimeZone == "Local" || len(in.TimeZone) > 100 || in.ExpectedRevision == nil || *in.ExpectedRevision < 0 || in.DefaultAfterSeconds < 0 || in.DefaultAfterSeconds > maxReminderSeconds || in.QuietStart < 0 || in.QuietStart > 1439 || in.QuietEnd < 0 || in.QuietEnd > 1439 {
+		if in.TimeZone == nil || in.DefaultAfterSeconds == nil || in.QuietStart == nil || in.QuietEnd == nil || in.ExpectedRevision == nil || *in.ExpectedRevision < 0 || len(*in.TimeZone) > 100 || *in.TimeZone == "Local" || *in.DefaultAfterSeconds < 0 || *in.DefaultAfterSeconds > maxReminderSeconds || *in.QuietStart < 0 || *in.QuietStart > 1439 || *in.QuietEnd < 0 || *in.QuietEnd > 1439 {
 			result(w, 0, nil, fail(400, "invalid_request", "invalid reminder defaults, quiet hours or expected_revision"))
+			return
+		}
+		if _, err := time.LoadLocation(*in.TimeZone); err != nil {
+			result(w, 0, nil, fail(400, "invalid_request", "invalid reminder timezone"))
 			return
 		}
 	}
@@ -96,8 +102,7 @@ func (m *Module) handleReminderSettings(w http.ResponseWriter, r *http.Request) 
 		if out.Revision != *in.ExpectedRevision {
 			return fail(409, "revision_conflict", "reminder defaults changed; reload")
 		}
-		in.Revision = out.Revision + 1
-		out = in.ReminderSettings
+		out = ReminderSettings{DefaultAfterSeconds: *in.DefaultAfterSeconds, TimeZone: *in.TimeZone, QuietStart: *in.QuietStart, QuietEnd: *in.QuietEnd, Revision: out.Revision + 1}
 		_, err = tx.Exec(r.Context(), `INSERT INTO desk_reminder_settings(tenant_id,default_after_seconds,time_zone,quiet_start,quiet_end,revision) VALUES($1,$2,$3,$4,$5,$6)
  ON CONFLICT(tenant_id) DO UPDATE SET default_after_seconds=excluded.default_after_seconds,time_zone=excluded.time_zone,quiet_start=excluded.quiet_start,quiet_end=excluded.quiet_end,revision=excluded.revision`, p.TenantID, out.DefaultAfterSeconds, out.TimeZone, out.QuietStart, out.QuietEnd, out.Revision)
 		if err != nil {
@@ -157,9 +162,31 @@ func reminderNotBefore(now time.Time, zone string, start, end int) (time.Time, e
 // Each due candidate is rechecked under the final mutation fence. Accepting the
 // notice and advancing its interval commit together, including across replicas.
 func (m *Module) remindOne(ctx context.Context, tid, id string) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	claimCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	err := db.InTenant(claimCtx, m.pool, tid, func(tx pgx.Tx) error { return m.remindTx(claimCtx, tx, tid, id) })
+	cancel()
+	if err == nil {
+		return nil
+	}
+	// A failed acceptance retains its interval identity. Back off only its next
+	// check, so persistently failing rows cannot starve healthy questions behind
+	// a bounded page. The original failure remains visible to the dispatcher.
+	retryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	return db.InTenant(ctx, m.pool, tid, func(tx pgx.Tx) error { return m.remindTx(ctx, tx, tid, id) })
+	retryErr := db.InTenant(retryCtx, m.pool, tid, func(tx pgx.Tx) error {
+		if err := treeLock(retryCtx, tx, tid); err != nil {
+			return err
+		}
+		now, err := m.now(retryCtx, tx)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(retryCtx, `UPDATE desk_question_reminders r SET next_at=$4 FROM desk_questions q
+ WHERE r.tenant_id=$1 AND r.question_id=$2 AND r.next_at<=$3
+ AND q.tenant_id=r.tenant_id AND q.node_id=r.question_id AND q.state='open'`, tid, id, now, now.Add(deliveryReconcile))
+		return err
+	})
+	return errors.Join(err, retryErr)
 }
 
 func (m *Module) remindTx(ctx context.Context, tx pgx.Tx, tid, id string) error {

@@ -194,7 +194,7 @@ func (m *Module) DispatchTenant(ctx context.Context, tid string) (time.Duration,
  JOIN desk_questions q ON q.tenant_id=r.tenant_id AND q.node_id=r.question_id AND q.state='open'
  JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id AND n.deleted_at IS NULL
  JOIN nodes project ON project.tenant_id=q.tenant_id AND project.id=q.project_id AND project.deleted_at IS NULL
- WHERE r.tenant_id=$1 AND r.next_at IS NOT NULL
+ WHERE r.tenant_id=$1 AND r.next_at IS NOT NULL ORDER BY r.next_at,r.question_id LIMIT $3
  ) SELECT ARRAY(SELECT id::text FROM candidates WHERE due<=$2
  ORDER BY ordering,question_id,(kind='outcome') DESC,kind,id LIMIT $3),
  (SELECT min(at) FROM (SELECT due AS at FROM candidates WHERE due>$2 UNION ALL SELECT next_at FROM reminders WHERE next_at>$2) deadlines),
