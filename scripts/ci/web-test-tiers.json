@@ -10976,6 +10976,8 @@
     ,
     {"kind":"browser","file":"tests/planning-columns.spec.ts","name":"unknown planned and used effort stays undrawn and is explained to hover and screen readers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/playwright-setup.spec.ts","name":"AEON-1711: shared font setup runs PR and nightly browser cases with the font negative control","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/policies-ladders-moved.spec.ts","name":"Policies links to Settings › Models and never calls the ladder endpoints","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/policies-ladders-moved.spec.ts","name":"on a phone › the Models link keeps a 44 px target inside its sentence","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
