@@ -6,6 +6,7 @@ import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { mockDecisionDesk } from './decision-desk-fixtures'
+import { mockSettings, settingsData } from './settings-fixtures'
 
 test.use({ timezoneId: 'Europe/Vienna', locale: 'en-GB' })
 const NOW = Date.parse('2026-10-21T17:00:00Z')
@@ -135,6 +136,24 @@ for (const width of [1440, 1024, 390] as const) {
     await page.getByRole('radio', { name: /^Decided/ }).click()
     await expect(page.getByRole('link', { name: 'Decisions made on pma are listed there' })).toHaveAttribute('href', `${SIBLING}/decision-desk?view=decided`)
     await shot(page, info, `decided-${width}-light`)
+    await mockSettings(page, settingsData())
+    await mock.mount()
+    await page.route('**/api/decision-desk/connections', route => route.fulfill({ json: { connections: [{ id: '00000000-0000-4000-8000-000000000099', origin: SIBLING, instance: 'pma', created_at: iso(NOW), expires_at: iso(NOW + 90 * 86400_000), last_used_at: iso(NOW) }] } }))
+    await page.goto('/settings/personal')
+    const receiving = page.locator('#other-instances'), issuing = page.locator('#connected-instances')
+    await expect(receiving).toContainText('Connected account')
+    await expect(issuing).toContainText('pma.example')
+    const notice = receiving.getByRole('checkbox', { name: 'Notify me about pma' })
+    await expect(notice).toBeChecked()
+    await expectStableControls({ controls: { notice: receiving.locator('.instance-notify'), disconnect: receiving.getByRole('button', { name: 'Disconnect', exact: true }) }, scrollAreas: { receiving }, interactions: [
+      { name: 'mute this instance', run: async () => { await notice.uncheck(); await expect(notice).not.toBeChecked() } },
+      { name: 'restore instance notifications', run: async () => { await notice.check(); await expect(notice).toBeChecked() } },
+    ] })
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme })
+      await receiving.screenshot({ path: info.outputPath(`connections-here-${width}-${theme}.png`) })
+      await issuing.screenshot({ path: info.outputPath(`connections-home-${width}-${theme}.png`) })
+    }
   })
 }
 
