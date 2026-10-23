@@ -393,6 +393,15 @@ test('the title bar: compact zoom, the header chevron beside PDF, save state and
           await expect(format).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
         }
       } },
+      { name: 'press the ghost menu action without moving it', run: async () => {
+        await more.hover()
+        const rest = await more.boundingBox()
+        await page.mouse.down()
+        if (width === 390) expect(await more.boundingBox()).toEqual(rest)
+        await page.mouse.up()
+        await expect(page.getByRole('menu', { name: 'Quote actions' })).toBeVisible()
+        await page.keyboard.press('Escape')
+      } },
     ] })
     expect(await bar.boundingBox(), 'switching panels moves the toolbar by 0 px').toEqual(before)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
