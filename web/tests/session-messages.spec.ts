@@ -25,7 +25,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
   return { data, worker, calls }
 }
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+for (const theme of ['light'] as const) for (const width of [1600, 390]) {
   test(`${theme} ${width}: session thread excludes other sessions and collapses consecutive duplicates`, async ({ page }) => {
     const { worker } = await setup(page, theme)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })

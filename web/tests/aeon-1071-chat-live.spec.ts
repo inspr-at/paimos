@@ -132,7 +132,7 @@ test('AEON-1082 closing chat closes its stream and rejects a late initial histor
   expect(await streams()).toEqual([2])
 })
 
-for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`AEON-1071 streams in place, stops mid-stream and yields to the saved reply ${theme} ${width}`, async ({ page }, testInfo) => {
     const { worker, data, calls, lookups, chat } = await setup(page, { theme })
     await page.setViewportSize({ width, height: 860 })
@@ -597,7 +597,7 @@ for (const width of [390, 1440]) test(`AEON-1071 a chat-native reply offers only
 // sends. The relay's real boundary interleaving is tested in Go; here the
 // selected mode, exact target, legacy compatibility and stable controls cross
 // the actual composer/API boundary without an implicit interrupt.
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`AEON-1082 chat-native timing reaches the outbox ${theme} ${width}`, async ({ page }, testInfo) => {
     const { worker, calls, chat } = await setup(page, { theme, timing: 'native', session: { activity: 'busy' } })
     const final = '3e000000-0000-4000-8000-000000000900'

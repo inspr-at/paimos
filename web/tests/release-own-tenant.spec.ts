@@ -20,7 +20,8 @@ test.beforeAll(({}, info) => {
   history = JSON.parse(readFileSync(output, 'utf8'))
 })
 
-for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) test(`own release notes reach another tenant at ${width} ${theme}`, async ({ page }) => {
+// P11: keep both list layouts; tenant isolation and frozen-note assertions are theme-independent.
+for (const width of [1600, 390]) for (const theme of ['light'] as const) test(`own release notes reach another tenant at ${width} ${theme}`, async ({ page }) => {
   await page.emulateMedia({ colorScheme: theme })
   await page.setViewportSize({ width, height: 1000 })
   const data = fixtures()

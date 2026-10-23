@@ -6,6 +6,7 @@
   },
   "spec": {
     "file": "tests/work-integration.spec.ts",
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.456,

@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/work-parent-status.spec.ts",
-    "listedTests": 6,
+    "listedTests": 2,
     "tierTiming": {
       "caseSeconds": {
-        "max": 3.448,
-        "median": 3.309,
-        "min": 3.237
+        "max": 3.5,
+        "median": 3.2875,
+        "min": 3.075
       },
-      "seconds": 21.072,
-      "selectedTests": 6
+      "seconds": 8.77896,
+      "selectedTests": 2
     },
     "weightSeconds": 16.082,
     "weightSource": "hosted-CI-37321154870"

@@ -85,7 +85,8 @@ async function desk(page: Page, theme: 'light' | 'dark', splitQuota = false) {
   return { data, calls, spare, claude }
 }
 
-for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1678: remove only unprotected theme copies; every protected ticket-pin case remains.
+for (const width of [1600, 390]) for (const theme of ['light'] as const) {
   test(`one quota, its own pool, and move ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.emulateMedia({ colorScheme: theme })
@@ -163,7 +164,7 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
 }
 
 
-for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1600, 390]) for (const theme of ['light'] as const) {
   test(`shared login keeps both group pools ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.emulateMedia({ colorScheme: theme })

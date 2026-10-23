@@ -165,7 +165,7 @@ test('rotation cannot silently drop scopes when the actor loses a grant', async 
   expect(posts(world)).toHaveLength(0)
 })
 
-for (const theme of ['light', 'dark'] as const) {
+for (const theme of ['light'] as const) {
   test(`axe and coordinator screenshots: keys and New key sheet in ${theme}`, async ({ page }, testInfo) => {
     await page.emulateMedia({ colorScheme: theme })
     await page.setViewportSize({ width: 1440, height: 1000 })

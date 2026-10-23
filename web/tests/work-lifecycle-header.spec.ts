@@ -20,7 +20,8 @@ async function expectHeaderFits(panel: Locator) {
   }
 }
 
-for (const width of [390, 600, 720, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1677: retain compact, navigation-only and wide-action header branches.
+for (const width of [390, 720, 1440]) for (const theme of ['light'] as const) {
   test(`work actions fit the ticket panel at ${width} ${theme}`, async ({ page }, testInfo) => {
     const errors = watchErrors(page)
     await page.setViewportSize({ width, height: width <= 600 ? 844 : 1000 })

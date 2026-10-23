@@ -149,8 +149,8 @@ test('a project without data or without a repository says so in place', async ({
   await expect(page.getByRole('status')).toContainText('No repository is linked yet.')
 })
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) for (const lang of ['en', 'de'] as const) {
-  if (lang === 'de' && width === 1024) continue
+// P11: retain the phone and desktop navigation geometry with the same assertions.
+for (const [width, theme, lang] of [[390, 'light', 'en'], [1440, 'light', 'en']] as const) {
   test(`Delivery numbers at ${width} ${theme} ${lang} keep controls still`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await setup(page, { theme, lang, prefs: { level: 'expert', window: 7 } })

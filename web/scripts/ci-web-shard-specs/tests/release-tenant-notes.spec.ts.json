@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/release-tenant-notes.spec.ts",
-    "listedTests": 20,
+    "listedTests": 10,
     "tierTiming": {
       "caseSeconds": {
         "max": 5.594,

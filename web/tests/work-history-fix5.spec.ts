@@ -16,7 +16,8 @@ const history: TicketReview = {
   ladder: [], cost_micros: null, duration_seconds: null, created_at: '2026-10-04T10:00:00Z',
 }
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+// AEON-1677: retain phone and desktop history/review wiring without theme copies.
+for (const width of [390, 1440]) for (const theme of ['light']) {
   test(`migrated work keeps history and review actions ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.clock.setSystemTime(new Date('2026-10-04T10:00:00Z'))

@@ -6,6 +6,20 @@ import { sessionEnded } from '../src/lib/api'
 afterEach(() => { clearPermissions(); sessionEnded.blocked = false; vi.unstubAllGlobals() })
 
 describe('can()', () => {
+  it('effective grants decide actions independently of admin, viewer and guest role labels', async () => {
+    for (const [label, permissions, expected] of [
+      ['admin', [], false], ['viewer', ['nodes.write'], true], ['guest', ['nodes.read', 'comments.write'], false],
+    ] as const) {
+      clearPermissions()
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({
+        workspace: { role: { id: `role-${label}`, key: label, name: label }, permissions }, project: null,
+      }) })))
+      await refreshPermissions()
+      expect(can('nodes.write'), label).toBe(expected)
+      expect(can('keys.manage'), `${label} never implies key management`).toBe(false)
+      expect(can('comments.write'), label).toBe((permissions as readonly string[]).includes('comments.write'))
+    }
+  })
   it('fails closed until the server returns effective grants', async () => {
     const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ workspace: { role: null, permissions: ['nodes.read'] }, project: null }) }))
     vi.stubGlobal('fetch', fetch)

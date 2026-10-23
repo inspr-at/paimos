@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/vendor-signals.spec.ts",
-    "listedTests": 5,
+    "listedTests": 3,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.15,

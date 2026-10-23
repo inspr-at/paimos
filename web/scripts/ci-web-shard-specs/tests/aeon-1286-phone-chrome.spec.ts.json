@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/aeon-1286-phone-chrome.spec.ts",
     "listedTests": 16,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.468,
+        "median": 2.4465000000000003,
+        "min": 2.002
+      },
+      "seconds": 57.23091,
+      "selectedTests": 16
+    },
     "weightSeconds": 35.512195,
     "weightSource": "unmeasured-test-rate"
   }

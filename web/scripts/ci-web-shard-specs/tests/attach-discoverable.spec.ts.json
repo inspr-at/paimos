@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/attach-discoverable.spec.ts",
-    "listedTests": 47,
+    "listedTests": 40,
     "tierTiming": {
       "caseSeconds": {
-        "max": 10.196,
-        "median": 3.248,
-        "min": 1.879
+        "max": 10.006,
+        "median": 1.574,
+        "min": 0.816
       },
-      "seconds": 181.26,
-      "selectedTests": 47
+      "seconds": 97.989711,
+      "selectedTests": 37
     },
     "weightSeconds": 81.316667,
     "weightSource": "web-15"

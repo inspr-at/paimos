@@ -428,7 +428,8 @@ test('at 400 px the count moves under the name, targets are 44 px and nothing sc
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
 })
 
-for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark']) test(`kinds evidence and control stability ${width} ${theme}`, async ({ page }, testInfo) => {
+// AEON-1677: retain desktop/phone stability; standalone keyboard/authority cases stay.
+for (const width of [1440, 400]) for (const theme of ['light']) test(`kinds evidence and control stability ${width} ${theme}`, async ({ page }, testInfo) => {
   await open(page, { width, theme })
   await page.screenshot({ path: testInfo.outputPath(`kinds-${width}-${theme}.png`), fullPage: true })
   const controls = { design: row(page, 'design'), designEdit: editButton(page, 'design', 'UI design'), designMenu: menuButton(page, 'design', 'UI design'), advanced: advanced(page) }

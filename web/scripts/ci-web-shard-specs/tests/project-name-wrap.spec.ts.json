@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/project-name-wrap.spec.ts",
     "listedTests": 8,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 9.636,
+        "median": 8.379,
+        "min": 6.282
+      },
+      "seconds": 79.314621,
+      "selectedTests": 8
+    },
     "weightSeconds": 17.756098,
     "weightSource": "unmeasured-test-rate"
   }

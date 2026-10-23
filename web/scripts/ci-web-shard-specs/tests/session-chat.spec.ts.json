@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/session-chat.spec.ts",
-    "listedTests": 55,
+    "listedTests": 54,
     "tierTiming": {
       "caseSeconds": {
-        "max": 7.694,
-        "median": 3.343,
-        "min": 2.232
+        "max": 4.854,
+        "median": 2.552,
+        "min": 1.929
       },
-      "seconds": 312.279,
-      "selectedTests": 84
+      "seconds": 82.881785,
+      "selectedTests": 23
     },
     "weightSeconds": 95.439023,
     "weightSource": "unmeasured-test-rate"

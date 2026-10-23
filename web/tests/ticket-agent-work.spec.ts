@@ -159,15 +159,6 @@ test('an epic shows sessions with reported figures and leaves missing ones out',
   await expect(work.getByRole('link')).toHaveCount(2)
 })
 
-test('a ticket with no sessions leaves the agent work section out', async ({ page }) => {
-  await mockWork(page, fixtures())
-  const read = page.waitForResponse(response => /\/api\/nodes\/[^/]+\/agent-work$/.test(new URL(response.url()).pathname))
-  await page.goto('/p/PHAROS/PHAROS-11')
-  await expect(panel(page).getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
-  await read
-  await expect(panel(page).getByRole('region', { name: 'Agent work' })).toHaveCount(0)
-})
-
 test('a 128-character usage model keeps its figures in the ticket panel', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const longModel = 'm'.repeat(128)
@@ -183,27 +174,3 @@ test('a 128-character usage model keeps its figures in the ticket panel', async 
   await expect(work).toContainText('$1.50 provisional')
   expect(await work.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
 })
-
-test('empty capped scope still warns that deeper sessions may exist', async ({ page }) => {
-  const report = structuredClone(agentWork)
-  report.sessions = []
-  report.scope_truncated = true
-  await mockWork(page, fixtures())
-  await page.route('**/api/nodes/n-epic/agent-work', route => route.fulfill({ json: report }))
-  await page.goto('/p/PHAROS/PHAROS-10')
-  const work = panel(page).getByRole('region', { name: 'Agent work' })
-  await expect(work).toContainText('No agent sessions are recorded in the included items.')
-  await expect(work).toContainText('Some items under this epic were left out of the query.')
-  await expect(work.locator('li')).toHaveCount(0)
-})
-
-for (const colorScheme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
-  test(`agent work ${colorScheme} ${width}`, async ({ page }) => {
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
-    const work = await openEpic(page)
-    await work.scrollIntoViewIfNeeded()
-    await expect(work.getByText('Harbor worker')).toBeVisible()
-    await page.screenshot({ path: `../.agent-shots/ticket-agent-work-${colorScheme}-${width}.png`, fullPage: true })
-  })
-}

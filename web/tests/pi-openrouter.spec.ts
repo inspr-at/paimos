@@ -31,7 +31,8 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', manage = tru
   await expect(row.getByLabel('Model OpenRouter')).toBeVisible()
   return { row, writes }
 }
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+// AEON-1678: remove unprotected settings theme copies; the protected Start pin matrix stays.
+for (const theme of ['light'] as const) for (const width of [1600, 390]) {
   test(`pi model settings ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     const { row, writes } = await setup(page, theme)

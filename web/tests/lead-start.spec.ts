@@ -8,7 +8,8 @@ import { mockLeadFlow } from './lead-flow-fixtures'
 const OFF = 'Automatic launch is not enabled for this workspace yet.'
 const leadName = 'Projektverantwortlicher'
 const submit = process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter'
-for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as const) {
+// AEON-1678: retain the full native-control journey on desktop and phone.
+for (const width of [390, 1440]) for (const look of ['light'] as const) {
   test(`AEON-1038: launch-off controls stay honest and still at ${width} ${look}`, async ({ page }, info) => {
     const capture = async (name: string) => {
       // Each full navigation restores the person's saved theme. Apply the

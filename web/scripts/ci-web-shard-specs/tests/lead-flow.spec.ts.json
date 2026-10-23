@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/lead-flow.spec.ts",
-    "listedTests": 15,
+    "listedTests": 19,
     "tierTiming": {
       "caseSeconds": {
-        "max": 13.135,
-        "median": 4.265,
-        "min": 2.046
+        "max": 12.168,
+        "median": 3.748,
+        "min": 1.843
       },
-      "seconds": 117.063,
-      "selectedTests": 23
+      "seconds": 115.999636,
+      "selectedTests": 19
     },
     "weightSeconds": 8.6,
     "weightSource": "unmeasured-test-count-estimate"

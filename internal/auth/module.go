@@ -213,7 +213,7 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			}
 			return
 		}
-		if kind == credAgent && p.MessagingOnly && !authz.MessagingAssistantInboxRoute(r.Pattern) {
+		if kind == credAgent && p.MessagingOnly && !authz.MessagingAssistantInboxRoute(r.Pattern) && !authz.AssistantPolicyReadRoute(r.Pattern) {
 			writeForbidden(w)
 			return
 		}
@@ -423,6 +423,8 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return "", false
 	case "POST /api/agents/assistants", "POST /api/agents/assistants/{principalId}/rotate", "DELETE /api/agents/assistants/{principalId}":
 		return "agents.create", true
+	case "GET /api/assistants/{principalId}/policy":
+		return "inbox.read", true
 	case "POST /api/agentd/native-sessions/claim", "POST /api/agentd/native-sessions/receipts",
 		"POST /api/agentd/native-sessions/events", "POST /api/agentd/native-sessions/finals",
 		"GET /api/agentd/native-sessions/commands":

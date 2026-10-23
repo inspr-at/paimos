@@ -50,7 +50,8 @@ async function leaveEvents(page: Page) {
   })
 }
 
-for (const width of [390, 1440]) for (const look of ['light', 'dark'] as const) {
+// This regression needs real touch dispatch, not a viewport/theme matrix.
+for (const width of [390]) for (const look of ['light'] as const) {
   test(`AEON-1637: ${width} ${look} a tap leaves Events for Lead, Details and Chat without an error, from a link and from the default`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })

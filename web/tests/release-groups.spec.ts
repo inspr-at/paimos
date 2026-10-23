@@ -135,7 +135,8 @@ for (const width of [1600, 390]) {
     await noHorizontalScroll(page)
   })
 
-  test(`server groups stable100 into one benefit line per ticket at ${width}`, async ({ page }) => {
+  // P11: the protected desktop case includes every assertion of the phone copy plus the rail filters.
+  if (width === 1600) test(`server groups stable100 into one benefit line per ticket at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
     await open(page, true)

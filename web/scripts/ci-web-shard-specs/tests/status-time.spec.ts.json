@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/status-time.spec.ts",
-    "listedTests": 18,
+    "listedTests": 11,
     "tierTiming": {
       "caseSeconds": {
-        "max": 8.14,
-        "median": 3.367,
-        "min": 1.529
+        "max": 4.309,
+        "median": 3.7545,
+        "min": 2.858
       },
-      "seconds": 72.375,
-      "selectedTests": 18
+      "seconds": 19.014853,
+      "selectedTests": 4
     },
     "weightSeconds": 26.27,
     "weightSource": "AEON-1359 remote-spec 7f01b0b9f: 18 cases, one worker on mbp2606, wall_ms 26265"

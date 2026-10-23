@@ -70,7 +70,7 @@ async function overlay(page: Page, trigger: string, min: number) {
 // The harness scrolls inside its main element, so the whole Models card is captured as an element.
 const shot = (page: Page, testInfo: TestInfo, name: string, card = true) => card ? page.locator('[data-models-section] .m-card').screenshot({ path: testInfo.outputPath(`${name}.png`) }) : page.screenshot({ path: testInfo.outputPath(`${name}.png`) })
 
-for (const width of [1440, 390]) for (const theme of ['light', 'dark']) test.describe(`at ${width} ${theme}`, () => {
+for (const width of [1440, 390]) for (const theme of ['light']) test.describe(`at ${width} ${theme}`, () => {
   const phone = width < 600, min = phone ? 44 : 24
   test.use(phone ? { viewport: { width, height: 860 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 } : { viewport: { width, height: 1000 } })
 

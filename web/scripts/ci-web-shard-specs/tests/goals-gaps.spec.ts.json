@@ -6,7 +6,16 @@
   },
   "spec": {
     "file": "tests/goals-gaps.spec.ts",
-    "listedTests": 6,
+    "listedTests": 7,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.462,
+        "median": 3.451,
+        "min": 2.704
+      },
+      "seconds": 34.2875,
+      "selectedTests": 7
+    },
     "weightSeconds": 13.317073,
     "weightSource": "unmeasured-test-rate"
   }

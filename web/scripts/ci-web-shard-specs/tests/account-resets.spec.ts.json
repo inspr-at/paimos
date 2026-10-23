@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/account-resets.spec.ts",
-    "listedTests": 6,
+    "listedTests": 2,
     "tierTiming": {
       "caseSeconds": {
-        "max": 5.703,
-        "median": 4.228,
-        "min": 3.877
+        "max": 4.397,
+        "median": 4.141,
+        "min": 3.885
       },
-      "seconds": 26.6,
-      "selectedTests": 6
+      "seconds": 10.730513,
+      "selectedTests": 2
     },
     "weightSeconds": 12,
     "weightSource": "local-single-worker-AEON-1037-6.2s-plus-margin"

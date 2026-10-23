@@ -9,7 +9,9 @@ import { agentData, mockAgents } from './agents-fixtures'
 // Started by TestSessionChatBrowser with an isolated DB, loopback API and CLI.
 // The remaining app shell is mocked; every chat request uses that real API.
 test.skip(!process.env.AEON_CHAT_CLI, 'run AEON_SESSION_CHAT_BROWSER=1 go test ./internal/cli -run ^TestSessionChatBrowser$')
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+// The two themes also select session-file versus vendor-reference discovery.
+// Retain both real CLI/API paths, removing only the repeated phone profile.
+for (const theme of ['light', 'dark'] as const) for (const width of [1600]) {
   test(`person asks and CLI answers in the same thread: ${theme} ${width}`, async ({ page, playwright }) => {
     test.setTimeout(60_000)
     await page.clock.install({ time: new Date() })

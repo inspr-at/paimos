@@ -176,8 +176,9 @@ test.describe('screenshots', () => {
 test.skip(!SHOTS, 'Screenshots run only with AEON_325_SHOTS=<dir>.')
 
 for (const state of ['outdated', 'missing'] as const) {
-  for (const theme of ['light', 'dark'] as const) {
-    for (const width of [1600, 390]) {
+  // P11: keep each notice's full clipping assertions at the narrowest profile.
+  for (const theme of ['light'] as const) {
+    for (const width of [390]) {
       test(`shot ${state} ${width} ${theme}`, async ({ page }) => {
         mkdirSync(SHOTS, { recursive: true })
         await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
@@ -328,8 +329,9 @@ test('the update toast ends at the release name and counts its public notes by k
 })
 
 test.describe('update toast counts', () => {
-  for (const width of [390, 1024, 1440]) {
-    for (const theme of ['light', 'dark'] as const) {
+  // P11: phone wrapping and desktop spacing remain separate with all stability assertions.
+  for (const width of [390, 1440]) {
+    for (const theme of ['light'] as const) {
       test(`toast ${width} ${theme}`, async ({ page }, testInfo) => {
         await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
         await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })

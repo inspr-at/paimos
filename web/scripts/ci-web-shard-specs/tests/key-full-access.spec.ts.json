@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/key-full-access.spec.ts",
-    "listedTests": 20,
+    "listedTests": 16,
     "tierTiming": {
       "caseSeconds": {
-        "max": 11.897,
-        "median": 3.453,
-        "min": 2.198
+        "max": 12.997,
+        "median": 3.3360000000000003,
+        "min": 2.377
       },
-      "seconds": 131.769,
-      "selectedTests": 22
+      "seconds": 82.966051,
+      "selectedTests": 16
     },
     "weightSeconds": 53.064516,
     "weightSource": "web-8"

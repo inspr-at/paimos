@@ -1,0 +1,582 @@
+{
+  "version": 1,
+  "ticket": "AEON-1678",
+  "package": "P06",
+  "round": "cut-A",
+  "status": "implementation-complete-browser-capacity-blocked",
+  "recordedAt": "2026-10-23T09:06:36.676Z",
+  "baseCommit": "c0f172e52e68ac58d399b6fccfd82978ddde3770",
+  "selectedAccount": {
+    "instance": "ppm",
+    "principal": "workstation-agents",
+    "tenant": "INSPR",
+    "workerMarkerVerified": true,
+    "coordinatorOwnsStatusAndReleaseGates": true
+  },
+  "browserCases": {
+    "auditBefore": 756,
+    "baselineBefore": 757,
+    "beforeRound": 773,
+    "currentAfter": 649,
+    "plannedCeiling": 29,
+    "removed": 124,
+    "demoted": 0,
+    "upstreamGrowthSinceBaseline": [
+      {
+        "file": "tests/agent-pairing.spec.ts",
+        "baseline": 35,
+        "currentBefore": 41
+      },
+      {
+        "file": "tests/agents-dial-usage.spec.ts",
+        "baseline": 7,
+        "currentBefore": 9
+      },
+      {
+        "file": "tests/start-agent.spec.ts",
+        "baseline": 36,
+        "currentBefore": 44
+      }
+    ],
+    "affectedBefore": 398,
+    "affectedAfter": 274
+  },
+  "cuts": {
+    "profileDuplicates": 112,
+    "provenRuntimeTransfers": 12,
+    "bySpec": [
+      {"file":"tests/agent-rules-ticks.spec.ts","before":13,"after":4,"removed":9,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/agent-rules-budget-clients.spec.ts","before":10,"after":8,"removed":2,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/provenance.spec.ts","before":13,"after":4,"removed":9,"unchangedRetainedAssertions":true,"captureOwnershipChanged":true},
+      {"file":"tests/lead-remove.spec.ts","before":7,"after":3,"removed":4,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/lead-start.spec.ts","before":7,"after":3,"removed":4,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/aeon-1209-agents-head.spec.ts","before":35,"after":27,"removed":8,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/aeon-1210-agents-tree.spec.ts","before":19,"after":13,"removed":6,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/aeon-1211-agents-rows.spec.ts","before":40,"after":23,"removed":17,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/aeon-1213-agents-split.spec.ts","before":15,"after":12,"removed":3,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/agent-recovery.spec.ts","before":9,"after":5,"removed":4,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/lead-adoption.spec.ts","before":10,"after":4,"removed":6,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/agent-pause.spec.ts","before":25,"after":18,"removed":7,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/agents-dial.spec.ts","before":28,"after":24,"removed":4,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/agents-dial-daily.spec.ts","before":38,"after":32,"removed":6,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/agents-handover.spec.ts","before":7,"after":5,"removed":2,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/agents-display.spec.ts","before":17,"after":13,"removed":4,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/agents-mission.spec.ts","before":11,"after":9,"removed":2,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/capacity-pace.spec.ts","before":15,"after":12,"removed":3,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/dead-screens.spec.ts","before":12,"after":4,"removed":8,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/groups.spec.ts","before":12,"after":8,"removed":4,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/lead-card.spec.ts","before":18,"after":14,"removed":4,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/lead-flow.spec.ts","before":23,"after":19,"removed":4,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/vendor-signals.spec.ts","before":5,"after":3,"removed":2,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false},
+      {"file":"tests/pi-openrouter.spec.ts","before":9,"after":7,"removed":2,"unchangedRetainedAssertions":true,"captureOwnershipChanged":false}
+    ],
+    "lineage": [
+      {"source":"browser:tests/agent-rules-ticks.spec.ts:a failed rule tick rolls back to the saved draft","kind":"production-runtime","destinations":[{"id":"runtime:agents-prune.unit.test.ts","nativeKeys":["vitest:tests/agents-prune.unit.test.ts:P06 rules: held set/rule tick failures roll back their optimistic state and reject overlapping ticks"]}]},
+      {"source":"browser:tests/agent-rules-ticks.spec.ts:a failed set tick rolls back to the saved draft","kind":"production-runtime","destinations":[{"id":"runtime:agents-prune.unit.test.ts","nativeKeys":["vitest:tests/agents-prune.unit.test.ts:P06 rules: held set/rule tick failures roll back their optimistic state and reject overlapping ticks"]}]},
+      {"source":"browser:tests/agent-rules-ticks.spec.ts:a layer tick of two sets says how many drafts were saved, and stops when one fails","kind":"production-runtime","destinations":[{"id":"runtime:agents-prune.unit.test.ts","nativeKeys":["vitest:tests/agents-prune.unit.test.ts:P06 rules: a partial layer tick keeps the committed draft, restores the failed set and stops before later sets"]}]},
+      {"source":"browser:tests/agent-rules-ticks.spec.ts:a layer tick saves the writable sets underneath it","kind":"production-runtime","destinations":[{"id":"runtime:agents-prune.unit.test.ts","nativeKeys":["vitest:tests/agents-prune.unit.test.ts:P06 rules: a partial layer tick keeps the committed draft, restores the failed set and stops before later sets"]}]},
+      {"source":"browser:tests/agent-rules-ticks.spec.ts:a rule tick saves a draft and does not publish","kind":"production-runtime","destinations":[{"id":"runtime:agents-prune.unit.test.ts","nativeKeys":["vitest:tests/agents-prune.unit.test.ts:P06 rules: held set/rule tick failures roll back their optimistic state and reject overlapping ticks"]}]},
+      {"source":"browser:tests/agent-rules-ticks.spec.ts:a set tick turns movable rules off and leaves locked rules on","kind":"production-runtime","destinations":[{"id":"runtime:agents-prune.unit.test.ts","nativeKeys":["vitest:tests/agents-prune.unit.test.ts:P06 rules: held set/rule tick failures roll back their optimistic state and reject overlapping ticks"]}]},
+      {"source":"browser:tests/agent-rules-ticks.spec.ts:duplicating a rule stays in the draft until save","kind":"production-runtime","destinations":[{"id":"runtime:agents-prune.unit.test.ts","nativeKeys":["vitest:tests/agents-prune.unit.test.ts:P06 rules: editing keeps ticks and duplicates local until an explicit draft save; publication requires a separate confirmation"]}]},
+      {"source":"browser:tests/agent-rules-ticks.spec.ts:duplicating a set writes a new draft and leaves the original live","kind":"production-runtime","destinations":[{"id":"runtime:agents-prune.unit.test.ts","nativeKeys":["vitest:tests/agents-prune.unit.test.ts:P06 rules: duplicate sets have independent identities and never change the original or publish"]}]},
+      {"source":"browser:tests/agent-rules-ticks.spec.ts:editing one set blocks ticks on the others until it is saved or cancelled","kind":"production-runtime","destinations":[{"id":"runtime:agents-prune.unit.test.ts","nativeKeys":["vitest:tests/agents-prune.unit.test.ts:P06 rules: editing keeps ticks and duplicates local until an explicit draft save; publication requires a separate confirmation"]}]},
+      {"source":"browser:tests/agent-rules-budget-clients.spec.ts:large budget and per-client delivery 1600 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agent-rules-budget-clients.spec.ts","nativeKeys":["browser:tests/agent-rules-budget-clients.spec.ts:large budget and per-client delivery 1600 light","browser:tests/agent-rules-budget-clients.spec.ts:large budget and per-client delivery 390 light"]}]},
+      {"source":"browser:tests/agent-rules-budget-clients.spec.ts:large budget and per-client delivery 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agent-rules-budget-clients.spec.ts","nativeKeys":["browser:tests/agent-rules-budget-clients.spec.ts:large budget and per-client delivery 1600 light","browser:tests/agent-rules-budget-clients.spec.ts:large budget and per-client delivery 390 light"]}]},
+      {"source":"browser:tests/provenance.spec.ts:a forbidden read shows an error and no instruction rows","kind":"production-runtime","destinations":[{"id":"runtime:agents-prune.unit.test.ts","nativeKeys":["vitest:tests/agents-prune.unit.test.ts:P06 metadata: forbidden/missing provenance clears the old data and stale failures cannot hide a newer record"]}]},
+      {"source":"browser:tests/provenance.spec.ts:a late provenance response does not attach to the session now open","kind":"production-runtime","destinations":[{"id":"runtime:agents-prune.unit.test.ts","nativeKeys":["vitest:tests/agents-prune.unit.test.ts:P06 metadata: delayed provenance cannot replace the session now open"]}]},
+      {"source":"browser:tests/provenance.spec.ts:a missing session shows an error and no instruction rows","kind":"production-runtime","destinations":[{"id":"runtime:agents-prune.unit.test.ts","nativeKeys":["vitest:tests/agents-prune.unit.test.ts:P06 metadata: forbidden/missing provenance clears the old data and stale failures cannot hide a newer record"]}]},
+      {"source":"browser:tests/provenance.spec.ts:instruction versions render at 1600px in dark, pass 1","kind":"retained-identical-body","destinations":[{"id":"retained:tests/provenance.spec.ts","nativeKeys":["browser:tests/provenance.spec.ts:instruction versions render at 1600px in light, pass 1","browser:tests/provenance.spec.ts:instruction versions render at 390px in light, pass 1"]}]},
+      {"source":"browser:tests/provenance.spec.ts:instruction versions render at 1600px in dark, pass 2","kind":"retained-identical-body","destinations":[{"id":"retained:tests/provenance.spec.ts","nativeKeys":["browser:tests/provenance.spec.ts:instruction versions render at 1600px in light, pass 1","browser:tests/provenance.spec.ts:instruction versions render at 390px in light, pass 1"]}]},
+      {"source":"browser:tests/provenance.spec.ts:instruction versions render at 1600px in light, pass 2","kind":"retained-identical-body","destinations":[{"id":"retained:tests/provenance.spec.ts","nativeKeys":["browser:tests/provenance.spec.ts:instruction versions render at 1600px in light, pass 1","browser:tests/provenance.spec.ts:instruction versions render at 390px in light, pass 1"]}]},
+      {"source":"browser:tests/provenance.spec.ts:instruction versions render at 390px in dark, pass 1","kind":"retained-identical-body","destinations":[{"id":"retained:tests/provenance.spec.ts","nativeKeys":["browser:tests/provenance.spec.ts:instruction versions render at 1600px in light, pass 1","browser:tests/provenance.spec.ts:instruction versions render at 390px in light, pass 1"]}]},
+      {"source":"browser:tests/provenance.spec.ts:instruction versions render at 390px in dark, pass 2","kind":"retained-identical-body","destinations":[{"id":"retained:tests/provenance.spec.ts","nativeKeys":["browser:tests/provenance.spec.ts:instruction versions render at 1600px in light, pass 1","browser:tests/provenance.spec.ts:instruction versions render at 390px in light, pass 1"]}]},
+      {"source":"browser:tests/provenance.spec.ts:instruction versions render at 390px in light, pass 2","kind":"retained-identical-body","destinations":[{"id":"retained:tests/provenance.spec.ts","nativeKeys":["browser:tests/provenance.spec.ts:instruction versions render at 1600px in light, pass 1","browser:tests/provenance.spec.ts:instruction versions render at 390px in light, pass 1"]}]},
+      {"source":"browser:tests/lead-remove.spec.ts:AEON-1040: remove confirmation stays still on card and Leads at 1024 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-remove.spec.ts","nativeKeys":["browser:tests/lead-remove.spec.ts:AEON-1040: remove confirmation stays still on card and Leads at 390 light","browser:tests/lead-remove.spec.ts:AEON-1040: remove confirmation stays still on card and Leads at 1440 light"]}]},
+      {"source":"browser:tests/lead-remove.spec.ts:AEON-1040: remove confirmation stays still on card and Leads at 1024 light","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-remove.spec.ts","nativeKeys":["browser:tests/lead-remove.spec.ts:AEON-1040: remove confirmation stays still on card and Leads at 390 light","browser:tests/lead-remove.spec.ts:AEON-1040: remove confirmation stays still on card and Leads at 1440 light"]}]},
+      {"source":"browser:tests/lead-remove.spec.ts:AEON-1040: remove confirmation stays still on card and Leads at 1440 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-remove.spec.ts","nativeKeys":["browser:tests/lead-remove.spec.ts:AEON-1040: remove confirmation stays still on card and Leads at 390 light","browser:tests/lead-remove.spec.ts:AEON-1040: remove confirmation stays still on card and Leads at 1440 light"]}]},
+      {"source":"browser:tests/lead-remove.spec.ts:AEON-1040: remove confirmation stays still on card and Leads at 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-remove.spec.ts","nativeKeys":["browser:tests/lead-remove.spec.ts:AEON-1040: remove confirmation stays still on card and Leads at 390 light","browser:tests/lead-remove.spec.ts:AEON-1040: remove confirmation stays still on card and Leads at 1440 light"]}]},
+      {"source":"browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 1024 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-start.spec.ts","nativeKeys":["browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 390 light","browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 1440 light"]}]},
+      {"source":"browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 1024 light","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-start.spec.ts","nativeKeys":["browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 390 light","browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 1440 light"]}]},
+      {"source":"browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 1440 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-start.spec.ts","nativeKeys":["browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 390 light","browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 1440 light"]}]},
+      {"source":"browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-start.spec.ts","nativeKeys":["browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 390 light","browser:tests/lead-start.spec.ts:AEON-1038: launch-off controls stay honest and still at 1440 light"]}]},
+      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:1024: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:1440: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover","browser:tests/aeon-1209-agents-head.spec.ts:390: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover"]}]},
+      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:dark 1440: head order, the capacity row and no Desk panel","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:light 1440: head order, the capacity row and no Desk panel"]}]},
+      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:dark: hovering a unit shows its − / + in place, wide and tight","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:light: hovering a unit shows its − / + in place, wide and tight"]}]},
+      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1024 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1440 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state","browser:tests/aeon-1209-agents-head.spec.ts:design gate at 390 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state"]}]},
+      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1024 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1440 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state","browser:tests/aeon-1209-agents-head.spec.ts:design gate at 390 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state"]}]},
+      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1440 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1440 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state","browser:tests/aeon-1209-agents-head.spec.ts:design gate at 390 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state"]}]},
+      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:design gate at 390 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1440 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state","browser:tests/aeon-1209-agents-head.spec.ts:design gate at 390 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state"]}]},
+      {"source":"browser:tests/aeon-1209-agents-head.spec.ts:phone › dark 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1209-agents-head.spec.ts","nativeKeys":["browser:tests/aeon-1209-agents-head.spec.ts:phone › light 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head"]}]},
+      {"source":"browser:tests/aeon-1210-agents-tree.spec.ts:dark 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1210-agents-tree.spec.ts","nativeKeys":["browser:tests/aeon-1210-agents-tree.spec.ts:light 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip"]}]},
+      {"source":"browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1024 dark: the grouped list, its menus and its folds","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1210-agents-tree.spec.ts","nativeKeys":["browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1440 light: the grouped list, its menus and its folds","browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 390 light: the grouped list, its menus and its folds"]}]},
+      {"source":"browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1024 light: the grouped list, its menus and its folds","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1210-agents-tree.spec.ts","nativeKeys":["browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1440 light: the grouped list, its menus and its folds","browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 390 light: the grouped list, its menus and its folds"]}]},
+      {"source":"browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1440 dark: the grouped list, its menus and its folds","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1210-agents-tree.spec.ts","nativeKeys":["browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1440 light: the grouped list, its menus and its folds","browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 390 light: the grouped list, its menus and its folds"]}]},
+      {"source":"browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 390 dark: the grouped list, its menus and its folds","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1210-agents-tree.spec.ts","nativeKeys":["browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1440 light: the grouped list, its menus and its folds","browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 390 light: the grouped list, its menus and its folds"]}]},
+      {"source":"browser:tests/aeon-1210-agents-tree.spec.ts:phone › dark 390: the lead line, the queue chip and every row target reach 44 px","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1210-agents-tree.spec.ts","nativeKeys":["browser:tests/aeon-1210-agents-tree.spec.ts:phone › light 390: the lead line, the queue chip and every row target reach 44 px"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1024 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1440 light","browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 390 light"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1024 light","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1440 light","browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 390 light"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1440 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1440 light","browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 390 light"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1440 light","browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 390 light"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:dark 1024: held handover headings never add a row or move its controls","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held handover headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held handover headings never add a row or move its controls"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:dark 1024: held queue headings never add a row or move its controls","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held handover headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held handover headings never add a row or move its controls"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:dark 1024: the state lives in the avatar, Time sits beside the name","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: the state lives in the avatar, Time sits beside the name","browser:tests/aeon-1211-agents-rows.spec.ts:light 1024: the state lives in the avatar, Time sits beside the name"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:dark 1440: held handover headings never add a row or move its controls","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held handover headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held handover headings never add a row or move its controls"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:dark 1440: held queue headings never add a row or move its controls","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held handover headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held handover headings never add a row or move its controls"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:dark 1440: the approved columns, registry model names, a name-only line 1; listening and tier in the details","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: the approved columns, registry model names, a name-only line 1; listening and tier in the details","browser:tests/aeon-1211-agents-rows.spec.ts:light 400: the approved columns, registry model names, a name-only line 1; listening and tier in the details"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:dark 1440: the state lives in the avatar, Time sits beside the name","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: the state lives in the avatar, Time sits beside the name","browser:tests/aeon-1211-agents-rows.spec.ts:light 1024: the state lives in the avatar, Time sits beside the name"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:dark 390: compact rows open with the harness mark and end with the time","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:light 390: compact rows open with the harness mark and end with the time"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:dark 390: held handover headings never add a row or move its controls","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held handover headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held handover headings never add a row or move its controls"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:dark 390: held queue headings never add a row or move its controls","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held handover headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held handover headings never add a row or move its controls"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:dark 400: the approved columns, registry model names, a name-only line 1; listening and tier in the details","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: the approved columns, registry model names, a name-only line 1; listening and tier in the details","browser:tests/aeon-1211-agents-rows.spec.ts:light 400: the approved columns, registry model names, a name-only line 1; listening and tier in the details"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:light 1024: held handover headings never add a row or move its controls","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held handover headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held handover headings never add a row or move its controls"]}]},
+      {"source":"browser:tests/aeon-1211-agents-rows.spec.ts:light 1024: held queue headings never add a row or move its controls","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1211-agents-rows.spec.ts","nativeKeys":["browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 1440: held handover headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held queue headings never add a row or move its controls","browser:tests/aeon-1211-agents-rows.spec.ts:light 390: held handover headings never add a row or move its controls"]}]},
+      {"source":"browser:tests/aeon-1213-agents-split.spec.ts:AEON-1213 dark 1024: a sheet replaces the split without losing the list","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1213-agents-split.spec.ts","nativeKeys":["browser:tests/aeon-1213-agents-split.spec.ts:AEON-1213 light 1024: a sheet replaces the split without losing the list","browser:tests/aeon-1213-agents-split.spec.ts:AEON-1213 light 390: a sheet replaces the split without losing the list"]}]},
+      {"source":"browser:tests/aeon-1213-agents-split.spec.ts:AEON-1213 dark 1440: one dock, presets, live divider and top-starting panes","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1213-agents-split.spec.ts","nativeKeys":["browser:tests/aeon-1213-agents-split.spec.ts:AEON-1213 light 1440: one dock, presets, live divider and top-starting panes"]}]},
+      {"source":"browser:tests/aeon-1213-agents-split.spec.ts:AEON-1213 dark 390: a sheet replaces the split without losing the list","kind":"retained-identical-body","destinations":[{"id":"retained:tests/aeon-1213-agents-split.spec.ts","nativeKeys":["browser:tests/aeon-1213-agents-split.spec.ts:AEON-1213 light 1024: a sheet replaces the split without losing the list","browser:tests/aeon-1213-agents-split.spec.ts:AEON-1213 light 390: a sheet replaces the split without losing the list"]}]},
+      {"source":"browser:tests/agent-recovery.spec.ts:recovery actions stay still 1024 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agent-recovery.spec.ts","nativeKeys":["browser:tests/agent-recovery.spec.ts:recovery actions stay still 390 light","browser:tests/agent-recovery.spec.ts:recovery actions stay still 1440 light"]}]},
+      {"source":"browser:tests/agent-recovery.spec.ts:recovery actions stay still 1024 light","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agent-recovery.spec.ts","nativeKeys":["browser:tests/agent-recovery.spec.ts:recovery actions stay still 390 light","browser:tests/agent-recovery.spec.ts:recovery actions stay still 1440 light"]}]},
+      {"source":"browser:tests/agent-recovery.spec.ts:recovery actions stay still 1440 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agent-recovery.spec.ts","nativeKeys":["browser:tests/agent-recovery.spec.ts:recovery actions stay still 390 light","browser:tests/agent-recovery.spec.ts:recovery actions stay still 1440 light"]}]},
+      {"source":"browser:tests/agent-recovery.spec.ts:recovery actions stay still 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agent-recovery.spec.ts","nativeKeys":["browser:tests/agent-recovery.spec.ts:recovery actions stay still 390 light","browser:tests/agent-recovery.spec.ts:recovery actions stay still 1440 light"]}]},
+      {"source":"browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 1024 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-adoption.spec.ts","nativeKeys":["browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 1440 light","browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 390 light"]}]},
+      {"source":"browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 1024 light","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-adoption.spec.ts","nativeKeys":["browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 1440 light","browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 390 light"]}]},
+      {"source":"browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 1440 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-adoption.spec.ts","nativeKeys":["browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 1440 light","browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 390 light"]}]},
+      {"source":"browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-adoption.spec.ts","nativeKeys":["browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 1440 light","browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 390 light"]}]},
+      {"source":"browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 400 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-adoption.spec.ts","nativeKeys":["browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 1440 light","browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 390 light"]}]},
+      {"source":"browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 400 light","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-adoption.spec.ts","nativeKeys":["browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 1440 light","browser:tests/lead-adoption.spec.ts:person confirms the running coordinator without moving controls at 390 light"]}]},
+      {"source":"browser:tests/agent-pause.spec.ts:1024 dark: stop request stays visible until the worker confirms stopped","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agent-pause.spec.ts","nativeKeys":["browser:tests/agent-pause.spec.ts:390 light: stop request stays visible until the worker confirms stopped","browser:tests/agent-pause.spec.ts:1440 light: stop request stays visible until the worker confirms stopped"]}]},
+      {"source":"browser:tests/agent-pause.spec.ts:1024 light: stop request stays visible until the worker confirms stopped","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agent-pause.spec.ts","nativeKeys":["browser:tests/agent-pause.spec.ts:390 light: stop request stays visible until the worker confirms stopped","browser:tests/agent-pause.spec.ts:1440 light: stop request stays visible until the worker confirms stopped"]}]},
+      {"source":"browser:tests/agent-pause.spec.ts:1440 dark: stop request stays visible until the worker confirms stopped","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agent-pause.spec.ts","nativeKeys":["browser:tests/agent-pause.spec.ts:390 light: stop request stays visible until the worker confirms stopped","browser:tests/agent-pause.spec.ts:1440 light: stop request stays visible until the worker confirms stopped"]}]},
+      {"source":"browser:tests/agent-pause.spec.ts:1440 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agent-pause.spec.ts","nativeKeys":["browser:tests/agent-pause.spec.ts:1440 light: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down","browser:tests/agent-pause.spec.ts:390 light: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"]}]},
+      {"source":"browser:tests/agent-pause.spec.ts:1440 dark: the head stays on one line beside the session panel while a stop is requested","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agent-pause.spec.ts","nativeKeys":["browser:tests/agent-pause.spec.ts:1440 light: the head stays on one line beside the session panel while a stop is requested"]}]},
+      {"source":"browser:tests/agent-pause.spec.ts:390 dark: stop request stays visible until the worker confirms stopped","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agent-pause.spec.ts","nativeKeys":["browser:tests/agent-pause.spec.ts:390 light: stop request stays visible until the worker confirms stopped","browser:tests/agent-pause.spec.ts:1440 light: stop request stays visible until the worker confirms stopped"]}]},
+      {"source":"browser:tests/agent-pause.spec.ts:390 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agent-pause.spec.ts","nativeKeys":["browser:tests/agent-pause.spec.ts:1440 light: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down","browser:tests/agent-pause.spec.ts:390 light: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"]}]},
+      {"source":"browser:tests/agents-dial.spec.ts:1024 dark wind: stepping, modes and folding keep every control put","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-dial.spec.ts","nativeKeys":["browser:tests/agents-dial.spec.ts:390 light wind: stepping, modes and folding keep every control put","browser:tests/agents-dial.spec.ts:1440 light wind: stepping, modes and folding keep every control put"]}]},
+      {"source":"browser:tests/agents-dial.spec.ts:1024 light wind: stepping, modes and folding keep every control put","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-dial.spec.ts","nativeKeys":["browser:tests/agents-dial.spec.ts:390 light wind: stepping, modes and folding keep every control put","browser:tests/agents-dial.spec.ts:1440 light wind: stepping, modes and folding keep every control put"]}]},
+      {"source":"browser:tests/agents-dial.spec.ts:1440 dark wind: stepping, modes and folding keep every control put","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-dial.spec.ts","nativeKeys":["browser:tests/agents-dial.spec.ts:390 light wind: stepping, modes and folding keep every control put","browser:tests/agents-dial.spec.ts:1440 light wind: stepping, modes and folding keep every control put"]}]},
+      {"source":"browser:tests/agents-dial.spec.ts:390 dark wind: stepping, modes and folding keep every control put","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-dial.spec.ts","nativeKeys":["browser:tests/agents-dial.spec.ts:390 light wind: stepping, modes and folding keep every control put","browser:tests/agents-dial.spec.ts:1440 light wind: stepping, modes and folding keep every control put"]}]},
+      {"source":"browser:tests/agents-dial-daily.spec.ts:1024 dark: folding, picking a harness, folds and the info area keep every control put","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-dial-daily.spec.ts","nativeKeys":["browser:tests/agents-dial-daily.spec.ts:1440 light: folding, picking a harness, folds and the info area keep every control put","browser:tests/agents-dial-daily.spec.ts:400 light: folding, picking a harness, folds and the info area keep every control put"]}]},
+      {"source":"browser:tests/agents-dial-daily.spec.ts:1024 light: folding, picking a harness, folds and the info area keep every control put","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-dial-daily.spec.ts","nativeKeys":["browser:tests/agents-dial-daily.spec.ts:1440 light: folding, picking a harness, folds and the info area keep every control put","browser:tests/agents-dial-daily.spec.ts:400 light: folding, picking a harness, folds and the info area keep every control put"]}]},
+      {"source":"browser:tests/agents-dial-daily.spec.ts:1440 dark: folding, picking a harness, folds and the info area keep every control put","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-dial-daily.spec.ts","nativeKeys":["browser:tests/agents-dial-daily.spec.ts:1440 light: folding, picking a harness, folds and the info area keep every control put","browser:tests/agents-dial-daily.spec.ts:400 light: folding, picking a harness, folds and the info area keep every control put"]}]},
+      {"source":"browser:tests/agents-dial-daily.spec.ts:400 dark: folding, picking a harness, folds and the info area keep every control put","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-dial-daily.spec.ts","nativeKeys":["browser:tests/agents-dial-daily.spec.ts:1440 light: folding, picking a harness, folds and the info area keep every control put","browser:tests/agents-dial-daily.spec.ts:400 light: folding, picking a harness, folds and the info area keep every control put"]}]},
+      {"source":"browser:tests/agents-dial-daily.spec.ts:AEON-1166 1440 dark: at the limit the detail follows Settings › Models and the line keeps every control put","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-dial-daily.spec.ts","nativeKeys":["browser:tests/agents-dial-daily.spec.ts:AEON-1166 1440 light: at the limit the detail follows Settings › Models and the line keeps every control put","browser:tests/agents-dial-daily.spec.ts:AEON-1166 390 light: at the limit the detail follows Settings › Models and the line keeps every control put"]}]},
+      {"source":"browser:tests/agents-dial-daily.spec.ts:AEON-1166 390 dark: at the limit the detail follows Settings › Models and the line keeps every control put","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-dial-daily.spec.ts","nativeKeys":["browser:tests/agents-dial-daily.spec.ts:AEON-1166 1440 light: at the limit the detail follows Settings › Models and the line keeps every control put","browser:tests/agents-dial-daily.spec.ts:AEON-1166 390 light: at the limit the detail follows Settings › Models and the line keeps every control put"]}]},
+      {"source":"browser:tests/agents-handover.spec.ts:handover and keyboard menu with undo dark 1600","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-handover.spec.ts","nativeKeys":["browser:tests/agents-handover.spec.ts:handover and keyboard menu with undo light 390","browser:tests/agents-handover.spec.ts:handover and keyboard menu with undo light 1600"]}]},
+      {"source":"browser:tests/agents-handover.spec.ts:handover and keyboard menu with undo dark 390","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-handover.spec.ts","nativeKeys":["browser:tests/agents-handover.spec.ts:handover and keyboard menu with undo light 390","browser:tests/agents-handover.spec.ts:handover and keyboard menu with undo light 1600"]}]},
+      {"source":"browser:tests/agents-display.spec.ts:1024 dark: first ETA report keeps family controls and following rows still","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-display.spec.ts","nativeKeys":["browser:tests/agents-display.spec.ts:390 light: first ETA report keeps family controls and following rows still","browser:tests/agents-display.spec.ts:1440 light: first ETA report keeps family controls and following rows still"]}]},
+      {"source":"browser:tests/agents-display.spec.ts:1024 light: first ETA report keeps family controls and following rows still","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-display.spec.ts","nativeKeys":["browser:tests/agents-display.spec.ts:390 light: first ETA report keeps family controls and following rows still","browser:tests/agents-display.spec.ts:1440 light: first ETA report keeps family controls and following rows still"]}]},
+      {"source":"browser:tests/agents-display.spec.ts:1440 dark: first ETA report keeps family controls and following rows still","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-display.spec.ts","nativeKeys":["browser:tests/agents-display.spec.ts:390 light: first ETA report keeps family controls and following rows still","browser:tests/agents-display.spec.ts:1440 light: first ETA report keeps family controls and following rows still"]}]},
+      {"source":"browser:tests/agents-display.spec.ts:390 dark: first ETA report keeps family controls and following rows still","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-display.spec.ts","nativeKeys":["browser:tests/agents-display.spec.ts:390 light: first ETA report keeps family controls and following rows still","browser:tests/agents-display.spec.ts:1440 light: first ETA report keeps family controls and following rows still"]}]},
+      {"source":"browser:tests/agents-mission.spec.ts:dark 1600px fits without horizontal scroll and captures review image","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-mission.spec.ts","nativeKeys":["browser:tests/agents-mission.spec.ts:light 1600px fits without horizontal scroll and captures review image","browser:tests/agents-mission.spec.ts:light 390px fits without horizontal scroll and captures review image"]}]},
+      {"source":"browser:tests/agents-mission.spec.ts:dark 390px fits without horizontal scroll and captures review image","kind":"retained-identical-body","destinations":[{"id":"retained:tests/agents-mission.spec.ts","nativeKeys":["browser:tests/agents-mission.spec.ts:light 1600px fits without horizontal scroll and captures review image","browser:tests/agents-mission.spec.ts:light 390px fits without horizontal scroll and captures review image"]}]},
+      {"source":"browser:tests/capacity-pace.spec.ts:1024 dark › capacity 1024 dark: named controls, no sideways scroll, one-line labels stay on one line","kind":"retained-identical-body","destinations":[{"id":"retained:tests/capacity-pace.spec.ts","nativeKeys":["browser:tests/capacity-pace.spec.ts:1440 light › capacity 1440 light: named controls, no sideways scroll, one-line labels stay on one line","browser:tests/capacity-pace.spec.ts:1024 light › capacity 1024 light: named controls, no sideways scroll, one-line labels stay on one line","browser:tests/capacity-pace.spec.ts:390 light › capacity 390 light: named controls, no sideways scroll, 44 px targets, one-line labels stay on one line"]}]},
+      {"source":"browser:tests/capacity-pace.spec.ts:1440 dark › capacity 1440 dark: named controls, no sideways scroll, one-line labels stay on one line","kind":"retained-identical-body","destinations":[{"id":"retained:tests/capacity-pace.spec.ts","nativeKeys":["browser:tests/capacity-pace.spec.ts:1440 light › capacity 1440 light: named controls, no sideways scroll, one-line labels stay on one line","browser:tests/capacity-pace.spec.ts:1024 light › capacity 1024 light: named controls, no sideways scroll, one-line labels stay on one line","browser:tests/capacity-pace.spec.ts:390 light › capacity 390 light: named controls, no sideways scroll, 44 px targets, one-line labels stay on one line"]}]},
+      {"source":"browser:tests/capacity-pace.spec.ts:390 dark › capacity 390 dark: named controls, no sideways scroll, 44 px targets, one-line labels stay on one line","kind":"retained-identical-body","destinations":[{"id":"retained:tests/capacity-pace.spec.ts","nativeKeys":["browser:tests/capacity-pace.spec.ts:1440 light › capacity 1440 light: named controls, no sideways scroll, one-line labels stay on one line","browser:tests/capacity-pace.spec.ts:1024 light › capacity 1024 light: named controls, no sideways scroll, one-line labels stay on one line","browser:tests/capacity-pace.spec.ts:390 light › capacity 390 light: named controls, no sideways scroll, 44 px targets, one-line labels stay on one line"]}]},
+      {"source":"browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1024 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/dead-screens.spec.ts","nativeKeys":["browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 390 light","browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1440 light"]}]},
+      {"source":"browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1024 light","kind":"retained-identical-body","destinations":[{"id":"retained:tests/dead-screens.spec.ts","nativeKeys":["browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 390 light","browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1440 light"]}]},
+      {"source":"browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1440 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/dead-screens.spec.ts","nativeKeys":["browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 390 light","browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1440 light"]}]},
+      {"source":"browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/dead-screens.spec.ts","nativeKeys":["browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 390 light","browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1440 light"]}]},
+      {"source":"browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1024 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/dead-screens.spec.ts","nativeKeys":["browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 390 light","browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1440 light"]}]},
+      {"source":"browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1024 light","kind":"retained-identical-body","destinations":[{"id":"retained:tests/dead-screens.spec.ts","nativeKeys":["browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 390 light","browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1440 light"]}]},
+      {"source":"browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1440 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/dead-screens.spec.ts","nativeKeys":["browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 390 light","browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1440 light"]}]},
+      {"source":"browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/dead-screens.spec.ts","nativeKeys":["browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 390 light","browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1440 light"]}]},
+      {"source":"browser:tests/groups.spec.ts:one quota, its own pool, and move 1600 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/groups.spec.ts","nativeKeys":["browser:tests/groups.spec.ts:one quota, its own pool, and move 1600 light","browser:tests/groups.spec.ts:one quota, its own pool, and move 390 light"]}]},
+      {"source":"browser:tests/groups.spec.ts:one quota, its own pool, and move 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/groups.spec.ts","nativeKeys":["browser:tests/groups.spec.ts:one quota, its own pool, and move 1600 light","browser:tests/groups.spec.ts:one quota, its own pool, and move 390 light"]}]},
+      {"source":"browser:tests/groups.spec.ts:shared login keeps both group pools 1600 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/groups.spec.ts","nativeKeys":["browser:tests/groups.spec.ts:shared login keeps both group pools 1600 light","browser:tests/groups.spec.ts:shared login keeps both group pools 390 light"]}]},
+      {"source":"browser:tests/groups.spec.ts:shared login keeps both group pools 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/groups.spec.ts","nativeKeys":["browser:tests/groups.spec.ts:shared login keeps both group pools 1600 light","browser:tests/groups.spec.ts:shared login keeps both group pools 390 light"]}]},
+      {"source":"browser:tests/lead-card.spec.ts:the card folds to one line with Start lead at 1440 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-card.spec.ts","nativeKeys":["browser:tests/lead-card.spec.ts:the card folds to one line with Start lead at 1440 light","browser:tests/lead-card.spec.ts:the card folds to one line with Start lead at 400 light"]}]},
+      {"source":"browser:tests/lead-card.spec.ts:the card folds to one line with Start lead at 400 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-card.spec.ts","nativeKeys":["browser:tests/lead-card.spec.ts:the card folds to one line with Start lead at 1440 light","browser:tests/lead-card.spec.ts:the card folds to one line with Start lead at 400 light"]}]},
+      {"source":"browser:tests/lead-card.spec.ts:the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 1440 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-card.spec.ts","nativeKeys":["browser:tests/lead-card.spec.ts:the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 1440 light","browser:tests/lead-card.spec.ts:the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 400 light"]}]},
+      {"source":"browser:tests/lead-card.spec.ts:the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 400 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-card.spec.ts","nativeKeys":["browser:tests/lead-card.spec.ts:the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 1440 light","browser:tests/lead-card.spec.ts:the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 400 light"]}]},
+      {"source":"browser:tests/lead-flow.spec.ts:Agents page: one line per lead; + offers Start lead only while a project has none (dark)","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-flow.spec.ts","nativeKeys":["browser:tests/lead-flow.spec.ts:Agents page: one line per lead; + offers Start lead only while a project has none (light)"]}]},
+      {"source":"browser:tests/lead-flow.spec.ts:no lead: the band offers Start lead and the sheet requests one at 1440 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-flow.spec.ts","nativeKeys":["browser:tests/lead-flow.spec.ts:no lead: the band offers Start lead and the sheet requests one at 1440 light","browser:tests/lead-flow.spec.ts:no lead: the band offers Start lead and the sheet requests one at 390 light"]}]},
+      {"source":"browser:tests/lead-flow.spec.ts:no lead: the band offers Start lead and the sheet requests one at 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-flow.spec.ts","nativeKeys":["browser:tests/lead-flow.spec.ts:no lead: the band offers Start lead and the sheet requests one at 1440 light","browser:tests/lead-flow.spec.ts:no lead: the band offers Start lead and the sheet requests one at 390 light"]}]},
+      {"source":"browser:tests/lead-flow.spec.ts:phone: band, full-height panel and pinned sheet bar at 390 (dark)","kind":"retained-identical-body","destinations":[{"id":"retained:tests/lead-flow.spec.ts","nativeKeys":["browser:tests/lead-flow.spec.ts:phone: band, full-height panel and pinned sheet bar at 390 (light)"]}]},
+      {"source":"browser:tests/vendor-signals.spec.ts:vendor throttling and explicit statusline consent 1600 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/vendor-signals.spec.ts","nativeKeys":["browser:tests/vendor-signals.spec.ts:vendor throttling and explicit statusline consent 1600 light","browser:tests/vendor-signals.spec.ts:vendor throttling and explicit statusline consent 390 light"]}]},
+      {"source":"browser:tests/vendor-signals.spec.ts:vendor throttling and explicit statusline consent 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/vendor-signals.spec.ts","nativeKeys":["browser:tests/vendor-signals.spec.ts:vendor throttling and explicit statusline consent 1600 light","browser:tests/vendor-signals.spec.ts:vendor throttling and explicit statusline consent 390 light"]}]},
+      {"source":"browser:tests/pi-openrouter.spec.ts:pi model settings 1600 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/pi-openrouter.spec.ts","nativeKeys":["browser:tests/pi-openrouter.spec.ts:pi model settings 1600 light","browser:tests/pi-openrouter.spec.ts:pi model settings 390 light"]}]},
+      {"source":"browser:tests/pi-openrouter.spec.ts:pi model settings 390 dark","kind":"retained-identical-body","destinations":[{"id":"retained:tests/pi-openrouter.spec.ts","nativeKeys":["browser:tests/pi-openrouter.spec.ts:pi model settings 1600 light","browser:tests/pi-openrouter.spec.ts:pi model settings 390 light"]}]}
+    ],
+    "protectedAnchorsRemoved": 0,
+    "assertionsWeakened": 0,
+    "retainedVerification": "Scoped TypeScript AST expansion matches every pre-cut native manifest identity. All retained assertions are unchanged apart from provenance screenshot output ownership. Each profile cut maps to retained callbacks with the identical original body. The approved remote runner executed all 55 native cases from six affected specs successfully; native execution/discovery for the other 18 specs remains capacity-refused."
+  },
+  "runtime": {
+    "owner": "web/tests/agents-prune.unit.test.ts",
+    "tier": "ESSENTIAL",
+    "nativeKeys": [
+      "vitest:tests/agents-prune.unit.test.ts:P06 metadata: delayed provenance cannot replace the session now open",
+      "vitest:tests/agents-prune.unit.test.ts:P06 metadata: forbidden/missing provenance clears the old data and stale failures cannot hide a newer record",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: a held budget save sends once, reports refusal and retains the unsaved values",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: a partial layer tick keeps the committed draft, restores the failed set and stops before later sets",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: client delivery uses each client ceiling and invalid totals/layer caps never write",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: company ticks and duplication require a person with write and publish grants",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: duplicate sets have independent identities and never change the original or publish",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: editing keeps ticks and duplicates local until an explicit draft save; publication requires a separate confirmation",
+      "vitest:tests/agents-prune.unit.test.ts:P06 rules: held set/rule tick failures roll back their optimistic state and reject overlapping ticks"
+    ],
+    "command": "cd web && npx --no-install vitest run tests/agents-prune.unit.test.ts --maxWorkers=1",
+    "result": "passed",
+    "cases": 9,
+    "observedRunnerSeconds": 0.651,
+    "sourceHelper": "web/tests/record-source.ts",
+    "sourceHelperChange": "Optional in-memory source argument; existing callers still compile the current production source by default.",
+    "host": "One targeted local Vitest file with one worker after the approved remote browser lane refused capacity. No local browser was launched."
+  },
+  "negativeControls": [
+    {
+      "change": "Continue after a failed layer draft instead of stopping.",
+      "requiredFailure": "partial layer stops before the third set"
+    },
+    {
+      "change": "Omit restoring the previous draft after a rejected set/rule tick.",
+      "requiredFailure": "failed tick restores the saved rules"
+    },
+    {
+      "change": "Publish automatically on opening the review.",
+      "requiredFailure": "review alone never publishes"
+    },
+    {
+      "change": "Use the workspace budget without the individual client ceiling.",
+      "requiredFailure": "each client keeps its delivery ceiling"
+    },
+    {
+      "change": "Allow another budget write while the first response is held.",
+      "requiredFailure": "a pending budget has one write"
+    },
+    {
+      "change": "Accept a delayed provenance response after the selected session changes.",
+      "requiredFailure": "late provenance belongs to its captured session"
+    }
+  ],
+  "negativeControlMethod": "Each counterexample compiles a one-guard mutant in memory and runs the same behavioral oracle. The test requires AssertionError and the exact risk-specific message, so compilation/dependency failures cannot count as proof. Production files are never mutated.",
+  "runtimeVerification": {
+    "result": "passed",
+    "cases": 9,
+    "negativeControls": 6,
+    "seconds": 0.651,
+    "executedBeforeCuts": true
+  },
+  "checks": {
+    "defaultLedger": {
+      "command": "node scripts/test-prune/check.mjs",
+      "result": "passed",
+      "protectedRisks": 647,
+      "cuts": false,
+      "visualApproval": "pending"
+    },
+    "ledgerRegression": {
+      "command": "node --test web/tests/test-prune-ledger.test.ts",
+      "result": "passed",
+      "cases": 1
+    },
+    "rulesRuntime": {
+      "command": "node --test web/tests/rules.test.ts",
+      "result": "passed",
+      "cases": 22
+    },
+    "canonicalManifests": {
+      "command": "node scripts/test-tiers/cli.mjs manifests --write && node scripts/test-tiers/cli.mjs manifests --check",
+      "result": "passed"
+    },
+    "scopeInvariants": {
+      "result": "passed",
+      "protectedRiskRowsUnchanged": true,
+      "survivingRowsAndTiersUnchanged": true,
+      "selectionPolicyUnchanged": true,
+      "launchPolicyUnchangedExceptOwnListedCounts": true,
+      "historicalTimingAndEvidenceUnchanged": true
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    "static": {
+      "result": "deferred-to-hosted-CI",
+      "authority": "Cut A brief: Static in hosted CI."
+    },
+    "browserAfter": {
+      "result": "partial-pass-remaining-capacity-refused",
+      "host": "mbp2606",
+      "commit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+      "passed": 55,
+      "specs": [
+        "tests/dead-screens.spec.ts",
+        "tests/groups.spec.ts",
+        "tests/lead-card.spec.ts",
+        "tests/lead-flow.spec.ts",
+        "tests/vendor-signals.spec.ts",
+        "tests/pi-openrouter.spec.ts"
+      ],
+      "playwrightReportedTime": "1.8m",
+      "remainingSpecs": [
+        "tests/agent-rules-ticks.spec.ts",
+        "tests/agent-rules-budget-clients.spec.ts",
+        "tests/provenance.spec.ts",
+        "tests/lead-remove.spec.ts",
+        "tests/lead-start.spec.ts",
+        "tests/aeon-1209-agents-head.spec.ts",
+        "tests/aeon-1210-agents-tree.spec.ts",
+        "tests/aeon-1211-agents-rows.spec.ts",
+        "tests/aeon-1213-agents-split.spec.ts",
+        "tests/agent-recovery.spec.ts",
+        "tests/lead-adoption.spec.ts",
+        "tests/agent-pause.spec.ts",
+        "tests/agents-dial.spec.ts",
+        "tests/agents-dial-daily.spec.ts",
+        "tests/agents-handover.spec.ts",
+        "tests/agents-display.spec.ts",
+        "tests/agents-mission.spec.ts",
+        "tests/capacity-pace.spec.ts"
+      ],
+      "remainingCases": 213
+    }
+  },
+  "protectedAfterP02": {
+    "reason": "Every protected anchor remains. Protected cuts follow after AEON-1674 supplies the approved, digest-pinned references and the exact replacement is verified.",
+    "count": 151,
+    "bySpec": [
+      {"file":"tests/aeon-908-polish.spec.ts","cases":["browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark","browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light","browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 dark","browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 light"]},
+      {"file":"tests/agent-activity.spec.ts","cases":["browser:tests/agent-activity.spec.ts:Off shows no activity line or current activity history","browser:tests/agent-activity.spec.ts:activity fits phone and desktop in both themes","browser:tests/agent-activity.spec.ts:credential text is hidden in current activity and legacy fallback: AKIAIOSFODNN7EXAMPLE","browser:tests/agent-activity.spec.ts:credential text is hidden in current activity and legacy fallback: ÁKIAIOSFODNN7EXAMPLE","browser:tests/agent-activity.spec.ts:credential text is hidden in current activity and legacy fallback: Editing AKIAIOSFODNN7EXAMPLE.go","browser:tests/agent-activity.spec.ts:credential text is hidden in current activity and legacy fallback: Editing id-rsa.go","browser:tests/agent-activity.spec.ts:credential text is hidden in current activity and legacy fallback: Editing sk-live.go","browser:tests/agent-activity.spec.ts:credential text is hidden in current activity and legacy fallback: FOO=secret","browser:tests/agent-activity.spec.ts:credential text is hidden in current activity and legacy fallback: https://user:pass@host/a","browser:tests/agent-activity.spec.ts:table and details show activity and phase durations; Off hides both","browser:tests/agent-activity.spec.ts:workspace administrators can choose each activity mode and recover a failed save"]},
+      {"file":"tests/agent-done-state.spec.ts","cases":["browser:tests/agent-done-state.spec.ts:the ticket list keeps a silent 100% worker on its heartbeat warning and shows no avatar for a stopped one"]},
+      {"file":"tests/agent-pairing.spec.ts","cases":["browser:tests/agent-pairing.spec.ts:Agents links to Connect your machine"]},
+      {"file":"tests/agent-pause.spec.ts","cases":["browser:tests/agent-pause.spec.ts:AEON-783: chosen agents keeps Done in, By, Cancel and Submit still","browser:tests/agent-pause.spec.ts:wind-down previews only owned work and a reloaded all-computer report leaves new agents untouched"]},
+      {"file":"tests/agent-rules-shots.spec.ts","cases":["browser:tests/agent-rules-shots.spec.ts:history 1600 dark","browser:tests/agent-rules-shots.spec.ts:history 1600 light","browser:tests/agent-rules-shots.spec.ts:history 390 dark","browser:tests/agent-rules-shots.spec.ts:history 390 light","browser:tests/agent-rules-shots.spec.ts:import-checking 1600 dark","browser:tests/agent-rules-shots.spec.ts:import-checking 1600 light","browser:tests/agent-rules-shots.spec.ts:import-checking 390 dark","browser:tests/agent-rules-shots.spec.ts:import-checking 390 light","browser:tests/agent-rules-shots.spec.ts:import-review 1600 dark","browser:tests/agent-rules-shots.spec.ts:import-review 1600 light","browser:tests/agent-rules-shots.spec.ts:import-review 390 dark","browser:tests/agent-rules-shots.spec.ts:import-review 390 light","browser:tests/agent-rules-shots.spec.ts:preview 1600 dark","browser:tests/agent-rules-shots.spec.ts:preview 1600 light","browser:tests/agent-rules-shots.spec.ts:preview 390 dark","browser:tests/agent-rules-shots.spec.ts:preview 390 light"]},
+      {"file":"tests/agent-rules-tldr.spec.ts","cases":["browser:tests/agent-rules-tldr.spec.ts:the preview is an explanation ↔ exact rule table with search, harness filter, layer budget and the exact file"]},
+      {"file":"tests/agent-rules.spec.ts","cases":["browser:tests/agent-rules.spec.ts:preview explains the session file for this project, you and the builder role","browser:tests/agent-rules.spec.ts:preview lists controlled agents first and disables the rest with a plain reason"]},
+      {"file":"tests/agents-cleanup.spec.ts","cases":["browser:tests/agents-cleanup.spec.ts:Queued folds per person, says what waits, and a run link opens it without changing the preference","browser:tests/agents-cleanup.spec.ts:Queued keeps the page section gap below Sessions; folding and emptying move nothing above it","browser:tests/agents-cleanup.spec.ts:a queued run can be cancelled from /agents","browser:tests/agents-cleanup.spec.ts:a section preference that lands after a run link keeps Queued open until the person folds it","browser:tests/agents-cleanup.spec.ts:accounts and computers is one chip whose popover states the state; a stored fold changes nothing"]},
+      {"file":"tests/agents-display.spec.ts","cases":["browser:tests/agents-display.spec.ts:1024 dark: existing Agents layout shows the report source and stable capacity controls","browser:tests/agents-display.spec.ts:1024 light: existing Agents layout shows the report source and stable capacity controls","browser:tests/agents-display.spec.ts:1440 dark: existing Agents layout shows the report source and stable capacity controls","browser:tests/agents-display.spec.ts:1440 light: existing Agents layout shows the report source and stable capacity controls","browser:tests/agents-display.spec.ts:390 dark: existing Agents layout shows the report source and stable capacity controls","browser:tests/agents-display.spec.ts:390 light: existing Agents layout shows the report source and stable capacity controls","browser:tests/agents-display.spec.ts:another person’s visible account never becomes your full account or your capacity","browser:tests/agents-display.spec.ts:live families count all external workers, hide hundreds of ended siblings and retain counts when folded"]},
+      {"file":"tests/agents-harness-status.spec.ts","cases":["browser:tests/agents-harness-status.spec.ts:offline and revoked computers do not present prior harness reports as live readiness"]},
+      {"file":"tests/agents-hierarchy.spec.ts","cases":["browser:tests/agents-hierarchy.spec.ts:returning to a visible tab refreshes immediately and failed reads keep the last success visible","browser:tests/agents-hierarchy.spec.ts:workers nest by session ID, display their label, harness and ticket, and expand with the keyboard"]},
+      {"file":"tests/agents-metadata.spec.ts","cases":["browser:tests/agents-metadata.spec.ts:an open panel refreshes metadata history after a heartbeat without an activity-note change"]},
+      {"file":"tests/agents-mission.spec.ts","cases":["browser:tests/agents-mission.spec.ts:detail shows now, activity, ticket status and hides unreported fields"]},
+      {"file":"tests/agents-phone-rows.spec.ts","cases":["browser:tests/agents-phone-rows.spec.ts:phone session rows are compact and aligned at 375px in dark","browser:tests/agents-phone-rows.spec.ts:phone session rows are compact and aligned at 375px in light","browser:tests/agents-phone-rows.spec.ts:phone session rows are compact and aligned at 390px in dark","browser:tests/agents-phone-rows.spec.ts:phone session rows are compact and aligned at 390px in light","browser:tests/agents-phone-rows.spec.ts:phone session rows are compact and aligned at 430px in dark","browser:tests/agents-phone-rows.spec.ts:phone session rows are compact and aligned at 430px in light"]},
+      {"file":"tests/agents-top.spec.ts","cases":["browser:tests/agents-top.spec.ts:chores preserve the sign-in and its command while approvals live in the desk","browser:tests/agents-top.spec.ts:nothing waits: no chores, a compact live line, and Accounts and computers as one status line","browser:tests/agents-top.spec.ts:sign-in prompts only for a confirmed sign-out of that account","browser:tests/agents-top.spec.ts:the Accounts tile opens Settings / Accounts"]},
+      {"file":"tests/agents-worker-tree.spec.ts","cases":["browser:tests/agents-worker-tree.spec.ts:a Sessions fold stored before shows the list; a count and History lead straight into it without a preference write","browser:tests/agents-worker-tree.spec.ts:a deep problem marks every ancestor, folded parents name it, and arrow keys fold and walk the tree","browser:tests/agents-worker-tree.spec.ts:a lead with only stopped workers opens history only through its stopped count","browser:tests/agents-worker-tree.spec.ts:a stopped lead links its successor instead of claiming live workers","browser:tests/agents-worker-tree.spec.ts:four live workers lead eight collapsed stopped workers, and labels distinguish their shared principal","browser:tests/agents-worker-tree.spec.ts:idle follows working; a newly stopped worker keeps its place for 10 minutes, then joins its history; histories stay independent","browser:tests/agents-worker-tree.spec.ts:nested live workers stay visible through stopped parents and each level closes its last connector","browser:tests/agents-worker-tree.spec.ts:the footer problem jump switches a Working filter to Problem and focuses the folded row","browser:tests/agents-worker-tree.spec.ts:worker tree fits 1440px in dark, passes axe, and captures coordinator evidence","browser:tests/agents-worker-tree.spec.ts:worker tree fits 1440px in light, passes axe, and captures coordinator evidence","browser:tests/agents-worker-tree.spec.ts:worker tree fits 390px in dark, passes axe, and captures coordinator evidence","browser:tests/agents-worker-tree.spec.ts:worker tree fits 390px in light, passes axe, and captures coordinator evidence"]},
+      {"file":"tests/agents.spec.ts","cases":["browser:tests/agents.spec.ts:closing a session panel goes back instead of adding history, like the ticket panel","browser:tests/agents.spec.ts:on a phone the overview fits and a session opens full screen in dark","browser:tests/agents.spec.ts:on a phone the overview fits and a session opens full screen in light","browser:tests/agents.spec.ts:the session panel shows the ticket, runs, telemetry and the thread, and sends messages"]},
+      {"file":"tests/capacity-learning.spec.ts","cases":["browser:tests/capacity-learning.spec.ts:learned evidence 1600 dark","browser:tests/capacity-learning.spec.ts:learned evidence 1600 light","browser:tests/capacity-learning.spec.ts:learned evidence 390 dark","browser:tests/capacity-learning.spec.ts:learned evidence 390 light"]},
+      {"file":"tests/connect-verification.spec.ts","cases":["browser:tests/connect-verification.spec.ts:leaving unverifiable harnesses out preserves verification and requires Connect","browser:tests/connect-verification.spec.ts:mixed harnesses keep Connect enabled and offer an explicit verification choice"]},
+      {"file":"tests/first-run.spec.ts","cases":["browser:tests/first-run.spec.ts:a queued run exposes its wait and a run-scoped override from the queue","browser:tests/first-run.spec.ts:first run Start 1600 dark: schedule wait and run now once","browser:tests/first-run.spec.ts:first run Start 1600 light: schedule wait and run now once","browser:tests/first-run.spec.ts:first run Start 390 dark: schedule wait and run now once","browser:tests/first-run.spec.ts:first run Start 390 light: schedule wait and run now once"]},
+      {"file":"tests/groups.spec.ts","cases":["browser:tests/groups.spec.ts:remember for this ticket 1600 dark","browser:tests/groups.spec.ts:remember for this ticket 1600 light","browser:tests/groups.spec.ts:remember for this ticket 390 dark","browser:tests/groups.spec.ts:remember for this ticket 390 light"]},
+      {"file":"tests/new-agent.spec.ts","cases":["browser:tests/new-agent.spec.ts:Escape leaves the key and the command before Key ready closes","browser:tests/new-agent.spec.ts:agent has no new-agent action","browser:tests/new-agent.spec.ts:computer pairing offers the CLI path directly","browser:tests/new-agent.spec.ts:empty agents hint stays hidden for agent","browser:tests/new-agent.spec.ts:empty agents hint stays hidden for member","browser:tests/new-agent.spec.ts:empty agents hint stays hidden for viewer","browser:tests/new-agent.spec.ts:guest has no new-agent action","browser:tests/new-agent.spec.ts:member has no new-agent action","browser:tests/new-agent.spec.ts:new agent 1600 dark","browser:tests/new-agent.spec.ts:new agent 1600 light","browser:tests/new-agent.spec.ts:new agent 390 dark","browser:tests/new-agent.spec.ts:new agent 390 light","browser:tests/new-agent.spec.ts:selected projects, clipboard rejection and duplicate-name recovery"]},
+      {"file":"tests/pi-openrouter.spec.ts","cases":["browser:tests/pi-openrouter.spec.ts:pi Start pins the Settings model 1600 dark","browser:tests/pi-openrouter.spec.ts:pi Start pins the Settings model 1600 light","browser:tests/pi-openrouter.spec.ts:pi Start pins the Settings model 390 dark","browser:tests/pi-openrouter.spec.ts:pi Start pins the Settings model 390 light"]},
+      {"file":"tests/run-kinds.spec.ts","cases":["browser:tests/run-kinds.spec.ts:execution kinds and person-specific host names on the real agents table"]},
+      {"file":"tests/start-agent.spec.ts","cases":["browser:tests/start-agent.spec.ts:AEON-1508: lead queue replaces manual setup and keeps controls still at 1024 dark","browser:tests/start-agent.spec.ts:AEON-1508: lead queue replaces manual setup and keeps controls still at 1024 light","browser:tests/start-agent.spec.ts:AEON-1508: lead queue replaces manual setup and keeps controls still at 1440 dark","browser:tests/start-agent.spec.ts:AEON-1508: lead queue replaces manual setup and keeps controls still at 1440 light","browser:tests/start-agent.spec.ts:AEON-1508: lead queue replaces manual setup and keeps controls still at 390 dark","browser:tests/start-agent.spec.ts:AEON-1508: lead queue replaces manual setup and keeps controls still at 390 light","browser:tests/start-agent.spec.ts:AEON-1509 inactive Claude login keeps its account pin and deliberate pause guidance","browser:tests/start-agent.spec.ts:AEON-1510: Sonnet explains a single catalog level and keeps every granted level selectable","browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 dark","browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 light","browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1440 dark","browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1440 light","browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 390 dark","browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 390 light","browser:tests/start-agent.spec.ts:a catalog miss stays empty until retry","browser:tests/start-agent.spec.ts:a connected session keeps the request separate from what it reports","browser:tests/start-agent.spec.ts:a provisional window is unknown and is not treated as fully unused","browser:tests/start-agent.spec.ts:a queue that fails after the work order was written still reads the lists again","browser:tests/start-agent.spec.ts:a stale grant does not queue or fall back, and catalog refresh drops the hidden model","browser:tests/start-agent.spec.ts:advanced launch retains its selected ticket and retry reuses the created work order","browser:tests/start-agent.spec.ts:an empty model grant is not filled from the tenant catalog","browser:tests/start-agent.spec.ts:an unreported session does not reuse the requested labels as fact","browser:tests/start-agent.spec.ts:canonical leaf search excludes mixed parent results and queues only the selected leaf","browser:tests/start-agent.spec.ts:changing host replaces the granted model","browser:tests/start-agent.spec.ts:creates, readies and queues a ticket, then follows claim and managed registration","browser:tests/start-agent.spec.ts:failed prerequisites keep launch disabled and read-only people have no action","browser:tests/start-agent.spec.ts:keyboard, axe and phone layout in dark","browser:tests/start-agent.spec.ts:keyboard, axe and phone layout in light","browser:tests/start-agent.spec.ts:pi registry model ids stay offered and a secret-shaped id does not","browser:tests/start-agent.spec.ts:reports Account is draining and still pins that account","browser:tests/start-agent.spec.ts:reports Sign-in probe is stale and still pins that account","browser:tests/start-agent.spec.ts:same-name hosts distinguish offline pairings and queue only the chosen account","browser:tests/start-agent.spec.ts:screenshot 1600 dark","browser:tests/start-agent.spec.ts:screenshot 1600 light","browser:tests/start-agent.spec.ts:screenshot 390 dark","browser:tests/start-agent.spec.ts:screenshot 390 light"]}
+    ]
+  },
+  "keptOnPurpose": [
+    "Fix round 3 restores all eight AEON-1336 G7 viewport/theme identities as ESSENTIAL, with their complete state sequence and limits unchanged; the existing all-profile regression remains authoritative.",
+    "All protected native identities and historical fallback rows, including whole-file anchors, are unchanged.",
+    "Native keyboard/platform submission, real touch targets, stationary controls, pairing/adoption person confirmation, Stop pending until worker confirmation, pointer/tree holds, pace conflicts and scoped Undo remain in their current browser owners.",
+    "Unique or incompletely replaced assertions stay: upstream reset wording/source behavior, import/publish/conflict journeys, selected tablet/long-name geometry, and mixed loops containing protected cases. Full P06 consolidation to 29 cases is a later round."
+  ],
+  "remoteAttempts": [
+    {
+      "batch": 1,
+      "stage": "before",
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/agent-rules-ticks.spec.ts tests/agent-rules-budget-clients.spec.ts tests/provenance.spec.ts tests/lead-remove.spec.ts tests/lead-start.spec.ts tests/aeon-1209-agents-head.spec.ts'",
+      "exitCode": 3,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n"
+    },
+    {
+      "batch": 2,
+      "stage": "before",
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/aeon-1210-agents-tree.spec.ts tests/aeon-1211-agents-rows.spec.ts tests/aeon-1213-agents-split.spec.ts tests/agent-recovery.spec.ts tests/lead-adoption.spec.ts tests/agent-pause.spec.ts'",
+      "exitCode": 3,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n"
+    },
+    {
+      "batch": 3,
+      "stage": "before",
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/agents-dial.spec.ts tests/agents-dial-daily.spec.ts tests/agents-handover.spec.ts tests/agents-display.spec.ts tests/agents-mission.spec.ts tests/capacity-pace.spec.ts'",
+      "exitCode": 3,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n"
+    },
+    {
+      "batch": 4,
+      "stage": "before",
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/dead-screens.spec.ts tests/groups.spec.ts tests/lead-card.spec.ts tests/lead-flow.spec.ts tests/vendor-signals.spec.ts tests/pi-openrouter.spec.ts'",
+      "exitCode": 3,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n"
+    },
+    {
+      "batch": 1,
+      "stage": "after",
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/agent-rules-ticks.spec.ts tests/agent-rules-budget-clients.spec.ts tests/provenance.spec.ts tests/lead-remove.spec.ts tests/lead-start.spec.ts tests/aeon-1209-agents-head.spec.ts'",
+      "exitCode": 3,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n"
+    },
+    {
+      "batch": 2,
+      "stage": "after",
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/aeon-1210-agents-tree.spec.ts tests/aeon-1211-agents-rows.spec.ts tests/aeon-1213-agents-split.spec.ts tests/agent-recovery.spec.ts tests/lead-adoption.spec.ts tests/agent-pause.spec.ts'",
+      "exitCode": 3,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n"
+    },
+    {
+      "batch": 3,
+      "stage": "after",
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/agents-dial.spec.ts tests/agents-dial-daily.spec.ts tests/agents-handover.spec.ts tests/agents-display.spec.ts tests/agents-mission.spec.ts tests/capacity-pace.spec.ts'",
+      "exitCode": 3,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n"
+    },
+    {
+      "batch": 4,
+      "stage": "after",
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/dead-screens.spec.ts tests/groups.spec.ts tests/lead-card.spec.ts tests/lead-flow.spec.ts tests/vendor-signals.spec.ts tests/pi-openrouter.spec.ts'",
+      "exitCode": 0,
+      "output": "55 passed (1.8m)\nAEON_PW_PROCESSES reported remaining_processes=0\nrc=0; results in web/test-results/remote",
+      "commit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+      "host": "mbp2606",
+      "passed": 55,
+      "playwrightReportedTime": "1.8m",
+      "evidence": "Completed approved remote-spec.sh run; terminal summary captured. Full tail contained the 55 native progress entries."
+    },
+    {
+      "stage": "after",
+      "batch": 1,
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/agent-rules-ticks.spec.ts tests/agent-rules-budget-clients.spec.ts tests/provenance.spec.ts tests/lead-remove.spec.ts tests/lead-start.spec.ts tests/aeon-1209-agents-head.spec.ts'",
+      "commit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+      "host": "mbp2606",
+      "exitCode": 3,
+      "entryElapsedSeconds": 0.178,
+      "passed": null,
+      "playwrightReportedTime": null,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n",
+      "retry": true
+    },
+    {
+      "stage": "after",
+      "batch": 2,
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/aeon-1210-agents-tree.spec.ts tests/aeon-1211-agents-rows.spec.ts tests/aeon-1213-agents-split.spec.ts tests/agent-recovery.spec.ts tests/lead-adoption.spec.ts tests/agent-pause.spec.ts'",
+      "commit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+      "host": "mbp2606",
+      "exitCode": 3,
+      "entryElapsedSeconds": 0.172,
+      "passed": null,
+      "playwrightReportedTime": null,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n",
+      "retry": true
+    },
+    {
+      "stage": "after",
+      "batch": 3,
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/agents-dial.spec.ts tests/agents-dial-daily.spec.ts tests/agents-handover.spec.ts tests/agents-display.spec.ts tests/agents-mission.spec.ts tests/capacity-pace.spec.ts'",
+      "commit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+      "host": "mbp2606",
+      "exitCode": 3,
+      "entryElapsedSeconds": 0.166,
+      "passed": null,
+      "playwrightReportedTime": null,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n",
+      "retry": true
+    },
+    {
+      "stage": "before",
+      "batch": 4,
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/dead-screens.spec.ts tests/groups.spec.ts tests/lead-card.spec.ts tests/lead-flow.spec.ts tests/vendor-signals.spec.ts tests/pi-openrouter.spec.ts'",
+      "commit": "c0f172e52e68ac58d399b6fccfd82978ddde3770",
+      "host": "mbp2606",
+      "exitCode": 3,
+      "entryElapsedSeconds": 0.18,
+      "passed": null,
+      "playwrightReportedTime": null,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n",
+      "retry": true
+    }
+  ],
+  "runnerMeasurement": {
+    "host": "mbp2606",
+    "entryPoint": "/Users/markus/.aeon/lead/aeon/remote-spec.sh",
+    "sameHostRequired": true,
+    "beforeSeconds": null,
+    "afterSeconds": null,
+    "changeSeconds": null,
+    "result": "unmeasured before/after change: all approved before batches, including a retry at the committed pre-cut ancestor in the same worktree, were capacity-refused. One after batch passed (55 cases, reported 1.8m); no browser runtime saving is claimed.",
+    "observedAfter": {
+      "batch": 4,
+      "commit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+      "cases": 55,
+      "specs": [
+        "tests/dead-screens.spec.ts",
+        "tests/groups.spec.ts",
+        "tests/lead-card.spec.ts",
+        "tests/lead-flow.spec.ts",
+        "tests/vendor-signals.spec.ts",
+        "tests/pi-openrouter.spec.ts"
+      ],
+      "playwrightReportedTime": "1.8m",
+      "unit": "rounded Playwright suite duration; no before comparison available"
+    }
+  },
+  "browserRunnerTimeChangeSeconds": null,
+  "remaining": [
+    "Remote execution/native catalogue verification for 18 affected specs (219 current cases after restoring G7) awaits capacity or hosted CI; six specs (55 cases) passed in the cut-A attempt.",
+    "The required same-host browser before/after runner-time delta is unmeasured: before runs were refused. No runtime saving is claimed.",
+    "Static checks run in hosted CI as explicitly assigned by the cut-A brief. Protected cuts wait for P02 and verified replacement lineage."
+  ],
+  "sourceOwnership": {
+    "newSourceFiles": 0,
+    "existingRules": "Existing web/tests/** S9 and scripts/** S7 ownership."
+  },
+  "outsideWriteSet": [
+    {
+      "path": "scripts/test-tiers/drift-obligations.json",
+      "reason": "Fix the reported AEON-1334 CI failure by refreshing only the current NIGHTLY drift-file count after the authorized cuts; preserve every historical case, obligation and selection rule."
+    },
+    {
+      "path": "docs/features/test-prune-ledger.md",
+      "reason": "Update the existing ledger feature documentation to reflect authorized unprotected cut-A progress and remaining P02/runtime proof."
+    }
+  ],
+  "preserved": "No product code, permission, contract, migration, version, historical replay source, protected risk, required check, browser launch restriction, CI flag, selector policy, origin push, deployment, model CLI or review gate changed or ran.",
+  "previousRound": {
+    "recordedAt": "2026-10-22T23:28:29.236219+00:00",
+    "baseCommit": "20eea5be1fb22f5579619d8de6cc2577384cb749",
+    "status": "blocked-by-cut-prerequisites",
+    "runtimeCases": 9,
+    "negativeControls": 6,
+    "removedBrowserCases": 0
+  },
+  "implementationCommit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+  "finalMergedMain": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
+  "finalMainMergeResult": "Fetched newest origin/main immediately before completion; already up to date.",
+  "fixRound3": {
+    "recordedAt": "2026-10-23T10:00:46.122277+00:00",
+    "baseCommit": "0c9518050",
+    "findingsSource": "review-ci905-1154.out",
+    "g7": {
+      "restoredCases": 6,
+      "retainedCases": 8,
+      "tier": "ESSENTIAL",
+      "viewports": [
+        1440,
+        1024,
+        400,
+        390
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "assertionsAndLimitsUnchanged": true,
+      "regressionCommand": "node --test --test-name-pattern 'bounded G7 read-state' scripts/test-tiers/browser-areas.test.mjs",
+      "baselineResult": "fails on 0c9518050 for the six exact missing profile identities",
+      "fixedResult": "passes; all eight cases remain selected for PR and merge-group scenarios"
+    },
+    "driftCost": {
+      "previousNightlyCasesInDriftFiles": 1524,
+      "currentNightlyCasesInDriftFiles": 1509,
+      "fullExtraNightlyCases": 502,
+      "baselineResult": "the unchanged corpus-replay current-cost assertion fails on 0c9518050 (1524 !== 1509), reproduced separately without running the historical replay locally",
+      "fixedResult": "the same exact current-cost and full-extra-cost equalities pass against the catalogue",
+      "historicalObligationsAndSelectorUnchanged": true
+    },
+    "localVerification": {
+      "defaultLedger": "passed",
+      "ledgerRegression": "passed (1 test)",
+      "canonicalManifests": "passed (--write then --check)",
+      "scopeAndCounts": "passed: 124 cut identities, 773 -> 649 P06 cases, 398 -> 274 affected cases; protected lineage and unrelated rows/tiers unchanged"
+    },
+    "remoteVerification": "pending committed HEAD; approved entry points only"
+  }
+}
