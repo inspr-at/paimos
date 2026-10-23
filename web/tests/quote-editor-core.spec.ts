@@ -39,7 +39,12 @@ test('AEON-1682: native prose edit, measurement history and CAS save survive a r
   await expect(page.locator('.quote-document')).toHaveAttribute('data-quote-ready', 'true')
   const paragraph = page.locator(`.quote-page [data-text-id="${NODES[0]}"]`)
   await paragraph.click()
-  await page.keyboard.press('End')
+  await paragraph.evaluate(element => {
+    const range = document.createRange()
+    range.selectNodeContents(element); range.collapse(false)
+    const selection = getSelection()!
+    selection.removeAllRanges(); selection.addRange(range)
+  })
   await page.keyboard.type(' Revised.')
   await expect(paragraph).toContainText('Revised.')
   await expect.poll(() => draft.document.sections[0]!.nodes[0]!.text).toBe(`${document.sections[0]!.nodes[0]!.text} Revised.`)
