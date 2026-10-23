@@ -204,19 +204,32 @@ export function tickStep(span: number, px: number, every = 90): number {
 export const CHAR_W = 5.9
 export interface LabelInput { tag?: string; text: string; since?: string; duration?: string; room: number; pad: number }
 /**
- * The longest label that fits: run tag + text, then the text alone, then (waits and
- * repeats) the duration. A "since" suffix stays on every candidate, including the
- * duration. Then the text cut with an ellipsis, still keeping "· since HH:MM".
- * Nothing when even that does not fit — a cut wait never drops its suffix.
+ * A multi-run bar keeps its complete run tag: shorten the description first,
+ * then show just the tag. Keep "since" while it fits beside the tag. Untagged
+ * bars fall back to text, duration and clipped text, always keeping "since".
+ * Both paths keep the label inside the bar's existing padding.
  */
 export function fitLabel({ tag, text, since = '', duration, room, pad }: LabelInput): string {
+  const fits = (value: string) => value.length * CHAR_W + pad + 6 < room
+  if (tag) {
+    // AEON-1698: a shorter label must still identify its run. Never fall back to
+    // description/duration alone, or clip a key into a different-looking key.
+    const full = `${tag} · ${text}${since}`
+    if (fits(full)) return full
+    if (duration && fits(`${tag} · ${duration}${since}`)) return `${tag} · ${duration}${since}`
+    const suffix = fits(tag + since) ? since : ''
+    const base = `${tag} · ${text}`
+    if (fits(base + suffix)) return base + suffix
+    const keep = Math.ceil((room - pad - 6) / CHAR_W) - 1 - tag.length - 3 - 1 - suffix.length
+    if (keep > 0) return `${tag} · ${text.slice(0, keep).trimEnd()}…${suffix}`
+    return fits(tag + suffix) ? tag + suffix : ''
+  }
   const base = text + since
   const durationLabel = duration ? `${duration}${since}` : ''
-  const options = [tag ? `${tag} · ${base}` : base, base, durationLabel].filter(Boolean)
-  const fits = options.find(option => option.length * CHAR_W + pad + 6 < room)
-  if (fits) return fits
+  const candidate = [base, durationLabel].filter(Boolean).find(fits)
+  if (candidate) return candidate
   if (room <= 46) return ''
-  const source = tag ? `${tag} · ${text}` : text
+  const source = text
   const keep = Math.floor((room - pad - 8 - since.length * CHAR_W) / CHAR_W) - 1
   if (keep > 4) return `${source.slice(0, keep).trimEnd()}…${since}`
   if (since) return ''

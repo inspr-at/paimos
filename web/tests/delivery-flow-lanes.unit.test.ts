@@ -118,19 +118,42 @@ it('a live update grows lanes below the pointer only: nothing above it moves unt
 })
 
 it('a label falls back from tag and text, to the text, to the duration, to an ellipsis that keeps "since"', () => {
-  const base = { tag: '126', text: 'Fix being checked', pad: 6 }
-  expect(fitLabel({ ...base, room: 400 })).toBe('126 · Fix being checked')
+  // AEON-1698 changes tagged bars deliberately: the key is dropped last. These
+  // fallbacks still apply to a single-run bar, which has no tag to preserve.
+  const base = { text: 'Fix being checked', pad: 6 }
+  expect(fitLabel({ ...base, tag: '126', room: 400 })).toBe('126 · Fix being checked')
   expect(fitLabel({ ...base, room: 120 })).toBe('Fix being checked')
   expect(fitLabel({ ...base, text: 'Waiting for a reviewer', duration: '14 min', pad: 16, room: 70 })).toBe('14 min')
   // A cut wait keeps "since" when the text no longer fits. 160 px holds
   // "14 min · since 19:36" (140 px) and must not fall back to "14 min".
-  expect(fitLabel({ ...base, tag: '983–986', text: 'Waiting for a reviewer', since: ' · since 19:36', duration: '14 min', pad: 16, room: 160 })).toBe('14 min · since 19:36')
+  expect(fitLabel({ ...base, text: 'Waiting for a reviewer', since: ' · since 19:36', duration: '14 min', pad: 16, room: 160 })).toBe('14 min · since 19:36')
   expect(fitLabel({ ...base, text: 'Fixing the notes', since: ' · since 18:33', duration: '18 min', pad: 16, room: 160 })).toBe('18 min · since 18:33')
   expect(fitLabel({ ...base, text: 'Waiting for a reviewer', since: ' · since 19:36', duration: '14 min', pad: 16, room: 100 })).toBe('')
-  const cut = fitLabel({ ...base, text: 'Being built, a bit longer than usual', since: ' · since 19:47', room: 200 })
+  const cut = fitLabel({ ...base, tag: '126', text: 'Being built, a bit longer than usual', since: ' · since 19:47', room: 200 })
   expect(cut).toMatch(/^126 · Being.*… · since 19:47$/)
   expect(cut.length * 5.9 + 6).toBeLessThan(200)
   expect(fitLabel({ ...base, room: 40 })).toBe('')
+  const answer = liveHarnessFlow()
+  const run = recordedRuns(answer, { extendOpen: true }).runs.find(run => run.tag === '1676')!
+  const text = run.steps.find(step => step.facts?.round === 3)!.expert.en
+  expect(text).toBe('Build r3 · gpt-6.1-sol')
+  const input = { tag: run.tag, text, pad: 6 }
+  // At the old row-1 width the description fitted alone and hid the run key.
+  expect(fitLabel({ ...input, room: 160 })).toMatch(/^1676 · /)
+  expect(fitLabel({ ...input, room: 110 })).toBe('1676 · Build r3…')
+  expect(fitLabel({ ...input, room: 75 })).toBe('1676 · Bu…')
+  expect(fitLabel({ ...input, room: 40 })).toBe('1676')
+  const keyRoom = input.tag.length * CHAR_W + input.pad + 6
+  expect(fitLabel({ ...input, room: keyRoom + 0.5 })).toBe('1676')
+  expect(fitLabel({ ...input, room: keyRoom - 0.5 })).toBe('')
+  // Every rendered label still fits, and even clipped waits identify their run.
+  for (const tag of ['1676', '983–986']) for (const since of ['', ' · since 19:36']) for (const room of [30, 40, 75, 100, 140, 160, 400]) {
+    const label = fitLabel({ tag, text, since, duration: '14 min', pad: 16, room })
+    if (!label) continue
+    expect(label.startsWith(tag)).toBe(true)
+    expect(label.length * CHAR_W + 16 + 6).toBeLessThan(room)
+  }
+  expect(fitLabel({ tag: '983–986', text: 'Waiting for a reviewer', since: ' · since 19:36', duration: '14 min', pad: 16, room: 160 })).toBe('983–986 · since 19:36')
 })
 
 it('panning an incident onto the right edge keeps its caption inside a 320 px frame', () => {
