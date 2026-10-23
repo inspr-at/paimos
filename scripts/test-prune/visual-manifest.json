@@ -7,7 +7,7 @@
     "status": "awaiting-set-3",
     "states": [],
     "checkpoints": [],
-    "evidence": "LEAD-M AEON-1674 round 12, 2026-10-23: every checkpoint reports awaiting re-capture under the final renderer. AEON-1692 pins reference set 3 and flips comparison.mode to blocking; historical sets authorize no cuts."
+    "evidence": "AEON-1692 fix4: prepare exactly the 64 stable, non-deferred checkpoints. Hours phone awaits AEON-1699; all Decision Desk awaits AEON-1700; Goals awaits v6; Ticket Workspace stays deferred. No approval or blocking activation is granted by this preparation."
   },
   "baselineAuthority": {
     "status": "historical-only",
@@ -381,7 +381,13 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1621",
+            "AEON-1625"
+          ],
+          "deferredReason": "Tick 2026-10-23: exclude every Goals checkpoint from the first pinned set; review against the v6 canvas after both product packages land."
         },
         {
           "id": "V-goals-390-dark",
@@ -390,7 +396,13 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1621",
+            "AEON-1625"
+          ],
+          "deferredReason": "Tick 2026-10-23: exclude every Goals checkpoint from the first pinned set; review against the v6 canvas after both product packages land."
         },
         {
           "id": "V-goals-1440-light",
@@ -399,7 +411,13 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1621",
+            "AEON-1625"
+          ],
+          "deferredReason": "Tick 2026-10-23: exclude every Goals checkpoint from the first pinned set; review against the v6 canvas after both product packages land."
         },
         {
           "id": "V-goals-1440-dark",
@@ -408,7 +426,13 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1621",
+            "AEON-1625"
+          ],
+          "deferredReason": "Tick 2026-10-23: exclude every Goals checkpoint from the first pinned set; review against the v6 canvas after both product packages land."
         }
       ],
       "fixturesByProfile": {
@@ -640,11 +664,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "needs-re-capture",
+          "referenceStatus": "deferred",
           "deferredUntil": [
-            "AEON-1692"
+            "AEON-1700"
           ],
-          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
+          "deferredReason": "Awaiting AEON-1700: Decision Desk indicator replacement; all six checkpoints are excluded from reference set 3 activation. Capture pixels remain diagnostic, report-only evidence."
         },
         {
           "id": "V-decision-desk-390-dark",
@@ -654,11 +678,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "needs-re-capture",
+          "referenceStatus": "deferred",
           "deferredUntil": [
-            "AEON-1692"
+            "AEON-1700"
           ],
-          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
+          "deferredReason": "Awaiting AEON-1700: Decision Desk indicator replacement; all six checkpoints are excluded from reference set 3 activation. Capture pixels remain diagnostic, report-only evidence."
         },
         {
           "id": "V-decision-desk-1024-light",
@@ -668,11 +692,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "needs-re-capture",
+          "referenceStatus": "deferred",
           "deferredUntil": [
-            "AEON-1692"
+            "AEON-1700"
           ],
-          "deferredReason": "AEON-1616 changed the Desk gap on current main; set-2 pixels fail in PR #891."
+          "deferredReason": "Awaiting AEON-1700: Decision Desk indicator replacement; all six checkpoints are excluded from reference set 3 activation. Capture pixels remain diagnostic, report-only evidence."
         },
         {
           "id": "V-decision-desk-1024-dark",
@@ -682,11 +706,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "needs-re-capture",
+          "referenceStatus": "deferred",
           "deferredUntil": [
-            "AEON-1692"
+            "AEON-1700"
           ],
-          "deferredReason": "AEON-1616 changed the Desk gap on current main; set-2 pixels fail in PR #891."
+          "deferredReason": "Awaiting AEON-1700: Decision Desk indicator replacement; all six checkpoints are excluded from reference set 3 activation. Capture pixels remain diagnostic, report-only evidence."
         },
         {
           "id": "V-decision-desk-1440-light",
@@ -696,11 +720,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "needs-re-capture",
+          "referenceStatus": "deferred",
           "deferredUntil": [
-            "AEON-1692"
+            "AEON-1700"
           ],
-          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
+          "deferredReason": "Awaiting AEON-1700: Decision Desk indicator replacement; all six checkpoints are excluded from reference set 3 activation. Capture pixels remain diagnostic, report-only evidence."
         },
         {
           "id": "V-decision-desk-1440-dark",
@@ -710,11 +734,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "needs-re-capture",
+          "referenceStatus": "deferred",
           "deferredUntil": [
-            "AEON-1692"
+            "AEON-1700"
           ],
-          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
+          "deferredReason": "Awaiting AEON-1700: Decision Desk indicator replacement; all six checkpoints are excluded from reference set 3 activation. Capture pixels remain diagnostic, report-only evidence."
         }
       ],
       "clock": {
@@ -725,7 +749,7 @@
     },
     {
       "id": "account-use-matrix",
-      "label": "Settings \u00b7 Account use matrix",
+      "label": "Settings · Account use matrix",
       "owner": "tests/visual/account-use-matrix.spec.ts",
       "fixture": "Long account/context names, partial selection and visible Undo",
       "profiles": [
@@ -908,7 +932,7 @@
     },
     {
       "id": "access",
-      "label": "Access \u00b7 role/scopes picker",
+      "label": "Access · role/scopes picker",
       "owner": "tests/visual/access.spec.ts",
       "fixture": "Long role descriptions, bounded choices and authority explanation",
       "profiles": [
@@ -1062,7 +1086,7 @@
     },
     {
       "id": "delivery-numbers",
-      "label": "Delivery \u00b7 Numbers",
+      "label": "Delivery · Numbers",
       "owner": "tests/visual/delivery-numbers.spec.ts",
       "fixture": "Representative counts/chart plus honest partial-data label",
       "profiles": [
@@ -1082,11 +1106,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "deferred",
+          "referenceStatus": "needs-re-capture",
           "deferredUntil": [
             "AEON-1692"
           ],
-          "deferredReason": "Tick requested changes to the 390px Delivery capture: heading top must be at least app-header bottom +12 px, with the full on-target headline in view. Re-capture and approval belong to AEON-1692 / reference set 3; these old PNGs remain transport evidence only."
+          "deferredReason": "Tick requested changes to the 390px Delivery capture: heading top must be at least app-header bottom +12 px, with the full on-target headline in view. Re-capture and approval belong to AEON-1692 / reference set 3; these old PNGs remain transport evidence only. The reviewed main capture passed the required fixture assertions; eligible for the stable set-3 pin, subject to repeat identity and the exact archive receipt."
         },
         {
           "id": "V-delivery-numbers-390-dark",
@@ -1096,11 +1120,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "deferred",
+          "referenceStatus": "needs-re-capture",
           "deferredUntil": [
             "AEON-1692"
           ],
-          "deferredReason": "Tick requested changes to the 390px Delivery capture: heading top must be at least app-header bottom +12 px, with the full on-target headline in view. Re-capture and approval belong to AEON-1692 / reference set 3; these old PNGs remain transport evidence only."
+          "deferredReason": "Tick requested changes to the 390px Delivery capture: heading top must be at least app-header bottom +12 px, with the full on-target headline in view. Re-capture and approval belong to AEON-1692 / reference set 3; these old PNGs remain transport evidence only. The reviewed main capture passed the required fixture assertions; eligible for the stable set-3 pin, subject to repeat identity and the exact archive receipt."
         },
         {
           "id": "V-delivery-numbers-1440-light",
@@ -1139,7 +1163,7 @@
     },
     {
       "id": "hours",
-      "label": "Business \u00b7 Hours",
+      "label": "Business · Hours",
       "owner": "tests/visual/hours.spec.ts",
       "fixture": "Week/period entries, correction control and approval state",
       "profiles": [
@@ -1159,11 +1183,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "needs-re-capture",
+          "referenceStatus": "deferred",
           "deferredUntil": [
-            "AEON-1692"
+            "AEON-1699"
           ],
-          "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
+          "deferredReason": "Awaiting AEON-1699: Hours phone presentation changes; both 390px checkpoints are excluded from this pin and remain report-only."
         },
         {
           "id": "V-hours-390-dark",
@@ -1173,11 +1197,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "needs-re-capture",
+          "referenceStatus": "deferred",
           "deferredUntil": [
-            "AEON-1692"
+            "AEON-1699"
           ],
-          "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
+          "deferredReason": "Awaiting AEON-1699: Hours phone presentation changes; both 390px checkpoints are excluded from this pin and remain report-only."
         },
         {
           "id": "V-hours-1440-light",
@@ -1401,7 +1425,7 @@
       "id": "start-agent",
       "label": "Start agent / Run once",
       "owner": "tests/visual/start-agent.spec.ts",
-      "fixture": "Run once mode; task filled; \"Create a ticket in a project\"; read-only; folded \"Runs on \u2026\" row with a capacity warning",
+      "fixture": "Run once mode; task filled; \"Create a ticket in a project\"; read-only; folded \"Runs on …\" row with a capacity warning",
       "profiles": [
         "phone",
         "desktop"
@@ -1573,11 +1597,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "deferred",
+          "referenceStatus": "needs-re-capture",
           "deferredUntil": [
             "AEON-1692"
           ],
-          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
+          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only. The reviewed main capture passed the required fixture assertions; eligible for the stable set-3 pin, subject to repeat identity and the exact archive receipt."
         },
         {
           "id": "V-capacity-390-dark",
@@ -1587,11 +1611,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "deferred",
+          "referenceStatus": "needs-re-capture",
           "deferredUntil": [
             "AEON-1692"
           ],
-          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
+          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only. The reviewed main capture passed the required fixture assertions; eligible for the stable set-3 pin, subject to repeat identity and the exact archive receipt."
         },
         {
           "id": "V-capacity-1440-light",
@@ -1601,11 +1625,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "deferred",
+          "referenceStatus": "needs-re-capture",
           "deferredUntil": [
             "AEON-1692"
           ],
-          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
+          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only. The reviewed main capture passed the required fixture assertions; eligible for the stable set-3 pin, subject to repeat identity and the exact archive receipt."
         },
         {
           "id": "V-capacity-1440-dark",
@@ -1615,11 +1639,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "deferred",
+          "referenceStatus": "needs-re-capture",
           "deferredUntil": [
             "AEON-1692"
           ],
-          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
+          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only. The reviewed main capture passed the required fixture assertions; eligible for the stable set-3 pin, subject to repeat identity and the exact archive receipt."
         }
       ],
       "clock": {
@@ -1649,7 +1673,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1674"
+          ],
+          "deferredReason": "Deferred until the separately owned Tick product ticket fixes attachment action hit-area overlap and classification feedback semantics. Round 6 reverts both product changes; no quality checks or captures run for this state."
         },
         {
           "id": "V-ticket-workspace-390-dark",
@@ -1658,7 +1687,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1674"
+          ],
+          "deferredReason": "Deferred until the separately owned Tick product ticket fixes attachment action hit-area overlap and classification feedback semantics. Round 6 reverts both product changes; no quality checks or captures run for this state."
         },
         {
           "id": "V-ticket-workspace-1440-light",
@@ -1667,7 +1701,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1674"
+          ],
+          "deferredReason": "Deferred until the separately owned Tick product ticket fixes attachment action hit-area overlap and classification feedback semantics. Round 6 reverts both product changes; no quality checks or captures run for this state."
         },
         {
           "id": "V-ticket-workspace-1440-dark",
@@ -1676,7 +1715,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1674"
+          ],
+          "deferredReason": "Deferred until the separately owned Tick product ticket fixes attachment action hit-area overlap and classification feedback semantics. Round 6 reverts both product changes; no quality checks or captures run for this state."
         }
       ],
       "referenceStatus": "deferred",
@@ -2245,7 +2289,7 @@
         "sourceCaptureSHA": "6fea542010b4c699dadadd74529fdaf7a1ef4c9a",
         "captureRun": "39912019882",
         "recordedBy": "LEAD-M",
-        "scope": "Exactly 53 checkpoints are comparison authority. Thirteen stale set-2 checkpoints report awaiting reference (needs re-capture) for AEON-1692 / reference set 3: nine named in round 11 plus four Hours failures proven by the attached CI log. Existing 14 explicit deferrals remain. No protected cuts are authorized in P02; P03\u2013P11 own their subsequent cut rounds."
+        "scope": "Exactly 53 checkpoints are comparison authority. Thirteen stale set-2 checkpoints report awaiting reference (needs re-capture) for AEON-1692 / reference set 3: nine named in round 11 plus four Hours failures proven by the attached CI log. Existing 14 explicit deferrals remain. No protected cuts are authorized in P02; P03–P11 own their subsequent cut rounds."
       },
       "baselineAuthority": {
         "status": "approved",
@@ -2860,7 +2904,7 @@
         },
         {
           "id": "account-use-matrix",
-          "label": "Settings \u00b7 Account use matrix",
+          "label": "Settings · Account use matrix",
           "owner": "tests/visual/account-use-matrix.spec.ts",
           "fixture": "Long account/context names, partial selection and visible Undo",
           "profiles": [
@@ -3028,7 +3072,7 @@
         },
         {
           "id": "access",
-          "label": "Access \u00b7 role/scopes picker",
+          "label": "Access · role/scopes picker",
           "owner": "tests/visual/access.spec.ts",
           "fixture": "Long role descriptions, bounded choices and authority explanation",
           "profiles": [
@@ -3156,7 +3200,7 @@
         },
         {
           "id": "delivery-numbers",
-          "label": "Delivery \u00b7 Numbers",
+          "label": "Delivery · Numbers",
           "owner": "tests/visual/delivery-numbers.spec.ts",
           "fixture": "Representative counts/chart plus honest partial-data label",
           "profiles": [
@@ -3231,7 +3275,7 @@
         },
         {
           "id": "hours",
-          "label": "Business \u00b7 Hours",
+          "label": "Business · Hours",
           "owner": "tests/visual/hours.spec.ts",
           "fixture": "Week/period entries, correction control and approval state",
           "profiles": [
@@ -3471,7 +3515,7 @@
           "id": "start-agent",
           "label": "Start agent / Run once",
           "owner": "tests/visual/start-agent.spec.ts",
-          "fixture": "Run once mode; task filled; \"Create a ticket in a project\"; read-only; folded \"Runs on \u2026\" row with a capacity warning",
+          "fixture": "Run once mode; task filled; \"Create a ticket in a project\"; read-only; folded \"Runs on …\" row with a capacity warning",
           "profiles": [
             "phone",
             "desktop"
@@ -3900,7 +3944,11 @@
       "reviewedRunnerRun": "39949629594",
       "reviewedRunnerArchiveSHA256": "3c407f853fd48512b713543726c28bcf7d1c317d02fbf9c5d1479bf0a824e348",
       "reviewedRunnerManifestSHA256": "e3d68ef66a4cd7ca7a93c125be9970c76d1fbf295ed2df3a3e1c39af31cbfb6e",
-      "condition": "Two independent captures of the same commit must have 72/72 byte-identical PNGs, then 72/72 identical decoded pixels against the Tick-approved runner capture. Any difference stops pinning and reports exact percentages and regions."
+      "condition": "Capture all 72 candidates twice at the same commit. All 64 non-deferred PNGs must be byte-identical; deferred noise never supplies reference authority. Runner differences stop pinning except the single declared account-use checkpoint, which requires an explicit Tick re-look receipt for the exact container archive.",
+      "relookCheckpoints": [
+        "V-account-use-matrix-1440-light"
+      ],
+      "relookReason": "If the settled container still differs from the reviewed runner at this checkpoint, preserve its pixels and require Tick to re-review it; never mask it or accept repeat instability."
     }
   }
 }

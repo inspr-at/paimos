@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { expect, type Page, type Response } from '@playwright/test'
 import { agents, capacity, deliveryNumbers, publicQuote, quoteEditor, NOW, sessionChat, sessionChatUnavailable } from './fixtures'
-import { test, checkVisual, compareVisualReference, visualCases, prepareVisualFonts, renderedFonts, fontEvidence } from './checkpoint'
+import { test, checkVisual, compareVisualReference, visualCases, prepareVisualFonts, renderedFonts, fontEvidence, settleVisualCapture } from './checkpoint'
 import { visualChrome } from './chrome-fixture'
 import { fixtures, mockWork } from '../work-fixtures'
 import { NODES } from '../quote-inspector-fixtures'
@@ -68,6 +68,22 @@ test('visual comparison rejects a changed control and never creates a missing re
   await page.goto('/__visual-comparator-proof')
   await prepareVisualFonts(page, String(info.project.use.baseURL))
   await fontEvidence(page, 'projects')
+  const settled = await settleVisualCapture(page)
+  expect(settled.evidence.consecutive).toBe(3)
+  expect(settled.evidence.samples.slice(-3)).toEqual(Array(3).fill(settled.evidence.samples.at(-1)))
+  // A source that keeps repainting must fail at the bound, even with no
+  // pending CSS animation. Each screenshot is a distinct actual browser PNG.
+  let attempts = 0
+  const repainting = {
+    evaluate: page.evaluate.bind(page),
+    screenshot: async (options: Parameters<Page['screenshot']>[0]) => {
+      await page.getByRole('button').evaluate((element, red) => { element.style.background = `rgb(${red}, 0, 0)` }, ++attempts * 20)
+      return page.screenshot(options)
+    },
+  } as Page
+  await expect(settleVisualCapture(repainting)).rejects.toThrow(/did not settle.*eight captures/)
+  expect(attempts).toBe(8)
+  await page.getByRole('button').evaluate(element => { element.style.background = 'white' })
   const reference = info.snapshotPath('synthetic-reference.png')
   mkdirSync(dirname(reference), { recursive: true })
   writeFileSync(reference, await page.screenshot({ path: info.outputPath('synthetic-reference.png') }))

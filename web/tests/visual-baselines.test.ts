@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGate, referenceGates, referenceReport, materializeBaseline, checkpointReport } from '../../scripts/test-prune/visual-baselines.mjs'
 import { collectCandidates, packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
-import { pinManifest, assertPinIdentity, pngTools, replayCandidates, publicationCommands } from '../../scripts/test-prune/visual-pin.mjs'
+import { pinCheckpoints, pinManifest, assertPinIdentity, pngTools, replayCandidates, publicationCommands } from '../../scripts/test-prune/visual-pin.mjs'
 import { compareCaptureRecords, proveCaptureIdentity } from '../../scripts/test-prune/visual-identity.mjs'
 import { checkContainerPin } from '../../scripts/test-prune/visual-container-check.mjs'
 import { pixelChanges } from '../../scripts/test-prune/visual-review.mjs'
@@ -365,28 +365,42 @@ test('visual references require approval, immutable attachment bytes and every e
     // activate blocking references, revive history, or lift product deferrals.
     const receipt = { reviewer: 'Tick', status: 'approved', dryRun: true, approvedAt: '2026-10-23T12:00:00Z',
       evidence: 'DRY RUN ONLY; no product approval', captureSHA: candidate.captureSHA, archiveSHA256: candidate.archive.sha256,
-      checkpoints: candidate.members.map(member => member.id) }
+      checkpoints: pinCheckpoints(manifest) }
     const identityRows = candidate.members.map(member => ({ id: member.id, byteIdentical: true, pixels: 0, total: 1, percent: 0, regions: [] }))
-    const identityProof = { version: 1, status: 'identical', captureSHA: candidate.captureSHA, archiveSHA256: candidate.archive.sha256,
+    const identityProof = { version: 2, status: 'identical', captureSHA: candidate.captureSHA, archiveSHA256: candidate.archive.sha256,
       repeatArchiveSHA256: 'f'.repeat(64), containerDigest: renderer.container.digest,
+      pinCheckpoints: pinCheckpoints(manifest), reviewRequired: [],
       reviewedRunnerArchiveSHA256: manifest.capture.identityProof.reviewedRunnerArchiveSHA256,
       repeat: { byteIdentical: 72, pixelIdentical: 72, checkpoints: identityRows }, runner: { pixelIdentical: 72, checkpoints: identityRows } }
     const options = { dryRun: true, identityProof }
-    assert.throws(() => pinManifest(manifest, candidate, detached, receipt, {}, { dryRun: true }), /72\/72 byte-identical/)
+    assert.throws(() => pinManifest(manifest, candidate, detached, receipt, {}, { dryRun: true }), /64\/64 byte-identical/)
     const unstable = structuredClone(identityProof); unstable.repeat.checkpoints[0].pixels = 1
     assert.throws(() => assertPinIdentity(unstable, candidate, manifest), /STOP before pinning/)
+    const encodingOnly = structuredClone(identityProof); encodingOnly.repeat.checkpoints[0].byteIdentical = false
+    assert.throws(() => assertPinIdentity(encodingOnly, candidate, manifest), /STOP before pinning/)
+    assert.throws(() => assertPinIdentity({ ...identityProof, pinCheckpoints: identityProof.pinCheckpoints.slice(1) }, candidate, manifest), /STOP before pinning/)
     const wrongArchiveProof = { ...identityProof, archiveSHA256: '0'.repeat(64) }
     assert.throws(() => assertPinIdentity(wrongArchiveProof, candidate, manifest), /STOP before pinning/)
     const draft = pinManifest(manifest, candidate, detached, receipt, {}, options)
     assert.equal(draft.referenceSet, 3)
     assert.equal(draft.comparison.mode, 'blocking')
-    assert.equal(draft.approval.checkpoints.length, 72)
+    assert.equal(draft.approval.checkpoints.length, 64)
     assert.deepEqual(draft.history, manifest.history)
     for (const id of ['goals', 'ticket-workspace']) {
       assert.deepEqual(draft.states.find(state => state.id === id), manifest.states.find(state => state.id === id))
       assert.equal(referenceGate(draft, `V-${id}-390-light`).mode, 'deferred')
     }
-    assert.equal(verifyReferenceArchive(readFileSync(join(output, candidate.archive.name)), detached, draft).references.size, 72)
+    assert.equal(verifyReferenceArchive(readFileSync(join(output, candidate.archive.name)), detached, draft).references.size, 64)
+    // Risk: deferred noise passes through a complete archive and accidentally
+    // becomes blocking authority. All bytes remain verified, only 64 enter the map.
+    const deferredIDs = manifest.states.flatMap(state => state.checkpoints.filter(checkpoint => checkpoint.referenceStatus === 'deferred').map(checkpoint => checkpoint.id))
+    assert.equal(deferredIDs.length, 16)
+    for (const id of deferredIDs) {
+      assert.equal(referenceGate(draft, id).mode, 'deferred')
+      assert.equal(draft.approval.checkpoints.includes(id), false)
+      assert.throws(() => pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: [...receipt.checkpoints, id] }, {}, options),
+        /Product deferral|enumerate candidate checkpoint IDs/)
+    }
     assert.throws(() => pinManifest(manifest, candidate, detached, receipt, {}, { identityProof }), /dry-run approval cannot pin/)
     const realReceipt = { ...receipt, dryRun: false, evidence: 'Synthetic isolated test receipt' }
     assert.throws(() => pinManifest(manifest, candidate, detached, realReceipt, {}, { identityProof }), /Real, distinct AEON-1670/)
@@ -394,7 +408,7 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.throws(() => pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: ['V-goals-390-light'] }, {}, options), /enumerate candidate checkpoint IDs/)
     const partialDraft = pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: receipt.checkpoints.slice(1) }, {}, options)
     const partialRefs = verifyReferenceArchive(readFileSync(join(output, candidate.archive.name)), detached, partialDraft).references
-    assert.equal(partialRefs.size, 71)
+    assert.equal(partialRefs.size, 63)
     assert.equal(partialRefs.has(`${receipt.checkpoints[0]}.png`), false)
     assert.equal(manifest.comparison.mode, 'report-only')
     assert.equal(manifest.approval.checkpoints.length, 0)
@@ -412,23 +426,47 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.deepEqual(change.regions, [{ x: 0, y: 0, width: 1, height: 1, pixels: 1 }])
     const smallRecords = candidate.members.map(member => ({ quality: { id: member.id }, png: white }))
     const baseCapture = { candidate, records: smallRecords, archiveSHA256: candidate.archive.sha256 }
-    const repeatProof = proveCaptureIdentity(baseCapture, baseCapture, { ...baseCapture, archiveSHA256: manifest.capture.identityProof.reviewedRunnerArchiveSHA256 }, manifest)
+    const reviewedCapture = { ...baseCapture, archiveSHA256: manifest.capture.identityProof.reviewedRunnerArchiveSHA256 }
+    const repeatProof = proveCaptureIdentity(baseCapture, baseCapture, reviewedCapture, manifest)
     assert.equal(repeatProof.status, 'identical')
     assert.equal(repeatProof.repeat.byteIdentical, 72)
     assert.equal(repeatProof.runner.pixelIdentical, 72)
     assertPinIdentity(repeatProof, candidate, manifest)
+    assert.equal(repeatProof.pinnable.total, 64)
+    assert.equal(repeatProof.pinnable.byteIdentical, 64)
+    const deferredRecords = smallRecords.map(record => receipt.checkpoints.includes(record.quality.id) ? record : { ...record, png: blackCorner })
+    const deferredNoise = proveCaptureIdentity(baseCapture, { ...baseCapture, records: deferredRecords }, reviewedCapture, manifest)
+    assert.equal(deferredNoise.repeat.byteIdentical, 64)
+    assert.equal(deferredNoise.status, 'identical')
+    assertPinIdentity(deferredNoise, candidate, manifest)
+    const accountID = 'V-account-use-matrix-1440-light'
+    const accountRecords = smallRecords.map(record => record.quality.id === accountID ? { ...record, png: blackCorner } : record)
+    const relook = proveCaptureIdentity(baseCapture, baseCapture, { ...reviewedCapture, records: accountRecords }, manifest)
+    assert.equal(relook.status, 'stable-awaiting-Tick-review')
+    assert.deepEqual(relook.reviewRequired, [accountID])
+    assertPinIdentity(relook, candidate, manifest)
+    const unstableAccount = proveCaptureIdentity(baseCapture, { ...baseCapture, records: accountRecords }, reviewedCapture, manifest)
+    assert.equal(unstableAccount.status, 'STOP-before-pinning')
+    assert.throws(() => assertPinIdentity(unstableAccount, candidate, manifest), /STOP before pinning/)
+    const realAttachments = { archive: '11111111-1111-4111-8111-111111111111', manifest: '22222222-2222-4222-8222-222222222222' }
+    assert.throws(() => pinManifest(manifest, candidate, detached, realReceipt, realAttachments, { identityProof: relook }), /Tick must explicitly re-review/)
+    // Pre-publication verification uses dryRun with a real receipt and must
+    // enforce the same re-look gate before any assets can be published.
+    assert.throws(() => pinManifest(manifest, candidate, detached, realReceipt, {}, { dryRun: true, identityProof: relook }), /Tick must explicitly re-review/)
+    assert.equal(pinManifest(manifest, candidate, detached, { ...realReceipt, reReviewedCheckpoints: [accountID] }, realAttachments, { identityProof: relook }).approval.checkpoints.length, 64)
+    assert.throws(() => pinManifest(manifest, candidate, detached, { ...realReceipt, checkpoints: receipt.checkpoints.slice(1) }, realAttachments, { identityProof }), /exactly the stable non-deferred/)
     const differentRecords = smallRecords.map((record, index) => index ? record : { ...record, png: blackCorner })
-    const unstableProof = proveCaptureIdentity(baseCapture, { ...baseCapture, records: differentRecords }, baseCapture, manifest)
+    const unstableProof = proveCaptureIdentity(baseCapture, { ...baseCapture, records: differentRecords }, reviewedCapture, manifest)
     assert.equal(unstableProof.status, 'STOP-before-pinning')
     assert.equal(unstableProof.repeat.byteIdentical, 71)
     assert.equal(unstableProof.repeat.checkpoints[0].pixels, 1)
     assert.deepEqual(unstableProof.repeat.checkpoints[0].regions, change.regions)
-    const runnerDifference = proveCaptureIdentity(baseCapture, baseCapture, { ...baseCapture, records: differentRecords }, manifest)
+    const runnerDifference = proveCaptureIdentity(baseCapture, baseCapture, { ...reviewedCapture, records: differentRecords }, manifest)
     assert.equal(runnerDifference.repeat.byteIdentical, 72)
     assert.equal(runnerDifference.runner.pixelIdentical, 71)
     assert.equal(runnerDifference.status, 'STOP-before-pinning')
     assert.throws(() => assertPinIdentity(runnerDifference, candidate, manifest), /STOP before pinning/)
-    assert.throws(() => proveCaptureIdentity(baseCapture, { ...baseCapture, candidate: { ...candidate, captureSHA: 'b'.repeat(40) } }, baseCapture, manifest), /SAME commit/)
+    assert.throws(() => proveCaptureIdentity(baseCapture, { ...baseCapture, candidate: { ...candidate, captureSHA: 'b'.repeat(40) } }, reviewedCapture, manifest), /SAME commit/)
     assert.throws(() => compareCaptureRecords(smallRecords.slice(1), smallRecords), /exactly 72/)
     const single = { ...draft, approval: { ...draft.approval, checkpoints: [receipt.checkpoints[0]] } }
     const replay = await replayCandidates([{ png: white, quality: { id: receipt.checkpoints[0], captureSHA: candidate.captureSHA } }],

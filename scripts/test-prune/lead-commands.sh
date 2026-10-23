@@ -30,10 +30,15 @@ case "${1:-}" in
     gh run download "$capture_run" --repo inspr-at/paimos \
       --name "visual-linux-candidate-${capture_sha}-${capture_attempt}" --dir web/test-results
     cat web/test-results/container-identity/identity-proof.md
-    # A difference leaves no usable plan and fails this verification. LEAD
-    # resolves instability first and decides any review of changed regions.
+    # All 64 non-deferred PNGs must repeat byte-for-byte. The other 16
+    # checkpoints stay awaiting/report-only. Only the declared account-use
+    # runner difference may reach a plan, with an explicit Tick re-look gate.
     node scripts/test-prune/visual-pin.mjs verify-plan web/test-results/container-pin-plan
-    echo 'After Tick receipt for the exact container archive: fill tick-approval.json, then run container-pin-plan/lead-commands.sh.'
+    echo 'The plan selects exactly 64 checkpoints; keep its explicit checkpoint list in the Tick receipt.'
+    echo 'Copy tick-approval.template.json to tick-approval.json and fill the actual receipt for these exact archive bytes.'
+    echo 'If reviewRequired lists the account-use checkpoint, obtain its Tick re-look and record it in reReviewedCheckpoints.'
+    echo 'Then run: bash web/test-results/container-pin-plan/lead-commands.sh publish'
+    echo 'After recording attachment IDs: bash web/test-results/container-pin-plan/lead-commands.sh activate ARCHIVE_ATTACHMENT_UUID MANIFEST_ATTACHMENT_UUID'
     ;;
   *)
     echo 'Usage: lead-commands.sh dispatch COORDINATOR_PUBLISHED_REF | download CI_RUN_ID' >&2

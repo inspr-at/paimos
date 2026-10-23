@@ -29,19 +29,32 @@ export function boundedFile(path, limit = 1024 * 1024) {
   return readFileSync(path)
 }
 
+// Capture all 72 diagnostic candidates, but never promote a product deferral.
+// Keep this selection shared by proof, rehearsal and activation.
+export function pinCheckpoints(visual) {
+  return visual.states.filter(state => visual.capture.states.includes(state.id) && state.referenceStatus !== 'deferred')
+    .flatMap(state => state.checkpoints.filter(checkpoint => checkpoint.referenceStatus !== 'deferred').map(checkpoint => checkpoint.id))
+}
+
 export function assertPinIdentity(proof, candidate, visual) {
   const ids = candidate.members.map(member => member.id).sort()
-  const complete = rows => Array.isArray(rows) && rows.length === 72 &&
-    JSON.stringify(rows.map(row => row.id).sort()) === JSON.stringify(ids) &&
-    rows.every(row => row.pixels === 0 && row.percent === 0 && row.regions?.length === 0)
-  need(proof?.version === 1 && proof.status === 'identical' && proof.captureSHA === candidate.captureSHA &&
+  const selected = pinCheckpoints(visual), selectedSet = new Set(selected)
+  const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort())
+  const complete = rows => Array.isArray(rows) && rows.length === ids.length && same(rows.map(row => row.id), ids)
+  const zero = row => row.pixels === 0 && row.percent === 0 && row.regions?.length === 0
+  const repeat = proof?.repeat?.checkpoints, runner = proof?.runner?.checkpoints
+  const reviewRequired = runner?.filter(row => selectedSet.has(row.id) && !zero(row)).map(row => row.id) ?? []
+  const allowedReview = visual.capture.identityProof.relookCheckpoints ?? []
+  need(proof?.version === 2 && ['identical', 'stable-awaiting-Tick-review'].includes(proof.status) && proof.captureSHA === candidate.captureSHA &&
     proof.archiveSHA256 === candidate.archive.sha256 && proof.containerDigest === visual.renderer.container.digest &&
     proof.reviewedRunnerArchiveSHA256 === visual.capture.identityProof.reviewedRunnerArchiveSHA256 &&
     /^[a-f0-9]{64}$/.test(proof.repeatArchiveSHA256 ?? '') &&
-    proof.repeat?.byteIdentical === 72 && proof.repeat.pixelIdentical === 72 &&
-    proof.runner?.pixelIdentical === 72 && complete(proof.repeat.checkpoints) && complete(proof.runner.checkpoints) &&
-    proof.repeat.checkpoints.every(row => row.byteIdentical === true),
-  'Set 3 requires 72/72 byte-identical repeat captures and 72/72 identical Tick-reviewed runner pixels; STOP before pinning')
+    same(proof.pinCheckpoints ?? [], selected) && complete(repeat) && complete(runner) &&
+    repeat.filter(row => selectedSet.has(row.id)).every(row => row.byteIdentical === true && zero(row)) &&
+    reviewRequired.every(id => allowedReview.includes(id)) && same(proof.reviewRequired ?? [], reviewRequired) &&
+    proof.status === (reviewRequired.length ? 'stable-awaiting-Tick-review' : 'identical'),
+  `Set 3 requires ${selected.length}/${selected.length} byte-identical non-deferred repeat captures and reviewed runner pixels (or the explicitly listed Tick re-look); STOP before pinning`)
+  return reviewRequired
 }
 
 export function pinManifest(visual, candidate, detachedBytes, approval, attachments, { dryRun = false, identityProof, proofInput = false } = {}) {
@@ -50,12 +63,18 @@ export function pinManifest(visual, candidate, detachedBytes, approval, attachme
   need(candidate.status === 'pending-Tick-review' && candidate.members?.length === 72 && candidate.states?.length === 16,
     'Set 3 needs all 72 main-capture candidates from sixteen states')
   assertRenderer(candidate.renderer, visual.renderer)
-  if (candidate.renderer.version === 2 && !(dryRun && proofInput)) assertPinIdentity(identityProof, candidate, visual)
+  const reviewRequired = candidate.renderer.version === 2 && !(dryRun && proofInput) ? assertPinIdentity(identityProof, candidate, visual) : []
   need(approval?.reviewer === 'Tick' && approval.status === 'approved' && Number.isFinite(Date.parse(approval.approvedAt)) &&
     typeof approval.evidence === 'string' && approval.evidence.trim().length > 0 && approval.captureSHA === candidate.captureSHA &&
     approval.archiveSHA256 === candidate.archive.sha256, 'A Tick approval receipt must identify these exact capture and archive bytes')
   need(Array.isArray(approval.checkpoints) && approval.checkpoints.length > 0 && new Set(approval.checkpoints).size === approval.checkpoints.length &&
     approval.checkpoints.every(id => candidate.members.some(member => member.id === id)), 'Approval must explicitly enumerate candidate checkpoint IDs')
+  const eligible = new Set(pinCheckpoints(visual))
+  need(approval.checkpoints.every(id => eligible.has(id)), 'Product deferral cannot be lifted by pin preparation or approval')
+  need((dryRun && approval.dryRun === true) || approval.checkpoints.length === eligible.size,
+    'Set 3 activation requires exactly the stable non-deferred checkpoint set')
+  need((dryRun && approval.dryRun === true) || reviewRequired.filter(id => approval.checkpoints.includes(id)).every(id => approval.reReviewedCheckpoints?.includes(id)),
+    'Tick must explicitly re-review each changed runner checkpoint for this exact container archive')
   need(dryRun || (approval.dryRun !== true && approval.evidence !== 'DRY RUN ONLY; no product approval'), 'A dry-run approval cannot pin product references')
   const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
   need(dryRun || (uuid.test(attachments?.archive) && uuid.test(attachments?.manifest) && attachments.archive !== attachments.manifest),
@@ -65,6 +84,10 @@ export function pinManifest(visual, candidate, detachedBytes, approval, attachme
   pinned.renderer = structuredClone(candidate.renderer)
   pinned.approval = { reviewer: 'Tick', status: 'approved', approvedAt: approval.approvedAt, evidence: approval.evidence,
     states: [], checkpoints: candidate.members.filter(member => approved.has(member.id)).map(member => member.id) }
+  if (reviewRequired.length) {
+    pinned.approval.reviewRequired = reviewRequired
+    pinned.approval.reReviewedCheckpoints = (approval.reReviewedCheckpoints ?? []).filter(id => reviewRequired.includes(id))
+  }
   if (dryRun) pinned.approval.dryRun = true
   for (const state of pinned.states) for (const checkpoint of state.checkpoints) {
     if (!approved.has(checkpoint.id)) continue
@@ -155,14 +178,23 @@ export function publicationCommands(directory, candidate, planDirectory = direct
   const files = [candidate.archive.name, `${candidate.archive.name}.manifest.json`, `${candidate.archive.name}.sha256`].map(name => join(directory, name))
   return [
     '#!/usr/bin/env bash',
+    '# SPDX-License-Identifier: AGPL-3.0-only',
     'set -euo pipefail',
     '# LEAD only, after Tick approves these exact bytes. A pre-existing tag/release must stop this flow.',
+    '# All transport bytes are retained; only the verified non-deferred checkpoint list can be activated.',
+    'case "${1:-}" in',
+    'publish)',
     `node scripts/test-prune/visual-pin.mjs verify-plan ${q(planDirectory)} ${q(join(planDirectory, 'tick-approval.json'))}`,
     `gh release create test-references-3 --repo inspr-at/paimos --target ${candidate.captureSHA} --prerelease --title 'Visual reference set 3' --notes 'Tick-approved reference set 3; AEON-1670 approval record; immutable assets.' ${files.map(q).join(' ')}`,
     ...files.slice(0, 2).map(path => `/Users/markus/.aeon/lead/aeon/pm --instance ppm --agent-name aeon-lead-claude --json attach AEON-1670 ${q(path)}`),
-    '# Record returned attachment IDs, then use an actual Tick receipt (captureSHA, archiveSHA256, approvedAt, evidence, checkpoints).',
-    `node scripts/test-prune/visual-pin.mjs activate ${q(planDirectory)} ${q(join(planDirectory, 'tick-approval.json'))} ARCHIVE_ATTACHMENT_UUID MANIFEST_ATTACHMENT_UUID`,
+    `echo ${q(`Record the two returned attachment IDs, then run: bash ${join(planDirectory, 'lead-commands.sh')} activate ARCHIVE_ATTACHMENT_UUID MANIFEST_ATTACHMENT_UUID`)}`,
+    ';;',
+    'activate)',
+    `node scripts/test-prune/visual-pin.mjs activate ${q(planDirectory)} ${q(join(planDirectory, 'tick-approval.json'))} "\${2:?archive attachment UUID required}" "\${3:?manifest attachment UUID required}"`,
     '# Activation is local only. LEAD owns the commit, publication verification, review, merge and CI.',
+    ';;',
+    '*) echo "Usage: $0 publish | activate ARCHIVE_ATTACHMENT_UUID MANIFEST_ATTACHMENT_UUID" >&2; exit 2 ;;',
+    'esac',
   ].join('\n') + '\n'
 }
 
@@ -187,7 +219,7 @@ async function main() {
     const archive = boundedFile(capturedArchive, 64 * 1024 * 1024)
     const approval = { reviewer: 'Tick', status: 'approved', dryRun: true, approvedAt: new Date().toISOString(),
       evidence: 'DRY RUN ONLY; no product approval', captureSHA: candidate.captureSHA, archiveSHA256: candidate.archive.sha256,
-      checkpoints: candidate.members.map(member => member.id) }
+      checkpoints: pinCheckpoints(visual) }
     const pinned = pinManifest(visual, candidate, detached, approval, {}, { dryRun: true, identityProof })
     const verified = verifyReferenceArchive(archive, detached, pinned)
     mkdirSync(argument, { recursive: false })
@@ -203,7 +235,8 @@ async function main() {
     writeFileSync(join(argument, 'proof.json'), JSON.stringify(proof, null, 2) + '\n', { flag: 'wx' })
     writeFileSync(join(argument, 'identity-proof.json'), identityBytes, { flag: 'wx' })
     writeFileSync(join(argument, 'tick-approval.template.json'), JSON.stringify({ ...approval, status: 'pending-Tick-review', dryRun: false,
-      approvedAt: null, evidence: null, standingConsent: { ticket: 'AEON-1692 item 1',
+      approvedAt: null, evidence: null, reviewRequired: identityProof.reviewRequired, reReviewedCheckpoints: [],
+      standingConsent: { ticket: 'AEON-1692 item 1',
         checkpoints: candidate.members.filter(member => member.id.startsWith('V-delivery-numbers-390-')).map(member => member.id),
         condition: 'Both the 12px header-gap and full on-target-headline viewport assertions passed on the capture SHA; no additional Tick look required.' },
     }, null, 2) + '\n', { flag: 'wx' })
@@ -220,6 +253,8 @@ async function main() {
     if (mode === 'verify-plan') {
       const pinned = JSON.parse(boundedFile(join(directory, 'visual-manifest.dry-run.json')))
       need(pinned.approval.dryRun === true && pinned.baselineAuthority.source.sha256 === candidate.archive.sha256, 'Invalid dry-run pin plan')
+      need(JSON.stringify([...pinned.approval.checkpoints].sort()) === JSON.stringify(pinCheckpoints(visual).sort()),
+        'Dry-run plan must pin exactly the current non-deferred checkpoint set')
       verifyReferenceArchive(boundedFile(join(archiveDirectory, candidate.archive.name), 64 * 1024 * 1024), detached, pinned)
       if (argument) {
         const approval = JSON.parse(boundedFile(argument))

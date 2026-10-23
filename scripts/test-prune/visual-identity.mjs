@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectCandidates, packCandidates } from './visual-candidates.mjs'
 import { verifyReferenceArchive } from './visual-baselines.mjs'
-import { boundedFile, pinManifest, sha256 } from './visual-pin.mjs'
+import { boundedFile, pinCheckpoints, pinManifest, sha256 } from './visual-pin.mjs'
 import { pixelChanges } from './visual-review.mjs'
 import { assertRenderer } from './visual-renderer.mjs'
 
@@ -39,7 +39,7 @@ export function verifyCapture(directory, visual, { archiveSHA256, manifestSHA256
     'Identity archive does not contain these quality-checked captures')
   const receipt = { reviewer: 'Tick', status: 'approved', dryRun: true, approvedAt: '2026-10-23T00:00:00Z',
     evidence: 'DRY RUN ONLY; no product approval', captureSHA: candidate.captureSHA, archiveSHA256: candidate.archive.sha256,
-    checkpoints: candidate.members.map(member => member.id) }
+    checkpoints: pinCheckpoints(visual) }
   // Verification of a proof input is not pinning. In particular it does not
   // demand the later cross-capture proof that this operation is constructing.
   const pinned = pinManifest(policy, candidate, detached, receipt, {}, { dryRun: true, proofInput: true })
@@ -57,16 +57,29 @@ export function proveCaptureIdentity(first, second, reviewed, visual) {
     second.candidate.renderer.container.digest === visual.renderer.container.digest, 'Repeat captures must use the pinned container')
   const repeat = compareCaptureRecords(first.records, second.records)
   const runner = compareCaptureRecords(reviewed.records, first.records)
-  const stable = repeat.every(row => row.byteIdentical && row.pixels === 0)
-  const identical = runner.every(row => row.pixels === 0)
-  return { version: 1, status: stable && identical ? 'identical' : 'STOP-before-pinning',
+  const selected = pinCheckpoints(visual), selectedSet = new Set(selected)
+  const selectedRepeat = repeat.filter(row => selectedSet.has(row.id)), selectedRunner = runner.filter(row => selectedSet.has(row.id))
+  need(selectedRepeat.length === selected.length && selectedRunner.length === selected.length, 'Incomplete non-deferred identity coverage')
+  const stable = selectedRepeat.every(row => row.byteIdentical && row.pixels === 0)
+  const reviewRequired = selectedRunner.filter(row => row.pixels !== 0).map(row => row.id)
+  const reviewAllowed = reviewRequired.every(id => (visual.capture.identityProof.relookCheckpoints ?? []).includes(id))
+  const ready = stable && reviewAllowed
+  return { version: 2, status: ready ? reviewRequired.length ? 'stable-awaiting-Tick-review' : 'identical' : 'STOP-before-pinning',
     captureSHA: sha, containerDigest: visual.renderer.container.digest,
     archiveSHA256: first.archiveSHA256, repeatArchiveSHA256: second.archiveSHA256,
     reviewedRunnerArchiveSHA256: reviewed.archiveSHA256,
+    pinCheckpoints: selected, reviewRequired,
+    deferred: visual.states.flatMap(state => state.checkpoints.filter(checkpoint =>
+      checkpoint.referenceStatus === 'deferred' || state.referenceStatus === 'deferred').map(checkpoint => ({
+      id: checkpoint.id, until: checkpoint.deferredUntil ?? state.deferredUntil, reason: checkpoint.deferredReason ?? state.deferredReason }))),
+    pinnable: { total: selected.length, byteIdentical: selectedRepeat.filter(row => row.byteIdentical).length,
+      pixelIdentical: selectedRepeat.filter(row => row.pixels === 0).length, runnerPixelIdentical: selectedRunner.filter(row => row.pixels === 0).length },
     repeat: { byteIdentical: repeat.filter(row => row.byteIdentical).length, pixelIdentical: repeat.filter(row => row.pixels === 0).length, checkpoints: repeat },
     runner: { byteIdentical: runner.filter(row => row.byteIdentical).length, pixelIdentical: runner.filter(row => row.pixels === 0).length, checkpoints: runner },
-    approvalCoverage: stable && identical ? 'Tick review of the runner capture covers all 72 pixel-identical container checkpoints.' :
-      'No container pin is authorized: resolve repeat instability first; LEAD decides re-review for any runner differences.' }
+    approvalCoverage: ready ? `${selected.length}/${selected.length} non-deferred repeat PNGs are byte-identical. ` +
+      (reviewRequired.length ? `Tick re-look required for: ${reviewRequired.join(', ')}; activation requires its explicit receipt.` :
+        'The reviewed runner pixels cover this subset; Tick must still identify the exact container archive in the receipt.') :
+      'No container pin is authorized: resolve non-deferred repeat instability or unexpected runner differences first.' }
 }
 
 async function main() {
@@ -84,13 +97,16 @@ async function main() {
   const lines = ['# Container identity proof', '', proof.approvalCoverage, '',
     `Same commit twice: **${proof.repeat.byteIdentical}/72 byte-identical**, **${proof.repeat.pixelIdentical}/72 pixel-identical**.`,
     `Reviewed runner → container: **${proof.runner.pixelIdentical}/72 pixel-identical**.`, '',
+    `Pin selection: **${proof.pinnable.byteIdentical}/${proof.pinnable.total} byte-identical**; **${proof.pinnable.runnerPixelIdentical}/${proof.pinnable.total} reviewed runner matches**.`, '',
     '| Comparison | Checkpoint | Different pixels | Difference % | Regions (x,y,width,height) |', '| --- | --- | ---: | ---: | --- |']
   for (const [label, result] of [['repeat', proof.repeat], ['runner', proof.runner]])
     for (const row of result.checkpoints.filter(row => row.pixels || !row.byteIdentical))
       lines.push(`| ${label} | ${row.id} | ${row.pixels} | ${row.percent.toFixed(8)} | ${row.regions.map(box => `${box.x},${box.y},${box.width},${box.height}`).join('; ') || 'PNG encoding bytes only'} |`)
+  lines.push('', '| Deferred checkpoint | Awaiting | Reason |', '| --- | --- | --- |',
+    ...proof.deferred.map(row => `| ${row.id} | ${row.until.join(', ')} | ${row.reason} |`))
   writeFileSync(join(output, 'identity-proof.md'), lines.join('\n') + '\n', { flag: 'wx' })
   console.log(lines.join('\n'))
-  need(proof.status === 'identical', 'STOP before pinning: container captures are unstable or differ from Tick-reviewed runner pixels; see identity-proof.json/.md')
+  need(proof.status !== 'STOP-before-pinning', 'STOP before pinning: non-deferred container captures are unstable or have unexpected runner differences; see identity-proof.json/.md')
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(error => {

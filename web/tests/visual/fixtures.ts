@@ -168,7 +168,11 @@ export const decisionDesk: VisualSetup = async (page, profile, theme) => {
   world.questions[0]!.input.context = `${LONG}.\n\n${LONG}.`
   for (const question of world.questions) { question.created_at = new Date(NOW - 120_000).toISOString(); question.updated_at = question.created_at }
   await page.goto('/decision-desk')
+  // A row can appear before the refresh has finished hydrating its sources.
+  // The glass memo must capture the settled desk behind it, not that indicator.
+  await expect(page.getByTestId('desk-list')).toHaveAttribute('aria-busy', 'false')
   await page.getByTestId('desk-row-q:question-1').click()
+  await expect(page.locator('.sheet-shape path')).toHaveAttribute('d', /^M/)
   await expect(page.getByTestId('stamp-doctrine')).toBeDisabled()
   await expect(page.getByTestId('desk-choices')).toBeVisible()
   await page.getByTestId('stamp-doctrine').scrollIntoViewIfNeeded()
