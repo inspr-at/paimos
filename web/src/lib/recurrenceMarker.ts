@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { displayLanguage } from './displayLanguage.ts'
 import type { NodeRecurrence } from './api'
-import { ruleParts, type RecurrenceTrigger } from './recurrences'
+import { elapsedCadence, ruleParts, type RecurrenceTrigger } from './recurrences'
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const daysDE = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag']
@@ -17,6 +17,8 @@ export function recurrenceSchedule(trigger: RecurrenceTrigger, locale = 'en'): s
     return words[trigger.event || 'release.published'][de ? 1 : 0]!
   }
   const rule = ruleParts(trigger.rrule)
+  const cadence = elapsedCadence(rule, de ? 'de' : 'en')
+  if (cadence) return cadence
   if (rule.FREQ === 'DAILY') return de ? 'jeden Tag' : 'every day'
   if (rule.FREQ === 'WEEKLY') {
     let selected = codes.filter(code => rule.BYDAY?.split(',').includes(code))

@@ -47,9 +47,18 @@ export const recurrenceZone = (trigger: RecurrenceTrigger) => trigger.timezone |
 export const weekdays = [['MO', 'Monday'], ['TU', 'Tuesday'], ['WE', 'Wednesday'], ['TH', 'Thursday'], ['FR', 'Friday'], ['SA', 'Saturday'], ['SU', 'Sunday']] as const
 export const zones = ['Europe/Vienna', 'Europe/London', 'UTC', 'America/New_York', 'America/Los_Angeles', 'Asia/Tokyo', 'Australia/Sydney']
 export function ruleParts(rule = ''): Record<string, string> { return Object.fromEntries(rule.split(';').map(part => part.split('='))) }
+export function elapsedCadence(rule: Record<string, string>, language: 'en' | 'de' = 'en'): string | null {
+  if (rule.FREQ !== 'MINUTELY' && rule.FREQ !== 'HOURLY') return null
+  const interval = Number(rule.INTERVAL || 1), minute = rule.FREQ === 'MINUTELY'
+  if (language === 'de') return interval === 1 ? minute ? 'jede Minute' : 'jede Stunde' : `alle ${interval} ${minute ? 'Minuten' : 'Stunden'}`
+  const unit = minute ? 'minute' : 'hour'
+  return interval === 1 ? `every ${unit}` : `every ${interval} ${unit}s`
+}
 export function triggerWords(trigger: RecurrenceTrigger) {
   if (trigger.kind === 'event') return ({ 'release.published': 'After every release is published', 'node.done': 'After matching work reaches Done', 'knowledge.changed': 'After matching knowledge changes', 'external.tag': 'After a signed external tag', 'external.deploy': 'After a signed external deploy' }[trigger.event || 'release.published']) + (trigger.event_start === 'hour' ? ', an hour later' : trigger.event_start === 'morning' ? ', next morning at 06:00' : '')
   const rule = ruleParts(trigger.rrule)
+  const cadence = elapsedCadence(rule)
+  if (cadence) return `${cadence[0]!.toUpperCase()}${cadence.slice(1)} · ${trigger.timezone}`
   let words = 'Every day'
   if (rule.FREQ === 'WEEKLY') words = `Every ${weekdays.filter(([day]) => rule.BYDAY?.split(',').includes(day)).map(([, label]) => label).join(', ') || 'week'}`
   if (rule.FREQ === 'MONTHLY') words = `${!rule.INTERVAL || rule.INTERVAL === '1' ? 'Monthly' : `Every ${rule.INTERVAL} months`} on ${rule.BYMONTHDAY === '-1' ? 'the last day' : `day ${rule.BYMONTHDAY || 'of the start date'}`}`

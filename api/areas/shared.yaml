@@ -1733,6 +1733,7 @@ components:
         answer: {$ref: '#/components/schemas/QuestionAnswer'}
         pending: {type: array, items: {$ref: '#/components/schemas/QuestionPending'}}
         outcomes: {type: array, items: {$ref: '#/components/schemas/QuestionOutcomeAvailability'}}
+        reminder: {$ref: '#/components/schemas/QuestionReminder'}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     QuestionAnswer:
@@ -1800,6 +1801,7 @@ components:
       required: [request_id, question, options, meanwhile]
       properties:
         request_id: {type: string, format: uuid}
+        remind_after_seconds: {type: integer, minimum: 0, maximum: 2592000, description: 'Repeat a reminder while unanswered after this interval. Zero disables reminders; omitted uses the workspace default when a fresh question is created. Joining an existing question preserves its reminder schedule.'}
         question: {type: string, minLength: 1, maxLength: 2000}
         context: {type: string, maxLength: 16000}
         findings: {type: string, maxLength: 8000}
@@ -1983,7 +1985,7 @@ components:
       required: [kind]
       properties:
         kind: {type: string, enum: [time, event]}
-        rrule: {type: string, maxLength: 256, description: 'Time only. FREQ=DAILY, FREQ=WEEKLY with optional BYDAY=MO,TU,WE,TH,FR,SA,SU, or FREQ=MONTHLY with optional BYMONTHDAY=-31..-1,1..31 and INTERVAL=1,2,3,6 (default 1). Monthly intervals step from the month of start_date. INTERVAL is rejected for DAILY and WEEKLY. Unspecified days derive from start_date. Other RFC 5545 parts are rejected.'}
+        rrule: {type: string, maxLength: 256, description: 'Time only. FREQ=MINUTELY with INTERVAL=1..1440 or FREQ=HOURLY with INTERVAL=1..168 uses elapsed intervals anchored to start_date and time_of_day in timezone, including across DST; the anchor must exist. FREQ=DAILY, FREQ=WEEKLY with optional BYDAY=MO,TU,WE,TH,FR,SA,SU, or FREQ=MONTHLY with optional BYMONTHDAY=-31..-1,1..31 and INTERVAL=1,2,3,6 (default 1) keeps calendar timing. Monthly intervals step from the month of start_date. INTERVAL is rejected for DAILY and WEEKLY. Unspecified days derive from start_date. Other RFC 5545 parts are rejected.'}
         time_of_day: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$', description: Time only; HH:MM wall time.}
         timezone: {type: string, maxLength: 128, description: Time only; IANA timezone or UTC.}
         start_date: {type: string, format: date, description: Time only; defaults to today's date in the selected timezone. Inclusive earliest local date.}
