@@ -72,6 +72,7 @@ export function proveCaptureIdentity(first, second, reviewed, visual) {
 async function main() {
   const [firstDirectory, secondDirectory, reviewedDirectory, output] = process.argv.slice(2)
   need(firstDirectory && secondDirectory && reviewedDirectory && output, 'Usage: visual-identity.mjs <container-run-1> <container-run-2> <reviewed-runner-artifact> <new-proof-dir>')
+  need(resolve(firstDirectory) !== resolve(secondDirectory), 'Repeat identity proof needs two separate capture directories')
   const visual = JSON.parse(readFileSync(new URL('./visual-manifest.json', import.meta.url), 'utf8'))
   const expected = visual.capture.identityProof
   const first = verifyCapture(firstDirectory, visual), second = verifyCapture(secondDirectory, visual)

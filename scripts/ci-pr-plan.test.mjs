@@ -548,7 +548,7 @@ test('every CI lane and tier runner consumer uses the single effective publisher
       assert.match(body, /^          AEON_TEST_TIER_LAYOUT: \$\{\{ needs.ci-plan.outputs.layout \}\}$/m, id);
     }
   }
-  assert.deepEqual(consumers, ['apt-bundle', 'go-test', 'go-timing', 'go-static', 'go', 'web-catalogue', 'web-setup', 'web-unit', 'web-shard', 'web', 'release-check', 'release-check-run', 'e2e', 'e2e-run', 'tier-measurements']);
+  assert.deepEqual(consumers, ['apt-bundle', 'go-test', 'go-timing', 'go-static', 'go', 'web-catalogue', 'web-setup', 'web-unit', 'web-shard', 'visual-comparison', 'web', 'release-check', 'release-check-run', 'e2e', 'e2e-run', 'tier-measurements']);
   const newSpec = classifyPaths(['web/tests/new-feature.spec.ts']);
   assert.equal(newSpec.lane, 'spec-only');
   assert.equal(effectiveLane(newSpec.lane, {mode: 'full', event: 'pull_request', affectedLane: 'on'}), 'full');

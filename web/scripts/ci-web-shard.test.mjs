@@ -337,10 +337,10 @@ test('list/check launch no process and checks are wired into the existing CI uni
   const output = []
   assert.equal(await main(['--check', '--all', '--shards', '12'], { run: forbiddenRun, out: s => output.push(s), env: {} }), 0)
   const all = JSON.parse(output.pop())
-  assert.equal(all.specs + (all.excluded ?? 0), discoverSpecs().length)
+  assert.equal(all.specs + (all.dedicated ?? 0) + (all.excluded ?? 0), discoverSpecs().length)
   assert.equal(await main(['--check', '--shards', '12'], { run: forbiddenRun, out: s => output.push(s), env: {} }), 0)
   const gate = JSON.parse(output.pop())
-  assert.equal(gate.specs + gate.ungated + (gate.excluded ?? 0), discoverSpecs().length)
+  assert.equal(gate.specs + gate.ungated + (gate.dedicated ?? 0) + (gate.excluded ?? 0), discoverSpecs().length)
   assert.equal(await main(['--list', '1/12'], { run: forbiddenRun, out: s => output.push(s), env: {} }), 0)
   assert.equal(JSON.parse(output.pop()).length, 1)
   const scripts = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).scripts

@@ -172,7 +172,8 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.throws(() => assertRenderer(changed, renderer), /renderer differs from reference|visual = CI only/)
   }
   const environment = { AEON_VISUAL_CONTAINER_DIGEST: renderer.container.digest, ImageOS: 'ubuntu26', ImageVersion: 'new-hosted-image' }
-  const identityOptions = { env: environment, platform: 'linux', arch: 'x64', fontconfigFile: 'scripts/test-prune/visual-fonts.conf' }
+  const identityOptions = { env: environment, platform: 'linux', arch: 'x64',
+    fontconfigFile: new URL('../../scripts/test-prune/visual-fonts.conf', import.meta.url) }
   const actual = rendererIdentity(manifest, manifest.renderer.browser.version, identityOptions)
   assertRenderer(actual, renderer)
   assert.equal(actual.runner.imageVersion, 'new-hosted-image')
