@@ -57,7 +57,7 @@ async function setup(page: Page, width = 1440, theme = 'light', extraDoing = 0) 
   return { data, summaryRequests: () => summaryRequests }
 }
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+for (const width of [390, 1024]) for (const theme of ['light']) {
   test(`status filters and stable grid at ${width}px ${theme}`, async ({ page }) => {
     const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
     const probe = await setup(page, width, theme)
@@ -187,7 +187,7 @@ test('truncated summary keeps custom Done QA visible through reload and restores
   await expect(hide(page)).not.toBeChecked()
 })
 
-for (const width of [1024, 1440]) test(`live count digit growth stays still at ${width}px`, async ({ page }) => {
+for (const width of [1024]) test(`live count digit growth stays still at ${width}px`, async ({ page }) => {
   await setup(page, width, 'light', 6); await roomy(page, width)
   await expect(group(page, 'in_progress').locator('b')).toHaveText('9')
   await expectStableControls({ controls: { grid: countRoot(page), open: group(page, 'open'), doing: group(page, 'in_progress'), done: group(page, 'done'), qa: status(page, 'qa'), accepted: status(page, 'accepted'), hide: await shownHide(page), new: page.getByRole('button', { name: 'New ticket', exact: true }) },

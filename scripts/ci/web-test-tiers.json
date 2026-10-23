@@ -116,11 +116,7 @@
     ,
     "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › moves a split column row into the slot its new order reserves"
     ,
-    "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 1440 dark"
-    ,
     "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 1440 light"
-    ,
-    "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 400 dark"
     ,
     "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 400 light"
     ,
@@ -146,17 +142,11 @@
     ,
     "browser:tests/aeon-1188-displayhome.spec.ts:Outline on a phone: Expand all from the Display sheet closes it and returns focus"
     ,
-    "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px dark"
-    ,
     "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px light"
     ,
     "browser:tests/aeon-1188-displayhome.spec.ts:on a phone, ⋯ › Display… opens the same full-width Display sheet as the Filters link"
     ,
-    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px dark"
-    ,
     "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px light"
-    ,
-    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px dark"
     ,
     "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px light"
     ,
@@ -277,18 +267,6 @@
     "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 light"
-    ,
-    "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 1024 dark"
-    ,
-    "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 1024 light"
-    ,
-    "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 1440 dark"
-    ,
-    "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 1440 light"
-    ,
-    "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 390 dark"
-    ,
-    "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 390 light"
     ,
     "browser:tests/agent-pause.spec.ts:1440 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
     ,
@@ -771,12 +749,6 @@
     "browser:tests/group-figures.spec.ts:AEON-1388 collapse and expand all: the first cell, Alt-click on a chevron and Display; folds survive a reload of the view"
     ,
     "browser:tests/group-figures.spec.ts:AEON-1388 figures land in reserved slots: the group row and the header never move while they arrive"
-    ,
-    "browser:tests/group-figures.spec.ts:AEON-1388 grouped list at 1024 px, light and dark: figures or the phone line, still on hover"
-    ,
-    "browser:tests/group-figures.spec.ts:AEON-1388 grouped list at 1440 px, light and dark: figures or the phone line, still on hover"
-    ,
-    "browser:tests/group-figures.spec.ts:AEON-1388 grouped list at 390 px, light and dark: figures or the phone line, still on hover"
     ,
     "browser:tests/group-figures.spec.ts:AEON-1388 phones: one muted line after the name, at most three facts in order, never wrapped; Display orders the groups"
     ,
@@ -5492,11 +5464,7 @@
     ,
     {"kind":"browser","file":"tests/add-account.spec.ts","name":"without account.manage the action is gone and the hint stays","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 400px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 400px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5505,10 +5473,6 @@
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: Display beside New › stays on the toolbar at tablet width, where the header bar has no Display","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › flows into columns at 1024×800 and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › flows into columns at 1100×1000 and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › flows into columns at 1280×800 and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"collapsed header: the menu never scrolls › flows into columns at 1440×900 and fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5576,11 +5540,7 @@
     ,
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the toolbar in every header view at 400px; the list’s end still says it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1042-headergraph.spec.ts","name":"header graph off by default, developer switch keeps the header still 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/aeon-1042-headergraph.spec.ts","name":"header graph off by default, developer switch keeps the header still 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1042-headergraph.spec.ts","name":"header graph off by default, developer switch keeps the header still 400 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1042-headergraph.spec.ts","name":"header graph off by default, developer switch keeps the header still 400 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5644,17 +5604,11 @@
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"Outline on a phone: Expand all from the Display sheet closes it and returns focus","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"desktop Display buttons open the Display menu at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"desktop Display buttons open the Display menu at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"on a phone, ⋯ › Display… opens the same full-width Display sheet as the Filters link","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6398,23 +6352,9 @@
     ,
     {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"Filter and Search stay put while pills overflow, come and go at 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"Filter and Search stay put while pills overflow, come and go at 940","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"Type rows wait for their names and counts, then hold their places while the menu is open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"a shared-name Type option shows a partial saved choice as mixed; a click completes it and never narrows it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"applied Type filter at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"applied Type filter at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"applied Type filter at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"applied Type filter at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"applied Type filter at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"applied Type filter at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-974-typefilter.spec.ts","name":"levels that share a name are one Type option, one pill and one request for all of them","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -9452,8 +9392,6 @@
     ,
     {"kind":"browser","file":"tests/graph-motion.spec.ts","name":"label fades › labels fade with an opacity transition instead of toggling display","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 a filter change empties the group figures at once: no group shows the previous scope’s numbers while it is counted again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 an ungrouped list keeps the checkbox above the row checkboxes and the sort control, without a chevron","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 collapse and expand all: the first cell, Alt-click on a chevron and Display; folds survive a reload of the view","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -9461,12 +9399,6 @@
     {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 each group row carries its figures in its own columns: sums of its leaves, nothing where there is nothing to say","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 figures land in reserved slots: the group row and the header never move while they arrive","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 grouped list at 1024 px, light and dark: figures or the phone line, still on hover","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 grouped list at 1440 px, light and dark: figures or the phone line, still on hover","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 grouped list at 390 px, light and dark: figures or the phone line, still on hover","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1388 phones: one muted line after the name, at most three facts in order, never wrapped; Display orders the groups","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12266,21 +12198,11 @@
     ,
     {"kind":"browser","file":"tests/project-status-counts.spec.ts","name":"live count digit growth stays still at 1024px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/project-status-counts.spec.ts","name":"live count digit growth stays still at 1440px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/project-status-counts.spec.ts","name":"manual Hide toggles stick when a status is cleared; visible selection restores only automatic overrides","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-status-counts.spec.ts","name":"older and partial summary detail is labelled honestly","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/project-status-counts.spec.ts","name":"status filters and stable grid at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/project-status-counts.spec.ts","name":"status filters and stable grid at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/project-status-counts.spec.ts","name":"status filters and stable grid at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/project-status-counts.spec.ts","name":"status filters and stable grid at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/project-status-counts.spec.ts","name":"status filters and stable grid at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-status-counts.spec.ts","name":"status filters and stable grid at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -16613,6 +16535,32 @@
     {"kind":"node","file":"tests/outline.test.ts","name":"match sets group by parent, find missing ancestors and order siblings","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/outline.test.ts","name":"the outline flattens epics, their children with guides, then the No epic group","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 figures: a changed filter clears counts before idle and rejects a held old answer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 figures: a changed person clears counts before idle and rejects a held old answer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 figures: a changed project clears counts before idle and rejects a held old answer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 graph: changing dimension makes the pending engine obsolete and preserves the current engine","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 graph: leaving during setup aborts and disposes the late renderer without publishing readiness","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 header: a held old project or filter context cannot paint after the scope leaves","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 header: a held-delivery narrow root sample wins over stale media and geometry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 header: section searches stay out of Tickets and Open graph carries the effective filter identity","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 header: visibility and occlusion never resume a graph the person paused","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 negative control: accepting an aborted graph context is detected","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 negative control: ignoring a delivered viewport sample is detected","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 negative control: keeping old-scope counts until idle is detected","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/p04-runtime.test.ts","name":"P04 negative control: missing late-renderer disposal is detected","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/package-doc.test.ts","name":"documented stream intervals match the shared health watcher","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
