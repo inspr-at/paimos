@@ -164,9 +164,9 @@ test('P11 pruning rejects missing original-case mappings and dangling current de
   const baseline = json('scripts/test-prune/baseline.json')
   const ledger = json('scripts/test-prune/risk-ledger.json')
   const execution = json('scripts/test-prune/p11-execution.json')
-  const owners = new Set(ledger.specs.filter((row: { package: string }) => row.package === 'P11').map((row: { file: string }) => row.file))
+  const owners = new Set<string>(ledger.specs.filter((row: { package: string }) => row.package === 'P11').map((row: { file: string }) => row.file))
   const originals = baseline.catalogue.filter((row: { kind: string; file: string }) => row.kind === 'browser' && owners.has(row.file))
-  const current = new Map(json('scripts/ci/web-test-tiers.json').tests.map((row: Parameters<typeof key>[0]) => [key(row), row]))
+  const current = new Map<string, Parameters<typeof key>[0]>(json('scripts/ci/web-test-tiers.json').tests.map((row: Parameters<typeof key>[0]) => [key(row), row]))
   const protectedKeys = new Set(ledger.risks.flatMap((row: { currentKeys: string[] }) => row.currentKeys))
   type Mapping = { source: string; disposition: string; destinations: string[]; approval?: string }
   type Execution = { baselineSha256: string; actualAfter: number; unchangedSpecs: string[]; specs: { file: string; before: number; actualAfter: number; replacement: string; mappings: Mapping[] }[] }
@@ -197,7 +197,7 @@ test('P11 pruning rejects missing original-case mappings and dangling current de
       const { key: ignored, ...entry } = row
       assert.deepEqual(current.get(key(row)), entry, 'An unmapped P11 original changed')
     }
-    assert.equal(proof.actualAfter, [...current.values()].filter((row: Parameters<typeof key>[0]) => row.kind === 'browser' && owners.has(row.file)).length)
+    assert.equal(proof.actualAfter, [...current.values()].filter(row => row.kind === 'browser' && row.file !== undefined && owners.has(row.file)).length)
   }
   validate(execution)
   const missing = structuredClone(execution)
