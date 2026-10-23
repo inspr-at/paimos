@@ -92,7 +92,7 @@ test('visual comparison rejects a changed control and never creates a missing re
 
 // Risk: optional native/chat reads escape the fixture to a backend 404, so
 // the intended chat reference depicts an outage before comparison can run.
-test('P02 Session Chat fixture binds its chat reads and native refusal to the displayed session', async ({ page }) => {
+test('P02 Session Chat fixture binds its chat reads and native refusal to the displayed session', async ({ page, browser }, info) => {
   const errors: string[] = [], reads: Response[] = []
   page.on('pageerror', error => errors.push(error.message))
   page.on('response', response => reads.push(response))
@@ -122,14 +122,24 @@ test('P02 Session Chat fixture binds its chat reads and native refusal to the di
   expect(errors).toEqual([])
   expect(reads.filter(response => response.status() >= 400).map(response => ({ path: new URL(response.url()).pathname, status: response.status() })))
     .toEqual([{ path: new URL(native.url()).pathname, status: 503 }])
-  reads.length = 0
-  const healthyNativeRead = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/native-context') && response.status() === 200)
-  await sessionChat(page, 'desktop', 'light')
-  const healthyNative = await healthyNativeRead
-  expect(await healthyNative.json()).toMatchObject({ profile: 'native', current_binding: { project_id: 'p-pharos', harness_session_id: session } })
-  await expect(page.getByRole('tabpanel', { name: /^Chat/ })).toContainText('Owned session input from this panel is not available yet. Use the qualified session client.')
-  await expect(page.getByText('The session’s live capabilities could not be read. Reopen the panel to try again.', { exact: true })).toHaveCount(0)
-  expect(reads.filter(response => response.status() >= 400).map(response => new URL(response.url()).pathname)).toEqual([])
-  expect(errors).toEqual([])
+  // Refusal and healthy fixtures get separate contexts. Replacing route stacks
+  // under an old thread poll could send the old session's read to the new mock.
+  await page.close()
+  const healthyContext = await browser.newContext({ baseURL: info.project.use.baseURL })
+  try {
+    const healthyPage = await healthyContext.newPage(), healthyReads: Response[] = [], healthyErrors: string[] = []
+    healthyPage.on('response', response => healthyReads.push(response))
+    healthyPage.on('pageerror', error => healthyErrors.push(error.message))
+    await healthyPage.clock.setFixedTime(new Date('2026-09-23T12:00:00Z'))
+    const healthyNativeRead = healthyPage.waitForResponse(response => new URL(response.url()).pathname.endsWith('/native-context'))
+    await sessionChat(healthyPage, 'desktop', 'light')
+    const healthyNative = await healthyNativeRead
+    expect(healthyNative.status()).toBe(200)
+    expect(await healthyNative.json()).toMatchObject({ profile: 'native', current_binding: { project_id: 'p-pharos', harness_session_id: session } })
+    await expect(healthyPage.getByRole('tabpanel', { name: /^Chat/ })).toContainText('Owned session input from this panel is not available yet. Use the qualified session client.')
+    await expect(healthyPage.getByText('The session’s live capabilities could not be read. Reopen the panel to try again.', { exact: true })).toHaveCount(0)
+    expect(healthyReads.filter(response => response.status() >= 400).map(response => new URL(response.url()).pathname)).toEqual([])
+    expect(healthyErrors).toEqual([])
+  } finally { await healthyContext.close() }
 
 })

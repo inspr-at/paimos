@@ -156,7 +156,8 @@ export async function renderedFonts(page: Page) {
       for (const font of fonts) if (font.glyphCount > 0) {
         if (!font.isCustomFont || font.familyName !== 'JetBrains Mono') {
           const { node } = await client.send('DOM.describeNode', { nodeId, depth: 0 })
-          throw new Error(`System-font fallback in visual checkpoint: ${font.familyName} at ${node.nodeName}`)
+          const { outerHTML } = await client.send('DOM.getOuterHTML', { nodeId })
+          throw new Error(`System-font fallback in visual checkpoint: ${font.familyName} at ${node.nodeName}: ${outerHTML.slice(0, 200)}`)
         }
         rendered.set(font.familyName, { family: font.familyName, custom: font.isCustomFont })
       }
