@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
@@ -93,6 +94,36 @@ func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "work scope root budget exceeded") {
 		t.Fatalf("corpus did not exceed the scope root budget: %v", err)
+	}
+	// Risk: stale row estimates can turn a set-based leaf filter into one
+	// rescan of the entire candidate set per row. Inspect actual work rather
+	// than relying on the speed of the test host.
+	query := leaf
+	query.Q = "PICK"
+	querySQL, queryArgs := listSQL(query, nil)
+	err = db.InTenant(tenant.WithPrincipal(t.Context(), p), appPool, p.TenantID, func(tx pgx.Tx) error {
+		var raw []byte
+		if err := tx.QueryRow(t.Context(), "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+querySQL, queryArgs...).Scan(&raw); err != nil {
+			return err
+		}
+		var documents []map[string]any
+		if err := json.Unmarshal(raw, &documents); err != nil {
+			return err
+		}
+		var visit func(map[string]any)
+		visit = func(plan map[string]any) {
+			if relation, _ := plan["Relation Name"].(string); relation == "nodes" || plan["CTE Name"] != nil || plan["Function Name"] != nil {
+				t.Logf("picker plan: node=%v relation=%v cte=%v function=%v rows=%v loops=%v", plan["Node Type"], plan["Relation Name"], plan["CTE Name"], plan["Function Name"], plan["Actual Rows"], plan["Actual Loops"])
+			}
+			for _, child := range planChildren(plan) {
+				visit(child)
+			}
+		}
+		visit(documents[0]["Plan"].(map[string]any))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	status, body := call(t, &p, http.MethodGet, "/api/nodes?kind=work&shape=leaf&limit=30&sort=-updated_at&rollups=omit&q=PICK", "")

@@ -299,7 +299,7 @@ test('P04 header: visibility and occlusion never resume a graph the person pause
   } finally { app.stop() }
 })
 
-async function deliveredWidth(mutation?: Mutation) {
+async function deliveredWidth(mutation?: Mutation, target: 'root' | 'body' = 'root') {
   const app = header(mutation)
   try {
     await app.start(); await app.answer(0, 'A')
@@ -308,15 +308,23 @@ async function deliveredWidth(mutation?: Mutation) {
     assert.ok(observer, 'the viewport observer is installed')
     // No frames, tasks, window events or fresh geometry: deliver only the
     // observer's narrow sample while all synchronous hints still say wide.
-    observer.deliver([{ target: app.env.document.documentElement, borderBoxSize: [{ inlineSize: 390 }], contentRect: { width: 390 } }])
+    observer.deliver([{ target: target === 'root' ? app.env.document.documentElement : app.env.document.body, borderBoxSize: [{ inlineSize: 390 }], contentRect: { width: 390 } }])
     await flush()
     assert.equal(app.state.paint.value, false, 'a delivered narrow width must clear the painted glimpse')
+    observer.deliver([{ target: app.env.document.body, borderBoxSize: [{ inlineSize: 1600 }], contentRect: { width: 1600 } }])
+    await flush()
+    assert.equal(app.state.paint.value, false, 'a body-only wide delivery cannot revive a cleared glimpse')
     app.env.media('(min-width: 1280px)', true)
     await flush()
     assert.equal(app.state.paint.value, false, 'a late wide-media callback cannot revive it')
   } finally { app.stop() }
 }
-test('P04 header: a held-delivery narrow root sample wins over stale media and geometry', () => deliveredWidth())
+test('P04 header: a held-delivery narrow root sample wins over stale media and geometry', async () => {
+  await deliveredWidth()
+  // The root observer can be dropped independently. A body delivery must
+  // carry its measured width even before synchronous viewport reads catch up.
+  await deliveredWidth(undefined, 'body')
+})
 
 function grouped(mutation?: Mutation) {
   const env = environment(), requests: { id: string; query: ListQuery; signal: AbortSignal; result: ReturnType<typeof deferred<ProjectFigures>> }[] = []
