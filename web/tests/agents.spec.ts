@@ -1088,9 +1088,13 @@ test('assistant Desk approvals keep independent links, waiting order and partial
     await page.evaluate(() => (window as unknown as { fixtureQuietStreams: { emit: (name: string, data: string, id: number) => void } }).fixtureQuietStreams.emit('approval.proposed', '{}', 1705))
     await page.clock.fastForward(3001)
   }
-  partial = true
-  await wake()
-  await expect(amyRow.getByRole('link', { name: '2+ to approve', exact: true })).toHaveAttribute('title', 'This list is partial; more entries are available.')
+  const countGuard = await controlStability(page, { assistant: amyRow.locator('.assistant-open'), approvalLink: amyRow.locator('.assistant-approvals a') })
+  await countGuard.check(async () => {
+    partial = true
+    await wake()
+    await expect(amyRow.getByRole('link', { name: '2+ to approve', exact: true })).toHaveAttribute('title', 'This list is partial; more entries are available.')
+  })
+  countGuard.done()
   await expect(details.locator('.panel-status-line')).toContainText('At least 2 actions need an approval')
   await expect(details.getByRole('tabpanel', { name: 'Approvals', exact: true })).toContainText('This list is partial; more entries are available.')
   readable = false

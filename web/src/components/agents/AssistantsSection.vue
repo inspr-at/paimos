@@ -129,7 +129,7 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
 [data-status="waiting"] .assistant-state { font-weight: 600; }
 .assistant-approvals { grid-column: 5; white-space: nowrap; }
 .assistant-approvals > span { position: relative; pointer-events: auto; cursor: pointer; }
-.assistant-approvals a { display: inline-flex; align-items: center; min-height: 44px; position: relative; z-index: 1; pointer-events: auto; color: var(--teal-ink); }
+.assistant-approvals a { display: flex; align-items: center; min-height: 44px; position: relative; z-index: 1; pointer-events: auto; color: var(--teal-ink); }
 .assistant-show-all { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; width: 100%; border: 0; background: transparent; color: var(--ink-2); font-size: 12px; cursor: pointer; }
 .assistant-empty, .assistant-message { min-height: 56px; padding: 8px 16px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 12px; }
 .assistant-empty { display: flex; align-items: center; gap: 20px; }
@@ -161,8 +161,8 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
   .assistant-state svg { display: none; }
   .folded-facts, .row-budget, .assistant-glance { display: none; }
   .phone-facts { display: block; font-size: 12px; white-space: nowrap; }
-  .assistant-approvals:has(a) { display: block; position: absolute; right: 12px; bottom: 1px; }
-  .assistant-approvals a { min-height: 44px; }
+  .assistant-approvals:has(a) { display: block; position: absolute; left: 50%; right: 12px; bottom: 1px; }
+  .assistant-approvals a { min-height: 44px; justify-content: flex-end; }
   .assistant-open { display: block; padding: 0; border-radius: var(--radius); }
   .assistant-empty { flex-direction: column; align-items: flex-start; gap: 10px; padding: 12px; }
   .assistant-empty .btn { min-height: 44px; }
