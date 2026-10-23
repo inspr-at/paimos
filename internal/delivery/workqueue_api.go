@@ -13,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -210,9 +211,12 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Revision int64           `json:"revision"`
-		State    string          `json:"state"`
-		Hold     json.RawMessage `json:"hold_reason"`
+		Revision     int64           `json:"revision"`
+		MergeOutcome string          `json:"merge_outcome"`
+		Repository   string          `json:"repository"`
+		Head         string          `json:"head_sha"`
+		State        string          `json:"state"`
+		Hold         json.RawMessage `json:"hold_reason"`
 	}
 	if err := decode(w, r, &in); err != nil {
 		respondError(w, err)
@@ -225,6 +229,14 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Revision < 1 || progress && (len(in.Hold) > 0 || in.State != "running" && in.State != "done") || !progress && (in.State != "" && in.State != "queued" && in.State != "parked" || in.State == "" && len(in.Hold) == 0) {
 		respondError(w, fail(400, "invalid round transition"))
+		return
+	}
+	if in.MergeOutcome != "" && (!progress || in.State != "done" || in.MergeOutcome != "scripted" && in.MergeOutcome != "model" || !reviewgate.ValidRepository(in.Repository) || !reviewgate.ValidSHA(in.Head)) {
+		respondError(w, fail(400, "merge_outcome requires completed merge progress and captured repository/head"))
+		return
+	}
+	if in.MergeOutcome == "" && (in.Repository != "" || in.Head != "") {
+		respondError(w, fail(400, "repository/head belong to merge_outcome"))
 		return
 	}
 	var hold *string
@@ -248,12 +260,28 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 		if before.Revision != in.Revision {
 			return nil, 200, fail(409, "round changed; reload first")
 		}
+		if in.MergeOutcome != "" && (before.Kind != "merge" || before.PR == nil) {
+			return nil, 200, fail(400, "merge_outcome belongs to a merge round with a pull request")
+		}
 		out := before
 		if progress {
 			if before.Claimant == nil || *before.Claimant != p.ID {
 				return nil, 200, authz.ErrForbidden
 			}
 			if before.State == in.State {
+				if in.MergeOutcome != "" {
+					var same bool
+					if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM delivery_metric_marks m
+ JOIN delivery_metric_sources s ON s.repository=m.repository AND s.project_id=$1
+ JOIN delivery_items d ON d.project_id=s.project_id AND d.repository=s.repository AND d.pull_request=m.pull_request
+ WHERE m.repository=$2 AND m.kind='merge_round' AND m.mark_key=$3 AND m.head_sha=$4 AND m.outcome=$5
+ AND d.ticket_node_id=$6 AND d.head_sha=$4)`, project, in.Repository, "round/"+before.ID, in.Head, in.MergeOutcome, before.Ticket).Scan(&same); err != nil {
+						return nil, 200, err
+					}
+					if !same {
+						return nil, 200, fail(409, "completed merge evidence differs; reload the round and source")
+					}
+				}
 				return before, 200, nil
 			}
 			if !(before.State == "claimed" && in.State == "running" || before.State == "running" && in.State == "done") {
@@ -302,7 +330,37 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 		if err = saveRoundTx(r.Context(), tx, p.TenantID, out); err != nil {
 			return nil, 200, err
 		}
-		err = appendQueueChanges(r.Context(), tx, p, []events.Change{queueChange(project, "transition", queueSnapshot{Project: project, Round: &before}, queueSnapshot{Project: project, Round: &out}, out.Updated)})
+		changes := []events.Change{queueChange(project, "transition", queueSnapshot{Project: project, Round: &before}, queueSnapshot{Project: project, Round: &out}, out.Updated)}
+		if in.MergeOutcome != "" {
+			source, err := loadMetricSourceTx(r.Context(), tx, project, false)
+			if err != nil {
+				return nil, 200, err
+			}
+			if source == nil || source.Repository != in.Repository {
+				return nil, 200, fail(409, "project repository changed; discard the merge result")
+			}
+			var head string
+			err = tx.QueryRow(r.Context(), `SELECT head_sha FROM delivery_items WHERE project_id=$1 AND ticket_node_id=$2 AND repository=$3 AND pull_request=$4`, project, out.Ticket, source.Repository, out.PR).Scan(&head)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, 200, fail(409, "merge round no longer links to the project repository")
+			}
+			if err != nil {
+				return nil, 200, err
+			}
+			if head != in.Head {
+				return nil, 200, fail(409, "pull request head changed; discard the merge result")
+			}
+			if err := lockMergeEventParentsTx(r.Context(), tx, p, &project); err != nil {
+				return nil, 200, err
+			}
+			fact := metricFactInput{Kind: "merge_round", Key: "round/" + out.ID, PullRequest: out.PR, HeadSHA: &head, At: out.Updated, Outcome: in.MergeOutcome}
+			evidence, err := metricEvidenceTx(r.Context(), tx, p.TenantID, project, source.Repository, []metricFactInput{fact}, out.Updated)
+			if err != nil {
+				return nil, 200, err
+			}
+			changes = append(changes, evidence...)
+		}
+		err = appendQueueChanges(r.Context(), tx, p, changes)
 		return out, 200, err
 	})
 }

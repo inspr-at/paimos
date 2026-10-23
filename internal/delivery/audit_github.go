@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
@@ -214,4 +215,20 @@ func (g AppReader) AuditChecks(ctx context.Context, sha string) ([]Check, error)
 		return err
 	})
 	return out, err
+}
+
+// Historical queue membership is bound to the canonical PR merge SHA, not
+// assumed equal to a transient merge_group head. This repairs missed webhooks.
+type auditQueueGitHub interface {
+	AuditQueue(context.Context, int64, string) (bool, error)
+}
+
+func (g AppReader) AuditQueue(ctx context.Context, pr int64, sha string) (bool, error) {
+	var queued bool
+	err := g.observeGitHub(func(app *crossreview.GitHubApp) error {
+		var err error
+		queued, err = app.MergeQueueProof(ctx, pr, sha)
+		return err
+	})
+	return queued, err
 }
