@@ -742,12 +742,12 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .person-btn { height: 40px; }
   .log-wrap { padding: 12px; }
   .week-grid { min-width: 0; }
-  .week-grid .c-ticket { width: 94px; padding-left: 10px; padding-right: 4px; }
+  .week-grid .c-ticket { width: 90px; padding-left: 10px; padding-right: 0; }
   .week-grid thead .c-ticket { font-size: 0; }
   .t-cell .t-title { display: none; }
-  .c-day { width: auto; padding: 0 2px !important; font-size: 11.5px; }
+  .c-day { width: auto; padding: 0 !important; font-size: 10.5px; }
   .d-date { font-size: 10.5px; }
-  .c-total { width: 56px; padding-right: 10px !important; }
+  .c-total { width: 56px; padding-right: 10px !important; font-size: 11.5px; }
   .day-group { padding: 0 12px 8px; }
   .entry { grid-template-columns: max-content minmax(0, 1fr) 48px 28px; grid-template-areas: "time text dur act" "chip text dur act"; padding: 6px 0; }
   .entry > .ticket-chip { justify-self: start; }
