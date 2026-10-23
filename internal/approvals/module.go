@@ -21,8 +21,9 @@ import (
 
 // Module serves the approval routes.
 type Module struct {
-	pool     *pgxpool.Pool
-	inTenant func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error
+	pool          *pgxpool.Pool
+	inTenant      func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error
+	actionOutcome ActionOutcomeWriter
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -31,12 +32,21 @@ var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[
 
 // New returns an httpapi.Module for the approval routes. Mount it from the
 // coordinator; queries use db.InTenant.
-func New(pool *pgxpool.Pool) httpapi.Module {
-	return &Module{pool: pool, inTenant: db.InTenant}
+func New(pool *pgxpool.Pool, outcome ...ActionOutcomeWriter) httpapi.Module {
+	m := &Module{pool: pool, inTenant: db.InTenant}
+	if len(outcome) == 1 {
+		m.actionOutcome = outcome[0]
+	}
+	return m
 }
 
 // Mount registers the approval routes on mux.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/projects/{projectId}/action-requests", m.handleRequestAction)
+	mux.HandleFunc("POST /api/projects/{projectId}/action-approvals/{approvalId}/decision", reportercontract.WithHeader(reportercontract.Approvals, m.handleDecideAction))
+	mux.HandleFunc("GET /api/projects/{projectId}/action-requests/{requestId}", m.handleGetAction)
+	mux.HandleFunc("GET /api/action-request-kinds", m.handleActionKinds)
+	mux.HandleFunc("PUT /api/action-request-kinds/{kind}", m.handlePutActionKind)
 	mux.HandleFunc("GET /api/approvals", reportercontract.WithHeader(reportercontract.Approvals, m.handleList))
 	mux.HandleFunc("GET /api/approvals/{approvalId}", reportercontract.WithHeader(reportercontract.Approvals, m.handleGet))
 	mux.HandleFunc("POST /api/approvals", reportercontract.WithHeader(reportercontract.Approvals, m.handlePropose))

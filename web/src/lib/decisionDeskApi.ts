@@ -119,9 +119,10 @@ function base(id: string, kind: DeskItem['kind'], title: string, context: string
     why: '', outcome: 'once', suggestion: 'This action keeps its native permissions.', revision: 1, createdAt: '', held: true, decided: false }
 }
 export function approvalItem(approval: Approval, projectName = approval.resource_kind === 'tenant' ? 'Workspace' : 'Project name unavailable'): DeskItem {
-  return { ...base(`a:${approval.id}`, 'approval', `Allow ${approval.scope}?`, approval.rationale, [
-    { id: 'approved', title: 'Approve', description: 'Grant this request through the approvals API.', answer: 'Approved' },
-    { id: 'denied', title: 'Deny', description: 'Keep the permission unchanged.', answer: 'Denied' },
+  const outward = approval.scope.startsWith('approvals.request.outward_')
+  return { ...base(`a:${approval.id}`, 'approval', outward ? 'Approve this outward action?' : `Allow ${approval.scope}?`, approval.rationale, [
+    { id: 'approved', title: 'Approve', description: outward ? 'Approve only the exact effect described in this request.' : 'Grant this request through the approvals API.', answer: 'Approved' },
+    { id: 'denied', title: 'Deny', description: outward ? 'Decline this action and tell the requesting agent why.' : 'Keep the permission unchanged.', answer: 'Denied' },
   ]), askers: [{ principalId: approval.agent_principal_id, name: approval.agent_name?.trim() || undefined }], approval: { ...approval }, source: `/api/approvals/${encodeURIComponent(approval.id)}`, projectName, ticketId: approval.resource_kind === 'node' ? approval.resource_id ?? undefined : undefined, runId: approval.resource_kind === 'run' ? approval.resource_id || undefined : undefined, createdAt: approval.proposed_at, expiresAt: approval.expires_at, decided: decidedApprovals([approval], Date.now()).length > 0, optionId: approval.decision ?? undefined, answer: approval.decision ?? (Date.parse(approval.expires_at) <= Date.now() ? 'Expired without a decision' : undefined) }
 }
 export function actionItem(message: ProjectMessage, projectId: string, projectName: string): DeskItem {
@@ -542,7 +543,12 @@ export function decisionPermission(item: DeskItem, sources: DeskSources, can: (p
   if (item.kind === 'lesson') return !!sources.lessons.get(item.id) && can('knowledge.read', item.projectId) && can('knowledge.write', item.projectId) && (!item.lesson?.learning.recommendation?.rule_layer_id || can('rules.write', item.projectId))
   if (item.kind === 'key_trim') return can('keys.manage')
   if (item.kind === 'stepup') return !!item.stepup && can(item.stepup.permission, item.stepup.project_id)
-  if (item.kind === 'approval') { const approval = sources.approvals.get(item.id); return !!approval && canDecideApproval(approval, can) }
+  if (item.kind === 'approval') {
+    const approval = sources.approvals.get(item.id)
+    if (!approval) return false
+    if (approval.scope.startsWith('approvals.request.outward_')) return !!item.projectId && can('approvals.read', item.projectId) && can('approvals.decide', item.projectId) && can('approvals.decide_high', item.projectId)
+    return canDecideApproval(approval, can)
+  }
   if (item.kind === 'action') return can('inbox.manage', item.projectId)
   if (item.kind === 'rule') return can('rules.write')
   return item.kind === 'tier' && adapters.tiers?.allowed(item) === true
@@ -596,7 +602,7 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
     }
     if (item.decided) throw new Error('This protected decision cannot be replaced here.')
     const expected = draft.optionId === 'approved' ? 'approved' : 'denied'
-    const updated = await decideApproval(approval.id, expected, draft.reason.trim())
+    const updated = await decideApproval(approval.id, expected, draft.reason.trim(), approval)
     if (updated.id !== approval.id || updated.decision !== expected) throw new Error('The native approval decision was not confirmed. Refresh before trying again.')
     sources.approvals.set(item.id, { ...approval, ...updated })
   } else if (item.kind === 'action') {

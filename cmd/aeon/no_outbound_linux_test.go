@@ -355,6 +355,15 @@ func TestDefaultServerHasNoOutboundNetwork(t *testing.T) {
 	base := "http://" + ln.Addr().String()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
+		select {
+		case err := <-done:
+			// Wait completed, so the output buffer is no longer being written.
+			// Preserve the result for cleanup and expose the actual startup
+			// failure instead of hiding it behind the readiness timeout.
+			done <- err
+			t.Fatalf("server exited before readiness: %v\n%s", err, logs.String())
+		default:
+		}
 		resp, err := client.Get(base + "/api/ready")
 		if err == nil {
 			_ = resp.Body.Close()

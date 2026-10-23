@@ -138,6 +138,7 @@ test('R2 reads and mutations use only the human-session contract', async () => {
   await listAccounts(); await getRun('run/id'); await listApprovals()
   await setAccountState('account/id', 'draining')
   await decideApproval('approval/id', 'denied', 'Wrong resource')
+  await decideApproval('action/id', 'approved', 'Exact effect checked', { scope: 'approvals.request.outward_fixture', resource_kind: 'node', resource_id: 'project/id' })
   await revokeApproval('approval/id')
   assert.deepEqual(calls, [
     { url: '/api/agent-accounts', method: 'GET', body: undefined },
@@ -145,6 +146,7 @@ test('R2 reads and mutations use only the human-session contract', async () => {
     { url: '/api/approvals?limit=200', method: 'GET', body: undefined },
     { url: '/api/agent-accounts/account%2Fid', method: 'PATCH', body: { state: 'draining' } },
     { url: '/api/approvals/approval%2Fid/decision', method: 'POST', body: { decision: 'denied', reason: 'Wrong resource' } },
+    { url: '/api/projects/project%2Fid/action-approvals/action%2Fid/decision', method: 'POST', body: { decision: 'approved', reason: 'Exact effect checked' } },
     { url: '/api/approvals/approval%2Fid/revoke', method: 'POST', body: undefined },
   ])
 })
