@@ -245,7 +245,7 @@ export const useDeskConnections = defineStore('deskConnections', () => {
   if (typeof window !== 'undefined') { window.addEventListener('focus', focus); window.addEventListener('storage', storage); window.addEventListener(NOTICES, notificationPreference) }
   onScopeDispose(() => { reset(); if (typeof window !== 'undefined') { window.removeEventListener('focus', focus); window.removeEventListener('storage', storage); window.removeEventListener(NOTICES, notificationPreference) } })
   const count = computed(() => reads.value.reduce((n, r) => n + (r.summary?.open ?? 0), 0))
-  const complete = computed(() => discovery.value === 'known' && reads.value.every(r => r.state === 'ok' && checkedAt.value - r.lastReadAt < 60_000))
+  const complete = computed(() => discovery.value === 'known' && reads.value.every(r => !grants.has(r.tag) || (r.state === 'ok' && checkedAt.value - r.lastReadAt < 60_000)))
   const allClear = computed(() => complete.value && count.value === 0)
   const breakdown = computed(() => reads.value.flatMap(r => {
     if (r.state === 'not connected') return []
@@ -253,6 +253,7 @@ export const useDeskConnections = defineStore('deskConnections', () => {
     if (r.summary) return [`${r.summary.open} on ${r.tag}${r.state === 'unreachable' ? ` (as of ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}`]
     return [`${r.tag}: ${r.state === 'unreachable' ? "couldn't be reached" : r.state}`]
   }))
-  const syncTooltip = (now: number) => reads.value.filter(r => r.state !== 'not connected').map(r => `${r.tag}: ${r.state === 'unreachable' ? "couldn't be reached" : r.state === 'ended' ? 'connection ended' : r.summary ? `checked ${Math.max(0, Math.floor((now - r.lastReadAt) / 1000))} s ago` : r.state}${r.state === 'unreachable' && r.summary ? ` · showing ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`).join('\n')
+  const checkedAge = (seconds: number) => displayLanguage() === 'de' ? `vor ${seconds}\u00a0s geprüft` : `checked ${seconds}\u00a0s ago`
+  const syncTooltip = (now: number) => reads.value.filter(r => r.state !== 'not connected').map(r => `${r.tag}: ${r.state === 'unreachable' ? "couldn't be reached" : r.state === 'ended' ? 'connection ended' : r.summary ? checkedAge(Math.max(0, Math.floor((now - r.lastReadAt) / 1000))) : r.state}${r.state === 'unreachable' && r.summary ? ` · showing ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`).join('\n')
   return { here, reads, discovery, count, complete, allClear, breakdown, syncTooltip, noticeEnabled, refresh, connect, cancel, acceptFragment, disconnect, expand, dismiss, setNotify, showAll }
 })

@@ -60,7 +60,7 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
   <section v-if="visible" ref="root" class="instance-waiting" :class="variant" role="group" tabindex="-1" :aria-label="read.tag" :data-state="read.state" :data-testid="`instance-${read.tag}`">
     <div class="instance-line">
       <AppIcon name="server" :size="16" />
-      <span class="instance-copy" :data-tip="`${read.tag} · ${message}`"><b :data-tip="tooltip">{{ variant === 'goals' ? read.tag : text(`On ${read.tag}`, `Auf ${read.tag}`) }}</b><span aria-hidden="true"> · </span>{{ headerMessage }}</span>
+      <span v-clip-tip class="instance-copy" :data-tip="`${read.tag} · ${message}`"><b :data-tip="tooltip">{{ variant === 'goals' ? read.tag : text(`On ${read.tag}`, `Auf ${read.tag}`) }}</b><span aria-hidden="true"> · </span>{{ headerMessage }}</span>
       <span class="instance-actions">
         <span v-if="variant === 'goals' || action" class="action-slot">
           <span v-for="label in [text('Reconnect', 'Neu verbinden'), text('Try again', 'Erneut versuchen')]" :key="label" class="action-size" aria-hidden="true">{{ label }}</span>
@@ -80,10 +80,10 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
         <AppIcon :name="kindIcon(line.kind)" :size="14" />
         <template v-if="variant === 'goals'">
           <span v-clip-tip class="instance-title">{{ line.title }}</span>
-          <span class="instance-project">{{ line.projectKey }}</span>
+          <span v-clip-tip class="instance-project">{{ line.projectKey }}</span>
           <time v-if="line.createdAt" :datetime="line.createdAt">{{ relativeTime(line.createdAt, { now: Date.parse(read.summary!.asOf) }) }}</time>
         </template>
-        <span v-else class="instance-body"><span v-clip-tip class="instance-title">{{ line.title }}</span><small><span>{{ line.projectKey }}</span><span v-if="variant === 'preview'" class="instance-tag">{{ read.tag }}</span><time v-if="line.createdAt" :datetime="line.createdAt">{{ relativeTime(line.createdAt, { now: Date.parse(read.summary!.asOf) }) }}</time></small></span>
+        <span v-else class="instance-body"><span v-clip-tip class="instance-title">{{ line.title }}</span><small><span v-clip-tip class="instance-project">{{ line.projectKey }}</span><span v-if="variant === 'preview'" class="instance-tag">{{ read.tag }}</span><time v-if="line.createdAt" :datetime="line.createdAt">{{ relativeTime(line.createdAt, { now: Date.parse(read.summary!.asOf) }) }}</time></small></span>
         <span class="instance-decide"><span v-if="variant === 'desk'" class="decide-words">{{ text(`Decide on ${read.tag}`, `Auf ${read.tag} entscheiden`) }}</span><AppIcon name="external" :size="13" /></span>
       </a>
       <p v-if="variant === 'desk' && read.allItems && (read.summary?.open ?? 0) > lines.length" class="instance-asof">{{ text(`${lines.length} of ${read.summary!.open} shown. The rest are on the home Desk.`, `${lines.length} von ${read.summary!.open} angezeigt. Weitere Einträge stehen auf dem eigenen Desk.`) }}</p>
@@ -122,9 +122,9 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
 .instance-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .instance-project, time, .instance-asof { color: var(--ink-3); font-size: 12px; }
 .instance-asof { margin: 0; padding: 4px 0; }
-.instance-project { max-width: 10ch; overflow-wrap: anywhere; }
+.instance-project { min-width: 0; max-width: 10ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 520px) {
-  .instance-copy { overflow: hidden; max-height: 36px; }
+  .instance-copy { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .instance-project { max-width: 7ch; }
   .desk .instance-line, .preview .instance-line { flex-wrap: wrap; height: auto; }
   .desk .instance-actions, .preview .instance-actions { margin-left: auto; }

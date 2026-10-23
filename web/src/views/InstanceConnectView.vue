@@ -9,6 +9,7 @@ import { readInstances, type DeskSibling } from '../lib/deskElsewhere'
 import { confirmInstance, takeInstanceFragment } from '../lib/instanceConnect'
 import { brand } from '../lib/brand'
 import { displayLanguage } from '../lib/displayLanguage'
+import { vClipTip } from '../lib/clipTip'
 import Avatar from '../components/Avatar.vue'
 
 const props = defineProps<{ callback?: boolean; openHome?: boolean }>()
@@ -78,8 +79,8 @@ onBeforeUnmount(() => { generation++; abort.abort() })
     <article class="connect-card">
       <h1>{{ sibling ? text(`Show your waiting decisions on ${sibling.tag}?`, `Wartende Entscheidungen auf ${sibling.tag} anzeigen?`) : text('Connect another instance', 'Andere Instanz verbinden') }}</h1>
       <template v-if="sibling && !result">
-        <p>{{ text(`${sibling.tag} (${host(sibling.origin)}) will read what waits for you here: titles, projects and how long each has waited. It can't change anything. The access lives only in that browser, and you can disconnect it any time in Personal settings.`, `${sibling.tag} (${host(sibling.origin)}) liest, was hier wartet: Titel, Projekte und wie lange es schon wartet. Ändern kann es nichts. Der Zugriff gilt nur in diesem Browser und lässt sich jederzeit in den persönlichen Einstellungen trennen.`) }}</p>
-        <div class="connect-account"><Avatar :id="session.identity?.principal.id" :name="account" :size="36" /><span><b>{{ account }}</b><small>{{ email }}</small></span></div>
+        <p>{{ sibling.tag }} (<span v-clip-tip class="connect-host">{{ host(sibling.origin) }}</span>) {{ text("will read what waits for you here: titles, projects and how long each has waited. It can't change anything. The access lives only in that browser, and you can disconnect it any time in Personal settings.", 'liest, was hier wartet: Titel, Projekte und wie lange es schon wartet. Ändern kann es nichts. Der Zugriff gilt nur in diesem Browser und lässt sich jederzeit in den persönlichen Einstellungen trennen.') }}</p>
+        <div class="connect-account"><Avatar :id="session.identity?.principal.id" :name="account" :size="36" /><span><b v-clip-tip>{{ account }}</b><small v-clip-tip>{{ email }}</small></span></div>
         <button type="button" class="linkish" :disabled="busy" @click="switchAccount">{{ text('Not you? Switch account', 'Nicht das richtige Konto? Konto wechseln') }}</button>
         <p>{{ text('Ends after 90 days, or when you disconnect.', 'Endet nach 90 Tagen oder beim Trennen.') }}</p>
         <div class="connect-actions"><button type="button" class="btn primary" :disabled="busy" @click="connect">{{ text('Connect', 'Verbinden') }}</button><button type="button" class="btn" :disabled="busy" @click="cancel">{{ text('Cancel', 'Abbrechen') }}</button></div>
@@ -95,13 +96,18 @@ onBeforeUnmount(() => { generation++; abort.abort() })
 .instance-connect { width: min(100% - 32px, 440px); margin: 7vh auto 0; color: var(--ink); }
 .connect-brand { color: var(--ink-3); font-weight: 600; }
 .connect-card { border: 1px solid var(--line); border-radius: 12px; padding: 24px; background: var(--surface); }
-h1 { margin: 0 0 20px; font-size: 22px; line-height: 1.3; overflow-wrap: anywhere; }
+h1 { margin: 0 0 20px; font-size: 22px; line-height: 1.3; hyphens: auto; }
 p { font-size: 14px; line-height: 1.6; }
 .connect-account { display: flex; gap: 12px; align-items: center; margin: 18px 0 10px; }
-.connect-account span { display: grid; min-width: 0; overflow-wrap: anywhere; }
+.connect-account span { display: grid; flex: 1; min-width: 0; }
+.connect-account b { hyphens: auto; }
+.connect-account b, .connect-account small, .connect-host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connect-host { display: inline-block; max-width: 100%; vertical-align: bottom; }
 .connect-account small { color: var(--ink-3); }
 .connect-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 button, .btn { min-height: 44px; }
+.linkish { display: inline-flex; align-items: center; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-size: 14px; cursor: pointer; }
+.linkish:focus-visible { outline: none; border-radius: 4px; box-shadow: var(--focus-ring); }
 .connect-error { color: var(--danger); }
 @media (max-width: 520px) { .instance-connect { margin-top: 24px; } .connect-card { padding: 20px; } .connect-actions { flex-direction: column; } }
 </style>

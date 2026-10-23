@@ -227,70 +227,86 @@ func (m *Module) ownerSummary(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	// The parsed identity has no authority until the exact hash, origin, expiry
-	// and live person permission are verified inside this transaction.
+	// Reject an unknown hash, origin, expired/revoked grant or inactive person
+	// without taking the tenant's write fence. The parsed identity alone grants
+	// no access, including when its tenant does not exist.
 	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(r.Context(), p), 8*time.Second)
 	defer cancel()
-	ctx = db.WithAdditionalTenantGuard(ctx, func(ctx context.Context, tx pgx.Tx, tid string) error {
-		if err := db.LockTenant(ctx, tx, tid); err != nil {
-			return err
-		}
-		var id string
+	ctx = db.WithReadStatementTimeout(ctx, 5*time.Second)
+	var id string
+	activeConnection := func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `SELECT c.id::text FROM desk_instance_connections c
    JOIN principals p ON p.tenant_id=c.tenant_id AND p.id=c.principal_id AND p.kind='person' AND p.status='active'
    WHERE c.tenant_id=$1 AND c.principal_id=$2 AND c.token_hash=$3 AND c.origin=$4 AND c.revoked_at IS NULL AND c.expires_at>clock_timestamp()`, p.TenantID, p.ID, hash, r.Header.Get("Origin")).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConnectionEnded
 		}
-		if err != nil {
-			return err
-		}
-		if err = requireDeskAccessTx(ctx, tx, p); err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `UPDATE desk_instance_connections SET last_used_at=now() WHERE tenant_id=$1 AND id=$2`, tid, id)
 		return err
-	})
+	}
+	credentialCtx := db.NoProjects(ctx, "decision desk: validate a browser summary grant only")
+	err := db.InTenantReadSnapshot(credentialCtx, m.pool, p.TenantID, activeConnection)
+	if err == nil {
+		// Only the usage write needs the access-change fence. Recheck the grant
+		// and current Desk authority under that fence, then commit immediately.
+		err = db.InTenant(credentialCtx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+			if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+				return err
+			}
+			if err := activeConnection(tx); err != nil {
+				return err
+			}
+			if err := requireDeskAccessTx(ctx, tx, p); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `UPDATE desk_instance_connections SET last_used_at=now() WHERE tenant_id=$1 AND id=$2`, p.TenantID, id)
+			return err
+		})
+	}
 	out := OwnerSummary{Instance: m.instances.Here, Items: []SummaryItem{}}
-	// READ COMMITTED is deliberate: visibility setup can precede a wait for the
-	// access fence. A repeatable-read snapshot taken before that wait could
-	// retain a revoked grant or role. Under the fence every authority query sees
-	// current committed rows; ReadTx obtains items and counts in one statement.
-	err := db.InTenant(db.AllProjects(ctx, "decision desk: connected person summary reauthorized per source"), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
-			return err
-		}
-		page, err := ReadTx(ctx, tx, p, limit, nil, m.routineRuntime)
-		if err != nil {
-			return err
-		}
-		if err = askersTx(ctx, tx, p.TenantID, page.Items); err != nil {
-			return err
-		}
-		keys, err := projectKeysTx(ctx, tx, p.TenantID, page.Items)
-		if err != nil {
-			return err
-		}
-		upcoming, err := upcomingTx(ctx, tx, p)
-		if err != nil {
-			return err
-		}
-		out.Counts.Open, out.Counts.Held, out.AsOf = page.Counts.Open, page.Counts.Held, page.AsOf
-		if len(upcoming) > 0 {
-			out.Upcoming = &upcoming[0]
-		}
-		for _, item := range page.Items {
-			line := SummaryItem{ID: item.ID, Kind: item.Kind, ProjectKey: keys[item.ProjectID], Title: clip(item.Title, maxSummaryTitle), CreatedAt: item.CreatedAt, Held: item.Held, Href: item.Href}
-			if item.AskedBy != nil {
-				line.AskedBy = clip(item.AskedBy.Name, 120)
+	if err == nil {
+		// Like the home Desk, permissions and source data share an independent
+		// read snapshot. Slow summary queries never hold the tenant write fence.
+		err = db.InTenantReadSnapshot(db.AllProjects(ctx, "decision desk: connected person summary reauthorized per source"), m.pool, p.TenantID, func(tx pgx.Tx) error {
+			if err := requireDeskAccessTx(ctx, tx, p); err != nil {
+				return err
 			}
-			if !strings.HasPrefix(line.Href, "/") || strings.HasPrefix(line.Href, "//") {
-				line.Href = "/decision-desk"
+			page, err := ReadTx(ctx, tx, p, limit, nil, m.routineRuntime)
+			if err != nil {
+				return err
 			}
-			out.Items = append(out.Items, line)
-		}
-		return nil
-	})
+			if err = askersTx(ctx, tx, p.TenantID, page.Items); err != nil {
+				return err
+			}
+			keys, err := projectKeysTx(ctx, tx, p.TenantID, page.Items)
+			if err != nil {
+				return err
+			}
+			upcoming, err := upcomingTx(ctx, tx, p)
+			if err != nil {
+				return err
+			}
+			out.Counts.Open, out.Counts.Held, out.AsOf = page.Counts.Open, page.Counts.Held, page.AsOf
+			if len(upcoming) > 0 {
+				out.Upcoming = &upcoming[0]
+			}
+			for _, item := range page.Items {
+				line := SummaryItem{ID: item.ID, Kind: item.Kind, ProjectKey: keys[item.ProjectID], Title: clip(item.Title, maxSummaryTitle), CreatedAt: item.CreatedAt, Held: item.Held, Href: item.Href}
+				if item.AskedBy != nil {
+					line.AskedBy = clip(item.AskedBy.Name, 120)
+				}
+				if !strings.HasPrefix(line.Href, "/") || strings.HasPrefix(line.Href, "//") {
+					line.Href = "/decision-desk"
+				}
+				out.Items = append(out.Items, line)
+			}
+			return nil
+		})
+	}
+	if err == nil {
+		// A fresh snapshot catches a revocation/expiry committed during the read;
+		// an old read snapshot must not keep an ended connection alive.
+		err = db.InTenantReadSnapshot(credentialCtx, m.pool, p.TenantID, activeConnection)
+	}
 	if errors.Is(err, errConnectionEnded) || errors.Is(err, authz.ErrForbidden) {
 		httpapi.WriteError(w, 401, "connection ended")
 		return

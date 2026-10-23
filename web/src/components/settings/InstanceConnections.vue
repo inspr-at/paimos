@@ -6,6 +6,7 @@ import { useSession } from '../../stores/session'
 import { issuedConnections, revokeIssuedConnection, type IssuedConnection } from '../../lib/instanceConnect'
 import { displayLanguage } from '../../lib/displayLanguage'
 import { toast } from '../../lib/toast'
+import { vClipTip } from '../../lib/clipTip'
 import SettingsCard from './SettingsCard.vue'
 import AppIcon from '../AppIcon.vue'
 
@@ -44,7 +45,7 @@ onBeforeUnmount(() => { generation++; abort.abort() })
   <SettingsCard :title="text('Other instances', 'Andere Instanzen')" icon="link" anchor="other-instances">
     <template #lead>{{ text('Read your waiting decisions here. Each decision opens on its home instance.', 'Wartende Entscheidungen werden hier angezeigt. Jede Entscheidung öffnet sich auf ihrer eigenen Instanz.') }}</template>
     <div v-for="row in store.reads" :key="row.tag" class="connection-row">
-      <span><b>{{ row.tag }}</b> · {{ host(row.origin) }}<small v-if="row.account">{{ text('connected as', 'verbunden als') }} {{ row.account }} · {{ text('since', 'seit') }} {{ date(row.connectedAt) }}<template v-if="row.summary"> · {{ text('last read', 'zuletzt gelesen') }} {{ date(row.summary.asOf) }}</template></small><small>{{ connectionState(row.state) }}</small><label v-if="['ok', 'reading', 'unreachable'].includes(row.state)" class="instance-notify"><input type="checkbox" :checked="row.notify" @change="store.setNotify(row.tag, ($event.target as HTMLInputElement).checked)"><span>{{ text(`Notify me about ${row.tag}`, `Über ${row.tag} benachrichtigen`) }}</span></label></span>
+      <span><span class="connection-identity"><b>{{ row.tag }}</b> · <span v-clip-tip class="connection-host">{{ host(row.origin) }}</span></span><small v-if="row.account"><span v-clip-tip class="connection-account">{{ text('connected as', 'verbunden als') }} {{ row.account }}</span>{{ text('since', 'seit') }} {{ date(row.connectedAt) }}<template v-if="row.summary"> · {{ text('last read', 'zuletzt gelesen') }} {{ date(row.summary.asOf) }}</template></small><small>{{ connectionState(row.state) }}</small><label v-if="['ok', 'reading', 'unreachable'].includes(row.state)" class="instance-notify"><input type="checkbox" :checked="row.notify" @change="store.setNotify(row.tag, ($event.target as HTMLInputElement).checked)"><span>{{ text(`Notify me about ${row.tag}`, `Über ${row.tag} benachrichtigen`) }}</span></label></span>
       <button v-if="row.state === 'connecting'" type="button" class="btn sm" @click="store.cancel(row.tag)">{{ text('Cancel', 'Abbrechen') }}</button>
       <button v-else-if="row.state === 'not connected' || row.state === 'ended'" type="button" class="btn sm" @click="store.connect(row.tag)">{{ row.state === 'ended' ? text('Reconnect', 'Neu verbinden') : text('Connect', 'Verbinden') }}</button>
       <button v-else type="button" class="btn sm" @click="disconnect(row.tag)">{{ text('Disconnect', 'Trennen') }}</button>
@@ -55,7 +56,7 @@ onBeforeUnmount(() => { generation++; abort.abort() })
   <SettingsCard :title="text('Connected instances (read your waiting items)', 'Verbundene Instanzen (Wartendes lesen)')" icon="shield" anchor="connected-instances">
     <template #lead>{{ text('Disconnect here to end access from that browser.', 'Durch Trennen endet der Zugriff aus dem verbundenen Browser.') }}</template>
     <div v-for="row in issued" :key="row.id" class="connection-row">
-      <span><b>{{ row.instance }}</b> · {{ host(row.origin) }}<small>{{ text('this browser · connected', 'dieser Browser · verbunden') }} {{ date(row.created_at) }}<template v-if="row.last_used_at"> · {{ text('last used', 'zuletzt verwendet') }} {{ date(row.last_used_at) }}</template></small></span>
+      <span><span class="connection-identity"><b>{{ row.instance }}</b> · <span v-clip-tip class="connection-host">{{ host(row.origin) }}</span></span><small>{{ text('this browser · connected', 'dieser Browser · verbunden') }} {{ date(row.created_at) }}<template v-if="row.last_used_at"> · {{ text('last used', 'zuletzt verwendet') }} {{ date(row.last_used_at) }}</template></small></span>
       <button type="button" class="btn sm" :disabled="!!busy" @click="revoke(row.id)">{{ text('Disconnect', 'Trennen') }}</button>
     </div>
     <p v-if="!issued.length && !failed">{{ text('No active connections.', 'Keine aktiven Verbindungen.') }}</p>
@@ -65,7 +66,11 @@ onBeforeUnmount(() => { generation++; abort.abort() })
 
 <style scoped>
 .connection-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 13px; }
-.connection-row > span { min-width: 0; overflow-wrap: anywhere; }
+.connection-row > span { flex: 1; min-width: 0; }
+.connection-identity { display: flex; align-items: baseline; gap: .3em; min-width: 0; }
+.connection-identity b { flex: none; }
+.connection-host, .connection-account { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connection-account { display: block; }
 small { display: block; margin-top: 3px; color: var(--ink-3); font-size: 12px; }
 button { flex: none; min-height: 44px; }
 .instance-notify { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 13px; }

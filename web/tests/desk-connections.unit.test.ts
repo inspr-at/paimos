@@ -16,6 +16,8 @@ import GoalWaiting from '../src/components/goals/GoalWaiting.vue'
 import DeskInstanceItems from '../src/components/DeskInstanceItems.vue'
 
 vi.mock('../src/stores/session', () => ({ useSession: () => session }))
+const language = vi.hoisted(() => ({ value: 'en' }))
+vi.mock('../src/lib/displayLanguage', () => ({ displayLanguage: () => language.value }))
 vi.mock('../src/lib/deskElsewhere', async original => ({ ...await original<object>(), readInstances: vi.fn(), readSibling: vi.fn() }))
 vi.mock('../src/lib/decisionDesk', async original => ({ ...await original<object>(), loadDeskProjection: vi.fn() }))
 vi.mock('../src/lib/phoneApprovals', () => ({ deviceSubscriptionHash: async () => '', phoneSettings: vi.fn() }))
@@ -33,7 +35,7 @@ let pinia: Pinia
 const storage = new Map<string, string>()
 let opened: ReturnType<typeof vi.fn>, notices: { title: string; options?: NotificationOptions; onclick?: () => void; close: ReturnType<typeof vi.fn> }[]
 beforeEach(() => {
-  storage.clear(); notices = []; session.identity = null
+  storage.clear(); notices = []; session.identity = null; language.value = 'en'
   vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) })
   opened = vi.fn()
   vi.stubGlobal('window', Object.assign(new EventTarget(), { open: opened }))
@@ -219,4 +221,6 @@ it('blocks unknown or unread grants but excludes disconnected siblings from all-
 it('keeps the checked age and its seconds unit together', async () => {
   const store = await start()
   expect(store.syncTooltip(store.reads[0].lastReadAt + 12_000)).toBe('pma: checked 12\u00a0s ago')
+  language.value = 'de'
+  expect(store.syncTooltip(store.reads[0].lastReadAt + 12_000)).toBe('pma: vor 12\u00a0s geprüft')
 })
