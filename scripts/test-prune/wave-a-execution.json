@@ -2108,8 +2108,8 @@
   },
   "fix3": {
     "base": "13b51572194737ea2198dd6f8e0e9babd9764c50",
-    "sourceHead": "88aded7fd566a5b554cfb8e9d8da220e78c33aac",
-    "recordedAt": "2026-10-23T13:54:52.394364+00:00",
+    "sourceHead": "5527402c5073a155a48f993dc8cb3d72256ddc01",
+    "recordedAt": "2026-10-23T14:03:20.500586+00:00",
     "blockingFindings": [
       "picker HTTP 503 from quadratic canonical child probes hidden below Function Scan",
       "operator hostname in the public test-prune ledger"
@@ -2288,7 +2288,37 @@
             "classification": "Known shared-runner environment item 3; the Tick LEAD note explicitly keeps this duplicate wrapper deadline unchanged and accepts hosted CI proof."
           }
         }
-      ]
+      ],
+      "webRuntime": {
+        "entryPoint": "remote-spec.sh",
+        "proofHead": "57f448ef0d1f36ecfe6c5d10ad3caf668fd1a653",
+        "host": "agm2-ci",
+        "file": "tests/aeon-1696-fix3-units-proof.spec.ts",
+        "routingUnitsPassed": 39,
+        "p04RuntimePassed": 13,
+        "ledgerRegressionsPassed": 2,
+        "publicNameTestsPassed": 4,
+        "defaultPruneLedgerCheckPassed": true,
+        "publicNameGuardPassed": true,
+        "failed": 0,
+        "skipped": 0,
+        "transportCasesPassed": 1,
+        "reportedSeconds": 8.2,
+        "cleanupComplete": true,
+        "artifacts": "web/test-results/aeon-1696-fix3-units"
+      },
+      "visibilityPresenceRefinement": {
+        "sourceHead": "5527402c5073a155a48f993dc8cb3d72256ddc01",
+        "entryPoint": "remote-test.sh",
+        "host": "agm2-ci",
+        "test": "TestShapeLeafExcludesHiddenChild",
+        "passedRootTests": 1,
+        "failed": 0,
+        "skipped": 0,
+        "packageSeconds": 2.195,
+        "exitCode": 0,
+        "purpose": "Require explicit presence of both expected IDs so a missing false-valued parent cannot masquerade as a valid canonical result."
+      }
     },
     "constraints": {
       "nativeRegistrationsAdded": 0,
@@ -2304,11 +2334,25 @@
       "subagents": false,
       "temporaryLaunchersInDelivery": false
     },
-    "status": "verification running",
-    "workerPct": 90,
+    "status": "functional acceptance passed; authoritative hosted static wrapper proof outstanding",
+    "workerPct": 95,
     "pending": [
-      "Retained runtime units and default prune ledger check on the browser lane.",
       "Authoritative hosted static proof of the unchanged 120-second duplicate web-shard-spec-tests wrapper."
-    ]
+    ],
+    "sourceHeadBeforeEvidence": "88aded7fd566a5b554cfb8e9d8da220e78c33aac",
+    "sourceWriteSet": [
+      "internal/db/migrations/1427_bounded_picker_leaf_flags.sql",
+      "internal/nodes/list.go",
+      "internal/nodes/picker_search_test.go",
+      "docs/features/test-prune-ledger.md",
+      "scripts/test-prune/wave-a-execution.json"
+    ],
+    "outsideOriginalConsolidationPaths": [
+      {
+        "path": "internal/db/migrations/1427_bounded_picker_leaf_flags.sql",
+        "reason": "An additive canonical leaf helper is necessary to eliminate tenant rescans while retaining the published helper for older binaries; 1427 was reserved in the migration ledger after checking current main and active reservations."
+      }
+    ],
+    "r0RowsAdded": []
   }
 }
