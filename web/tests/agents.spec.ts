@@ -821,6 +821,9 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
       await expect(pane.getByRole('button')).toHaveCount(0)
     }
     if (name === 'Policy') {
+      const policy = details.getByRole('tabpanel', { name: 'Policy', exact: true })
+      await expect(policy).toContainText('Read and write tickets')
+      await expect(policy.getByText('nodes.read', { exact: true })).toHaveCount(0)
       for (const locked of ['outward', 'secrets']) await expect(details.locator(`[data-locked-rule="${locked}"] input, [data-locked-rule="${locked}"] select`)).toHaveCount(0)
     }
     await shot(`1440-light-panel-${name.toLowerCase()}`)

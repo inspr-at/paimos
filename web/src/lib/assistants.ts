@@ -81,9 +81,9 @@ export function policyGroups(scopes: string[]): string[] {
   const groups = new Set<string>()
   for (const scope of scopes) {
     if (scope === 'nodes.write') groups.add(scopes.includes('nodes.read') ? words.writeTickets : words.writeTicketsOnly)
-    else if (scope === 'nodes.read' && !scopes.includes('nodes.write')) groups.add(words.readTickets)
+    else if (scope === 'nodes.read') { if (!scopes.includes('nodes.write')) groups.add(words.readTickets) }
     else if (scope === 'knowledge.write') groups.add(words.writeKnowledge)
-    else if (scope === 'knowledge.read' && !scopes.includes('knowledge.write')) groups.add(words.readKnowledge)
+    else if (scope === 'knowledge.read') { if (!scopes.includes('knowledge.write')) groups.add(words.readKnowledge) }
     else if (scope === 'inbox.send') groups.add(words.messagePeople)
     else if (scope === 'inbox.read') groups.add(scopes.includes('inbox.receipt') ? words.readInbox : words.readInboxOnly)
     else if (scope === 'inbox.receipt') groups.add(scopes.includes('inbox.read') ? words.readInbox : words.acknowledgeInbox)

@@ -487,6 +487,7 @@
         "web/src/lib/assistants.ts",
         "web/src/lib/assistantsCopy.ts",
         "web/src/stores/assistants.ts",
+        "web/tests/assistants.unit.test.ts",
         "web/src/lib/personSteps.ts",
         "web/tests/lead-adoption.unit.test.ts",
         "web/tests/lead-adoption.spec.ts",
