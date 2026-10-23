@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Isolated unauthenticated Playwright smoke. Never use an operator profile,
 // login, mutation, third-party request, WebSocket, or service worker.
-import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { setupBrowserFonts } from "./playwright-global-setup.mjs";
@@ -22,8 +21,7 @@ export async function smoke(env = process.env, base = BASE) {
 }
 
 async function runSmoke(env, base) {
-  const require = createRequire(new URL("../web/package.json", import.meta.url));
-  const { chromium } = require("@playwright/test");
+  const { chromium } = await import("../web/node_modules/playwright/index.mjs");
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ serviceWorkers: "block", reducedMotion: "reduce" });
   let blocked = 0, errors = 0, bundleSeen = false;

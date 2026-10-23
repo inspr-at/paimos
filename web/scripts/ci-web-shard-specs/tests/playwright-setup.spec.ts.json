@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 30,
+    "selectedTests": 1
+  },
+  "spec": {
+    "file": "tests/playwright-setup.spec.ts",
+    "listedTests": 1,
+    "weightSeconds": 30,
+    "weightSource": "unmeasured-test-rate"
+  }
+}
