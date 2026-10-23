@@ -6,6 +6,7 @@
 // sheet layouts, with axe in light and dark.
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
+import { expectStableControls } from './helpers/stable'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockQuoteEditor, NODES, QUOTE_ID, quoteDocument, type QuoteDoc } from './quote-inspector-fixtures'
 
@@ -307,7 +308,8 @@ test('the Document tab holds this quote’s settings and links to the templates'
   await expect(page).toHaveURL('/settings/business#quotes')
 })
 
-test('the title bar: compact zoom, the header chevron beside PDF, save state and one panel toggle', async ({ page }) => {
+test('the title bar: compact zoom, the header chevron beside PDF, save state and one panel toggle', async ({ page }, info) => {
+  test.setTimeout(120_000)
   await page.setViewportSize({ width: 1440, height: 900 })
   const { calls } = await open(page)
   const face = page.getByRole('button', { name: /^Zoom 100 %/ })
@@ -362,6 +364,40 @@ test('the title bar: compact zoom, the header chevron beside PDF, save state and
   expect(node.marks).toEqual([{ start: 4, end: 9, bold: true }])
   await expect(save).toBeDisabled()
   await expect(page.locator('.save')).toContainText('Saved')
+  // AEON-1688: phone toolbar actions share one ghost surface; only the open panel is tinted.
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await open(page)
+    await page.evaluate(async theme => { document.documentElement.dataset.theme = theme; await document.fonts.ready }, theme)
+    const bar = page.locator('.titlebar'), pdf = bar.getByRole('button', { name: 'PDF', exact: true })
+    const chevron = bar.locator('.chevron'), more = bar.getByRole('button', { name: 'More actions', exact: true })
+    const details = bar.getByRole('button', { name: 'Details', exact: true }), format = bar.getByRole('button', { name: 'Format panel', exact: true })
+    const before = await bar.boundingBox()
+    await expectStableControls({ controls: { bar, pdf, chevron, more, details, format }, interactions: [
+      { name: 'open Details', run: async () => {
+        await details.click()
+        await expect(details).toHaveAttribute('aria-pressed', 'true')
+        if (width === 390) {
+          for (const control of [pdf, chevron, more, format]) {
+            await expect(control).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+            await expect(control).toHaveCSS('box-shadow', 'none')
+          }
+          await expect(details).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+        }
+      } },
+      { name: 'switch to Format', run: async () => {
+        await format.click()
+        await expect(format).toHaveAttribute('aria-pressed', 'true')
+        if (width === 390) {
+          await expect(details).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+          await expect(format).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+        }
+      } },
+    ] })
+    expect(await bar.boundingBox(), 'switching panels moves the toolbar by 0 px').toEqual(before)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
+    await page.screenshot({ path: info.outputPath(`AEON-1688/quote-editor-${width}-${theme}.png`) })
+  }
 })
 
 // Nothing in the panel reaches past its inner gutter, whichever tab and layout.

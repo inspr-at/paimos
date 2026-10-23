@@ -168,24 +168,43 @@ test('AEON-1535 P1: the phone question card reads at 22 px and the four stamp ro
 })
 
 test('AEON-1535 P2: an unavailable stamp row is disabled and reads its reason', async ({ page }, testInfo) => {
-  test.setTimeout(60_000)
-  await openQuestion(page, { width: 390, height: 844, theme: 'light', state: 'P2' })
-  const doctrine = row(page, 'doctrine')
-  await expect(doctrine).toHaveAttribute('aria-disabled', 'true')
-  await expect(doctrine).toBeDisabled()
-  await expect(page.getByTestId('stamp-words-doctrine')).toHaveText(DOCTRINE_OFF)
-  await expect(doctrine).toHaveAccessibleDescription(DOCTRINE_OFF)
-  expect(await oneLine(page.getByTestId('stamp-words-doctrine')), 'the reason stays one line').toBe(true)
-  // The question is about AEON-1: Requirement names it.
-  await expect(page.getByTestId('stamp-words-requirement')).toHaveText('add to AEON-1')
-  for (const outcome of ['once', 'always', 'requirement']) await expect(row(page, outcome)).not.toHaveAttribute('aria-disabled', /.*/)
-  await page.getByTestId('desk-stamps').evaluate(element => element.scrollIntoView({ block: 'center' }))
-  await shot(page, testInfo, '390-light-P2')
-  // A tap on it chooses nothing and shows the reason in full.
-  await doctrine.click({ force: true })
-  await expect(page.locator('.dlg-toast')).toHaveText(DOCTRINE_OFF)
-  await expect(row(page, 'once')).toHaveAttribute('aria-checked', 'true')
-  await expect(doctrine).toHaveAttribute('aria-checked', 'false')
+  test.setTimeout(120_000)
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await openQuestion(page, { width, height: 1000, theme, state: 'P2' })
+    const doctrine = row(page, 'doctrine'), words = page.getByTestId('stamp-words-doctrine')
+    await expect(doctrine).toHaveAttribute('aria-disabled', 'true')
+    await expect(doctrine).toBeDisabled()
+    await expect(doctrine).toHaveAccessibleDescription(DOCTRINE_OFF)
+    await expect(words).toHaveText(width === 390 ? 'Not available: the agent didn’t name the rule to change.' : DOCTRINE_OFF)
+    await expect(page.getByTestId('stamp-words-requirement')).toHaveText('add to AEON-1')
+    for (const outcome of ['once', 'always', 'requirement']) await expect(row(page, outcome)).not.toHaveAttribute('aria-disabled', /.*/)
+    const controls = {
+      decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), stamps: page.getByTestId('desk-stamps'),
+      once: row(page, 'once'), always: row(page, 'always'), doctrine,
+    }
+    await page.getByTestId('desk-stamps').scrollIntoViewIfNeeded()
+    const before = await row(page, 'always').boundingBox()
+    await expectStableControls({ controls, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
+      { name: 'focus the unavailable stamp', run: async () => {
+        await doctrine.focus()
+        if (width === 390) {
+          await expect(doctrine).not.toHaveAttribute('data-tip', /.*/)
+          await expect(page.getByRole('tooltip')).toHaveCount(0)
+          const lines = await words.evaluate(el => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))
+          expect(lines, 'the full inline reason wraps to two lines').toBe(2)
+          expect(await words.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
+        } else await expect(doctrine).toHaveAttribute('data-tip', DOCTRINE_OFF)
+      } },
+      { name: 'tap the unavailable stamp', run: async () => {
+        await doctrine.click({ force: true })
+        if (width === 390) await expect(page.locator('.dlg-toast')).toHaveText(DOCTRINE_OFF)
+        await expect(row(page, 'once')).toHaveAttribute('aria-checked', 'true')
+        await expect(doctrine).toHaveAttribute('aria-checked', 'false')
+      } },
+    ] })
+    expect(await row(page, 'always').boundingBox(), 'disabled stamp focus moves its neighbour by 0 px').toEqual(before)
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1688/desk-${width}-${theme}.png`) })
+  }
 })
 
 // A phone: touch input, so the tap is a real tap.

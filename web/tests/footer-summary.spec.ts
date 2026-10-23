@@ -198,7 +198,7 @@ test('a review filter stays through search and kind, and All entries clears it',
 
 // AEON-1459 (D5): phones have no footer bar. A failed save still says so, over the page's foot, and
 // retries from there; saving and the needs line stay quiet, so nothing floats over the page for them.
-test('a phone save that fails is said over the page and retried from there', async ({ page }) => {
+test('a phone save that fails is said over the page and retried from there', async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 800 })
   await mockWork(page, fixtures())
   let fail = true
@@ -235,6 +235,24 @@ test('a phone save that fails is said over the page and retried from there', asy
   })
   await expect.poll(() => page.evaluate(async () => (await import('/src/lib/footerSummary.ts')).footerSummary.value?.aria ?? '')).toMatch(/2 need you/)
   await expect(notice).toHaveCount(0)
+  // AEON-1688: a short floating notice sizes to its text, with no wrap at 390.
+  await page.goto('/p/PHAROS/tickets')
+  const toolbar = page.locator('.compact-ticket-toolbar')
+  for (const theme of ['light', 'dark'] as const) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await expect(notice).toHaveText('Updates paused · retrying')
+    const before = await toolbar.boundingBox()
+    const guard = await controlStability(page, { toolbar, notice })
+    await guard.check(async () => {
+      await notice.hover()
+      const lines = await notice.locator('span').evaluate(el => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))
+      expect(lines).toBeCloseTo(1, 1)
+      expect(await notice.locator('span').evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
+    })
+    guard.done()
+    expect(await toolbar.boundingBox(), 'notice moves the toolbar by 0 px').toEqual(before)
+    await page.screenshot({ path: info.outputPath(`AEON-1688/tickets-390-${theme}.png`) })
+  }
 })
 
 // The narrowest footer is 720 px wide: phones and short screens have none (AEON-1459).
