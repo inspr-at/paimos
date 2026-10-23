@@ -224,6 +224,16 @@ func (rt *runtime) printQuestion(q questions.Question) error {
 		return rt.printJSON(q)
 	}
 	fmt.Fprintf(rt.stdout, "question: %s\nstate: %s\nrevision: %d\n", q.ID, q.State, q.Revision)
+	if q.Reminder != nil && q.State == "open" {
+		if q.Reminder.AfterSeconds == 0 {
+			fmt.Fprintln(rt.stdout, "reminder: off")
+		} else {
+			fmt.Fprintf(rt.stdout, "reminder: every %s\n", time.Duration(q.Reminder.AfterSeconds)*time.Second)
+			if q.Reminder.NextAt != nil {
+				fmt.Fprintln(rt.stdout, "next reminder check:", q.Reminder.NextAt.UTC().Format(time.RFC3339))
+			}
+		}
+	}
 	for _, a := range q.Askers {
 		fmt.Fprintf(rt.stdout, "comment destination: %s\nreply root: %s\n", a.CommentNodeID, a.ReplyRootID)
 		if a.FromRecord != nil {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -203,5 +204,45 @@ func reminderQuietBoundaries(t *testing.T) {
 				t.Fatalf("quiet boundary: %s %v, want %s", got, err, tc.want)
 			}
 		})
+	}
+}
+
+func reminderCurrentAuthority(t *testing.T) {
+	f := deliveryFixtureFor(t)
+	ctx := t.Context()
+	if _, err := f.d.Admin.Exec(ctx, `INSERT INTO desk_reminder_settings(tenant_id,default_after_seconds,time_zone,quiet_start,quiet_end,revision) VALUES($1,7200,'UTC',0,0,1)`, f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	viewer := tenant.Principal{TenantID: f.person.TenantID, Kind: tenant.Person}
+	if err := f.d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Reminder reader') RETURNING id::text`, viewer.TenantID).Scan(&viewer.ID); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, f.d, viewer.TenantID, viewer.ID, "viewer")
+	if w := request(ctx, f.mux, viewer, "PUT", "/api/settings/question-reminders", map[string]any{"default_after_seconds": 0, "time_zone": "UTC", "quiet_start": 0, "quiet_end": 0, "expected_revision": 1}); w.Code != 403 || !strings.Contains(w.Body.String(), "forbidden") {
+		t.Fatalf("reader changed reminder defaults: %d %s", w.Code, w.Body)
+	}
+	q := f.ask(t, input())
+	for _, permission := range []string{"questions.decide", "questions.read", "inbox.read"} {
+		if _, err := f.d.Admin.Exec(ctx, `DELETE FROM role_permissions WHERE tenant_id=$1 AND permission=$2 AND role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='owner')`, f.person.TenantID, permission); err != nil {
+			t.Fatal(err)
+		}
+		f.advance(2 * time.Hour)
+		f.dispatch(t)
+		var accepted int
+		var last *time.Time
+		if err := f.d.Admin.QueryRow(ctx, `SELECT reminder_count,last_at FROM desk_question_reminders WHERE question_id=$1`, q.ID).Scan(&accepted, &last); err != nil {
+			t.Fatal(err)
+		}
+		if accepted != 0 || last != nil || f.count(t, `SELECT count(*) FROM inbox_messages WHERE idempotency_key LIKE 'question-reminder/%'`) != 0 {
+			t.Fatalf("revoked %s still received a reminder", permission)
+		}
+		if _, err := f.d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,id,$2 FROM roles WHERE tenant_id=$1 AND key='owner'`, f.person.TenantID, permission); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.advance(time.Minute)
+	f.dispatch(t)
+	if f.count(t, `SELECT count(*) FROM inbox_messages WHERE idempotency_key LIKE 'question-reminder/%'`) != 1 {
+		t.Fatal("restored authority did not recover the single retained interval")
 	}
 }

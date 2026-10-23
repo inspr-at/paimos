@@ -17,10 +17,7 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              allOf:
-                - {$ref: '#/components/schemas/QuestionReminderSettings'}
-                - {type: object, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 0}}}
+            schema: {$ref: '#/components/schemas/QuestionReminderSettingsInput'}
       responses:
         '200': {description: 'Saved reminder defaults', content: {application/json: {schema: {$ref: '#/components/schemas/QuestionReminderSettings'}}}}
         '400': {$ref: '#/components/responses/Error'}
@@ -73,6 +70,16 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
 components:
   schemas:
+    QuestionReminderSettingsInput:
+      type: object
+      additionalProperties: false
+      required: [default_after_seconds, time_zone, quiet_start, quiet_end, expected_revision]
+      properties:
+        default_after_seconds: {type: integer, minimum: 0, maximum: 2592000}
+        time_zone: {type: string, maxLength: 100}
+        quiet_start: {type: integer, minimum: 0, maximum: 1439}
+        quiet_end: {type: integer, minimum: 0, maximum: 1439}
+        expected_revision: {type: integer, minimum: 0}
     QuestionReminderSettings:
       type: object
       required: [default_after_seconds, time_zone, quiet_start, quiet_end, revision]
