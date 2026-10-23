@@ -87,6 +87,11 @@ it('exchanges the history code in a credential-free POST and receives the bearer
     method: 'POST', credentials: 'omit', mode: 'cors', cache: 'no-store', redirect: 'error', referrerPolicy: 'no-referrer',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: 'history-code', state: 'state', code_verifier: 'verifier' }),
   }))
+  fetch.mockImplementation(async () => new Response(`{"token":"${token}",broken`))
+  const failure = await exchangeInstance(pma, 'history-code', 'state', 'verifier').catch(error => error)
+  expect(failure).toBeInstanceOf(Error)
+  expect(failure.message).toBe('Connection could not be completed.')
+  expect(failure.message).not.toContain(token)
 })
 
 it('reports a refused remote revocation as a failed disconnect', async () => {

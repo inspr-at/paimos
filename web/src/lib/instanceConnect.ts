@@ -38,7 +38,9 @@ export async function exchangeInstance(sibling: DeskSibling, code: string, state
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   })
   if (!response.ok) throw new Error('Connection code could not be exchanged. Return and connect again.')
-  const body = await boundedJSON(response, 2048) as Record<string, unknown>
+  // Never let a parser error quote any part of the credential response in UI.
+  const body = await boundedJSON(response, 2048).catch(() => null) as Record<string, unknown> | null
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Connection could not be completed.')
   const token = typeof body.token === 'string' ? body.token : '', createdAt = typeof body.created_at === 'string' ? body.created_at : '', expiresAt = typeof body.expires_at === 'string' ? body.expires_at : ''
   if (body.instance !== sibling.tag || !/^desk_[\da-f-]{36}_[\da-f-]{36}_[A-Za-z0-9_-]{43}$/i.test(token) || !Number.isFinite(Date.parse(createdAt)) || !Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now() || Date.parse(expiresAt) > Date.now() + 91 * 86400_000 || typeof body.account !== 'string' || body.account.length > 120) throw new Error('Connection could not be completed.')
   return { token, origin: sibling.origin, account: body.account, createdAt, expiresAt }
