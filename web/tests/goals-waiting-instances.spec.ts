@@ -441,16 +441,19 @@ for (const width of [1440, 390] as const) {
 test('Desk coverage matrix, header tooltip and preview evidence in both themes', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 950 })
   for (const scenario of [
-    { name: 'here-2-there-1', local: 2, lines: 1, sibling: 'ok' as const },
-    { name: 'here-0-there-3', local: 0, lines: 3, sibling: 'ok' as const },
-    { name: 'here-0-there-unreachable', local: 0, lines: 0, sibling: 'down' as const },
-    { name: 'all-0', local: 0, lines: 0, sibling: 'ok' as const },
+    { name: 'here-2-there-1', width: 1440, local: 2, lines: 1, sibling: 'ok' as const },
+    { name: 'here-0-there-3', width: 1440, local: 0, lines: 3, sibling: 'ok' as const },
+    { name: 'here-0-there-unreachable', width: 1440, local: 0, lines: 0, sibling: 'down' as const },
+    { name: 'all-0', width: 1440, local: 0, lines: 0, sibling: 'ok' as const },
+    { name: 'here-1-there-2', width: 390, local: 1, lines: 2, sibling: 'ok' as const },
   ]) {
+    await page.setViewportSize({ width: scenario.width, height: 950 })
     const mock = await mockBand(page, scenario)
     const home = await mockDecisionDesk(page, { emptyDesk: scenario.local === 0 })
     home.projectionTime = NOW
     home.approval.expires_at = iso(NOW + HOUR)
     if (scenario.local) {
+      home.questions.splice(scenario.local)
       home.approval.decision = 'approved'; home.rule.state = 'proposed'
       home.questions[0].input.source_request_id = home.action.id
       home.action.reply_obligation = 'closed'
@@ -472,7 +475,7 @@ test('Desk coverage matrix, header tooltip and preview evidence in both themes',
     }
     for (const theme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: theme })
-      await shot(page, info, `desk-${scenario.name}-1440-${theme}`)
+      await shot(page, info, `desk-${scenario.name}-${scenario.width}-${theme}`)
     }
     if (scenario.name === 'here-2-there-1') {
       const deskPlace = page.locator('header .places').getByRole('link', { name: /Decision Desk, 3 open/ })
