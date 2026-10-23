@@ -104,9 +104,9 @@ apply. Overnight windows and DST gaps/folds are resolved in local time. Quiet
 ends are exclusive; equal endpoints disable the window.
 
 Acceptance writes one System inbox notice containing only the Desk question
-link and a `question.reminded` event. The open canonical question moves into
-the Desk's priority group without changing its answer revision or held-work
-state. The `reminder` projection exposes `after_seconds`, accepted `count`,
+link and a `question.reminded` event. The open canonical question is ordered
+ahead of other unheld questions in the Desk without changing its answer
+revision or held-work state. The `reminder` projection exposes `after_seconds`, accepted `count`,
 optional `last_at` and `next_at`; count records durable acceptance, not successful
 external transport. Answering clears the next reminder in the answer transaction.
 
@@ -123,3 +123,14 @@ These are configuration examples, not installed production schedules. Migration
 1423 adds tenant-scoped settings and project-scoped reminder state with forced
 RLS; both are classified in the DSAR inventory. No session cron, new secret,
 execution enablement, push or deployment is part of this slice.
+
+
+Regression coverage exercises competing replica claims at the tenant fence,
+acceptance rollback and fair retry, quiet-hour and DST boundaries, restart and
+downtime coalescing, current recipient permissions, answer cancellation, Desk
+ordering, and CLI/MCP parity. A scheduled 15-minute occurrence feeds the existing
+routine dispatch and coordinator pickup test; agentd's existing routine tests
+exercise its workspace and launch handling. Detached controls removing elapsed
+timing, Desk promotion and the final interval check fail their corresponding
+behaviour assertions. All original top-level test registrations are retained;
+no shared tier manifest or browser spec is changed.

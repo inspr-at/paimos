@@ -16,8 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Registered under the existing delivery lifecycle test: the forbidden shared
-// tier manifests need no new rows. One DB clock drives all due comparisons.
+// Risks: early or duplicate nags, stale recipients, lost retries and answered
+// questions waking again. One fixture database clock drives all deadlines.
 func reminderLifecycle(t *testing.T) {
 	f := deliveryFixtureFor(t)
 	ctx := t.Context()

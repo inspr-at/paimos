@@ -8,8 +8,8 @@ import (
 	"github.com/inspr-at/paimos/internal/recurrences"
 )
 
-// Runs under the registered dispatch behaviour test, keeping shared tier files
-// untouched. Every preview is derived from one clock, with no database values.
+// Risk: elapsed schedules drift across DST or burst after downtime. Preview
+// cases use one clock; the dispatch fixture proves the persisted pickup path.
 func elapsedRecurrenceCalendar(t *testing.T) {
 	for _, tc := range []struct {
 		name, rule, date, clock, zone, after, first, second string
