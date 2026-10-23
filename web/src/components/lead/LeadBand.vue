@@ -253,5 +253,7 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
 }
 @media (pointer: coarse) { .fold-btn { width: 44px; height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .lead.moving, .lead.moving .lead-fold, .fold-btn :deep(svg) { transition: none; } }
-.settings-link { display:inline-flex; align-items:center; gap:3px; min-height:30px; color:var(--ink-2); } @media(pointer:coarse) { .settings-link { min-height:44px; } }
+.settings-link { position: relative; display: inline-flex; align-items: center; gap: 3px; line-height: inherit; color: var(--ink-2); }
+/* The hit area grows around the text without raising its sentence's line box. */
+@media (pointer: coarse) { .settings-link::before { content: ''; position: absolute; inset: 50% 0 auto; min-height: 44px; width: 100%; transform: translateY(-50%); } }
 </style>
