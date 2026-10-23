@@ -6,6 +6,7 @@
   },
   "spec": {
     "file": "tests/work-surfaces-fix2.spec.ts",
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
         "max": 7.752,

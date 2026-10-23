@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/estimates.spec.ts",
-    "listedTests": 7,
+    "listedTests": 6,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.332,

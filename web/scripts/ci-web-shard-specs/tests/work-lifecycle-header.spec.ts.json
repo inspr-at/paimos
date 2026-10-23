@@ -6,6 +6,7 @@
   },
   "spec": {
     "file": "tests/work-lifecycle-header.spec.ts",
+    "listedTests": 3,
     "tierTiming": {
       "caseSeconds": {
         "max": 5.228,

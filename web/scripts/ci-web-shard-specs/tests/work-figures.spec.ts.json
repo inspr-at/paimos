@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/work-figures.spec.ts",
-    "listedTests": 28,
+    "listedTests": 19,
     "tierTiming": {
       "caseSeconds": {
         "max": 19.248,

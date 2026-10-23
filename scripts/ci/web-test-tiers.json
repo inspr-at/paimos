@@ -642,10 +642,6 @@
     ,
     "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (short at 1024)"
     ,
-    "browser:tests/goals-view.spec.ts:1024 dark: essentials stay, nothing overflows, axe is clean"
-    ,
-    "browser:tests/goals-view.spec.ts:1024 light: essentials stay, nothing overflows, axe is clean"
-    ,
     "browser:tests/goals-view.spec.ts:1440 dark: essentials stay, nothing overflows, axe is clean"
     ,
     "browser:tests/goals-view.spec.ts:1440 light: essentials stay, nothing overflows, axe is clean"
@@ -920,15 +916,7 @@
     ,
     "browser:tests/recurrence-marker.spec.ts:authoritative GET withheld provenance refreshes a cached list row at the same revision"
     ,
-    "browser:tests/recurrence-marker.spec.ts:delayed source permissions keep the edit action and stable header at 1024px in dark"
-    ,
-    "browser:tests/recurrence-marker.spec.ts:delayed source permissions keep the edit action and stable header at 1024px in light"
-    ,
-    "browser:tests/recurrence-marker.spec.ts:delayed source permissions keep the edit action and stable header at 1440px in dark"
-    ,
     "browser:tests/recurrence-marker.spec.ts:delayed source permissions keep the edit action and stable header at 1440px in light"
-    ,
-    "browser:tests/recurrence-marker.spec.ts:delayed source permissions keep the edit action and stable header at 390px in dark"
     ,
     "browser:tests/recurrence-marker.spec.ts:delayed source permissions keep the edit action and stable header at 390px in light"
     ,
@@ -950,31 +938,13 @@
     ,
     "browser:tests/recurrence-marker.spec.ts:readers and retired sources keep a marker without a management link"
     ,
-    "browser:tests/recurrence-marker.spec.ts:touch permission changes › coarse-pointer list keeps the recurring marker and title still at 1024px"
-    ,
     "browser:tests/recurrence-marker.spec.ts:touch permission changes › coarse-pointer list keeps the recurring marker and title still at 1440px"
-    ,
-    "browser:tests/recurrence-marker.spec.ts:touch permission changes › grant keeps the recurring pill and ticket content still at 1024px in dark"
-    ,
-    "browser:tests/recurrence-marker.spec.ts:touch permission changes › grant keeps the recurring pill and ticket content still at 1024px in light"
-    ,
-    "browser:tests/recurrence-marker.spec.ts:touch permission changes › grant keeps the recurring pill and ticket content still at 1440px in dark"
     ,
     "browser:tests/recurrence-marker.spec.ts:touch permission changes › grant keeps the recurring pill and ticket content still at 1440px in light"
     ,
-    "browser:tests/recurrence-marker.spec.ts:touch permission changes › grant keeps the recurring pill and ticket content still at 390px in dark"
-    ,
     "browser:tests/recurrence-marker.spec.ts:touch permission changes › grant keeps the recurring pill and ticket content still at 390px in light"
     ,
-    "browser:tests/recurrence-marker.spec.ts:touch permission changes › revoke keeps the recurring pill and ticket content still at 1024px in dark"
-    ,
-    "browser:tests/recurrence-marker.spec.ts:touch permission changes › revoke keeps the recurring pill and ticket content still at 1024px in light"
-    ,
-    "browser:tests/recurrence-marker.spec.ts:touch permission changes › revoke keeps the recurring pill and ticket content still at 1440px in dark"
-    ,
     "browser:tests/recurrence-marker.spec.ts:touch permission changes › revoke keeps the recurring pill and ticket content still at 1440px in light"
-    ,
-    "browser:tests/recurrence-marker.spec.ts:touch permission changes › revoke keeps the recurring pill and ticket content still at 390px in dark"
     ,
     "browser:tests/recurrence-marker.spec.ts:touch permission changes › revoke keeps the recurring pill and ticket content still at 390px in light"
     ,
@@ -988,11 +958,7 @@
     ,
     "browser:tests/recurrences.spec.ts:an Undo toast cannot mutate a different project and a failed pause stays honest"
     ,
-    "browser:tests/recurrences.spec.ts:controls stay anchored at 1440px in dark"
-    ,
     "browser:tests/recurrences.spec.ts:controls stay anchored at 1440px in light"
-    ,
-    "browser:tests/recurrences.spec.ts:controls stay anchored at 390px in dark"
     ,
     "browser:tests/recurrences.spec.ts:controls stay anchored at 390px in light"
     ,
@@ -1218,21 +1184,11 @@
     ,
     "browser:tests/routines-tab.spec.ts:at tablet width the list and one logbook take turns, and the logbook keeps its controls"
     ,
-    "browser:tests/routines-tab.spec.ts:counts never read \"0+\" at 1024 dark"
-    ,
-    "browser:tests/routines-tab.spec.ts:counts never read \"0+\" at 1024 light"
-    ,
-    "browser:tests/routines-tab.spec.ts:counts never read \"0+\" at 1440 dark"
-    ,
     "browser:tests/routines-tab.spec.ts:counts never read \"0+\" at 1440 light"
-    ,
-    "browser:tests/routines-tab.spec.ts:counts never read \"0+\" at 390 dark"
     ,
     "browser:tests/routines-tab.spec.ts:counts never read \"0+\" at 390 light"
     ,
     "browser:tests/routines-tab.spec.ts:one row per routine; filters per kind; failed never green; created is not finished; controls stay put"
-    ,
-    "browser:tests/routines-tab.spec.ts:phone › the list, then one logbook with a way back, in dark"
     ,
     "browser:tests/routines-tab.spec.ts:phone › the list, then one logbook with a way back, in light"
     ,
@@ -1472,35 +1428,15 @@
     ,
     "browser:tests/webcore-recovery.spec.ts:timing failures keep typed values and controls anchored, and save again on blur"
     ,
-    "browser:tests/work-figures.spec.ts:AEON-1358 evidence 1440 dark"
-    ,
     "browser:tests/work-figures.spec.ts:AEON-1358 evidence 1440 light"
-    ,
-    "browser:tests/work-figures.spec.ts:AEON-1358 evidence 390 dark"
     ,
     "browser:tests/work-figures.spec.ts:AEON-1358 evidence 390 light"
     ,
-    "browser:tests/work-figures.spec.ts:AEON-1358 evidence 960 dark"
-    ,
-    "browser:tests/work-figures.spec.ts:AEON-1358 evidence 960 light"
-    ,
-    "browser:tests/work-figures.spec.ts:AEON-1358 the Model popup names each model as its Model cells do (1024 dark)"
-    ,
     "browser:tests/work-figures.spec.ts:AEON-1358 the Model popup names each model as its Model cells do (1024 light)"
-    ,
-    "browser:tests/work-figures.spec.ts:AEON-1358 the Model popup names each model as its Model cells do (1440 dark)"
-    ,
-    "browser:tests/work-figures.spec.ts:AEON-1358 the Model popup names each model as its Model cells do (390 dark)"
     ,
     "browser:tests/work-figures.spec.ts:AEON-1358 the Model popup names each model as its Model cells do (390 light)"
     ,
-    "browser:tests/work-figures.spec.ts:AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1024 dark)"
-    ,
     "browser:tests/work-figures.spec.ts:AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1024 light)"
-    ,
-    "browser:tests/work-figures.spec.ts:AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1440 dark)"
-    ,
-    "browser:tests/work-figures.spec.ts:AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (390 dark)"
     ,
     "browser:tests/work-figures.spec.ts:AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (390 light)"
     ,
@@ -1524,15 +1460,7 @@
     ,
     "browser:tests/work-kinds.spec.ts:invalid and failed saves keep the draft and the controls still"
     ,
-    "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 1024 dark"
-    ,
-    "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 1024 light"
-    ,
-    "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 1440 dark"
-    ,
     "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 1440 light"
-    ,
-    "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 400 dark"
     ,
     "browser:tests/work-kinds.spec.ts:kinds evidence and control stability 400 light"
     ,
@@ -8494,8 +8422,6 @@
     ,
     {"kind":"browser","file":"tests/estimates.spec.ts","name":"an epic with open children and no hours shows coverage on the empty estimate","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/estimates.spec.ts","name":"estimate display and edit at 1600 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/estimates.spec.ts","name":"estimate display and edit at 1600 in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/estimates.spec.ts","name":"estimate display and edit at 390 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -8776,21 +8702,9 @@
     ,
     {"kind":"browser","file":"tests/from-classic.spec.ts","name":"sign-in returns to the classic resolver before opening its destination","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1024 dark: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1024 light: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 dark: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 dark: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 light: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"1440 light: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 dark: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 dark: Rename in place moves nothing; Esc cancels, an empty name is refused, Enter saves; Delete offers Undo, no confirm","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"390 light: New goal opens and closes without moving the toolbar or rows; create, link three, unlink and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8808,13 +8722,9 @@
     ,
     {"kind":"browser","file":"tests/goals-create-link.spec.ts","name":"a person who may not create goals sees no New goal, and no goal offers Link work, Edit or Delete","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":" › E6 390 dark: phones keep the epic rows and their essentials, 44 px Group targets, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/goals-epics.spec.ts","name":" › E6 390 light: phones keep the epic rows and their essentials, 44 px Group targets, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E1/E2 1024 light: epics in the goal anatomy; an opened epic lists what's missing in Definitions order, then its items with live lines and folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E1/E2 1440 dark: epics in the goal anatomy; an opened epic lists what's missing in Definitions order, then its items with live lines and folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E1/E2 1440 light: epics in the goal anatomy; an opened epic lists what's missing in Definitions order, then its items with live lines and folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8822,17 +8732,11 @@
     ,
     {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E4 1440: no open epics says so, without examples","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E5 1024: Goals → Epics → Goals moves no toolbar control, chip, Display trigger or header cell; GOAL and EPIC share one box","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E5 1440: Goals → Epics → Goals moves no toolbar control, chip, Display trigger or header cell; GOAL and EPIC share one box","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"the group is kept per person across a reload; ?view=goals&group=epics opens it once and changes nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1024: items nest under their goal at the step icons' x, labels run from the key to the ETA in at most two lines with the badge in the meta line; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1024: one line is reserved, only \"more\" pushes the list, \"less\" folds it back, a new note starts on one line, and #no-note renders nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1024: the status note keeps its reserve through a live update, hours left sit under LANDS, items carry their note and the Done fold counts today; a dropped stream says Reconnecting in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1440: items nest under their goal at the step icons' x, one line each with the live line in the Moving → Progress span; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8846,29 +8750,15 @@
     ,
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"390: the status note keeps its reserve through a live update, hours left sit under LANDS, items carry their note and the Done fold counts today; a dropped stream says Reconnecting in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"900: items nest under their goal at the step icons' x, labels run from the key to the ETA in at most two lines with the badge in the meta line; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 dark: Hide for me, Undo, Display › Show (Done goals, Hidden goals, Waiting on you), Unhide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 dark: the toolbar's Waiting on you toggle hides and shows the band, Display › Show follows, and the count stays without moving anything","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: Hide for me, Undo, Display › Show (Done goals, Hidden goals, Waiting on you), Unhide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: Waiting on you off leaves no band, keeps the header Desk count, and stays off from the first paint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: the toolbar's Waiting on you toggle hides and shows the band, Display › Show follows, and the count stays without moving anything","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 dark: the toolbar toggle steps aside; the ⋯ row reads \"Waiting on you · 1\", hides and shows the band, and keeps the count while hidden","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 dark: the ⋯ Goal display menu has the three Show rows; the opened goal hides, Undo restores, Hidden goals shows it and Unhide brings it back","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 light: the toolbar toggle steps aside; the ⋯ row reads \"Waiting on you · 1\", hides and shows the band, and keeps the count while hidden","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 light: the ⋯ Goal display menu has the three Show rows; the opened goal hides, Undo restores, Hidden goals shows it and Unhide brings it back","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1024 dark: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1024 light: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1440 dark: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11082,41 +10972,15 @@
     ,
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves custom-complete as done","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves custom-complete as done at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves custom-complete as done at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves custom-complete as done at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves custom-complete as done at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves custom-complete as done at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"leaf benefit guidance resolves done as open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"parent retry and generated text keep controls stable 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"parent retry and generated text keep controls stable 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"parent retry and generated text keep controls stable 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"parent retry and generated text keep controls stable 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"parent retry and generated text keep controls stable 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"parent retry and generated text keep controls stable 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"read-only generation status remains visible","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"workspace parent benefit opt-in 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"workspace parent benefit opt-in 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"workspace parent benefit opt-in 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"workspace parent benefit opt-in 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"workspace parent benefit opt-in 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/parent-benefits.spec.ts","name":"workspace parent benefit opt-in 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -11954,15 +11818,7 @@
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"authoritative GET withheld provenance refreshes a cached list row at the same revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"delayed source permissions keep the edit action and stable header at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"delayed source permissions keep the edit action and stable header at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"delayed source permissions keep the edit action and stable header at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"delayed source permissions keep the edit action and stable header at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"delayed source permissions keep the edit action and stable header at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"delayed source permissions keep the edit action and stable header at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11988,31 +11844,13 @@
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"theme token consumers recolour while fixed warnings and controls stay still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › coarse-pointer list keeps the recurring marker and title still at 1024px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › coarse-pointer list keeps the recurring marker and title still at 1440px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › grant keeps the recurring pill and ticket content still at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › grant keeps the recurring pill and ticket content still at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › grant keeps the recurring pill and ticket content still at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › grant keeps the recurring pill and ticket content still at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › grant keeps the recurring pill and ticket content still at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › grant keeps the recurring pill and ticket content still at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › revoke keeps the recurring pill and ticket content still at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › revoke keeps the recurring pill and ticket content still at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › revoke keeps the recurring pill and ticket content still at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › revoke keeps the recurring pill and ticket content still at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › revoke keeps the recurring pill and ticket content still at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › revoke keeps the recurring pill and ticket content still at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12026,11 +11864,7 @@
     ,
     {"kind":"browser","file":"tests/recurrences.spec.ts","name":"an Undo toast cannot mutate a different project and a failed pause stays honest","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/recurrences.spec.ts","name":"controls stay anchored at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/recurrences.spec.ts","name":"controls stay anchored at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/recurrences.spec.ts","name":"controls stay anchored at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/recurrences.spec.ts","name":"controls stay anchored at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12680,21 +12514,11 @@
     ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"at tablet width the list and one logbook take turns, and the logbook keeps its controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"counts never read \"0+\" at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"counts never read \"0+\" at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"counts never read \"0+\" at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"counts never read \"0+\" at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"counts never read \"0+\" at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"counts never read \"0+\" at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"one row per routine; filters per kind; failed never green; created is not finished; controls stay put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"phone › the list, then one logbook with a way back, in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"phone › the list, then one logbook with a way back, in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14340,51 +14164,19 @@
     ,
     {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"live leaf aggregates refresh from status_autopilot.undone with unchanged parent status","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"parent leaf totals at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"parent leaf totals at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"parent leaf totals at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"parent leaf totals at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"parent leaf totals at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"parent leaf totals at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished formatter-rounded 100% parent retains ETA and honest Progress at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished formatter-rounded 100% parent retains ETA and honest Progress at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished formatter-rounded 100% parent retains ETA and honest Progress at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished formatter-rounded 100% parent retains ETA and honest Progress at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished formatter-rounded 100% parent retains ETA and honest Progress at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished formatter-rounded 100% parent retains ETA and honest Progress at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished server-rounded 100% parent retains ETA and honest Progress at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished server-rounded 100% parent retains ETA and honest Progress at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished server-rounded 100% parent retains ETA and honest Progress at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished server-rounded 100% parent retains ETA and honest Progress at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished server-rounded 100% parent retains ETA and honest Progress at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished server-rounded 100% parent retains ETA and honest Progress at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished weighted 100% parent retains ETA and honest Progress at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished weighted 100% parent retains ETA and honest Progress at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished weighted 100% parent retains ETA and honest Progress at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished weighted 100% parent retains ETA and honest Progress at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished weighted 100% parent retains ETA and honest Progress at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-aggregates.spec.ts","name":"unfinished weighted 100% parent retains ETA and honest Progress at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14404,81 +14196,37 @@
     ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 every tooltip is opaque and the header's Closed group reads at 4.5:1 (light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 evidence 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 evidence 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 evidence 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 evidence 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 evidence 960 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 evidence 960 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 no popup clips a footer at the largest counts, and a box that grows is placed again over its header","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (1024 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (1024 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (1440 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (1440 light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (390 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the Model popup names each model as its Model cells do (390 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 the header work bar shows the whole project in hours, drawn to scale, with opaque counts on hover","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1024 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1024 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1440 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (1440 light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (390 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"AEON-1358 top-N popups keep empty lines reserved but blank, with Others only above 0 (390 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-figures.spec.ts","name":"phone › AEON-1358 on a phone the bar takes the full width and a tap pins the counts","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/work-history-fix5.spec.ts","name":"migrated work keeps history and review actions 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-history-fix5.spec.ts","name":"migrated work keeps history and review actions 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-history-fix5.spec.ts","name":"migrated work keeps history and review actions 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-history-fix5.spec.ts","name":"migrated work keeps history and review actions 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-history-fix5.spec.ts","name":"migrated work keeps history and review actions 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-history-fix5.spec.ts","name":"migrated work keeps history and review actions 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical leaf classification renders, confirms and saves at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical leaf classification renders, confirms and saves at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical leaf classification renders, confirms and saves at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical leaf classification renders, confirms and saves at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical leaf classification renders, confirms and saves at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical leaf classification renders, confirms and saves at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical work palette and relation key/title search at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical work palette and relation key/title search at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical work palette and relation key/title search at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical work palette and relation key/title search at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical work palette and relation key/title search at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical work palette and relation key/title search at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14502,15 +14250,7 @@
     ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"invalid and failed saves keep the draft and the controls still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 400 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and control stability 400 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14528,23 +14268,9 @@
     ,
     {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"⌘/Ctrl+Enter saves once from any field; the area stays; Undo restores the words","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 600 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 600 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 720 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 720 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14552,39 +14278,15 @@
     ,
     {"kind":"browser","file":"tests/work-lifecycle.spec.ts","name":"keyboard preserves native modifiers and Escape leaves the field before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-lifecycle.spec.ts","name":"work actions stay still 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-lifecycle.spec.ts","name":"work actions stay still 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-lifecycle.spec.ts","name":"work actions stay still 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-lifecycle.spec.ts","name":"work actions stay still 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-lifecycle.spec.ts","name":"work actions stay still 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-lifecycle.spec.ts","name":"work actions stay still 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-parent-releases.spec.ts","name":"parent ships-in and release choice 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-parent-releases.spec.ts","name":"parent ships-in and release choice 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-parent-releases.spec.ts","name":"parent ships-in and release choice 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-parent-releases.spec.ts","name":"parent ships-in and release choice 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-parent-releases.spec.ts","name":"parent ships-in and release choice 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-parent-releases.spec.ts","name":"parent ships-in and release choice 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-parent-status.spec.ts","name":"derived status refresh at unchanged edit revision · 1024 · dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-parent-status.spec.ts","name":"derived status refresh at unchanged edit revision · 1024 · light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-parent-status.spec.ts","name":"derived status refresh at unchanged edit revision · 1440 · dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-parent-status.spec.ts","name":"derived status refresh at unchanged edit revision · 1440 · light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-parent-status.spec.ts","name":"derived status refresh at unchanged edit revision · 390 · dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-parent-status.spec.ts","name":"derived status refresh at unchanged edit revision · 390 · light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14648,99 +14350,35 @@
     ,
     {"kind":"browser","file":"tests/work-queue.spec.ts","name":"unassigning In progress work enables Queue directly from the mutation response","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-surfaces-fix2.spec.ts","name":"incremental Outline and leaf progress 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-surfaces-fix2.spec.ts","name":"incremental Outline and leaf progress 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-surfaces-fix2.spec.ts","name":"incremental Outline and leaf progress 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-surfaces-fix2.spec.ts","name":"incremental Outline and leaf progress 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-surfaces-fix2.spec.ts","name":"incremental Outline and leaf progress 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-surfaces-fix2.spec.ts","name":"incremental Outline and leaf progress 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-surfaces-fix2.spec.ts","name":"vocabulary pending Reload 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-surfaces-fix2.spec.ts","name":"vocabulary pending Reload 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-surfaces-fix2.spec.ts","name":"vocabulary pending Reload 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-surfaces-fix2.spec.ts","name":"vocabulary pending Reload 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-surfaces-fix2.spec.ts","name":"vocabulary pending Reload 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-surfaces-fix2.spec.ts","name":"vocabulary pending Reload 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-surfaces-fix3.spec.ts","name":"unified Outline nests and unnests work 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-surfaces-fix3.spec.ts","name":"unified Outline nests and unnests work 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-surfaces-fix3.spec.ts","name":"unified Outline nests and unnests work 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-surfaces-fix3.spec.ts","name":"unified Outline nests and unnests work 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-surfaces-fix3.spec.ts","name":"unified Outline nests and unnests work 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-surfaces-fix3.spec.ts","name":"unified Outline nests and unnests work 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-surfaces-fix4.spec.ts","name":"migrated work completion and benefit editing 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-surfaces-fix4.spec.ts","name":"migrated work completion and benefit editing 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-surfaces-fix4.spec.ts","name":"migrated work completion and benefit editing 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-surfaces-fix4.spec.ts","name":"migrated work completion and benefit editing 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-surfaces-fix4.spec.ts","name":"migrated work completion and benefit editing 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-surfaces-fix4.spec.ts","name":"migrated work completion and benefit editing 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"quick creation preserves custom workspace names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"quick creation preserves custom workspace names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"quick creation preserves custom workspace names 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"quick creation preserves custom workspace names 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"quick creation preserves custom workspace names 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"quick creation preserves custom workspace names 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"quick creation preserves default workspace names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"quick creation preserves default workspace names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"quick creation preserves default workspace names 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"quick creation preserves default workspace names 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"quick creation preserves default workspace names 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"quick creation preserves default workspace names 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary reads top-down with an icon picker 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary reads top-down with an icon picker 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary reads top-down with an icon picker 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary reads top-down with an icon picker 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary reads top-down with an icon picker 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary reads top-down with an icon picker 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -23401,6 +23039,50 @@
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"system kind wording is editable while its immutable ticket area is preserved","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"the ⋯ menu binds to the record it opened on; Archive is disabled for built-in kinds and Everything else has no Move","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 autopilot settings actions > Undo refuses both a newer settings revision and a different person","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 autopilot settings actions > a rejected settings write preserves the saved limits and never offers Undo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 autopilot settings actions > a response after session expiry cannot replace settings or offer Undo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 autopilot settings actions > validates all day bounds before writing and preserves the server cap after explicit upgrade","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 estimate actions > a late conflict for ticket A cannot close or mark ticket B’s estimate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 estimate actions > a late error for ticket A cannot close or mark ticket B’s estimate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 estimate actions > a late ok for ticket A cannot close or mark ticket B’s estimate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 estimate actions > invalid values never write; a conflict preserves the draft; clearing writes null after explicit retry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 estimate actions > read-only estimates cannot write and parent editing starts from the plan, not the leaf total","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 logbook callbacks > a deep-linked run is pinned once, then deduplicated when Show older reaches it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 logbook callbacks > an older page cannot land after the filter changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 logbook callbacks > an older page cannot land after the person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 logbook callbacks > an older page cannot land after the routine changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 logbook callbacks > failed pagination retains the shown rows and cursor so Retry reads that exact page","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > a failed consent stays resumed, never reports consented or kept paused, and does not retry itself","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > a held resume cannot carry consent across a permission change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > a held resume cannot carry consent across a person change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > a held resume cannot carry consent across a project change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > a held resume cannot carry consent across a record change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > a held resume cannot carry consent across a tenant change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > another owner or an unavailable agent cannot begin either consent write","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-prune-runtime.unit.test.ts","name":"P05 routine consent actions > resumes the reviewed record before consenting to the returned revision as the captured agent","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"accepts authoritative relation-blocker readiness, coalesces checks and fences revisions and tenant resets","tier":"GATED-FULL"}
     ,

@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/goals-view.spec.ts",
-    "listedTests": 13,
+    "listedTests": 14,
     "weightSeconds": 28.853659,
     "weightSource": "unmeasured-test-rate"
   }

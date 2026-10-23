@@ -6,6 +6,7 @@
   },
   "spec": {
     "file": "tests/work-aggregates.spec.ts",
+    "listedTests": 13,
     "tierTiming": {
       "caseSeconds": {
         "max": 9.032,

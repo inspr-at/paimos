@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/goals-epics.spec.ts",
-    "listedTests": 10,
+    "listedTests": 7,
     "tierTiming": {
       "caseSeconds": {
         "max": 5.731,
