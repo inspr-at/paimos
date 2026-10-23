@@ -11,7 +11,7 @@ import { mockPublicQuote } from '../quote-list-fixtures'
 import { mockSettings, settingsData } from '../settings-fixtures'
 import { mockRulesScale, scaleImportFile } from '../rules-scale-fixtures'
 import { mockModels } from '../models-simple-fixtures'
-import { openModelsSettings } from '../models-settings-page'
+import { mockLeadActions } from '../lead-flow-fixtures'
 import { deliveryMetrics, mockDelivery } from '../delivery-numbers-fixtures'
 import { mockFlow } from '../delivery-flow-fixtures'
 import { capacityWorld, NOW as CAPACITY_NOW } from '../capacity-fixtures'
@@ -71,6 +71,14 @@ export const agents: VisualSetup = async (page, _profile, theme) => {
   data.sessions[1]!.host = 'entwicklungsarbeitsplatz.infrastruktur.example.invalid'
   data.accounts[0]!.label = `Gemeinsam verwaltetes Entwicklungskonto · ${LONG}`
   await mockAgents(page, data, { now: () => NOW })
+  // This reference depicts a successful lead read. Missing action projections
+  // remain covered separately by the lead-panel refusal test.
+  await page.route('**/api/projects/*/lead', route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const lead = { project_id: new URL(route.request().url()).pathname.split('/')[3]!, revision: 0, generation: 0,
+      session_id: null, state: 'none' as const, reason: '', process_active: false, automatic_launch_enabled: false }
+    return route.fulfill({ json: { ...lead, actions: mockLeadActions(lead) } })
+  })
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible()
   await expect(page.locator('.sessions [data-row]').first()).toBeVisible()
@@ -141,9 +149,18 @@ export const knowledge: VisualSetup = async (page, profile, theme) => {
 export const models: VisualSetup = async (page, _profile, theme) => {
   await work(page, theme)
   await mockModels(page, { longLabels: true, fallback: true })
-  await openModelsSettings(page)
+  // The isolated Models harness has no application header. References must
+  // exercise the real shell, whose main pane owns Settings scrolling.
+  await page.goto('/settings/models')
+  await expect(page.locator('[data-models-ready="true"]')).toBeVisible()
+  await expect(page.locator('.app-header')).toBeVisible()
   await page.getByRole('button', { name: 'For everyone' }).click()
-  await page.locator('[data-pick="design"]').click()
+  const picker = page.locator('[data-pick="design"]')
+  await picker.evaluate(element => {
+    const options = { block: 'nearest', inline: 'nearest', container: 'nearest' } as const
+    element.scrollIntoView(options)
+  })
+  await picker.click()
   await expect(page.locator('.mdl-pop .pm-lock')).toBeVisible()
 }
 
@@ -153,6 +170,8 @@ export const deliveryNumbers: VisualSetup = async (page, _profile, theme) => {
   await mockFlow(page, { empty: true })
   await page.goto('/p/AEON/delivery')
   await expect(page.getByTestId('delivery-summary')).toBeVisible()
+  await page.locator('main').evaluate(panel => panel.scrollTo({ top: 0, left: 0, behavior: 'instant' }))
+  await expect(page.locator('main')).toHaveJSProperty('scrollTop', 0)
 }
 
 export const hours: VisualSetup = async (page, _profile, theme) => {

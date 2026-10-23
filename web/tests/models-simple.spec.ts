@@ -5,6 +5,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { mockModels, simplePerson, type MockOptions } from './models-simple-fixtures'
 import { openModelsSettings } from './models-settings-page'
 import { controlStability } from './control-stability'
+import { models as visualModels, NOW as VISUAL_NOW } from './visual/fixtures'
 
 const row = (page: Page, key: string) => page.locator(`[data-row="${key}"]`)
 const pick = (page: Page, key: string) => page.locator(`[data-pick="${key}"]`)
@@ -84,7 +85,7 @@ test('the keyboard picks without the mouse: arrows choose the model and its leve
   expect(state.writes.map(write => write.body)).toEqual([expect.objectContaining({ revision: 3 }), { effort: 'high', revision: 4 }])
 })
 
-test('admins switch between For everyone and Just me; the lock lives in the picker and follows the row', async ({ page }) => {
+test('admins switch between For everyone and Just me; the lock lives in the picker and follows the row', async ({ page, browser }) => {
   const state = await open(page)
   await page.getByRole('button', { name: 'For everyone' }).click()
   await expect(row(page, 'design').locator('[data-lock]')).toBeVisible(); await expect(row(page, 'design').locator('[data-remove]')).toBeVisible()
@@ -113,6 +114,31 @@ test('admins switch between For everyone and Just me; the lock lives in the pick
   await page.getByRole('button', { name: 'Just me' }).click()
   await expect(row(page, 'concept').locator('[data-lock]')).toBeVisible(); expect(await pick(page, 'concept').evaluate(element => element.tagName)).toBe('SPAN')
   await expect(row(page, 'concept').locator('[data-lock]')).toHaveAttribute('data-tip', /You locked this for everyone .* Change it under For everyone\./)
+  // AEON-1674: exercise capture preparation without taking new references. The
+  // standalone harness cannot prove that the real application header survives
+  // opening a picker; both the phone and desktop must keep that shell in place.
+  for (const sample of [
+    { profile: 'desktop', theme: 'light', viewport: { width: 1440, height: 900 } },
+    { profile: 'phone', theme: 'dark', viewport: { width: 390, height: 844 } },
+  ] as const) {
+    const context = await browser.newContext({ viewport: sample.viewport, colorScheme: sample.theme,
+      reducedMotion: 'reduce', hasTouch: sample.profile === 'phone' })
+    try {
+      const preview = await context.newPage()
+      await preview.clock.setFixedTime(VISUAL_NOW)
+      await visualModels(preview, sample.profile, sample.theme)
+      await expect(preview).toHaveURL(/\/settings\/models$/)
+      const header = preview.locator('.app-header')
+      await expect(header).toBeVisible()
+      expect((await header.boundingBox())!.y).toBe(0)
+      expect(await preview.evaluate(() => window.scrollY)).toBe(0)
+      const guard = await controlStability(preview, { header })
+      await guard.check(() => preview.keyboard.press('Escape'))
+      await guard.check(() => preview.locator('[data-pick="design"]').click())
+      await expect(preview.locator('.mdl-pop .pm-lock')).toBeVisible()
+      guard.done()
+    } finally { await context.close() }
+  }
 })
 
 test('a lock set by someone else names them, and says "an admin" when the member list is not for this person', async ({ page }) => {

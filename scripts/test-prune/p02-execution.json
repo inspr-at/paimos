@@ -2,9 +2,9 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "fix2-ci-metadata-verified-reference-authority-blocked",
+  "status": "r3-seven-approved-states-packaged-fixtures-prepared",
   "cuts": false,
-  "note": "Fix2 resolves the six CI metadata failures without removing or demoting any original case. The full browser gate still fails honestly for unapproved references and the approved product deferrals; no assertion, axe rule or image comparison was weakened or skipped. Tick reference approval, permanent attachment identity, availability and CI materialization remain coordinator-owned prerequisites.",
+  "note": "Round 3 splits only the seven Tick-approved states from immutable 2e6c7938e captures, preserving all selected PNG and quality-report bytes. Agents now supplies caller-specific lead actions; Delivery preparation scrolls the main panel to its top; Models preparation uses the real Settings route instead of the headerless isolated harness and nearest scrolling. Six changes-requested states are not recaptured. No cuts, demotions or pinning; permanent attachment identity, verified availability and CI materialization remain coordinator-owned next-round prerequisites. Per-area reference authority is unchanged.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -25,7 +25,7 @@
     },
     {
       "kind": "reference-authority",
-      "reason": "Tick initial-reference review and permanent AEON-1670 attachment identity/member/bundle digests remain pending. Existing-authority CI materialization still needs verification."
+      "reason": "Tick approved projects, access, knowledge, public-quote, agent-rules, start-agent and quote-editor for source 2e6c7938e. Their exact 30 captures are in the approved round-3 archive. LEAD still supplies the permanent AEON-1670 attachment identity; availability and CI materialization must be verified before any per-area pin or cut. The six changes-requested areas wait for AEON-1688 and the next capture round."
     },
     {
       "kind": "quality-finding",
@@ -50,7 +50,7 @@
     {
       "kind": "reference-authority",
       "round": 3,
-      "reason": "LEAD gives the clean bundle to Tick, uploads it to AEON-1670, and supplies the permanent attachment identity. Then record identity, verify availability and CI materialization, and evaluate per-risk cuts."
+      "reason": "Tick approved projects, access, knowledge, public-quote, agent-rules, start-agent and quote-editor for source 2e6c7938e. Their exact 30 captures are in the approved round-3 archive. LEAD still supplies the permanent AEON-1670 attachment identity; availability and CI materialization must be verified before any per-area pin or cut. The six changes-requested areas wait for AEON-1688 and the next capture round."
     }
   ],
   "measurements": [
@@ -3141,6 +3141,100 @@
       "Tick has not approved the initial reference bundle; AEON-1670 permanent attachment identity, availability verification and CI materialization are absent. The visual cases remain real failures until those authorities exist.",
       "Keep Goals deferred to AEON-1621/AEON-1625, Session Chat/Hours/Capacity to AEON-1687, and Ticket workspace findings at AEON-1674 for coordinator product-owner routing, per the approved round-2 decisions.",
       "The complete static suite remains unproven at this head because the approved entry point refused under the night protocol; no local heavy fallback or origin push is performed."
+    ]
+  },
+  "round3": {
+    "brief": "aeon-1674-prune-p02-shell-visual-r3.md",
+    "mergedMain": "44dff09b4",
+    "approval": {
+      "reviewer": "Tick",
+      "recordedBy": "LEAD-M",
+      "reviewedOn": "2026-10-23",
+      "reportedLocalTime": "03:3x",
+      "timePrecision": "Exact minute and second not supplied in the brief.",
+      "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+      "states": [
+        "projects",
+        "access",
+        "knowledge",
+        "public-quote",
+        "agent-rules",
+        "start-agent",
+        "quote-editor"
+      ],
+      "nonBlockingProductFollowUps": {
+        "start-agent": "AEON-1688",
+        "quote-editor": "AEON-1688"
+      }
+    },
+    "approvedBundle": {
+      "directory": "/Users/markus/Code/aeon-worktrees/aeon-1674-prune-p02-shell-visual/web/test-results/AEON-1674-approved-1-2e6c7938e",
+      "archive": "/Users/markus/Code/aeon-worktrees/aeon-1674-prune-p02-shell-visual/web/test-results/AEON-1674-approved-1-2e6c7938e.tar",
+      "archiveSHA256": "2c17e829b380a9d3d357871f0f18ba8c2d6f021b00bb15c74f2884406a436055",
+      "archiveBytes": 13977600,
+      "archiveMembers": 62,
+      "states": [
+        "projects",
+        "access",
+        "knowledge",
+        "public-quote",
+        "agent-rules",
+        "start-agent",
+        "quote-editor"
+      ],
+      "pngMembers": 30,
+      "qualityReports": 30,
+      "baselineBundleSHA256": "c7673b146cc62d0e055bbe8fe9020bfa7f314b89a052a6ee75123e88cbacefe8",
+      "manifestSHA256": "b5e7c215b92ce31ff4ac19fb1e8d4fbeea3d56ed18a6b6a9447e8cd5c3cd9ab5",
+      "archiveManifest": "/Users/markus/Code/aeon-worktrees/aeon-1674-prune-p02-shell-visual/web/test-results/AEON-1674-approved-1-2e6c7938e.tar.manifest.json",
+      "archiveManifestSHA256": "e826bde57eccd7bbb711072474f9dea94f5710bfb5313cb1469518ddac89dc16",
+      "originalPNGsAndReportsUnchanged": true
+    },
+    "verification": {
+      "originalSourceManifestAndArchiveDigestsVerified": true,
+      "all121OriginalPayloadDigestsVerified": true,
+      "selected30PNGsAnd30QualityReportsByteIdentical": true,
+      "archive62MembersByteVerified": true,
+      "baseline30MembersDecodedAndVerified": true,
+      "perStateApprovalAndSourceRecorded": true,
+      "archiveDigestRecordedInDetachedManifest": true,
+      "browserFixtures": "pending-targeted-non-capture-run",
+      "static": "pending-approved-entry-point"
+    },
+    "fixtureChanges": {
+      "agents": "Explicit GET /api/projects/*/lead includes mockLeadActions for a successful caller projection. automatic_launch_enabled remains false; the independent action-omission/read-only browser case is retained.",
+      "delivery-numbers": "After the summary is ready, main scrolls to top=0/left=0 with instant behavior and asserts scrollTop=0.",
+      "models": "The previous openModelsSettings helper navigated to models-settings-harness.html; ModelsSettingsHarness.vue contains RouterView in a scrolling main but no AppHeader. This fixture omission explains the absent global top bar without asserting an app-shell defect. Preparation now opens the real /settings/models route, waits for its data and visible app header, and reveals the design picker with block/inline/container nearest. The existing Models admin case also exercises this exact fixture on phone dark and desktop light without taking reference screenshots and measures header stability across close/reopen."
+    },
+    "changesRequested": {
+      "states": [
+        "tickets",
+        "decision-desk",
+        "account-use-matrix",
+        "delivery-numbers",
+        "agents",
+        "models"
+      ],
+      "recaptured": false,
+      "nextRoundAfter": "AEON-1688 merged"
+    },
+    "attachment": {
+      "ticket": "AEON-1670",
+      "uploadedBy": "LEAD in next round",
+      "identity": null,
+      "availabilityVerified": false,
+      "ciMaterializationVerified": false,
+      "pinned": false
+    },
+    "perAreaAuthority": "Only approved, pinned, available states protecting a cut may authorize it; unrelated changes-requested or deferred states do not block it. Existing check.mjs and ledger controls are unchanged.",
+    "newBrowserCases": 0,
+    "originalCasesRemovedOrDemoted": 0,
+    "productChanges": false,
+    "outsideWriteSet": [
+      {
+        "path": "web/tests/models-simple.spec.ts",
+        "reason": "Extend its existing admin/lock case to exercise the actual Models visual fixture without screenshots; prove the application header stays visible and still on phone and desktop, without adding browser registrations."
+      }
     ]
   }
 }
