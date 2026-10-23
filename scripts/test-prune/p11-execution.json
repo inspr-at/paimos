@@ -2,7 +2,7 @@
   "version": 1,
   "ticket": "AEON-1683",
   "package": "P11",
-  "status": "replacements-proven-cuts-planned",
+  "status": "verified-overlap-applied-partial-package",
   "baseline": "scripts/test-prune/baseline.json",
   "baselineSha256": "e017c08a8cbad7451c9c1615a98f03cb10de1f1c85bef0d561c86fec1faaafc0",
   "before": 493,
@@ -145,7 +145,8 @@
             "browser:tests/status-icons.spec.ts:AEON-1362 slides pause off-screen and in a hidden tab"
           ]
         }
-      ]
+      ],
+      "actualAfter": 5
     },
     {
       "file": "tests/portal-admin.spec.ts",
@@ -175,7 +176,8 @@
             "browser:tests/portal-admin.spec.ts:AEON-1683: portal publishing and moderation retain the current binding after a stale write"
           ]
         }
-      ]
+      ],
+      "actualAfter": 1
     },
     {
       "file": "tests/delivery-flow-modes.spec.ts",
@@ -189,7 +191,7 @@
         "browser:tests/delivery-flow-modes.spec.ts:the Flow empty state at 390 light sits under the mode controls without sample data",
         "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 light en)",
         "browser:tests/delivery-flow-modes.spec.ts:the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 light de)",
-        "browser:tests/delivery-flow-modes.spec.ts:with motion \u203a Replay opens at the start of the latest release and auto-plays once per session",
+        "browser:tests/delivery-flow-modes.spec.ts:with motion › Replay opens at the start of the latest release and auto-plays once per session",
         "browser:tests/delivery-flow-modes.spec.ts:without a recorded run every mode shows the empty state and no sample data, until the first run is recorded"
       ],
       "mappings": [
@@ -359,10 +361,10 @@
           ]
         },
         {
-          "source": "browser:tests/delivery-flow-modes.spec.ts:with motion \u203a Replay opens at the start of the latest release and auto-plays once per session",
+          "source": "browser:tests/delivery-flow-modes.spec.ts:with motion › Replay opens at the start of the latest release and auto-plays once per session",
           "disposition": "retained",
           "destinations": [
-            "browser:tests/delivery-flow-modes.spec.ts:with motion \u203a Replay opens at the start of the latest release and auto-plays once per session"
+            "browser:tests/delivery-flow-modes.spec.ts:with motion › Replay opens at the start of the latest release and auto-plays once per session"
           ]
         },
         {
@@ -372,7 +374,8 @@
             "browser:tests/delivery-flow-modes.spec.ts:without a recorded run every mode shows the empty state and no sample data, until the first run is recorded"
           ]
         }
-      ]
+      ],
+      "actualAfter": 9
     },
     {
       "file": "tests/delivery-ui.spec.ts",
@@ -516,7 +519,8 @@
             "browser:tests/delivery-ui.spec.ts:shadow delivery rounds show holds without moving delivery controls"
           ]
         }
-      ]
+      ],
+      "actualAfter": 6
     },
     {
       "file": "tests/delivery-flow-lanes.spec.ts",
@@ -606,7 +610,8 @@
             "browser:tests/delivery-flow-lanes.spec.ts:AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls"
           ]
         }
-      ]
+      ],
+      "actualAfter": 4
     }
   ],
   "evidence": "docs/features/test-prune-p11.md",
@@ -614,5 +619,6 @@
     "Tick visual approval and immutable reference digests remain pending; protected cuts stay closed.",
     "Unexecuted runtime recipients keep their browser donors; the new stream-lifetime test is additive until its runtime execution and negative control pass.",
     "Remote static checks are paused at night; performance config and affected unit suites require hosted CI or an approved remote entry point."
-  ]
+  ],
+  "actualAfter": 450
 }

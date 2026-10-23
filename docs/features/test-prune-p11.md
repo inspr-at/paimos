@@ -1,10 +1,10 @@
 # P11 replacement proof and remaining cuts
 
-AEON-1683 implements a conservative first part of P11 under Markus's standing AEON-1670 approval of 2026-10-22. The full package is **not complete**. Its frozen input is 493 browser cases across 40 source owners; the planned verified overlap below reduces that to **450**, above the requested ceiling of 22. No protected historical identity, historical replay evidence, production behavior, CI activation flag, required check or visual reference is changed.
+AEON-1683 implements a conservative first part of P11 under Markus's standing AEON-1670 approval of 2026-10-22. The full package is **not complete**. Its frozen input is 493 browser cases across 40 source owners; the verified overlap below reduces that to **450**, above the requested ceiling of 22. No protected historical identity, historical replay evidence, production behavior, CI activation flag, required check or visual reference is changed.
 
 The exact original-case mappings are in `scripts/test-prune/p11-execution.json`, pinned to P01's immutable baseline digest. All 68 original registrations in the five changed groups have explicit destinations. The other 35 owners map every frozen registration to itself. An original identity protected by the standing ledger cannot be removed by this package's mapping.
 
-| Browser owner | Before | Retained after planned cuts | Risks intentionally retained beyond its one-case plan |
+| Browser owner | Before | Retained after cuts | Risks intentionally retained beyond its one-case plan |
 |---|---:|---:|---|
 | status-icons | 12 | 5 | Phone icon geometry; native animation of every menu mark; off-screen/hidden-tab suspension; actual CSS bar hover/live/static behavior |
 | portal-admin | 3 | 1 | Publishing and moderation, a stale project/revision refusal, authoritative binding refresh and explicit retry |
@@ -18,7 +18,7 @@ The five new cases use one rendering profile each. Their workflows perform actua
 
 `delivery-flow-modes.unit.test.ts` also adds a runtime subscription-lifetime case using production `useDeliveryFlow`, mounted Vue components, an injected clock and counted sources/requests. Twenty deactivate/reactivate cycles require no stream or timer while inactive, exactly one stream while active, two reads per activation and no extra reads for an equal-project rerender. Its native identity is ESSENTIAL. This runtime test has been collected, but its execution and negative control remain unproven; **delivery-tab-switch's two original browser cases remain**.
 
-Five replacement cases passed through LEAD's `remote-spec.sh` before cuts. A separate scratch branch then changed one production behavior for each case; all five cases failed on commit `9bc7d7532`, with the original product behavior restored on the work branch:
+Five replacement cases passed through LEAD's `remote-spec.sh` before cuts, including the strengthened SVG/stripe geometry check (4.6 s). A separate scratch branch then changed one production behavior for each case; all five cases failed on commit `9bc7d7532`, with the original product behavior restored on the work branch:
 
 | Negative control | Observed refusal |
 |---|---|

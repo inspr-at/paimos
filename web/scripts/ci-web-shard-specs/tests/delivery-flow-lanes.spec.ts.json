@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/delivery-flow-lanes.spec.ts",
-    "listedTests": 12,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
         "max": 7.15,

@@ -1520,15 +1520,7 @@
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 390 light"
     ,
-    "browser:tests/status-icons.spec.ts:AEON-1362 every one-off in the status menu (dark): timings, marks only, base never blanks, ends static, keyboard"
-    ,
-    "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 1440px dark: diagonal slide, one-offs once per entry, no shift"
-    ,
     "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 390px light: diagonal slide, one-offs once per entry, no shift"
-    ,
-    "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 960px dark: diagonal slide, one-offs once per entry, no shift"
-    ,
-    "browser:tests/status-icons.spec.ts:AEON-1362 icons in the list and header at 960px light: diagonal slide, one-offs once per entry, no shift"
     ,
     "browser:tests/status-time.spec.ts:AEON-1359 screenshots at 1440 dark"
     ,
@@ -8736,45 +8728,13 @@
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 light de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 400 dark de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 400 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 400 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"a 15 min window at a phone overview edge keeps both handles draggable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"at Fit all a phone overview keeps each 44 px handle inside and a drag at either edge resizes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"lanes zoom, pan and move the time without moving a control, and a click never moves the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"panning an incident to the right edge keeps its caption inside the lane frame","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"the overview brush pans and resizes the window, and its playhead moves the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"AEON-1683: Flow switches Live Replay and Compare and a held hint preserves the chosen time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Compare races release 126 from step a against the Arion target on one axis","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Flow modes at 1440 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Flow modes at 1440 light de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Flow modes at 1440 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Flow modes at 400 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Flow modes at 400 light en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Live reads the recorded runs, follows a server hint, and keeps the time the person is viewing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Replay under reduced motion shows the run still; the handle and Shift+arrows move the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (de)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8782,27 +8742,9 @@
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"a release no record has reported on says \"not recorded\" in the same four rows","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 1024 dark sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 1024 light sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 1440 dark sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 1440 light sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 390 dark sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the Flow empty state at 390 light sits under the mode controls without sample data","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 dark en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 light en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 dark en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 light en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 dark en)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 light de)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8928,37 +8870,13 @@
     ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"AEON-1683: Delivery retains failed rows and drafts, retries, and binds policy Undo to its project","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"a failed refresh keeps the delivery rows and notes the failure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"a later hold on a lifted row can be lifted again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1024 dark de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1024 dark en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1024 light de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1024 light en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1440 dark de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1440 dark en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1440 light de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1440 light en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 390 dark de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 390 dark en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 390 light de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 390 light en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery loading, empty, unavailable and error replace one slot; readers have no management actions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"failed writes stay honest; project reset offers scope-bound Undo and uses captured revisions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"shadow delivery rounds show holds without moving delivery controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -12224,12 +12142,6 @@
     ,
     {"kind":"browser","file":"tests/portal-admin.spec.ts","name":"AEON-1683: portal publishing and moderation retain the current binding after a stale write","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/portal-admin.spec.ts","name":"a stale release-history publish reloads the link that is there now","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/portal-admin.spec.ts","name":"portal settings publish, moderate and hide at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/portal-admin.spec.ts","name":"portal settings publish, moderate and hide at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/portal-public.spec.ts","name":"a catalog without release history hides the releases link","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/portal-public.spec.ts","name":"a closed portal reads as unavailable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14690,25 +14602,9 @@
     ,
     {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 bar form: diagonal stripes slide only live or under the pointer; Cancelled is one slash, never stripes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 budget: 24 sliding icons cost at most 1 ms of main-thread time per frame","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 every one-off in the status menu (dark): timings, marks only, base never blanks, ends static, keyboard","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 every one-off in the status menu (light): timings, marks only, base never blanks, ends static, keyboard","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 icons in the list and header at 1440px dark: diagonal slide, one-offs once per entry, no shift","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 icons in the list and header at 1440px light: diagonal slide, one-offs once per entry, no shift","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 icons in the list and header at 390px dark: diagonal slide, one-offs once per entry, no shift","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 icons in the list and header at 390px light: diagonal slide, one-offs once per entry, no shift","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 icons in the list and header at 960px dark: diagonal slide, one-offs once per entry, no shift","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 icons in the list and header at 960px light: diagonal slide, one-offs once per entry, no shift","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 reduced motion: nothing slides and no one-off plays","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/status-icons.spec.ts","name":"AEON-1362 slides pause off-screen and in a hidden tab","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -24663,9 +24559,9 @@
       ,
       "tests/delivery-arion-v5.spec.ts": {"caseSeconds":{"Delivery v5 readings at 1440 dark expert":2.443,"Delivery v5 readings at 1440 dark simple":2.426,"Delivery v5 readings at 1440 light expert":2.654,"Delivery v5 readings at 1440 light simple":2.67,"Delivery v5 readings at 400 dark expert":2.414,"Delivery v5 readings at 400 dark simple":2.328,"Delivery v5 readings at 400 light expert":2.451,"Delivery v5 readings at 400 light simple":2.581,"Simple keeps every Learn and section still through every window at 1024":2.709,"Simple keeps every Learn and section still through every window at 1440":2.723,"Simple keeps every Learn and section still through every window at 400":2.73,"a v5 reading never moves its own tile or a control when the window or the level changes":5.802,"missing, partial and unwatched facts are said as that, never as zero":2.055,"the v5 readings sit in their tiles with exact counts and the plan’s targets":1.903},"seconds":37.889,"selectedTests":14}
       ,
-      "tests/delivery-flow-lanes.spec.ts": {"caseSeconds":{"Flow lanes at 1440 dark en keep controls still":2.706,"Flow lanes at 1440 light de keep controls still":2.764,"Flow lanes at 1440 light en keep controls still":2.745,"Flow lanes at 400 dark de keep controls still":2.312,"Flow lanes at 400 dark en keep controls still":2.286,"Flow lanes at 400 light en keep controls still":2.332,"a 15 min window at a phone overview edge keeps both handles draggable":2.643,"at Fit all a phone overview keeps each 44 px handle inside and a drag at either edge resizes":2.099,"lanes zoom, pan and move the time without moving a control, and a click never moves the time":4.57,"panning an incident to the right edge keeps its caption inside the lane frame":1.953,"the overview brush pans and resizes the window, and its playhead moves the time":2.809},"seconds":29.219,"selectedTests":11}
+      "tests/delivery-flow-lanes.spec.ts": {"caseSeconds":{"a 15 min window at a phone overview edge keeps both handles draggable":2.643,"lanes zoom, pan and move the time without moving a control, and a click never moves the time":4.57,"panning an incident to the right edge keeps its caption inside the lane frame":1.953},"seconds":9.166,"selectedTests":3}
       ,
-      "tests/delivery-flow-modes.spec.ts": {"caseSeconds":{"Compare races release 126 from step a against the Arion target on one axis":1.856,"Flow modes at 1440 dark en keep controls still":7.375,"Flow modes at 1440 light de keep controls still":7.32,"Flow modes at 1440 light en keep controls still":7.874,"Flow modes at 400 dark en keep controls still":6.434,"Flow modes at 400 light en keep controls still":6.887,"Live reads the recorded runs, follows a server hint, and keeps the time the person is viewing":3.953,"Replay under reduced motion shows the run still; the handle and Shift+arrows move the time":2.909,"a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (de)":14.622,"a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (en)":14.787,"a release no record has reported on says \"not recorded\" in the same four rows":1.787,"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 dark en)":6.68,"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1024 light en)":6.737,"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 dark en)":6.85,"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 light en)":6.949,"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 dark en)":6.558,"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 light de)":6.528,"with motion › Replay opens at the start of the latest release and auto-plays once per session":5.141,"without a recorded run every mode shows the empty state and no sample data, until the first run is recorded":3.082},"seconds":124.329,"selectedTests":19}
+      "tests/delivery-flow-modes.spec.ts": {"caseSeconds":{"a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (de)":14.622,"a refused preference save takes the Flow headline slot and leaves the mode controls in place and clickable (en)":14.787,"a release no record has reported on says \"not recorded\" in the same four rows":1.787,"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (1440 light en)":6.949,"the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (390 light de)":6.528,"with motion › Replay opens at the start of the latest release and auto-plays once per session":5.141,"without a recorded run every mode shows the empty state and no sample data, until the first run is recorded":3.082},"seconds":52.895999999999994,"selectedTests":7}
       ,
       "tests/delivery-numbers.spec.ts": {"caseSeconds":{"Delivery is absent without delivery.read, and its address leads to the tickets":1.378,"Delivery numbers at 1024 dark en keep controls still":2.987,"Delivery numbers at 1024 light en keep controls still":3.34,"Delivery numbers at 1440 dark de keep controls still":3.101,"Delivery numbers at 1440 dark en keep controls still":3.04,"Delivery numbers at 1440 light de keep controls still":3.364,"Delivery numbers at 1440 light en keep controls still":3.111,"Delivery numbers at 390 dark de keep controls still":2.464,"Delivery numbers at 390 dark en keep controls still":2.526,"Delivery numbers at 390 light de keep controls still":2.794,"Delivery numbers at 390 light en keep controls still":2.774,"a project without data or without a repository says so in place":1.971,"tiles and charts tell partial, missing and clipped data apart and never show stale numbers":2.516,"window, level and view switches keep every control still and are the person’s own":5.977},"seconds":41.343,"selectedTests":14}
       ,
@@ -24675,7 +24571,7 @@
       ,
       "tests/delivery-simple.spec.ts": {"caseSeconds":{"Delivery Simple at 1440 dark de":2.53,"Delivery Simple at 1440 dark en":2.505,"Delivery Simple at 1440 light en":3.009,"Delivery Simple at 400 dark de":1.627,"Delivery Simple at 400 dark en":1.966,"Delivery Simple at 400 light en":2.157,"Simple explains each number in plain words, and its controls stay still through every window":2.358,"a failed preference save keeps the choice and shows an English warning with retry for the de profile":3.059,"a failed preference save keeps the choice and shows an English warning with retry for the en profile":3.521,"a failed refresh keeps Learn still through the error and the retry":7.226,"a refused save and a failed read together keep both alerts and both retries, and Learn still":16.364},"seconds":46.322,"selectedTests":11}
       ,
-      "tests/delivery-ui.spec.ts": {"caseSeconds":{"a failed refresh keeps the delivery rows and notes the failure":2.033,"a later hold on a lifted row can be lifted again":1.96,"delivery and review card keep controls still at 1024 dark de":5.584,"delivery and review card keep controls still at 1024 dark en":5.587,"delivery and review card keep controls still at 1024 light de":5.737,"delivery and review card keep controls still at 1024 light en":5.774,"delivery and review card keep controls still at 1440 dark de":5.957,"delivery and review card keep controls still at 1440 dark en":6.009,"delivery and review card keep controls still at 1440 light de":6.271,"delivery and review card keep controls still at 1440 light en":6.349,"delivery and review card keep controls still at 390 dark de":4.977,"delivery and review card keep controls still at 390 dark en":5.039,"delivery and review card keep controls still at 390 light de":5.073,"delivery and review card keep controls still at 390 light en":5.661,"delivery loading, empty, unavailable and error replace one slot; readers have no management actions":3.306,"failed writes stay honest; project reset offers scope-bound Undo and uses captured revisions":3.621,"shadow delivery rounds show holds without moving delivery controls":2.457},"seconds":81.395,"selectedTests":17}
+      "tests/delivery-ui.spec.ts": {"caseSeconds":{"a later hold on a lifted row can be lifted again":1.96,"delivery and review card keep controls still at 1440 light en":6.349,"delivery and review card keep controls still at 390 light en":5.661,"delivery loading, empty, unavailable and error replace one slot; readers have no management actions":3.306,"shadow delivery rounds show holds without moving delivery controls":2.457},"seconds":19.733,"selectedTests":5}
       ,
       "tests/deployTarget.test.ts": {"seconds":0.297328,"selectedTests":1}
       ,

@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/delivery-flow-modes.spec.ts",
-    "listedTests": 26,
+    "listedTests": 9,
     "tierTiming": {
       "caseSeconds": {
         "max": 19.782,

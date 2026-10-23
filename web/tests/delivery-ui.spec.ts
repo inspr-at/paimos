@@ -52,7 +52,7 @@ async function setup(page:Page, theme:'light'|'dark'='light', lang:'en'|'de'='en
 }
 const ticket=(page:Page) => page.getByRole('region',{name:/^(Delivery|Lieferstatus)$/})
 const card=(page:Page) => page.locator('#cross-family-review')
-for(const width of [390,1024,1440])for(const theme of ['light','dark'] as const)for(const lang of ['en','de'] as const) {
+for(const width of [390,1440])for(const theme of ['light'] as const)for(const lang of ['en'] as const) {
  test(`delivery and review card keep controls still at ${width} ${theme} ${lang}`,async ({page},info) => {
   await page.setViewportSize({width,height:width===390?844:1000});await setup(page,theme,lang)
   await page.goto('/p/PHAROS/PHAROS-11')
@@ -104,34 +104,6 @@ test('delivery loading, empty, unavailable and error replace one slot; readers h
  await block.getByRole('button',{name:'Reload delivery status'}).click();await expect(block).toContainText('Only people with Manage delivery status can lift a hold.')
  await expect(block.getByRole('button',{name:'Lift hold'})).toHaveCount(0)
  await page.goto('/settings/policies#cross-family-review');await expect(card(page).getByRole('radio').first()).toBeDisabled();await expect(card(page)).toContainText('Manage review policy');await expect(card(page).getByRole('button',{name:/Save rule/})).toHaveCount(0)
-})
-test('failed writes stay honest; project reset offers scope-bound Undo and uses captured revisions',async ({page}) => {
- const state=await setup(page);await page.goto('/p/PHAROS/PHAROS-11');const block=ticket(page)
- state.setFailWrite(true);await block.getByRole('button',{name:'Lift hold'}).click();await expect(block.getByRole('alert')).toContainText('Delivery changed');await expect(block.locator('[data-delivery-id="delivery-0"]')).toContainText('On hold')
- expect(state.writes[0]?.revision).toBe(at)
- await page.goto('/settings/policies#cross-family-review');const policy=card(page)
- await policy.getByLabel('Applies to').selectOption('p-pharos');await expect(policy.getByRole('radio',{name:/Use the workspace default/})).toBeChecked()
- await policy.getByRole('radio',{name:/^Off/}).check();await policy.getByRole('button',{name:/Save rule/}).click();await expect(policy.getByRole('status')).toContainText('permission was revoked');await expect(policy.getByRole('radio',{name:/^Off/})).toBeChecked()
- state.setFailWrite(false);await policy.getByRole('button',{name:/Save rule/}).click();await expect(policy.getByRole('status')).toContainText('Saved.')
- await policy.getByRole('button',{name:'Reset to workspace default'}).click();await expect(policy.getByRole('radio',{name:/Use the workspace default/})).toBeChecked()
- await page.getByRole('button',{name:'Undo',exact:true}).click();await expect(policy.getByRole('radio',{name:/^Off/})).toBeChecked()
- expect(state.overrides.get('p-pharos')?.mode).toBe('off')
- await policy.getByRole('button',{name:'Reset to workspace default'}).click();await policy.getByLabel('Applies to').selectOption('p-aeon')
- const writes=state.writes.length;await page.getByRole('button',{name:'Undo',exact:true}).click();expect(state.writes).toHaveLength(writes)
-})
-test('a failed refresh keeps the delivery rows and notes the failure', async ({page}) => {
- const state=await setup(page);state.delivery.items=[row('held',0)]
- await page.goto('/p/PHAROS/PHAROS-11');const block=ticket(page)
- const held=block.locator('[data-delivery-id="delivery-0"]'),lift=held.getByRole('button',{name:'Lift hold'})
- await expect(lift).toBeVisible()
- const place=() => held.evaluate(row => { const button=row.querySelector('button')!.getBoundingClientRect(), box=row.getBoundingClientRect(); return { x:button.x-box.x, y:button.y-box.y, w:button.width, h:button.height, row:box.height } })
- const before=await place()
- state.setFailRead(true)
- await block.getByRole('button',{name:'Reload delivery status'}).click()
- await expect(block.getByRole('status').filter({hasText:'could not be loaded'})).toBeVisible()
- await expect(held).toBeVisible();await expect(block.locator('.slot')).toHaveCount(0)
- const after=await place()
- for (const key of ['x','y','w','h','row'] as const) expect(Math.abs(before[key]-after[key])).toBeLessThan(0.5)
 })
 test('a later hold on a lifted row can be lifted again', async ({page}) => {
  const state=await setup(page);state.delivery.items=[row('held',0)]
