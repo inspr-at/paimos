@@ -79,7 +79,8 @@ for (const width of [1440, 390]) {
     }
   })
 
-  test(`direct reserved links open quietly and navigation skips them at ${width}px`, async ({ page }) => {
+  // P11: the direct-link keyboard journey is independent of the row-layout profile above.
+  if (width === 390) test(`direct reserved links open quietly and navigation skips them at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     const { history } = await setup(page)
     const reserved = history.releases[2]

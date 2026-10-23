@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/release-groups.spec.ts",
-    "listedTests": 10,
+    "listedTests": 9,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.521,

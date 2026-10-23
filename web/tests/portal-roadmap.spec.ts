@@ -103,7 +103,8 @@ async function expectFits(page: Page) {
   expect(edged).toEqual([])
 }
 
-for (const width of [1600, 390]) {
+// P11: retain the full public projection/language/navigation assertions on the narrow profile.
+for (const width of [390]) {
   test(`public roadmap at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await install(page, 'roadmap')

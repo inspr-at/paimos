@@ -722,20 +722,51 @@ function fakeSources() {
   return { opened, open, live: () => opened.filter(source => !source.closed) }
 }
 function mountInProject(sources: ReturnType<typeof fakeSources>) {
-  const parent = Vue.reactive({ renders: 0, shown: true })
+  const parent = Vue.reactive({ renders: 0, shown: true, active: true })
   let loaded: ReturnType<typeof useDeliveryFlow> | null = null
   const Child = Vue.defineComponent({
-    props: { project: { type: Object as Vue.PropType<{ id: string }>, required: true }, renders: { type: Number, required: true } },
+    props: { project: { type: Object as Vue.PropType<{ id: string }>, required: true }, renders: { type: Number, required: true }, active: { type: Boolean, required: true } },
     setup(props) {
-      loaded = useDeliveryFlow({ projectId: () => props.project.id, mode: () => 'live', run: () => null, active: () => true, lang: () => 'en', open: sources.open, now: () => T0 + 60 * 60_000 })
+      loaded = useDeliveryFlow({ projectId: () => props.project.id, mode: () => 'live', run: () => null, active: () => props.active, lang: () => 'en', open: sources.open, now: () => T0 + 60 * 60_000 })
       return () => Vue.h('span', String(props.renders))
     },
   })
   // Like ProjectView: a new object literal for the same project on every render.
-  const app = renderer.createApp({ render: () => parent.shown ? Vue.h(Child, { project: { id: 'p' }, renders: parent.renders }) : Vue.h('span') })
+  const app = renderer.createApp({ render: () => parent.shown ? Vue.h(Child, { project: { id: 'p' }, renders: parent.renders, active: parent.active }) : Vue.h('span') })
   const root = node('root'); apps.push(app); app.mount(root)
   return { parent, flow: () => loaded! }
 }
+
+it('AEON-1683: rapid section switches retain exactly one live stream and bounded reads per activation', async () => {
+  const reads: string[] = []
+  http.handle = async path => { reads.push(path); return json(flowList()) }
+  const sources = fakeSources()
+  const view = mountInProject(sources)
+  await ticks(20)
+  expect(view.flow().status.value).toBe('ready')
+  expect(reads).toHaveLength(2)
+  for (let visit = 1; visit <= 20; visit++) {
+    view.parent.active = false
+    await ticks(2)
+    expect(sources.live()).toHaveLength(0)
+    expect(vi.getTimerCount()).toBe(0)
+    view.parent.active = true
+    await ticks(20)
+    expect(sources.live()).toHaveLength(1)
+    expect(sources.opened).toHaveLength(visit + 1)
+    expect(reads).toHaveLength(2 * (visit + 1))
+    expect(view.flow().status.value).toBe('ready')
+    // The enclosing project renders a new object without a new visit.
+    view.parent.renders++
+    await ticks(2)
+    expect(reads).toHaveLength(2 * (visit + 1))
+    expect(sources.opened).toHaveLength(visit + 1)
+  }
+  view.parent.shown = false
+  await ticks(2)
+  expect(sources.live()).toHaveLength(0)
+  expect(vi.getTimerCount()).toBe(0)
+})
 
 it('a parent re-render with the same project neither reads again nor reopens the hint stream (AEON-1352)', async () => {
   const reads: string[] = []

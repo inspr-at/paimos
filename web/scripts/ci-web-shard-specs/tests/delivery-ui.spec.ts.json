@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/delivery-ui.spec.ts",
-    "listedTests": 16,
+    "listedTests": 6,
     "tierTiming": {
       "caseSeconds": {
         "max": 7.94,

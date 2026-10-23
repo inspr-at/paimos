@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/release-header.spec.ts",
-    "listedTests": 23,
+    "listedTests": 27,
     "tierTiming": {
       "caseSeconds": {
         "max": 5.194,

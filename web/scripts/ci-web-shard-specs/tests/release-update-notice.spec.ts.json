@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/release-update-notice.spec.ts",
-    "listedTests": 16,
+    "listedTests": 13,
     "tierTiming": {
       "caseSeconds": {
         "max": 4.328,
