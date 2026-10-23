@@ -424,8 +424,8 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 		if in.DaemonID != d.DaemonID || in.DaemonGeneration != d.DaemonGeneration || in.LedgerGeneration != d.LedgerGeneration || in.CapabilityDigest != d.CapabilityDigest || in.ExpectedRevision != b.BindingRevision || proof.Identity.ProcessIdentityDigest != c.intent.ProcessIdentityDigest || proof.Identity.RuntimeEpoch != b.RuntimeEpoch {
 			return fail(409, nativecontract.ReasonIdentityMismatch)
 		}
-		retire := func(state string, reason nativecontract.Reason) error {
-			claimRefusal = fail(403, reason)
+		retire := func(status int, state string, reason nativecontract.Reason) error {
+			claimRefusal = fail(status, reason)
 			var err error
 			retired, err = s.retireInboxTx(ctx, tx, &c, session.OwnerPersonID, state, reason)
 			if err != nil || !retired {
@@ -439,8 +439,8 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 		if c.inbox {
 			if err := inboxCommandTx(ctx, tx, d, c); err != nil {
 				var refusal *Failure
-				if errors.As(err, &refusal) && refusal.Reason == nativecontract.ReasonPermissionRevoked {
-					return retire("rejected", refusal.Reason)
+				if errors.As(err, &refusal) && (refusal.Reason == nativecontract.ReasonPermissionRevoked || refusal.Reason == nativecontract.ReasonOwnershipUnconfirmed) {
+					return retire(refusal.Status, "rejected", refusal.Reason)
 				}
 				return err
 			}
@@ -462,7 +462,7 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 		}
 		if !now.Before(until) {
 			if c.inbox {
-				return retire("expired", nativecontract.ReasonGrantExpired)
+				return retire(403, "expired", nativecontract.ReasonGrantExpired)
 			}
 			return fail(403, nativecontract.ReasonGrantExpired)
 		}

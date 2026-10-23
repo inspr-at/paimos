@@ -61,7 +61,7 @@ func inboxRecoveryFixture(t *testing.T) (*productionComposition, nativecontract.
 // A successful claim is the negative control: queue loss must never release a
 // possibly written input. The store clock advances without sleeping.
 func TestNativeInboxUnclaimedLeaseRecovery(t *testing.T) {
-	for _, scenario := range []string{"expired", "queue lost", "claim refused", "claim expired", "claimed queue lost"} {
+	for _, scenario := range []string{"expired", "queue lost", "claim refused", "claim expired", "turn starts before claim", "consent withdrawn", "claimed queue lost"} {
 		t.Run(scenario, func(t *testing.T) {
 			c, b, ctx, d, clock := inboxRecoveryFixture(t)
 			f := c.f
@@ -83,6 +83,12 @@ func TestNativeInboxUnclaimedLeaseRecovery(t *testing.T) {
 			item := page.Items[0]
 			claim := nativecontract.Claim{RequestID: guuid.NewString(), OperationID: item.OperationID, DaemonID: d.DaemonID, DaemonGeneration: d.DaemonGeneration, LedgerGeneration: d.LedgerGeneration, CapabilityDigest: d.CapabilityDigest, ExpectedRevision: b.BindingRevision, ClaimKind: "command"}
 			if scenario == "claimed queue lost" {
+				stale := claim
+				stale.ExpectedRevision++
+				var refusal *Failure
+				if _, err := f.s.claimCommand(ctx, d, stale); !errors.As(err, &refusal) || refusal.Reason != nativecontract.ReasonIdentityMismatch {
+					t.Fatal("stale claim did not fail for the exact binding", err)
+				}
 				if _, err := f.s.claimCommand(ctx, d, claim); err != nil {
 					t.Fatal("valid claim was refused", err)
 				}
@@ -100,11 +106,25 @@ func TestNativeInboxUnclaimedLeaseRecovery(t *testing.T) {
 			if scenario == "expired" || scenario == "claim expired" || scenario == "claimed queue lost" {
 				clock.Store(item.ExpiresAt.Add(time.Second).UnixNano())
 			}
-			if scenario == "claim refused" || scenario == "claim expired" {
+			if scenario == "consent withdrawn" {
+				c.personCall(t, "/api/approvals/"+f.intent.PolicyID+"/revoke", nil, nil)
+			}
+			if scenario == "turn starts before claim" {
+				input := nativecontract.Input{RequestID: guuid.NewString(), InputID: guuid.NewString(), ExpectedBinding: b, Mode: "now", Text: "person wins the turn boundary", ExpiresAt: f.now.Add(time.Minute)}
+				if _, err := f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "input", Input: &input}); err != nil {
+					t.Fatal(err)
+				}
+				if out, err := c.config.Host.Input(t.Context(), input); err != nil || out.Receipt.State != "write_acknowledged" {
+					t.Fatal("intervening person turn not established", out, err)
+				}
+			}
+			if scenario == "claim refused" || scenario == "claim expired" || scenario == "turn starts before claim" {
 				_, err := f.s.claimCommand(ctx, d, claim)
 				want := nativecontract.ReasonPermissionRevoked
 				if scenario == "claim expired" {
 					want = nativecontract.ReasonGrantExpired
+				} else if scenario == "turn starts before claim" {
+					want = nativecontract.ReasonOwnershipUnconfirmed
 				}
 				var refusal *Failure
 				if !errors.As(err, &refusal) || refusal.Reason != want {
@@ -155,8 +175,33 @@ func TestNativeInboxUnclaimedLeaseRecovery(t *testing.T) {
 					t.Fatalf("durable inbox fallback unavailable: %d %s (%v)", w.Code, w.Body.String(), err)
 				}
 			}
+			if scenario == "turn starts before claim" {
+				turn := guuid.NewString()
+				c.provider.turn("turn_started", turn, 2)
+				select {
+				case <-c.turnStarted:
+				case <-time.After(15 * time.Second):
+					t.Fatal("missing intervening turn start")
+				}
+				c.provider.turn("turn_completed", turn, 3)
+				select {
+				case <-c.turnDone:
+				case <-time.After(15 * time.Second):
+					t.Fatal("missing intervening turn completion")
+				}
+			}
 			next := send("next live message")
 			page, err = f.s.Commands(ctx, d, nativecontract.PageQuery{})
+			if scenario == "consent withdrawn" {
+				if err != nil || len(page.Items) != 0 {
+					t.Fatal("withdrawn consent admitted new native work", page, err)
+				}
+				var leases int
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM harness_deliveries WHERE message_id=$1`, next.ID).Scan(&leases); err != nil || leases != 0 {
+					t.Fatal("cleanup expanded withdrawn input authority", leases, err)
+				}
+				return
+			}
 			if err != nil || len(page.Items) != 1 || page.Items[0].RequestID != next.ID {
 				t.Fatal("retired entry blocked the next message or was reinjected", page, err)
 			}

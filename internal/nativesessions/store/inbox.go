@@ -47,9 +47,11 @@ func (s *Store) admitInbox(ctx context.Context, d nativecontract.DaemonActor) er
 	defer s.commandMu.Unlock()
 	var queued *queuedCommand
 	var retired []queuedCommand
-	err = s.runtimeTx(ctx, d, b, false, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
+	// The stop-only fence also permits discarding an unclaimed lease after
+	// consent lapses. It never admits input without full current consent below.
+	err = s.stopTx(ctx, d, b, false, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
 		var err error
-		retired, err = s.retireUnclaimedInboxTx(ctx, tx, b, session.OwnerPersonID)
+		retired, err = s.retireUnclaimedInboxTx(ctx, tx, b, session.OwnerPersonID, session.StopOnly)
 		if err != nil {
 			return err
 		}
@@ -88,7 +90,7 @@ func (s *Store) admitInbox(ctx context.Context, d nativecontract.DaemonActor) er
 
 func (s *Store) queueInboxTx(ctx context.Context, tx pgx.Tx, d nativecontract.DaemonActor, b nativecontract.Binding, session consent.Session, proof receipts.RuntimeProof, queueLength int) (*queuedCommand, error) {
 	v := session.View
-	if queueLength >= 1024 || v.Mode != "structured" || (v.State != "running" && v.State != "idle") || !v.Capabilities.Input || !v.Capabilities.ChatSupported {
+	if session.StopOnly || queueLength >= 1024 || v.Mode != "structured" || (v.State != "running" && v.State != "idle") || !v.Capabilities.Input || !v.Capabilities.ChatSupported {
 		return nil, nil
 	}
 	// One live inbox input at a time keeps a stalled provider bounded without
@@ -101,11 +103,8 @@ func (s *Store) queueInboxTx(ctx context.Context, tx pgx.Tx, d nativecontract.Da
 	// Defer inbox admission itself until the observed turn ends. A long turn
 	// must not consume a claim window or hide the message behind a lease.
 	// Person commands continue through their independent bounded input path.
-	var busy bool
-	rawBinding, _ := json.Marshal(b)
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM native_session_receipts
- WHERE tenant_id=$1 AND owned_session_id=$2 AND receipt->'binding'=$3::jsonb
- AND receipt->>'operation'='input' AND receipt->>'state' IN ('accepted','queued','write_started','write_acknowledged','turn_started','uncertain'))`, b.TenantID, b.OwnedSessionID, rawBinding).Scan(&busy); err != nil {
+	busy, err := inboxRuntimeBusyTx(ctx, tx, b, "")
+	if err != nil {
 		return nil, err
 	}
 	if busy {
@@ -114,7 +113,7 @@ func (s *Store) queueInboxTx(ctx context.Context, tx pgx.Tx, d nativecontract.Da
 	var message, sender, body string
 	var cursor int64
 	var priority bool
-	err := tx.QueryRow(ctx, `SELECT m.id::text,m.sender_principal_id::text,m.body,m.sent_event_id,(`+inbox.LivePrioritySQL+`)
+	err = tx.QueryRow(ctx, `SELECT m.id::text,m.sender_principal_id::text,m.body,m.sent_event_id,(`+inbox.LivePrioritySQL+`)
  FROM inbox_messages m WHERE m.tenant_id=$1 AND m.recipient_principal_id=$2 AND m.recipient_session_id=$3
  AND m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.acked_at IS NULL AND m.cancelled_at IS NULL
  AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp())
@@ -157,7 +156,7 @@ func (s *Store) queueInboxTx(ctx context.Context, tx pgx.Tx, d nativecontract.Da
 // absence of a receipt proves that no claim could have crossed the write
 // boundary, even after server restart. Claimed/uncertain inputs retain their
 // holds; queue loss must never turn a possible write into another injection.
-func (s *Store) retireUnclaimedInboxTx(ctx context.Context, tx pgx.Tx, b nativecontract.Binding, owner string) ([]queuedCommand, error) {
+func (s *Store) retireUnclaimedInboxTx(ctx context.Context, tx pgx.Tx, b nativecontract.Binding, owner string, withdrawn bool) ([]queuedCommand, error) {
 	rawBinding, _ := json.Marshal(b)
 	rows, err := tx.Query(ctx, `SELECT o.intent FROM native_session_operations o
  JOIN harness_deliveries h ON h.tenant_id=o.tenant_id AND h.id=o.operation_id
@@ -196,6 +195,8 @@ func (s *Store) retireUnclaimedInboxTx(ctx context.Context, tx pgx.Tx, b nativec
 		state, reason := "rejected", nativecontract.ReasonGrantMissing
 		if !s.now().Before(c.intent.ExpiresAt) {
 			state, reason = "expired", nativecontract.ReasonGrantExpired
+		} else if withdrawn {
+			reason = nativecontract.ReasonPermissionRevoked
 		} else if queued {
 			continue
 		}
@@ -265,5 +266,23 @@ func inboxCommandTx(ctx context.Context, tx pgx.Tx, d nativecontract.DaemonActor
 	if !allowed {
 		return fail(403, nativecontract.ReasonPermissionRevoked)
 	}
+	// A person input may have won the write boundary since the commands page.
+	// Recheck here as well, excluding this exact command's durable claim fence.
+	busy, err := inboxRuntimeBusyTx(ctx, tx, b, c.intent.Receipt.OperationID)
+	if err != nil {
+		return err
+	}
+	if busy {
+		return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+	}
 	return nil
+}
+
+func inboxRuntimeBusyTx(ctx context.Context, tx pgx.Tx, b nativecontract.Binding, operation string) (bool, error) {
+	var busy bool
+	rawBinding, _ := json.Marshal(b)
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM native_session_receipts
+ WHERE tenant_id=$1 AND owned_session_id=$2 AND receipt->'binding'=$3::jsonb AND operation_id::text<>$4
+ AND receipt->>'operation'='input' AND receipt->>'state' IN ('accepted','queued','write_started','write_acknowledged','turn_started','uncertain'))`, b.TenantID, b.OwnedSessionID, rawBinding, operation).Scan(&busy)
+	return busy, err
 }
