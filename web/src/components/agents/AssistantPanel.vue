@@ -27,6 +27,7 @@ type Tab = typeof tabs[number]
 const tab = ref<Tab>('overview'), activityFilter = ref<keyof typeof words.filters>('all'), refusalsOnly = ref(false)
 const root = ref<HTMLElement>(), menuAnchor = ref<HTMLElement | null>(null)
 const editing = ref(false), original = ref<Assistant>(), draft = ref<AssistantPolicy>(), feedback = ref(''), failed = ref(false)
+const editProjects = ref<{ id: string; routeKey: string; title: string }[]>([])
 const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const who = computed(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '')
 const mayEdit = computed(() => store.mayEdit(props.item)), pending = computed(() => !!store.busy[props.item.principal_id])
@@ -84,6 +85,7 @@ function beginEdit() {
   menuAnchor.value = null
   if (!mayEdit.value || pending.value) return
   original.value = { ...props.item, policy: cloneAssistantPolicy(props.item.policy) }
+  editProjects.value = projects.projects.map(({ id, routeKey, title }) => ({ id, routeKey, title }))
   draft.value = cloneAssistantPolicy(props.item.policy); editing.value = true; tab.value = 'policy'; feedback.value = ''; failed.value = false
 }
 function cancelEdit() { if (pending.value) return; editing.value = false; draft.value = undefined; original.value = undefined; feedback.value = ''; failed.value = false }
@@ -160,8 +162,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </div>
       <div v-show="tab === 'policy'" id="assistant-pane-policy" role="tabpanel" aria-labelledby="assistant-tab-policy">
         <p v-if="!mayEdit" class="policy-read-only">{{ words.readOnly }} <span>{{ words.ownerOnly }}</span></p>
-        <section class="assistant-block"><h3>{{ words.projects }}</h3><div v-if="editing" class="policy-choices"><label v-for="project in projects.projects" :key="project.id"><input type="checkbox" :checked="draft!.allowed_projects.includes(project.id)" :disabled="pending" @change="toggleProject(project.id, ($event.target as HTMLInputElement).checked)" />{{ project.routeKey }} · {{ project.title }}</label></div><div v-else class="project-chips"><span v-for="id in displayPolicy.allowed_projects" :key="id">{{ projectName(id) }}</span><span v-if="!displayPolicy.allowed_projects.length">{{ words.noProjects }}</span></div><p v-if="editing && projects.error" class="assistant-error" role="alert">{{ projects.error }}</p></section>
-        <section class="assistant-block"><h3>{{ words.mayDo }}</h3><div v-if="editing" class="policy-choices"><label v-for="option in scopeOptions" :key="option.label"><input type="checkbox" :checked="option.scopes.every(scope => draft!.allowed_scopes.includes(scope))" :disabled="pending" @change="toggleScope(option.scopes, ($event.target as HTMLInputElement).checked)" />{{ option.label }}</label><p v-for="scope in otherScopes" :key="scope">{{ scope }}</p></div><ul v-else class="policy-scopes"><li v-for="group in policyGroups(displayPolicy.allowed_scopes)" :key="group">{{ group }}</li><li v-if="!displayPolicy.allowed_scopes.length">{{ words.noScopes }}</li></ul></section>
+        <section class="assistant-block"><h3>{{ words.projects }}</h3><div v-if="editing" class="policy-choices"><label v-for="project in editProjects" :key="project.id"><input type="checkbox" :checked="draft!.allowed_projects.includes(project.id)" :disabled="pending" @change="toggleProject(project.id, ($event.target as HTMLInputElement).checked)" /><span v-clip-tip>{{ project.routeKey }} · {{ project.title }}</span></label></div><div v-else class="project-chips"><span v-for="id in displayPolicy.allowed_projects" :key="id">{{ projectName(id) }}</span><span v-if="!displayPolicy.allowed_projects.length">{{ words.noProjects }}</span></div><p v-if="editing && projects.error" class="assistant-error" role="alert">{{ projects.error }}</p></section>
+        <section class="assistant-block"><h3>{{ words.mayDo }}</h3><div v-if="editing" class="policy-choices"><label v-for="option in scopeOptions" :key="option.label"><input type="checkbox" :checked="option.scopes.every(scope => draft!.allowed_scopes.includes(scope))" :disabled="pending" @change="toggleScope(option.scopes, ($event.target as HTMLInputElement).checked)" /><span v-clip-tip>{{ option.label }}</span></label><p v-for="scope in otherScopes" :key="scope">{{ scope }}</p></div><ul v-else class="policy-scopes"><li v-for="group in policyGroups(displayPolicy.allowed_scopes)" :key="group">{{ group }}</li><li v-if="!displayPolicy.allowed_scopes.length">{{ words.noScopes }}</li></ul></section>
         <section class="assistant-block"><h3>{{ words.budget }}</h3><div v-if="editing" class="policy-budget-fields"><label>{{ words.budget }}<input v-model="draft!.weekly_budget.amount" class="field" inputmode="decimal" maxlength="19" :disabled="pending" :aria-invalid="!budgetValid" /></label><label>{{ words.currency }}<select v-model="draft!.weekly_budget.unit" class="field" :disabled="pending"><option>USD</option><option>EUR</option><option value="tokens">tokens</option><option value="credits">credits</option></select></label></div><p v-else>{{ assistantMoney(displayPolicy.weekly_budget.amount, displayPolicy.weekly_budget.unit) }} {{ words.week }}</p><p>{{ words.resetUnavailable }}</p><p v-if="editing && !budgetValid" class="assistant-error">{{ words.invalidBudget }}</p></section>
         <section class="assistant-block locked-rule" data-locked-rule="outward"><h3><AppIcon name="lock" :size="14" />{{ words.outward }}</h3><strong>{{ words.outwardRule }}</strong><p>{{ words.outwardHelp }}</p></section>
         <section class="assistant-block"><h3>{{ words.approvers }}</h3><p>{{ words.approversUnavailable }}</p></section>
@@ -214,7 +216,8 @@ dt { color: var(--ink-2); } dd { margin: 0; overflow-wrap: anywhere; }
 .project-chips > span { color: var(--ink-2); }
 .policy-scopes { list-style: none; margin: 0; padding: 0; color: var(--ink-2); }
 .policy-choices { display: grid; gap: 0; }
-.policy-choices label { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--ink); }
+.policy-choices label { display: flex; align-items: center; gap: 10px; height: 44px; color: var(--ink); }
+.policy-choices label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .policy-budget-fields { display: flex; flex-wrap: wrap; gap: 10px; }
 .policy-budget-fields label { display: grid; gap: 6px; flex: 1 1 10em; min-width: 0; }
 .policy-budget-fields input, .policy-budget-fields select { width: 100%; min-width: 0; min-height: 44px; }
