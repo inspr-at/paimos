@@ -28,6 +28,9 @@ type routineRoundTrip func(*http.Request) (*http.Response, error)
 func (f routineRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestRoutineDispatcherUsesEncryptedTargetAndFencedCompletion(t *testing.T) {
+	t.Run("assistant registry round trip", testAssistantAdapterRoundTrip)
+	t.Run("assistant registration revocation", testAssistantAdapterRevocation)
+	t.Run("legacy assistant migration", testAssistantAdapterMigration)
 	w, m, project, _ := messagingWorld(t)
 	const senderKey = "fixture-routine-sender-key"
 	const targetRef = "https://8.8.8.8/fixture-hook"

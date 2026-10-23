@@ -3,7 +3,6 @@
 package inbox
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,7 +24,7 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
-// RoutineDispatcher delivers receiver-owned grok_bot_routine webhook wakes.
+// RoutineDispatcher delivers receiver-owned registered assistant webhook wakes.
 // The coordinator calls Run once for each tenant with a cancellable server
 // context. DispatchOne allows deterministic tests and manual recovery.
 type RoutineDispatcher struct {
@@ -305,7 +304,7 @@ func notifyRoutineTarget(ctx context.Context, tx pgx.Tx, tenantID string, target
 		return nil
 	}
 	_, err := tx.Exec(ctx, `SELECT pg_notify('aeon_routine_deliveries', json_build_object('tenant_id',$1::text)::text)
-	 FROM inbox_message_targets WHERE tenant_id=$1::uuid AND id=$2::uuid AND adapter='grok_bot_routine'`, tenantID, *target)
+	 FROM assistant_adapters WHERE tenant_id=$1::uuid AND target_id=$2::uuid`, tenantID, *target)
 	return err
 }
 
@@ -313,6 +312,7 @@ type routineCandidate struct {
 	project string
 	key     string
 	address string
+	adapter string
 	actor   tenant.Principal
 }
 
@@ -333,19 +333,20 @@ func (d *RoutineDispatcher) nextRoutine(ctx context.Context, tenantID string) (r
 		var kind string
 		var retrySeconds, nextRetrySeconds float64
 		err := tx.QueryRow(ctx, `WITH clock AS MATERIALIZED (SELECT COALESCE($2::timestamptz,clock_timestamp()) AS now)
-		 SELECT c.project_id::text,COALESCE(n.fields->>'project_key',n.key),c.recipient_address,p.id::text,p.kind,p.name,
+		 SELECT c.project_id::text,COALESCE(n.fields->>'project_key',n.key),c.recipient_address,t.adapter,p.id::text,p.kind,p.name,
 		 GREATEST(EXTRACT(EPOCH FROM (COALESCE(d.lease_until,clock.now)-clock.now)),0)::double precision,
 		 GREATEST(EXTRACT(EPOCH FROM ((MIN(d.lease_until) FILTER (WHERE d.lease_until>clock.now) OVER ())-clock.now)),0)::double precision
 		 FROM inbox_message_deliveries d
 		 JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id
 		 JOIN inbox_message_targets t ON t.tenant_id=d.tenant_id AND t.id=COALESCE(d.effective_target_id,d.target_id)
+		 JOIN assistant_adapters a ON a.tenant_id=t.tenant_id AND a.target_id=t.id
 		 JOIN inbox_messages i ON i.tenant_id=c.tenant_id AND i.id=c.inbox_message_id
 		 JOIN nodes n ON n.tenant_id=c.tenant_id AND n.id=c.project_id
 		 JOIN principals p ON p.tenant_id=c.tenant_id AND p.id=c.recipient_principal_id
 		 CROSS JOIN clock
-		 WHERE d.tenant_id=$1::uuid AND d.state='pending' AND t.adapter='grok_bot_routine'
+		 WHERE d.tenant_id=$1::uuid AND d.state='pending' AND t.adapter=ANY($3::text[])
 		 AND d.attempts<8 AND i.acked_at IS NULL
-		 ORDER BY CASE WHEN d.lease_until>clock.now THEN d.lease_until ELSE '-infinity'::timestamptz END,c.sent_event_id LIMIT 1`, tenantID, now).Scan(&candidate.project, &candidate.key, &candidate.address, &candidate.actor.ID, &kind, &candidate.actor.Name, &retrySeconds, &nextRetrySeconds)
+		 ORDER BY CASE WHEN d.lease_until>clock.now THEN d.lease_until ELSE '-infinity'::timestamptz END,c.sent_event_id LIMIT 1`, tenantID, now, d.m.adapters.targets).Scan(&candidate.project, &candidate.key, &candidate.address, &candidate.adapter, &candidate.actor.ID, &kind, &candidate.actor.Name, &retrySeconds, &nextRetrySeconds)
 		candidate.actor.Kind = tenant.PrincipalKind(kind)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
@@ -420,6 +421,8 @@ func (d *RoutineDispatcher) DispatchOne(ctx context.Context, tenantID string) (b
 }
 
 func (d *RoutineDispatcher) dispatchOne(ctx context.Context, tenantID string) (bool, time.Duration, error) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
 	// A system job: it serves routine targets in every project (ADR-003 P2).
 	ctx = db.AllProjects(ctx, "routine webhook dispatcher")
 	candidate, delay, err := d.nextRoutine(ctx, tenantID)
@@ -429,7 +432,7 @@ func (d *RoutineDispatcher) dispatchOne(ctx context.Context, tenantID string) (b
 	if err != nil {
 		return false, delay, errors.New("routine queue unavailable")
 	}
-	work, err := d.m.claim(ctx, candidate.actor, candidate.project, claimInput{To: candidate.address, Adapter: "grok_bot_routine"})
+	work, err := d.m.claim(ctx, candidate.actor, candidate.project, claimInput{To: candidate.address, Adapter: candidate.adapter})
 	if err != nil {
 		return false, delay, errors.New("routine claim failed")
 	}
@@ -447,24 +450,21 @@ func (d *RoutineDispatcher) dispatchOne(ctx context.Context, tenantID string) (b
 	if work.Message.Level == "steer" && fallback == "" {
 		fallback = "unsupported"
 	}
-	wake := routineWake{Event: "agent_message.available", Version: 1, Instance: "aeon", DeliveryID: work.ID,
-		Project: candidate.key, MessageID: work.Message.ID, Cursor: work.Cursor, To: work.Message.To,
-		RequestedLevel: work.Message.Level, EffectiveLevel: "simple", FallbackReason: fallback,
-		Content: routineFrame(*work.Message, candidate.key)}
-	data, err := json.Marshal(wake)
+	adapter := d.m.adapters.byTarget[work.Adapter]
+	if adapter == nil {
+		d.failRoutine(ctx, candidate.actor, work, "target_invalid", true)
+		return true, delay, errors.New("routine adapter unavailable")
+	}
+	data, err := adapter.Encode(AssistantDelivery{Message: *work.Message, DeliveryID: work.ID, Project: candidate.key, Cursor: work.Cursor, FallbackReason: fallback})
 	if err != nil {
 		d.failRoutine(ctx, candidate.actor, work, "payload_invalid", true)
 		return true, delay, errors.New("routine payload unavailable")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, work.TargetRef, bytes.NewReader(data))
+	req, err := assistantWebhookRequest(ctx, work, data, time.Now())
 	if err != nil {
 		d.failRoutine(ctx, candidate.actor, work, "target_invalid", true)
 		return true, delay, errors.New("routine target unavailable")
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Idempotency-Key", work.ID)
-	req.Header.Set("Authorization", "Bearer "+work.TargetSecret)
 	resp, err := d.client.Do(req)
 	if resp != nil {
 		_, _ = io.CopyN(io.Discard, resp.Body, 4096)
@@ -498,11 +498,18 @@ func (d *RoutineDispatcher) failRoutine(ctx context.Context, actor tenant.Princi
 		if err := tx.QueryRow(ctx, `SELECT attempts FROM inbox_message_deliveries WHERE id=$1::uuid AND lease_token=$2::uuid AND state='pending' FOR UPDATE`, work.ID, work.LeaseToken).Scan(&attempts); err != nil {
 			return err
 		}
+		now, err := d.m.databaseNow(ctx, tx)
+		if err != nil {
+			return err
+		}
 		state, delay := "pending", time.Duration(1<<min(attempts, 6))*time.Second
 		if terminal || attempts >= 8 {
 			state, delay = "dead", 0
 		}
-		if _, err := tx.Exec(ctx, `UPDATE inbox_message_deliveries SET state=$3,reason=$4,lease_token=NULL,lease_until=clock_timestamp()+$5::interval WHERE id=$1::uuid AND lease_token=$2::uuid`, work.ID, work.LeaseToken, state, reason, delay.String()); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE inbox_message_deliveries SET state=$3,reason=$4,lease_token=NULL,lease_until=$5::timestamptz WHERE id=$1::uuid AND lease_token=$2::uuid`, work.ID, work.LeaseToken, state, reason, now.Add(delay)); err != nil {
+			return err
+		}
+		if err := recordAssistantHealth(ctx, tx, work.ID, reason, now); err != nil {
 			return err
 		}
 		if state == "pending" {
@@ -523,7 +530,7 @@ func (d *RoutineDispatcher) failRoutine(ctx context.Context, actor tenant.Princi
 				}
 			}
 		}
-		_, err := events.Append(ctx, tx, actor, events.Change{Type: "inbox.delivery_attempt_failed", After: map[string]any{"delivery_id": work.ID, "reason": reason, "state": state}})
+		_, err = events.Append(ctx, tx, actor, events.Change{Type: "inbox.delivery_attempt_failed", After: map[string]any{"delivery_id": work.ID, "reason": reason, "state": state}})
 		return err
 	})
 }

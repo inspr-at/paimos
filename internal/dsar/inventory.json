@@ -207,6 +207,21 @@
       "table": "approval_requests"
     },
     {
+      "classification": "metadata",
+      "columns": {
+        "tenant_id": "metadata",
+        "target_id": "metadata",
+        "vendor": "metadata",
+        "last_success_at": "metadata",
+        "last_failure_at": "metadata",
+        "last_failure_code": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "assistant_adapters"
+    },
+    {
       "classification": "personal",
       "columns": {
         "action": "metadata",

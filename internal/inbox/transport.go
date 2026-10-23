@@ -356,6 +356,9 @@ func (m *messaging) complete(ctx context.Context, p tenant.Principal, project st
 			 ON CONFLICT (tenant_id,project_id,principal_id,address,adapter) DO UPDATE SET last_event_id=GREATEST(inbox_message_cursors.last_event_id,EXCLUDED.last_event_id),updated_at=clock_timestamp()`, p.TenantID, project, p.ID, address, adapter, cursor); err != nil {
 				return err
 			}
+			if err := recordAssistantHealth(ctx, tx, in.ID, "", now); err != nil {
+				return err
+			}
 			if _, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.delivery_completed", After: map[string]any{"delivery_id": in.ID, "message_id": messageID, "cursor": cursor, "effective_level": in.EffectiveLevel, "fallback_reason": in.FallbackReason}}); err != nil {
 				return err
 			}

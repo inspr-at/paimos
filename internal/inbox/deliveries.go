@@ -24,6 +24,7 @@ import (
 )
 
 type compatSend struct {
+	adapterTestID      string
 	peer               bool
 	Kind               string      `json:"kind,omitempty"`
 	LaneStatus         *LaneStatus `json:"lane_status,omitempty"`
@@ -220,16 +221,27 @@ func (m *messaging) sendMessage(w http.ResponseWriter, r *http.Request) {
 func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, project string, in compatSend) (CompatMessage, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if !in.peer && in.ResendOf == nil {
+	if !in.peer && in.ResendOf == nil && in.adapterTestID == "" {
 		if handled, _, msg, err := m.base.tryAttached(ctx, p, project, attachedInput{Status: in.LaneStatus != nil, Recipient: in.To, Body: in.Body, Key: in.Key, Generation: in.Generation, Session: in.RecipientSessionID, SenderSession: in.SenderSessionID, Reply: in.ReplyTo, Thread: in.ThreadID, Level: in.Level, Action: in.ActionRequest, Expects: in.ExpectsReply, Compat: true}); handled || err != nil {
 			return msg, err
 		}
 	}
 	var out CompatMessage
 	key, digest := messageDigest(in.Key), messageDigest(in)
+	if in.adapterTestID != "" {
+		digest = messageDigest(struct {
+			Input     compatSend
+			AdapterID string
+		}{in, in.adapterTestID})
+	}
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := attachedmsg.Lock(ctx, tx); err != nil {
 			return err
+		}
+		if in.adapterTestID != "" {
+			if err := requireAdapterTestTx(ctx, tx, p, project, in.adapterTestID, in.To); err != nil {
+				return err
+			}
 		}
 		if err := authz.RequireTx(ctx, tx, p, "inbox.send", authz.Scope{ProjectID: project}); err != nil {
 			// Unbound reply parents and resend sources retain their existing
@@ -508,13 +520,16 @@ func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		if target == nil {
 			state, reason = "blocked", "target_missing"
 		}
+		if in.adapterTestID != "" && (target == nil || *target != in.adapterTestID) {
+			return errConflict
+		}
 	}
 	var d MessageDelivery
 	err := tx.QueryRow(ctx, `INSERT INTO inbox_message_deliveries(tenant_id,message_id,target_id,fallback_target_id,state,reason) VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6) RETURNING id::text,message_id::text,target_id::text,fallback_target_id::text,state,reason,attempts,COALESCE(effective_level,''),fallback_reason`, p.TenantID, id, target, fallback, state, reason).Scan(&d.ID, &d.MessageID, &d.TargetID, &d.FallbackTargetID, &d.State, &d.Reason, &d.Attempts, &d.EffectiveLevel, &d.FallbackReason)
 	if err != nil {
 		return err
 	}
-	if state == "pending" && strings.HasPrefix(in.To, "grok_bot:") {
+	if state == "pending" {
 		if err := notifyRoutineTarget(ctx, tx, p.TenantID, target); err != nil {
 			return err
 		}
