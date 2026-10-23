@@ -113,12 +113,47 @@ export function installRendererFonts(visual, directory, { run = execFileSync } =
   return path
 }
 
+export function assertBodyFontEvidence(body) {
+  if (!body || typeof body.computedFamily !== 'string' ||
+      !/(Inter|system-ui|-apple-system|sans-serif)/.test(body.computedFamily) ||
+      /JetBrains|monospace/i.test(body.computedFamily) ||
+      !same(body.renderedFamilies, ['Inter Variable']))
+    throw new Error(`Visual font guard: body text must resolve to Inter sans: ${JSON.stringify(body)}`)
+}
+
+// Shared by the fail-fast browser setup and visual checkpoint/profile guards.
+// Reading font-family alone cannot reveal a monospace fontconfig fallback.
+export async function sampleRenderedFont(page, selector) {
+  const client = await page.context().newCDPSession(page)
+  try {
+    await client.send('DOM.enable'); await client.send('CSS.enable')
+    const computedFamily = await page.locator(selector).first().evaluate(element => {
+      const probe = document.createElement('span')
+      probe.id = 'visual-font-probe'; probe.textContent = 'Proportional body Wiim'
+      probe.style.cssText = `position:fixed;opacity:0;pointer-events:none;font-family:${getComputedStyle(element).fontFamily}`
+      document.body.append(probe)
+      return getComputedStyle(element).fontFamily.replaceAll('"', '')
+    })
+    try {
+      // The computed-style read can be the first use of an injected face.
+      await page.evaluate(async () => {
+        const probe = document.getElementById('visual-font-probe')
+        const style = getComputedStyle(probe)
+        await document.fonts.load(`${style.fontSize} ${style.fontFamily}`)
+        await document.fonts.ready
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      })
+      const { root } = await client.send('DOM.getDocument')
+      const { nodeId } = await client.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#visual-font-probe' })
+      const { fonts } = await client.send('CSS.getPlatformFontsForNode', { nodeId })
+      return { computedFamily, renderedFamilies: [...new Set(fonts.filter(font => font.glyphCount > 0).map(font => font.familyName))].sort() }
+    } finally { await page.locator('#visual-font-probe').evaluate(element => element.remove()) }
+  } finally { await client.detach() }
+}
+
 export function assertFontEvidence(evidence, state, { platform = 'linux' } = {}) {
   const fail = detail => { throw new Error(`Visual font guard: ${detail}`) }
-  if (!evidence || typeof evidence.body?.computedFamily !== 'string' ||
-      !/(Inter|system-ui|-apple-system|sans-serif)/.test(evidence.body.computedFamily) ||
-      /JetBrains|monospace/i.test(evidence.body.computedFamily) ||
-      !same(evidence.body.renderedFamilies, ['Inter Variable'])) fail(`body text must resolve to Inter sans: ${JSON.stringify(evidence?.body)}`)
+  assertBodyFontEvidence(evidence?.body)
   const allowed = new Set(['Inter Variable', 'JetBrains Mono', 'Source Sans 3', 'Source Sans 3 Semibold', 'Source Sans 3 Bold', 'Source Serif 4 Display',
     // Only the remote Mac quality lane has OS-rendered date-input segments.
     // Linux candidate packaging always uses the default and rejects these.
