@@ -411,6 +411,11 @@ func (m *Module) deliverEffect(ctx context.Context, tx pgx.Tx, tid string, d del
 		}
 	}
 
+	fyis, err := relatedAnswerSessions(ctx, tx, tid, d.project, d.question, a.Input.TicketID, session, answer)
+	if err != nil {
+		return err
+	}
+
 	// Reserve destination/result before appending any event; event counter last.
 	if _, err := tx.Exec(ctx, `UPDATE desk_pending SET state='delivered',effect_ref=$3,error_code='',retry_at=NULL,delivery_session_id=$4 WHERE tenant_id=$1 AND id=$2`, tid, d.id, messageID, nullable(session)); err != nil {
 		return err
@@ -420,7 +425,7 @@ func (m *Module) deliverEffect(ctx context.Context, tx pgx.Tx, tid string, d del
 		kind = "question.correction"
 	}
 	body, _ := json.Marshal(map[string]any{"type": kind, "question_id": d.question, "answer_id": answer.ID, "revision": d.revision, "answer": answer.Answer, "replaces": answer.Replaces, "asker_id": a.ID})
-	return inbox.RecordDeskReply(ctx, tx, p, inbox.DeskReply{ID: messageID, RootID: a.ReplyRootID, ReplyToID: replyTo, ProjectID: d.project, RecipientID: a.PrincipalID, RecipientSessionID: session, Body: string(body), RootBody: "Decision Desk question " + d.question + "; read through ask status", RootSenderSessionID: a.SessionID, RecipientName: recipient.Name})
+	return inbox.RecordDeskReply(ctx, tx, p, inbox.DeskReply{ID: messageID, RootID: a.ReplyRootID, ReplyToID: replyTo, ProjectID: d.project, RecipientID: a.PrincipalID, RecipientSessionID: session, Body: string(body), RootBody: "Decision Desk question " + d.question + "; read through ask status", RootSenderSessionID: a.SessionID, RecipientName: recipient.Name, FYIs: fyis})
 }
 
 // routeAnswer serializes against AEON-524 registration using its hierarchy

@@ -14,10 +14,13 @@ import (
 
 // All predicates use inbox_messages alias m. Desk replies retain their own
 // replay and thirty-minute alert protocol, even when answered by a person.
+// Desk FYIs carry a trusted server-authored event marker, not a person-chat
+// obligation. Neither a sender's body nor its idempotency key grants this bypass.
 const personSessionChatSQL = `m.content_mode='durable' AND m.chat_thread_id IS NULL
  AND m.recipient_session_id IS NOT NULL
  AND EXISTS(SELECT 1 FROM principals sp WHERE sp.tenant_id=m.tenant_id AND sp.id=m.sender_principal_id AND sp.kind='person')
- AND NOT EXISTS(SELECT 1 FROM inbox_compat_messages dc WHERE dc.tenant_id=m.tenant_id AND dc.inbox_message_id=m.id AND dc.key_digest='desk/'||dc.id::text)`
+ AND NOT EXISTS(SELECT 1 FROM inbox_compat_messages dc WHERE dc.tenant_id=m.tenant_id AND dc.inbox_message_id=m.id AND dc.key_digest='desk/'||dc.id::text)
+ AND NOT EXISTS(SELECT 1 FROM events fe WHERE fe.tenant_id=m.tenant_id AND fe.id=m.sent_event_id AND fe.type='inbox.sent' AND fe.after->>'source'='decision_desk_fyi')`
 
 const chatPickupAvailableSQL = `(m.pickup_lease_until IS NULL OR m.pickup_lease_until<=clock_timestamp())
  AND NOT EXISTS(SELECT 1 FROM harness_deliveries h WHERE h.tenant_id=m.tenant_id AND h.message_id=m.id AND h.completed_at IS NULL AND h.released_at IS NULL)`

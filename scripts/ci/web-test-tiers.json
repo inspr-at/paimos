@@ -18146,6 +18146,8 @@
     ,
     {"kind":"vitest","file":"tests/agents-cleanup-store.unit.test.ts","name":"a poll in flight during Remove does not restore the removed account","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/agents-cleanup-store.unit.test.ts","name":"a reconnect refreshes accounts before an invalidated bundle finishes and keeps the new bundle owned","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"Boost today and pace input > accepts only whole numbers in range and never clamps a wrong one into a right one","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"Boost today and pace input > compares settings by value, and a missing harness means the defaults","tier":"ESSENTIAL"}

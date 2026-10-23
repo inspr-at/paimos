@@ -329,6 +329,7 @@ func checkHarnessNotificationBurst(t *testing.T, revokeAfterCheck bool) {
 // Risk: a queued after-turn message is drained by the busy loop, or the
 // daemon can acknowledge a different delivery level from the one requested.
 func TestHarnessDrainSelectsBoundaryInputAndChecksCompletionLevel(t *testing.T) {
+	t.Run("direct exact-session inbox is priority", exerciseDirectPriorityInbox)
 	f := fixture(t)
 	lease := "level-fixture-lease-000000000000000000000975"
 	base := "/api/projects/" + f.project + "/harness-sessions"
