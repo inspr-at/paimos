@@ -2,9 +2,9 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "round11-renderer-confined-53-pins-awaiting-hosted-proof",
+  "status": "round11-implemented-capacity-handoff-53-strict-13-awaiting",
   "cuts": false,
-  "note": "Round 11 confines fontconfig to the child environment of the tests/visual browser fixture and relocates all six guards beneath that directory without changing their ESSENTIAL tier. Job-wide FONTCONFIG_FILE export was the non-visual font leak; the fixed clock already belonged only to visual pages. Thirteen failed set-2 pins (nine brief-listed plus four actual Hours failures in attached job 120309394777) now report awaiting reference / needs-re-capture for AEON-1692 reference set 3. The 53 unchanged pins remain exact comparisons; 14 original deferrals remain. Non-visual batch A passes 113/113 remotely and ten affected workflow tests pass. Hosted static and Linux comparison proof remain coordinator-owned; no push, deploy, cut or model review.",
+  "note": "Round 11 confines visual renderer fontconfig to the visual browser child environment under tests/visual and retains six relocated ESSENTIAL guards. All affected non-visual specs pass remotely: 239 passed, with 54 unchanged optional header screenshot cases skipped. Thirteen failed set-2 pins explicitly await AEON-1692 / reference set 3, while 53 unchanged pins remain strict and 14 original deferrals remain. Node transport/ledger, archive verification and ten workflow tests pass. Five initial visual guards pass; the sixth exposed AEON-1690 day-label semantics and is fixed in visual assertions at 49a779c6d. Final guard/deferral rerun and static attempts are refused for remote 2/2 capacity; 53 Linux comparisons and hosted static remain unproven until coordinator push. No product changes, new references, cuts, origin push, deploy or model review.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -13,7 +13,7 @@
     "additionalBrowserGuards": 6,
     "currentPackageBrowserCases": 1201,
     "plannedCeiling": 105,
-    "currentGlobalBrowserCases": 5470,
+    "currentGlobalBrowserCases": 5472,
     "newRuntimeRegressionCases": 14,
     "referenceTransportCases": 1
   },
@@ -3093,7 +3093,7 @@
       "runner": "LEAD remote-spec.sh (the entry point currently exposes mbp2606 Chromium, not a CI-equivalent Linux browser lane)",
       "specs": [
         "tests/ui-audit-rules.spec.ts",
-        "tests/visual/reference-guard.spec.ts"
+        "tests/visual-reference-guard.spec.ts"
       ],
       "passed": 11,
       "failed": 0,
@@ -3311,14 +3311,14 @@
     "mergedMain": "a836b2c3f",
     "validationSHA": "d61e0dd4efc06cd49cdf886e55e633d6eec5788d",
     "fixtureRegression": {
-      "nativeKey": "browser:tests/visual/reference-guard.spec.ts:P02 Session Chat fixture binds its chat reads and native refusal to the displayed session",
+      "nativeKey": "browser:tests/visual-reference-guard.spec.ts:P02 Session Chat fixture binds its chat reads and native refusal to the displayed session",
       "tier": "ESSENTIAL",
       "passed": 1,
       "failed": 0,
       "seconds": 3.0,
       "runner": "remote-spec.sh / mbp2606 Chromium, one worker",
       "initialPassOwner": "tests/visual/session-chat.spec.ts",
-      "finalOwner": "tests/visual/reference-guard.spec.ts",
+      "finalOwner": "tests/visual-reference-guard.spec.ts",
       "placementReason": "The independent infrastructure guard owns fixture transport proof; the 18 visual sources retain exactly 80 comparison registrations."
     },
     "counterexample": {
@@ -3665,7 +3665,7 @@
         "sourceSHA": "22ed0ec1289dbc884b08e8e56d1e6998a9ad7ab3",
         "entrypoint": "remote-spec.sh",
         "selection": [
-          "tests/visual/reference-guard.spec.ts",
+          "tests/visual-reference-guard.spec.ts",
           "tests/models-simple.spec.ts"
         ],
         "passed": 29,
@@ -3678,7 +3678,7 @@
         "sourceSHA": "4c1587abce33547321d0f3f507a97cc813a9a458",
         "entrypoint": "remote-spec.sh",
         "selection": [
-          "tests/visual/reference-guard.spec.ts"
+          "tests/visual-reference-guard.spec.ts"
         ],
         "passed": 2,
         "failed": 0,
@@ -4032,7 +4032,7 @@
     ],
     "rendererImageVersion": "20261012.334.1",
     "captureFix": "The phone Delivery heading scrolls into view with block start, then main scrolls by the measured heading offset minus app-header height. The complete on-target headline must be inside the viewport. Desktop capture setup is unchanged.",
-    "guard": "browser:tests/visual/reference-guard.spec.ts:P02 Delivery phone capture includes its heading and on-target headline in both themes",
+    "guard": "browser:tests/visual-reference-guard.spec.ts:P02 Delivery phone capture includes its heading and on-target headline in both themes",
     "validation": {
       "transportAndLedger": "2/2 Node tests passed; exact 70 usable references from 72 digest-verified PNGs; missing approved pin, deferred pin, deferred digest and duplicate controls reject as intended.",
       "realArchive": "GitHub test-references-2 assets downloaded; archive/detached/internal/bundle/payload/PNG digests verified locally before materialization. Original macOS history is byte-for-byte unchanged as JSON data.",
@@ -4121,7 +4121,7 @@
   "round11": {
     "baseMain": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
     "leak": "scripts/test-prune/visual-renderer.mjs install-fonts appended FONTCONFIG_FILE to GITHUB_ENV; web-shard ran it unconditionally for all specs.",
-    "confinement": "Only tests/visual specs import the extended test fixture in checkpoint.ts. Its launchOptions worker fixture provisions fonts before browser launch and supplies FONTCONFIG_FILE in that child environment only. The CLI no longer writes GITHUB_ENV; no workflow step installs visual fonts. Date.setFixedTime remains page-scoped in visual setup only.",
+    "confinement": "Only tests/visual specs import the extended test fixture in checkpoint.ts. Its launchOptions worker fixture provisions fonts before browser launch and supplies FONTCONFIG_FILE in that child environment only. The CLI no longer writes GITHUB_ENV; no workflow step installs visual fonts. page.clock.setFixedTime remains page-scoped in visual setup only.",
     "guardRelocation": {
       "from": "tests/visual-reference-guard.spec.ts",
       "to": "tests/visual/reference-guard.spec.ts",
@@ -4182,15 +4182,56 @@
         "result": "All 72 PNG/payload digests verify; exactly 53 references exposed. No archive bytes changed."
       },
       {
-        "check": "Non-visual batch B and relocated guard",
-        "result": "Pending remote run"
+        "check": "Non-visual batch B and initial relocated guards",
+        "sourceSHA": "17d51e8e40ff6b723dbb9661d7fc84b312cf9b02",
+        "result": "126 non-visual tests PASS; 54 pre-existing optional header screenshot registrations skip without HEADER_SHOTS. Five guards PASS; one Session Chat visual fixture fails because main AEON-1690 removed role=separator. Visual assertions updated at 49a779c6d to verify Today label and accessible description; rerun pending capacity.",
+        "specs": [
+          "tests/ticket-panel.spec.ts",
+          "tests/header-menus.spec.ts",
+          "tests/footer-release-pill.spec.ts",
+          "tests/visual/reference-guard.spec.ts"
+        ]
       },
       {
         "check": "Hosted Linux comparisons and static",
-        "result": "Pending coordinator push; remote static refused: remote busy (mbp2606 host guard OPS-300)."
+        "result": "UNPROVEN: coordinator push required. All seven remote static attempts returned exit 3; the initial host guard refused and later attempts reported remote busy (2 remote runs already active on mbp2606, global cap). No local fallback or checks bypassed."
+      },
+      {
+        "check": "Final six visual guards and fourteen actual deferral registrations",
+        "sourceSHA": "49a779c6d8be0b0af4ffb069b84e7058561020a8",
+        "result": "UNPROVEN: four attempts refused with exit 3, remote busy (no free mbp2606 slot: global cap / CI pool / battery). The initial guard run proved five guards and all thirteen stale-report dispatches; the main AEON-1690 selector fix requires this rerun.",
+        "specs": [
+          "tests/visual/reference-guard.spec.ts",
+          "tests/visual/goals.spec.ts",
+          "tests/visual/ticket-workspace.spec.ts",
+          "tests/visual/capacity.spec.ts",
+          "tests/visual/delivery-numbers.spec.ts"
+        ],
+        "filter": "P02|visual comparison|V-goals-|V-ticket-workspace-|V-capacity-|V-delivery-numbers-390-"
+      },
+      {
+        "check": "Canonical manifests / CI static command inventory",
+        "result": "PASS; canonical manifest writer/check and 44 registered CI checks. Six guard identities moved with unchanged titles, ESSENTIAL tiers and scheduling metadata. Existing web/tests/** slice owns the relocated guard."
       }
     ],
     "negativeControl": "On temporary scratch/aeon-1674-r11-font-leak, restoring only the previous workflow makes the new no-job-font-provisioning assertion fail on install-fonts. Scratch ref removed with no negative-control commit.",
-    "outsideWriteSet": "No explicit write-set paths in round-11 brief; shared workflow/configuration hook and CI registry/tier entries are minimal required isolation/relocation changes. No product source changes."
+    "outsideWriteSet": "No explicit write-set paths in round-11 brief; shared workflow/configuration hook and CI registry/tier entries are minimal required isolation/relocation changes. No product source changes.",
+    "mainMergeAdaptation": "AEON-1690 leaves day labels aria-hidden and describes the first message with Today. Visual fixture and guard now check the exact visible label, one day row, first-message accessible description and complete day viewport. No product semantics or screenshot pins changed.",
+    "sharedFiles": {
+      ".github/workflows/ci.yml": "Remove the two job-wide font-provisioning steps.",
+      "scripts/ci/static-checks.json": "Refresh only the two affected job command digests.",
+      "scripts/releaseworkflow/tree_reuse_test.go": "Replace the old font-install projection with rejection of job-wide font setup; historical fallback pins remain unchanged.",
+      "scripts/ci/web-test-tiers.json": "Move six unchanged ESSENTIAL guard identities to tests/visual/reference-guard.spec.ts via canonical manifest writer."
+    },
+    "handoff": {
+      "pct": 95,
+      "reason": "BLOCKED-REMOTE-CAPACITY: final guard/deferral rerun and remote static refused; hosted static and exact Linux comparisons remain coordinator-owned.",
+      "proofDirectory": "tmp/AEON-1674-r11",
+      "remoteBrowserEvidence": "web/test-results/remote/r11-nonvisual-a and web/test-results/remote/r11-nonvisual-b-guards",
+      "pendingReferenceOwner": "AEON-1692 / reference set 3",
+      "originPush": false,
+      "deploy": false,
+      "modelReview": false
+    }
   }
 }
