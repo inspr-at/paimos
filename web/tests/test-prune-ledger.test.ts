@@ -36,7 +36,7 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   const summary = checkRepository()
   assert.deepEqual(summary, { browserCases: 5318, specs: 378, core: 29, protectedRisks: 647,
     driftCases: 455, candidateGroups: 31, candidateCases: 155, visualCases: 80,
-    visualApproval: 'pending', phase: 'P01', cuts: false })
+    visualApproval: 'pending', phase: 'P08', cuts: false })
   const original = {
     baseline,
     ledger: json('scripts/test-prune/risk-ledger.json'),
@@ -88,7 +88,7 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
     else edited.currentWeb.tests.splice(index, 1)
     assert.equal(validateLedger({ ...edited, sourceHash }).cuts, false,
       `An unprotected unit ${operation} must pass without Tick references`)
-    assert.throws(() => validateLedger({ ...edited, sourceHash, p01: true }), {
+    assert.throws(() => validateLedger({ ...edited, ledger: { ...edited.ledger, phase: 'P01' }, sourceHash, p01: true }), {
       message: 'P01 cannot remove or demote any existing test execution',
     })
   }
@@ -143,6 +143,7 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   // Snapshot enforcement is explicit: future assertion additions and refreshed
   // timings must not be blocked by P01's one-time no-execution-change check.
   const frozen = structuredClone(original)
+  frozen.ledger.phase = 'P01'
   frozen.currentWeb = { ...frozen.baseline.cataloguePolicy, tests: frozen.baseline.catalogue.map((row: { key: string }) => {
     const { key: ignored, ...entry } = row
     return entry
