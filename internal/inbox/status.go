@@ -84,8 +84,8 @@ func (m *module) handleMessageStatus(w http.ResponseWriter, r *http.Request) {
 			var evidence AttachedStatus
 			var state, mode string
 			var outcome, generation *string
-			var chat bool
-			if err := rows.Scan(&s.Cancelled, &s.MessageID, &state, &s.Reason, &s.DeliveredAt, &s.ReadAt, &s.DeliverBy, &mode, &outcome, &generation, &evidence.OfferedAt, &evidence.ShownAt, &evidence.CompletedAt, &evidence.OfferDeadline, &chat, &s.PickupStalledAt); err != nil {
+			var waitsForPickup bool
+			if err := rows.Scan(&s.Cancelled, &s.MessageID, &state, &s.Reason, &s.DeliveredAt, &s.ReadAt, &s.DeliverBy, &mode, &outcome, &generation, &evidence.OfferedAt, &evidence.ShownAt, &evidence.CompletedAt, &evidence.OfferDeadline, &waitsForPickup, &s.PickupStalledAt); err != nil {
 				return err
 			}
 			switch {
@@ -101,7 +101,7 @@ func (m *module) handleMessageStatus(w http.ResponseWriter, r *http.Request) {
 			if state != "failed" {
 				s.Reason = ""
 			}
-			s.WaitingForPickup = chat && s.Status == "sent" && !s.Cancelled
+			s.WaitingForPickup = waitsForPickup && s.Status == "sent" && !s.Cancelled
 			if !s.WaitingForPickup {
 				s.PickupStalledAt = nil
 			}

@@ -24,8 +24,9 @@ import (
 // delivery goes dead, the receipt fails, the message leaves every read path and
 // one system notice reaches the sender (plus the recipient session's
 // coordinator). A late acknowledgement cannot move a failed receipt back.
-// Desk replies (AEON-1432) and person-to-session chat (AEON-1487) wait
-// through no_listener/deadline, including a crash before confirmation.
+// Desk replies (AEON-1432), person-to-session chat (AEON-1487) and enabled
+// pull assistants (AEON-1702) wait through online no_listener/deadline failures,
+// including a crash before confirmation. Pull retention is bounded separately.
 
 // Failure reasons written by the delivery guarantee. Adapter reasons written by
 // the routine dispatcher (http_error, transport_error, ...) remain valid too.
@@ -116,7 +117,7 @@ const pullFailureReasonSQL = `(SELECT CASE
  WHEN ap.status<>'active' OR ap.linked_to IS NOT NULL THEN 'assistant_disabled'
  WHEN NOT coalesce(ap.messaging_only,false) AND NOT EXISTS(SELECT 1 FROM inbox_message_targets active
  WHERE active.tenant_id=m.tenant_id AND active.principal_id=m.recipient_principal_id AND active.enabled
- AND (NOT EXISTS(SELECT 1 FROM inbox_receipts ar WHERE ar.tenant_id=m.tenant_id AND ar.message_id=m.id AND ar.target_id IS NOT NULL)
+ AND (NOT EXISTS(SELECT 1 FROM inbox_compat_messages ac WHERE ac.tenant_id=m.tenant_id AND ac.inbox_message_id=m.id)
  OR EXISTS(SELECT 1 FROM inbox_receipts ar JOIN inbox_message_targets bound ON bound.tenant_id=ar.tenant_id AND bound.id=ar.target_id
  WHERE ar.tenant_id=m.tenant_id AND ar.message_id=m.id AND bound.project_id=active.project_id AND bound.address=active.address AND bound.role=active.role))) THEN 'assistant_disabled'
  WHEN EXISTS(SELECT 1 FROM agent_keys k WHERE k.tenant_id=m.tenant_id AND k.principal_id=ap.id)
@@ -286,12 +287,13 @@ func FailSessionMessages(ctx context.Context, tx pgx.Tx, tenantID, sessionID str
 // FailMessage is the one terminal "not delivered" transition, for every caller
 // (the sweeper, session end, the attempt cap, managed delivery that gives up).
 // In the caller's transaction it locks the message, and when it is still
-// unacknowledged with a queued receipt that has a deadline it: marks the
+// unacknowledged with a queued receipt that has a deadline (or an expired or
+// disabled/revoked pull lifecycle) it: marks the
 // delivery dead with reason, fails the receipt, hides the message from every
 // read path, releases drain leases, appends inbox.receipt_failed and
 // inbox.delivery_failed (System), and writes the System notice to the sender
 // plus the coordinator copy. It returns false and changes nothing otherwise
-// (already terminal, acknowledged, or a legacy message without a deadline),
+// (already terminal, acknowledged, or a non-pull legacy message without a deadline),
 // so every caller is idempotent. The caller must not set acked_at first.
 // reason is deadline, attempts, session_ended, no_listener or an adapter
 // reason allowed by inbox_message_deliveries_reason_check.

@@ -86,8 +86,8 @@ Before first pickup the sender sees `status: "sent"` with
 acknowledgement changes the receipt to `handed_off`.
 
 Unread and unacknowledged pull messages have a separate seven-day retention
-limit from acceptance, shortened by an explicit sender expiry. This does not
-change the tenant's online delivery deadline or push/session behaviour. At the
+limit (168 elapsed hours) from acceptance, shortened by an explicit sender
+expiry. This does not change the tenant's online delivery deadline or push/session behaviour. At the
 retention limit the receipt fails with `pickup_expired`, and one System notice
 tells the sender **not picked up within 7 days**. Failed messages cannot later
 be pulled or acknowledged. Disabling the assistant principal or its configured
@@ -148,6 +148,9 @@ The existing `TestRoutineDispatcherUsesEncryptedTargetAndFencedCompletion`
 behaviour test now includes production-authenticated round-trip, exact injected
 retry boundaries, signature/redaction, dry-run, target version, authorization
 revocation, pull polling/receipts/health without outbound attempts, frozen-host
-retention, and pre-expansion Amy-shaped provisioning/rotation subtests. Its
+retention, and pre-expansion Amy-shaped provisioning/rotation subtests. The
+pickup-retention subtest covers the expired legacy online deadline, both
+configured and implicit assistants, the exact retention boundary, one-time
+sender notices, key rotation/revocation, disabling and replacement with push. Its
 existing test tier is retained; no browser case or coordinator-owned tier record
 is added.
