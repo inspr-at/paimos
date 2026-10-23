@@ -2,8 +2,8 @@
   "version": 1,
   "ticket": "AEON-1676",
   "package": "P04",
-  "status": "cut-round-a-validation",
-  "recordedAt": "2026-10-23T08:46:02.568Z",
+  "status": "cut-round-a-awaiting-hosted-ci",
+  "recordedAt": "2026-10-23T09:00:01.382Z",
   "browserCases": {
     "sourceOwners": 46,
     "before": 696,
@@ -666,7 +666,18 @@
       "Graph picking/fullscreen/disposal, live-row retention, lazy Outline trees and Knowledge edit/dock remain native.",
       "Protected header shrink and contrast identities stay unchanged; AEON-1663 is not claimed closed by this cut round."
     ],
-    "remaining": "This round does not claim the final P04 32-case consolidation. Protected cuts need P02, and each remaining unique risk still needs an exact proven recipient."
+    "remaining": "This round does not claim the final P04 32-case consolidation. Protected cuts need P02, and each remaining unique risk still needs an exact proven recipient.",
+    "uncutAdditionalCandidates": {
+      "specs": [
+        "tests/aeon-632b-clip-settings.spec.ts",
+        "tests/aeon-632b-clip-touch.spec.ts",
+        "tests/aeon-632b-clip.spec.ts",
+        "tests/header-glimpse-context.spec.ts",
+        "tests/project-header.spec.ts",
+        "tests/project-list.spec.ts"
+      ],
+      "result": "Baseline refused: remote busy (no free mbp2606 slot: global cap / CI pool / battery); no cuts in these owners."
+    }
   },
   "runtime": {
     "owner": "web/tests/p04-runtime.test.ts",
@@ -709,10 +720,24 @@
           "runnerReported": "2.3m",
           "logArtifact": "web/test-results/cutA-before.log"
         },
-        "after": null
+        "after": {
+          "sourceCommit": "6eb9d00374ce5bc03f3dc73e9a9f066072c8f353",
+          "exitCode": 3,
+          "passed": null,
+          "runnerReported": null,
+          "refusal": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI",
+          "logArtifact": "web/test-results/cutA-after-final-attempt.log"
+        }
       }
     ],
-    "note": "Runner-reported time includes the browser test run, rounded by Playwright; it is not an invoice or a whole-package estimate."
+    "note": "Runner-reported time includes the browser test run, rounded by Playwright; it is not an invoice or a whole-package estimate.",
+    "reason": "Before: 96 cases passed on mbp2606 in the runner-reported 2.3m. After: all attempts refused with exit 3 for occupied 2/2 slots. No runner-time delta or saving is claimed.",
+    "retryWindow": {
+      "firstAfterAttempt": "2026-10-23T08:49:22.362Z",
+      "lastAfterAttempt": "2026-10-23T08:58:40.728Z",
+      "boundedBy": "worker-common: at most ten minutes once implementation is complete and committed",
+      "localFallbackUsed": false
+    }
   },
   "checks": {
     "standingLedger": {
@@ -733,6 +758,75 @@
     "postGateMetadata": {
       "removed": 14,
       "removedKeysStillReferenced": []
+    },
+    "retainedBrowserAssertions": {
+      "method": "TypeScript AST: each remaining test() call text must occur byte-for-byte in a7ea6c7cad7349acf79c1b25d75d6c8bb0d56284; profile registration loops are checked separately against the exact removed-key list.",
+      "result": [
+        {
+          "file": "web/tests/aeon-1028-projheader.spec.ts",
+          "retainedTestBodies": 30,
+          "allByteIdentical": true
+        },
+        {
+          "file": "web/tests/aeon-1042-headergraph.spec.ts",
+          "retainedTestBodies": 1,
+          "allByteIdentical": true
+        },
+        {
+          "file": "web/tests/aeon-1188-displayhome.spec.ts",
+          "retainedTestBodies": 4,
+          "allByteIdentical": true
+        },
+        {
+          "file": "web/tests/aeon-974-typefilter.spec.ts",
+          "retainedTestBodies": 8,
+          "allByteIdentical": true
+        },
+        {
+          "file": "web/tests/group-figures.spec.ts",
+          "retainedTestBodies": 11,
+          "allByteIdentical": true
+        },
+        {
+          "file": "web/tests/project-status-counts.spec.ts",
+          "retainedTestBodies": 6,
+          "allByteIdentical": true
+        }
+      ]
+    },
+    "preservedSafety": {
+      "protectedLineageRowsUnchanged": 647,
+      "coreDefinitionsUnchanged": 29,
+      "browserRemovals": 25,
+      "otherBrowserRowsAndPolicyUnchanged": true,
+      "historicalAndLaunchPolicyFilesUnchanged": [
+        "scripts/test-prune/baseline.json",
+        "scripts/test-prune/visual-manifest.json",
+        "scripts/test-tiers/drift-obligations.json",
+        "scripts/test-tiers/browser-candidate-measurement.json",
+        "scripts/test-tiers/affected-replay.json",
+        "web/ci-web-shards.json"
+      ],
+      "comparisonBase": "11b092730e55abd0d0cdb645f0feb0dd970c0076"
+    },
+    "tierPolicy": {
+      "command": "node --test --test-name-pattern='three-tier manifests allow new NIGHTLY|test-prune ledger' scripts/test-tiers/test-tiers.test.mjs",
+      "passed": 2,
+      "failed": 0,
+      "exitCode": 0,
+      "logArtifact": "web/test-results/cutA-tier-policy.log"
+    },
+    "affected": {
+      "command": "node scripts/test-tiers/affected.mjs --base origin/main --kind web",
+      "exitCode": 0,
+      "result": "FULL: unnarrowed risk: scripts/test-prune/p04-evidence.json",
+      "execution": "Complete affected selection belongs to hosted CI; targeted owners are measured separately."
+    },
+    "remoteStatic": {
+      "command": "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh",
+      "exitCode": 3,
+      "result": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (2 remote runs already active on mbp2606, global cap); keep coding and retry in a few minutes, or rely on PR CI",
+      "logArtifact": "web/test-results/cutA-static-final-attempt.log"
     }
   },
   "sourceSha256": {
@@ -863,5 +957,31 @@
         "mainSha256": "7d3b3d34218d72209fddbe77932958c9bda27117456cbdd25cceaf3c99adf88e"
       }
     }
+  },
+  "completion": {
+    "implementation": "complete for the 25 selected unprotected cuts",
+    "pct": 95,
+    "reason": "BLOCKED-REMOTE-CAPACITY: the after browser run and full affected/static verification were refused on mbp2606; hosted CI remains authoritative.",
+    "noOriginPush": true,
+    "noDeployment": true,
+    "noReviewGate": true,
+    "noModelCLI": true
+  },
+  "remainingVerification": {
+    "browserSpecs": [
+      "tests/aeon-1028-projheader.spec.ts",
+      "tests/aeon-1042-headergraph.spec.ts",
+      "tests/aeon-1188-displayhome.spec.ts",
+      "tests/aeon-974-typefilter.spec.ts",
+      "tests/group-figures.spec.ts",
+      "tests/project-status-counts.spec.ts"
+    ],
+    "expectedRetainedCases": 71,
+    "checks": [
+      "native registration reconciliation for the changed owners",
+      "full affected set: FULL: unnarrowed risk: scripts/test-prune/p04-evidence.json",
+      "node scripts/ci-static.mjs --merge-main in hosted CI"
+    ],
+    "measurement": "Run the same six owners on mbp2606; compare its runner-reported result with the 96-case 2.3m baseline. Do not report an unmeasured saving."
   }
 }
