@@ -89,6 +89,18 @@ func testPeerDirectoryAndDelivery(t *testing.T) {
 	if len(get(w.sender, "?project="+project).Items) != 1 {
 		t.Fatal("project filter lost its scope")
 	}
+	// Sharing an owner never grants project visibility or harness.read.
+	restricted := insertPrincipal(t, w.db, owner.TenantID, tenant.Agent, "project-peer-reader", nil)
+	restricted.KeyCreatorID, restricted.Scopes = owner.ID, []string{"harness.read"}
+	if _, err := w.db.Admin.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, restricted.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.db.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, owner.TenantID, restricted.ID, sourceProject); err != nil {
+		t.Fatal(err)
+	}
+	if visible := get(restricted, ""); len(visible.Items) != 1 || visible.Items[0].SessionID != source {
+		t.Fatalf("owner directory widened project access: %+v", visible)
+	}
 	for _, query := range []string{"?limit=0", "?limit=101", "?after=bad", "?session=", "?project=bad", "?name=", "?name=" + url.QueryEscape(strings.Repeat("x", 161))} {
 		workspaceStatus(t, workspaceCall(m, w.sender, "GET", "/api/peers"+query, "", nil), 400)
 	}
