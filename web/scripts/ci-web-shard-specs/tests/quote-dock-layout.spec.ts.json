@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/quote-dock-layout.spec.ts",
-    "listedTests": 8,
+    "listedTests": 6,
     "tierTiming": {
       "caseSeconds": {
         "max": 7.437,

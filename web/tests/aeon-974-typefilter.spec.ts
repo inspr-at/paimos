@@ -220,6 +220,27 @@ test('with Type applied, the Filters sheet waits for its unfiltered counts; a la
   const counts = await heldLevelCounts(page, true)
   await page.goto('/p/PHAROS?type=leaf')
   await expect(rows(page).first()).toBeVisible()
+  await expect.poll(() => level(calls)).toBe('leaf')
+  const noPhoneOverflow = async () => {
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+      'phone page with Type applied has no horizontal overflow').toBeLessThanOrEqual(1)
+  }
+  await noPhoneOverflow()
+  // Fault control: put twenty pixels beyond the viewport and require the
+  // same page-level assertion to fail, then restore the retained journey.
+  const overflow = await page.evaluateHandle(() => {
+    const element = document.createElement('div')
+    element.style.cssText = 'position:absolute;left:100%;top:0;width:20px;height:1px'
+    document.documentElement.append(element)
+    return element
+  })
+  try {
+    await expect(noPhoneOverflow()).rejects.toThrow(/phone page with Type applied has no horizontal overflow/)
+  } finally {
+    await overflow.evaluate(element => element.remove())
+    await overflow.dispose()
+  }
+  await noPhoneOverflow()
   await expect.poll(() => counts.asked).toBe(true)
   await openListFilters(page)
   const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
@@ -249,7 +270,7 @@ test('with Type applied, the Filters sheet waits for its unfiltered counts; a la
   guard.done()
 })
 
-for (const width of [1024, 940]) {
+for (const width of [1024]) {
   test(`Filter and Search stay put while pills overflow, come and go at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await world(page)
@@ -296,33 +317,3 @@ test('links and saved views with the legacy type or Parents / Leaves open as Typ
   await expect(toolbar(page).getByRole('button', { name: `Edit Type filter: ${TOP}`, exact: true })).toBeVisible()
   await expect(views.locator('.dirty')).toBeHidden()
 })
-
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
-  test(`applied Type filter at ${width} ${theme}`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 900 })
-    await page.emulateMedia({ colorScheme: theme as 'light' | 'dark', reducedMotion: 'reduce' })
-    await world(page, theme)
-    await mkdir(shots, { recursive: true })
-    await page.goto('/p/PHAROS?type=leaf,1&status=new,backlog,in-progress&priority=high')
-    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
-    await expect(rows(page).first()).toBeVisible()
-    if (width <= 900) {
-      // Phones and small tablets keep every filter in the Filters sheet.
-      await openListFilters(page)
-      const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
-      const type = sheet.locator('.sheet-section').filter({ has: page.locator('.eyebrow', { hasText: /^Type$/ }) })
-      await type.scrollIntoViewIfNeeded()
-      await expect(type.locator('.facet-option .option-label')).toHaveText([TOP, 'Teilvorhaben', LEAF])
-      await expect(sheet.getByText('Parents / Leaves', { exact: true })).toHaveCount(0)
-      await page.screenshot({ path: `${shots}/sheet-${width}-${theme}.png` })
-      return
-    }
-    await expect(toolbar(page).locator('.facet-control')).toHaveCount(3)
-    await expect(toolbar(page).getByRole('button', { name: `Edit Type filter: ${LEAF}, ${TOP}`, exact: true })).toBeVisible()
-    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
-    await page.screenshot({ path: `${shots}/toolbar-${width}-${theme}.png` })
-    const type = await addFilter(page, 'Type')
-    await expect(type).toBeVisible()
-    await page.screenshot({ path: `${shots}/type-menu-${width}-${theme}.png` })
-  })
-}

@@ -98,7 +98,8 @@ async function rowMenu(page: Page, id: string) {
   return page.getByRole('menu')
 }
 
-for (const dark of [false, true]) {
+// AEON-1677: retain desktop and phone Hide/Undo/toggle journeys without theme copies.
+for (const dark of [false]) {
   test(`1440 ${theme(dark)}: Hide for me, Undo, Display › Show (Done goals, Hidden goals, Waiting on you), Unhide`, async ({ page }, info) => {
     const w = world()
     await page.emulateMedia({ colorScheme: dark ? 'dark' : 'light' })
@@ -216,7 +217,7 @@ test('1440 light: Waiting on you off leaves no band, keeps the header Desk count
   check(info, 1440, false, 'all-hidden empty state links to Display', true)
 })
 
-for (const dark of [false, true]) {
+for (const dark of [false]) {
 test(`390 ${theme(dark)}: the ⋯ Goal display menu has the three Show rows; the opened goal hides, Undo restores, Hidden goals shows it and Unhide brings it back`, async ({ page }, info) => {
   const w = world()
   await page.emulateMedia({ colorScheme: dark ? 'dark' : 'light' })
@@ -266,7 +267,7 @@ test(`390 ${theme(dark)}: the ⋯ Goal display menu has the three Show rows; the
 }
 
 // v1.2: the toolbar toggle and Display › Show › Waiting on you are one setting.
-for (const dark of [false, true]) {
+for (const dark of [false]) {
   test(`1440 ${theme(dark)}: the toolbar's Waiting on you toggle hides and shows the band, Display › Show follows, and the count stays without moving anything`, async ({ page }, info) => {
     const w = world()
     await page.emulateMedia({ colorScheme: dark ? 'dark' : 'light' })

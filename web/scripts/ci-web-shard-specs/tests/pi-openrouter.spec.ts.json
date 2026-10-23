@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/pi-openrouter.spec.ts",
-    "listedTests": 9,
+    "listedTests": 7,
     "tierTiming": {
       "caseSeconds": {
-        "max": 3.298,
-        "median": 2.378,
-        "min": 1.892
+        "max": 4.252,
+        "median": 2.742,
+        "min": 2.232
       },
-      "seconds": 21.615,
-      "selectedTests": 9
+      "seconds": 16.495269,
+      "selectedTests": 4
     },
     "weightSeconds": 19.97561,
     "weightSource": "unmeasured-test-rate"

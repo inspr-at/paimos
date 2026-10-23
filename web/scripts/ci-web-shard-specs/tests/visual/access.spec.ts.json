@@ -8,6 +8,15 @@
   "spec": {
     "file": "tests/visual/access.spec.ts",
     "listedTests": 4,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.362,
+        "median": 4.0545,
+        "min": 3.498
+      },
+      "seconds": 22.929212,
+      "selectedTests": 4
+    },
     "weightSeconds": 40,
     "weightSource": "AEON-1674-initial-estimate"
   }

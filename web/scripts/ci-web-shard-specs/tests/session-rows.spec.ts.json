@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/session-rows.spec.ts",
-    "listedTests": 16,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
         "max": 2.272,

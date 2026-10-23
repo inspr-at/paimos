@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/release-switches.spec.ts",
-    "listedTests": 17,
+    "listedTests": 16,
     "tierTiming": {
       "caseSeconds": {
         "max": 7.748,

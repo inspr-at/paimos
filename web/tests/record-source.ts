@@ -22,14 +22,14 @@ export function sourceModule<T>(path: string, modules: Record<string, unknown>):
   const { outputText } = ts.transpileModule(sourceText(path), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
   const exports = {}
   new Function('require', 'exports', outputText)((id: string) => {
-    if (id === 'vue') return Vue
+    if (id === 'vue') return modules.vue ?? Vue
     if (!(id in modules)) throw new Error(`Missing test dependency: ${id}`)
     return modules[id]
   }, exports)
   return exports as T
 }
-export function setupSource(path: string, props: Record<string, unknown>, modules: Record<string, unknown>) {
-  const { descriptor } = parse(sourceText(path))
+export function setupSource(path: string, props: Record<string, unknown>, modules: Record<string, unknown>, source = sourceText(path)) {
+  const { descriptor } = parse(source)
   const { content } = compileScript(descriptor, { id: path })
   const { outputText } = ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
   const exports: { default?: { setup: Function } } = {}

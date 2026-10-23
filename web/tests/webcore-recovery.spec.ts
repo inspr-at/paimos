@@ -6,8 +6,9 @@ import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { expectStableControls } from './helpers/stable'
 
-for (const width of [390, 1024, 1440]) for (const scheme of ['light', 'dark'] as const) {
-  test(`start-time typing keeps the cost unit and controls stable (${width}, ${scheme})`, async ({ page }) => {
+// P11: retain the phone sheet and desktop form with their full typing/stability assertions.
+for (const width of [390, 1440]) for (const scheme of ['light'] as const) {
+  test(`start-time typing keeps the cost unit and controls stable (${width}, ${scheme})`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 })
     await page.emulateMedia({ colorScheme: scheme })
     await mockWork(page, fixtures())
@@ -38,7 +39,7 @@ for (const width of [390, 1024, 1440]) for (const scheme of ['light', 'dark'] as
       })),
     })
     expect(calls.filter(call => call.method === 'POST' && call.path === '/api/time-entries')).toHaveLength(0)
-    await page.screenshot({ path: `test-results/aeon-theme-webcore-fix2/hours-${width}-${scheme}.png`, fullPage: true })
+    await page.screenshot({ path: info.outputPath(`aeon-theme-webcore-fix2/hours-${width}-${scheme}.png`), fullPage: true })
   })
 }
 

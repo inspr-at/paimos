@@ -40,7 +40,7 @@ async function open(page: Page, width: number, theme = 'light', url = '/p/PHAROS
 }
 
 for (const width of [390, 768]) {
-  for (const theme of ['light', 'dark'] as const) {
+  for (const theme of ['light'] as const) {
     test(`the Filters sheet filters and links to the Display menu at ${width}px ${theme}`, async ({ page }) => {
       const data = await open(page, width, theme)
       await filters(page).click()
@@ -133,7 +133,7 @@ test('Outline on a phone: Expand all from the Display sheet closes it and return
   await expect(filters(page)).toBeFocused()
 })
 
-for (const theme of ['light', 'dark'] as const) {
+for (const theme of ['light'] as const) {
   test(`desktop Display buttons open the Display menu at 1440px ${theme}`, async ({ page }) => {
     await open(page, 1440, theme)
     await expect(filters(page)).toBeHidden()

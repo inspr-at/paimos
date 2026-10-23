@@ -3,7 +3,8 @@ import { expect, test } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { fixtures, mockWork } from './work-fixtures'
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+// AEON-1677: retain mounted child-derived status refresh in both row layouts.
+for (const width of [390, 1440]) for (const theme of ['light']) {
   test(`derived status refresh at unchanged edit revision · ${width} · ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     const data = fixtures()

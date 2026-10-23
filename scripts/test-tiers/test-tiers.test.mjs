@@ -1340,7 +1340,7 @@ test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 860s and eight
     assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),rows.length)
     return full
   }
-  const full=assertFullGate(gate,policy)
+  assertFullGate(gate,policy)
   // Risk: treating the 800s rebalance goal as a hard budget rejects normal
   // catalogue growth. Exercise the same invariants above 800s, below 860s,
   // with deterministic timings independent of the live inventory.
@@ -1349,28 +1349,53 @@ test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 860s and eight
   assert.equal(assertFullGate(growthGate,growthPolicy).projectedMaxSeconds,830)
   const overTargetPolicy={groups:[{specs:growthGate.map(row=>({file:row.file,tierTiming:{seconds:741,selectedTests:1}}))}]}
   assert.throws(()=>assertFullGate(growthGate,overTargetPolicy),{name:'AssertionError',message:'busiest shard 861.000s'})
-  const weights=tierWeights(policy,gate)
-  const workSeconds=[...new Set(gate.map(row=>row.file))].reduce((sum,file)=>sum+weights[file],0)
+  // The lower bounds describe the pre-prune workload, not today's smaller
+  // catalogue. Retain that recorded population and its complete launch policy;
+  // the live gate above still has to keep every case below the same 860s target.
+  const frozen=JSON.parse(readFileSync(new URL('../test-prune/baseline.json',import.meta.url)))
+  // These frozen counterexamples predate the container split. Retain their
+  // combined population; only the live gate routes visuals to their own job.
+  const historicalGate=fullGateTests(frozen.catalogue).filter(row=>row.kind==='browser').map(({executionJob,...row})=>row)
+  const historicalFull=assertFullGate(historicalGate,frozen.launchPolicy)
+  const weights=tierWeights(frozen.launchPolicy,historicalGate)
+  const workSeconds=[...new Set(historicalGate.map(row=>row.file))].reduce((sum,file)=>sum+weights[file],0)
   for(const count of [20,21]) {
-    const lowerBound=full.overheadSeconds+workSeconds/count
+    const lowerBound=historicalFull.overheadSeconds+workSeconds/count
     assert.ok(lowerBound>800,`${count} shards could meet 800s; measured lower bound ${lowerBound.toFixed(3)}s`)
   }
-  // AEON-1674 stages replacement journeys alongside every original case.
-  // Keep the prior twenty-shard proof on the frozen pre-prune catalogue;
-  // the enlarged current gate must still pass the unchanged full budget.
-  const beforePrune=new Set(JSON.parse(readFileSync(new URL('../test-prune/baseline.json',import.meta.url))).catalogue.map(key))
-  // Preserve the original overflow counterexample on the pre-move combined
-  // catalogue; current ordinary shards exclude the required container owner.
-  const historicalGate=fullGateTests(replayRows).filter(row=>row.kind==='browser').map(({executionJob,...row})=>row)
-  const previous=webShardPlan(historicalGate.filter(row=>beforePrune.has(key(row))),policy,{mode:'full',maximum:20})
+  const previous=webShardPlan(historicalGate,frozen.launchPolicy,{mode:'full',maximum:20})
   assert.equal(previous.shards.length,20)
   assert.equal(previous.fitsBudget,true)
   assert.ok(previous.projectedMaxSeconds>800,`twenty-shard main must miss 800s, got ${previous.projectedMaxSeconds.toFixed(3)}s`)
-  const enlarged=webShardPlan(historicalGate,policy,{mode:'full',maximum:20})
+  // P02 also proves that staging its replacements beside the original
+  // population exceeds twenty shards. Rebuild that historical population
+  // and overlay only P02's staged launch records; later cuts must not erase
+  // either this counterexample or the unchanged live 860/900-second guards.
+  const staged=new Set(JSON.parse(readFileSync(new URL('../test-prune/p02-execution.json',import.meta.url))).candidateNativeKeys)
+  const beforePrune=new Set(frozen.catalogue.map(key))
+  const additions=replayRows.filter(row=>staged.has(key(row))&&!beforePrune.has(key(row)))
+  const owners=new Set([
+    ...JSON.parse(readFileSync(new URL('../test-prune/risk-ledger.json',import.meta.url))).specs.filter(row=>row.package==='P02').map(row=>row.file),
+    ...additions.filter(row=>row.kind==='browser').map(row=>row.file),
+  ])
+  const stagedPolicy=structuredClone(frozen.launchPolicy)
+  for(const group of stagedPolicy.groups) group.specs=group.specs.filter(spec=>!owners.has(spec.file))
+  // Freeze the original staged timings: a later measured refresh cannot
+  // change what this historical pre-prune overflow counterexample proves.
+  const stagedGroups=JSON.parse(readFileSync(new URL('../test-prune/wave-a-execution.json',import.meta.url))).fix4.historicalStagedPolicyGroups
+  for(const group of stagedGroups) {
+    const specs=group.specs.filter(spec=>owners.has(spec.file))
+    if(!specs.length) continue
+    let target=stagedPolicy.groups.find(row=>row.id===group.id)
+    if(!target) { target={...group,specs:[]}; stagedPolicy.groups.push(target) }
+    target.specs.push(...specs)
+  }
+  const stagedGate=fullGateTests([...frozen.catalogue,...additions]).filter(row=>row.kind==='browser').map(({executionJob,...row})=>row)
+  const enlarged=webShardPlan(stagedGate,stagedPolicy,{mode:'full',maximum:20})
   assert.equal(enlarged.shards.length,20)
   assert.equal(enlarged.fitsBudget,false)
   assert.throws(()=>assertWebShardBudget(enlarged),/over the 900s budget/)
-  const narrow=webShardPlan(gate,policy,{mode:'full',maximum:18})
+  const narrow=webShardPlan(historicalGate,frozen.launchPolicy,{mode:'full',maximum:18})
   assert.equal(narrow.shards.length,18)
   assert.equal(narrow.budgetSeconds,900)
   assert.equal(narrow.overheadSeconds,120)
@@ -1429,7 +1454,11 @@ test('AEON-1619 hosted shards 2, 13 and 14 keep launch-wall timings from run 395
     'tests/work-kinds.spec.ts':[6.412,2],
     'tests/work-surfaces-fix2.spec.ts':[56.127,12],
   }
-  const readRecord=file=>JSON.parse(readFileSync(new URL(`../../web/scripts/ci-web-shard-specs/${file}.json`,import.meta.url)))
+  // This is a historical measurement regression. Live scheduling is refreshed
+  // independently; the immutable pre-prune policy retains the original proof.
+  const historicalPolicy=JSON.parse(readFileSync(new URL('../test-prune/baseline.json',import.meta.url))).launchPolicy
+  const readRecord=file=>({spec:historicalPolicy.groups.flatMap(group=>group.specs).find(spec=>spec.file===file),
+    nightlyTiming:historicalPolicy.nightlyTiming.files[file]})
   for(const [file,[seconds,selectedTests]] of Object.entries(measured)) {
     const spec=readRecord(file).spec
     assert.equal(spec.tierTiming?.seconds,seconds,file)
@@ -1446,13 +1475,51 @@ test('AEON-1619 hosted shards 2, 13 and 14 keep launch-wall timings from run 395
   const requests=readRecord('tests/session-requests.spec.ts').spec
   assert.equal(requests.weightSeconds,22.94)
   assert.equal(requests.weightSource,'hosted-CI-39565819178')
-  const policy=loadWebPolicy()
-  const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser'&&row.executionJob!=='visual-comparison')
+  const policy=historicalPolicy
+  // This regression describes the recorded run, whose selected counts stay
+  // fixed when later prune packages remove current registrations. Live packing
+  // and selected-slice scaling have their own catalogue checks below.
+  const gate=Object.entries(measured).flatMap(([file,[,selectedTests]])=>
+    Array.from({length:selectedTests},(_,index)=>({kind:'browser',file,name:`hosted case ${index}`})))
   const weights=tierWeights(policy,gate)
   assert.ok(weights['tests/aeon-1212-lead-panel.spec.ts']>=468,'lead-panel must cover the hosted case sum')
   for(const file of ['tests/aeon-1212-lead-panel.spec.ts','tests/person-steps.spec.ts','tests/definitions-p3.spec.ts','tests/eta-column.spec.ts','tests/aeon-1470-list-titles.spec.ts','tests/aeon-1474-desk-push-ui.spec.ts','tests/desk-empty.spec.ts','tests/performance.spec.ts']) {
     assert.equal(weights[file],measured[file][0],file)
   }
+})
+
+test('AEON-1696 refreshed browser costs charge the measured launch wall and scheduling reserve',()=>{
+  // Risk: scaling an old all-case average after pruning undercharges the
+  // expensive retained cases and lets an apparently balanced shard time out.
+  // Historical timing assertions above retain their own immutable inputs;
+  // this live regression rejects stale costs for every refreshed owner.
+  const proof=JSON.parse(readFileSync(new URL('../test-prune/wave-a-execution.json',import.meta.url))).fix4
+  const policy=loadWebPolicy()
+  const records=new Map(policy.groups.flatMap(group=>group.specs).map(spec=>[spec.file,spec]))
+  assert.equal(proof.safetyFactor,1.15)
+  assert.equal(proof.estimates.length,306)
+  for(const recorded of proof.estimates) {
+    const timing=records.get(recorded.file)?.tierTiming
+    assert.ok(recorded.measuredSeconds>0,recorded.file)
+    assert.equal(recorded.seconds,Number((recorded.measuredSeconds*proof.safetyFactor).toFixed(6)),recorded.file)
+    const schedulingTests=recorded.schedulingTests??recorded.selectedTests
+    const schedulingSeconds=recorded.schedulingSeconds??recorded.seconds
+    if(recorded.schedulingTests!==undefined) {
+      assert.equal(schedulingTests,records.get(recorded.file).listedTests,recorded.file)
+      assert.equal(schedulingSeconds,recorded.seconds*schedulingTests/recorded.selectedTests,recorded.file)
+    }
+    assert.deepEqual(timing,{caseSeconds:recorded.caseSeconds,seconds:schedulingSeconds,
+      selectedTests:schedulingTests},recorded.file)
+  }
+  assert.ok(proof.maxMeasuredOverheadSeconds<=120,'source job setup, collection and reporting fit the retained reserve')
+  const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
+  const plan=webShardPlan(gate,policy,{mode:'full'})
+  assert.deepEqual(plan.shards,fullWebShards)
+  assert.equal(plan.overheadSeconds,120)
+  assert.equal(plan.timeoutSeconds,1200)
+  assert.equal(plan.budgetSeconds,900)
+  assert.ok(plan.projectedMaxSeconds<=860)
+  assertWebShardBudget(plan)
 })
 
 const assignWebShards=(rows,policy,plan)=>{

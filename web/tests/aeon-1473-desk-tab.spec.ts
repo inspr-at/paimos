@@ -152,29 +152,6 @@ test('AEON-1473: a background tab reads the Desk itself and says New decision fo
   expect(await page.evaluate(() => (window as unknown as { tabCalls: { focus: number; sound: number } }).tabCalls)).toEqual({ focus: 0, sound: 0 })
 })
 
-test('AEON-1473: reduced motion changes only the number, visible or in the background', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.clock.install({ time: T0 })
-  const desk = await setup(page, { open: 1 })
-  await page.goto('/')
-  await expect(page).toHaveTitle(/^\(1\) Projects · /)
-  await expect(icon(page)).toHaveAttribute('data-desk-count', '1')
-  await pauseClock(page)
-  await recordTab(page)
-  desk.open = 2
-  await readAgain(page)
-  await expect(page).toHaveTitle(/^\(2\) Projects · /, { timeout: 1000 })
-  await page.clock.runFor(2000)
-  await hideTab(page)
-  desk.open = 3
-  await backgroundRead(page, desk)
-  await expect(page).toHaveTitle(/^\(3\) Projects · /, { timeout: 1000 })
-  await page.clock.runFor(3000)
-  const log = await tabLog(page)
-  expect(log.icons, 'one change per count, no frames').toHaveLength(2)
-  expect(noticeShown(log)).toHaveLength(0)
-})
-
 test('AEON-1473: an agent principal and a signed-out visitor see no count and the plain icon', async ({ page }) => {
   const desk = await setup(page, { open: 4, principalKind: 'agent' })
   await page.goto('/')

@@ -1395,7 +1395,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		in := arg(array(q.Shapes))
 		out := arg(array(q.ShapesNot))
 		sql += `, leaf_flags AS MATERIALIZED (
-        SELECT id, is_leaf FROM aeon_work_leaf_flags(ARRAY(SELECT id FROM matched))
+        SELECT id, is_leaf FROM aeon_work_leaf_flags_bounded(ARRAY(SELECT id FROM matched))
     ), filtered AS (
         SELECT m.* FROM matched m
         LEFT JOIN leaf_flags lf ON lf.id = m.id
@@ -1567,8 +1567,10 @@ func listSQL(q listQuery, anchor any) (string, []any) {
     -- Count visible children for the page once instead of rescanning nodes per row.
     child_counts AS MATERIALIZED (
         SELECT c.parent_id,count(*)::int AS child_count FROM nodes c
-        JOIN selected s ON s.id=c.parent_id
         WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.deleted_at IS NULL
+            -- Keep membership as a hashed subplan: stale estimates must not
+            -- turn it into a nested comparison of each node with the page.
+            AND (c.parent_id IN (SELECT id FROM selected)) IS TRUE
         GROUP BY c.parent_id
     )
     , page_rows AS (SELECT ` + nodeCols + `,k.slug,k.label,nullif(n.fields->>'priority',''),assignee.id::text,assignee.name,
@@ -1577,15 +1579,35 @@ func listSQL(q listQuery, anchor any) (string, []any) {
            coalesce(cc.child_count,0),
            project.id::text,project.key,project.title,
            epic.id::text,epic.key,epic.title,` + leadColumns + moneyCols + aggregateCols + `,s.rn
-    FROM selected s JOIN nodes n ON n.id=s.id JOIN node_kinds k ON k.id=n.kind_id
+    FROM selected s CROSS JOIN LATERAL (
+        SELECT n.* FROM nodes n
+        WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=s.id
+            AND (n.tenant_id,n.id)>=(current_setting('aeon.tenant_id')::uuid,s.id)
+            AND (n.tenant_id,n.id)<=(current_setting('aeon.tenant_id')::uuid,s.id) OFFSET 0
+    ) n JOIN node_kinds k ON k.id=n.kind_id
     LEFT JOIN child_counts cc ON cc.parent_id=n.id
     ` + assigneeJoin + pageWorker + `
-    LEFT JOIN nodes par ON par.id=n.parent_id AND par.deleted_at IS NULL
+    -- Keep parent/ancestor reads dependent on their selected ID. With stale
+    -- tenant statistics, a join can otherwise rescan all nodes per page row.
+    -- Composite bounds keep the lookup in an ID range even when the planner
+    -- prefers a tenant index whose other columns precede the ID.
+    LEFT JOIN LATERAL (
+        SELECT id,parent_id,kind_id,key,title FROM nodes
+        WHERE tenant_id=n.tenant_id AND id=n.parent_id AND deleted_at IS NULL
+            AND (tenant_id,id)>=(n.tenant_id,n.parent_id)
+            AND (tenant_id,id)<=(n.tenant_id,n.parent_id) OFFSET 0
+    ) par ON true
     LEFT JOIN node_kinds pk ON pk.id=par.kind_id
     LEFT JOIN LATERAL (
         WITH RECURSIVE ancestors AS (
             SELECT n.id,n.parent_id,n.kind_id,n.key,n.title,0 AS depth
-            UNION ALL SELECT a.id,a.parent_id,a.kind_id,a.key,a.title,anc.depth+1 FROM nodes a JOIN ancestors anc ON a.id=anc.parent_id WHERE a.deleted_at IS NULL
+            UNION ALL SELECT a.id,a.parent_id,a.kind_id,a.key,a.title,anc.depth+1
+            FROM ancestors anc CROSS JOIN LATERAL (
+                SELECT id,parent_id,kind_id,key,title FROM nodes
+                WHERE tenant_id=n.tenant_id AND id=anc.parent_id AND deleted_at IS NULL
+                    AND (tenant_id,id)>=(n.tenant_id,anc.parent_id)
+                    AND (tenant_id,id)<=(n.tenant_id,anc.parent_id) OFFSET 0
+            ) a
         ) SELECT a.id,a.key,a.title FROM ancestors a JOIN node_kinds ak ON ak.id=a.kind_id WHERE ak.slug='project' ORDER BY a.depth LIMIT 1
     ) project ON true
     LEFT JOIN LATERAL (
@@ -1594,7 +1616,12 @@ func listSQL(q listQuery, anchor any) (string, []any) {
             SELECT par.id,par.parent_id,par.kind_id,par.key,par.title,1 AS depth WHERE par.id IS NOT NULL
             UNION ALL SELECT a.id,a.parent_id,a.kind_id,a.key,a.title,up.depth+1 FROM up
                 JOIN node_kinds uk ON uk.id=up.kind_id AND uk.slug NOT IN ('work','epic','project')
-                JOIN nodes a ON a.id=up.parent_id AND a.deleted_at IS NULL
+                CROSS JOIN LATERAL (
+                    SELECT id,parent_id,kind_id,key,title FROM nodes
+                    WHERE tenant_id=n.tenant_id AND id=up.parent_id AND deleted_at IS NULL
+                        AND (tenant_id,id)>=(n.tenant_id,up.parent_id)
+                        AND (tenant_id,id)<=(n.tenant_id,up.parent_id) OFFSET 0
+                ) a
             WHERE up.depth<32
         ) SELECT u.id,u.key,u.title FROM up u JOIN node_kinds ek ON ek.id=u.kind_id WHERE ek.slug IN ('epic','work') ORDER BY u.depth LIMIT 1
     ) epic ON true` + moneyJoin + aggregateJoin + `

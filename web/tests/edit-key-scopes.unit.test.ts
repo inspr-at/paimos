@@ -5,6 +5,8 @@ import * as Access from '../src/lib/access'
 import { readFileSync } from 'node:fs'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import ts from 'typescript'
+import { deferred, flush, sourceModule } from './record-source'
+import { scopeOwner } from '../src/lib/identityScope'
 
 // Execute the sheet's real setup in Node, with its API answer and caller grants
 // injected. No browser is needed to test the unavailable-scope explanation.
@@ -138,4 +140,136 @@ it('late adoption results cannot restore another person or a departed key', asyn
     expect(tab.store.keys?.every(k => k.created_by_principal_id === null) ?? true).toBe(true)
     tab.stop()
   }
+})
+
+// P03 / AEON-1604: these are ticket edit/comment intents, separate from API-key
+// scope editing above. Run the production owner with held permission answers.
+function ticketShortcuts() {
+  const listeners = new Map<string, (event: { target: unknown }) => void>()
+  const observers = new Set<(records: MutationRecord[]) => void>()
+  let active: Element | null = null, dialog = false
+  class Element {
+    tagName = 'DIV'
+    isContentEditable = false
+    isConnected = true
+    closest() { return null }
+    matches() { return false }
+    querySelector() { return null }
+    contains(target: unknown) { return target === field }
+    focus() { active = this; listeners.get('focusin')?.({ target: this }) }
+  }
+  class Input extends Element { tagName = 'INPUT'; type = 'text' }
+  class Textarea extends Element { tagName = 'TEXTAREA'; disabled = true }
+  class Dialog extends Element {}
+  class Observer {
+    constructor(private callback: (records: MutationRecord[]) => void) {}
+    observe() { observers.add(this.callback) }
+    disconnect() { observers.delete(this.callback) }
+  }
+  const field = new Textarea(), root = new Element()
+  root.querySelector = () => field as never
+  vi.stubGlobal('HTMLElement', Element); vi.stubGlobal('Element', Element)
+  vi.stubGlobal('HTMLInputElement', Input); vi.stubGlobal('HTMLTextAreaElement', Textarea)
+  vi.stubGlobal('HTMLDialogElement', Dialog); vi.stubGlobal('MutationObserver', Observer)
+  vi.stubGlobal('window', { addEventListener() {}, removeEventListener() {} })
+  vi.stubGlobal('document', {
+    body: root, get activeElement() { return active }, querySelector: () => dialog ? {} : null,
+    addEventListener: (name: string, listener: (event: { target: unknown }) => void) => listeners.set(name, listener),
+    removeEventListener: (name: string) => listeners.delete(name),
+  })
+  const known = Vue.ref(false), permission = deferred<'known' | 'unavailable'>()
+  const ensurePermissions = vi.fn(() => permission.promise)
+  const session = Vue.reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'person' } }, authenticationCurrent: () => true })
+  const startEdit = vi.fn(), focusComposer = vi.fn(() => { if (!field.disabled) field.focus() })
+  const workspace = { el: root, startEdit, focusComposer }
+  const state = {
+    ticketKey: Vue.ref('PHAROS-12'), projectId: Vue.ref('project'), session,
+    knowledgeActive: Vue.ref(false), settingsActive: Vue.ref(false), deliveryActive: Vue.ref(false), graphActive: Vue.ref(false), outlineActive: Vue.ref(false),
+    toolbar: Vue.ref(null), table: Vue.ref(null), panel: Vue.shallowRef(workspace), cursorId: Vue.ref(null), creating: Vue.ref(false), fullView: Vue.ref(true),
+    writable: Vue.ref(false), commentable: Vue.ref(false),
+  }
+  const pane = { panelItem: Vue.ref<{ key: string } | null>({ key: 'PHAROS-12' }), trail: Vue.ref([]) }
+  const data = { list: {}, outline: {}, activeLive: Vue.ref({}), liveActive: Vue.ref(false), sequence: Vue.ref([]) }
+  const selection = { selectable: Vue.ref(false), selected: Vue.ref(new Set()), phonePicking: Vue.ref(false) }
+  const { useProjectKeyboard } = sourceModule<typeof import('../src/views/project/useProjectKeyboard')>('views/project/useProjectKeyboard.ts', {
+    vue: { ...Vue, onMounted() {}, onBeforeUnmount: Vue.onScopeDispose },
+    '../../lib/authz': { ensurePermissions, permissionsKnown: () => known.value }, '../../lib/identityScope': { scopeOwner },
+  })
+  const scope = Vue.effectScope()
+  const keys = scope.run(() => useProjectKeyboard(state as never, data as never, pane as never, selection as never, {} as never, {} as never))!
+  const press = (key: string, target: unknown = null) => keys.keydown({ key, target, preventDefault() {} } as KeyboardEvent)
+  const grant = async (write = true, comment = true) => {
+    state.writable.value = write; state.commentable.value = comment; field.disabled = !comment
+    known.value = true; permission.resolve('known'); await flush()
+  }
+  return { state, pane, workspace, known, press, grant, permission, ensurePermissions, startEdit, focusComposer,
+    enterField() { new Input().focus(); active = null },
+    openDialog() {
+      dialog = true
+      for (const callback of observers) callback([{ type: 'childList', addedNodes: [new Dialog()] }] as unknown as MutationRecord[])
+      dialog = false
+    },
+    stop: () => scope.stop(),
+  }
+}
+
+it('P03: deferred e waits for both grants and the captured ticket, in either order', async () => {
+  for (const first of ['ticket', 'permissions']) {
+    const h = ticketShortcuts()
+    try {
+      h.pane.panelItem.value = null
+      h.press('e')
+      expect(h.ensurePermissions).toHaveBeenCalledExactlyOnceWith('project')
+      expect(h.startEdit).not.toHaveBeenCalled()
+      if (first === 'permissions') await h.grant()
+      else { h.pane.panelItem.value = { key: 'PHAROS-12' }; await flush() }
+      expect(h.startEdit).not.toHaveBeenCalled()
+      if (first === 'permissions') { h.pane.panelItem.value = { key: 'PHAROS-12' }; await flush() }
+      else await h.grant()
+      expect(h.startEdit).toHaveBeenCalledTimes(1)
+      h.state.panel.value = { ...h.workspace }; await flush()
+      expect(h.startEdit).toHaveBeenCalledTimes(1)
+    } finally { h.stop() }
+  }
+})
+
+it('P03: deferred ticket shortcuts are spent by changed ownership, fields, dialogs and denial', async () => {
+  for (const key of ['e', 'c']) for (const interruption of ['ticket', 'project', 'person', 'tenant', 'field', 'dialog', 'denial', 'unmount']) {
+    const h = ticketShortcuts()
+    try {
+      h.press(key)
+      expect(h.ensurePermissions).toHaveBeenCalledTimes(1)
+      if (interruption === 'ticket') h.state.ticketKey.value = 'PHAROS-11'
+      if (interruption === 'project') h.state.projectId.value = 'other-project'
+      if (interruption === 'person') h.state.session.identity.principal.id = 'other-person'
+      if (interruption === 'tenant') h.state.session.identity.tenant.id = 'other-tenant'
+      if (interruption === 'field') h.enterField()
+      if (interruption === 'dialog') h.openDialog()
+      if (interruption === 'denial') { await h.grant(false, false); h.known.value = false; await flush() }
+      if (interruption === 'unmount') h.stop()
+      await flush(); await h.grant()
+      expect(h.startEdit, `${key}: ${interruption}`).not.toHaveBeenCalled()
+      expect(h.focusComposer, `${key}: ${interruption}`).not.toHaveBeenCalled()
+    } finally { h.stop() }
+  }
+})
+
+it('P03: the latest e/c intent alone runs once, while denied readers gain no intent', async () => {
+  for (const last of ['e', 'c']) {
+    const h = ticketShortcuts()
+    try {
+      h.press(last === 'e' ? 'c' : 'e'); h.press(last)
+      await h.grant()
+      expect(h.startEdit).toHaveBeenCalledTimes(last === 'e' ? 1 : 0)
+      expect(h.focusComposer).toHaveBeenCalledTimes(last === 'c' ? 1 : 0)
+    } finally { h.stop() }
+  }
+  const h = ticketShortcuts()
+  try {
+    await h.grant(false, false)
+    h.press('e'); h.press('c'); await h.grant()
+    expect(h.ensurePermissions).not.toHaveBeenCalled()
+    expect(h.startEdit).not.toHaveBeenCalled()
+    expect(h.focusComposer).not.toHaveBeenCalled()
+  } finally { h.stop() }
 })

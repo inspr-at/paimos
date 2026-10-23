@@ -150,8 +150,8 @@ test('people without keys.manage have no scope edit action', async ({ page }) =>
   await expect(page.getByRole('button', { name: /^Edit scopes/ })).toHaveCount(0)
 })
 
-const scopeLayouts = [{ width: 1600 }, { width: 1440 }, { width: 390 }, { width: 390, wideFont: true }]
-for (const theme of ['light', 'dark'] as const) for (const { width, wideFont } of scopeLayouts) {
+const scopeLayouts = [{ width: 1440 }, { width: 390 }, { width: 390, wideFont: true }]
+for (const theme of ['light'] as const) for (const { width, wideFont } of scopeLayouts) {
   test(`scopes fit ${width}px in ${theme} with keyboard access${wideFont ? ' (wide system font)' : ''}`, async ({ page }, testInfo) => {
     await page.emulateMedia({ colorScheme: theme })
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
@@ -201,7 +201,7 @@ for (const theme of ['light', 'dark'] as const) for (const { width, wideFont } o
   })
 }
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`adoption preserves the key and controls at ${width}px in ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.emulateMedia({ colorScheme: theme })

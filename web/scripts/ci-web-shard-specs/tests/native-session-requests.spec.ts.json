@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/native-session-requests.spec.ts",
-    "listedTests": 7,
+    "listedTests": 3,
     "tierTiming": {
       "caseSeconds": {
-        "max": 0.633,
-        "median": 0.56,
-        "min": 0.37
+        "max": 0.856,
+        "median": 0.58,
+        "min": 0.385
       },
-      "seconds": 3.882,
-      "selectedTests": 7
+      "seconds": 2.431405,
+      "selectedTests": 3
     },
     "weightSeconds": 4.219,
     "weightSource": "AEON-1304: guarded remote serial Playwright wall 4219ms for seven cases at 8362dbbfc"

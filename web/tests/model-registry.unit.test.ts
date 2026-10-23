@@ -2,6 +2,8 @@
 // Risks: a hand-added model is stored under a route the server refuses; the registry shows a
 // level order, state or "taken on" the data does not support; a partial write is reported as saved.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { reactive, ref } from 'vue'
+import { deferred, flush, setupSource } from './record-source'
 const http = vi.hoisted(() => ({ calls: [] as { method: string; path: string; body: unknown }[], signals: [] as (AbortSignal | undefined)[], handle: (_method: string, _path: string, _body: unknown): Response => new Response('{}') }))
 vi.mock('../src/lib/api.ts', () => ({
   api: async (path: string, init: RequestInit = {}) => {
@@ -17,6 +19,98 @@ import { LEVEL, manyRoutes } from './fixtures/registry-many'
 import { RegistryError, addLine, getRefreshStatus, listProfiles, buildLines, changeOf, checkReport, cooldownLabel, draftOf, emptyDraft, familyOf, intervalLabel, lastChecked, lineWriteOf, profileSource, modelSlug, removalText, removeLine, restoreLine, routeOf, routesFor, shortDate, splitLevels, takenText, useText, validateDraft, checkNow, lifecycleSource, outdatedBatch, outdatedEntries, outdatedTray, outdatedUseText, outdatedWhy, readOutdated, readOutdatedBatch, refused, retireOutdated, undoOutdated, OUTDATED_LIMIT, OUTDATED_PAGES, type LineDraft, type LineUsage, type OutdatedDocument, type OutdatedVersion, type RegistryProfile, type WriteScope, buildRegistry, registryCount, pauseUntil, pauseOptions, untilText, pauseTag, pauseModel, undoPause, previewRemoval, atLevel, lifecycleText, olderWhy, pauseTargets, PAUSED_REASON, type RegistryModel } from '../src/lib/modelRegistry'
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } })
+
+describe('saved in-app provider configuration', () => {
+  const initial = () => ({ enabled: false, base_url: 'http://fixture.invalid/v1', chat_model: 'fixture-model', embedding_model: '', features: { crm_note_rewrite: false, embeddings: false }, revision: 3, has_api_key: false })
+  function provider() {
+    const session = reactive({ identity: { tenant: { id: 'tenant-a' }, principal: { id: 'person-a' } } })
+    const api = vi.fn(async (_path: string, _init?: RequestInit, _timeout?: number): Promise<Response> => json(initial()))
+    const mounted = setupSource('components/settings/ModelProviderCard.vue', {}, {
+      '../../lib/api': { api }, '../../lib/brand': { brand: ref({ short_name: 'PAIMOS' }) }, '../../stores/session': { useSession: () => session },
+    })
+    return { ...mounted, api, session }
+  }
+
+  it('tests only saved settings and preserves explicit feature choices, revision and key intent', async () => {
+    const card = provider()
+    try {
+      await flush()
+      const state = card.state
+      state.settings.value.enabled = true
+      state.settings.value.features.crm_note_rewrite = true
+      state.settings.value.base_url = ' http://fixture.invalid/v1 '
+      state.apiKey.value = 'synthetic-provider-fixture'
+      await state.test()
+      expect(card.api).toHaveBeenCalledTimes(1)
+      card.api.mockResolvedValueOnce(json({ ...initial(), enabled: true, features: { crm_note_rewrite: true, embeddings: false }, revision: 4, has_api_key: true }))
+      await state.save()
+      expect(JSON.parse(card.api.mock.calls[1]![1]!.body as string)).toEqual({
+        enabled: true, base_url: 'http://fixture.invalid/v1', chat_model: 'fixture-model', embedding_model: '',
+        features: { crm_note_rewrite: true, embeddings: false }, expected_revision: 3, api_key: 'synthetic-provider-fixture',
+      })
+      expect(state.apiKey.value).toBe('')
+      expect(state.dirty.value).toBe(false)
+      card.api.mockResolvedValueOnce(json({ ok: true }))
+      await state.test()
+      expect(card.api.mock.calls[2]).toEqual(['/settings/model-provider/test', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: 4 }),
+      }, 35_000])
+      expect(state.notice.value).toContain('Connection succeeded')
+      state.settings.value.enabled = false
+      card.api.mockResolvedValueOnce(json({ ...initial(), revision: 5, has_api_key: true }))
+      await state.save()
+      expect(JSON.parse(card.api.mock.calls[3]![1]!.body as string)).not.toHaveProperty('api_key')
+      state.clearKey.value = true
+      await state.save()
+      expect(JSON.parse(card.api.mock.calls[4]![1]!.body as string)).toMatchObject({ api_key: '', expected_revision: 5 })
+    } finally { card.stop() }
+  })
+
+  it('refused connection tests and conflicting writes never claim success or discard the draft', async () => {
+    const card = provider()
+    try {
+      await flush()
+      card.api.mockResolvedValueOnce(json({ error: 'refused' }, 502))
+      await card.state.test()
+      expect(card.state.problem.value).toContain('Connection test failed')
+      expect(card.state.notice.value).toBe('')
+      card.state.settings.value.chat_model = 'unsaved-model'
+      card.api.mockResolvedValueOnce(json({ error: 'changed' }, 409))
+      await card.state.save()
+      expect(card.state.problem.value).toContain('Another admin changed')
+      expect(card.state.settings.value.chat_model).toBe('unsaved-model')
+      expect(card.state.dirty.value).toBe(true)
+      expect(card.state.notice.value).toBe('')
+      const calls = card.api.mock.calls.length
+      await card.state.test()
+      expect(card.api).toHaveBeenCalledTimes(calls)
+      await card.state.load()
+      expect(card.state.settings.value.chat_model).toBe('fixture-model')
+      expect(card.state.dirty.value).toBe(false)
+    } finally { card.stop() }
+  })
+
+  it('a held provider save cannot acknowledge settings for a different person', async () => {
+    const card = provider()
+    try {
+      await flush()
+      const held = deferred<Response>()
+      card.api.mockImplementationOnce(() => held.promise)
+      card.state.settings.value.chat_model = 'old-owner-draft'
+      const saving = card.state.save()
+      expect(card.state.busy.value).toBe(true)
+      card.api.mockResolvedValueOnce(json({ ...initial(), chat_model: 'new-owner-model', revision: 9 }))
+      card.session.identity.principal.id = 'person-b'
+      await flush()
+      expect(card.state.settings.value.chat_model).toBe('new-owner-model')
+      held.resolve(json({ ...initial(), chat_model: 'old-owner-draft', revision: 4 }))
+      await saving
+      expect(card.state.settings.value).toMatchObject({ chat_model: 'new-owner-model', revision: 9 })
+      expect(card.state.notice.value).toBe('')
+      expect(card.state.apiKey.value).toBe('')
+    } finally { card.stop() }
+  })
+})
 let counter = 0
 const profile = (over: Partial<RegistryProfile> & Pick<RegistryProfile, 'harness' | 'model' | 'effort'>): RegistryProfile => ({
   id: `id-${++counter}`, slug: `s${counter}`, version: '1', family: 'openai', tier: 'strong', enabled: true, created_at: '2026-09-20T12:00:00Z', source: 'auto', retire_at: null, retired: false, effort_level: null, ...over,

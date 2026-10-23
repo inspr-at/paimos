@@ -8,6 +8,15 @@
   "spec": {
     "file": "tests/visual/session-chat.spec.ts",
     "listedTests": 4,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.966,
+        "median": 5.309,
+        "min": 3.952
+      },
+      "seconds": 26.94564,
+      "selectedTests": 4
+    },
     "weightSeconds": 40,
     "weightSource": "AEON-1674-initial-estimate"
   }

@@ -2,7 +2,7 @@
 // AEON-372: product notes survive a tenant without an AEON project/snapshots.
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync } from 'node:fs'
-import { dirname, resolve, join } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { test, expect } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockReleases } from './releases-fixtures'
@@ -25,6 +25,8 @@ test.beforeAll(({}, info) => {
 const current = '260923143005.0.0'
 const paths = { header: '/', direct: '/releases', all: '/?releases=all', version: `/?releases=${current}` }
 for (const tenant of ['pma', 'ppm']) for (const width of [1600, 390]) for (const [entry, path] of Object.entries(paths)) {
+  // P11: retain each entry on the phone, plus desktop's distinct direct-page preselection.
+  if (width === 1600 && entry !== 'direct') continue
   test(`${tenant} ${width} ${entry}: frozen notes and both switches survive reload`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.emulateMedia({ colorScheme: 'light' })
@@ -88,28 +90,5 @@ for (const tenant of ['pma', 'ppm']) for (const width of [1600, 390]) for (const
     await page.goto('/releases/260923134631.0.0?release_lang=de')
     await expect(detail.getByRole('article', { name: /^Earlier release notes/ })).toBeVisible()
     await expect(detail.locator('.lang-badge').first()).toHaveText('EN')
-  })
-}
-
-for (const width of [1600, 390]) for (const colorScheme of ['light', 'dark'] as const) {
-  test(`portable notes visual ${width} ${colorScheme}`, async ({ page }) => {
-    const shots = process.env.AEON_372_SHOTS
-    test.skip(!shots, 'set AEON_372_SHOTS for visual inspection')
-    mkdirSync(shots!, { recursive: true })
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
-    const data = fixtures()
-    data.projects = data.projects.filter(p => p.id !== 'p-aeon')
-    data.nodes = data.nodes.filter(n => n.project !== 'p-aeon')
-    await mockWork(page, data)
-    await mockReleases(page, history as unknown as Record<string, unknown>)
-    await page.goto(`/?releases=${current}&release_lang=en`)
-    const sheet = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
-    await expect(sheet.getByRole('article', { name: 'Clear release notes', exact: true })).toBeVisible()
-    await page.screenshot({ path: join(shots!, `highlights-${width}-${colorScheme}.png`) })
-    await sheet.getByRole('radio', { name: 'DE', exact: true }).click()
-    await sheet.getByRole('radio', { name: 'Details', exact: true }).click()
-    await expect(sheet.locator('article.detail .benefit')).toHaveCount(0)
-    await page.screenshot({ path: join(shots!, `details-${width}-${colorScheme}.png`) })
   })
 }

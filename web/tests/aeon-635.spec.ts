@@ -18,8 +18,9 @@ const pendingPane = (page: Page) => sheet(page).getByRole('region', { name: 'Cha
 
 test.describe('coarse-pointer version copy (AEON-635 fix3)', () => {
   test.use({ hasTouch: true })
-  for (const colorScheme of ['light', 'dark'] as const) {
-    for (const width of [390, 1024, 1440]) {
+  // P11: retain real touch/clipboard dispatch in both list layouts.
+  for (const colorScheme of ['light'] as const) {
+    for (const width of [390, 1440]) {
       test(`44px version-copy targets stay within their rows at ${width} ${colorScheme}`, async ({ page, context }) => {
         await context.grantPermissions(['clipboard-read', 'clipboard-write'])
         await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
@@ -282,7 +283,7 @@ test('partial and unavailable pending data never report an exact zero (AEON-635)
   await expect(pendingPane(page)).toContainText('The main branch could not be read completely.')
 })
 
-for (const width of [390, 1024, 1440]) {
+for (const width of [390, 1440]) {
   test(`waiting-panel keys keep the selected release and native controls at ${width} (AEON-635 fix2)`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const { history, errors } = await open(page)
@@ -391,7 +392,7 @@ test('successful pagination retains earlier incomplete evidence until a full ref
   expect(errors).toEqual([])
 })
 
-for (const colorScheme of ['light', 'dark'] as const) {
+for (const colorScheme of ['light'] as const) {
   test(`header status stays on one line from 600px and stacks cleanly on phones ${colorScheme} (AEON-635 fix2)`, async ({ page }) => {
     await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
     await page.clock.setFixedTime(NOW + 30 * 60_000)

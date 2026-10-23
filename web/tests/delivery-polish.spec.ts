@@ -427,34 +427,3 @@ for (const width of [1440, 400] as const) {
     }
   })
 }
-
-// ---------- Evidence: every changed view at 390, 1024 and 1440, light and dark ----------
-for (const width of [390, 1024, 1440] as const) {
-  for (const theme of ['light', 'dark'] as const) {
-    test(`Delivery screenshots at ${width} ${theme}`, async ({ page }, info) => {
-      await page.setViewportSize({ width, height: width === 390 ? 900 : 1000 })
-      await setup(page, { theme, lang: theme === 'dark' ? 'de' : 'en' })
-      const shot = async (name: string) => {
-        await page.mouse.move(0, 0)
-        // main scrolls, not the page: grow the viewport by what main hides, capture, and restore.
-        const viewport = page.viewportSize()!
-        const extra = await page.evaluate(() => { const main = document.querySelector('main'); if (main) main.scrollTop = 0; return main ? main.scrollHeight - main.clientHeight : 0 })
-        await page.setViewportSize({ width, height: Math.min(viewport.height + extra + 8, 7000) })
-        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
-        await page.screenshot({ path: info.outputPath(`aeon-994-p7-polish/${name}-${width}-${theme}.png`) })
-        await page.setViewportSize(viewport)
-      }
-      await page.goto('/p/AEON/delivery')
-      await numbersReady(page, 'simple')
-      await shot('numbers-simple')
-      await head(page).getByRole('radio').filter({ hasText: /^Expert$/ }).click()
-      await numbersReady(page, 'expert')
-      await shot('numbers-expert')
-      for (const mode of ['live', 'replay', 'compare'] as const) {
-        await page.goto(`/p/AEON/delivery?view=flow${mode === 'live' ? '' : `&mode=${mode}`}`)
-        await flowReady(page)
-        await shot(`flow-${mode}`)
-      }
-    })
-  }
-}

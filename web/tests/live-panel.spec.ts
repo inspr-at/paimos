@@ -10,32 +10,46 @@ const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
 
 test('a change in one browser patches the open ticket in the other in place', async ({ browser }) => {
-  const { a, b, live, errors, close } = await openBoth(browser, '/p/PHAROS/PHAROS-12')
+  const { a, b, data, live, errors, close } = await openBoth(browser, '/p/PHAROS/PHAROS-14', { clock: Date.parse('2026-09-23T12:00:00Z') })
   try {
     const wsA = panel(a), wsB = panel(b)
-    await expect(wsB.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
+    await expect(wsB.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
 
-    await wsA.getByRole('heading', { name: 'Add an Oracle Cloud connector' }).click()
-    await wsA.getByLabel('Title', { exact: true }).fill('Add an Oracle Cloud Always Free connector')
+    await wsA.getByRole('heading', { name: 'Visual acceptance of the version pill' }).click()
+    await wsA.getByLabel('Title', { exact: true }).fill('Verify the version pill before release')
     await a.keyboard.press('Enter')
-    await expect(wsA.getByRole('heading', { name: 'Add an Oracle Cloud Always Free connector' })).toBeVisible()
+    await expect(wsA.getByRole('heading', { name: 'Verify the version pill before release' })).toBeVisible()
 
     // B: the title patches in place, tinted briefly, and is announced politely.
-    const title = wsB.getByRole('heading', { name: 'Add an Oracle Cloud Always Free connector' })
+    const title = wsB.getByRole('heading', { name: 'Verify the version pill before release' })
     await expect(title).toBeVisible()
     await expect(wsB.locator('.inline-title')).toHaveClass(/live-tint/)
-    await expect(wsB.locator('p.sr-only[role="status"]')).toHaveText('PHAROS-12 was updated elsewhere: title.')
-    await expect(wsB.locator('.inline-title')).not.toHaveClass(/live-tint/, { timeout: 4000 })
+    await expect(wsB.locator('p.sr-only[role="status"]')).toHaveText('PHAROS-14 was updated elsewhere: title.')
+    await b.clock.fastForward(2001)
+    await expect(wsB.locator('.inline-title')).not.toHaveClass(/live-tint/)
     // The row under the panel is the same ticket, patched in place too.
-    await expect(b.locator('#row-n-2')).toContainText('Always Free')
+    await expect(b.locator('#row-n-4')).toContainText('before release')
 
     await a.keyboard.press('p')
-    await a.getByRole('menu', { name: 'Priority of PHAROS-12' }).getByRole('menuitemradio', { name: 'High' }).click()
+    await a.getByRole('menu', { name: 'Priority of PHAROS-14' }).getByRole('menuitemradio', { name: 'High' }).click()
     await expect(wsB.getByRole('button', { name: /Priority: High/ })).toBeVisible()
-    await expect(wsB.locator('p.sr-only[role="status"]')).toHaveText('PHAROS-12 was updated elsewhere: priority.')
+    await expect(wsB.locator('p.sr-only[role="status"]')).toHaveText('PHAROS-14 was updated elsewhere: priority.')
     // A's own change is not announced to A.
     await expect(wsA.locator('p.sr-only[role="status"]')).toHaveText('')
 
+    const saved = structuredClone(data.nodes.find(node => node.id === 'n-4')!)
+    await wsA.getByRole('button', { name: 'More actions' }).click()
+    await a.getByRole('menuitem', { name: 'Delete ticket…' }).click()
+    await a.getByRole('dialog', { name: 'Delete PHAROS-14?' }).getByRole('button', { name: 'Delete ticket' }).click()
+    await expect(a).toHaveURL('/p/PHAROS/tickets')
+    await expect(wsB.getByRole('alert')).toContainText('PHAROS-14 is no longer here')
+    await expect(b.locator('#row-n-4')).toHaveCount(0)
+    // The mock server publishes a restore with a strictly newer revision.
+    // B remains mounted and must accept the restoration through its SSE read.
+    data.nodes.push({ ...saved, updated_at: new Date(Date.parse(saved.updated_at) + 5 * 60_000).toISOString() })
+    await expect(title).toBeVisible()
+    await expect(wsB.getByRole('alert')).toHaveCount(0)
+    await expect(wsB.getByRole('button', { name: /Priority: High/ })).toBeVisible()
     // Every connection asked for live mode; reconnects resumed after the last event.
     expect(live.requests.every(r => r.after === 'latest')).toBe(true)
     expect(live.requests.filter(r => r.page === 'b' && r.resumed).length).toBeGreaterThan(0)

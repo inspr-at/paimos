@@ -67,7 +67,8 @@ async function newEditor(page: Page) {
   await editor(page).getByRole('textbox', { name: 'Criteria', exact: true }).fill('- [ ] Record the outcome')
   await expect(editor(page).getByRole('button', { name: /^Create/ })).toBeEnabled()
 }
-for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1677: retain both editor layouts and all revision/Undo/keyboard cases.
+for (const width of [1440, 390]) for (const theme of ['light'] as const) {
   test(`controls stay anchored at ${width}px in ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1100 }); await page.emulateMedia({ colorScheme: theme })
     const { errors } = await setup(page); await settings(page)

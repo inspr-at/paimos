@@ -9,12 +9,12 @@
     "listedTests": 11,
     "tierTiming": {
       "caseSeconds": {
-        "max": 11.941,
-        "median": 2.143,
-        "min": 1.389
+        "max": 9.695,
+        "median": 5.161,
+        "min": 1.618
       },
-      "seconds": 47.049,
-      "selectedTests": 11
+      "seconds": 47.730108,
+      "selectedTests": 7
     },
     "weightSeconds": 7.48,
     "weightSource": "aeon-903-local-serial-wall"

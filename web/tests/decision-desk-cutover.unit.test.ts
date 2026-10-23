@@ -8,7 +8,8 @@ import type { AttachQueueRow } from '../src/lib/attachWatch'
 import { useDecisionDesk } from '../src/stores/decisionDesk'
 import { useSession } from '../src/stores/session'
 import { deskRefreshNotice, loadDeskProjection, retainDecidedLessons, type DeskItem, type DeskProjection } from '../src/lib/decisionDesk'
-import { decisionPermission, emptySources } from '../src/lib/decisionDeskApi'
+import { decisionPermission, emptySources, readDoctrineProjects } from '../src/lib/decisionDeskApi'
+import { getDoctrineInbox } from '../src/lib/doctrine'
 import { onProjectionWake } from '../src/lib/agents'
 import { APIError } from '../src/lib/api'
 import type { MethodLearning } from '../src/lib/knowledge'
@@ -16,6 +17,8 @@ import type { MethodLearning } from '../src/lib/knowledge'
 vi.mock('../src/stores/session', () => ({ useSession: vi.fn() }))
 vi.mock('../src/lib/decisionDesk', async original => ({ ...await original<object>(), loadDeskProjection: vi.fn() }))
 vi.mock('../src/lib/agents', async original => ({ ...await original<object>(), onProjectionWake: vi.fn(() => () => {}) }))
+vi.mock('../src/lib/doctrine', async original => ({ ...await original<object>(), getDoctrineInbox: vi.fn() }))
+vi.mock('../src/lib/decisionDeskApi', async original => ({ ...await original<object>(), readDoctrineProjects: vi.fn() }))
 const page = (count: number): DeskProjection & { truncated: boolean } => ({ items: [], counts: { open: count, held: 0, chores: 0 }, has_more: false, as_of: '', truncated: false })
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (cause: unknown) => void; const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail }); return { promise, resolve, reject } }
 const stores: ReturnType<typeof useDecisionDesk>[] = []
@@ -27,6 +30,39 @@ function setup() {
   const desk = useDecisionDesk(); stores.push(desk)
   return { session, desk }
 }
+
+const rulePage = () => ({ ...page(1), items: [{ id: 'rule', kind: 'doctrine' as const, revision: 1, title: 'Rule', created_at: '', held: false, href: '/decision-desk?item=r:rule', source: '/api/rules/doctrine/inbox/rule' }] })
+it('resolves doctrine projects once for concurrent consumers and retains the authorized cache across a projection refresh', async () => {
+  vi.mocked(loadDeskProjection).mockImplementation(async () => rulePage())
+  vi.mocked(getDoctrineInbox).mockResolvedValue({ items: [{ id: 'rule', ticket: 'AEON-1' }], pending: 1 } as never)
+  vi.mocked(readDoctrineProjects).mockResolvedValue(new Map([['AEON-1', 'project-A']]))
+  const { session, desk } = setup()
+  session.identity = { tenant: { id: 'tenant' }, principal: { id: 'A', kind: 'person' } }
+  await desk.refresh()
+  await Promise.all([desk.resolveRuleProjects(), desk.resolveRuleProjects()])
+  expect(desk.ruleProjects.get('rule')).toBe('project-A')
+  expect(getDoctrineInbox).toHaveBeenCalledTimes(1); expect(readDoctrineProjects).toHaveBeenCalledTimes(1)
+  await desk.refresh(); await desk.resolveRuleProjects()
+  expect(desk.ruleProjects.get('rule')).toBe('project-A')
+  expect(getDoctrineInbox).toHaveBeenCalledTimes(1); expect(readDoctrineProjects).toHaveBeenCalledTimes(1)
+})
+
+it('rejects a held doctrine project lookup after a person change, even when the transport ignores cancellation', async () => {
+  const held = deferred<Map<string, string>>(), entered = deferred<void>()
+  vi.mocked(loadDeskProjection).mockResolvedValueOnce(rulePage()).mockResolvedValue(page(0))
+  vi.mocked(getDoctrineInbox).mockResolvedValue({ items: [{ id: 'rule', ticket: 'AEON-1' }], pending: 1 } as never)
+  vi.mocked(readDoctrineProjects).mockImplementationOnce(() => { entered.resolve(); return held.promise })
+  const { session, desk } = setup()
+  session.identity = { tenant: { id: 'tenant' }, principal: { id: 'A', kind: 'person' } }
+  await desk.refresh()
+  const reading = desk.resolveRuleProjects(); await entered.promise
+  session.identity = { tenant: { id: 'tenant' }, principal: { id: 'B', kind: 'person' } }
+  expect(desk.ruleProjects.size).toBe(0)
+  await desk.refresh(); held.resolve(new Map([['AEON-1', 'private-project-A']]))
+  await reading
+  expect(desk.ruleProjects.size).toBe(0)
+  expect(desk.ruleProjectError).toBe('')
+})
 it('drops a previous person read even if transport ignores abort, and resets the count synchronously', async () => {
   const previous = deferred<ReturnType<typeof page>>(), next = deferred<ReturnType<typeof page>>()
   vi.mocked(loadDeskProjection).mockReturnValueOnce(previous.promise).mockReturnValueOnce(next.promise)

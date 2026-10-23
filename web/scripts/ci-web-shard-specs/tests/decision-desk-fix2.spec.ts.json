@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/decision-desk-fix2.spec.ts",
-    "listedTests": 8,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
-        "max": 17.423,
-        "median": 16.553,
-        "min": 2.624
+        "max": 15.276,
+        "median": 7.697,
+        "min": 2.209
       },
-      "seconds": 108.457,
-      "selectedTests": 8
+      "seconds": 41.572589,
+      "selectedTests": 4
     },
     "weightSeconds": 40,
     "weightSource": "AEON-569 regression port; conservative initial estimate"

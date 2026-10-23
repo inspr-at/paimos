@@ -97,7 +97,8 @@ test('offline and unauthorized sessions offer no Restart or Reconnect', async ({
   await page.keyboard.press('Escape')
 })
 
-for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
+// AEON-1678: exact-session recovery and stationary controls on desktop and phone.
+for (const theme of ['light']) for (const width of [390, 1440]) {
   test(`recovery actions stay still ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     const fixture = await setup(page, 'restart', true, true)

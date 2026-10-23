@@ -9,12 +9,12 @@
     "listedTests": 5,
     "tierTiming": {
       "caseSeconds": {
-        "max": 19.375,
-        "median": 7.606,
-        "min": 3.4
+        "max": 10.94,
+        "median": 8.003,
+        "min": 3.585
       },
-      "seconds": 45.766,
-      "selectedTests": 5
+      "seconds": 30.128871,
+      "selectedTests": 3
     },
     "weightSeconds": 11.097561,
     "weightSource": "unmeasured-test-rate"

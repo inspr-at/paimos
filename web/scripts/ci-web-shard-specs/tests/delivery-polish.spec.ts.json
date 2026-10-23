@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/delivery-polish.spec.ts",
-    "listedTests": 18,
+    "listedTests": 12,
     "tierTiming": {
       "caseSeconds": {
-        "max": 17.033,
-        "median": 9.407,
-        "min": 1.971
+        "max": 19.396,
+        "median": 6.984500000000001,
+        "min": 1.98
       },
-      "seconds": 153.594,
-      "selectedTests": 18
+      "seconds": 117.38086,
+      "selectedTests": 12
     },
     "weightSeconds": 45,
     "weightSource": "aeon-1007-estimate"

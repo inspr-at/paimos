@@ -6,14 +6,14 @@
   },
   "spec": {
     "file": "tests/aeon-635.spec.ts",
-    "listedTests": 21,
+    "listedTests": 15,
     "tierTiming": {
       "caseSeconds": {
-        "max": 31.673,
-        "median": 28.6315,
-        "min": 27.547
+        "max": 25.838,
+        "median": 25.5975,
+        "min": 25.354
       },
-      "seconds": 182.25,
+      "seconds": 198.594428,
       "selectedTests": 6
     },
     "weightSeconds": 46.609756,

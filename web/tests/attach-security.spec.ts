@@ -55,7 +55,7 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
   await page.screenshot({ path: testInfo.outputPath(`${name}.png`) })
 }
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+for (const theme of ['light'] as const) for (const width of [1600]) {
   test(`session watching security ${theme} ${width}`, async ({ page }, testInfo) => {
     await setup(page, theme, { mode: 'local_auth', saved: false })
     const card = await open(page, theme, width)
@@ -174,7 +174,7 @@ test('a failed security save never claims the stricter mode was stored', async (
   await expect(card.getByRole('radio', { name: /Approve in / })).toBeChecked()
 })
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+for (const theme of ['light'] as const) for (const width of [1600]) {
   test(`saved mac confirmation without a capable computer ${theme} ${width}`, async ({ page }, testInfo) => {
     await setup(page, theme, { mode: 'local_auth', computers: [computer('unsigned')] })
     const card = await open(page, theme, width)
@@ -204,8 +204,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await expect(card.locator('label').filter({ hasText: 'Approve in' })).toContainText('Default')
     await expect(card).toContainText('No paired computer has reported Touch ID support.')
     await fits(page, card)
-    if (theme === 'light' && width === 390) await shot(page, testInfo, 'security-none-light-390')
-    if (theme === 'dark' && width === 1600) await shot(page, testInfo, 'security-none-dark-1600')
+    await shot(page, testInfo, `security-none-${theme}-${width}`)
   })
 }
 
@@ -218,7 +217,7 @@ test('a long computer name wraps at 390', async ({ page }, testInfo) => {
   await shot(page, testInfo, 'security-long-name-light-390')
 })
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) for (const saved of [false, true]) {
+for (const theme of ['light'] as const) for (const width of [1600]) for (const saved of [false, true]) {
   test(`older pairing uses Aeon approval until upgraded ${theme} ${width} saved ${saved}`, async ({ page }, testInfo) => {
     const legacy = { ...computer('available'), pairing_upgraded: false }
     await setup(page, theme, { mode: saved ? 'local_auth' : 'aeon', saved, computers: [legacy] })

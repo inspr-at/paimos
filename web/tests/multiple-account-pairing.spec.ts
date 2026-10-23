@@ -4,7 +4,7 @@ import { mockPairing } from './agent-pairing-fixtures'
 import { controlStability } from './control-stability'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+for (const width of [390, 1440]) for (const theme of ['light']) {
   test(`isolated account selection stays stable at ${width}px in ${theme}`, async ({ page }, testInfo) => {
     const errors = watchErrors(page)
     await page.setViewportSize({ width, height: 1000 })

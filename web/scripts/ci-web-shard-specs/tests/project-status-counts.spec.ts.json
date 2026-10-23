@@ -6,6 +6,7 @@
   },
   "spec": {
     "file": "tests/project-status-counts.spec.ts",
+    "listedTests": 7,
     "tierTiming": {
       "caseSeconds": {
         "max": 7.621,

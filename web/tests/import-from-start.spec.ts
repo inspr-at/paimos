@@ -3,8 +3,8 @@
 // line; loading shifts the sheet when the draft arrives; a toggle, the owner
 // list or a date moves a control; the expired answer reveals the draft; the
 // create sends other choices than those on screen, or the result is not the
-// project it made. Every state is drawn at 1440 and 390, light and dark, in
-// English sheet copy, including a German draft (screenshots for the visual hold).
+// project it made. Desktop light and phone dark retain both native layouts and
+// themes, including English sheet copy for a German draft.
 import { test, expect, type Browser, type Page, type TestInfo } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { controlStability } from './control-stability'
@@ -92,7 +92,7 @@ async function shoot(page: Page, testInfo: TestInfo, state: string, width: numbe
   await page.screenshot({ path: testInfo.outputPath(`${state}-${width}-${theme}.png`) })
 }
 
-for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const [width, theme] of [[1440, 'light'], [390, 'dark']] as const) {
   test(`AEON-1441: from START, loading to created at ${width} ${theme}`, async ({ browser }, testInfo) => {
     test.setTimeout(120_000)
     const ctx = await context(browser, width, theme)

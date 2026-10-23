@@ -2,11 +2,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildTimeline, commentEditable, describeChange, parseWorkerMarker } from '../src/lib/activity.ts'
+import * as activity from '../src/lib/activity.ts'
+import { ref } from 'vue'
+import { flatten, mountView, settle, textOf } from './webcore-view-harness.ts'
 import type { ActivityItem } from '../src/lib/api.ts'
 
 const mba = { id: 'p-1', name: 'mba' }, mira = { id: 'p-2', name: 'Mira' }
 const at = (minutes: number) => new Date(Date.parse('2026-09-23T12:00:00Z') + minutes * 60_000).toISOString()
-const change = (id: string, minutes: number, changes: ActivityItem['changes'], author = mba): ActivityItem => ({ id, at: at(minutes), type: 'change', author, changes })
+const change = (id: string, minutes: number, changes: ActivityItem['changes'], author: ActivityItem['author'] = mba): ActivityItem => ({ id, at: at(minutes), type: 'change', author, changes })
 
 test('the timeline runs oldest first and collapses one person’s changes within five minutes', () => {
   const items: ActivityItem[] = [
@@ -57,6 +60,34 @@ test('an automatic change keeps the job that wrote it', () => {
   assert.equal(timeline[0].author.automatic, true)
   assert.equal(timeline[0].author.job, 'learning-tagger')
   assert.equal(timeline[0].author.reason, 'method learning tagger')
+})
+
+test('P03: automatic history names Aeon while a person named System remains a person through filtering', async () => {
+  const entries = buildTimeline([
+    change('auto', 0, [{ field: 'tags', from: 'ops', to: 'ops, process-learning' }], { id: 'automatic', name: 'System', automatic: true, job: 'learning-tagger', reason: 'method learning tagger' }),
+    change('person', 10, [{ field: 'priority', from: 'low', to: 'medium' }], { id: 'human', name: 'System' }),
+  ])
+  const view = mountView('../src/components/work/ActivityTimeline.vue', {
+    '../../lib/activity': activity, '../../lib/brand': { brand: ref({ short_name: 'AEON' }) },
+    '../../lib/confirm': { confirmAction: async () => false },
+    '../../lib/work': { absoluteTime: (value: string) => value, relativeTime: () => 'recorded time', statusMeta: () => ({ label: 'Open' }) },
+  }, { recordId: 'ticket', entries, loading: false, loadingOlder: false, hasOlder: false, error: '', me: 'person', now: Date.parse(at(20)), canWrite: false, canDelete: false, edit: async () => false, remove: async () => false })
+  try {
+    assert.match(textOf(view.root), /AEON \(automatic\)/)
+    assert.equal(flatten(view.root).filter(node => node.tag === 'li').length, 2)
+    assert.equal(view.find(node => node.props['data-tip'] === 'learning-tagger · method learning tagger').tag, 'strong')
+    const automatic = view.find(node => node.tag === 'button' && textOf(node) === 'Automatic')
+    ;(automatic.props.onClick as () => void)()
+    await settle()
+    assert.equal(flatten(view.root).filter(node => node.tag === 'li').length, 1)
+    assert.match(textOf(view.root), /AEON \(automatic\)/)
+    const people = view.find(node => node.tag === 'button' && textOf(node) === 'People and agents')
+    ;(people.props.onClick as () => void)()
+    await settle()
+    assert.equal(flatten(view.root).filter(node => node.tag === 'li').length, 1)
+    assert.doesNotMatch(textOf(view.root), /AEON \(automatic\)/)
+    assert.match(textOf(view.root), /System/)
+  } finally { view.app.unmount() }
 })
 
 test('own comments stay editable for 15 minutes', () => {

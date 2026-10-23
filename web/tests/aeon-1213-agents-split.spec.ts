@@ -112,7 +112,8 @@ async function checkRows(page: Page, label: string) {
   console.log(`check.mjs (P5 routed adapter): PASS ${label} · row texts do not overlap · no edge accents · SVG icons · English controls · no sideways scroll`)
 }
 
-for (const theme of ['light', 'dark'] as const) {
+// AEON-1678: one rendering profile; keep real desktop divider, tablet sheet and phone sheet.
+for (const theme of ['light'] as const) {
   test(`AEON-1213 ${theme} 1440: one dock, presets, live divider and top-starting panes`, async ({ page }, info) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
     const errors = watchErrors(page), { data, work, calls } = await setup(page, theme)

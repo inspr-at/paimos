@@ -9,7 +9,16 @@
   },
   "spec": {
     "file": "tests/aeon-1532-editor-steady.spec.ts",
-    "listedTests": 9,
+    "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 13.583,
+        "median": 4.8585,
+        "min": 3.121
+      },
+      "seconds": 46.603456,
+      "selectedTests": 6
+    },
     "weightSeconds": 19.97561,
     "weightSource": "unmeasured-test-rate"
   }

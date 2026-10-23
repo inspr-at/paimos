@@ -632,21 +632,70 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   // AEON-1331 adds lesson decisions after the prior baseline. Preserve that
   // baseline and charge only this slice's independently bounded spec budget.
   // AEON-1363 adds three Knowledge lesson-line cases to the same spec.
+  // AEON-1681 removes twelve repeated rendering profiles; the distinct native
+  // lesson, Undo, stale-revision, keyboard and Knowledge-link flows remain.
   const deskLessons = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/decision-desk-lessons.spec.ts')
-  assert.ok(deskLessons && deskLessons.listedTests === 26, 'Lesson decision regressions must remain in the gate')
+  assert.ok(deskLessons && deskLessons.listedTests === 14, 'Retained lesson decision regressions must remain in the gate')
   assert.ok(gated.some(spec => spec.file === deskLessons.file), 'Lesson decisions must remain gated')
-  // AEON-1309 splits its nine unchanged panel cases so files can be packed
-  // independently. Charge only this slice's declared weights, like the other
-  // additions above; the historical <300s bound and twelve shards stay intact.
-  const panelFiles = new Set(['tests/native-session-program.spec.ts',
-    'tests/native-session-program-390.spec.ts', 'tests/native-session-program-1024.spec.ts',
-    'tests/native-session-program-1440.spec.ts', 'tests/native-session-program-reader.spec.ts',
-    'tests/native-session-program-validation.spec.ts'])
+  // AEON-1309 splits panel coverage across six independently packed files.
+  // AEON-1679 Cut A removes only the three duplicate dark viewport cases;
+  // pin every surviving identity and reconcile each count with native discovery.
+  // Charge the declared weights without changing the historical <300s bound.
+  const panelCases = [
+    ['tests/native-session-program.spec.ts', 'AEON-1309: fake-host mode changes stay read-only, preserve the menu and reject stale context'],
+    ['tests/native-session-program-390.spec.ts', 'AEON-1309: 390 light panel controls, layouts and live-reader anchor stay stable'],
+    ['tests/native-session-program-1024.spec.ts', 'AEON-1309: 1024 light panel controls, layouts and live-reader anchor stay stable'],
+    ['tests/native-session-program-1440.spec.ts', 'AEON-1309: 1440 light panel controls, layouts and live-reader anchor stay stable'],
+    ['tests/native-session-program-reader.spec.ts', 'AEON-1309: negative control reproduces reader drift with the anchor disabled'],
+    ['tests/native-session-program-validation.spec.ts', 'AEON-1309: malformed native JSON and invalid shapes stay incomplete without granting control'],
+  ]
+  const panelFiles = new Set(panelCases.map(([file]) => file))
   const panelAdded = real.groups.flatMap(group => group.specs).filter(spec => panelFiles.has(spec.file))
   assert.equal(panelAdded.length, 6, 'All six balanced panel files must remain declared')
-  assert.equal(panelAdded.reduce((sum, spec) => sum + spec.listedTests, 0), 9, 'The split must retain every panel case')
-  for (const spec of panelAdded) assert.ok(gated.some(candidate => candidate.file === spec.file), 'Panel specs must remain in the declared gate')
+  const panelCollected = flattenBrowser(JSON.parse(command(process.execPath, ['node_modules/@playwright/test/cli.js', 'test',
+    '-c', 'playwright.ui.config.ts', ...panelFiles, '--list', '--reporter=json'], { cwd: webRoot })), 'playwright.ui.config.ts')
+  assert.deepEqual(panelCollected.map(row => [row.file, row.name]).sort(), panelCases.toSorted(),
+    'Native discovery must retain every panel authority, viewport, reader and validation case after Cut A')
+  for (const spec of panelAdded) {
+    assert.equal(spec.listedTests, panelCollected.filter(row => row.file === spec.file).length,
+      `${spec.file} must declare its exact native panel case count`)
+    assert.equal(gated.filter(candidate => candidate.file === spec.file).length, 1,
+      'Panel specs must remain in the declared gate exactly once')
+  }
   const panelGrowth = panelAdded.reduce((sum, spec) => sum + spec.weightSeconds, 0)
+  // AEON-1682 promotes these previously ungated quote boundaries. Preserve the
+  // historical five-minute gate and charge their bounded scheduling estimate
+  // separately, with native discovery proving the complete promoted case set.
+  const quoteNative = real.groups.find(group => group.id === 'quote-native')
+  assert.ok(quoteNative && quoteNative.gate === true, 'Quote native boundaries must remain gated')
+  const quoteFiles = [
+    'tests/quote-editor-core.spec.ts', 'tests/quote-public.spec.ts', 'tests/quotes/parity-flow.spec.ts',
+    'tests/quotes/print-receipt.spec.ts', 'tests/quotes/two-user-presence.spec.ts',
+  ]
+  assert.deepEqual(quoteNative.specs.map(spec => spec.file).sort(), quoteFiles, 'Charge exactly the five newly gated quote files')
+  assert.equal(quoteNative.config, 'playwright.ui.config.ts')
+  assert.equal(quoteNative.project, null)
+  assert.equal(quoteNative.hostedOnly, true)
+  assert.deepEqual(quoteNative.flags, ['--workers=1', '--trace=retain-on-failure'])
+  assert.deepEqual(quoteNative.env, {})
+  const quoteCases = flattenBrowser(JSON.parse(command(process.execPath, ['node_modules/@playwright/test/cli.js', 'test',
+    '-c', quoteNative.config, ...quoteFiles, '--list', '--reporter=json'], { cwd: webRoot })), quoteNative.config)
+  const quoteCatalogue = JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json', import.meta.url), 'utf8')).tests
+    .filter(row => row.kind === 'browser' && quoteFiles.includes(row.file))
+  assert.equal(quoteCases.length, 7, 'Native discovery must retain all seven quote boundary cases')
+  assert.deepEqual(quoteCases.map(key).sort(), quoteCatalogue.map(key).sort(), 'Every native quote boundary must have a tier registration')
+  assert.ok(quoteCatalogue.every(row => row.tier === 'ESSENTIAL' || row.tier === 'GATED-FULL'), 'Every quote boundary must run in the full gate')
+  assert.deepEqual(quoteCatalogue.filter(row => row.tier === 'ESSENTIAL').map(row => [row.file, row.name]), [
+    ['tests/quote-public.spec.ts', 'expired but readable document has no acceptance form'],
+    ['tests/quote-public.spec.ts', 'scoped document renders read-only and acceptance submits displayed digest'],
+    ['tests/quotes/parity-flow.spec.ts', 'customer → quote → inspector save → issue → public acceptance race → receipt'],
+  ], 'Public acceptance, its expired-document refusal and the lifecycle journey must remain essential')
+  for (const spec of quoteNative.specs) {
+    assert.equal(spec.listedTests, quoteCases.filter(row => row.file === spec.file).length, 'Quote declaration must match native discovery')
+    assert.equal(gated.filter(candidate => candidate.file === spec.file).length, 1, 'Each quote boundary file must gate exactly once')
+  }
+  const quoteGrowth = quoteNative.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0)
+  assert.ok(quoteGrowth <= 25, 'Newly gated quote boundaries must retain their bounded scheduling estimate')
   // AEON-1316 adds its project Definitions spec after the historical budget.
   // Keep the old budget and charge only this independently bounded addition.
   // FIX4 adds six verdict regressions alongside the original three flows.
@@ -696,9 +745,11 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   // AEON-1406 adds four empty-Desk cases (two widths x two themes) after the historical budget.
   // AEON-1477 adds six refresh-stability cases, the failed-first-load case, three
   // Open/Decided tab-switch cases and one touch Try again case.
+  // AEON-1681 removes five profile copies while retaining both theme artwork
+  // checks, all three breakpoints, failed reads, tab switching and phone retry.
   // Keep the old budget and charge only this file's scheduling weight, as for project name wrap.
   const deskEmpty = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/desk-empty.spec.ts')
-  assert.ok(deskEmpty && deskEmpty.listedTests === 15, 'Empty Desk and refresh regressions must remain declared')
+  assert.ok(deskEmpty && deskEmpty.listedTests === 10, 'Retained empty Desk and refresh regressions must remain declared')
   assert.ok(gated.some(spec => spec.file === deskEmpty.file), 'Empty Desk regressions must remain gated')
   // AEON-1448 adds four Desk tab-row cases after the historical budget.
   // Keep the old budget and charge only this file's scheduling weight, as for project name wrap.
@@ -711,20 +762,26 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const viewSwitch = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/view-switch.spec.ts')
   assert.ok(viewSwitch && viewSwitch.listedTests === 7, 'ViewSwitch regressions must remain declared')
   assert.ok(gated.some(spec => spec.file === viewSwitch.file), 'ViewSwitch regressions must remain gated')
+  // Preserve the original population and weights for the historical <300s
+  // packing claim. Removing files can worsen a greedy bin even as total work
+  // falls; the current expanded gate still has its separate bound below.
+  const historical = JSON.parse(readFileSync(new URL('../../scripts/test-prune/baseline.json', import.meta.url))).launchPolicy
+  const additions = new Set([...deskFiles, ...panelFiles, ...quoteFiles, ...[themeApply, registryShots, expertTerminal, entryChecks,
+    deskLessons, projectDefinitions, definitionDecisions, nameWrap, personSteps, deskEmpty, deskTabRow, viewSwitch].map(spec => spec.file)])
   const priorGate = {
-    ...real,
-    groups: real.groups.filter(group => group !== attention).map(group => ({
+    ...historical,
+    groups: historical.groups.filter(group => group.id !== attention.id).map(group => ({
       ...group,
-      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && !panelFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions && spec !== definitionDecisions && spec !== nameWrap && spec !== personSteps && spec !== deskEmpty && spec !== deskTabRow && spec !== viewSwitch).map(spec =>
-        spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
-          spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
+      specs: group.specs.filter(spec => !additions.has(spec.file)).map(spec =>
+        spec.file === autopilot.file ? { ...spec, weightSeconds: autopilotOnMain } :
+          spec.file === noShift.file ? { ...spec, weightSeconds: noShiftOnMain } : spec),
     })),
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + panelGrowth + projectDefinitions.weightSeconds + definitionDecisions.weightSeconds + nameWrap.weightSeconds + personSteps.weightSeconds + deskEmpty.weightSeconds + deskTabRow.weightSeconds + viewSwitch.weightSeconds
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + panelGrowth + quoteGrowth + projectDefinitions.weightSeconds + definitionDecisions.weightSeconds + nameWrap.weightSeconds + personSteps.weightSeconds + deskEmpty.weightSeconds + deskTabRow.weightSeconds + viewSwitch.weightSeconds
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision, panel, project Definitions, workspace definition decisions, project name wrap, person-step ownership, empty Desk, Desk tab-row and ViewSwitch specs')
+    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision, panel, quote native boundaries, project Definitions, workspace definition decisions, project name wrap, person-step ownership, empty Desk, Desk tab-row and ViewSwitch specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {
