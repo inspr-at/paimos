@@ -33,7 +33,7 @@ for (const size of sizes) for (const theme of ['light', 'dark']) {
     expect(await scroll()).toEqual({ x: 0, y: 0, shell: 0 })
     await page.screenshot({ path: testInfo.outputPath(`AEON-1688/models-${size.width}-${theme}.png`), fullPage: true })
     expect(await header.boundingBox(), 'capture does not move the nav').toEqual(before)
-    await expectStableControls({ controls: { nav: header, trigger }, interactions: [
+    await expectStableControls({ tolerance: 0, controls: { nav: header, trigger }, interactions: [
       { name: 'open the model picker', run: async () => { await trigger.click(); await expect(page.locator('.mdl-pop')).toBeVisible() } },
       { name: 'move the active model with the keyboard', run: async () => { await page.getByRole('combobox').press('ArrowDown') } },
     ] })

@@ -373,7 +373,7 @@ test('the title bar: compact zoom, the header chevron beside PDF, save state and
     const chevron = bar.locator('.chevron'), more = bar.getByRole('button', { name: 'More actions', exact: true })
     const details = bar.getByRole('button', { name: 'Details', exact: true }), format = bar.getByRole('button', { name: 'Format panel', exact: true })
     const before = await bar.boundingBox()
-    await expectStableControls({ controls: { bar, pdf, chevron, more, details, format }, interactions: [
+    await expectStableControls({ tolerance: 0, controls: { bar, pdf, chevron, more, details, format }, interactions: [
       { name: 'open Details', run: async () => {
         await details.click()
         await expect(details).toHaveAttribute('aria-pressed', 'true')

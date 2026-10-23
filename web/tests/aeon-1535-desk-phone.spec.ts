@@ -175,7 +175,7 @@ test('AEON-1535 P2: an unavailable stamp row is disabled and reads its reason', 
     await expect(doctrine).toHaveAttribute('aria-disabled', 'true')
     await expect(doctrine).toBeDisabled()
     await expect(doctrine).toHaveAccessibleDescription(DOCTRINE_OFF)
-    await expect(words).toHaveText(width === 390 ? 'Not available: the agent didn’t name the rule to change.' : DOCTRINE_OFF)
+    await expect(words).toHaveText(width === 390 ? 'Not available: the agent named no rule.' : DOCTRINE_OFF)
     await expect(page.getByTestId('stamp-words-requirement')).toHaveText('add to AEON-1')
     for (const outcome of ['once', 'always', 'requirement']) await expect(row(page, outcome)).not.toHaveAttribute('aria-disabled', /.*/)
     const controls = {
@@ -184,7 +184,7 @@ test('AEON-1535 P2: an unavailable stamp row is disabled and reads its reason', 
     }
     await page.getByTestId('desk-stamps').scrollIntoViewIfNeeded()
     const before = await row(page, 'always').boundingBox()
-    await expectStableControls({ controls, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
+    await expectStableControls({ tolerance: 0, controls, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
       { name: 'focus the unavailable stamp', run: async () => {
         await doctrine.focus()
         if (width === 390) {
@@ -192,12 +192,13 @@ test('AEON-1535 P2: an unavailable stamp row is disabled and reads its reason', 
           await expect(page.getByRole('tooltip')).toHaveCount(0)
           const lines = await words.evaluate(el => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))
           expect(lines, 'the full inline reason wraps to two lines').toBe(2)
+          expect((await doctrine.boundingBox())!.height, 'the disabled choice keeps its 52 px row').toBe(52)
           expect(await words.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
         } else await expect(doctrine).toHaveAttribute('data-tip', DOCTRINE_OFF)
       } },
       { name: 'tap the unavailable stamp', run: async () => {
         await doctrine.click({ force: true })
-        if (width === 390) await expect(page.locator('.dlg-toast')).toHaveText(DOCTRINE_OFF)
+        if (width === 390) await expect(page.locator('.dlg-toast')).toHaveCount(0)
         await expect(row(page, 'once')).toHaveAttribute('aria-checked', 'true')
         await expect(doctrine).toHaveAttribute('aria-checked', 'false')
       } },

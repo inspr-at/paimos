@@ -97,7 +97,7 @@ const stampWords = (row: DeskItem, outcome: DeskOutcome) => {
   const why = stampWhy(row, outcome)
   // The full server reason remains the accessible description. The phone row says
   // the same thing in two lines, without a tooltip over the neighbouring choice.
-  if (narrow.value && why === 'Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.') return 'Not available: the agent didn’t name the rule to change.'
+  if (narrow.value && why === 'Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.') return 'Not available: the agent named no rule.'
   return why || (outcome === 'requirement' ? `add to ${ticketRef.value?.key || 'the ticket'}` : STAMP_WORDS[outcome])
 }
 // Source only where no ticket names the origin. Phones show it on the answer line in the head (AEON-1535).
@@ -482,7 +482,11 @@ function typed(id: string) { if (draft.value && draft.value.optionId !== id) dra
 function stamp(outcome: DeskOutcome) {
   if (!item.value || !draft.value) return
   const why = stampWhy(item.value, outcome)
-  if (why) { setStatus(why); return }
+  if (why) {
+    if (narrow.value) { clearTimeout(narrowToast); toastText.value = ''; announcement.value = why }
+    else setStatus(why)
+    return
+  }
   if (!editable.value) return
   draft.value.outcome = outcome; touch()
 }
@@ -1341,9 +1345,7 @@ a.res-key:hover { text-decoration: underline; }
   @media (hover: hover) { .stamp:hover:not([aria-disabled="true"]):not([aria-checked="true"]) { background: var(--row-hover); } }
   .stamp[data-off] { color: var(--ink-3); cursor: not-allowed; }
   .stamp[data-off] .st-icon { color: var(--ink-3); opacity: .7; }
-  .stamp[data-off] { grid-template-rows: 20px auto; padding-block: 8px; }
-  .stamp[data-off] .st-words { grid-column: 2 / -1; grid-row: 2; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
-  .stamp[data-off] .st-check { grid-column: 4; grid-row: 1; }
+  .stamp[data-off] .st-words { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
   .stamp-desc { height: 60px; -webkit-line-clamp: 3; line-clamp: 3; }
   .desk-foot { display: none; }
   .choice > .field-row, .choice > .c-answer { padding-left: 10px; }

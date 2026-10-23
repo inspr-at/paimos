@@ -242,7 +242,7 @@ test('a phone save that fails is said over the page and retried from there', asy
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     await expect(notice).toHaveText('Updates paused · retrying')
     const before = await toolbar.boundingBox()
-    const guard = await controlStability(page, { toolbar, notice })
+    const guard = await controlStability(page, { toolbar, notice }, { tolerance: 0 })
     await guard.check(async () => {
       await notice.hover()
       const lines = await notice.locator('span').evaluate(el => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))

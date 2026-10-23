@@ -111,7 +111,7 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
     await expect(unavailable.locator('.nl-note')).toHaveText("Couldn't load lead actions. Reload to try again.")
     await expect(unavailable.getByRole('button', { name: /^Start a/ })).toHaveCount(0)
     const header = page.locator('.app-header'), bounds = await header.boundingBox()
-    await expectStableControls({ controls: { header, row: unavailable }, interactions: [
+    await expectStableControls({ tolerance: 0, controls: { header, row: unavailable }, interactions: [
       { name: 'read the unavailable actions without moving the list', run: async () => { await unavailable.hover() } },
     ] })
     expect(await header.boundingBox(), 'error copy moves navigation by 0 px').toEqual(bounds)

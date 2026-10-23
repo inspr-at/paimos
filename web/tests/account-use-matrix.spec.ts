@@ -671,7 +671,7 @@ test('a cleared New tag keeps its room: with a long account name the clicked box
       lastRow: rowBox(page, ACCOUNTS.spare), lastCell: cell(page, ACCOUNTS.spare, C.beta), add: zone(page).getByRole('button', { name: 'Add context' }),
     }
     for (const control of Object.values(controls)) await control.scrollIntoViewIfNeeded()
-    const guard = await controlStability(page, controls)
+    const guard = await controlStability(page, controls, { tolerance: 0 })
     // The save ends the wait: the tag and the tint go, the row keeps its height, also once the matrix is read
     // again and the server no longer reports the wait (the project waiting since shows that read arrived).
     w.holding = WAITING

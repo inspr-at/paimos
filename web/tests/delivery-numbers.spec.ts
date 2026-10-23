@@ -163,7 +163,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     const line = await link.evaluate(el => ({ height: el.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(el.parentElement!).lineHeight) }))
     expect(line.height, 'inline Settings link never raises the text line').toBeLessThanOrEqual(line.lineHeight)
     const nav = page.locator('.app-header'), before = await nav.boundingBox()
-    const guard = await controlStability(page, { windows, levels, nav, views: head(page).getByRole('tablist') })
+    const guard = await controlStability(page, { windows, levels, nav, views: head(page).getByRole('tablist') }, { tolerance: 0 })
     await guard.check(() => windows.getByRole('radio', { name: '90 days' }).click())
     await guard.check(() => windows.getByRole('radio', { name: '7 days' }).click())
     guard.done()
