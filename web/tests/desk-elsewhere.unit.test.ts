@@ -9,7 +9,7 @@ const harness = vi.hoisted(() => ({
 }))
 vi.mock('../src/stores/session', () => ({ useSession: () => harness }))
 vi.mock('../src/lib/api', () => ({ api: harness.api }))
-const { parseSummary, readSibling } = await import('../src/lib/deskElsewhere')
+const { parseSummary, readSibling, ConnectionEnded } = await import('../src/lib/deskElsewhere')
 afterEach(() => { harness.identity = null; harness.api.mockReset(); vi.unstubAllGlobals() })
 
 const pma = { tag: 'pma', origin: 'https://pma.example' }
@@ -65,4 +65,26 @@ describe('readSibling', () => {
     expect(offset).toBeGreaterThan(64_000)
     expect(offset).toBeLessThanOrEqual(64_000 + chunk)
   })
+})
+
+// Risk: throttling discards a still-valid grant and its dated cached summary.
+it('treats 429 as unreachable instead of ending the connection', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 429, headers: { 'Retry-After': '60' } })))
+  const result = await readSibling(pma, 'browser-only-test-grant').catch(error => error)
+  expect(result).toBeInstanceOf(Error)
+  expect(result).not.toBeInstanceOf(ConnectionEnded)
+  expect(result.message).toContain('429')
+})
+
+it('exchanges the history code in a credential-free POST and receives the bearer only in the body', async () => {
+  const { exchangeInstance } = await import('../src/lib/instanceConnect')
+  const token = `desk_${'a'.repeat(36)}_${'b'.repeat(36)}_${'c'.repeat(43)}`
+  const fetch = vi.fn(async () => new Response(JSON.stringify({ token, instance: 'pma', account: 'Account', created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 90 * 86400_000).toISOString() })))
+  vi.stubGlobal('fetch', fetch)
+  const result = await exchangeInstance(pma, 'history-code', 'state', 'verifier')
+  expect(result.token).toBe(token)
+  expect(fetch).toHaveBeenCalledWith('https://pma.example/api/decision-desk/connections/exchange', expect.objectContaining({
+    method: 'POST', credentials: 'omit', mode: 'cors', cache: 'no-store', redirect: 'error', referrerPolicy: 'no-referrer',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: 'history-code', state: 'state', code_verifier: 'verifier' }),
+  }))
 })

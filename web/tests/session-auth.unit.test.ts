@@ -16,7 +16,7 @@ beforeEach(() => {
   clearPermissions()
   vi.mocked(api).mockImplementation(async () => new Response(JSON.stringify({ workspace: { role: null, permissions: ['account.manage'] }, project: null }), { status: 200 }))
 })
-afterEach(() => { useSession().$dispose(); sessionEnded.handler = null })
+afterEach(() => { useSession().$dispose(); sessionEnded.handler = null; vi.unstubAllGlobals() })
 
 it('retains public sign-in config when the initial 401 invalidates the session before /me returns', async () => {
   const session = useSession()
@@ -59,4 +59,18 @@ it('a late anonymous /me response cannot clear the person established by a newer
   await previous
   expect(session.identity?.principal.id).toBe('grace')
   expect(session.devMode).toBe(true)
+})
+
+it('explicit sign-out removes this person’s stored instance credentials and pending verifier', async () => {
+  const storage = new Map<string, string>([
+    ['aeon.desk-connections.tenant:ada.pma', 'credential'],
+    ['aeon.desk-connections.tenant:grace.pma', 'other-person'],
+    ['aeon.desk-connections.pending.state', JSON.stringify({ owner: 'tenant:ada', verifier: 'private' })],
+  ])
+  vi.stubGlobal('localStorage', { get length() { return storage.size }, key: (n: number) => [...storage.keys()][n] ?? null, getItem: (key: string) => storage.get(key) ?? null, removeItem: (key: string) => storage.delete(key) })
+  const session = useSession(); session.identity = person('ada')
+  await session.signOut()
+  expect(storage.has('aeon.desk-connections.tenant:ada.pma')).toBe(false)
+  expect(storage.has('aeon.desk-connections.pending.state')).toBe(false)
+  expect(storage.get('aeon.desk-connections.tenant:grace.pma')).toBe('other-person')
 })

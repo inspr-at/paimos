@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
+import { waitingCount } from '../lib/deskElsewhere'
+import { displayLanguage } from '../lib/displayLanguage'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useSession } from './session'
 import { onAccessRevalidate } from '../lib/authz'
@@ -142,7 +144,7 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
   onScopeDispose(() => { stopWakes(); stopLive(); stopAccess(); invalidate() })
   const hereCount = computed(() => projection.value?.counts.open ?? null)
   const count = computed(() => hereCount.value === null ? null : hereCount.value + connections.count)
-  const countTip = computed(() => [count.value === null ? 'Reading Decision Desk' : `${count.value} wait for you`, hereCount.value === null ? 'Reading here' : `${hereCount.value} here`, ...connections.breakdown, ...(connections.discovery === 'unknown' ? ['Other instances could not be read'] : [])].join(' · '))
+  const countTip = computed(() => [count.value === null ? (displayLanguage() === 'de' ? 'Decision Desk wird gelesen' : 'Reading Decision Desk') : waitingCount(count.value), hereCount.value === null ? (displayLanguage() === 'de' ? 'Hier wird gelesen' : 'Reading here') : `${hereCount.value} ${displayLanguage() === 'de' ? 'hier' : 'here'}`, ...connections.breakdown, ...(connections.discovery === 'unknown' ? [displayLanguage() === 'de' ? 'Andere Instanzen konnten nicht gelesen werden' : 'Other instances could not be read'] : [])].join(' · '))
   const allClear = computed(() => hereCount.value === 0 && failures.value === 0 && connections.allClear)
   return { projection, error, loading, failures, failedSince, refreshedAt, refresh, refreshPastCancel, cancelRefresh, invalidate, ruleProjects, ruleProjectError, resolveRuleProjects, hereCount, count, countTip, allClear, live, liveEvents, changeArrived, notePoll, nextPollAt }
 })

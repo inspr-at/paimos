@@ -16,7 +16,7 @@ const SIBLING = 'https://pma.example'
 const SUMMARY = `${SIBLING}/api/decision-desk/owner-summary`
 test.beforeEach(async ({ page }) => { await page.clock.install({ time: new Date(NOW) }) })
 
-type Sibling = 'ok' | 'down' | 'ended'
+type Sibling = 'ok' | 'down' | 'ended' | 'throttled'
 const keptGoal = {
   id: 'g-wait', key: 'G-WAIT', title: 'Keep the header still', kind: 'goal', project_id: 'p-aeon', workspace: false, expansion: 'full',
   counts: { outcomes: 1, tickets: 1 }, items: [], steps: [], next_step: null,
@@ -25,11 +25,11 @@ const keptGoal = {
   eta: { source: 'none', partial: false }, passed: false, states: { moving: 1, queued: 0, paused: 0, done: 0 }, done: false,
   stall: { stalled: false, since: iso(NOW) }, read_through: 1, generation: 1,
 }
-async function mockBand(page: Page, options: { connected?: boolean; sibling: Sibling; lines?: number; goal?: boolean; instances?: Sibling; desk?: 'items' | 'empty'; projectKey?: string }) {
+async function mockBand(page: Page, options: { connected?: boolean; sibling: Sibling; lines?: number; goal?: boolean; instances?: Sibling; desk?: 'items' | 'empty'; local?: number; projectKey?: string }) {
   const reads = { sibling: 0, origins: [] as string[], cookie: false, bearer: false }
   let state = options.sibling
   let instances: Sibling = options.instances ?? 'ok'
-  const lines = options.lines ?? 1
+  let lines = options.lines ?? 1
   const deskItems = options.desk === 'empty' ? [] : [
     { id: '00000000-0000-4000-8000-000000000001', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'Which identity should agent reviews run as for the gatekeeper go-live?', created_at: iso(NOW - 3 * HOUR), held: false, href: '', source: '', ticket_key: 'AEON-1394', asked_by: { id: 'p-lead', name: 'AEON-LEAD' } },
     { id: '00000000-0000-4000-8000-000000000002', kind: 'question', project_id: 'p-pharos', revision: 1, title: 'Run the 60-minute voice soak test on the Aithema test host?', created_at: iso(NOW - 2 * HOUR), held: true, href: '', source: '', asked_by: { id: 'p-ops', name: 'OPS' } },
@@ -43,8 +43,8 @@ async function mockBand(page: Page, options: { connected?: boolean; sibling: Sib
     items: options.goal ? [keptGoal] : [], totals: options.goal ? { moving: 1, queued: 0, paused: 0, done: 0 } : { moving: 0, queued: 0, paused: 0, done: 0 }, totals_partial: false, quiet_projects: { count: 0, keys: [] }, truncated: false, read_through: 1, generation: 1,
   }, headers: { 'Aeon-Contract': 'goals/1.5' } }))
   await page.route(/\/api\/decision-desk\/projection/, route => route.fulfill({ json: {
-    items: deskItems,
-    counts: options.desk === 'empty' ? { open: 0, held: 0, chores: 0 } : { open: 3, held: 1, chores: 0 }, has_more: false, as_of: iso(NOW),
+    items: options.local === undefined ? deskItems : deskItems.slice(0, options.local),
+    counts: options.local !== undefined ? { open: options.local, held: options.local >= 2 ? 1 : 0, chores: 0 } : options.desk === 'empty' ? { open: 0, held: 0, chores: 0 } : { open: 3, held: 1, chores: 0 }, has_more: false, as_of: iso(NOW),
     upcoming: [{ node_id: 'n-ait', check_id: 'human', project_id: 'p-aeon', ticket_key: 'AIT-140', label: 'Your Aithema test session (~20 min, whenever you like)' }],
   } }))
   const mount = async () => {
@@ -54,12 +54,12 @@ async function mockBand(page: Page, options: { connected?: boolean; sibling: Sib
   })
   await page.route(SUMMARY + '*', route => {
     const request = route.request(), origin = request.headers().origin ?? ''
-    const cors = { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'GET', 'access-control-allow-headers': 'Authorization, Accept', vary: 'Origin' }
-    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors })
+    const cors = { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'GET, DELETE', 'access-control-allow-headers': 'Authorization, Accept', vary: 'Origin' }
+    if (request.method() === 'OPTIONS' || request.method() === 'DELETE') return route.fulfill({ status: 204, headers: cors })
     reads.sibling++; reads.origins.push(origin)
     reads.cookie ||= !!request.headers().cookie
     reads.bearer ||= /^Bearer desk_/.test(request.headers().authorization ?? '')
-    if (state !== 'ok') return route.fulfill({ status: state === 'ended' ? 401 : 503, json: { error: state }, headers: cors })
+    if (state !== 'ok') return route.fulfill({ status: state === 'ended' ? 401 : state === 'throttled' ? 429 : 503, json: { error: state }, headers: cors })
     return route.fulfill({ headers: cors, json: {
       instance: 'pma', counts: { open: lines, held: 0 }, as_of: iso(NOW),
       items: Array.from({ length: lines }, (_, index) => ({
@@ -71,7 +71,7 @@ async function mockBand(page: Page, options: { connected?: boolean; sibling: Sib
   })
   }
   await mount()
-  return { reads, mount, set: (next: Sibling) => { state = next }, setInstances: (next: Sibling) => { instances = next } }
+  return { reads, mount, set: (next: Sibling) => { state = next }, setLines: (next: number) => { lines = next }, setInstances: (next: Sibling) => { instances = next } }
 }
 async function openBand(page: Page) {
   await page.goto('/?view=goals')
@@ -146,6 +146,7 @@ for (const width of [1440, 1024, 390] as const) {
     await page.getByRole('radio', { name: /^Decided/ }).click()
     await expect(page.getByRole('link', { name: 'Decisions made on pma are listed there' })).toHaveAttribute('href', `${SIBLING}/decision-desk?view=decided`)
     await shot(page, info, `decided-${width}-light`)
+    await page.emulateMedia({ colorScheme: 'dark' }); await shot(page, info, `decided-${width}-dark`)
     await mockSettings(page, settingsData())
     await mock.mount()
     await page.route('**/api/decision-desk/connections', route => route.fulfill({ json: { connections: [{ id: '00000000-0000-4000-8000-000000000099', origin: SIBLING, instance: 'pma', created_at: iso(NOW), expires_at: iso(NOW + 90 * 86400_000), last_used_at: iso(NOW) }] } }))
@@ -174,6 +175,7 @@ test('unreachable results remain dated, ended results disappear, and connection 
   await expect(action).toHaveText('Show'); await action.click()
   await expectStableControls({ controls: { action, line: row.locator('.instance-line') }, scrollAreas: { band }, interactions: [
     { name: 'unreachable keeps cache', run: async () => { mock.set('down'); await page.clock.fastForward(30_000); await expect(row).toContainText("couldn't be reached"); await expect(row.locator('.instance-item')).toHaveCount(2) } },
+    { name: 'throttling retains the connection and dated items', run: async () => { mock.set('throttled'); await page.clock.fastForward(30_000); await expect(row).toHaveAttribute('data-state', 'unreachable'); await expect(row.locator('.instance-item')).toHaveCount(2) } },
     { name: 'retry restores current answer', run: async () => { mock.set('ok'); await action.click(); await expect(row).toContainText('2 wait for you') } },
     { name: 'revoked drops cached items', run: async () => { mock.set('ended'); await page.clock.fastForward(30_000); await expect(row).toContainText('connection ended'); await expect(row.locator('.instance-item')).toHaveCount(0) } },
   ] })
@@ -218,6 +220,7 @@ test('phone status and project keys expose their full copy with text spacing', a
   const project = row.locator('.instance-project')
   await expect(project).toHaveCSS('white-space', 'nowrap')
   await expect(project).toHaveAttribute('data-tip', projectKey)
+  await expect(project).toHaveAttribute('data-clip-tip', '')
   await expect(project).toHaveAttribute('tabindex', '0')
   await page.addStyleTag({ content: '.instance-copy { line-height: 2 !important; letter-spacing: .12em !important; word-spacing: .16em !important; }' })
   mock.set('down'); await page.clock.fastForward(30_000)
@@ -256,7 +259,21 @@ test('connect opens a top-level confirmation and a single-use callback clears th
   const target = new URL(opened), state = target.searchParams.get('state')!
   expect(target.origin+target.pathname).toBe(`${SIBLING}/instances/connect`)
   const token = `desk_${'a'.repeat(8)}-${'a'.repeat(4)}-${'a'.repeat(4)}-${'a'.repeat(4)}-${'a'.repeat(12)}_${'b'.repeat(8)}-${'b'.repeat(4)}-${'b'.repeat(4)}-${'b'.repeat(4)}-${'b'.repeat(12)}_${'c'.repeat(43)}`
-  const fragment = new URLSearchParams({ state, token, instance: 'pma', account: 'Connected account', created_at: iso(NOW), expires_at: iso(NOW+90*86400_000) }).toString()
+  const code = token.replace(/^desk_/, 'code_')
+  const fragment = new URLSearchParams({ state, code, instance: 'pma' }).toString()
+  expect(target.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/)
+  let exchanges = 0
+  await page.route(`${SIBLING}/api/decision-desk/connections/exchange`, route => {
+    const request = route.request(), origin = request.headers().origin
+    const headers = { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'POST', 'access-control-allow-headers': 'Content-Type', 'cache-control': 'no-store', vary: 'Origin' }
+    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers })
+    exchanges++
+    expect(request.method()).toBe('POST')
+    expect(request.headers().cookie).toBeUndefined()
+    expect(request.headers().authorization).toBeUndefined()
+    expect(request.postDataJSON()).toMatchObject({ code, state, code_verifier: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) })
+    return route.fulfill({ headers, json: { token, instance: 'pma', account: 'Connected account', created_at: iso(NOW), expires_at: iso(NOW + 90 * 86400_000) } })
+  })
   const sent: string[] = []
   page.on('request', request => sent.push(request.url()))
   await page.goto(`/instances/connected#${fragment}`)
@@ -269,6 +286,7 @@ test('connect opens a top-level confirmation and a single-use callback clears th
   await page.goto(`/instances/connected#${fragment}`)
   await expect(page.getByRole('alert')).toContainText('Return and connect again')
   expect(mock.reads.cookie).toBe(false)
+  expect(exchanges).toBe(1)
 })
 
 for (const width of [1440, 1024, 390] as const) {
@@ -277,7 +295,7 @@ for (const width of [1440, 1024, 390] as const) {
     await mockBand(page, { connected: false, sibling: 'ok' })
     let writes = 0
     await page.route('**/api/decision-desk/connections', async route => { writes++; await route.fulfill({ status: 503, json: { error: 'temporarily unavailable' } }) })
-    await page.goto(`/instances/connect?origin=${encodeURIComponent(SIBLING)}&state=${'a'.repeat(43)}`)
+    await page.goto(`/instances/connect?origin=${encodeURIComponent(SIBLING)}&state=${'a'.repeat(43)}&code_challenge=${'c'.repeat(43)}`)
     await expect(page.getByRole('heading', { name: 'Show your waiting decisions on pma?' })).toBeVisible()
     await expect(page.locator('.connect-account')).toContainText(me.name)
     await expect(page.locator('.connect-account .avatar')).toHaveCSS('width', '36px')
@@ -309,8 +327,8 @@ for (const width of [1440, 1024, 390] as const) {
     await mockBand(page, { connected: false, sibling: 'ok' })
     await page.route('**/api/me', route => route.fulfill({ json: { principal: { ...me, name: account, email, kind: 'person', roles: ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
     await page.route('**/api/decision-desk/instances', route => route.fulfill({ json: { here: 'ppm', siblings: [{ tag: 'pma', origin }] } }))
-    await page.route(`${origin}/api/decision-desk/owner-summary*`, route => route.fulfill({ status: 503, headers: { 'access-control-allow-origin': new URL(page.url()).origin, 'access-control-allow-methods': 'GET', 'access-control-allow-headers': 'Authorization, Accept' }, json: { error: 'unavailable' } }))
-    await page.goto(`/instances/connect?origin=${encodeURIComponent(origin)}&state=${'a'.repeat(43)}`)
+    await page.route(`${origin}/api/decision-desk/owner-summary*`, route => route.fulfill({ status: 503, headers: { 'access-control-allow-origin': new URL(page.url()).origin, 'access-control-allow-methods': 'GET, DELETE', 'access-control-allow-headers': 'Authorization, Accept' }, json: { error: 'unavailable' } }))
+    await page.goto(`/instances/connect?origin=${encodeURIComponent(origin)}&state=${'a'.repeat(43)}&code_challenge=${'c'.repeat(43)}`)
     const card = page.locator('.connect-card'), name = page.locator('.connect-account b'), address = page.locator('.connect-account small')
     await expect(name).toHaveText(account)
     await expect(page.locator('.connect-account .avatar')).toHaveCSS('width', '36px')
@@ -357,3 +375,93 @@ for (const width of [1440, 1024, 390] as const) {
     ] })
   })
 }
+
+// The final-head evidence uses only production components driven by these API
+// fixtures; no screenshot-only UI or production demo records are introduced.
+for (const width of [1440, 390] as const) {
+  test(`Goals connection states and final-head evidence at ${width}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 950 })
+    const mock = await mockBand(page, { connected: false, sibling: 'ok', lines: 4 })
+    await page.addInitScript(() => { window.open = (() => null) as typeof window.open })
+    const band = await openBand(page), row = band.getByTestId('instance-pma')
+    const capture = async (state: string) => {
+      for (const theme of ['light', 'dark'] as const) {
+        await page.emulateMedia({ colorScheme: theme })
+        await shot(page, info, `line-${state}-${width}-${theme}`)
+      }
+    }
+    await expect(row).toContainText('see what waits for you there too'); await capture('not-connected')
+    await row.getByRole('button', { name: 'Connect', exact: true }).click()
+    await expect(row).toContainText('confirm in the tab that opened'); await capture('confirming')
+    await row.getByRole('button', { name: 'Cancel', exact: true }).click()
+    // Restore a fixture grant through browser storage and reload the real app.
+    await page.evaluate(({ key, origin, now }) => localStorage.setItem(key, JSON.stringify({ token: `desk_${'a'.repeat(36)}_${'b'.repeat(36)}_${'c'.repeat(43)}`, origin, account: 'Connected account', createdAt: new Date(now).toISOString(), expiresAt: new Date(now + 90 * 86400_000).toISOString() })), { key: `aeon.desk-connections.t1:${me.id}.pma`, origin: SIBLING, now: NOW })
+    await page.reload()
+    await expect(row).toContainText('4 wait for you'); await capture('four-collapsed')
+    await row.getByRole('button', { name: 'Show', exact: true }).click()
+    await expect(row.locator('.instance-item')).toHaveCount(4); await capture('four-shown')
+    mock.set('down'); await page.clock.fastForward(30_000)
+    await expect(row).toContainText("couldn't be reached"); await capture('unreachable-cached')
+    mock.set('ended'); await page.clock.fastForward(30_000)
+    await expect(row).toContainText('connection ended'); await capture('ended')
+    mock.set('ok'); mock.setLines(0)
+    await page.evaluate(({ key, origin, now }) => localStorage.setItem(key, JSON.stringify({ token: `desk_${'a'.repeat(36)}_${'b'.repeat(36)}_${'c'.repeat(43)}`, origin, account: 'Connected account', createdAt: new Date(now).toISOString(), expiresAt: new Date(now + 90 * 86400_000).toISOString() })), { key: `aeon.desk-connections.t1:${me.id}.pma`, origin: SIBLING, now: NOW })
+    await page.reload()
+    await expect(row).toContainText('nothing waits for you'); await capture('zero')
+    mock.set('down'); await page.reload()
+    await expect(row).toContainText("couldn't be reached")
+    await expect(row.locator('.instance-item')).toHaveCount(0); await capture('unreachable-empty')
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    await page.route(SUMMARY + '*', async route => {
+      if (route.request().method() === 'OPTIONS') return route.fallback()
+      await pending; return route.fallback()
+    })
+    mock.set('ok'); await page.reload()
+    await expect(row).toContainText('checking…'); await capture('reading')
+    release(); await expect(row).toContainText('nothing waits for you')
+  })
+}
+
+test('Desk coverage matrix, header tooltip and preview evidence in both themes', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1440, height: 950 })
+  for (const scenario of [
+    { name: 'here-2-there-1', local: 2, lines: 1, sibling: 'ok' as const },
+    { name: 'here-0-there-3', local: 0, lines: 3, sibling: 'ok' as const },
+    { name: 'here-0-there-unreachable', local: 0, lines: 0, sibling: 'down' as const },
+    { name: 'all-0', local: 0, lines: 0, sibling: 'ok' as const },
+  ]) {
+    await mockDecisionDesk(page, { emptyDesk: true })
+    // The Desk's source fixtures are registered last to retain the matrix totals.
+    await mockBand(page, scenario)
+    await page.goto('/decision-desk')
+    const remote = page.getByTestId('instance-pma')
+    if (scenario.sibling === 'down') {
+      await expect(remote).toContainText("couldn't be reached")
+      await expect(page.getByTestId('desk-clear')).toHaveCount(0)
+      await expect(page.getByTestId('desk-empty')).toHaveText("Nothing waits here · pma couldn't be reached")
+    } else {
+      await expect(remote.locator('.instance-item')).toHaveCount(scenario.lines)
+      if (scenario.local === 0) await expect(page.getByTestId('desk-empty')).toHaveText(scenario.lines ? 'Nothing waits here' : 'Nothing waits for you')
+    }
+    for (const theme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: theme })
+      await shot(page, info, `desk-${scenario.name}-1440-${theme}`)
+    }
+    if (scenario.name === 'here-2-there-1') {
+      const deskPlace = page.locator('header .places').getByRole('link', { name: /Decision Desk, 3 open/ })
+      await expect(deskPlace).toHaveAttribute('data-tip', /3 wait for you · 2 here · 1 on pma/)
+      for (const theme of ['light', 'dark'] as const) {
+        await page.emulateMedia({ colorScheme: theme })
+        await deskPlace.hover()
+        await expect(page.locator('.tooltip')).toContainText('2 here')
+        await shot(page, info, `header-tooltip-1440-${theme}`)
+        await page.mouse.move(0, 0)
+        await page.getByRole('button', { name: 'Preview the Decision Desk', exact: true }).click()
+        await expect(page.getByRole('dialog', { name: 'Decision Desk preview', exact: true }).getByTestId('instance-pma')).toContainText('On pma · 1')
+        await shot(page, info, `header-preview-1440-${theme}`)
+        await page.keyboard.press('Escape')
+      }
+    }
+  }
+})

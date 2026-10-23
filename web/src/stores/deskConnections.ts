@@ -2,9 +2,10 @@
 import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useSession } from './session'
-import { ConnectionEnded, readInstances, readSibling, type DeskSibling, type ElsewhereDiscovery, type ElsewhereSummary } from '../lib/deskElsewhere'
+import { ConnectionEnded, connectionLabel, revokeSibling, readInstances, readSibling, type DeskSibling, type ElsewhereDiscovery, type ElsewhereSummary } from '../lib/deskElsewhere'
 import { deviceSubscriptionHash, phoneSettings } from '../lib/phoneApprovals'
 import { displayLanguage } from '../lib/displayLanguage'
+import { exchangeInstance } from '../lib/instanceConnect'
 
 export type ConnectionState = 'not connected' | 'connecting' | 'reading' | 'ok' | 'unreachable' | 'ended'
 export interface InstanceRead extends DeskSibling {
@@ -14,7 +15,7 @@ export interface InstanceRead extends DeskSibling {
   lastReadAt: number
 }
 interface BrowserGrant { token: string; origin: string; account: string; createdAt: string; expiresAt: string }
-interface Pending { owner: string; tag: string; origin: string; until: number; returnTo: string }
+interface Pending { owner: string; tag: string; origin: string; until: number; returnTo: string; verifier: string }
 const PREFIX = 'aeon.desk-connections.', PENDING = `${PREFIX}pending.`, NOTICES = 'aeon:desk-notifications'
 const TOKEN = /^desk_[\da-f-]{36}_[\da-f-]{36}_[A-Za-z0-9_-]{43}$/i
 const STATE = /^[A-Za-z0-9_-]{43}$/
@@ -81,14 +82,20 @@ export const useDeskConnections = defineStore('deskConnections', () => {
       // One bounded lookup/claim per item, without loading an ever-growing
       // ledger. Prime even an empty Desk so its first arrival can notify.
       const seenKey = `${PREFIX}${who}.${tag}.seen`
-      storagePut(seenKey, '1')
+      const previous = Number(storageGet(seenKey))
+      const asOf = Date.parse(summary.asOf)
+      // Compare source creation times with the last successful source read,
+      // never the top-five membership or this browser's clock. Reconnects
+      // establish a new baseline so old backlog cannot become a notification.
+      const after = Math.max(Number.isFinite(previous) ? previous : 0, Date.parse(grant.createdAt))
+      storagePut(seenKey, String(Math.max(previous || 0, asOf)))
       for (const line of summary.lines) {
         const id = `${line.kind}:${line.id}`
         const claim = `${PREFIX}${who}.${tag}.notice.${encodeURIComponent(id)}`
         if (storageGet(claim)) continue
         storagePut(claim, '1')
         if (storageGet(claim) !== '1') continue // No repeatable delivery without a durable claim.
-        if (baseline || !noticeEnabled.value || reads.value.find(r => r.tag === tag)?.notify === false || typeof Notification === 'undefined' || Notification.permission !== 'granted') continue
+        if (baseline || !Number.isFinite(Date.parse(line.createdAt)) || Date.parse(line.createdAt) <= after || !noticeEnabled.value || reads.value.find(r => r.tag === tag)?.notify === false || typeof Notification === 'undefined' || Notification.permission !== 'granted') continue
         const de = displayLanguage() === 'de', title = de ? `Neu auf ${tag}: ${line.title}` : `New on ${tag}: ${line.title}`
         const body = [line.projectKey, de ? `auf ${tag} entscheiden` : `decide on ${tag}`].filter(Boolean).join(' · ')
         try {
@@ -117,7 +124,8 @@ export const useDeskConnections = defineStore('deskConnections', () => {
     if (Date.parse(grant.expiresAt) <= Date.now()) { ended(tag); return Promise.resolve() }
     if (!force && Date.now() - (attempted.get(tag) ?? 0) < 25_000) return Promise.resolve()
     attempted.set(tag, Date.now())
-    const who = owner.value, turn = generation, signal = abort.signal, baseline = !storageGet(key(tag, '.seen'))
+    const watermark = Number(storageGet(key(tag, '.seen')))
+    const who = owner.value, turn = generation, signal = abort.signal, baseline = !Number.isFinite(watermark) || watermark <= 1 || watermark < Date.parse(grant.createdAt)
     const valid = () => current(who, turn) && grants.get(tag) === grant && !signal.aborted
     if (!row.summary) patch(tag, { state: 'reading' })
     let flight!: Promise<void>
@@ -163,18 +171,22 @@ export const useDeskConnections = defineStore('deskConnections', () => {
     }
     await Promise.all(reads.value.map(row => readOne(row.tag, force)))
   }
-  function connect(tag: string) {
-    const row = reads.value.find(r => r.tag === tag)
-    if (!row || !owner.value || !session.authenticationCurrent()) return
+  async function connect(tag: string) {
+    const row = reads.value.find(r => r.tag === tag), who = owner.value, turn = generation
+    if (!row || !who || !session.authenticationCurrent()) return
     cancel(tag)
-    const bytes = crypto.getRandomValues(new Uint8Array(32))
-    const state = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-    const record: Pending = { owner: owner.value, tag, origin: row.origin, until: Date.now() + 10 * 60_000, returnTo: location.pathname + location.search }
+    const random = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    const state = random(), verifier = random()
+    const record: Pending = { owner: who, tag, origin: row.origin, verifier, until: Date.now() + 10 * 60_000, returnTo: location.pathname + location.search }
     storagePut(PENDING + state, JSON.stringify(record))
-    // Persistence is necessary for a separate top-level callback tab.
     if (!storageGet(PENDING + state)) { patch(tag, { state: 'unreachable' }); return }
     pending.set(tag, state); patch(tag, { state: 'connecting', hiddenUntil: 0 })
-    const url = new URL('/instances/connect', row.origin); url.searchParams.set('origin', location.origin); url.searchParams.set('state', state)
+    let digest: ArrayBuffer
+    try { digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)) }
+    catch { if (current(who, turn) && pending.get(tag) === state) { cancel(tag); patch(tag, { state: 'unreachable' }) }; return }
+    if (!current(who, turn) || pending.get(tag) !== state) return
+    const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    const url = new URL('/instances/connect', row.origin); url.searchParams.set('origin', location.origin); url.searchParams.set('state', state); url.searchParams.set('code_challenge', challenge)
     window.open(url.href, '_blank', 'noopener,noreferrer')
   }
   function cancel(tag: string) {
@@ -196,9 +208,22 @@ export const useDeskConnections = defineStore('deskConnections', () => {
       if (discovery.value !== 'known') await discover()
       if (!current(who, turn)) return null
       const row = reads.value.find(r => r.tag === record.tag && r.origin === record.origin)
-      const token = params.get('token') ?? '', expiresAt = params.get('expires_at') ?? '', createdAt = params.get('created_at') ?? ''
-      if (!row || params.get('instance') !== row.tag || !TOKEN.test(token) || !Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now() || Date.parse(expiresAt) > Date.now() + 91 * 86400_000 || !Number.isFinite(Date.parse(createdAt))) return null
-      const grant: BrowserGrant = { token, origin: row.origin, expiresAt, createdAt, account: (params.get('account') ?? '').slice(0, 120) }
+      const code = params.get('code') ?? ''
+      if (!row || params.get('instance') !== row.tag || !/^code_[\da-f-]{36}_[\da-f-]{36}_[A-Za-z0-9_-]{43}$/i.test(code) || !STATE.test(record.verifier) || params.has('token')) return null
+      const previous = grants.get(row.tag), signal = abort.signal
+      const valid = () => current(who, turn) && grants.get(row.tag) === previous && !signal.aborted
+      if (previous) {
+        await revokeSibling(row, previous.token, signal)
+        if (!valid()) return null
+        ended(row.tag)
+      }
+      const grant: BrowserGrant = await exchangeInstance(row, code, state, record.verifier, signal)
+      if (!current(who, turn) || signal.aborted || grants.has(row.tag)) {
+        // An identity change or another callback cannot leave an adopted-orphan grant.
+        void revokeSibling(row, grant.token).catch(() => {})
+        return null
+      }
+      const { createdAt, expiresAt } = grant
       flights.delete(row.tag); attempted.delete(row.tag)
       grants.set(row.tag, grant); save(row.tag); pending.delete(row.tag)
       patch(row.tag, { state: 'reading', account: grant.account, connectedAt: createdAt, expiresAt, hiddenUntil: 0, summary: null })
@@ -210,17 +235,16 @@ export const useDeskConnections = defineStore('deskConnections', () => {
     if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request(`${PREFIX}connect.${state}`, accept)
     return accept()
   }
-  function disconnect(tag: string): (() => void) | undefined {
+  async function disconnect(tag: string): Promise<boolean> {
     const row = reads.value.find(r => r.tag === tag), grant = grants.get(tag), who = owner.value, turn = generation
-    if (!row || !grant) return
+    if (!row || !grant) return false
+    // Keep the credential until the home instance confirms revocation, so a
+    // failed Disconnect can be retried and never claims to have ended access.
+    await revokeSibling(row, grant.token, abort.signal)
+    if (!current(who, turn) || grants.get(tag) !== grant) return false
     cancel(tag); grants.delete(tag); flights.delete(tag); attempted.delete(tag); save(tag)
-    patch(tag, { ...emptyRead(row), expanded: row.expanded, notify: row.notify })
-    view(tag)
-    return () => {
-      if (!current(who, turn) || grants.has(tag) || Date.parse(grant.expiresAt) <= Date.now()) return
-      grants.set(tag, grant); save(tag); patch(tag, { state: 'reading', account: grant.account, expiresAt: grant.expiresAt, connectedAt: grant.createdAt })
-      void readOne(tag, true)
-    }
+    patch(tag, { ...emptyRead(row), expanded: row.expanded, notify: row.notify }); view(tag)
+    return true
   }
   function reset() {
     for (const state of pending.values()) storagePut(PENDING + state, null)
@@ -242,18 +266,20 @@ export const useDeskConnections = defineStore('deskConnections', () => {
       }
     }
   }
-  if (typeof window !== 'undefined') { window.addEventListener('focus', focus); window.addEventListener('storage', storage); window.addEventListener(NOTICES, notificationPreference) }
-  onScopeDispose(() => { reset(); if (typeof window !== 'undefined') { window.removeEventListener('focus', focus); window.removeEventListener('storage', storage); window.removeEventListener(NOTICES, notificationPreference) } })
+  const signout = (event: Event) => { if ((event as CustomEvent<string>).detail === owner.value) reset() }
+  if (typeof window !== 'undefined') { window.addEventListener('aeon:desk-signout', signout); window.addEventListener('focus', focus); window.addEventListener('storage', storage); window.addEventListener(NOTICES, notificationPreference) }
+  onScopeDispose(() => { reset(); if (typeof window !== 'undefined') { window.removeEventListener('aeon:desk-signout', signout); window.removeEventListener('focus', focus); window.removeEventListener('storage', storage); window.removeEventListener(NOTICES, notificationPreference) } })
   const count = computed(() => reads.value.reduce((n, r) => n + (r.summary?.open ?? 0), 0))
   const complete = computed(() => discovery.value === 'known' && reads.value.every(r => !grants.has(r.tag) || (r.state === 'ok' && checkedAt.value - r.lastReadAt < 60_000)))
   const allClear = computed(() => complete.value && count.value === 0)
+  const text = (en: string, de: string) => displayLanguage() === 'de' ? de : en
   const breakdown = computed(() => reads.value.flatMap(r => {
     if (r.state === 'not connected') return []
-    if (r.state === 'ended') return [`${r.tag}: connection ended`]
-    if (r.summary) return [`${r.summary.open} on ${r.tag}${r.state === 'unreachable' ? ` (as of ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ''}`]
-    return [`${r.tag}: ${r.state === 'unreachable' ? "couldn't be reached" : r.state}`]
+    if (r.state === 'ended') return [`${r.tag}: ${connectionLabel(r.state)}`]
+    if (r.summary) return [text(`${r.summary.open} on ${r.tag}`, `${r.summary.open} auf ${r.tag}`) + (r.state === 'unreachable' ? text(` (as of ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`, ` (Stand ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`) : '')]
+    return [`${r.tag}: ${connectionLabel(r.state)}`]
   }))
-  const checkedAge = (seconds: number) => displayLanguage() === 'de' ? `vor ${seconds}\u00a0s geprüft` : `checked ${seconds}\u00a0s ago`
-  const syncTooltip = (now: number) => reads.value.filter(r => r.state !== 'not connected').map(r => `${r.tag}: ${r.state === 'unreachable' ? "couldn't be reached" : r.state === 'ended' ? 'connection ended' : r.summary ? checkedAge(Math.max(0, Math.floor((now - r.lastReadAt) / 1000))) : r.state}${r.state === 'unreachable' && r.summary ? ` · showing ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}`).join('\n')
+  const checkedAge = (seconds: number) => text(`checked ${seconds}\u00a0s ago`, `vor ${seconds}\u00a0s geprüft`)
+  const syncTooltip = (now: number) => reads.value.filter(r => r.state !== 'not connected').map(r => `${r.tag}: ${r.state === 'unreachable' || r.state === 'ended' || !r.summary ? connectionLabel(r.state) : checkedAge(Math.max(0, Math.floor((now - r.lastReadAt) / 1000)))}${r.state === 'unreachable' && r.summary ? text(` · showing ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, ` · Stand ${new Date(r.summary.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`) : ''}`).join('\n')
   return { here, reads, discovery, count, complete, allClear, breakdown, syncTooltip, noticeEnabled, refresh, connect, cancel, acceptFragment, disconnect, expand, dismiss, setNotify, showAll }
 })

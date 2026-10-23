@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1709. Wire parsing only; stores/deskConnections owns every sibling read.
 import { api } from './api'
+import { displayLanguage } from './displayLanguage'
 
 export interface DeskSibling { tag: string; origin: string }
 export interface DeskInstances { here: string; siblings: DeskSibling[] }
@@ -48,7 +49,7 @@ export function parseSummary(sibling: DeskSibling, body: unknown, limit = SUMMAR
 }
 
 // Count the bytes actually read. A missing or smaller Content-Length must not admit the rest of the body.
-async function boundedJSON(response: Response, limit: number): Promise<unknown> {
+export async function boundedJSON(response: Response, limit: number): Promise<unknown> {
   const declared = Number(response.headers.get('content-length'))
   if (Number.isFinite(declared) && declared > limit) {
     await response.body?.cancel()
@@ -92,4 +93,23 @@ export async function readSibling(sibling: DeskSibling, token: string, signal?: 
   const summary = parseSummary(sibling, body, all ? 100 : SUMMARY_LINES)
   if (!summary) throw new Error(`${sibling.tag} answered an unknown shape`)
   return summary
+}
+
+/** The same words for a connection state on every surface. */
+export function connectionLabel(state: string): string {
+  const de = displayLanguage() === 'de'
+  return ({ ok: de ? 'Verbunden' : 'Connected', reading: de ? 'wird geprüft…' : 'checking…', connecting: de ? 'im geöffneten Tab bestätigen' : 'confirm in the tab that opened', ended: de ? 'Verbindung beendet' : 'connection ended', unreachable: de ? 'nicht erreichbar' : "couldn't be reached", 'not connected': de ? 'Nicht verbunden' : 'Not connected' } as Record<string, string>)[state] ?? ''
+}
+export function waitingCount(count: number): string {
+  if (displayLanguage() === 'de') return `${count} offen`
+  return `${count} ${new Intl.PluralRules('en').select(count) === 'one' ? 'waits' : 'wait'} for you`
+}
+/** A bearer can end only itself, never a different person's grant. */
+export async function revokeSibling(sibling: DeskSibling, token: string, signal?: AbortSignal): Promise<void> {
+  const timeout = AbortSignal.timeout(READ_TIMEOUT)
+  const response = await fetch(`${sibling.origin}/api/decision-desk/owner-summary`, {
+    method: 'DELETE', credentials: 'omit', mode: 'cors', cache: 'no-store', redirect: 'error', referrerPolicy: 'no-referrer',
+    headers: { Authorization: `Bearer ${token}` }, signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+  })
+  if (response.status !== 204 && response.status !== 401) throw new Error('The connection could not be ended on its home instance.')
 }

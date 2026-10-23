@@ -5,7 +5,8 @@ import AppIcon, { type IconName } from './AppIcon.vue'
 import { useDeskConnections, type InstanceRead } from '../stores/deskConnections'
 import { displayLanguage } from '../lib/displayLanguage'
 import { relativeTime } from '../lib/work'
-import { vClipTip } from '../lib/clipTip'
+import { connectionLabel, waitingCount } from '../lib/deskElsewhere'
+import { vClipTip } from '../directives/clipTip'
 
 const props = withDefaults(defineProps<{ read: InstanceRead; variant?: 'goals' | 'desk' | 'preview' }>(), { variant: 'desk' })
 const emit = defineEmits<{ navigate: [] }>()
@@ -17,11 +18,11 @@ const message = computed(() => {
   const row = props.read
   switch (row.state) {
     case 'not connected': return text('see what waits for you there too', 'auch dort Wartendes anzeigen')
-    case 'connecting': return text('confirm in the tab that opened', 'im geöffneten Tab bestätigen')
-    case 'reading': return text('checking…', 'wird geprüft…')
-    case 'ended': return text('connection ended', 'Verbindung beendet')
+    case 'connecting': return connectionLabel(row.state)
+    case 'reading': return connectionLabel(row.state)
+    case 'ended': return connectionLabel(row.state)
     case 'unreachable': return text(`couldn't be reached${time.value ? ` · showing ${time.value}` : ''}`, `nicht erreichbar${time.value ? ` · Stand ${time.value}` : ''}`)
-    case 'ok': return row.summary?.open ? text(`${row.summary.open} wait for you`, `${row.summary.open} warten auf dich`) : text('nothing waits for you', 'nichts wartet auf dich')
+    case 'ok': return row.summary?.open ? waitingCount(row.summary.open) : text('nothing waits for you', 'nichts offen')
   }
 })
 const headerMessage = computed(() => props.variant !== 'goals' && props.read.state === 'ok' ? String(props.read.summary?.open ?? 0) : message.value)
@@ -57,10 +58,10 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
 </script>
 
 <template>
-  <section v-if="visible" ref="root" class="instance-waiting" :class="variant" role="group" tabindex="-1" :aria-label="read.tag" :data-state="read.state" :data-testid="`instance-${read.tag}`">
+  <section v-if="visible" ref="root" :lang="displayLanguage()" class="instance-waiting" :class="variant" role="group" tabindex="-1" :aria-label="read.tag" :data-state="read.state" :data-testid="`instance-${read.tag}`">
     <div class="instance-line">
       <AppIcon name="server" :size="16" />
-      <span v-clip-tip class="instance-copy" :data-tip="`${read.tag} · ${message}`"><b :data-tip="tooltip">{{ variant === 'goals' ? read.tag : text(`On ${read.tag}`, `Auf ${read.tag}`) }}</b><span aria-hidden="true"> · </span>{{ headerMessage }}</span>
+      <span v-clip-tip="`${read.tag} · ${message}`" class="instance-copy"><b tabindex="0" :data-tip="tooltip">{{ variant === 'goals' ? read.tag : text(`On ${read.tag}`, `Auf ${read.tag}`) }}</b><span aria-hidden="true"> · </span>{{ headerMessage }}</span>
       <span class="instance-actions">
         <span v-if="variant === 'goals' || action" class="action-slot">
           <span v-for="label in [text('Reconnect', 'Neu verbinden'), text('Try again', 'Erneut versuchen')]" :key="label" class="action-size" aria-hidden="true">{{ label }}</span>
@@ -97,7 +98,7 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
 .instance-waiting { grid-column: 1 / -1; min-width: 0; border-top: 1px solid var(--line); }
 .instance-line { display: flex; align-items: center; gap: 8px; height: 44px; }
 .instance-line > svg { flex: none; color: var(--ink-3); }
-.instance-copy { flex: 1; min-width: 0; color: var(--ink-2); font-size: 13px; line-height: 18px; }
+.instance-copy { flex: 1; min-width: 0; color: var(--ink-2); font-size: 13px; line-height: 18px; font-variant-numeric: tabular-nums; }
 .instance-copy b { color: var(--ink); font-weight: 600; }
 .instance-actions { display: flex; align-items: center; flex: none; gap: 6px; }
 .action-slot { display: grid; justify-items: end; align-items: center; }
