@@ -194,13 +194,12 @@ test('AEON-1336 a token and exact-base nightly cannot narrow web source PRs whil
   assert.ok(readFileSync(resolve(directory, 'gh-called'), 'utf8').length > 0, 'opted-in qualified S4 fetches observations')
 })
 
-test('AEON-1336 bounded G7 read-state cases retain all viewport and theme coverage on every PR', () => {
-  // Risk: splitting the timed-out screenshot matrix leaves new cases NIGHTLY,
-  // so a green PR proves only the original viewport instead of all eight.
+test('AEON-1336 retained phone and desktop G7 read-state cases stay essential on every PR', () => {
+  // AEON-1678 removes six unprotected profile copies. Both retained native
+  // read-state cases must still run on every PR, rather than becoming NIGHTLY.
   const catalogue = load('web').tests
   const title = 'AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart'
-  const expected = [1440, 1024, 400, 390].flatMap(width => ['light', 'dark'].map(theme =>
-    width === 1440 && theme === 'light' ? title : `${title} (${width} ${theme})`))
+  const expected = [title, `${title} (390 light)`]
   const cases = catalogue.filter(row => row.file === 'tests/aeon-1209-agents-head.spec.ts' && row.name.startsWith(title))
   assert.deepEqual(cases.map(row => row.name).sort(), expected.sort())
   assert.ok(cases.every(row => row.tier === 'ESSENTIAL'), 'every split case stays on every PR')

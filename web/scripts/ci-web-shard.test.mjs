@@ -655,6 +655,11 @@ test('ungated groups stay declared and checked but only run with --all', () => {
       'Panel specs must remain in the declared gate exactly once')
   }
   const panelGrowth = panelAdded.reduce((sum, spec) => sum + spec.weightSeconds, 0)
+  // AEON-1682 moves the retained native quote journey out of remaining-ui.
+  // Charge that newly gated owner's unchanged weight after the prior baseline.
+  const quoteCore = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/quote-editor-core.spec.ts')
+  assert.ok(quoteCore && quoteCore.listedTests === 1, 'The retained native quote journey must remain declared')
+  assert.equal(gated.filter(spec => spec.file === quoteCore.file).length, 1, 'The native quote journey must gate exactly once')
   // AEON-1316 adds its project Definitions spec after the historical budget.
   // Keep the old budget and charge only this independently bounded addition.
   // FIX4 adds six verdict regressions alongside the original three flows.
@@ -721,20 +726,26 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const viewSwitch = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/view-switch.spec.ts')
   assert.ok(viewSwitch && viewSwitch.listedTests === 7, 'ViewSwitch regressions must remain declared')
   assert.ok(gated.some(spec => spec.file === viewSwitch.file), 'ViewSwitch regressions must remain gated')
+  // Preserve the original population and weights for the historical <300s
+  // packing claim. Removing files can worsen a greedy bin even as total work
+  // falls; the current expanded gate still has its separate bound below.
+  const historical = JSON.parse(readFileSync(new URL('../../scripts/test-prune/baseline.json', import.meta.url))).launchPolicy
+  const additions = new Set([...deskFiles, ...panelFiles, ...[themeApply, registryShots, expertTerminal, entryChecks,
+    deskLessons, quoteCore, projectDefinitions, definitionDecisions, nameWrap, personSteps, deskEmpty, deskTabRow, viewSwitch].map(spec => spec.file)])
   const priorGate = {
-    ...real,
-    groups: real.groups.filter(group => group !== attention).map(group => ({
+    ...historical,
+    groups: historical.groups.filter(group => group.id !== attention.id).map(group => ({
       ...group,
-      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && !panelFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions && spec !== definitionDecisions && spec !== nameWrap && spec !== personSteps && spec !== deskEmpty && spec !== deskTabRow && spec !== viewSwitch).map(spec =>
-        spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
-          spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
+      specs: group.specs.filter(spec => !additions.has(spec.file)).map(spec =>
+        spec.file === autopilot.file ? { ...spec, weightSeconds: autopilotOnMain } :
+          spec.file === noShift.file ? { ...spec, weightSeconds: noShiftOnMain } : spec),
     })),
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + panelGrowth + projectDefinitions.weightSeconds + definitionDecisions.weightSeconds + nameWrap.weightSeconds + personSteps.weightSeconds + deskEmpty.weightSeconds + deskTabRow.weightSeconds + viewSwitch.weightSeconds
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + panelGrowth + quoteCore.weightSeconds + projectDefinitions.weightSeconds + definitionDecisions.weightSeconds + nameWrap.weightSeconds + personSteps.weightSeconds + deskEmpty.weightSeconds + deskTabRow.weightSeconds + viewSwitch.weightSeconds
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision, panel, project Definitions, workspace definition decisions, project name wrap, person-step ownership, empty Desk, Desk tab-row and ViewSwitch specs')
+    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision, panel, native quote, project Definitions, workspace definition decisions, project name wrap, person-step ownership, empty Desk, Desk tab-row and ViewSwitch specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {

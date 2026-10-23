@@ -1340,7 +1340,7 @@ test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 860s and eight
     assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),rows.length)
     return full
   }
-  const full=assertFullGate(gate,policy)
+  assertFullGate(gate,policy)
   // Risk: treating the 800s rebalance goal as a hard budget rejects normal
   // catalogue growth. Exercise the same invariants above 800s, below 860s,
   // with deterministic timings independent of the live inventory.
@@ -1349,17 +1349,23 @@ test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 860s and eight
   assert.equal(assertFullGate(growthGate,growthPolicy).projectedMaxSeconds,830)
   const overTargetPolicy={groups:[{specs:growthGate.map(row=>({file:row.file,tierTiming:{seconds:741,selectedTests:1}}))}]}
   assert.throws(()=>assertFullGate(growthGate,overTargetPolicy),{name:'AssertionError',message:'busiest shard 861.000s'})
-  const weights=tierWeights(policy,gate)
-  const workSeconds=[...new Set(gate.map(row=>row.file))].reduce((sum,file)=>sum+weights[file],0)
+  // The lower bounds describe the pre-prune workload, not today's smaller
+  // catalogue. Retain that recorded population and its complete launch policy;
+  // the live gate above still has to keep every case below the same 860s target.
+  const frozen=JSON.parse(readFileSync(new URL('../test-prune/baseline.json',import.meta.url)))
+  const historicalGate=fullGateTests(frozen.catalogue).filter(row=>row.kind==='browser')
+  const historicalFull=assertFullGate(historicalGate,frozen.launchPolicy)
+  const weights=tierWeights(frozen.launchPolicy,historicalGate)
+  const workSeconds=[...new Set(historicalGate.map(row=>row.file))].reduce((sum,file)=>sum+weights[file],0)
   for(const count of [20,21]) {
-    const lowerBound=full.overheadSeconds+workSeconds/count
+    const lowerBound=historicalFull.overheadSeconds+workSeconds/count
     assert.ok(lowerBound>800,`${count} shards could meet 800s; measured lower bound ${lowerBound.toFixed(3)}s`)
   }
-  const previous=webShardPlan(gate,policy,{mode:'full',maximum:20})
+  const previous=webShardPlan(historicalGate,frozen.launchPolicy,{mode:'full',maximum:20})
   assert.equal(previous.shards.length,20)
   assert.equal(previous.fitsBudget,true)
   assert.ok(previous.projectedMaxSeconds>800,`twenty-shard main must miss 800s, got ${previous.projectedMaxSeconds.toFixed(3)}s`)
-  const narrow=webShardPlan(gate,policy,{mode:'full',maximum:18})
+  const narrow=webShardPlan(historicalGate,frozen.launchPolicy,{mode:'full',maximum:18})
   assert.equal(narrow.shards.length,18)
   assert.equal(narrow.budgetSeconds,900)
   assert.equal(narrow.overheadSeconds,120)
