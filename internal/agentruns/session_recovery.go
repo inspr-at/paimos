@@ -29,6 +29,9 @@ func PrepareSessionRecovery(ctx context.Context, tx pgx.Tx, actor tenant.Princip
 	if err != nil {
 		return "", nil, nil, err
 	}
+	if old.RunOnce {
+		return "", nil, nil, workorders.Fail(409, "restart this one-off through Run once to choose its instruction and file permissions")
+	}
 	if !terminal(old.Status) || old.Purpose != "managed" || old.ReadOnlyReview || old.ProfileID == nil || old.AccountID == nil {
 		return "", nil, nil, workorders.Fail(409, "settled managed run with account and model required")
 	}

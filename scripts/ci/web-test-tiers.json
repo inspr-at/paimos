@@ -1208,6 +1208,18 @@
     ,
     "browser:tests/release-switches.spec.ts:the language is remembered per person and defaults to the app language"
     ,
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1024 dark"
+    ,
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1024 light"
+    ,
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 dark"
+    ,
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 light"
+    ,
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 dark"
+    ,
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 light"
+    ,
     "browser:tests/role-picker-layout.spec.ts:a description distinguishes duplicate role names when it is present in the payload"
     ,
     "browser:tests/role-picker-layout.spec.ts:a rejected role change and another choice keep actions still at 1440"
@@ -13368,7 +13380,21 @@
     ,
     {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"screenshots › shot outdated 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"the update toast ends at the release name and counts its public notes by kind, without a gap or a shift","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"the update toast uses the codename /api/version gave when the release detail fails, and reveals the version on hover and focus","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"what’s new opens the one notice for a server version this build does not list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14575,6 +14601,22 @@
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"New menu restores its trigger without moving header controls at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"New menu restores its trigger without moving header controls at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once controls stay still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once controls stay still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once controls stay still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once controls stay still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once controls stay still at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once controls stay still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once is available without developer settings and recovers an exact read-only request","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"Run once resets task choices on context changes and never reuses a different instruction","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/start-agent.spec.ts","name":"a catalog miss stays empty until retry","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -17308,7 +17350,11 @@
     ,
     {"kind":"node","file":"tests/release-surfaces.test.ts","name":"a control whose owner rewrites its description gets the stamp back","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/release-surfaces.test.ts","name":"a note the server put under other counts as other, in singular words and in German","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/release-surfaces.test.ts","name":"a release nobody has named falls back to its version, still as structured metadata","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/release-surfaces.test.ts","name":"a release without public notes counts nothing, even when its commits name tickets","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/release-surfaces.test.ts","name":"a toast keeps the structured release beside its plain sentence","tier":"GATED-FULL"}
     ,
@@ -17316,9 +17362,11 @@
     ,
     {"kind":"node","file":"tests/release-surfaces.test.ts","name":"copying uses the clipboard, then the hidden field, and says when neither worked","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/release-surfaces.test.ts","name":"public notes count by kind: a bug ticket is a fix, commits are never counted, and kinds with none are left out","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/release-surfaces.test.ts","name":"the control that takes focus carries the stamp as its description","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/release-surfaces.test.ts","name":"the release detail’s own name wins, and its headline follows the name","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/release-surfaces.test.ts","name":"the release detail’s own name wins and ends the sentence, with the counts beside it","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/release-surfaces.test.ts","name":"the update toast names the release by the codename /api/version gave when the release detail fetch failed","tier":"GATED-FULL"}
     ,
@@ -21064,9 +21112,13 @@
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > AEON-1508: unreadable project settings keep manual launch disabled until a successful retry","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > keeps failed one-off choices but resets them when context or person changes","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > queries canonical leaves on every page and excludes parents and unknown shapes from mixed results","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > rechecks leaf eligibility at submission before remembering an account or launching","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > refreshes project revisions on every open and keeps a task entered before choosing its project","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > refuses non-leaf selection and initial targets while keeping confirmed leaves launchable","tier":"ESSENTIAL"}
     ,
@@ -21082,9 +21134,15 @@
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"run now once > uses the server wait reason on a queued run","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > binds a one-off retry to its exact context, instruction and restriction","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > copies ticket content and criteria, readies with revision, then queues the selected agent/profile","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > does not queue after a revision conflict or unblock an order implicitly","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > does not reuse a one-off run for an ordinary ticket start","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > drops an old one-off response after the context or person changes","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > judges the launch result by the run ledger: a newer row that landed while the POST was in flight stands","tier":"GATED-FULL"}
     ,

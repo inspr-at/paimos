@@ -56,6 +56,8 @@ components:
         queue_target_agent_id: {type: [string, 'null'], format: uuid}
         queue_routed_at: {type: [string, 'null'], format: date-time}
         read_only_review: {type: boolean, description: A pinned review run using a qualified no-tools adapter; repository_mutation_allowed is false.}
+        run_once: {type: boolean, description: 'Person-requested one-off run. This is ordinary managed work, separate from review and pairing verification.'}
+        instruction: {type: string, maxLength: 262144, description: 'Authoritative one-off task text, available only through authorized run content reads. The request text is retained exactly; empty requests use the saved work-order fallback.'}
         verification_error: {type: string, enum: [verification_unavailable], description: Present only for a verification refused before launch.}
         verification_reason: {type: string, enum: [adapter_unsupported, binding_incomplete, local_binding_missing], description: Bounded cause for verification_unavailable; never vendor diagnostics.}
         capacity_override: {type: string, enum: ['', now]}
@@ -1314,6 +1316,13 @@ components:
       type: object
       description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.
       properties:
+        run_once:
+          type: object
+          required: [instruction, repository_mutation_allowed, request_digest]
+          properties:
+            instruction: {type: string, maxLength: 262144}
+            repository_mutation_allowed: {type: boolean}
+            request_digest: {type: string, pattern: '^[a-f0-9]{64}$', description: 'Immutable digest of the selected context and exact request options. Content reads only.'}
         preference_of: {type: object, required: [person, source], properties: {person: {type: [string, 'null'], format: uuid}, source: {type: string}}}
         column: {type: string}
         situation: {type: string, enum: [first, fix, stuck, small, review], description: "Models row or selected situation; small is the First build matrix override and review selects the author kind's review order."}
