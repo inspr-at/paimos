@@ -268,24 +268,25 @@ export const useAgents = defineStore('agents', () => {
     const sessionRead = refreshSessions()
     if (loadFlight) return loadFlight
     loading.value = true
-    const current: Promise<void> = (async () => {
-        // Sessions do not wait for optional project or account metadata.
-        await Promise.all([projects.load(), refreshApprovals(), sessionRead, refreshRuns(), refreshAccounts(), refreshModels()])
+    // Sessions do not wait for optional project or account metadata.
+    const current: Promise<void> = Promise.all([
+      projects.load(), refreshApprovals(), sessionRead, refreshRuns(), refreshAccounts(), refreshModels(),
+    ]).then(async () => {
+      if (loadFlight !== current) return
+      await Promise.all([refreshMessaging(), resourceNodes()])
+      if (loadFlight !== current) return
+      // The first visible bundle includes the grants used by its controls.
+      // Session ledger admission above remains immediate; a failed permission
+      // read still grants nothing, and later refreshes keep the current frame.
+      if (!loaded.value) {
+        await ensurePermissions()
         if (loadFlight !== current) return
-        await Promise.all([refreshMessaging(), resourceNodes()])
-        if (loadFlight !== current) return
-        // The first visible bundle includes the grants used by its controls.
-        // Session ledger admission above remains immediate; a failed permission
-        // read still grants nothing, and later refreshes keep the current frame.
-        if (!loaded.value) {
-          await ensurePermissions()
-          if (loadFlight !== current) return
-          await all([...new Set(sessions.value.map(session => session.project_id).filter(Boolean))], async projectId => { await ensurePermissions(projectId) })
-        }
-        if (loadFlight !== current) return
-        loaded.value = true
-        needsAt = Date.now()
-    })().finally(() => {
+        await all([...new Set(sessions.value.map(session => session.project_id).filter(Boolean))], async projectId => { await ensurePermissions(projectId) })
+      }
+      if (loadFlight !== current) return
+      loaded.value = true
+      needsAt = Date.now()
+    }).finally(() => {
       if (loadFlight !== current) return
       loadFlight = undefined; loading.value = false; now.value = Math.max(now.value, Date.now())
     })
