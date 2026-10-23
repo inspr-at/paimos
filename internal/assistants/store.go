@@ -98,6 +98,21 @@ func writeAuthority(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 	return nil
 }
 
+func requireOwnerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ownerID string) error {
+	var callerID string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(linked_to,id)::text FROM principals
+ WHERE tenant_id=$1::uuid AND id=$2::uuid AND kind='person' AND status='active'`, p.TenantID, p.ID).Scan(&callerID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return authz.ErrForbidden
+		}
+		return err
+	}
+	if callerID != ownerID {
+		return authz.ErrForbidden
+	}
+	return nil
+}
+
 func validateProjectsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, policy Policy) error {
 	for _, id := range policy.AllowedProjects {
 		if err := authz.RequireTx(ctx, tx, p, "nodes.read", authz.Scope{ProjectID: id}); err != nil {
@@ -167,6 +182,9 @@ func (m *Module) create(ctx context.Context, p tenant.Principal, in createInput)
 			return err
 		}
 		out.OwnerPersonID = owner
+		if err := requireOwnerTx(ctx, tx, p, owner); err != nil {
+			return err
+		}
 		if err := validateProjectsTx(ctx, tx, p, out.Policy); err != nil {
 			return err
 		}
@@ -228,6 +246,9 @@ func (m *Module) update(ctx context.Context, p tenant.Principal, id string, in u
 		var err error
 		out, err = getTx(ctx, tx, p.TenantID, id)
 		if err != nil {
+			return err
+		}
+		if err := requireOwnerTx(ctx, tx, p, out.OwnerPersonID); err != nil {
 			return err
 		}
 		before := out

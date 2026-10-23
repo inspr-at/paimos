@@ -183,7 +183,7 @@ func testAssistantIdentityPolicy(t *testing.T) {
 		call(endpoint.method, endpoint.path, amy.Token, endpoint.body, 403)
 	}
 	// A person-owned full-access/coordinator key is still an agent.
-	fullKey, err := m.createAgentKey(t.Context(), owner, "Full assistant editor", "", authz.CoordinatorKeyScopes, nil)
+	fullKey, err := m.createAgentKey(tenant.WithPrincipal(t.Context(), owner), owner, "Full assistant editor", "", authz.CoordinatorKeyScopes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,6 +291,28 @@ func testAssistantIdentityPolicy(t *testing.T) {
 	limitedSession := session(limited)
 	call("POST", "/api/assistants", limitedSession, newBody, 403)
 	call("PUT", path+"/policy", limitedSession, map[string]any{"expected_revision": 2, "policy": policy}, 403)
+	// Possessing both permissions never transfers another person's assistant.
+	seed(owner.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission)
+ SELECT tenant_id,id,'agents.create' FROM roles WHERE key='assistant_limited'`)
+		return err
+	})
+	call("PUT", path+"/policy", limitedSession, map[string]any{"expected_revision": 2, "policy": policy}, 403)
+	call("POST", path+"/disable", limitedSession, nil, 403)
+	call("POST", "/api/assistants", limitedSession, newBody, 403)
+	// Conversely, agents.create alone cannot replace the keys.manage check.
+	seed(owner.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `DELETE FROM role_permissions WHERE permission='keys.manage'
+ AND role_id=(SELECT id FROM roles WHERE key='assistant_limited')`)
+		return err
+	})
+	limitedBody := map[string]any{"display_name": "Limited helper", "vendor": "grok", "owner_person_id": limited.ID, "policy": assistants.DefaultPolicy()}
+	call("POST", "/api/assistants", limitedSession, limitedBody, 403)
+	renamed := decodeAssistant(call("PATCH", path, ownerSession, map[string]any{"expected_revision": 2, "display_name": "Amy hosted"}, 200))
+	if renamed.DisplayName != "Amy hosted" || renamed.Revision != 3 || renamed.PrincipalID != amy.PrincipalID {
+		t.Fatal("metadata update changed identity or lost revision")
+	}
+	call("PATCH", path, ownerSession, map[string]any{"expected_revision": 2, "display_name": "Stale Amy"}, 409)
 	// Disable revokes the same pre-link key, with one audit and no resurrection.
 	disabled := decodeAssistant(call("POST", path+"/disable", ownerSession, nil, 200))
 	if disabled.Status != "deactivated" || disabled.PrincipalID != amy.PrincipalID {

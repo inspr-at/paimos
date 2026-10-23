@@ -24,7 +24,7 @@ paths:
     post:
       operationId: createAssistant
       summary: Create or link a hosted assistant identity and policy
-      description: "Person-only, requires live workspace agents.create and keys.manage. Creates an agent principal in the assistant class with the existing messaging-only restriction and no key or role grant. An optional principal_id links an existing messaging-only identity owned by the same person, preserving its keys, inbox and status. The owner must be an active person in this tenant."
+      description: "Person owner only, requires live workspace agents.create and keys.manage. Creates an agent principal in the assistant class with the existing messaging-only restriction and no key or role grant. An optional principal_id links an existing messaging-only identity owned by the same person, preserving its keys, inbox and status. The owner must be the caller’s active canonical person in this tenant."
       requestBody:
         required: true
         content:
@@ -67,7 +67,7 @@ paths:
     patch:
       operationId: updateAssistant
       summary: Update hosted assistant metadata
-      description: "Person-only, requires live workspace agents.create and keys.manage. Owner transfer is excluded to preserve the existing messaging and key ownership. Disabled assistants cannot be reactivated through this route."
+      description: "Person owner only, requires live workspace agents.create and keys.manage. Owner transfer is excluded to preserve the existing messaging and key ownership. Disabled assistants cannot be reactivated through this route."
       requestBody:
         required: true
         content:
@@ -93,7 +93,7 @@ paths:
     post:
       operationId: disableAssistant
       summary: Disable a hosted assistant and revoke its keys
-      description: "Person-only, requires live workspace agents.create and keys.manage. Principal deactivation, live-key revocation and audit commit together. Repeated calls return the disabled identity."
+      description: "Person owner only, requires live workspace agents.create and keys.manage. Principal deactivation, live-key revocation and audit commit together. Repeated calls return the disabled identity."
       parameters:
         - {name: principalId, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
@@ -122,7 +122,7 @@ paths:
     put:
       operationId: updateAssistantPolicy
       summary: Replace an assistant policy
-      description: "Person-only, requires live workspace agents.create and keys.manage. Project IDs must be visible projects in this tenant, and scopes must be known agent-grantable permissions. Neither allowlist grants authority. All outward or irreversible effects require approval, and asking a person for secrets or manual steps remains forbidden. Enforcement in adapters and routines is wired separately."
+      description: "Person owner only, requires live workspace agents.create and keys.manage. Project IDs must be visible projects in this tenant, and scopes must be known agent-grantable permissions. Neither allowlist grants authority. All outward or irreversible effects require approval, and asking a person for secrets or manual steps remains forbidden. Enforcement in adapters and routines is wired separately."
       requestBody:
         required: true
         content:

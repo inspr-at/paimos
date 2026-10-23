@@ -17,6 +17,8 @@ The existing `agents assistant` credential lifecycle remains available.
 
 Person writes require both live workspace `agents.create` and `keys.manage`,
 rechecked under the tenant/tree access fences inside the mutation transaction.
+Writes preserve the existing owner boundary: only the canonical person owner
+may configure or disable an assistant, including when another person has both permissions.
 Person reads require `members.read`. An agent with live `inbox.read` may read
 only its own `/api/assistants/{principalId}/policy`; existing routes retain their
 authorization. Disabling deactivates the principal and revokes its keys atomically.
