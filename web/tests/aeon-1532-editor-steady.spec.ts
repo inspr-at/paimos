@@ -296,19 +296,24 @@ async function editComment(page: Page) {
   // Hold that response so this setup always exercises the CI failure's ordering.
   let releaseGrants!: () => void
   const grants = new Promise<void>(resolve => { releaseGrants = resolve })
-  await mockWork(page, fixtures(), {
+  const calls = await mockWork(page, fixtures(), {
     hold: request => request.path === '/api/me/permissions' && request.query.get('project_id') === 'p-pharos' ? { until: grants } : undefined,
   })
   await page.goto('/p/PHAROS/PHAROS-13')
   const ws = page.getByRole('complementary', { name: 'Ticket details' })
   await expect(ws.getByRole('heading', { name: 'Run the disposable Hetzner end-to-end check' })).toBeVisible()
-  await expect(ws.getByRole('textbox', { name: 'Add a comment' })).toBeDisabled()
+  const composer = ws.getByRole('textbox', { name: 'Add a comment' })
+  await expect(composer).toBeDisabled()
   await page.keyboard.press('c')
-  await page.keyboard.type('Ran it on hsb-lab.')
   releaseGrants()
+  // Keyboard input has no actionability wait: c may still be waiting for grants.
+  await expect(composer).toBeFocused()
+  await page.keyboard.type('Ran it on hsb-lab.')
+  await expect(composer).toHaveValue('Ran it on hsb-lab.')
   await page.keyboard.press(`${mod}+Enter`)
   const comment = ws.locator('.entry.comment').filter({ hasText: 'Ran it on' })
   await expect(comment).toBeVisible()
+  expect(calls.find(call => call.method === 'POST' && call.path.endsWith('/comments'))?.body).toEqual({ body_markdown: 'Ran it on hsb-lab.' })
   await comment.getByRole('button', { name: 'Edit comment' }).click()
   const box = ws.getByLabel('Comment, Markdown')
   await expect(box).toBeVisible()
