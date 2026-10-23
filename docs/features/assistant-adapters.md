@@ -57,6 +57,8 @@ messages through `POST /api/inbox/messages/{messageId}/ack`. Fetching is
 replayable until acknowledgement; only acknowledgement moves the sender's
 receipt from `queued` to `handed_off`. The existing project message-listen API
 also records polling for configured pull adapters.
+Direct messages addressed by principal UUID follow the same pull mode without
+requiring a project-target address.
 
 Pull health uses the database/server clock: `last_pull_at` records a successful
 poll, including an empty one. `oldest_unread_at` and
