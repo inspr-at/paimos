@@ -17,15 +17,15 @@ import (
 // work-order reads or workspace allocation. A nil admission means an existing
 // run was already handled; it must not continue to routing or launch.
 type runAdmission struct {
-	run                                 Run
-	grant                               *agentsetup.RoutineGrant
-	entry                               *owned
-	profile                             Profile
-	adapter                             Adapter
-	accountIDs                          []string
-	routineBudget                       *RoutineCallBudget
-	verification, review, managedPolicy bool
-	approvedRepository                  RoutineRepository
+	run                                           Run
+	grant                                         *agentsetup.RoutineGrant
+	entry                                         *owned
+	profile                                       Profile
+	adapter                                       Adapter
+	accountIDs                                    []string
+	routineBudget                                 *RoutineCallBudget
+	verification, review, readOnly, managedPolicy bool
+	approvedRepository                            RoutineRepository
 }
 
 // preparedRun carries the work-order and workspace bindings into route/claim.
@@ -185,7 +185,8 @@ func (s *Supervisor) admitRun(ctx context.Context, run Run) (*runAdmission, erro
 	verification := run.Purpose == VerificationPurpose
 	managedAdapter, managedOK := adapter.(ManagedControlAdapter)
 	review := run.ReadOnlyReview
-	managedPolicy := !verification && !review && profile.Harness == Claude && managedOK && managedAdapter.ManagedControlSupported()
+	readOnly := readOnlyRun(run)
+	managedPolicy := !verification && !review && !readOnly && profile.Harness == Claude && managedOK && managedAdapter.ManagedControlSupported()
 	if verification {
 		s.mu.Lock()
 		entries := make([]*owned, 0, len(s.runs))
@@ -218,7 +219,7 @@ func (s *Supervisor) admitRun(ctx context.Context, run Run) (*runAdmission, erro
 	return &runAdmission{
 		run: run, grant: grant, entry: entry, profile: profile, adapter: adapter,
 		accountIDs: accountIDs, routineBudget: routineBudget, verification: verification,
-		review: review, managedPolicy: managedPolicy, approvedRepository: approvedRepository,
+		review: review, readOnly: readOnly, managedPolicy: managedPolicy, approvedRepository: approvedRepository,
 	}, nil
 }
 
@@ -299,7 +300,7 @@ func (s *Supervisor) prepareRun(ctx context.Context, admitted *runAdmission) (pr
 			return preparedRun{}, errors.New("journaled assignment pickup changed")
 		}
 	}
-	if grant == nil && !review && !verification {
+	if grant == nil && !review && !verification && !admitted.readOnly {
 		if err := s.acquireCheckout(run.ID); err != nil {
 			return preparedRun{}, err
 		}
@@ -324,8 +325,14 @@ func (s *Supervisor) prepareRun(ctx context.Context, admitted *runAdmission) (pr
 	for _, criterion := range order.Criteria {
 		prompt += "\n- " + criterion.ID + ": " + criterion.Description
 	}
+	if run.RunOnce {
+		if run.Instruction == "" || len(run.Instruction) > 256<<10 {
+			return preparedRun{}, errors.New("one-off instruction is unavailable or exceeds bound")
+		}
+		prompt = run.Instruction
+	}
 	branch := ""
-	if !verification && !review {
+	if !verification && !review && !admitted.readOnly {
 		if output, branchErr := exec.CommandContext(ctx, "git", "-C", runWorkspace, "branch", "--show-current").Output(); branchErr == nil {
 			branch = strings.TrimSpace(string(output))
 		}
@@ -355,6 +362,9 @@ func (s *Supervisor) prepareRun(ctx context.Context, admitted *runAdmission) (pr
 		} else {
 			prompt += "\n\nRun contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Use the Aeon tools to comment, check criteria, attach evidence, request approval, reply, and set status. Use aeon_terminal for tests and a local commit; never push without person approval. Report the commit ID and remaining blockers in your final reply."
 		}
+	}
+	if admitted.readOnly {
+		prompt += "\n\nRead-only run contract: Work order " + node.Key + ", run " + run.ID + ". Analyze only the supplied context and return the result. This run has no tools or repository access and cannot change files or perform external actions."
 	}
 	if verification {
 		prompt = VerificationTask

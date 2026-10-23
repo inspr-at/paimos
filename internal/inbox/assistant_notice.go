@@ -14,6 +14,17 @@ import (
 // wake path. The caller holds the tenant fence and has finished record writes.
 // Fence all existing FK parents before postNotice first touches the event counter.
 func MessagingAssistantNoticeTx(ctx context.Context, tx pgx.Tx, tenantID, owner, key, body string) error {
+	return systemNoticeTx(ctx, tx, tenantID, owner, "messaging-assistant/"+key, body)
+}
+
+// QuestionReminderNoticeTx accepts one durable, receipt-free pointer for a
+// currently authorized person. The question scheduler owns the access fence,
+// current recipient, quiet-hours check and transactional interval receipt.
+func QuestionReminderNoticeTx(ctx context.Context, tx pgx.Tx, tenantID, person, key, body string) error {
+	return systemNoticeTx(ctx, tx, tenantID, person, "question-reminder/"+key, body)
+}
+
+func systemNoticeTx(ctx context.Context, tx pgx.Tx, tenantID, owner, key, body string) error {
 	var systemID string
 	if err := tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE kind='agent' AND name='System' AND roles @> ARRAY['system'] AND status='active'`).Scan(&systemID); err != nil {
 		return err
@@ -29,5 +40,5 @@ func MessagingAssistantNoticeTx(ctx context.Context, tx pgx.Tx, tenantID, owner,
 	if targets > 32 {
 		return errors.New("assistant notice target limit exceeded")
 	}
-	return postNotice(ctx, tx, tenant.Principal{ID: systemID, TenantID: tenantID, Kind: tenant.Agent}, owner, nil, "messaging-assistant/"+key, body)
+	return postNotice(ctx, tx, tenant.Principal{ID: systemID, TenantID: tenantID, Kind: tenant.Agent}, owner, nil, key, body)
 }

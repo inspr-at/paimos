@@ -5,8 +5,11 @@ export interface ToastAction { label: string; run: () => void }
 // A release named inside a toast's sentence: `message` is the whole sentence in
 // plain text, `release` says where the release stands in it so the toast can draw
 // the name with its version on hover or focus (AEON-430).
-export interface ToastRelease { version: string; name?: string; before: string; after?: string }
-export interface Toast { id: number; message: string; tone: 'info' | 'error'; actions: ToastAction[]; sticky: boolean; key?: string; release?: ToastRelease }
+// `counts` is what the release's public notes hold by kind, drawn after the
+// sentence with an icon each, and spoken as one line (AEON-1655).
+export interface ToastCounts { items: { kind: 'features' | 'fixes' | 'other'; count: number; label: string }[]; spoken: string }
+export interface ToastRelease { version: string; name?: string; before: string; after?: string; counts?: ToastCounts }
+export interface Toast { id: number; message: string; compactMessage?: string; desktopMessage?: string; tone: 'info' | 'error'; actions: ToastAction[]; sticky: boolean; key?: string; release?: ToastRelease }
 export const toasts = reactive<Toast[]>([])
 // A fixed action bar reports its measured height and gap above the shell footer.
 export const toastBottomClearance = ref(0)
@@ -17,11 +20,11 @@ export function captureToastOwner() { const started = ownerEpoch; return () => s
 
 // Short, dismissible confirmations. Errors stay a little longer than info. A sticky
 // toast stays until it is acted on or dismissed; a keyed one replaces its earlier self.
-export function toast(message: string, options: { tone?: Toast['tone']; action?: ToastAction; actions?: ToastAction[]; timeout?: number; sticky?: boolean; key?: string; release?: ToastRelease } = {}) {
+export function toast(message: string, options: { compactMessage?: string; desktopMessage?: string; tone?: Toast['tone']; action?: ToastAction; actions?: ToastAction[]; timeout?: number; sticky?: boolean; key?: string; release?: ToastRelease } = {}) {
   if (options.key) { const earlier = toasts.find(item => item.key === options.key); if (earlier) dismiss(earlier.id) }
   const current = captureToastOwner()
   const item: Toast = {
-    id: next++, message, tone: options.tone ?? 'info', sticky: options.sticky ?? false, key: options.key, release: options.release,
+    id: next++, message, compactMessage: options.compactMessage, desktopMessage: options.desktopMessage, tone: options.tone ?? 'info', sticky: options.sticky ?? false, key: options.key, release: options.release,
     actions: [...(options.action ? [options.action] : []), ...(options.actions ?? [])].map(action => ({ ...action, run: () => { if (current()) return action.run() } })),
   }
   toasts.push(item)

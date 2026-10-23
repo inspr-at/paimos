@@ -7,6 +7,7 @@
 // or has targets under 44 px. AEON1175_SHOTS=1 also writes screenshots into each test's
 // output directory, including the Keep for you and work-week editors for the pixel check.
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { ACCOUNTS, NOW, TZ, capacityWorld } from './capacity-fixtures'
@@ -14,6 +15,7 @@ import { mockEffectivePermissions } from './authz-fixtures'
 import { controlStability } from './control-stability'
 import { mockDailyPlan } from './agents-daily-fixtures'
 import { HARNESS_LABEL } from '../src/lib/agentState'
+import { domAudit } from './ui-audit-rules'
 
 test.use({ timezoneId: TZ })
 // The harness's name as the dial shows it: "Claude" until AEON-1160 names it "Claude Code"; both pass.
@@ -392,6 +394,30 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
       await expect(page.getByRole('dialog', { name: `Daily limit for ${CLAUDE}`, exact: true })).toBeVisible()
       expect(await overflow(page)).toBeLessThanOrEqual(1)
       await shot(page, info, `capacity-picker-${width}-${theme}`, false)
+      // AEON-1687: scan both an own-pace selection and the default selection;
+      // small descriptions must retain contrast over the selected tint.
+      const scan = async () => {
+        const axe = await new AxeBuilder({ page }).include('.pp-pop')
+          .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+        expect(axe.violations, 'daily limit picker WCAG A/AA').toEqual([])
+        const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
+        expect(layout, 'Capacity picker has no overflow, overlap or clipping').toEqual([])
+      }
+      await scan()
+      await page.keyboard.press('Escape')
+      await page.locator('button[data-pace="codex"]').click()
+      const picker = page.getByRole('dialog', { name: 'Daily limit for Codex', exact: true })
+      const choices = picker.getByRole('radio')
+      await expect(choices.first()).toHaveAttribute('aria-checked', 'true')
+      const controls = { picker, default: choices.nth(0), own: choices.nth(1), everything: choices.nth(2) }
+      const guard = await controlStability(page, controls)
+      const boxes = await Promise.all(Object.values(controls).map(control => control.boundingBox()))
+      await guard.check(async () => { await page.keyboard.press('ArrowDown'); await expect(choices.nth(1)).toBeFocused() })
+      await guard.check(async () => { await page.keyboard.press('ArrowUp'); await expect(choices.nth(0)).toBeFocused() })
+      guard.done()
+      expect(await Promise.all(Object.values(controls).map(control => control.boundingBox())), 'picker focus moves controls by 0 px').toEqual(boxes)
+      await scan()
+      await page.screenshot({ path: info.outputPath(`AEON-1687-capacity-${width}-${theme}.png`) })
       await page.keyboard.press('Escape')
       if (width !== 1024) {
         // The editors behind Keep for you and the work-week gear, unchanged (compared pixel by pixel against main).

@@ -3,6 +3,7 @@ package agentruns
 
 import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -50,6 +51,9 @@ func (m *module) cancel(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if p.Kind != tenant.Person {
 		return nil, workorders.Fail(403, "only a person can cancel a run")
 	}
+	if err := lockTelemetryTarget(r.Context(), tx, r.PathValue("runId")); err != nil {
+		return nil, err
+	}
 	v, o, err := lockRun(r.Context(), tx, r.PathValue("runId"))
 	if err != nil {
 		return nil, err
@@ -69,6 +73,15 @@ func (m *module) cancel(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	}
 	if v, err = load(r.Context(), tx, v.ID, false); err != nil {
 		return nil, err
+	}
+	var pending []events.Change
+	if err := settleRunOnceTx(r.Context(), tx, p, v, Telemetry{ErrorCode: "cancelled_by_person"}, &pending); err != nil {
+		return nil, err
+	}
+	for _, change := range pending {
+		if _, err := events.Append(r.Context(), tx, p, change); err != nil {
+			return nil, err
+		}
 	}
 	return v, workorders.Record(r.Context(), tx, p, o.NodeID, "run.cancelled", before, v)
 }

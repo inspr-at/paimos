@@ -8,8 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 // Risk: a missing listener discards a person's chat, competing readers inject
@@ -220,6 +223,53 @@ func TestSessionChatQueuedPickupAndStall(t *testing.T) {
 			t.Fatalf("stalled message undeliverable: %+v %v", items, err)
 		}
 	})
+}
+
+// Risk: informational Desk fan-out is classified as person chat and produces
+// false owner/coordinator alerts and a misleading notice to the deciding person.
+func TestDeskFYIDoesNotStallPersonChat(t *testing.T) {
+	w, m, project, _ := messagingWorld(t)
+	asker := messageTestSession(t, w, project, w.agent, "Asking session")
+	related := messageTestSession(t, w, project, w.agent, "Related FYI session")
+	fyi := DeskFYI{ID: uuid.NewString(), SessionID: related, PrincipalID: w.agent.ID, Key: "desk-fyi/" + uuid.NewString(), Body: "FYI only; no action required"}
+	ctx := tenant.WithPrincipal(t.Context(), w.sender)
+	if err := db.InTenant(ctx, w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
+		return RecordDeskReply(ctx, tx, w.sender, DeskReply{ID: uuid.NewString(), RootID: uuid.NewString(), ProjectID: project, RecipientID: w.agent.ID, RecipientSessionID: asker, RecipientName: w.agent.Name, Body: "Recorded answer", RootBody: "Question", FYIs: []DeskFYI{fyi}})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	chat := boundMessage(t, w, m, project, related, "real-person-chat")
+	var created time.Time
+	guaranteeRow(t, w, `SELECT max(created_at) FROM inbox_messages WHERE id=ANY($1::uuid[])`, []any{[]string{chat.ID, fyi.ID}}, &created)
+	sweep := NewSweeper(w.db.App)
+	sweep.clock = func() time.Time { return created.Add(11 * time.Minute) }
+	for range 2 {
+		if err := sweep.sweepChatPickup(db.AllProjects(t.Context(), "Desk FYI stall regression"), w.sender.TenantID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := countSQL(t, w.db.Admin, w.sender.TenantID, `SELECT count(*) FROM events WHERE type='delivery.stall_alerted' AND after->>'message_id'=$1`, fyi.ID); n != 0 {
+		t.Fatalf("FYI generated %d false stall alerts", n)
+	}
+	if n := countSQL(t, w.db.Admin, w.sender.TenantID, `SELECT count(*) FROM inbox_messages WHERE idempotency_key=$1`, "chat-pickup-stalled/"+fyi.ID); n != 0 {
+		t.Fatal("FYI generated a misleading sender notice")
+	}
+	if n := countSQL(t, w.db.Admin, w.sender.TenantID, `SELECT count(*) FROM inbox_receipts WHERE message_id=$1 AND state='queued' AND pickup_stalled_at IS NULL`, fyi.ID); n != 1 {
+		t.Fatal("FYI receipt did not remain quietly queued")
+	}
+	if n := countSQL(t, w.db.Admin, w.sender.TenantID, `SELECT count(*) FROM events WHERE type='delivery.stall_alerted' AND after->>'message_id'=$1`, chat.ID); n != 1 {
+		t.Fatal("positive control: genuine person chat did not alert exactly once")
+	}
+	items, err := m.base.pendingVia(t.Context(), w.agent, 0, 10, &related, true, SeenHook)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.ID == fyi.ID && item.Body == fyi.Body {
+			return
+		}
+	}
+	t.Fatal("quiet FYI was not available in the related session's inbox")
 }
 
 // Independent wire-format probes retry after the prior pickup lease expires.

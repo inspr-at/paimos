@@ -32,6 +32,10 @@ export interface Paged<T> { items: T[]; next_cursor: string | null }
 // A session as the API sends it. Nothing outside the ledger may hold one: see
 // HarnessSession in lib/agents.ts for the type the page works with.
 export interface CurrentAgentActivity { text: string; source: 'agent' | 'auto'; at: string }
+export interface ChildCounts {
+  current: number; all: number; omitted_projects: number
+  cross_project: readonly { project_key: string; current: number; all: number }[]
+}
 export interface HarnessSessionRow {
   inbox_binding_error?: string | null
   agent_recovery?: { session_id: string; observed_revision: string; cause: string; detail: string; action: '' | 'restart' | 'reconnect' }
@@ -50,6 +54,7 @@ export interface HarnessSessionRow {
   watch?: import('./attachWatch').AttachStatus
   id: string; project_id: string; agent_principal_id: string
   cross_project_parent_harness_session_id?: string | null
+  child_counts?: ChildCounts
   owner_principal_id?: string | null
   archived_at?: string | null; recovery_process_state?: 'unknown' | null
   process_ownership?: ProcessOwnership; process_observed_at?: string
@@ -80,6 +85,9 @@ export interface HarnessSessionRow {
 }
 
 export interface AgentRunRow {
+  run_once?: boolean
+  instruction?: string
+  repository_mutation_allowed?: boolean
   capacity_override?: '' | 'now'
   wait?: CapacityWait
   id: string; work_order_id: string; agent_principal_id: string; model_profile_id?: string | null
@@ -93,6 +101,12 @@ export interface AgentRunRow {
   row_version?: number
   // Filled by this module from the daemon-wait endpoint. Not a column on the run.
   daemon_wait_reason?: string | null
+}
+
+export interface RunOnceRequest {
+  request_id: string; expected_updated_at: string; task?: string; instruction: string
+  repository_mutation_allowed: boolean; agent_principal_id: string; model_profile_id: string
+  requested_account_id?: string; capacity_override?: 'now'
 }
 
 export interface RemoveSessionResult { session: Wire<HarnessSessionRow>; message: string; processes_signalled: false; process_state: 'unknown'; event_id?: number; undoable?: boolean }
@@ -185,6 +199,11 @@ export const getRun = async (id: string) => {
       at.body = { ...at.body, daemon_wait_reason: wait.body.reason }
     } catch { /* The run stays readable when the checkout sentence is unavailable. */ }
   }
+  return rowOf(at.body, at)
+}
+
+export const createRunOnce = async (contextId: string, body: RunOnceRequest) => {
+  const at = await call<AgentRunRow>(`/nodes/${enc(contextId)}/run-once`, 'POST', body)
   return rowOf(at.body, at)
 }
 // The change requests (rename, model) a session's detail carries. Not a row: the session itself is not read here.

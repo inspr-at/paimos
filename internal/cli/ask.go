@@ -18,7 +18,7 @@ import (
 )
 
 func (rt *runtime) cmdAsk() *Command {
-	var project, ticket, contextFile, goal string
+	var project, ticket, contextFile, goal, remindAfter string
 	var options []string
 	in := questions.Input{Meanwhile: "carries_on"}
 	return &Command{Name: "ask", Short: "Leave a durable question for a person", Use: `ask --project KEY [--ticket KEY] QUESTION --option '["Title","Description","Answer"]'`, minArgs: 1, maxArgs: 1,
@@ -31,6 +31,7 @@ func (rt *runtime) cmdAsk() *Command {
 			return rt.printQuestion(q)
 		}}},
 		addFlags: func(fs *flagSet) {
+			fs.string(&remindAfter, "remind-after", 0, "repeat a reminder while unanswered, e.g. 2h or 6h; 0 disables; omitted uses settings")
 			fs.string(&project, "project", 0, "project key or UUID (required)")
 			fs.string(&ticket, "ticket", 0, "optional ticket key or UUID")
 			fs.string(&goal, "goal", 0, "optional goal key or UUID")
@@ -48,6 +49,14 @@ func (rt *runtime) cmdAsk() *Command {
 			fs.string(&in.AnywayReason, "anyway", 0, "open a fresh question instead of future matching; record why")
 			fs.string(&in.SourceRequestID, "source-request", 0, "owned inbox source message UUID")
 		}, run: func(args []string) error {
+			if remindAfter != "" {
+				d, err := time.ParseDuration(remindAfter)
+				if err != nil || d < 0 || d > 30*24*time.Hour || d%time.Second != 0 {
+					return usagef("--remind-after must be whole seconds between 0 and 720h (for example 2h)")
+				}
+				seconds := int(d / time.Second)
+				in.RemindAfterSeconds = &seconds
+			}
 			in.Question = args[0]
 			for i, raw := range options {
 				o, err := parseQuestionOption(raw, i+1)
@@ -215,6 +224,16 @@ func (rt *runtime) printQuestion(q questions.Question) error {
 		return rt.printJSON(q)
 	}
 	fmt.Fprintf(rt.stdout, "question: %s\nstate: %s\nrevision: %d\n", q.ID, q.State, q.Revision)
+	if q.Reminder != nil && q.State == "open" {
+		if q.Reminder.AfterSeconds == 0 {
+			fmt.Fprintln(rt.stdout, "reminder: off")
+		} else {
+			fmt.Fprintf(rt.stdout, "reminder: every %s\n", time.Duration(q.Reminder.AfterSeconds)*time.Second)
+			if q.Reminder.NextAt != nil {
+				fmt.Fprintln(rt.stdout, "next reminder check:", q.Reminder.NextAt.UTC().Format(time.RFC3339))
+			}
+		}
+	}
 	for _, a := range q.Askers {
 		fmt.Fprintf(rt.stdout, "comment destination: %s\nreply root: %s\n", a.CommentNodeID, a.ReplyRootID)
 		if a.FromRecord != nil {

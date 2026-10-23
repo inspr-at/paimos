@@ -28,6 +28,7 @@ type Store struct {
 	now              func() time.Time
 	validator        *nativecontract.Validator
 	entries          []Intent
+	recoveredInputs  map[string]bool
 	finals           []finalEntry
 	closed, poisoned bool
 	busy             map[string]bool

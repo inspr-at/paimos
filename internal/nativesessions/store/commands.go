@@ -27,13 +27,14 @@ import (
 // Only the bounded live queue holds command content. SQL retains immutable
 // metadata/digests. A restart cannot replay a possible native write from disk.
 type queuedCommand struct {
-	done           bool
-	intent         nativereceipts.Intent
-	command        nativecontract.DaemonCommand
-	drain          *nativecontract.FinalDrainGrant
-	actor          tenant.Principal
-	successor      *nativecontract.ClaimResult
-	successorProof daemon.Proof
+	inbox, inboxAcknowledged bool
+	done                     bool
+	intent                   nativereceipts.Intent
+	command                  nativecontract.DaemonCommand
+	drain                    *nativecontract.FinalDrainGrant
+	actor                    tenant.Principal
+	successor                *nativecontract.ClaimResult
+	successorProof           daemon.Proof
 }
 
 func commandValue(c nativecontract.Command) (nativecontract.Binding, string, string, time.Time, any, error) {
@@ -337,6 +338,16 @@ func (s *Store) Commands(ctx context.Context, d nativecontract.DaemonActor, q na
 	if q.Limit < 1 || q.Limit > 50 || q.After != "" && !workorders.UUID(q.After) {
 		return out, fail(400, nativecontract.ReasonInvalidInput)
 	}
+	if err := s.admitInbox(ctx, d); err != nil {
+		// Inbox admission never holds back a separately authorized owner stop
+		// after withdrawal of native consent or a provider qualification.
+		var refusal *nativecontract.ValidationError
+		var receiptRefusal *nativereceipts.Error
+		var failure *Failure
+		if !errors.As(err, &refusal) && !errors.As(err, &receiptRefusal) && !errors.As(err, &failure) {
+			return out, err
+		}
+	}
 	s.commandMu.Lock()
 	items := make([]queuedCommand, 0, len(s.commands))
 	for _, c := range s.commands {
@@ -347,7 +358,7 @@ func (s *Store) Commands(ctx context.Context, d nativecontract.DaemonActor, q na
 	private, _ := ctx.Value(proofKey{}).(daemon.Proof)
 	identity, _, _ := private.Runtime()
 	for _, c := range items {
-		if c.done || c.successor != nil || c.command.Kind == "resume" {
+		if c.done || c.inboxAcknowledged || c.successor != nil || c.command.Kind == "resume" {
 			continue
 		}
 		if identity.RuntimeEpoch != "" && c.intent.Receipt.Binding.RuntimeEpoch != identity.RuntimeEpoch {
@@ -397,8 +408,8 @@ func (s *Store) Commands(ctx context.Context, d nativecontract.DaemonActor, q na
 func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, in nativecontract.Claim) (nativecontract.ClaimResult, error) {
 	var out nativecontract.ClaimResult
 	s.commandMu.Lock()
+	defer s.commandMu.Unlock()
 	c, ok := s.commands[in.OperationID]
-	s.commandMu.Unlock()
 	if !ok || c.done || c.intent.Receipt.Binding == nil {
 		return out, fail(403, nativecontract.ReasonGrantMissing)
 	}
@@ -407,11 +418,33 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 	if c.command.Kind == "stop" {
 		authority = s.stopTx
 	}
+	var claimRefusal error
+	var retired bool
 	err := authority(ctx, d, b, false, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
 		if in.DaemonID != d.DaemonID || in.DaemonGeneration != d.DaemonGeneration || in.LedgerGeneration != d.LedgerGeneration || in.CapabilityDigest != d.CapabilityDigest || in.ExpectedRevision != b.BindingRevision || proof.Identity.ProcessIdentityDigest != c.intent.ProcessIdentityDigest || proof.Identity.RuntimeEpoch != b.RuntimeEpoch {
 			return fail(409, nativecontract.ReasonIdentityMismatch)
 		}
+		retire := func(status int, state string, reason nativecontract.Reason) error {
+			claimRefusal = fail(status, reason)
+			var err error
+			retired, err = s.retireInboxTx(ctx, tx, &c, session.OwnerPersonID, state, reason)
+			if err != nil || !retired {
+				return err
+			}
+			p, _ := tenant.PrincipalFrom(ctx)
+			_, err = events.Append(ctx, tx, p, inboxCommandEvent(c.intent.Receipt))
+			return err
+		}
 		actor := session.Original
+		if c.inbox {
+			if err := inboxCommandTx(ctx, tx, d, c); err != nil {
+				var refusal *Failure
+				if errors.As(err, &refusal) && (refusal.Reason == nativecontract.ReasonPermissionRevoked || refusal.Reason == nativecontract.ReasonOwnershipUnconfirmed) {
+					return retire(refusal.Status, "rejected", refusal.Reason)
+				}
+				return err
+			}
+		}
 		if c.command.Kind == "take" || c.command.Kind == "return" {
 			command, err := queuedControl(c)
 			if err != nil {
@@ -428,6 +461,9 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 			until = c.intent.ExpiresAt
 		}
 		if !now.Before(until) {
+			if c.inbox {
+				return retire(403, "expired", nativecontract.ReasonGrantExpired)
+			}
 			return fail(403, nativecontract.ReasonGrantExpired)
 		}
 		out = nativecontract.ClaimResult{OperationID: in.OperationID, OwnedSessionID: b.OwnedSessionID, Intent: session.Intent, Policy: session.Policy, ExpectedBinding: &b, ExpiresAt: until, FinalDrainGrant: c.drain, ClaimKind: "command", Command: &c.command, CommandActor: &nativecontract.CommandActor{TenantID: b.TenantID, PrincipalID: actor.ID, OwnerPersonID: session.OwnerPersonID, GrantID: session.GrantID, GrantRevision: session.Revision}, AuthorizationTTLMS: until.Sub(now).Milliseconds()}
@@ -435,10 +471,24 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 		if err := tx.QueryRow(ctx, `SELECT launch_config FROM native_session_intents WHERE owned_session_id=$1`, b.OwnedSessionID).Scan(&launch); err != nil {
 			return err
 		}
-		return json.Unmarshal(launch, &out.LaunchConfig)
+		if err := json.Unmarshal(launch, &out.LaunchConfig); err != nil {
+			return err
+		}
+		if err := s.validate("NativeClaimResult", out); err != nil {
+			return err
+		}
+		if c.inbox {
+			// Persist the claim before command content can reach the daemon. A
+			// restart can release only admissions without this possible-write fence.
+			return s.recordInboxReceiptTx(ctx, tx, c, session.OwnerPersonID)
+		}
+		return nil
 	})
-	if err == nil {
-		err = s.validate("NativeClaimResult", out)
+	if err == nil && claimRefusal != nil {
+		if retired {
+			delete(s.commands, in.OperationID)
+		}
+		return nativecontract.ClaimResult{}, claimRefusal
 	}
 	return out, err
 }
@@ -463,6 +513,18 @@ func (s *Store) Report(ctx context.Context, d nativecontract.DaemonActor, in nat
 		return s.reportStarted(ctx, d, in)
 	}
 	out, err := s.production.receipts.Report(ctx, d, in)
+	if err == nil && (in.State == "write_acknowledged" || in.State == "turn_started" || in.State == "uncertain" || in.State == "rejected" || in.State == "expired") {
+		s.commandMu.Lock()
+		if c, ok := s.commands[in.OperationID]; ok && c.inbox {
+			if in.State == "rejected" || in.State == "expired" {
+				delete(s.commands, in.OperationID)
+			} else {
+				c.inboxAcknowledged = true
+				s.commands[in.OperationID] = c
+			}
+		}
+		s.commandMu.Unlock()
+	}
 	if err == nil && (in.State == "turn_completed" || in.State == "applied" || in.State == "exit_confirmed") {
 		s.commandMu.Lock()
 		if c, ok := s.commands[in.OperationID]; ok {
