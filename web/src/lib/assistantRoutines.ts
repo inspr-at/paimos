@@ -57,7 +57,7 @@ export async function readAssistantRoutines(owners: Set<string>, projectKey: (id
         if (detail.run.owner_principal_id !== row.owner) continue
         row.view.lastState = runTitle(detail.run, now)
         row.activity = { at: detail.run.created_at, kind: 'runs', text: words.routineRun(row.view.name, row.view.lastState), href: `/agents/routines?routine=${encodeURIComponent(row.wire.id)}&run=${encodeURIComponent(runId)}` }
-        if (['running', 'done', 'failed'].includes(detail.run.state)) row.lastActivity = { at: detail.run.updated_at, text: words.routineRun(row.view.name, row.view.lastState) }
+        if (['running', 'done', 'failed'].includes(detail.run.state)) row.lastActivity = { at: detail.run.updated_at, text: words.ran(row.view.name, '') }
         const result = await getRoutineAgentResult(row.wire.id, runId, signal)
         if (!result?.node_id || result.run_id !== runId || result.status !== 'succeeded') continue
         const node = await assistantRequest<WorkNode>(`/nodes/${encodeURIComponent(result.node_id)}`, 'GET', undefined, signal)

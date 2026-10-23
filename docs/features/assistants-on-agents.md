@@ -45,3 +45,12 @@ merged. Their capabilities stay closed instead of fabricating health, spend or
 approvals. Assistant-wide pause/resume, approvers and reset weekday likewise stay
 unavailable while their APIs are absent. No sample values appear in product code.
 EN/DE strings are kept in the assistant catalog and follow the shared app language.
+
+The section uses the Sessions card style, with its heading and the page layout
+control inside the card header. Missing row metrics use muted dashes with a
+"Not available yet" tooltip; only the Status cell names the unavailable status.
+Overview explains the pending spend, adapter and approval connections once.
+Assistant-wide Pause is disabled in the actions menu, with a desktop tooltip and
+an inline reason in the phone sheet. Policy editing labels the budget section
+"Budget" and its amount "Per week". Routine activity shows the routine name and
+relative age, with more desktop column space while the other metrics are pending.

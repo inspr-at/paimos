@@ -767,17 +767,17 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
       </div>
     </div>
     <div ref="work" class="agents-work" :data-layout="preset">
-      <!-- One sticky dock. Both heads reserve its box; it never changes parents. -->
-      <div v-show="canSplit && !panelOpen" class="layout-dock">
-        <button type="button" class="icon-btn raised layout-button" data-layout-cycle :data-layout="preset" :aria-disabled="!layoutEnabled" :aria-label="`Layout: ${layouts[preset][0]}, ${layouts[preset][1]}. Next: ${layouts[nextPreset][0]}`" :aria-keyshortcuts="layoutKeys.join(' ') || undefined" :data-tip="layoutTip" @click="cycleLayout"><AppIcon :name="`layout-${preset}`" :size="17" /></button>
-      </div>
       <div class="agents-split">
         <div v-show="!panelOnly" ref="listPane" class="agents-list-pane" @transitionend="finishLayout">
-        <AssistantsSection :items="assistants.items" :facts="assistants.facts" :state="assistants.state" :error="assistants.error" :truncated="assistants.truncated" :can-connect="assistants.mayConnect" :can-approve="can('approvals.decide')" :now="agents.now" :sort-epoch="assistantSortEpoch" :selected="assistantId" :owner="person" :project-names="Object.fromEntries(projects.projects.map(project => [project.id, project.routeKey]))" @open="openAssistant" @retry="assistants.load()" />
+        <AssistantsSection :items="assistants.items" :facts="assistants.facts" :state="assistants.state" :error="assistants.error" :truncated="assistants.truncated" :can-connect="assistants.mayConnect" :can-approve="can('approvals.decide')" :now="agents.now" :sort-epoch="assistantSortEpoch" :selected="assistantId" :owner="person" :project-names="Object.fromEntries(projects.projects.map(project => [project.id, project.routeKey]))" @open="openAssistant" @retry="assistants.load()">
+          <template #actions><div v-show="canSplit && !panelOpen" class="layout-dock">
+            <button type="button" class="icon-btn raised layout-button" data-layout-cycle :data-layout="preset" :aria-disabled="!layoutEnabled" :aria-label="`Layout: ${layouts[preset][0]}, ${layouts[preset][1]}. Next: ${layouts[nextPreset][0]}`" :aria-keyshortcuts="layoutKeys.join(' ') || undefined" :data-tip="layoutTip" @click="cycleLayout"><AppIcon :name="`layout-${preset}`" :size="17" /></button>
+          </div></template>
+        </AssistantsSection>
         <SessionList
           v-if="agents.loaded" ref="sessionList"
           :groups="sessionGroups" :history="sessionHistory" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
-          :loaded="agents.loaded" :controls="agents.controls" :can-start="manualStart" :can-lead="canStart" :filter="filter" :query="query" :layout-dock="canSplit && !split" :pane="split"
+          :loaded="agents.loaded" :controls="agents.controls" :can-start="manualStart" :can-lead="canStart" :filter="filter" :query="query" :pane="split"
           :projects="projectLeads" :group="group" :facets="facets"
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()" @history="agents.loadHistory(true)" @older="agents.loadOlderHistory()" @clear-filter="clearFilter"
           @filter="setFilter" @search="setQuery" @group="setGroup" @facets="setFacets"
@@ -848,8 +848,8 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
 .hint .keycap + .keycap { margin-left: 2px; }
 /* Geometry and dock match the approved round-7 HTML; the main scroller starts below the header. */
 .agents-work { position: relative; margin-top: 14px; }
-.layout-dock { position: sticky; top: 0; z-index: 25; height: 0; }
-.layout-button { position: absolute; top: 15px; right: 11px; width: var(--ctl-h); height: var(--ctl-h); color: var(--ink-2); }
+.layout-dock { flex: none; }
+.layout-button { width: var(--ctl-h); height: var(--ctl-h); color: var(--ink-2); }
 .layout-button:not([data-layout="list"]) { color: var(--teal-ink); }
 .layout-button[aria-disabled="true"] { opacity: .5; }
 .agents-split { display: flex; gap: 0; align-items: flex-start; min-width: 0; }

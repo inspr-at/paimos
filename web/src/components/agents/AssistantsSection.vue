@@ -31,17 +31,22 @@ function showAll() { expanded.value = true; try { localStorage.setItem(storageKe
 const ordered = computed(() => order.value.flatMap(id => props.items.find(item => item.principal_id === id) ?? []))
 const shown = computed(() => expanded.value ? ordered.value : ordered.value.slice(0, 5))
 const factsOf = (item: Assistant) => props.facts[item.principal_id] ?? unavailableAssistantFacts()
+const metricsPending = computed(() => props.items.every(item => { const facts = factsOf(item); return facts.spend === null && facts.approvals === null && facts.adapter === null }))
 const statusOf = (item: Assistant) => assistantStatus(item, factsOf(item), props.now)
 const labelOf = (item: Assistant) => statusOf(item) === 'waiting' && !props.canApprove ? words.waitingOther : words.statuses[statusOf(item)]
 const approvalsOf = (item: Assistant) => factsOf(item).approvals?.filter(row => !row.decision).length ?? null
 const vendorOf = (item: Assistant) => item.vendor === 'grok' ? 'Grok' : words.vendorUnknown
+function activityLine(item: Assistant) {
+  const activity = factsOf(item).lastActivity
+  return activity ? `${activity.text} · ${relativeTime(activity.at, { now: props.now, long: true })}` : '—'
+}
 function glance(item: Assistant) {
   const budget = item.policy.weekly_budget
   return [item.policy.allowed_projects.length ? item.policy.allowed_projects.map(id => props.projectNames?.[id] ?? id).join(', ') : words.noProjects, words.asks.toLowerCase(), `${assistantMoney(budget.amount, budget.unit)} ${words.week}`].join(' · ')
 }
 function routineLine(item: Assistant) {
   const routines = factsOf(item).routines
-  if (routines === null) return words.unavailable
+  if (routines === null) return '—'
   if (factsOf(item).routinesTruncated) return words.atLeastRoutines(routines.length)
   if (!routines.length) return words.noRoutines
   const next = routines.filter(row => row.next && !row.paused).sort((a, b) => Date.parse(a.next!) - Date.parse(b.next!))[0]
@@ -49,15 +54,15 @@ function routineLine(item: Assistant) {
 }
 function adapterLine(item: Assistant) {
   const adapter = factsOf(item).adapter, vendor = vendorOf(item)
-  if (!adapter) return `${vendor} · ${words.unavailable.toLowerCase()}`
+  if (!adapter) return '—'
   if (adapter.state === 'setup') return words.connectVendor(vendor)
   if (adapter.state === 'ok') return words.adapterOk(vendor)
   return adapter.failingSince ? words.failing(vendor, new Date(adapter.failingSince).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })) : words.noReceipt(vendor, adapter.lastReceipt ? relativeTime(adapter.lastReceipt, { now: props.now }).replace(/ ago$/, '') : words.notReported)
 }
 </script>
 <template>
-  <section ref="root" class="assistants" aria-labelledby="assistants-heading" @pointerenter="pointer = true" @pointerleave="pointer = false">
-    <header class="assistants-head"><h2 id="assistants-heading">{{ words.heading(items.length) }}</h2></header>
+  <section ref="root" class="assistants glass-card" :class="{ 'metrics-pending': metricsPending }" aria-labelledby="assistants-heading" @pointerenter="pointer = true" @pointerleave="pointer = false">
+    <header class="assistants-head"><h2 id="assistants-heading">{{ words.heading(items.length) }}</h2><slot name="actions" /></header>
     <div v-if="state === 'loading' && !items.length" class="assistant-message" role="status">{{ words.loading }}</div>
     <div v-else-if="state === 'forbidden'" class="assistant-message">{{ words.noAccess }}</div>
     <div v-else-if="state === 'unavailable'" class="assistant-message">{{ words.unavailable }}</div>
@@ -69,15 +74,15 @@ function adapterLine(item: Assistant) {
       <div class="assistant-rows">
         <div v-for="item in shown" :key="item.principal_id" class="assistant-row" :class="{ selected: selected === item.principal_id }" :data-assistant="item.principal_id" :data-status="statusOf(item)">
           <button type="button" class="assistant-open" :aria-label="`${item.display_name} · ${labelOf(item)}`" :aria-pressed="selected === item.principal_id" :title="`${item.display_name} · ${glance(item)} · ${policyGroups(item.policy.allowed_scopes).join(', ')}`" @click="emit('open', item.principal_id, $event.currentTarget as HTMLElement)">
-            <span class="assistant-identity"><span class="assistant-name"><HarnessMark :harness="item.vendor" :size="16" /><strong v-clip-tip>{{ item.display_name }}</strong></span><span v-clip-tip class="assistant-glance">{{ glance(item) }}</span><span v-clip-tip class="folded-facts">{{ factsOf(item).lastActivity ? `${factsOf(item).lastActivity!.text} ${relativeTime(factsOf(item).lastActivity!.at, { now })}` : words.notReported }} · {{ factsOf(item).routines ? factsOf(item).routinesTruncated ? words.atLeastRoutines(factsOf(item).routines!.length) : words.routineCount(factsOf(item).routines!.length) : words.routinesUnavailable }}</span><span v-clip-tip class="phone-facts"><template v-if="factsOf(item).spend">{{ words.weekAmount(assistantMoney(factsOf(item).spend!.amount, item.policy.weekly_budget.unit, true), assistantMoney(item.policy.weekly_budget.amount, item.policy.weekly_budget.unit)) }}</template><template v-else>{{ item.status === 'deactivated' ? words.disconnected : words.statusUnavailable }}</template></span></span>
+            <span class="assistant-identity"><span class="assistant-name"><HarnessMark :harness="item.vendor" :size="16" /><strong v-clip-tip>{{ item.display_name }}</strong></span><span v-clip-tip class="assistant-glance">{{ glance(item) }}</span><span v-clip-tip class="folded-facts"><span :title="factsOf(item).lastActivity ? undefined : words.notAvailableYet" :data-tip="factsOf(item).lastActivity ? undefined : words.notAvailableYet">{{ activityLine(item) }}</span> · <span :title="factsOf(item).routines === null ? words.notAvailableYet : undefined" :data-tip="factsOf(item).routines === null ? words.notAvailableYet : undefined">{{ factsOf(item).routines ? factsOf(item).routinesTruncated ? words.atLeastRoutines(factsOf(item).routines!.length) : words.routineCount(factsOf(item).routines!.length) : '—' }}</span></span><span v-clip-tip class="phone-facts" :title="factsOf(item).spend ? undefined : words.notAvailableYet" :data-tip="factsOf(item).spend ? undefined : words.notAvailableYet"><template v-if="factsOf(item).spend">{{ words.weekAmount(assistantMoney(factsOf(item).spend!.amount, item.policy.weekly_budget.unit, true), assistantMoney(item.policy.weekly_budget.amount, item.policy.weekly_budget.unit)) }}</template><template v-else>—</template></span></span>
+            <span class="assistant-state"><AppIcon :name="ASSISTANT_STATUS_ICON[statusOf(item)]" :size="14" />{{ labelOf(item) }}<template v-if="statusOf(item) === 'paused' && factsOf(item).spend && Number(factsOf(item).spend!.amount) >= Number(item.policy.weekly_budget.amount)"> · {{ words.budgetReached }}</template></span>
+            <span v-clip-tip class="last-column" :title="factsOf(item).lastActivity ? undefined : words.notAvailableYet" :data-tip="factsOf(item).lastActivity ? undefined : words.notAvailableYet">{{ activityLine(item) }}</span>
+            <AssistantBudget class="row-budget" :policy="item.policy" :facts="factsOf(item)" />
+            <span aria-hidden="true" />
+            <span v-clip-tip class="routines-column" :title="factsOf(item).routines === null ? words.notAvailableYet : undefined" :data-tip="factsOf(item).routines === null ? words.notAvailableYet : undefined">{{ routineLine(item) }}</span>
+            <span v-clip-tip class="adapter-column" :title="factsOf(item).adapter ? adapterLine(item) : words.notAvailableYet" :data-tip="factsOf(item).adapter ? undefined : words.notAvailableYet">{{ adapterLine(item) }}</span>
           </button>
-          <span aria-hidden="true" />
-          <span class="assistant-state"><AppIcon :name="ASSISTANT_STATUS_ICON[statusOf(item)]" :size="14" />{{ labelOf(item) }}<template v-if="statusOf(item) === 'paused' && factsOf(item).spend && Number(factsOf(item).spend!.amount) >= Number(item.policy.weekly_budget.amount)"> · {{ words.budgetReached }}</template></span>
-          <span v-clip-tip class="last-column">{{ factsOf(item).lastActivity ? `${factsOf(item).lastActivity!.text} ${relativeTime(factsOf(item).lastActivity!.at, { now })}` : words.unavailable }}</span>
-          <AssistantBudget class="row-budget" :policy="item.policy" :facts="factsOf(item)" />
-          <span class="assistant-approvals"><RouterLink v-if="approvalsOf(item)" :to="assistantDeskLink(item.principal_id)" @click.stop>{{ words.toApprove(approvalsOf(item)!) }}</RouterLink><span v-else>{{ approvalsOf(item) === 0 ? '—' : words.unavailable }}</span></span>
-          <span v-clip-tip class="routines-column">{{ routineLine(item) }}</span>
-          <span v-clip-tip class="adapter-column" :title="adapterLine(item)">{{ adapterLine(item) }}</span>
+          <span class="assistant-approvals"><RouterLink v-if="approvalsOf(item)" :to="assistantDeskLink(item.principal_id)" @click.stop>{{ words.toApprove(approvalsOf(item)!) }}</RouterLink><span v-else :title="approvalsOf(item) === null ? words.notAvailableYet : undefined" :data-tip="approvalsOf(item) === null ? words.notAvailableYet : undefined" @click="emit('open', item.principal_id, $event.currentTarget as HTMLElement)">—</span></span>
         </div>
       </div>
       <button v-if="!expanded && items.length > 5" type="button" class="assistant-show-all" @click="showAll">{{ words.showAll(items.length) }}<AppIcon name="chevron" :size="14" /></button>
@@ -87,13 +92,16 @@ function adapterLine(item: Assistant) {
   </section>
 </template>
 <style scoped>
-.assistants { container: assistants / inline-size; min-width: 0; margin-bottom: 16px; }
-.assistants-head { display: flex; align-items: center; min-height: 44px; padding: 0 16px; }
+.assistants { container: assistants / inline-size; min-width: 0; margin-bottom: 16px; padding: 0; overflow: clip; }
+.assistants-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 8px 18px; background: var(--chrome); border-radius: var(--radius) var(--radius) 0 0; }
 h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
 .assistant-columns, .assistant-row, .assistant-open { display: grid; grid-template-columns: minmax(180px, 1.7fr) minmax(132px, 1fr) minmax(110px, 1fr) minmax(160px, 1fr) minmax(88px, .65fr) minmax(100px, .8fr) minmax(110px, 1fr); gap: 14px; align-items: center; padding: 0 16px; }
+.metrics-pending { --assistant-columns: minmax(180px, 1.6fr) minmax(132px, 1fr) minmax(220px, 1.8fr) minmax(94px, .65fr) minmax(72px, .5fr) minmax(100px, .8fr) minmax(78px, .6fr); }
+.metrics-pending .assistant-columns, .metrics-pending .assistant-row, .metrics-pending .assistant-open { grid-template-columns: var(--assistant-columns); }
 .assistant-columns { height: 28px; font-size: 11px; color: var(--ink-2); }
 .assistant-row { position: relative; height: 56px; border-bottom: 1px solid var(--line); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .assistant-row:first-child { border-top: 1px solid var(--line); }
+.assistant-row:last-child { border-bottom: 0; }
 .assistant-row:hover, .assistant-row.selected { background: var(--row-hover); }
 .assistant-open { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0; background: transparent; cursor: pointer; color: inherit; font: inherit; text-align: left; }
 .assistant-open:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
@@ -108,10 +116,11 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
 .assistant-state svg { flex: none; }
 [data-status="down"] .assistant-state, [data-status="down"] .adapter-column { color: var(--danger); }
 [data-status="waiting"] .assistant-state { font-weight: 600; }
-.assistant-approvals { white-space: nowrap; }
+.assistant-approvals { grid-column: 5; white-space: nowrap; }
+.assistant-approvals > span { position: relative; pointer-events: auto; cursor: pointer; }
 .assistant-approvals a { display: inline-flex; align-items: center; min-height: 44px; position: relative; z-index: 1; pointer-events: auto; color: var(--teal-ink); }
 .assistant-show-all { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; width: 100%; border: 0; background: transparent; color: var(--ink-2); font-size: 12px; cursor: pointer; }
-.assistant-empty, .assistant-message { min-height: 56px; padding: 8px 16px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--ink-2); font-size: 12px; }
+.assistant-empty, .assistant-message { min-height: 56px; padding: 8px 16px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 12px; }
 .assistant-empty { display: flex; align-items: center; gap: 20px; }
 .assistant-empty p { margin: 0; flex: 1; line-height: 1.5; }
 .assistant-empty .btn { flex: none; }
@@ -119,20 +128,22 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
 .assistant-error { color: var(--danger); }
 .folded-facts, .phone-facts { display: none; }
 @container assistants (max-width: 1150px) {
-  .assistant-columns, .assistant-row, .assistant-open { grid-template-columns: minmax(200px, 1.8fr) minmax(132px, 1fr) minmax(158px, 1fr) minmax(88px, .65fr) minmax(110px, 1fr); gap: 12px; }
+  .assistant-columns, .assistant-row, .assistant-open, .metrics-pending .assistant-columns, .metrics-pending .assistant-row, .metrics-pending .assistant-open { grid-template-columns: minmax(200px, 1.8fr) minmax(132px, 1fr) minmax(158px, 1fr) minmax(88px, .65fr) minmax(110px, 1fr); gap: 12px; }
+  .assistant-approvals { grid-column: 4; }
   .last-column, .routines-column { display: none; }
   .assistant-glance { display: none; }
   .folded-facts { display: block; font-size: 12px; }
 }
 @container assistants (max-width: 850px) {
-  .assistant-columns, .assistant-row, .assistant-open { grid-template-columns: minmax(140px, 1.4fr) minmax(130px, 1fr) minmax(140px, 1fr); gap: 10px; }
+  .assistant-columns, .assistant-row, .assistant-open, .metrics-pending .assistant-columns, .metrics-pending .assistant-row, .metrics-pending .assistant-open { grid-template-columns: minmax(140px, 1.4fr) minmax(130px, 1fr) minmax(140px, 1fr); gap: 10px; }
   .assistant-columns > :nth-child(5), .assistant-columns > :last-child, .adapter-column, .assistant-approvals { display: none; }
+  .assistant-open > [aria-hidden] { display: none; }
 }
 @container assistants (max-width: 520px) {
-  .assistants-head { padding-inline: 4px; }
+  .assistants-head { padding-inline: 12px; min-height: 52px; }
   .assistant-columns { display: none; }
-  .assistant-rows { display: grid; gap: 6px; }
-  .assistant-row { height: 56px; display: block; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius); }
+  .assistant-rows { display: grid; }
+  .assistant-row, .assistant-row:last-child { height: 56px; display: block; padding: 0 12px; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
   .assistant-identity { position: absolute; left: 12px; right: 12px; top: 8px; gap: 7px; }
   .assistant-name { padding-right: 9em; }
   .assistant-state { position: absolute; right: 12px; top: 10px; max-width: 48%; font-size: 11px; white-space: nowrap; }
@@ -146,7 +157,7 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
   .assistant-empty .btn { min-height: 44px; }
 }
 @media (max-width: 520px) {
-  .assistant-row { height: 64px; }
+  .assistant-row, .assistant-row:last-child { height: 64px; }
   .assistant-identity { top: 10px; }
   .assistant-state { top: 12px; }
 }
