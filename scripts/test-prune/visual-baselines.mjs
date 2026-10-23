@@ -163,10 +163,11 @@ export function checkpointReport(directory, visual) {
   }
   const cell = value => String(value ?? '').replaceAll('|', '\\|').replace(/[\r\n]+/g, ' ').slice(0, 1200)
   return ['Visual checkpoint execution (comparison.mode=' + visual.comparison.mode + '). PNGs, diffs and full quality reports are retained in the shard evidence artifact.', '',
-    '| Checkpoint | Reference state | Quality | Comparison | Detail |', '| --- | --- | --- | --- | --- |',
+    '| Checkpoint | Reference state | Quality | Comparison | Diff evidence | Detail |', '| --- | --- | --- | --- | --- | --- |',
     ...referenceGates(visual).flatMap(gate => gate.checkpointIds.map(id => {
       const report = results.get(id)
-      return `| ${id} | ${cell(gate.reason)} | ${cell(report?.quality?.status ?? (report?.requirementsRun ? 'checks ran; outcome unavailable' : 'not run in this shard'))} | ${cell(report?.comparison?.status ?? 'not run in this shard')} | ${cell(report?.quality?.error ?? report?.comparison?.error)} |`
+      const detail = [report?.quality?.error, report?.comparison?.rendererMismatch, report?.comparison?.error].filter(Boolean).join('; ')
+      return `| ${id} | ${cell(gate.reason)} | ${cell(report?.quality?.status ?? (report?.requirementsRun ? 'checks ran; outcome unavailable' : 'not run in this shard'))} | ${cell(report?.comparison?.status ?? 'not run in this shard')} | ${cell(report?.comparison?.diffs?.join(', ') ?? 'none')} | ${cell(detail)} |`
     })), '',
   ].join('\n')
 }
@@ -271,7 +272,7 @@ export function materializeBaseline(directory, visual, { download = false, run =
   // No output is written until the archive, both manifests and bundle verify.
   const path = join(directory, 'baseline.json')
   writeFileSync(path, baseline)
-  console.log(`Verified approved visual references: ${references.size} PNGs; archive SHA-256 ${source.sha256}`)
+  console.log(`Verified ${visualReportOnly(visual) ? 'historical' : 'approved'} visual references: ${references.size} PNGs; archive SHA-256 ${source.sha256}`)
   console.log(report.markdown)
   return path
 }

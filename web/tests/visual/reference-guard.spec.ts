@@ -117,9 +117,10 @@ test('visual comparison rejects a changed control and never creates a missing re
   const reporting = structuredClone(visual)
   reporting.history = [] // Synthetic bytes, never the real set-2 history.
   reporting.comparison.mode = 'report-only'
-  expect(await compareVisualReference(page, info, checkpoint, { visual: reporting, baselineFile, renderer, timeout: 1500 })).toBe(false)
+  expect(await compareVisualReference(page, info, checkpoint, { visual: reporting, baselineFile, renderer: { ...renderer, locale: 'de-DE' }, timeout: 1500 })).toBe(false)
   expect(JSON.parse(readFileSync(info.outputPath(`${checkpoint.id}-comparison.md`), 'utf8')))
-    .toMatchObject({ status: 'different', error: expect.stringMatching(/Screenshot comparison failed|pixels.*different/) })
+    .toMatchObject({ status: 'different', rendererMismatch: expect.stringContaining('renderer differs from reference: locale'),
+      error: expect.stringMatching(/Screenshot comparison failed|pixels.*different/) })
   reporting.comparison.mode = 'blocking'
   await expect(compareVisualReference(page, info, checkpoint, { visual: reporting, baselineFile, renderer, timeout: 1500 }))
     .rejects.toThrow(/Screenshot comparison failed|pixels.*different/)

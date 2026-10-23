@@ -41,6 +41,14 @@ test('visual references require approval, immutable attachment bytes and every e
   const bytes = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), renderer: visual.renderer, files }))
   visual.baselineAuthority.source.sha256 = hash(bytes)
   assert.equal(verifyBaselineBundle(bytes, visual).size, 80)
+  const historyOnly = structuredClone(visual)
+  historyOnly.comparison.mode = 'report-only'
+  historyOnly.history = [] // Synthetic transport, never real reference history.
+  historyOnly.approval.status = 'historical-only'
+  historyOnly.baselineAuthority.status = 'historical-only'
+  assert.equal(verifyBaselineBundle(bytes, historyOnly).size, 80)
+  assert.throws(() => verifyBaselineBundle(Buffer.concat([bytes, Buffer.from(' ')]), historyOnly), /attachment SHA-256 mismatch/)
+  assert.throws(() => validateVisual(historyOnly, { cuts: true, stateIds: ['agents'] }), /Protected visual cuts stay closed/)
   const rehash = (files: unknown[]) => {
     const changed = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), renderer: visual.renderer, files }))
     return { changed, pinned: { ...visual, baselineAuthority: { ...visual.baselineAuthority, source: { ...visual.baselineAuthority.source, sha256: hash(changed) } } } }
@@ -412,10 +420,11 @@ test('visual report-only switch records failures and restores blocking without g
   try {
     const id = 'V-projects-390-light'
     writeFileSync(join(directory, `${id}.md`), JSON.stringify({ id, requirementsRun: true,
-      quality: { status: 'failed', error: 'synthetic font guard failure' }, comparison: { status: 'different', error: 'synthetic pixel diff' } }))
+      quality: { status: 'failed', error: 'synthetic font guard failure' }, comparison: { status: 'different', error: 'synthetic pixel diff', diffs: [`${id}-diff.png`] } }))
     const summary = checkpointReport(directory, manifest)
     assert.equal(summary.split('\n').filter(line => line.startsWith('| V-')).length, 80)
     assert.match(summary, /V-projects-390-light.*failed.*different.*synthetic font guard failure/)
+    assert.match(summary, /V-projects-390-light-diff\.png/)
     assert.match(summary, /V-tickets-390-light.*not run in this shard/)
     assert.match(summary, /awaiting re-capture under the final renderer/)
     assert.equal(checkpointReport(join(directory, 'absent'), manifest).split('\n').filter(line => line.startsWith('| V-')).length, 80)

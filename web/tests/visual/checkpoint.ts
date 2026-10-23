@@ -184,9 +184,16 @@ export async function compareVisualReference(page: Page, info: TestInfo, checkpo
     await reportReference(info, checkpoint, visual)
     return false
   }
-  const comparison: { id: string; status: string; error?: string } = { id: checkpoint.id, status: 'unavailable' }
+  const comparison: { id: string; status: string; error?: string; rendererMismatch?: string; diffs: string[] } = {
+    id: checkpoint.id, status: 'unavailable', diffs: [],
+  }
   const result = await visualCheckResult(visual, async () => {
-    assertRenderer(renderer, visual.renderer)
+    // Historical pixels have no renderer authority. Keep metadata mismatches
+    // visible while still producing their diagnostic diff; strict mode rejects.
+    if (visualReportOnly(visual)) {
+      try { assertRenderer(renderer, visual.renderer) }
+      catch (error) { comparison.rendererMismatch = String(error) }
+    } else assertRenderer(renderer, visual.renderer)
     await fontEvidence(page, gate.state)
     materializeReference(info, checkpoint, { visual, baselineFile })
     comparison.status = 'different'
@@ -195,6 +202,8 @@ export async function compareVisualReference(page: Page, info: TestInfo, checkpo
     comparison.status = 'matched'
   })
   if (result.status === 'failed') comparison.error = result.error
+  comparison.diffs = info.attachments.filter(attachment => attachment.name.includes(checkpoint.id) && /diff/i.test(attachment.name))
+    .map(attachment => attachment.path?.split(/[\\/]/).at(-1) ?? attachment.name)
   writeFileSync(info.outputPath(`${checkpoint.id}-comparison.md`), JSON.stringify(comparison, null, 2))
   if (gate.mode === 'report-only') {
     await info.attach(`${checkpoint.id}-comparison`, { body: JSON.stringify(comparison), contentType: 'application/json' })
