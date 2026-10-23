@@ -62,7 +62,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await page.goto('/')
     await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
     expect(await order(page)).toEqual(['projects', 'agents', 'business', 'desk'])
-    await expect(deskLink(page)).toHaveAccessibleName('Decision Desk, 5 open')
+    await expect(deskLink(page)).toHaveAccessibleName('Decision Desk, 5 open · 5 wait for you · 5 here')
     await expect(deskLink(page)).toHaveAttribute('href', '/decision-desk')
     if (width < 720) {
       // AEON-1459 (D2): a compact header has no preview chevron; the Desk is one 44 px tap and the
@@ -200,11 +200,11 @@ test('the preview says when it shows part of the Desk, nothing, or could not rea
   await expect(preview(page)).toContainText('Count unavailable')
   // One calm line with its action inline (AEON-1339), never the raw server sentence.
   await expect(preview(page).getByRole('alert')).toContainText('Couldn’t load the desk')
-  await expect(deskLink(page)).toHaveAccessibleName('Decision Desk, count unavailable')
+  await expect(deskLink(page)).toHaveAccessibleName('Decision Desk, count unavailable · Reading Decision Desk · Reading here')
   control.failProjection = false
   await preview(page).getByRole('button', { name: 'Try again', exact: true }).click()
   await expect(preview(page)).toContainText('20 things for you')
-  await expect(deskLink(page)).toHaveAccessibleName('Decision Desk, 20 open')
+  await expect(deskLink(page)).toHaveAccessibleName('Decision Desk, 20 open · 20 wait for you · 20 here')
 })
 
 // Measured, not guessed: on a phone the chevron steps aside before the moon when

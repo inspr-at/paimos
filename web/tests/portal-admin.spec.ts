@@ -381,7 +381,7 @@ test('AEON-1683: portal publishing and moderation retain the current binding aft
     await page.getByRole('button', { name: 'Add aspect' }).click()
     await page.getByLabel('Aspect').fill('Statutory deadlines')
     await page.getByRole('button', { name: 'Add', exact: true }).click()
-    await page.getByLabel('Stance').selectOption('yes')
+    await page.getByLabel('Stance', { exact: true }).selectOption('yes')
     await page.getByLabel('Quote').fill('Every deadline is on the public help page.')
     await page.getByLabel('Source page').fill('https://northwind.example/deadlines')
     await page.getByLabel('Read on').fill('2026-09-01')

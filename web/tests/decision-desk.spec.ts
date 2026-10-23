@@ -504,7 +504,7 @@ test('legacy links select the canonical merged question and one server count', a
   await expect(page.getByTestId('desk-pager')).toContainText('of 4')
   await page.getByTestId('desk-close').click()
   await expect(page.getByTestId('desk-row-m:action-1')).toHaveCount(0)
-  await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, 4 open', exact: true })).toBeVisible()
+  await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, 4 open · 4 wait for you · 4 here', exact: true })).toBeVisible()
   await expect(page.locator('.view-tabs').getByRole('radio', { name: 'Open 4' })).toBeVisible()
   expect(world.calls).toHaveLength(0)
 })
@@ -544,11 +544,11 @@ test('projection access errors show an unknown count and an actionable Retry', a
   const world = await mockDecisionDesk(page); world.failProjection = true
   await page.goto('/decision-desk')
   await expect(page.getByRole('button', { name: 'Try again', exact: true })).toBeEnabled()
-  await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, count unavailable', exact: true })).toBeVisible()
+  await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, count unavailable · Reading Decision Desk · Reading here', exact: true })).toBeVisible()
   await expect(page.locator('.view-tabs').getByRole('radio', { name: 'Open ?' })).toBeVisible()
   world.failProjection = false
   await page.getByRole('button', { name: 'Try again', exact: true }).click()
-  await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, 5 open', exact: true })).toBeVisible()
+  await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, 5 open · 5 wait for you · 5 here', exact: true })).toBeVisible()
   await expect(page.getByTestId('desk-row-q:question-1')).toBeVisible()
 })
 
@@ -591,7 +591,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Needs you', exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0)
-    await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, 6 open', exact: true })).toBeVisible()
+    await expect(page.locator('.places').getByRole('link', { name: 'Decision Desk, 6 open · 6 wait for you · 6 here', exact: true })).toBeVisible()
     const chores = page.getByRole('region', { name: 'Sign-ins and connections' })
     await expect(chores).toBeVisible()
     await expectStableControls({ controls: { copy: chores.getByRole('button', { name: 'Copy command' }), header: page.locator('.places') }, interactions: [{ name: 'copy failure stays below controls', run: async () => {
@@ -615,7 +615,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     // The retired briefing link continues to Agents; the Desk is the header's place there (AEON-1209, AEON-1139).
     await page.goto('/briefing')
     await expect(page).toHaveURL('/agents')
-    const briefingDesk = page.locator('.places').getByRole('link', { name: 'Decision Desk, 6 open', exact: true })
+    const briefingDesk = page.locator('.places').getByRole('link', { name: 'Decision Desk, 6 open · 6 wait for you · 6 here', exact: true })
     await expect(briefingDesk).toBeVisible()
     await expect(page.getByRole('region', { name: 'Decision Desk', exact: true })).toHaveCount(0)
     if (width < 720) {

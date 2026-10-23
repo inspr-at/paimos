@@ -81,9 +81,9 @@ test('the header routes the canonical count to Decision Desk and keeps Agents se
   await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
   const places = page.getByRole('navigation', { name: 'Places' })
   await expect(places.getByRole('link', { name: 'Agents', exact: true })).toBeVisible()
-  await places.getByRole('link', { name: 'Decision Desk, 4 open', exact: true }).click()
+  await places.getByRole('link', { name: 'Decision Desk, 4 open · 4 wait for you · 4 here', exact: true }).click()
   await expect(page).toHaveURL('/decision-desk')
-  await expect(places.getByRole('link', { name: 'Decision Desk, 4 open', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(places.getByRole('link', { name: 'Decision Desk, 4 open · 4 wait for you · 4 here', exact: true })).toHaveAttribute('aria-current', 'page')
 })
 
 test('sessions are grouped by project, the lead heading its group, with ticket and heartbeat; details show account and model', async ({ page }) => {
@@ -537,7 +537,7 @@ test('held action requests resolve with an optional note through their original 
   const resolution = calls.find(c => c.path.endsWith('/resolution'))!
   expect(resolution.path).toBe(`/api/projects/p-frozen/messages/${held.id}/resolution`)
   expect(resolution.body).toEqual({ decision: 'resolved', note: 'Merged it myself after CI.' })
-  await expect(page.getByRole('link', { name: 'Decision Desk, 3 open' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Decision Desk, 3 open · 3 wait for you · 3 here' })).toBeVisible()
 })
 
 test('Settings lists limits set by hand as Set by you, never as a vendor percent; admins can drain and resume', async ({ page }) => {
@@ -629,7 +629,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await setup(page)
     await openAgents(page)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.querySelector('main')!.scrollWidth <= innerWidth)).toBe(true)
-    await expect(page.getByRole('link', { name: 'Decision Desk, 4 open' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Decision Desk, 4 open · 4 wait for you · 4 here' })).toBeVisible()
     // Row controls live in an overflow menu on phones.
     const { calls } = { calls: [] as string[] }
     page.on('request', request => { if (request.method() === 'POST') calls.push(new URL(request.url()).pathname) })
@@ -645,7 +645,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await expect(page.getByRole('menuitem', { name: /^Agent keys/ })).toBeVisible()
     await page.keyboard.press('Escape')
     await expectStableControls({ controls: {
-      desk: page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Decision Desk, 4 open', exact: true }),
+      desk: page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Decision Desk, 4 open · 4 wait for you · 4 here', exact: true }),
       more,
       new: page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }),
     }, interactions: [
@@ -671,7 +671,7 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 
     await openAgents(page)
     await expect(row(page, camy)).toContainText(brief)
     await expect(page.getByRole('region', { name: 'Needs you', exact: true })).toHaveCount(0)
-    await expect(page.getByRole('link', { name: 'Decision Desk, 4 open', exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Decision Desk, 4 open · 4 wait for you · 4 here', exact: true })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await page.screenshot({ path: testInfo.outputPath(`agents-overview-${width}-${colorScheme}.png`), fullPage: true })
     await row(page, camy).locator('.agent-link').click(); await expect(panel(page)).toBeVisible()

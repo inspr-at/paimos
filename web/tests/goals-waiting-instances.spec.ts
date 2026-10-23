@@ -106,8 +106,8 @@ for (const width of [1440, 1024, 390] as const) {
     await expect.poll(() => page.title()).toMatch(/^\(5\)/)
     const header = page.locator('header .needs-badge').first()
     await expect(header).toHaveText('5')
-    // The consolidated total has one stable accessible name; the breakdown stays in its tooltip.
-    const deskPlace = page.locator('header .places').getByRole('link', { name: 'Decision Desk, 5 open', exact: true })
+    // The approved total and per-instance breakdown are present in both the accessible name and tooltip.
+    const deskPlace = page.locator('header .places').getByRole('link', { name: 'Decision Desk, 5 open · 5 wait for you · 3 here · 2 on pma', exact: true })
     await expect(deskPlace).toBeVisible()
     await expect(deskPlace).toHaveAttribute('data-tip', /3 here · 2 on pma/)
     expect(errors).toEqual([])
