@@ -751,7 +751,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   const errors = watchErrors(page)
   await setup(page)
   const { items } = assistantEvidence(Date.now(), me.id)
-  const { writes, events, routineWrites, routines } = await mockAssistants(page, items, me.id)
+  const { writes, events, routineWrites, routines, runOwners, routineReads } = await mockAssistants(page, items, me.id)
   let policyAccess = true
   await page.route('**/api/me/permissions*', route => {
     const permissions = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
@@ -773,8 +773,8 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   expect(positions.capacity).toBeLessThanOrEqual(positions.assistants.top)
   expect(positions.assistants.bottom).toBeLessThanOrEqual(positions.sessions)
   await expect(page.locator(`[data-row="s:${session(5)}"]`)).toHaveCount(0)
-  // B/C/D are not on this main: no invented zero spend, healthy adapter,
-  // pending approvals or owned routines. Their renderer is proven by the unit fixture.
+  // B/C have not merged: health, spend and approvals stay unknown. D's owned
+  // routines below come from its merged, revisioned API fixtures.
   await expect(section.locator('.assistant-state').first()).toHaveText('Status unavailable')
   await expect(section.locator('.budget-unknown')).toHaveCount(2)
   const amy = items.find(item => item.display_name === 'Amy')!
@@ -831,6 +831,16 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
       await routineGuard.check(async () => { await action.click(); await expect(action).toHaveAccessibleName('Pause Inbox triage 1') })
       routineGuard.done()
       expect(routineWrites).toEqual([{ id: routines[0]!.id, action: 'pause', expected_revision: 1 }, { id: routines[0]!.id, action: 'resume', expected_revision: 2 }])
+      const readsBefore = routineReads.length
+      runOwners[routines[1]!.id] = 'af000000-0000-4000-8000-000000000099'
+      const ownerGuard = await controlStability(page, Object.fromEntries([0, 1, 2].map(index => [`routine ${index + 1}`, pane.locator('[data-routine]').nth(index).getByRole('button')])))
+      await ownerGuard.check(async () => {
+        await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+        await expect(pane.locator('[data-routine]').nth(1)).toContainText('The latest run belongs to another owner.')
+        await expect(pane.locator('[data-routine]').nth(1).getByRole('link', { name: 'AEON-1 · Aeon foundation' })).toHaveCount(0)
+      })
+      ownerGuard.done()
+      expect(routineReads.slice(readsBefore)).not.toContain(`/api/recurrences/${routines[1]!.id}/runs/${routines[1]!.last_run.id}/agent-result`)
     }
     if (name === 'Policy') {
       const policy = details.getByRole('tabpanel', { name: 'Policy', exact: true })

@@ -392,8 +392,10 @@ export async function mockAssistants(page: Page, items: Assistant[], owner: stri
   const now = Date.now()
   const routines = [1, 2, 3].map(n => ({ id: `ab000000-0000-4000-8000-00000000000${n}`, project_id: 'p-aeon', parent_id: 'p-aeon', template: { name: `Inbox triage ${n}`, title: `Triage ${n}`, description: '', acceptance_criteria: [], estimate_hours: 0, priority: 'medium', tags: [], type: 'work' }, trigger: { kind: 'time', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', time_of_day: '08:00', timezone: 'Europe/Vienna' }, queue_each: false, overlap_policy: 'skip', catch_up_policy: 'one', paused: false, revision: 1, occurrence_count: 1, next_at: new Date(now + n * 3600_000).toISOString(), created_at: new Date(now - 86400_000).toISOString(), updated_at: new Date(now - 3600_000).toISOString(), last_run: { id: `ad000000-0000-4000-8000-00000000000${n}`, state: 'done', reason: '', created_at: new Date(now - n * 3600_000).toISOString() } }))
   const routineWrites: { id: string; action: string; expected_revision: number }[] = []
+  const runOwners: Record<string, string> = {}, routineReads: string[] = []
   await page.route('**/api/recurrences**', async route => {
     const url = new URL(route.request().url()), method = route.request().method()
+    if (method === 'GET') routineReads.push(url.pathname)
     if (url.pathname === '/api/recurrences' && method === 'GET') return route.fulfill({ json: { items: items.some(item => item.principal_id === agent(5)) ? routines : [], next_cursor: null } })
     const match = /^\/api\/recurrences\/([^/]+)(?:\/(.*))?$/.exec(url.pathname), routine = routines.find(row => row.id === match?.[1])
     if (!routine) return route.fallback()
@@ -406,7 +408,7 @@ export async function mockAssistants(page: Page, items: Assistant[], owner: stri
       routine.paused = action === 'pause'; routine.revision++
       return route.fulfill({ json: routine })
     }
-    const run = { id: routine.last_run.id, recurrence_id: routine.id, definition_revision: 1, owner_principal_id: agent(5), state: 'done', reason: '', work_node_id: 'n-a1', work_order_id: null, agent_run_id: null, created_at: routine.last_run.created_at, updated_at: new Date(now - 30 * 60_000).toISOString(), usage: {} }
+    const run = { id: routine.last_run.id, recurrence_id: routine.id, definition_revision: 1, owner_principal_id: runOwners[routine.id] ?? agent(5), state: 'done', reason: '', work_node_id: 'n-a1', work_order_id: null, agent_run_id: null, created_at: routine.last_run.created_at, updated_at: new Date(now - 30 * 60_000).toISOString(), usage: {} }
     if (action === 'runs') return route.fulfill({ json: { items: [run], next_cursor: null } })
     if (action === `runs/${routine.last_run.id}`) return route.fulfill({ json: { run, attempts: { items: [], next_cursor: null }, actions: { items: [], next_cursor: null }, effects: { items: [], next_cursor: null } } })
     if (action === `runs/${routine.last_run.id}/agent-result`) return route.fulfill({ json: { run_id: routine.last_run.id, status: 'succeeded', node_id: 'n-a1', request_digest: 'a'.repeat(64) } })
@@ -438,5 +440,5 @@ export async function mockAssistants(page: Page, items: Assistant[], owner: stri
     return route.fulfill({ status: 404, json: { error: 'Assistant route not available' } })
   })
   await page.route('**/api/events?*', route => new URL(route.request().url()).searchParams.get('type')?.startsWith('assistant.') ? route.fulfill({ json: { items: events, next_after: null } }) : route.fallback())
-  return { writes, events, routineWrites, routines }
+  return { writes, events, routineWrites, routines, runOwners, routineReads }
 }

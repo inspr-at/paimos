@@ -42,10 +42,10 @@ function glance(item: Assistant) {
 function routineLine(item: Assistant) {
   const routines = factsOf(item).routines
   if (routines === null) return words.unavailable
-  if (factsOf(item).routinesTruncated) return `${words.routineCount(routines.length)} · ${words.truncated}`
+  if (factsOf(item).routinesTruncated) return words.atLeastRoutines(routines.length)
   if (!routines.length) return words.noRoutines
-  const next = routines.filter(row => row.next && !row.paused).sort((a, b) => Date.parse(a.next!) - Date.parse(b.next!))[0]?.next
-  return next ? words.routinesNext(routines.length, new Date(next).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })) : words.routineCount(routines.length)
+  const next = routines.filter(row => row.next && !row.paused).sort((a, b) => Date.parse(a.next!) - Date.parse(b.next!))[0]
+  return next ? words.routinesNext(routines.length, new Date(next.next!).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: next.timezone })) : words.routineCount(routines.length)
 }
 function adapterLine(item: Assistant) {
   const adapter = factsOf(item).adapter, vendor = vendorOf(item)

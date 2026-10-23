@@ -30,7 +30,7 @@ export interface AssistantEvent {
 export type AssistantStatus = 'waiting' | 'down' | 'working' | 'idle' | 'paused' | 'setup' | 'unavailable'
 export interface AssistantRoutine {
   id: string; name: string; schedule: string; next: string | null; projectId: string
-  result?: { label: string; href: string }; paused: boolean; revision: number; lastState?: string
+  result?: { label: string; href: string }; paused: boolean; revision: number; lastState?: string; timezone?: string
 }
 
 // Presentation facts have explicit unknowns. Unmerged services are never
@@ -46,8 +46,8 @@ export interface AssistantFacts {
   paused: null | { by: string; at: string }
 }
 export const unavailableAssistantFacts = (): AssistantFacts => ({ adapter: null, spend: null, approvals: null, routines: null, activity: null, lastActivity: null, paused: null })
-// These services have no merged assistant read contract yet. Add a capability
-// only alongside its real, permission-checked read/mutation adapter.
+// Capabilities follow merged contracts. Adapter health and action requests stay
+// closed until their real, permission-checked readers have merged.
 export const assistantCapabilities = Object.freeze({ adapter: false, approvals: false, routines: true, pause: false, approvers: false, resetWeekday: false })
 
 export function assistantStatus(item: Assistant, facts: AssistantFacts, now: number): AssistantStatus {

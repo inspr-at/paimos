@@ -3,7 +3,7 @@ import type { Kind, WorkNode } from './api'
 import { assistantRequest, type AssistantRoutine, type AssistantFacts } from './assistants'
 import { assistantCopy } from './assistantsCopy'
 import { isKnowledgeType } from './knowledge'
-import { recurrenceName, triggerWords, type Recurrence } from './recurrences'
+import { recurrenceName, recurrenceZone, triggerWords, type Recurrence } from './recurrences'
 import { checkedDetail, checkedRuns, runTitle } from './routineRuns'
 import { ticketPath } from './work'
 
@@ -81,5 +81,5 @@ export async function readAssistantRoutines(owners: Set<string>, projectKey: (id
   return { rows, truncated }
 }
 export function presentAssistantRoutine(wire: Recurrence): AssistantRoutine {
-  return { id: wire.id, projectId: wire.project_id, name: recurrenceName(wire), schedule: triggerWords(wire.trigger), next: wire.next_at, paused: wire.paused, revision: wire.revision }
+  return { id: wire.id, projectId: wire.project_id, name: recurrenceName(wire), schedule: triggerWords(wire.trigger), next: wire.next_at, paused: wire.paused, revision: wire.revision, timezone: recurrenceZone(wire.trigger) }
 }
