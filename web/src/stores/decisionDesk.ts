@@ -122,7 +122,11 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
     wakeTimer = setTimeout(async () => {
       wakeTimer = undefined
       if (flight) await flight
-      if (wake === token) void refresh()
+      if (wake !== token) return
+      void refresh()
+      // A read that did not start (signed out) or joined one already running leaves the window open: close it,
+      // so the next event opens its own and the sync line never keeps saying a change is updating (AEON-1700).
+      if (wake === token) { dropWake(); if (!flight) changeArrived.value = false }
     }, wakeWindow)
   }
   watch(owner, () => { invalidate(); void refresh() }, { immediate: true, flush: 'sync' })
