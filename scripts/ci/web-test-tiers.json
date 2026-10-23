@@ -20878,7 +20878,7 @@
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Agents #models bookmark opens catalog freshness and keeps its context","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Flow routes resolve to tickets and remove retired navigation parameters","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Flow routes resolve to tickets and remove retired navigation parameters","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired briefing bookmarks open Agents and keep request links","tier":"GATED-FULL"}
     ,
