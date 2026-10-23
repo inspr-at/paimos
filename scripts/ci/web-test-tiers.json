@@ -15644,6 +15644,8 @@
     ,
     {"kind":"browser","file":"tests/visual/reference-guard.spec.ts","name":"P02 capacity reference keeps the same open popover and scroll across themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/visual/reference-guard.spec.ts","name":"P02 quote editor selects the rendered paragraph when its hidden measurement copy comes first","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/visual/reference-guard.spec.ts","name":"P02 quote font guard rejects an unloaded profile face","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/visual/reference-guard.spec.ts","name":"visual comparison rejects a changed control and never creates a missing reference","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

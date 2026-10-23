@@ -6,10 +6,11 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { expect, type Page, type Response } from '@playwright/test'
-import { agents, capacity, deliveryNumbers, publicQuote, NOW, sessionChat, sessionChatUnavailable } from './fixtures'
+import { agents, capacity, deliveryNumbers, publicQuote, quoteEditor, NOW, sessionChat, sessionChatUnavailable } from './fixtures'
 import { test, checkVisual, compareVisualReference, visualCases, prepareVisualFonts, renderedFonts, fontEvidence } from './checkpoint'
 import { visualChrome } from './chrome-fixture'
 import { fixtures, mockWork } from '../work-fixtures'
+import { NODES } from '../quote-inspector-fixtures'
 
 // Risk: a healthy Agents reference accidentally depicts an unmocked permission
 // service, or hiding that banner also hides a real load failure and its retry.
@@ -345,6 +346,35 @@ test('P02 Session Chat fixture binds its chat reads and native refusal to the di
     await healthyPage.screenshot({ path: info.outputPath('session-chat-390.png'), animations: 'disabled', caret: 'hide' })
   } finally { await healthyContext.close() }
 
+})
+
+// Risk: pagination initially exposes only the hidden measurement copy. A broad
+// first() click can keep waiting on that copy after the real paragraph appears.
+test('P02 quote editor selects the rendered paragraph when its hidden measurement copy comes first', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.clock.setFixedTime(new Date(NOW))
+  page.setDefaultTimeout(5000)
+  // Keep the actual inert measurement tree ahead of the rendered pages. This
+  // deterministically exposes the same duplicate-ID ordering as initial layout,
+  // without depending on font/network speed or changing the quote's content.
+  await page.addInitScript(() => {
+    new MutationObserver(() => {
+      const measure = document.querySelector('.quote-measure')
+      if (measure?.parentElement && measure.parentElement.firstElementChild !== measure) measure.parentElement.prepend(measure)
+    }).observe(document, { childList: true, subtree: true })
+  })
+  for (const theme of ['light', 'dark'] as const) {
+    await quoteEditor(page, 'desktop', theme)
+    const copies = page.locator(`[data-node-id="${NODES[0]}"]`)
+    await expect(copies).toHaveCount(2)
+    await expect(copies.first()).toBeHidden()
+    await expect(page.locator(`.quote-page [data-node-id="${NODES[0]}"]`)).toBeVisible()
+    await expect(page.locator('.quote-document')).toHaveAttribute('data-quote-ready', 'true')
+    const panel = page.getByRole('complementary', { name: 'Format' })
+    await expect(panel.getByRole('tab', { selected: true })).toHaveText('Text')
+    await expect(panel.locator('.scope')).toContainText('Ausgangslage')
+    await expect(panel.locator('.scope')).toContainText('Paragraph')
+  }
 })
 
 // Risk: a missing profile route silently falls back to the shell's sans or mono,

@@ -292,8 +292,10 @@ export const quoteEditor: VisualSetup = async (page, _profile, theme) => {
   document.sections[0]!.nodes[0]!.text = `${LONG}. **Vollständige Prüfung** vor jeder Freigabe.`
   await mockQuoteEditor(page, document)
   await page.goto(`/business/quotes/${QUOTE_ID}`)
-  await expect(page.locator('.quote-document')).toBeVisible()
-  await page.locator(`[data-node-id="${NODES[0]}"]`).first().click()
+  await expect(page.locator('.quote-document')).toHaveAttribute('data-quote-ready', 'true')
+  // Pagination has an inert measurement copy with the same node IDs. Select
+  // only the finished page so a click cannot bind to that hidden copy.
+  await page.locator(`.quote-page [data-node-id="${NODES[0]}"]`).click()
   const panel = page.getByRole('complementary', { name: 'Format' })
   if (!await panel.isVisible()) await page.getByRole('button', { name: 'Format panel' }).click()
   await panel.getByRole('tab', { name: 'Text', exact: true }).click()
