@@ -278,6 +278,16 @@ func TestDefaultServerHasNoOutboundNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The approved Linux runner supplies Postgres through a Unix socket;
+	// hosted CI commonly supplies TCP. Use pgx's resolved transport instead
+	// of assuming that the URL authority contains a TCP endpoint.
+	upstreamConfig := fresh.App.Config().ConnConfig
+	upstreamNetwork := "tcp"
+	upstreamAddress := net.JoinHostPort(upstreamConfig.Host, fmt.Sprint(upstreamConfig.Port))
+	if filepath.IsAbs(upstreamConfig.Host) {
+		upstreamNetwork = "unix"
+		upstreamAddress = filepath.Join(upstreamConfig.Host, fmt.Sprintf(".s.PGSQL.%d", upstreamConfig.Port))
+	}
 	socketDir := t.TempDir()
 	proxy, err := net.Listen("unix", filepath.Join(socketDir, ".s.PGSQL.5432"))
 	if err != nil {
@@ -292,7 +302,7 @@ func TestDefaultServerHasNoOutboundNetwork(t *testing.T) {
 			}
 			go func() {
 				defer local.Close()
-				upstream, err := net.DialTimeout("tcp", u.Host, 5*time.Second)
+				upstream, err := net.DialTimeout(upstreamNetwork, upstreamAddress, 5*time.Second)
 				if err != nil {
 					return
 				}
