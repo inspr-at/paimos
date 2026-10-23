@@ -844,12 +844,11 @@ async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: numb
   await page.clock.runFor(400)
   expect(await pulses(), 'the catch-up pulses nothing').toBe(0)
   await expect(sync).toHaveAttribute('data-state', 'just')
-  // Past the 10 s "just now" window, still inside the 30 s poll, so the connected line is the normal state.
-  await page.clock.runFor(11_000)
-  await expect(sync).toHaveAttribute('data-state', 'normal')
   await expect(sync.getByTestId('desk-sync-dot')).toBeVisible()
-  await sameGlyph('live-normal')
-  // Evidence only: the pinned visual fixture keeps the stream shut. This shot is the connected normal line.
+  await expect(words).toHaveText(phone ? /^checked just now\s·\snext in \d+ s$/ : /^Live\s·\schecked just now\s·\snext check in \d+ s$/)
+  await sameGlyph('live-settled')
+  // Evidence only: the pinned visual fixture keeps the stream shut. A further clock step starts the next read,
+  // so this shot is the settled connected line (Live and the dot; "just now" until that read).
   if (theme === 'light' && (width === 1440 || width === 390)) await page.screenshot({ path: testInfo.outputPath(`AEON-1700-live-${width}-light.png`) })
   const liveReads = reads
   await page.evaluate(() => (window as unknown as { fixtureQuietStreams: { emit(type: string, data: string, id: number): void } }).fixtureQuietStreams.emit('question.asked', '{}', 9001))
