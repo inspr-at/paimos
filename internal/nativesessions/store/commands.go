@@ -408,8 +408,8 @@ func (s *Store) Commands(ctx context.Context, d nativecontract.DaemonActor, q na
 func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, in nativecontract.Claim) (nativecontract.ClaimResult, error) {
 	var out nativecontract.ClaimResult
 	s.commandMu.Lock()
+	defer s.commandMu.Unlock()
 	c, ok := s.commands[in.OperationID]
-	s.commandMu.Unlock()
 	if !ok || c.done || c.intent.Receipt.Binding == nil {
 		return out, fail(403, nativecontract.ReasonGrantMissing)
 	}
@@ -418,13 +418,30 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 	if c.command.Kind == "stop" {
 		authority = s.stopTx
 	}
+	var claimRefusal error
+	var retired bool
 	err := authority(ctx, d, b, false, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
 		if in.DaemonID != d.DaemonID || in.DaemonGeneration != d.DaemonGeneration || in.LedgerGeneration != d.LedgerGeneration || in.CapabilityDigest != d.CapabilityDigest || in.ExpectedRevision != b.BindingRevision || proof.Identity.ProcessIdentityDigest != c.intent.ProcessIdentityDigest || proof.Identity.RuntimeEpoch != b.RuntimeEpoch {
 			return fail(409, nativecontract.ReasonIdentityMismatch)
 		}
+		retire := func(state string, reason nativecontract.Reason) error {
+			claimRefusal = fail(403, reason)
+			var err error
+			retired, err = s.retireInboxTx(ctx, tx, &c, session.OwnerPersonID, state, reason)
+			if err != nil || !retired {
+				return err
+			}
+			p, _ := tenant.PrincipalFrom(ctx)
+			_, err = events.Append(ctx, tx, p, inboxCommandEvent(c.intent.Receipt))
+			return err
+		}
 		actor := session.Original
 		if c.inbox {
 			if err := inboxCommandTx(ctx, tx, d, c); err != nil {
+				var refusal *Failure
+				if errors.As(err, &refusal) && refusal.Reason == nativecontract.ReasonPermissionRevoked {
+					return retire("rejected", refusal.Reason)
+				}
 				return err
 			}
 		}
@@ -444,6 +461,9 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 			until = c.intent.ExpiresAt
 		}
 		if !now.Before(until) {
+			if c.inbox {
+				return retire("expired", nativecontract.ReasonGrantExpired)
+			}
 			return fail(403, nativecontract.ReasonGrantExpired)
 		}
 		out = nativecontract.ClaimResult{OperationID: in.OperationID, OwnedSessionID: b.OwnedSessionID, Intent: session.Intent, Policy: session.Policy, ExpectedBinding: &b, ExpiresAt: until, FinalDrainGrant: c.drain, ClaimKind: "command", Command: &c.command, CommandActor: &nativecontract.CommandActor{TenantID: b.TenantID, PrincipalID: actor.ID, OwnerPersonID: session.OwnerPersonID, GrantID: session.GrantID, GrantRevision: session.Revision}, AuthorizationTTLMS: until.Sub(now).Milliseconds()}
@@ -451,10 +471,24 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 		if err := tx.QueryRow(ctx, `SELECT launch_config FROM native_session_intents WHERE owned_session_id=$1`, b.OwnedSessionID).Scan(&launch); err != nil {
 			return err
 		}
-		return json.Unmarshal(launch, &out.LaunchConfig)
+		if err := json.Unmarshal(launch, &out.LaunchConfig); err != nil {
+			return err
+		}
+		if err := s.validate("NativeClaimResult", out); err != nil {
+			return err
+		}
+		if c.inbox {
+			// Persist the claim before command content can reach the daemon. A
+			// restart can release only admissions without this possible-write fence.
+			return s.recordInboxReceiptTx(ctx, tx, c, session.OwnerPersonID)
+		}
+		return nil
 	})
-	if err == nil {
-		err = s.validate("NativeClaimResult", out)
+	if err == nil && claimRefusal != nil {
+		if retired {
+			delete(s.commands, in.OperationID)
+		}
+		return nativecontract.ClaimResult{}, claimRefusal
 	}
 	return out, err
 }
@@ -482,8 +516,12 @@ func (s *Store) Report(ctx context.Context, d nativecontract.DaemonActor, in nat
 	if err == nil && (in.State == "write_acknowledged" || in.State == "turn_started" || in.State == "uncertain" || in.State == "rejected" || in.State == "expired") {
 		s.commandMu.Lock()
 		if c, ok := s.commands[in.OperationID]; ok && c.inbox {
-			c.inboxAcknowledged = true
-			s.commands[in.OperationID] = c
+			if in.State == "rejected" || in.State == "expired" {
+				delete(s.commands, in.OperationID)
+			} else {
+				c.inboxAcknowledged = true
+				s.commands[in.OperationID] = c
+			}
 		}
 		s.commandMu.Unlock()
 	}

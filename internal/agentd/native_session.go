@@ -1428,14 +1428,6 @@ func (e *nativeOwned) poll(ctx context.Context) error {
 		if stopOnly && item.Kind != "stop" {
 			continue
 		}
-		if item.Kind == "input" {
-			e.mu.Lock()
-			busy := len(e.operations) != 0
-			e.mu.Unlock()
-			if busy && e.transport.Capabilities().Steer != "native" {
-				continue // Keep priority input durable until this provider's safe boundary.
-			}
-		}
 		if _, err := e.journal.Get(item.ExpectedBinding, item.OperationID); err == nil {
 			continue
 		}
