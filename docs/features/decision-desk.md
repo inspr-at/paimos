@@ -3,6 +3,16 @@
 See [Decision Desk projection](decision-desk-projection.md) for canonical ordering,
 exact counts and notification admission.
 
+One sync line (AEON-1700) says how current the Desk is: when it last read the desk
+successfully, a read or a live change under way, and when it checks next. The
+countdown comes from the timers that actually read the Desk (the page's 30-second
+poll, the header's, and a pending automatic retry); it shows only while the page is
+visible and online. "Live" appears only while the live-event stream that wakes the
+Desk is connected. Failures show quietly, then escalate with Try again; offline says
+so. The empty Open card holds the line under "Nothing waits for you"; otherwise it
+sits at the tab row's end, or under the tabs on narrow screens. Screen readers hear
+only failures, escalation, recovery and new items, never the ticking countdown.
+
 The Decision Desk UI (AEON-567) lives at `/decision-desk`. Open and answered
 questions are paged separately; refresh retains up to ten loaded pages per state
 (1,000 questions), with remaining results stated explicitly. Each memo freezes its

@@ -6,6 +6,8 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import DecisionDeskMemo from '../components/agents/DecisionDeskMemo.vue'
 import PersonStepRequest from '../components/agents/PersonStepRequest.vue'
 import DoctrineProposalDialog from '../components/rules/DoctrineProposalDialog.vue'
+import DeskSyncLine from '../components/agents/DeskSyncLine.vue'
+import { deskClock, deskClockMoved, deskSyncAnnouncement, deskSyncCopy, deskSyncLine } from '../lib/deskSync'
 import { getDoctrine, type DoctrineSource, type DoctrineFile, type DoctrineRule, type DoctrineInboxItem, type DoctrineProposal } from '../lib/doctrine'
 import { arrivals, deskAutoRetry, deskEmptyState, deskFailedWords, deskItemID, deskLinkItem, deskReadAborted, deskRefreshNotice, deskSourceLines, deskUnansweredLine, draftFor, kindLabels, newRound, outcomeLabels, retainDecidedLessons, runRef, type DeskClose, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskRetryPhase, type DeskSource, type DeskTicket, type DeskWho } from '../lib/decisionDesk'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
@@ -117,6 +119,13 @@ let capabilityGeneration = 0
 let currentRead: DeskRead | undefined
 let hydratedProjection: DeskProjection | undefined, hydration: Promise<void> | undefined
 const lastGoodAt = ref<number | null>(null), hydrationFailures = ref(0), hydrationFailedSince = ref<number | null>(null)
+// AEON-1700: the store's failed projection reads, kept until a hydration adopts a good read. A projection that answers
+// clears the store's count before its rows are read; the Desk is up to date again only once they are.
+const outageFailures = ref(0), outageSince = ref<number | null>(null)
+watch(() => [desk.failures, desk.failedSince] as const, ([count, since]) => {
+  outageFailures.value = Math.max(outageFailures.value, count)
+  if (since !== null) outageSince.value = Math.min(outageSince.value ?? since, since)
+}, { flush: 'sync', immediate: true })
 // AEON-1631: good rows kept from this visit while a later read missed the canonical desk, and the automatic retries' phase.
 const stale = ref(false), retryPhase = ref<DeskRetryPhase>('idle')
 const linkError = ref(''), revoked = ref(new Set<string>()), settledSteps = ref(new Set<string>()), pendingSteps = ref(new Set<string>())
@@ -332,24 +341,73 @@ const listedLines = computed(() => failedPanel.value ? [] : clearFrame.value ? s
 const scopeInCard = computed(() => filter.value === 'open' && !visible.value.length && !!scopeProject.value && !scopeKind.value && !failedPanel.value)
 // A failed read is retried on its own, 3, 10 and 30 s apart, one at a time; the 30 s poll goes on after that.
 const failing = computed(() => failedPanel.value || stale.value)
-const autoRetry = deskAutoRetry(() => refresh(), () => alive && failing.value, phase => { retryPhase.value = phase })
+// The pending retry's due time, from its own timer, for the sync line's countdown (AEON-1700).
+const retryDue = ref<number | null>(null)
+const autoRetry = deskAutoRetry(() => refresh(), () => alive && failing.value, (phase, dueAt) => { retryPhase.value = phase; retryDue.value = phase === 'retrying' ? dueAt ?? null : null })
 watch(failing, now => { if (now) autoRetry.start(); else autoRetry.reset() })
 // A person's Try again restarts the schedule; a read already under way is joined, never doubled.
 async function tryAgain() {
-  autoRetry.stop()
+  autoRetry.stop(); retryDue.value = null
   await refresh()
   if (!alive) return
   if (failing.value) autoRetry.start()
   else autoRetry.reset()
 }
 function allowed(item: DeskItem) { return person.value && decisionPermission(item, sources, can, adapters) }
-const refreshFailures = computed(() => Math.max(desk.failures, hydrationFailures.value))
+const refreshFailures = computed(() => Math.max(desk.failures, outageFailures.value, hydrationFailures.value))
 const refreshHint = computed(() => {
-  const since = [desk.failedSince, hydrationFailedSince.value].filter((at): at is number => at !== null)
+  const since = [desk.failedSince, outageSince.value, hydrationFailedSince.value].filter((at): at is number => at !== null)
   return deskRefreshNotice(refreshFailures.value, since.length ? Math.min(...since) : null, lastGoodAt.value, now.value)
 })
-const refreshEscalated = computed(() => refreshHint.value === 'escalated')
-const lastGoodTime = computed(() => lastGoodAt.value === null ? '' : new Date(lastGoodAt.value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }))
+// AEON-1700 (Tick UI spec v1): one sync line for the whole Desk: the last good read, a read or a live change under
+// way, failures, the network, and the next read from the real timers (this view's poll, the header's, a retry).
+const VIEW_POLL_MS = 30_000
+const viewPoll = Symbol('desk-view-poll')
+const pageShown = ref(document.visibilityState !== 'hidden'), networkUp = ref(navigator.onLine !== false)
+function readPage() { pageShown.value = document.visibilityState !== 'hidden'; networkUp.value = navigator.onLine !== false }
+// "Checking now…" holds for 400 ms, so a fast read never flickers; a hydration that follows its projection
+// read straight away continues the same activity, and a live change keeps its words until its read is done.
+const CHECKING_MIN_MS = 400
+const activity = ref<{ since: number; change: boolean } | null>(null)
+let activityTimer: ReturnType<typeof setTimeout> | undefined
+watch(() => [desk.loading || loading.value || desk.changeArrived, desk.changeArrived] as const, ([busy, change]) => {
+  if (busy) {
+    clearTimeout(activityTimer); activityTimer = undefined
+    activity.value = { since: activity.value?.since ?? Date.now(), change: !!activity.value?.change || change }
+    return
+  }
+  if (!activity.value || activityTimer) return
+  activityTimer = setTimeout(() => { activityTimer = undefined; activity.value = null }, Math.max(0, activity.value.since + CHECKING_MIN_MS - Date.now()))
+}, { immediate: true })
+const sync = computed(() => deskSyncLine({
+  now: now.value, checkedAt: lastGoodAt.value, busy: !!activity.value, change: !!activity.value?.change,
+  failures: refreshFailures.value, notice: refreshHint.value, stale: stale.value, retry: retryPhase.value,
+  online: networkUp.value, visible: pageShown.value, live: desk.live, pollAt: desk.nextPollAt, retryAt: retryDue.value,
+}, displayLanguage()))
+// The empty Open card holds the line under its message; everywhere else it sits in the tab row (§1).
+const syncInCard = computed(() => clearFrame.value)
+// §5: one polite region hears only failures turning quiet, escalation, recovery and new items; never a tick or a check.
+const announcement = ref('')
+let announcing: string[] = []
+function announce(text: string) {
+  announcing.push(text)
+  if (announcing.length > 1) return
+  announcement.value = ''
+  void nextTick(() => { announcement.value = announcing.join(' '); announcing = [] })
+}
+watch(() => sync.value.health, (to, from) => {
+  if (to === 'ok' && lastGoodAt.value === null) return
+  const words = deskSyncAnnouncement(from, to, lastGoodAt.value === null ? '' : deskClock(lastGoodAt.value), displayLanguage())
+  if (words) announce(words)
+})
+// Open items this visit has listed; a later good read names the ones it adds. The first read announces nothing.
+let seenOpen: Set<string> | null = null
+function noteArrivals() {
+  const open = items.value.filter(item => !item.decided).map(item => item.id)
+  const added = seenOpen ? open.filter(id => !seenOpen!.has(id)).length : 0
+  seenOpen = new Set([...(seenOpen ?? []), ...open])
+  if (added) announce(deskSyncCopy(displayLanguage()).announce.arrived(added))
+}
 async function refresh() {
   if (!session.authenticationCurrent()) return
   const read = await desk.refresh()
@@ -419,6 +477,9 @@ async function hydrate(projection: DeskProjection): Promise<void> {
       applyRead(result); stale.value = false
       hydratedProjection = projection
       lastGoodAt.value = Date.now(); hydrationFailures.value = 0; hydrationFailedSince.value = null
+      // This adopted read ends the outage; a projection read that failed after it still counts.
+      outageFailures.value = desk.failures; outageSince.value = desk.failedSince
+      noteArrivals()
       followLink()
       void readTickets(result.items.filter(item => !item.decided).slice(0, 300))
     } catch (cause) {
@@ -620,10 +681,10 @@ function resetDesk() {
   trimCursors.value = {}; nextKeyTrims.value = {}
   currentRead = undefined
   hydratedProjection = undefined; hydration = undefined
-  lastGoodAt.value = null; hydrationFailures.value = 0; hydrationFailedSince.value = null
+  lastGoodAt.value = null; hydrationFailures.value = 0; hydrationFailedSince.value = null; outageFailures.value = 0; outageSince.value = null
   phoneVerification.value = undefined; capabilityError.value = ''; stepupMethod.value = 'Passkey or sign-in'
   warnings.value = []; unanswered.value = []; more.value = { open: false, answered: false }; loading.value = false
-  stale.value = false; autoRetry.reset()
+  stale.value = false; autoRetry.reset(); seenOpen = null
   state.value = 'loading'
 }
 watch(owner, () => {
@@ -637,52 +698,17 @@ watch(owner, () => {
 // reset invalidates the frozen source; can() reacts to the completed refresh.
 const stopAccess = onAccessRevalidate({ reset: resetDesk })
 // On a row too narrow for its label the arrow shows alone (AEON-1448); on a fine pointer its name then also comes as a tip.
-const tabRow = ref<HTMLElement>(), oneByOne = ref<HTMLButtonElement>(), arrowTip = ref(false), narrowTabRow = ref(false)
+const tabRow = ref<HTMLElement>(), oneByOne = ref<HTMLButtonElement>(), arrowTip = ref(false)
 let finePointer: MediaQueryList | undefined
 function readArrowTip() { const label = oneByOne.value?.querySelector('.label'); arrowTip.value = !!label && getComputedStyle(label).display === 'none' && !!finePointer?.matches }
-// The container query owns the breakpoint; its flag also decides when JS teleports the feedback.
-function readTabRow() {
-  const bar = tabRow.value?.querySelector('.dp-bar')
-  narrowTabRow.value = !!bar && getComputedStyle(bar).getPropertyValue('--desk-tabs-narrow').trim() === '1'
-  readArrowTip()
-}
 watch(oneByOne, readArrowTip, { flush: 'post' })
 let rowSize: ResizeObserver | undefined
 onMounted(() => {
   finePointer = matchMedia('(pointer: fine)'); finePointer.addEventListener('change', readArrowTip)
-  readTabRow()
-  rowSize = new ResizeObserver(readTabRow); if (tabRow.value) rowSize.observe(tabRow.value)
+  readArrowTip()
+  rowSize = new ResizeObserver(readArrowTip); if (tabRow.value) rowSize.observe(tabRow.value)
 })
 onBeforeUnmount(() => { rowSize?.disconnect(); finePointer?.removeEventListener('change', readArrowTip) })
-// Join the shell's existing toast/notice stack. Measure its top so wrapping notices, multiple toasts and
-// the toast host's --toast-obstacle-bottom clearance all leave eight pixels below the floating hint.
-const refreshObstacleBottom = ref(0)
-let stackSize: ResizeObserver | undefined, stackChanges: MutationObserver | undefined
-const stackObstacles = new Set<HTMLElement>()
-function measureRefreshStack() {
-  const obstacles = [...document.querySelectorAll<HTMLElement>('.compact-notice, .toast-host')].filter(element => !element.closest('dialog'))
-  for (const element of stackObstacles) if (!obstacles.includes(element)) { stackSize?.unobserve(element); stackObstacles.delete(element) }
-  for (const element of obstacles) if (!stackObstacles.has(element)) { stackObstacles.add(element); stackSize?.observe(element) }
-  refreshObstacleBottom.value = Math.max(0, ...obstacles.map(element => {
-    const r = element.getBoundingClientRect()
-    return r.width > 0 && r.height > 0 ? window.innerHeight - r.top + 8 : 0
-  }))
-}
-function stopRefreshStack() {
-  stackSize?.disconnect(); stackChanges?.disconnect(); stackObstacles.clear()
-  window.removeEventListener('resize', measureRefreshStack)
-  refreshObstacleBottom.value = 0
-}
-watch(() => narrowTabRow.value && (refreshHint.value || stale.value), active => {
-  stopRefreshStack()
-  if (!active) return
-  stackSize = new ResizeObserver(measureRefreshStack)
-  stackChanges = new MutationObserver(measureRefreshStack)
-  stackChanges.observe(document.body, { childList: true, subtree: true })
-  window.addEventListener('resize', measureRefreshStack)
-  measureRefreshStack()
-}, { flush: 'post' })
-onBeforeUnmount(stopRefreshStack)
 // How the round ended: after the last decision the desk returns to where it was opened (AEON-1339).
 function closed(result?: DeskClose) {
   opened.value = false; ruleEdit.value = undefined; changeId.value = ''
@@ -722,8 +748,26 @@ function beginOpen() { if (!openRound.value.length) return; filter.value = 'open
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let poll: ReturnType<typeof setInterval> | undefined
 const focus = () => { if (!loading.value) void refresh() }
-onMounted(() => { window.addEventListener('focus', focus); poll = setInterval(() => { if (!document.hidden && !loading.value) void refresh() }, 30_000); clockTimer = setInterval(() => { now.value = Date.now() }, 1000) })
-onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.stop(); stopAccess(); clearInterval(poll); clearInterval(clockTimer); window.removeEventListener('focus', focus) })
+onMounted(() => {
+  window.addEventListener('focus', focus)
+  // A frozen capture clock leaves Date.now() unchanged, so this poll must not start "Checking now…". Focus still reads.
+  let viewPollAt = Date.now()
+  poll = setInterval(() => {
+    const at = Date.now()
+    desk.notePoll(viewPoll, at + VIEW_POLL_MS)
+    if (!deskClockMoved(viewPollAt, at)) return
+    viewPollAt = at
+    if (!document.hidden && !loading.value) void refresh()
+  }, VIEW_POLL_MS)
+  desk.notePoll(viewPoll, Date.now() + VIEW_POLL_MS)
+  clockTimer = setInterval(() => { now.value = Date.now() }, 1000)
+  document.addEventListener('visibilitychange', readPage); window.addEventListener('online', readPage); window.addEventListener('offline', readPage)
+})
+onBeforeUnmount(() => {
+  alive = false; generation++; ticketTurn++; autoRetry.stop(); stopAccess(); clearInterval(poll); clearInterval(clockTimer); clearTimeout(activityTimer); window.removeEventListener('focus', focus)
+  desk.notePoll(viewPoll, null)
+  document.removeEventListener('visibilitychange', readPage); window.removeEventListener('online', readPage); window.removeEventListener('offline', readPage)
+})
 </script>
 
 <template>
@@ -757,13 +801,9 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
           <button type="button" role="radio" :aria-checked="filter === 'open'" data-testid="desk-tab-open" @click="filter = 'open'">Open<span class="n">{{ openCountLabel }}</span></button>
           <button type="button" role="radio" :aria-checked="filter === 'decided'" data-testid="desk-tab-decided" @click="filter = 'decided'">Decided<span class="n">{{ decidedCountLabel }}</span></button>
         </div>
-        <!-- A narrow row sends feedback above the footer, outside the container's fixed-position containing block. -->
-        <Teleport to="#app" :disabled="!narrowTabRow">
-          <div class="refresh-slot" :class="{ floating: narrowTabRow }" :style="{ '--toast-obstacle-bottom': `${refreshObstacleBottom}px` }" data-testid="desk-refresh-slot">
-            <p v-if="refreshHint" class="refresh-hint" :class="{ escalated: refreshEscalated }" role="status" data-testid="desk-refresh-hint"><span class="refresh-copy"><AppIcon name="refresh" :size="12" /><span>{{ refreshEscalated ? `The desk hasn't refreshed since ${lastGoodTime}` : `Refresh failed\u00a0· retrying\u00a0· showing ${lastGoodTime}` }}</span>&nbsp;<span class="refresh-retry" :class="{ shown: refreshEscalated }"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="refresh">Try again</button></span></span></p>
-            <p v-else-if="stale" class="refresh-hint" role="status" data-testid="desk-stale"><span class="refresh-copy"><AppIcon name="history" :size="12" /><span>{{ failedWords.stale(lastGoodTime) }}</span>&nbsp;<span class="refresh-retry shown"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="tryAgain">{{ failedWords.retry }}</button></span></span></p>
-          </div>
-        </Teleport>
+        <!-- AEON-1700: the sync line takes the row's free end on a wide row and its own line under the tabs on a narrow one.
+             On the empty Open card it moves into the card instead; there is only ever one. -->
+        <div v-if="!syncInCard" class="sync-slot" :class="{ 'over-filter': filter !== 'decided' }" data-testid="desk-sync-slot"><DeskSyncLine :line="sync" :pulse="desk.liveEvents" :busy="loading || desk.loading" @retry="tryAgain" /></div>
         <!-- Wide rows retain the inline filter's box; narrow rows only take a filter line on Decided (AEON-1616). -->
         <div class="seg dec-filter" :class="{ reserved: filter !== 'decided' }" role="radiogroup" aria-label="Stamp" :aria-hidden="filter !== 'decided' || undefined" :inert="filter !== 'decided' || undefined">
           <button v-for="option in ([['', 'All'], ['once', 'Once'], ['always', 'Always'], ['requirement', 'Requirement'], ['doctrine', 'Doctrine'], ['approvals', 'Approvals']] as const)" :key="option[0]" type="button" role="radio" :aria-checked="outcomeFilter === option[0]" @click="outcomeFilter = option[0]">{{ option[1] }}</button>
@@ -791,6 +831,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
       <div v-else-if="clearFrame" class="all-clear" :class="{ reading: emptyState === 'reading' }" :data-state="emptyState" data-testid="desk-clear">
         <span class="art" aria-hidden="true"><template v-if="emptyState !== 'reading'"><img class="light" :src="deskLight" alt="" width="840" height="560" decoding="async" loading="lazy"><img class="dark" :src="deskDark" alt="" width="840" height="560" decoding="async" loading="lazy"></template></span>
         <p class="line" :data-testid="emptyState === 'reading' ? undefined : 'desk-empty'"><template v-if="emptyState !== 'reading'"><AppIcon name="check" :size="16" />Nothing waits for you</template></p>
+        <DeskSyncLine v-if="syncInCard" class="card-sync" :line="sync" :pulse="desk.liveEvents" :busy="loading || desk.loading" @retry="tryAgain" />
         <p class="quiet" role="status" data-testid="desk-unanswered"><template v-if="emptyState === 'incomplete'"><AppIcon name="clock" :size="14" /><span>{{ unansweredLine }}</span><span class="sep" aria-hidden="true">·</span><button type="button" class="linkish" :disabled="loading" @click="refresh">Try again</button></template></p>
         <p v-if="emptyState === 'reading'" class="reading-note" role="status">Reading the desk…</p>
       </div>
@@ -850,6 +891,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
         <p v-if="more[filter === 'open' ? 'open' : 'answered']" class="src-error"><AppIcon name="list" :size="14" /><span>More questions are available</span><span class="sep">·</span><button v-if="pages[filter === 'open' ? 'open' : 'answered'] < MAX_QUESTION_PAGES" type="button" class="linkish" :disabled="loading" @click="loadMore">Load 100 more</button><span v-else>the view shows up to 1,000 questions per state</span></p>
       </div>
     </section>
+    <p class="sr-only" aria-live="polite" data-testid="desk-sync-announce">{{ announcement }}</p>
     <p v-if="opened && fresh.length" class="arrival-line" role="status">{{ fresh.length }} new item{{ fresh.length === 1 ? '' : 's' }} waiting for the next round.</p>
     <DecisionDeskMemo v-if="opened" :key="`${owner}:${memoRound}`" :items="roundItems" :round="round" :start="start" :arrivals-count="fresh.length" :pending-rule-ids="items.filter(row => row.kind === 'rule' && !row.decided).map(row => row.id.slice(2))" :allowed="allowed" :decide="decide" :stepup-method="stepupMethod" :can-revoke="canRevoke" :revoke="revoke" :edit-rule="editRule" :undo="undoLesson" :who="who" :ticket="ticketOf" :run-pending="runPending" :change="changeId || undefined" @recorded="recorded" @close="closed" />
     <DoctrineProposalDialog v-if="ruleEdit" :key="owner" :source="ruleEdit.source" :file="ruleEdit.file" :rule="ruleEdit.rule" :draft="ruleEdit.draft" @close="ruleEdit = undefined" @saved="editedRule" />
@@ -885,30 +927,18 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
 /* AEON-1448 (Tick): one tab row at every width: the tabs at its start, "Answer one by one" at its end. On a narrow row
    the Decided stamp filter takes a line of its own; the button keeps the first, so it never wraps or adds height. */
 .dp-tabrow { --desk-list-gap: 14px; container: desk-tabs / inline-size; }
-.dp-bar { --desk-tabs-narrow: 0; display: grid; grid-template-columns: max-content minmax(0, max-content) minmax(0, 1fr) max-content; align-items: center; gap: 10px 14px; margin-bottom: var(--desk-list-gap); }
+.dp-bar { --desk-row-gap: 10px; display: grid; grid-template-columns: max-content minmax(0, max-content) minmax(0, 1fr) max-content; align-items: center; gap: var(--desk-row-gap) 14px; margin-bottom: var(--desk-list-gap); }
 .dp-bar .view-tabs { grid-area: 1 / 1; }
 .dp-bar .view-tabs button { white-space: nowrap; }
-/* AEON-1477 (Tick): on a wide row the hint takes the row's free end, right-aligned before the round action. Its slot
-   is the row's own height and adds none; centred while it fits, a hint that needs more lines grows upward into the
-   header's empty right side, never down onto the list. */
-.refresh-slot { grid-area: 1 / 3; align-self: stretch; position: relative; min-width: 0; }
-.refresh-hint { position: absolute; right: 0; bottom: 0; min-height: 100%; max-width: 100%; display: flex; align-items: center; margin: 0; color: var(--ink-3); font-size: 12px; line-height: 16px; text-align: right; }
-/* A separator stays with the word before it, so a wrapped line never starts with "·". */
-.refresh-copy { text-wrap: balance; }
-.refresh-hint svg { display: inline-block; margin-right: 4px; vertical-align: -1px; }
-.refresh-hint.escalated { color: var(--warn-ink); }
-.refresh-retry { white-space: nowrap; opacity: 0; }
-.refresh-retry.shown, .refresh-hint:hover .refresh-retry, .refresh-hint:focus-within .refresh-retry { opacity: 1; }
-.refresh-hint .linkish { color: inherit; font-weight: inherit; }
-/* AEON-1616: phone feedback overlays the page above its footer instead of reserving an empty grid row.
-   The empty slot cannot intercept a tap; a warning grows upward without moving the list or the tabs. */
-.refresh-slot.floating { position: fixed; z-index: 19; inset: auto 16px max(calc(var(--footer-h) + 14px + env(safe-area-inset-bottom)), var(--toast-obstacle-bottom, 0px)); min-height: 40px; pointer-events: none; }
-.floating .refresh-hint { width: 100%; padding: 10px 14px; border-radius: var(--radius-s); background: var(--surface-raised); box-shadow: var(--shadow-pop); line-height: 20px; text-align: left; pointer-events: auto; }
-/* Touch has no hover to reveal it: Try again shows with the hint, on a 44 × 44 box that adds no line height. */
-@media (pointer: coarse) {
-  .refresh-retry { opacity: 1; }
-  .refresh-hint .linkish { display: inline-block; min-width: 44px; min-height: 44px; margin: -14px 0; }
-}
+/* AEON-1700 (Tick UI spec v1 §1): on a wide row the sync line takes the row's free end, right-aligned before the
+   round action. Its slot is the row's own height and adds none; centred while it fits, a line that needs more room
+   grows upward into the header's empty right side, never down onto the list (the AEON-1477 slot). */
+.sync-slot { grid-area: 1 / 3; align-self: stretch; position: relative; min-width: 0; }
+/* Open keeps the stamp filter's box but hides it (AEON-1616), so the line may use that space too; its right edge stays. */
+.sync-slot.over-filter { grid-column: 2 / 4; }
+.sync-slot > .desk-sync { position: absolute; right: 0; bottom: 0; min-height: 100%; max-width: 100%; justify-content: flex-end; text-align: right; }
+/* The empty Open card holds it centred, 8 px under "Nothing waits for you" (the card's own gap is 10 px). */
+.card-sync { justify-content: center; margin-top: -2px; text-align: center; }
 /* 12.5 px is the tabs' type (a plain .btn is 13 px), so the label fits beside them on a 390 px phone. */
 .one-by-one { grid-area: 1 / -2; justify-self: end; gap: 6px; padding: 0 12px; font-size: 12.5px; }
 /* Coarse pointers: 44 px tall, and 44 × 44 as the arrow alone. */
@@ -925,11 +955,13 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
 /* A 960 px window with a classic gutter wraps; 1024 keeps one row, where the filter and the hint fit.
    Below it only Decided needs a second line. Open goes straight from the tabs to its list or empty state. */
 @container desk-tabs (width < 910px) {
-  .dp-bar { --desk-tabs-narrow: 1; grid-template-columns: max-content minmax(0, 1fr); }
-  /* CSS changes before ResizeObserver teleports the slot; never let it create an implicit third column. */
-  .refresh-slot { display: none; }
+  .dp-bar { grid-template-columns: max-content minmax(0, 1fr); }
   .dp-bar .dec-filter { grid-area: 2 / 1 / auto / -1; }
   .dp-bar .dec-filter.reserved { display: none; }
+  /* AEON-1700 §1: one line under the tab row (and under Decided's stamp filter), left-aligned: 8 px below the row
+     above it, 14 px (--desk-list-gap) above the list. Auto-placed into the first free full-width row. */
+  .sync-slot, .sync-slot.over-filter { grid-area: auto / 1 / auto / -1; align-self: start; position: static; margin-top: calc(8px - var(--desk-row-gap)); }
+  .sync-slot > .desk-sync { position: static; min-height: 20px; justify-content: flex-start; text-align: left; }
 }
 /* Below about 420 px the view tabs and the round action give up a little padding so the label still clears the tabs.
    The stamp filter is unchanged: on a phone it keeps scrolling (AEON-1339). */
@@ -1092,5 +1124,5 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
   .q-group-label { padding: 0 14px; }
 }
 @media (max-width: 560px) { .all-clear { padding: 20px 16px 24px; } .all-clear .art { width: min(100%, 250px); } }
-@media (pointer: coarse) { .seg button { height: 40px; min-width: 44px; } .dp-bar { gap: 14px; } .linkish { position: relative; } .linkish::before { content: ''; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); } }
+@media (pointer: coarse) { .seg button { height: 40px; min-width: 44px; } .dp-bar { --desk-row-gap: 14px; } .linkish { position: relative; } .linkish::before { content: ''; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); } }
 </style>

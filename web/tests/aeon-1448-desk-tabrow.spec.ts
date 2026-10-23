@@ -220,7 +220,13 @@ async function deskRow(page: Page, locale: string, widths: number[]) {
     })
     open.done()
     const after = (await page.getByTestId('desk-list').boundingBox())!
-    for (const axis of ['x', 'y', 'width'] as const) expect(Math.abs(after[axis] - card[axis]), `${step}: card ${axis}`).toBeLessThanOrEqual(0.5)
+    for (const axis of ['x', 'width'] as const) expect(Math.abs(after[axis] - card[axis]), `${step}: card ${axis}`).toBeLessThanOrEqual(0.5)
+    // AEON-1700 §1: the sync line sits in the empty card; with rows it takes the tab row's end, or on a narrow row a
+    // line of its own under the tabs. There the card starts the list gap below that line, and nowhere else moves.
+    const line = (await page.getByTestId('desk-sync').boundingBox())!, row = (await tabs(page).boundingBox())!
+    const ownLine = line.y >= row.y + row.height
+    const gap = await page.locator('.dp-bar').evaluate(bar => parseFloat(getComputedStyle(bar).marginBottom))
+    expect(Math.abs(after.y - (ownLine ? line.y + line.height + gap : card.y)), `${step}: card y`).toBeLessThanOrEqual(0.5)
     const withQuestion = await rowGeometry(page)
     expectOneRow(withQuestion, `${step} open with a question`)
     expect(Math.abs(withQuestion.tabs!.top - withQuestion.note!.bottom - withQuestion.section), `${step}: the same gap with a question`).toBeLessThanOrEqual(0.5)
