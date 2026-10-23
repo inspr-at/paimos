@@ -530,7 +530,9 @@ test.describe('phones', () => {
     // Start the requested face and prove that the network barrier holds it.
     await page.evaluate(() => { void document.fonts.load('12px "JetBrains Mono"') })
     await expect.poll(() => requested).toBe(true)
-    expect(await page.evaluate(() => document.fonts.check('12px "JetBrains Mono"'))).toBe(false)
+    const pendingFont = await page.evaluate(() => ({ available: document.fonts.check('12px "JetBrains Mono"'),
+      faces: [...document.fonts].map(face => ({ family: face.family, weight: face.weight, style: face.style, status: face.status })) }))
+    expect(pendingFont.available, JSON.stringify(pendingFont.faces)).toBe(false)
     await page.setViewportSize({ width: 415, height: 844 })
     release()
     await page.evaluate(() => document.fonts.ready.then(() => undefined))

@@ -27,7 +27,7 @@ export function contentBox(
 export async function controlStability(page: Page, controls: Record<string, Locator>, options: { grows?: string[]; tolerance?: number } = {}) {
   let interactions = 0
   const measure = async () => {
-    const samples: Record<string, { x: number; y: number; width: number; height: number }> = {}
+    const samples: Record<string, { x: number; y: number; width: number; height: number; layout: unknown }> = {}
     for (const [name, locator] of Object.entries(controls)) {
       await expect(locator, name).toBeVisible()
       const sample = await locator.evaluate(el => {
@@ -36,9 +36,15 @@ export async function controlStability(page: Page, controls: Record<string, Loca
         for (let parent = el.parentElement; parent; parent = parent.parentElement) {
           ancestors.push({ scrollLeft: parent.scrollLeft, scrollTop: parent.scrollTop, root: parent === root })
         }
-        return { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, windowScroll: { x: window.scrollX, y: window.scrollY }, ancestors }
+        const layout = [el, ...el.querySelectorAll(':scope > *, :scope > * > *')].slice(0, 12).map(node => {
+          const style = getComputedStyle(node), box = node.getBoundingClientRect()
+          return { tag: node.tagName, class: node.getAttribute('class'), text: node.textContent?.trim(),
+            width: box.width, height: box.height, font: style.font, numeric: style.fontVariantNumeric,
+            features: style.fontFeatureSettings, kerning: style.fontKerning, flex: style.flex, visibility: style.visibility }
+        })
+        return { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, windowScroll: { x: window.scrollX, y: window.scrollY }, ancestors, layout }
       })
-      samples[name] = contentBox(sample.rect, sample.windowScroll, sample.ancestors)
+      samples[name] = { ...contentBox(sample.rect, sample.windowScroll, sample.ancestors), layout: sample.layout }
       expect(samples[name].width, name).toBeGreaterThan(0); expect(samples[name].height, name).toBeGreaterThan(0)
     }
     return samples
@@ -56,7 +62,9 @@ export async function controlStability(page: Page, controls: Record<string, Loca
           continue
         }
         for (const dimension of ['x', 'y', 'width', 'height'] as const) {
-          expect(Math.abs(after[name][dimension] - before[name][dimension]), `${name}.${dimension}`).toBeLessThanOrEqual(options.tolerance ?? .5)
+          const difference = Math.abs(after[name][dimension] - before[name][dimension])
+          const detail = difference > (options.tolerance ?? .5) ? `: ${JSON.stringify({ before: before[name], after: after[name] })}` : ''
+          expect(difference, `${name}.${dimension}${detail}`).toBeLessThanOrEqual(options.tolerance ?? .5)
         }
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 'horizontal overflow').toBeLessThanOrEqual(1)
