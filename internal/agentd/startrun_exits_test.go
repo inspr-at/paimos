@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -546,13 +545,8 @@ func (f *startRunExitFixture) assert(err error, want startRunExitWant) {
 		}
 		toolsState := "absent"
 		if tools != nil {
-			connection, dialErr := net.DialTimeout("tcp", tools.listener.Addr().String(), time.Second)
-			if dialErr == nil {
-				toolsState = "open"
-				_ = connection.Close()
-			} else {
-				toolsState = "closed"
-			}
+			assertManagedToolsClosed(f.t, tools)
+			toolsState = "closed"
 		}
 		if want.tools == "" {
 			want.tools = "absent"
@@ -801,11 +795,7 @@ func TestStartRunLaunchHandoff(t *testing.T) {
 			if !closed {
 				t.Fatal("monitor left chat open")
 			}
-			connection, dialErr := net.DialTimeout("tcp", entry.tools.listener.Addr().String(), time.Second)
-			if dialErr == nil {
-				_ = connection.Close()
-				t.Fatal("monitor left tools open")
-			}
+			assertManagedToolsClosed(t, entry.tools)
 			f.power.check(t, 1, 1)
 		})
 	}

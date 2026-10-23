@@ -17,10 +17,10 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
-	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type fixture struct {
@@ -203,8 +203,11 @@ func TestManualReceiptsOverlapProvenanceAndQueue(t *testing.T) {
 	}
 }
 
-// Risk: recurring work loses release copy or silently bypasses the Done gate.
-func TestRecurrenceReleaseCopySurvivesEditsAndDoneGate(t *testing.T) {
+// CheckReleaseCopySurvivesEditsAndDoneGate retains the white-box recurrence
+// fixture while the external integration test mounts nodes. Importing nodes
+// here would cycle through agentruns back to the package under test.
+func CheckReleaseCopySurvivesEditsAndDoneGate(t *testing.T, mountNodes func(*http.ServeMux, *pgxpool.Pool)) {
+	t.Helper()
 	for _, tc := range []struct {
 		name               string
 		hidden             *bool
@@ -222,7 +225,7 @@ func TestRecurrenceReleaseCopySurvivesEditsAndDoneGate(t *testing.T) {
 			f := setup(t)
 			mux := http.NewServeMux()
 			f.m.Mount(mux)
-			nodes.New(f.d.App, nil).Mount(mux)
+			mountNodes(mux, f.d.App)
 			f.handler = mux
 			// Q1 (AEON-1248): release copy is a configured entry check,
 			// with a deliberate exemption for hidden recurring work.

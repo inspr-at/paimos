@@ -154,7 +154,7 @@ func handOver(ctx context.Context, tx pgx.Tx, p tenant.Principal, via string, id
 	}
 	rows, err := tx.Query(ctx, `SELECT m.id::text,m.sender_principal_id::text,m.fetched_at IS NULL,`+personSessionChatSQL+` FROM inbox_messages m
  WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.id=ANY($1::uuid[]) AND m.recipient_principal_id=$2::uuid AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp())
- AND ($3 OR NOT (`+personSessionChatSQL+`) OR (`+chatPickupAvailableSQL+`))
+ AND ($3 OR m.recipient_session_id IS NULL OR (`+chatPickupAvailableSQL+`))
  ORDER BY m.id FOR NO KEY UPDATE OF m`, ids, p.ID, via == SeenDrain)
 	if err != nil {
 		return nil, err

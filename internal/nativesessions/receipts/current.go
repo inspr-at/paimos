@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativesessions/consent"
@@ -243,6 +244,72 @@ func (a CurrentAuthority) RegisterOperationTx(ctx context.Context, tx pgx.Tx, in
 	if len(in.Reports) != 0 || in.ReportOffset != 0 || in.ReportAttempts != 0 {
 		return currentFailure(nativecontract.ReasonInvalidInput)
 	}
+	return registerOperationTx(ctx, tx, s, in)
+}
+
+// RegisterInboxOperationTx admits only the exact durable inbox lease of this
+// currently owned runtime. It grants no person command, tool or approval power.
+// The original person's current native consent and the paired worker proof are
+// independently required; no impersonated person is installed in the context.
+func (a CurrentAuthority) RegisterInboxOperationTx(ctx context.Context, tx pgx.Tx, d nativecontract.DaemonActor, in nativereceipts.Intent, input nativecontract.Input) error {
+	b := input.ExpectedBinding
+	s, proof, err := a.RuntimeTx(ctx, tx, d, b, false)
+	if err != nil {
+		return err
+	}
+	if s.View.Mode != "structured" || (s.View.State != "running" && s.View.State != "idle") || !s.View.Capabilities.Input || !s.View.Capabilities.ChatSupported {
+		return currentFailure(nativecontract.ReasonQualificationMissing)
+	}
+	v, err := nativecontract.NewValidator()
+	if err != nil {
+		return err
+	}
+	if err = nativereceipts.Validate(v, "NativeInput", input); err != nil {
+		return err
+	}
+	if err = nativereceipts.Validate(v, "NativeReceipt", in.Receipt); err != nil {
+		return err
+	}
+	digest, err := nativereceipts.Digest(input)
+	if err != nil {
+		return err
+	}
+	if in.Receipt.Binding == nil || !in.Receipt.Binding.Equal(b) || in.ActorID != s.Original.ID ||
+		in.Receipt.Operation != "input" || in.Receipt.State != "accepted" || in.Receipt.SourceSequence != "0" || in.Receipt.Reason != nil ||
+		in.Receipt.RequestID != input.RequestID || in.Receipt.InputID == nil || *in.Receipt.InputID != input.InputID ||
+		input.InputID != input.RequestID || input.AllowSameConversationSuccessor ||
+		in.PayloadSHA256 != digest || !in.ExpiresAt.Equal(input.ExpiresAt) || in.ExpiresAt.After(s.Policy.ExpiresAt) ||
+		in.ProcessIdentityDigest != proof.Identity.ProcessIdentityDigest || !nativereceipts.ValidDigest(in.ProcessIdentityDigest) ||
+		len(in.Reports) != 0 || in.ReportOffset != 0 || in.ReportAttempts != 0 {
+		return currentFailure(nativecontract.ReasonIdentityMismatch)
+	}
+	var sender, body string
+	var priority bool
+	err = tx.QueryRow(ctx, `SELECT m.sender_principal_id::text,m.body,(`+inbox.LivePrioritySQL+`) FROM harness_deliveries h
+ JOIN inbox_messages m ON m.tenant_id=h.tenant_id AND m.id=h.message_id
+ WHERE h.tenant_id=$1 AND h.id=$2 AND h.session_id=$3 AND h.mode='managed'
+ AND h.completed_at IS NULL AND h.released_at IS NULL AND m.id=$4
+ AND m.recipient_principal_id=$5 AND m.recipient_session_id=$3 AND m.content_mode='durable'
+ AND m.chat_thread_id IS NULL AND m.acked_at IS NULL AND m.cancelled_at IS NULL
+ AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) FOR NO KEY UPDATE OF m,h`, b.TenantID, in.Receipt.OperationID, b.HarnessSessionID, input.InputID, d.PrincipalID).Scan(&sender, &body, &priority)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return currentFailure(nativecontract.ReasonPermissionRevoked)
+	}
+	if err != nil {
+		return err
+	}
+	mode := "now"
+	if !priority {
+		mode = "after_turn"
+	}
+	if input.Mode != mode || input.Text != inbox.LiveMessageText(input.InputID, sender, body) {
+		return currentFailure(nativecontract.ReasonIdentityMismatch)
+	}
+	return registerOperationTx(ctx, tx, s, in)
+}
+
+func registerOperationTx(ctx context.Context, tx pgx.Tx, s consent.Session, in nativereceipts.Intent) error {
+	p := s.Original
 	in.Reports = []nativecontract.Receipt{}
 	raw, err := json.Marshal(in)
 	if err != nil {

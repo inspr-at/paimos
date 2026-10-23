@@ -22,6 +22,7 @@ type attachedInput struct {
 	Session, SenderSession, Reply    *string
 	Thread, Level                    string
 	Action, Expects, Compat          bool
+	Status                           bool
 }
 
 // tryAttached is shared by both durable send implementations, including every
@@ -72,7 +73,7 @@ func (m *module) tryAttached(ctx context.Context, p tenant.Principal, project st
 		}
 		// Client attribution is discarded, including a real agent sender session.
 		// Replies/threads/actions are deliberately not an attached input mode in v1.
-		if in.Reply != nil || in.Thread != "" || in.Action || in.Expects || (in.Level != "" && in.Level != "simple") {
+		if in.Status || in.Reply != nil || in.Thread != "" || in.Action || in.Expects || (in.Level != "" && in.Level != "simple") {
 			return attachedmsg.Fail(400, "unsupported_attached_mode")
 		}
 		if _, e = attachedmsg.Frame(p.ID, p.Name, in.Body); e != nil {

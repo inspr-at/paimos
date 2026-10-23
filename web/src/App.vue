@@ -1,7 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import EntryChecklistHost from './components/work/EntryChecklistHost.vue'
-import { displayLanguage } from './lib/displayLanguage'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { isNavigationFailure, useRoute, useRouter } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
@@ -26,7 +25,7 @@ import { useSession } from './stores/session'
 import { useReleases } from './stores/releases'
 import { brand } from './lib/brand'
 import { toast } from './lib/toast'
-import { getRelease, releaseTitle } from './lib/releases'
+import { getRelease, noteKindCounts, noteKindLine } from './lib/releases'
 import { updateToast } from './lib/codenames'
 import { compactChrome, headerFolded, shortScreen } from './lib/chrome'
 import { usePoller } from './lib/usePolledData'
@@ -165,13 +164,11 @@ onMounted(() => {
 onBeforeUnmount(() => { freezeObserver?.disconnect(); updateTimer.stop(); window.removeEventListener('focus', checkUpdate) })
 watch(() => releases.available, async version => {
   if (!version) return
-  // The new server knows what the release was about; say it in its reading form.
+  // The new server knows the release: its name, and its public notes counted by kind (AEON-1655).
   const release = await getRelease(version)
   if (version !== releases.available) return
-  const title = release ? releaseTitle(release, displayLanguage()) : ''
-  const about = title ? `: ${title}` : ''
-  // The marketing name leads; the calendar version shows on hover, and stands in only for a release with no known name.
-  const { message, release: named } = updateToast(brand.value.wordmark, version, release?.codename, about)
+  // The marketing name ends the sentence; the calendar version shows on hover, and stands in only for a release with no known name.
+  const { message, release: named } = updateToast(brand.value.wordmark, version, release?.codename, noteKindLine(release ? noteKindCounts(release) : []))
   toast(message, {
     sticky: true, key: 'update', release: named,
     actions: [{ label: 'What’s new', run: () => openReleases(version) }, { label: 'Reload', run: () => window.location.reload() }],

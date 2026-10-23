@@ -608,19 +608,34 @@ test('long names stay on one line and a long popover still reaches its links', a
 })
 
 test('stopped records that remain in the feed do not keep the project live', async ({ page }) => {
+  // Freeze before mounting so setup cannot race a periodic read. This checks
+  // one stop transition, without rendering every animation frame between polls.
+  await page.clock.pauseAt(new Date('2026-09-23T12:01:00Z'))
   const data = fixtures()
   data.preferences.projects = { view: 'cards' }
   data.projects.push({ id: 'p-end', key: 'PRJ-81', title: 'Ending', state: 'active', classic: 'END', description: 'One live session and history.', last: '2026-09-23T11:40:00Z' })
   const active = liveAgent({ project_id: 'p-end', session_id: 'end-live', principal_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', name: 'nova', ticket: { id: 'n-end', key: 'END-1', title: 'Finish', project_id: 'p-end' } }, 5)
   data.live.push(active, liveAgent({ project_id: 'p-end', session_id: 'end-old', name: 'retired', phase: 'stopped', activity: 'idle', stopped_at: '2026-09-23T10:00:00Z', stop_reason: 'completed' }, 70))
-  await cards(page, data)
+  const calls = await cards(page, data)
+  const reads = () => calls.filter(c => c.path === '/api/harness-sessions/live').length
+  // Let the stream handshake's catch-up finish before changing the feed.
+  await page.clock.runFor(1)
+  await expect.poll(reads).toBe(2)
+  await expect.poll(() => page.evaluate(async () => (await import('/src/stores/liveAgents.ts' /* @vite-ignore */)).useLiveAgents().dataStale)).toBe(false)
   const news = page.getByRole('region', { name: 'Projects', exact: true }).locator('[aria-live="polite"].sr-only')
   await expect(card(page, 'p-end').locator('.count')).toHaveCount(0)
   await expect(card(page, 'p-end').getByRole('button', { name: /^1 agent working: nova on END-1/ })).toBeVisible()
   Object.assign(active, { phase: 'stopped', activity: 'idle', stopped_at: '2026-09-23T12:00:00Z', stop_reason: 'completed' })
-  await page.clock.runFor(20_500)
+  const stoppedFeed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/harness-sessions/live')
+  // Keep stream heartbeats running: one large jump would simulate sleep and
+  // trigger recovery reads as well as the periodic poll being checked here.
+  for (const step of [5_000, 5_000, 5_000, 5_500]) await page.clock.fastForward(step)
+  // Both stopped records must still be returned; an emptied feed cannot prove
+  // that lifecycle filtering removed the project's last active session.
+  expect((await (await stoppedFeed).json()).items).toEqual(data.live)
+  expect(reads()).toBe(3)
   await expect(card(page, 'p-end').locator('.live')).toHaveCount(0)
-  await page.clock.runFor(2_600)
+  await page.clock.fastForward(2_600)
   await expect(news).toHaveText('No agent is working on Ending any more.')
 })
 

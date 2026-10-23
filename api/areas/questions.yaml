@@ -1,6 +1,28 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # aeon:owner internal/questions
 paths:
+  /settings/question-reminders:
+    get:
+      operationId: getQuestionReminderSettings
+      security: [{session: []}]
+      description: 'Person-only workspace reminder defaults, requiring settings.read or settings.manage. Applies to fresh questions; existing schedules retain their interval. Quiet hours are checked again at delivery, using the recipient phone quiet preferences when present.'
+      responses:
+        '200': {description: 'Reminder defaults', content: {application/json: {schema: {$ref: '#/components/schemas/QuestionReminderSettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putQuestionReminderSettings
+      security: [{session: []}]
+      description: 'Person-only settings.manage, checked under the access fence in the final transaction. A stale expected_revision returns 409. Equal quiet endpoints disable quiet hours. No existing question interval, grant or execution consent changes.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QuestionReminderSettingsInput'}
+      responses:
+        '200': {description: 'Saved reminder defaults', content: {application/json: {schema: {$ref: '#/components/schemas/QuestionReminderSettings'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /questions/{questionId}:
     parameters:
       - {name: questionId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -48,6 +70,33 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
 components:
   schemas:
+    QuestionReminderSettingsInput:
+      type: object
+      additionalProperties: false
+      required: [default_after_seconds, time_zone, quiet_start, quiet_end, expected_revision]
+      properties:
+        default_after_seconds: {type: integer, minimum: 0, maximum: 2592000}
+        time_zone: {type: string, maxLength: 100}
+        quiet_start: {type: integer, minimum: 0, maximum: 1439}
+        quiet_end: {type: integer, minimum: 0, maximum: 1439}
+        expected_revision: {type: integer, minimum: 0}
+    QuestionReminderSettings:
+      type: object
+      required: [default_after_seconds, time_zone, quiet_start, quiet_end, revision]
+      properties:
+        default_after_seconds: {type: integer, minimum: 0, maximum: 2592000, default: 7200, description: 'Default elapsed interval for new questions; zero disables it.'}
+        time_zone: {type: string, maxLength: 100, default: UTC, description: 'IANA timezone for fallback quiet hours.'}
+        quiet_start: {type: integer, minimum: 0, maximum: 1439, default: 1320, description: 'Local minute of day, inclusive.'}
+        quiet_end: {type: integer, minimum: 0, maximum: 1439, default: 480, description: 'Local minute of day, exclusive.'}
+        revision: {type: integer, minimum: 0}
+    QuestionReminder:
+      type: object
+      required: [after_seconds, count]
+      properties:
+        after_seconds: {type: integer, minimum: 0, maximum: 2592000}
+        count: {type: integer, minimum: 0, description: 'Number of durably accepted reminders, never a transport success claim.'}
+        next_at: {type: string, format: date-time, description: 'Next reminder check. Omitted after answering or disabling.'}
+        last_at: {type: string, format: date-time}
     QuestionDecisionInput:
       type: object
       additionalProperties: false

@@ -17,7 +17,7 @@ export type LeadPersonAction = 'start' | 'resume' | 'pause' | 'adopt' | 'cancel_
 export const leadActionAvailable = (lead: ProjectLead | null | undefined, action: LeadPersonAction) => lead?.actions?.[action]?.available === true
 export function leadActionReason(lead: ProjectLead | null | undefined, action: LeadPersonAction): string {
   const projection = lead?.actions?.[action]
-  if (!projection) return 'Action availability could not be read. Refresh the lead.'
+  if (!projection) return "Couldn't load lead actions. Reload to try again."
   if (projection.available) return ''
   const reasons: Record<string, string> = {
     person_required: 'A person must make this choice.', harness_control_required: 'You need permission to control this lead.',

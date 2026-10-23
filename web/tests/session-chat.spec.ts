@@ -5,6 +5,7 @@
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test, expect, type Page, type Locator } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { controlStability } from './control-stability'
@@ -278,7 +279,16 @@ test('Messages is its own tab with an unread badge; seeing the posts clears it a
   await shot(page, 'overview-1600')
   await rememberTab(page, 'Chat')
   await expect(messagesTab(page)).toHaveAttribute('aria-selected', 'true')
-  await expect(panel.getByRole('separator', { name: '2 new' })).toBeVisible()
+  await expect(panel.locator('.new-divider')).toBeVisible()
+  // AEON-1690: the unread divider describes its following message without
+  // becoming a sixth list item or hiding its day label from assistive tech.
+  const thread = panel.getByRole('list', { name: 'Messages', exact: true })
+  await expect(thread.getByRole('listitem').and(thread.locator(':scope > *'))).toHaveCount(5)
+  await expect(thread.locator('.msg').first()).toHaveAccessibleDescription('Today')
+  await expect(thread.locator('.new-divider + .msg')).toHaveAccessibleDescription('2 new')
+  const axe = await new AxeBuilder({ page }).include('.session-messages')
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+  expect(axe.violations, 'an unread divider keeps the message list accessible').toEqual([])
   await expect(panel.locator('.msg').nth(2)).toHaveClass(/mine/) // Own post after the watermark, above the divider.
   await expect(panel.locator('.msg').nth(2)).toContainText('Good. Keep the fix small and ship it behind the release gate.')
   await noUnreadBadge(messagesTab(page).locator('.count'))
@@ -288,7 +298,7 @@ test('Messages is its own tab with an unread badge; seeing the posts clears it a
   // Remembered per viewer, and the posts stay read.
   await page.reload()
   await expect(messagesTab(page)).toHaveAttribute('aria-selected', 'true')
-  await expect(panel.getByRole('separator', { name: /^\d+ new$/ })).toHaveCount(0)
+  await expect(panel.locator('.new-divider')).toHaveCount(0)
   await rememberTab(page, 'Details')
   await page.reload()
   await expect(panel.getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true')
@@ -393,11 +403,11 @@ test('a late server read marker opens the thread at the first unread message', a
     const opened = page.goto(`/agents/${worker.id}`)
     const panel = panelOf(page)
     await expect(panel.locator('.msg').last()).toBeInViewport()
-    await expect(panel.getByRole('separator', { name: /^\d+ new$/ })).toHaveCount(0)
+    await expect(panel.locator('.new-divider')).toHaveCount(0)
     expect(await localEvent(page, worker.id)).toBe(0)
     release()
     await opened
-    await expect(panel.getByRole('separator', { name: /new/ })).toBeVisible()
+    await expect(panel.locator('.new-divider')).toBeVisible()
     await expect(panel.locator('.msg').nth(6)).toBeInViewport()
     await expect(panel.locator('.msg').last()).not.toBeInViewport()
     await expect.poll(() => localEvent(page, worker.id)).toBeGreaterThan(205)
@@ -441,7 +451,7 @@ for (const intent of ['wheel', 'touchstart', 'pointerdown', 'keydown', 'displace
       }, intent)
       release()
       await opened
-      await expect(panel.getByRole('separator', { name: /new/ })).toBeVisible()
+      await expect(panel.locator('.new-divider')).toBeVisible()
       await expect.poll(() => localEvent(page, worker.id)).toBeGreaterThanOrEqual(220)
       await page.clock.runFor(100)
       expect(await thread.evaluate(el => el.scrollTop)).toBe(top)
@@ -594,7 +604,7 @@ test('a late read marker never moves a reader who scrolled up', async ({ page })
     })
     release()
     await opened
-    await expect(panel.getByRole('separator', { name: /new/ })).toBeVisible()
+    await expect(panel.locator('.new-divider')).toBeVisible()
     await expect.poll(() => localEvent(page, worker.id)).toBeGreaterThanOrEqual(220)
     await page.clock.runFor(100)
     expect(await thread.evaluate(el => el.scrollTop)).toBe(top)
@@ -675,7 +685,7 @@ test('the thread stays pinned at the bottom, counts posts that arrive while scro
   await expect(panel.locator('.msg').first()).toBeVisible()
   // A first visit opens at the latest exchange, without a divider.
   await expect(panel.locator('.msg').last()).toBeInViewport()
-  await expect(panel.getByRole('separator', { name: /^\d+ new$/ })).toHaveCount(0)
+  await expect(panel.locator('.new-divider')).toHaveCount(0)
   await expect(panel.getByRole('button', { name: /new messages, go to the latest/ })).toHaveCount(0)
   // Reading to the bottom clears the badge.
   await thread.evaluate(el => el.scrollTo({ top: el.scrollHeight }))
@@ -761,7 +771,7 @@ test.describe('phone screenshots', () => {
       await expect(messagesTab(page)).toBeVisible()
       await capture(`overview-${theme}-390`)
       await messagesTab(page).click()
-      await expect(panelOf(page).getByRole('separator', { name: /new/ })).toBeVisible()
+      await expect(panelOf(page).locator('.new-divider')).toBeVisible()
       await capture(`messages-unread-${theme}-390`)
       await scroller(page).evaluate(el => el.scrollTo({ top: 0 }))
       await expect(panelOf(page).getByRole('button', { name: /latest message/ })).toBeVisible()

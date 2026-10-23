@@ -39,6 +39,61 @@ func BarrierPool(t *testing.T, pool *pgxpool.Pool, match func(string) bool) (*pg
 	return p, b, ctx
 }
 
+// QueryCounter records statement counts and affected rows, never arguments.
+// A separate pool keeps fixture setup and assertion reads out of measurements.
+type QueryCounter struct {
+	mu      sync.Mutex
+	queries map[string]int
+	rows    map[string]int64
+}
+
+func CountedPool(t *testing.T, pool *pgxpool.Pool) (*pgxpool.Pool, *QueryCounter) {
+	t.Helper()
+	c := &QueryCounter{}
+	c.Reset()
+	cfg := pool.Config()
+	cfg.ConnConfig.Tracer = c
+	p, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(p.Close)
+	return p, c
+}
+
+func (c *QueryCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryStartData) context.Context {
+	c.mu.Lock()
+	c.queries[q.SQL]++
+	c.mu.Unlock()
+	return context.WithValue(ctx, c, q.SQL)
+}
+
+func (c *QueryCounter) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryEndData) {
+	if sql, ok := ctx.Value(c).(string); ok && q.Err == nil {
+		c.mu.Lock()
+		c.rows[sql] += q.CommandTag.RowsAffected()
+		c.mu.Unlock()
+	}
+}
+
+func (c *QueryCounter) Reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.queries, c.rows = make(map[string]int), make(map[string]int64)
+}
+
+func (c *QueryCounter) Count(match func(string) bool) (calls int, rows int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for sql, n := range c.queries {
+		if match(sql) {
+			calls += n
+			rows += c.rows[sql]
+		}
+	}
+	return
+}
+
 func (b *QueryBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryStartData) context.Context {
 	if b.match(q.SQL) && b.used.CompareAndSwap(false, true) {
 		return context.WithValue(ctx, b, true)

@@ -82,7 +82,7 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 	return setupWithActions(t, mode, paid, []string{"work.create"}, "personal")
 }
 
-func setupWithActions(t *testing.T, mode string, paid bool, actions []string, scopeKind string) *fixture {
+func setupWithActions(t *testing.T, mode string, paid bool, actions []string, scopeKind string, scheduled ...recurrences.Trigger) *fixture {
 	t.Helper()
 	f := &fixture{t: t, d: dbtest.Open(t), mux: http.NewServeMux(), owner: tenant.Principal{Kind: tenant.Person, BrowserSession: true}, agent: tenant.Principal{Kind: tenant.Agent, Scopes: []string{"run.claim", "run.telemetry"}}}
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('routine-budget','Budget') RETURNING id::text`).Scan(&f.owner.TenantID))
@@ -134,6 +134,12 @@ func setupWithActions(t *testing.T, mode string, paid bool, actions []string, sc
 		scope.ProjectID = f.project
 	}
 	in := recurrences.Input{ProjectID: f.project, ParentID: f.parent, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one", Template: recurrences.Template{Title: "Budget work", Description: "Assigned workspace", Criteria: []string{"Validate"}, EstimateHours: 1, Priority: "high", Type: "ticket"}, Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=WEEKLY;BYDAY=MO", TimeOfDay: "09:00", Timezone: "UTC"}, Definition: &recurrences.Definition{Scope: scope, OwnerPrincipalID: f.owner.ID, Assignment: &recurrences.Assignment{Goal: "Bounded fixture", Sources: []recurrences.SourceReference{}, Role: "build", WorkKindID: kind, AllowedActions: actions, RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}, Budget: budget}}}
+	if len(scheduled) != 0 {
+		in.Trigger = scheduled[0]
+		var anchor time.Time
+		must(t, f.d.Admin.QueryRow(t.Context(), `SELECT clock_timestamp()-interval '1 day'`).Scan(&anchor))
+		in.Trigger.StartDate = anchor.UTC().Format(time.DateOnly)
+	}
 	f.call("POST", "/api/recurrences", in, &f.routine)
 	must(t, f.tx(func(tx pgx.Tx) error {
 		var err error
@@ -171,13 +177,25 @@ func setupWithActions(t *testing.T, mode string, paid bool, actions []string, sc
 	}
 	f.call("PUT", path+"/execution-consent", consent, nil)
 	f.call("GET", path, nil, &f.routine)
-	var occurrence recurrences.Occurrence
-	f.call("POST", path+"/run-now", map[string]string{"idempotency_key": "budget"}, &occurrence)
-	if occurrence.Run == nil || occurrence.NodeID == nil {
-		t.Fatal("missing actual occurrence lineage")
+	if len(scheduled) == 0 {
+		var occurrence recurrences.Occurrence
+		f.call("POST", path+"/run-now", map[string]string{"idempotency_key": "budget"}, &occurrence)
+		if occurrence.Run == nil || occurrence.NodeID == nil {
+			t.Fatal("missing actual occurrence lineage")
+		}
+		f.run, f.work = occurrence.Run.ID, *occurrence.NodeID
+	} else {
+		// Model a missed persisted cursor using the database's own clock. The
+		// scheduler coalesces downtime into one ordinary daemon pickup intent.
+		f.exec(`UPDATE recurrences SET next_at=clock_timestamp()-interval '1 day' WHERE id=$1`, f.routine.ID)
+		must(t, recurrences.New(f.d.App).WithExecutionRuntime(runtime).RunTenant(t.Context(), f.owner.TenantID))
+		must(t, f.d.Admin.QueryRow(t.Context(), `SELECT id::text,work_node_id::text FROM routine_runs WHERE recurrence_id=$1 AND occurrence_key LIKE 'time:%'`, f.routine.ID).Scan(&f.run, &f.work))
+		var count int
+		must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM recurrence_occurrences WHERE recurrence_id=$1`, f.routine.ID).Scan(&count))
+		if count != 1 {
+			t.Fatalf("downtime created %d occurrences, want one", count)
+		}
 	}
-	f.run = occurrence.Run.ID
-	f.work = *occurrence.NodeID
 	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT id::text FROM routine_actions WHERE run_id=$1`, f.run).Scan(&f.action))
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'budget-profile','1','codex','openai','fixture-model','high','standard') RETURNING id::text`, f.owner.TenantID).Scan(&f.profile))
 	billing := "subscription"
@@ -300,7 +318,8 @@ func setupDispatchOn(t *testing.T, f *fixture) *dispatchFixture {
 // recovery. Existing consent/budget/pairing guards are reused. The PostgreSQL
 // barrier proves scheduler and real coordinator pickup overlap on one intent.
 func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
-	f := setup(t, "off", false)
+	t.Run("elapsed recurrence calendar", elapsedRecurrenceCalendar)
+	f := setupWithActions(t, "off", false, []string{"work.create"}, "personal", recurrences.Trigger{Kind: "time", RRULE: "FREQ=MINUTELY;INTERVAL=15", TimeOfDay: "00:00", Timezone: "UTC"})
 	// Observe the committed turn writes from both independent connections;
 	// the queue event count alone cannot detect a replay advancing a turn.
 	f.exec(`CREATE TABLE routine_dispatch_turn_observations(tenant_id uuid,project_id uuid,at timestamptz)`)

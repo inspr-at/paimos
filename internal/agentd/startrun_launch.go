@@ -43,7 +43,7 @@ func (s *Supervisor) launchRun(ctx context.Context, claimed claimedRun, cleanup 
 			return launchedRun{}, err
 		}
 	}
-	if verification || review && routineWorkspace == nil {
+	if verification || admitted.readOnly || review && routineWorkspace == nil {
 		runWorkspace, err = s.prepareScratch(s.workspace)
 		if err != nil {
 			return launchedRun{}, err
@@ -103,7 +103,7 @@ func (s *Supervisor) launchRun(ctx context.Context, claimed claimedRun, cleanup 
 	// On a journal failure Start is never invoked; after success a crash is
 	// unconfirmed, even if no PID was subsequently persisted.
 	var launchRev, launchDefault string
-	if !verification && !review {
+	if !verification && !review && !admitted.readOnly {
 		launchRev, launchDefault = workspaceHEAD(ctx, runWorkspace), launchDefaultRev(ctx, runWorkspace)
 	}
 	if s.ledger != nil {
@@ -121,7 +121,7 @@ func (s *Supervisor) launchRun(ctx context.Context, claimed claimedRun, cleanup 
 	intent := entry.record
 	intent.LaunchState, intent.State = launchAttempted, "starting"
 	intent.LaunchRev, intent.LaunchDefaultRev = launchRev, launchDefault
-	intent.AutomaticReview = order.Kind == "build"
+	intent.AutomaticReview = order.Kind == "build" && !admitted.readOnly
 	intent.LaunchBranch = branch
 	err = s.journal.Put(intent)
 	if err == nil {
@@ -193,18 +193,18 @@ func (s *Supervisor) registerRunHarness(ctx context.Context, claimed claimedRun,
 	if managedPolicy {
 		caps = append(caps, recoveryCapability, managedControlCapability, "steer", "rename", "model", "effort")
 	}
-	if profile.Harness != Grok && !review {
+	if profile.Harness != Grok && !review && !claimed.admitted.readOnly {
 		caps = append(caps, "interrupt")
 	}
 	entry.queueInput = queuedChatHarness(profile.Harness)
-	entry.inboxCapable = !verification && !review && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi || entry.queueInput)
+	entry.inboxCapable = !verification && !review && !claimed.admitted.readOnly && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi || entry.queueInput)
 	if entry.inboxCapable {
 		caps = append(caps, "inbox")
 		if !managedPolicy {
 			caps = append(caps, "steer")
 		}
 	}
-	if (profile.Harness == Claude || profile.Harness == Codex) && !verification && !review {
+	if (profile.Harness == Claude || profile.Harness == Codex) && !verification && !review && !claimed.admitted.readOnly {
 		caps = append(caps, servicetier.Capability)
 	}
 	relayAPI, relayable := s.api.(ChatRelayAPI)
@@ -306,7 +306,7 @@ func (s *Supervisor) prepareRunTools(claimed claimedRun, runWorkspace string) (*
 	resourceEnvironment, branch := claimed.prepared.resourceEnvironment, claimed.prepared.branch
 	var err error
 	var runTools *RunTools
-	if toolAPI, ok := s.api.(RunToolAPI); ok && !verification && !review {
+	if toolAPI, ok := s.api.(RunToolAPI); ok && !verification && !review && !claimed.admitted.readOnly {
 		if scoped, ok := s.api.(interface{ RunToolsFor(string) RunToolAPI }); ok {
 			toolAPI = scoped.RunToolsFor(run.ID)
 		}
