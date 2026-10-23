@@ -70,9 +70,16 @@ export function retainAssistantOrder(items: Assistant[], previous: string[]): st
 }
 export function budgetPercent(policy: AssistantPolicy, facts: AssistantFacts): number | null {
   if (!facts.spend) return null
-  const spend = Number(facts.spend.amount), limit = Number(policy.weekly_budget.amount)
-  if (!Number.isFinite(spend) || !Number.isFinite(limit) || spend < 0 || limit < 0) return null
-  return limit === 0 ? 100 : Math.min(100, spend / limit * 100)
+  const scaled = (value: string): bigint | null => {
+    if (!/^[0-9]{1,24}(\.[0-9]{1,6})?$/.test(value)) return null
+    const [integer = '0', fraction = ''] = value.split('.')
+    return BigInt(integer) * 1_000_000n + BigInt(fraction.padEnd(6, '0'))
+  }
+  const spend = scaled(facts.spend.amount), limit = scaled(policy.weekly_budget.amount)
+  if (spend === null || limit === null) return null
+  // Compare exact micro-units before drawing: floating point rounding must not
+  // turn a value just below the ceiling into a budget-reached pause.
+  return limit === 0n || spend >= limit ? 100 : Number(spend * 10_000n / limit) / 100
 }
 export function assistantMoney(amount: string, unit: AssistantPolicy['weekly_budget']['unit'], spent = false): string {
   // Preserve the exact decimal sent by the server, including sub-cent spend.

@@ -29,6 +29,9 @@ it('assistant facts retain the specified status order, exact budget words and in
   expect(budgetPercent(scout.policy, facts[scout.principal_id]!)).toBeCloseTo(84)
   expect(budgetPercent(amy.policy, unavailableAssistantFacts())).toBeNull()
   expect(budgetPercent(amy.policy, { ...facts[amy.principal_id]!, spend: { amount: '8', daily: [] } })).toBe(80)
+  const exactPolicy = { ...amy.policy, weekly_budget: { ...amy.policy.weekly_budget, amount: '999999999999.999999' } }
+  expect(budgetPercent(exactPolicy, { ...facts[amy.principal_id]!, spend: { amount: '999999999999.999998', daily: [] } })).toBeLessThan(100)
+  expect(budgetPercent(exactPolicy, { ...facts[amy.principal_id]!, spend: { amount: '999999999999.999999', daily: [] } })).toBe(100)
   const app = createSSRApp(AssistantsSection, { items, facts, state: 'ready', error: '', truncated: false, canConnect: true, canApprove: true, now, sortEpoch: 0, selected: '', owner: 'owner' })
   app.component('RouterLink', defineComponent({ props: ['to'], setup: (props, { slots }) => () => h('a', { href: props.to }, slots.default?.()) }))
   const html = await renderToString(app)
