@@ -1,0 +1,23 @@
+{
+  "action": "completed",
+  "workflow_run": {
+    "id": 503,
+    "run_attempt": 1,
+    "name": "CI",
+    "path": ".github/workflows/ci.yml",
+    "event": "merge_group",
+    "head_branch": "gh-readonly-queue/main/pr-7-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "status": "completed",
+    "conclusion": "failure",
+    "created_at": "2026-10-07T08:00:00Z",
+    "run_started_at": "2026-10-07T08:00:30Z",
+    "updated_at": "2026-10-07T08:10:00Z",
+    "check_suite_id": 903,
+    "pull_requests": [
+      {
+        "number": 7
+      }
+    ]
+  }
+}

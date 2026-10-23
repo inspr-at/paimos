@@ -200,7 +200,7 @@ const { view: projectLeads, withoutLead: leadless, mayStart: mayStartLead, launc
 const manualStart = computed(() => canStart.value && showExpertStart.value)
 const canStartLead = computed(() => mayStartLead.value && leadless.value.length > 0)
 const leadlessNote = computed(() => !leadLaunchAvailable.value ? launchReason.value : leadless.value.length === 1 ? `${projects.byId(leadless.value[0]!)?.routeKey ?? 'One project'} has none. One per project.` : `${leadless.value.length} projects have none. One per project.`)
-const showNew = computed(() => manualStart.value || canStartLead.value || canAttach.value || showConnect.value)
+const showNew = computed(() => canStart.value || canStartLead.value || canAttach.value || showConnect.value)
 watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => {
   headerMenu.value = null; filter.value = null; capMoved.value = false; capOpen.value = false
   if (query.value) setQuery('')
@@ -680,6 +680,9 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
             <button v-if="canStartLead" type="button" role="menuitem" class="menu-item" :aria-disabled="!leadLaunchAvailable" @click="leadLaunchAvailable && menuAction(() => openStartLead(leadless, headerMenu?.anchor ?? null, true))"><AppIcon name="play" /><span>Start {{ LEAD_WORDS.l }}…<small>{{ leadlessNote }}</small></span></button>
             <button v-if="canAttach" type="button" role="menuitem" class="menu-item" @click="menuAction(() => attachDialog?.open())"><AppIcon name="link" /><span>Attach a running session…<small>Bring in a session started in a terminal.</small></span></button>
             <RouterLink v-if="showConnect" role="menuitem" class="menu-item" to="/agents/register-agent" @click="headerMenu = null"><AppIcon name="monitor" /><span>Connect your machine…<small>Install agentd so it can run agents.</small></span></RouterLink>
+            <template v-if="canStart">
+              <button type="button" role="menuitem" class="menu-item" @click="menuAction(() => startDialog?.openOnce())"><AppIcon name="agent" /><span>Run once…<small>A single run with a task and optional instruction. Read-only by default.</small></span></button>
+            </template>
             <template v-if="manualStart">
               <div class="menu-sep" role="separator" /><p class="eyebrow menu-eyebrow">Expert</p>
               <button type="button" role="menuitem" class="menu-item" @click="menuAction(() => startDialog?.open())"><AppIcon name="agent" /><span>Start agent manually…<small>Pick ticket, host, harness, account, model and thinking yourself. Same checks apply.</small></span></button>
@@ -693,7 +696,7 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
               <button role="menuitem" type="button" class="menu-item" data-autofocus @click="windDownFromMenu"><AppIcon name="pause" /><span>Wind down…<small>Finish what runs, start nothing new</small></span></button>
               <div class="menu-sep" role="separator" />
             </template>
-            <button role="menuitem" type="button" class="menu-item" aria-label="Model preferences" @click="menuAction(() => openModelPrefs())"><AppIcon name="gear" /><span>Model preferences<small>Which models do which work.</small></span></button>
+            <button role="menuitem" type="button" class="menu-item" aria-label="Model preferences" @click="menuAction(() => openModelPrefs(href => router.push(href)))"><AppIcon name="gear" /><span>Model preferences<small>Which models do which work.</small></span></button>
             <RouterLink role="menuitem" class="menu-item" to="/agents/usage" @click="headerMenu = null"><AppIcon name="pulse" /><span>Usage<small>Tokens and cost per agent, account and day.</small></span></RouterLink>
             <RouterLink role="menuitem" class="menu-item" to="/agents/routines" @click="headerMenu = null"><AppIcon name="repeat" /><span>Routines<small>Recurring work agents do by themselves.</small></span></RouterLink>
             <RouterLink v-if="can('keys.manage')" role="menuitem" class="menu-item" to="/settings/access/agents" @click="headerMenu = null"><AppIcon name="key" /><span>Agent keys<small>Scoped API keys for agents.</small></span></RouterLink>

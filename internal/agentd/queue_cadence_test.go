@@ -294,7 +294,7 @@ func TestRemoteProbeBatchUnavailableFallsBackWithoutWideningAuthority(t *testing
 type queueHintRetryAPI struct {
 	*fakeAPI
 	status int
-	calls  atomic.Int32
+	calls  atomic.Int64
 }
 
 func (a *queueHintRetryAPI) WatchQueue(context.Context, func()) error {

@@ -30,7 +30,7 @@ func armVendorRetry(ctx context.Context, tx pgx.Tx, v Run) error {
 		return nil
 	}
 
-	if v.Status != "failed" || v.Purpose != "managed" || v.AccountID == nil || v.ReadOnlyReview {
+	if v.Status != "failed" || v.Purpose != "managed" || v.AccountID == nil || v.ReadOnlyReview || v.RunOnce {
 		return nil
 	}
 	var stopped bool

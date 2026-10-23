@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
@@ -339,6 +341,112 @@ func TestSourceEventVisibilityAndLiveOwnerAuthorization(t *testing.T) {
 		t.Fatalf("revoked owner error: %v", err)
 	}
 	f.assertContextAndNoRuns(r, 1)
+}
+
+// Risk: keyless scheduler identities derive recurrences.manage from nodes.write
+// after an agent owner's or external sender's explicit grant is revoked.
+func TestEventRecurrenceAgentsNeedLiveExplicitManagementGrants(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		external, fullAccess bool
+	}{
+		{name: "scoped owner"},
+		{name: "full-access owner", fullAccess: true},
+		{name: "scoped external sender", external: true},
+		{name: "full-access external sender", external: true, fullAccess: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setup(t)
+			agent, signingKey := f.sender()
+			agent.Scopes = append(agent.Scopes, "nodes.write")
+			agent.FullAccess = tc.fullAccess
+			var role string
+			f.tx(func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `SELECT role_id::text FROM role_bindings WHERE principal_id=$1 AND scope_id=$2`, agent.ID, f.project).Scan(&role); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'nodes.write')`, agent.TenantID, role); err != nil {
+					return err
+				}
+				// Inert key metadata only; no credential is needed by this handler fixture.
+				return tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,full_access,created_by_principal_id)
+				 VALUES($1,$2,'Event authorization','event-authz-fixture',repeat('0',64),$3,$4,$5) RETURNING id::text`, agent.TenantID, agent.ID, agent.Scopes, agent.FullAccess, agent.KeyCreatorID).Scan(&agent.KeyID)
+			})
+			agent.AuthKeyID = agent.KeyID
+			source := f.node("work", &f.project, "Source feature")
+			in := f.input()
+			in.OverlapPolicy = "create"
+			in.Trigger = Trigger{Kind: "event", Event: "node.done"}
+			owner := agent
+			if tc.external {
+				owner = f.p
+				in.Trigger = Trigger{Kind: "event", Event: "external.tag", External: &ExternalSender{PrincipalID: agent.ID, PublicKey: base64.StdEncoding.EncodeToString(signingKey.Public().(ed25519.PublicKey))}}
+			}
+			var r Recurrence
+			if err := json.Unmarshal(f.call(owner, "POST", "/api/recurrences", in, http.StatusCreated), &r); err != nil {
+				t.Fatal(err)
+			}
+			emit := func(delivery string) int64 {
+				t.Helper()
+				f.now = f.now.Add(time.Minute)
+				if !tc.external {
+					return f.sourceEvent(source, "node.updated", "open", "accepted", map[string]any{})
+				}
+				var receipt externalReceipt
+				event := ExternalEvent{DeliveryID: delivery, Event: in.Trigger.Event, OccurredAt: f.now, Source: "product/repository", Ref: "v1"}
+				if err := json.Unmarshal(f.signedCall(agent, signingKey, r.ID, event, nil, http.StatusAccepted), &receipt); err != nil {
+					t.Fatal(err)
+				}
+				return receipt.EventID
+			}
+			first := emit("before-revocation")
+			f.run()
+			got := f.receipts(r.ID)
+			if len(got) != 1 || got[0].Outcome != "created" || got[0].SourceEventID == nil || *got[0].SourceEventID != first {
+				t.Fatalf("explicit grant did not create the first occurrence: %+v", got)
+			}
+			cursor := f.get(r.ID).EventCursor
+			pending := emit("pending-at-revocation")
+			f.tx(func(tx pgx.Tx) error {
+				changed, err := tx.Exec(t.Context(), `DELETE FROM role_permissions WHERE role_id=$1 AND permission=$2`, role, Permission)
+				if err == nil && changed.RowsAffected() != 1 {
+					return fmt.Errorf("revoked %d management grants, want 1", changed.RowsAffected())
+				}
+				return err
+			})
+			ctx := tenant.WithPrincipal(t.Context(), agent)
+			if err := db.InTenant(ctx, f.d.App, agent.TenantID, func(tx pgx.Tx) error {
+				for _, permission := range []string{"nodes.read", "nodes.write"} {
+					if err := authz.RequireTx(ctx, tx, agent, permission, authz.Scope{ProjectID: f.project}); err != nil {
+						return fmt.Errorf("revocation lost %s: %w", permission, err)
+					}
+				}
+				err := manage(ctx, tx, agent, f.project)
+				if tc.fullAccess && err != nil || !tc.fullAccess && !errors.Is(err, authz.ErrForbidden) {
+					return fmt.Errorf("authenticated key management after revocation: %v", err)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.m.RunTenant(t.Context(), agent.TenantID); !errors.Is(err, authz.ErrForbidden) {
+				t.Fatalf("scheduler must reject the revoked explicit grant: %v", err)
+			}
+			f.assertContextAndNoRuns(r, 1)
+			if after := f.get(r.ID).EventCursor; after != cursor {
+				t.Fatalf("denied event advanced cursor: %d, want %d", after, cursor)
+			}
+			f.tx(func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, agent.TenantID, role, Permission)
+				return err
+			})
+			f.run()
+			got = f.receipts(r.ID)
+			if len(got) != 2 || got[1].Outcome != "created" || got[1].SourceEventID == nil || *got[1].SourceEventID != pending {
+				t.Fatalf("restored explicit grant lost the pending event: %+v", got)
+			}
+		})
+	}
 }
 
 func (f *fixture) sender() (tenant.Principal, ed25519.PrivateKey) {

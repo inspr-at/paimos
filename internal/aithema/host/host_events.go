@@ -52,6 +52,9 @@ func (m *Module) queueHostEvents(ctx context.Context, tid string) error {
 			if err := tx.QueryRow(ctx, `SELECT coalesce(max(id),0) FROM events WHERE tenant_id=$1`, tid).Scan(&high); err != nil {
 				return err
 			}
+			if high <= cursor {
+				return nil
+			}
 			rows, err := tx.Query(ctx, `SELECT e.id,e.type FROM events e LEFT JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id WHERE e.tenant_id=$1 AND e.id>$2 AND e.id<=$3 AND (e.node_id=$4::uuid OR n.project_id=$4::uuid OR e.after->>'project_node_id'=$4::text) AND e.type NOT LIKE 'aithema.%' ORDER BY e.id LIMIT 100`, tid, cursor, high, a.Project)
 			if err != nil {
 				return err

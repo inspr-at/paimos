@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/embedding"
+	"github.com/inspr-at/paimos/internal/linkvault"
 )
 
 // Endpoint selection belongs only to settings.manage persons. Loopback and LAN
@@ -205,18 +206,25 @@ func (p workspaceEmbedding) Model() string { return p.identity }
 // queue untouched and its search lexical. Stored vector identity includes the
 // endpoint and model, so a provider switch never mixes incompatible vectors.
 func (s *Service) Embeddings(ctx context.Context, tenantID string) (embedding.Provider, error) {
-	c, key, err := s.resolve(ctx, tenantID)
+	c, sealed, err := s.embeddingConfig(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	if !c.Enabled || !c.Features.Embeddings {
 		return nil, nil
 	}
+	var key string
+	if len(sealed) > 0 {
+		key, err = linkvault.Decrypt(s.key, tenantID, credentialID, sealed)
+		if err != nil {
+			return nil, fault(503, "provider credential is unavailable")
+		}
+	}
 	u, err := endpoint(c.BaseURL, "embeddings")
 	if err != nil {
 		return nil, err
 	}
-	p, err := embedding.NewHTTPProvider(embedding.HTTPConfig{URL: u, Model: c.EmbeddingModel, APIKey: string(key), Client: s.client})
+	p, err := embedding.NewHTTPProvider(embedding.HTTPConfig{URL: u, Model: c.EmbeddingModel, APIKey: key, Client: s.client})
 	if err != nil {
 		return nil, errors.New("embedding provider unavailable")
 	}

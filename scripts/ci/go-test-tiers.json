@@ -2164,6 +2164,10 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRunIdleSleepAssertionLifecycle","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunOnceReadOnlyBridgeWithUntrustedAmbientNode","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRunOnceReadOnlyCeilingAndInstruction","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestSIGTERMEndsIdleManagedCodex","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestScanAttachProcargs","tier":"GATED-FULL"}
@@ -3082,6 +3086,12 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunNowIsPersonOnlyAuditedAndRunScoped","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunOnceBindsContextOptionsAndCurrentAuthority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunOnceMalformedBindingDoesNotPoisonLists","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunOnceRequestIDIsTenantScoped","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunPersonFinalClaimCeiling","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunPersonRecoveryAndChildInheritServerRun","tier":"ESSENTIAL"}
@@ -3945,6 +3955,8 @@
     {"kind":"go","package":"internal/auth","name":"TestFullAccessLiveCatalogAndBoundaries","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestFullAccessModelsV2SimpleRead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestFullAccessRecurrencesFollowProjectWriteGrants","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestGoalAgentKeyCeiling","tier":"ESSENTIAL"}
     ,
@@ -6424,6 +6436,10 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowWorkflowRunShowsRunningChecks","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryGitHubJobAttemptsProjection","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryGitHubMetricReadsWaitForCompletion","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryActionsRefusalFromGitHub","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryFirstReadFailurePreservesSelectedWindow","tier":"ESSENTIAL"}
@@ -6528,6 +6544,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliverySettingsOverridesRevisionFence","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliverySevenDayJobBackfillIsIdempotentAndBounded","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingAppReaderScopesBindingsAndPartialReads","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryShippingConcurrentClaimantsOwnOneAction","tier":"ESSENTIAL"}
@@ -6573,6 +6591,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookRetryBudget","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookSequenceRebuildIsolationAndHolds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookStartupProjectionRace","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookTerminalNoOps","tier":"ESSENTIAL"}
     ,
@@ -9887,6 +9907,8 @@
     {"kind":"go","package":"internal/recurrences","name":"TestEventCandidatesExcludeUnrelatedProjectEdits","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestEventMorningFollowsLocalDateAcrossDST","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestEventRecurrenceAgentsNeedLiveExplicitManagementGrants","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestEventRecurrenceBacklogDoesNotStarveRelease","tier":"ESSENTIAL"}
     ,

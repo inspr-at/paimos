@@ -1,0 +1,23 @@
+{
+  "action": "completed",
+  "workflow_run": {
+    "id": 501,
+    "run_attempt": 1,
+    "name": "CI",
+    "path": ".github/workflows/ci.yml",
+    "event": "pull_request",
+    "head_branch": "work/job-first",
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "status": "completed",
+    "conclusion": "success",
+    "created_at": "2026-10-07T06:00:00Z",
+    "run_started_at": "2026-10-07T06:00:30Z",
+    "updated_at": "2026-10-07T06:10:00Z",
+    "check_suite_id": 901,
+    "pull_requests": [
+      {
+        "number": 7
+      }
+    ]
+  }
+}
