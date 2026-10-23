@@ -468,10 +468,12 @@ func testAssistantPullRoundTrip(t *testing.T) {
 	}
 	// Explicit expiry remains authoritative even though automatic online
 	// deadlines are suppressed. Derive it from the database clock as well.
-	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_messages SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, raw.ID); err != nil {
+	if _, err := w.db.Admin.Exec(t.Context(), `WITH instant AS MATERIALIZED (SELECT clock_timestamp() AS now)
+	 UPDATE inbox_messages SET created_at=instant.now-interval '2 minutes',expires_at=instant.now-interval '1 minute'
+	 FROM instant WHERE id=$1`, raw.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_receipts SET deliver_by=clock_timestamp()-interval '1 second' WHERE message_id=$1`, raw.ID); err != nil {
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_receipts r SET deliver_by=m.expires_at FROM inbox_messages m WHERE r.message_id=m.id AND m.id=$1`, raw.ID); err != nil {
 		t.Fatal(err)
 	}
 	if failed, err := NewSweeper(w.db.App).SweepTenant(t.Context(), w.admin.TenantID); err != nil || failed != 1 {
