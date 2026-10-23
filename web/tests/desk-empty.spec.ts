@@ -33,6 +33,7 @@ async function mockEmptyDesk(page: Page, theme: 'light' | 'dark', withItem = fal
 // AEON-1477: a transient failure must never replace good rows or move controls.
 // AEON-1616 (R18): empty phone-only rows must not bury the first item or empty state.
 // Extend these existing cases: the normal desktop gap and zero movement elsewhere, including failures.
+// Tick: phone refresh feedback must clear the paused notice and the toast stack, leaving its retry reachable.
 for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
   test(`AEON-1477 refresh failures keep the items and hint geometry ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
@@ -81,7 +82,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     }
     const filled = await spacing()
     await page.screenshot({ path: testInfo.outputPath(`AEON-1616-items-${width}-${theme}.png`) })
-    const anchors = { heading: page.getByRole('heading', { level: 1, name: 'Decision Desk' }), tabs: page.getByRole('radiogroup', { name: 'Show' }), open: page.getByTestId('desk-tab-open'), decided: page.getByTestId('desk-tab-decided'), row, slot: page.getByTestId('desk-refresh-slot') }
+    const anchors = { heading: page.getByRole('heading', { level: 1, name: 'Decision Desk' }), tabs: page.getByRole('radiogroup', { name: 'Show' }), open: page.getByTestId('desk-tab-open'), decided: page.getByTestId('desk-tab-decided'), round: page.getByTestId('desk-one-by-one'), row, slot: page.getByTestId('desk-refresh-slot') }
     const before = await Promise.all(Object.values(anchors).map(control => control.boundingBox()))
     await expectStableControls({ controls: anchors, scrollAreas: { page: page.locator('html'), list }, interactions: [
       { name: 'one 429 keeps the row without a hint', run: async () => { await refresh(429); await expect(hint).toHaveCount(0) } },
@@ -89,6 +90,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
         await refresh(500)
         await expect(hint).toContainText('Refresh failed · retrying · showing')
         await expect(hint).not.toHaveClass(/escalated/)
+        if (width === 390) await page.screenshot({ path: testInfo.outputPath(`AEON-1616-hint-first-390-${theme}.png`) })
         const retry = hint.getByRole('button', { name: 'Try again' })
         await retry.focus()
         await expect(hint.locator('.refresh-retry')).toHaveCSS('opacity', '1')
@@ -100,6 +102,9 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
         await page.clock.setFixedTime(new Date(goodAt.getTime() + 60_001))
         await expect(hint).toHaveClass(/escalated/)
         await expect(hint).toContainText("The desk hasn't refreshed since")
+        await expect(hint.getByRole('button', { name: 'Try again' })).toBeVisible()
+        await expect(hint.locator('.refresh-retry')).toHaveCSS('opacity', '1')
+        if (width === 390) await page.screenshot({ path: testInfo.outputPath(`AEON-1616-hint-escalated-390-${theme}.png`) })
         await page.screenshot({ path: testInfo.outputPath(`AEON-1477-escalated-${width}-${theme}.png`) })
       } },
       { name: 'retry recovers in place', run: async () => {
@@ -123,6 +128,80 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     } })) })
     // The brief asks for zero pixels, beyond the shared guard's ±0.5 px limit.
     expect(await Promise.all(Object.values(anchors).map(control => control.boundingBox()))).toEqual(before)
+
+    if (width === 390) {
+      // The same unavailable connection leaves the Desk read failed and the shell's live summary paused.
+      // Publish through the real footer API so this is the actual CompactNotice, with its own styles/z-index.
+      // The scoped fixture retracts its publication before the rest of this existing case continues.
+      const notice = page.locator('.compact-notice'), toastHost = page.locator('.toast-host')
+      const retry = hint.getByRole('button', { name: 'Try again', exact: true })
+      const controls = { heading: anchors.heading, tabs: anchors.tabs, open: anchors.open, decided: anchors.decided, round: anchors.round, row, list }
+      const controlsAt = await Promise.all(Object.values(controls).map(control => control.boundingBox()))
+      const stacks: { state: string; hint: Awaited<ReturnType<typeof box>>; obstacle: Awaited<ReturnType<typeof box>>; gap: number; retryHit: boolean }[] = []
+      const above = async (state: string, obstacle: Locator) => {
+        await expect(hint).toBeVisible()
+        await expect(obstacle).toBeVisible()
+        await expect.poll(async () => {
+          const h = await box(hint), o = await box(obstacle)
+          return o.y - h.y - h.height
+        }, `${state}: eight pixels between the hint and the overlay stack`).toBe(8)
+        const h = await box(hint), o = await box(obstacle)
+        expect(h.y, `${state}: the whole hint stays on screen`).toBeGreaterThanOrEqual(0)
+        const retryHit = await retry.evaluate(button => {
+          const r = button.getBoundingClientRect()
+          return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === button
+        })
+        expect(retryHit, `${state}: nothing covers the centre of Try again`).toBe(true)
+        expect(await Promise.all(Object.values(controls).map(control => control.boundingBox())), `${state}: zero pixels of movement in the Desk`).toEqual(controlsAt)
+        stacks.push({ state, hint: h, obstacle: o, gap: o.y - h.y - h.height, retryHit })
+      }
+      let toastIds: number[] = []
+      await expectStableControls({ controls, scrollAreas: { page: page.locator('html'), list }, interactions: [
+        { name: 'paused updates stack below the escalated hint', run: async () => {
+          await page.evaluate(async updatedAt => {
+            // @ts-expect-error Vite resolves the app's Vue instance.
+            const { effectScope } = await import('/node_modules/.vite/deps/vue.js')
+            // @ts-expect-error Vite resolves browser source URLs.
+            const { useFooterSummary } = await import('/src/lib/footerSummary.ts')
+            const scope = effectScope()
+            scope.run(() => useFooterSummary(() => null, () => ({ updatedAt, paused: true })))
+            Object.assign(window, { deskPhoneNoticeStop: () => scope.stop() })
+          }, goodAt.getTime())
+          await expect(notice).toHaveText('Updates paused · retrying')
+          await above('paused notice', notice)
+          await page.screenshot({ path: testInfo.outputPath(`AEON-1616-hint-with-notice-390-${theme}.png`) })
+        } },
+        { name: 'a growing toast stack stays below the hint', run: async () => {
+          toastIds = await page.evaluate(async () => {
+            // @ts-expect-error Vite resolves browser source URLs.
+            const { toast } = await import('/src/lib/toast.ts')
+            return ['The connection could not be refreshed.', 'The last Desk items are still here.'].map(message => toast(message, { sticky: true }))
+          })
+          await expect(toastHost.locator('.toast')).toHaveCount(2)
+          await above('toast stack', toastHost)
+          const n = await box(notice), h = await box(hint)
+          expect(n.y - h.y - h.height, 'the paused notice remains below the hint too').toBeGreaterThanOrEqual(8)
+          await page.screenshot({ path: testInfo.outputPath(`AEON-1616-hint-with-toasts-390-${theme}.png`) })
+          const beforeRead = reads
+          await retry.click()
+          await expect.poll(() => reads, 'the unobstructed retry still reads the Desk').toBeGreaterThan(beforeRead)
+          await expect(list).toHaveAttribute('aria-busy', 'false')
+          await above('retry with overlays', toastHost)
+        } },
+        { name: 'removing the overlays restores the original phone anchor', run: async () => {
+          await page.evaluate(async ids => {
+            // @ts-expect-error Vite resolves browser source URLs.
+            const { dismiss } = await import('/src/lib/toast.ts')
+            ids.forEach(dismiss)
+            ;(window as unknown as { deskPhoneNoticeStop(): void }).deskPhoneNoticeStop()
+          }, toastIds)
+          await expect(notice).toHaveCount(0)
+          await expect(toastHost.locator('.toast')).toHaveCount(0)
+          await expect.poll(() => anchors.slot.boundingBox()).toEqual(before.at(-1))
+        } },
+      ] })
+      await writeFile(testInfo.outputPath(`AEON-1616-stack-390-${theme}.md`), JSON.stringify({ width, theme, stacks, movement: 0 }) + '\n')
+    }
 
     // A genuinely empty desk uses the same first-card slot; the title and tabs remain exactly where they were.
     await refresh(0)

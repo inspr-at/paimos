@@ -634,7 +634,12 @@ const stopAccess = onAccessRevalidate({ reset: resetDesk })
 const tabRow = ref<HTMLElement>(), oneByOne = ref<HTMLButtonElement>(), arrowTip = ref(false), narrowTabRow = ref(false)
 let finePointer: MediaQueryList | undefined
 function readArrowTip() { const label = oneByOne.value?.querySelector('.label'); arrowTip.value = !!label && getComputedStyle(label).display === 'none' && !!finePointer?.matches }
-function readTabRow() { narrowTabRow.value = !!tabRow.value && tabRow.value.getBoundingClientRect().width < 910; readArrowTip() }
+// The container query owns the breakpoint; its flag also decides when JS teleports the feedback.
+function readTabRow() {
+  const bar = tabRow.value?.querySelector('.dp-bar')
+  narrowTabRow.value = !!bar && getComputedStyle(bar).getPropertyValue('--desk-tabs-narrow').trim() === '1'
+  readArrowTip()
+}
 watch(oneByOne, readArrowTip, { flush: 'post' })
 let rowSize: ResizeObserver | undefined
 onMounted(() => {
@@ -643,6 +648,35 @@ onMounted(() => {
   rowSize = new ResizeObserver(readTabRow); if (tabRow.value) rowSize.observe(tabRow.value)
 })
 onBeforeUnmount(() => { rowSize?.disconnect(); finePointer?.removeEventListener('change', readArrowTip) })
+// Join the shell's existing toast/notice stack. Measure its top so wrapping notices, multiple toasts and
+// the toast host's --toast-obstacle-bottom clearance all leave eight pixels below the floating hint.
+const refreshObstacleBottom = ref(0)
+let stackSize: ResizeObserver | undefined, stackChanges: MutationObserver | undefined
+const stackObstacles = new Set<HTMLElement>()
+function measureRefreshStack() {
+  const obstacles = [...document.querySelectorAll<HTMLElement>('.compact-notice, .toast-host')].filter(element => !element.closest('dialog'))
+  for (const element of stackObstacles) if (!obstacles.includes(element)) { stackSize?.unobserve(element); stackObstacles.delete(element) }
+  for (const element of obstacles) if (!stackObstacles.has(element)) { stackObstacles.add(element); stackSize?.observe(element) }
+  refreshObstacleBottom.value = Math.max(0, ...obstacles.map(element => {
+    const r = element.getBoundingClientRect()
+    return r.width > 0 && r.height > 0 ? window.innerHeight - r.top + 8 : 0
+  }))
+}
+function stopRefreshStack() {
+  stackSize?.disconnect(); stackChanges?.disconnect(); stackObstacles.clear()
+  window.removeEventListener('resize', measureRefreshStack)
+  refreshObstacleBottom.value = 0
+}
+watch(() => narrowTabRow.value && (refreshHint.value || stale.value), active => {
+  stopRefreshStack()
+  if (!active) return
+  stackSize = new ResizeObserver(measureRefreshStack)
+  stackChanges = new MutationObserver(measureRefreshStack)
+  stackChanges.observe(document.body, { childList: true, subtree: true })
+  window.addEventListener('resize', measureRefreshStack)
+  measureRefreshStack()
+}, { flush: 'post' })
+onBeforeUnmount(stopRefreshStack)
 // How the round ended: after the last decision the desk returns to where it was opened (AEON-1339).
 function closed(result?: DeskClose) {
   opened.value = false; ruleEdit.value = undefined; changeId.value = ''
@@ -719,7 +753,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
         </div>
         <!-- A narrow row sends feedback above the footer, outside the container's fixed-position containing block. -->
         <Teleport to="#app" :disabled="!narrowTabRow">
-          <div class="refresh-slot" :class="{ floating: narrowTabRow }" data-testid="desk-refresh-slot">
+          <div class="refresh-slot" :class="{ floating: narrowTabRow }" :style="{ '--toast-obstacle-bottom': `${refreshObstacleBottom}px` }" data-testid="desk-refresh-slot">
             <p v-if="refreshHint" class="refresh-hint" :class="{ escalated: refreshEscalated }" role="status" data-testid="desk-refresh-hint"><span class="refresh-copy"><AppIcon name="refresh" :size="12" /><span>{{ refreshEscalated ? `The desk hasn't refreshed since ${lastGoodTime}` : `Refresh failed\u00a0· retrying\u00a0· showing ${lastGoodTime}` }}</span>&nbsp;<span class="refresh-retry" :class="{ shown: refreshEscalated }"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="refresh">Try again</button></span></span></p>
             <p v-else-if="stale" class="refresh-hint" role="status" data-testid="desk-stale"><span class="refresh-copy"><AppIcon name="history" :size="12" /><span>{{ failedWords.stale(lastGoodTime) }}</span>&nbsp;<span class="refresh-retry shown"><span aria-hidden="true">·</span> <button type="button" class="linkish" :disabled="loading || desk.loading" @click="tryAgain">{{ failedWords.retry }}</button></span></span></p>
           </div>
@@ -845,7 +879,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
 /* AEON-1448 (Tick): one tab row at every width: the tabs at its start, "Answer one by one" at its end. On a narrow row
    the Decided stamp filter takes a line of its own; the button keeps the first, so it never wraps or adds height. */
 .dp-tabrow { --desk-list-gap: 14px; container: desk-tabs / inline-size; }
-.dp-bar { display: grid; grid-template-columns: max-content minmax(0, max-content) minmax(0, 1fr) max-content; align-items: center; gap: 10px 14px; margin-bottom: var(--desk-list-gap); }
+.dp-bar { --desk-tabs-narrow: 0; display: grid; grid-template-columns: max-content minmax(0, max-content) minmax(0, 1fr) max-content; align-items: center; gap: 10px 14px; margin-bottom: var(--desk-list-gap); }
 .dp-bar .view-tabs { grid-area: 1 / 1; }
 .dp-bar .view-tabs button { white-space: nowrap; }
 /* AEON-1477 (Tick): on a wide row the hint takes the row's free end, right-aligned before the round action. Its slot
@@ -862,7 +896,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
 .refresh-hint .linkish { color: inherit; font-weight: inherit; }
 /* AEON-1616: phone feedback overlays the page above its footer instead of reserving an empty grid row.
    The empty slot cannot intercept a tap; a warning grows upward without moving the list or the tabs. */
-.refresh-slot.floating { position: fixed; z-index: 19; inset: auto 16px calc(var(--footer-h) + 14px + env(safe-area-inset-bottom)); min-height: 40px; pointer-events: none; }
+.refresh-slot.floating { position: fixed; z-index: 19; inset: auto 16px max(calc(var(--footer-h) + 14px + env(safe-area-inset-bottom)), var(--toast-obstacle-bottom, 0px)); min-height: 40px; pointer-events: none; }
 .floating .refresh-hint { width: 100%; padding: 10px 14px; border-radius: var(--radius-s); background: var(--surface-raised); box-shadow: var(--shadow-pop); line-height: 20px; text-align: left; pointer-events: auto; }
 /* Touch has no hover to reveal it: Try again shows with the hint, on a 44 × 44 box that adds no line height. */
 @media (pointer: coarse) {
@@ -882,10 +916,10 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
 .dp-bar .dec-filter.reserved { visibility: hidden; }
 .dp-bar .dec-filter::-webkit-scrollbar { display: none; }
 .dp-bar .dec-filter button { flex: none; white-space: nowrap; }
-/* 910 px: a 960 px window with a classic gutter wraps; 1024 keeps one row, where the filter and the hint fit.
+/* A 960 px window with a classic gutter wraps; 1024 keeps one row, where the filter and the hint fit.
    Below it only Decided needs a second line. Open goes straight from the tabs to its list or empty state. */
-@container desk-tabs (max-width: 909.98px) {
-  .dp-bar { grid-template-columns: max-content minmax(0, 1fr); }
+@container desk-tabs (width < 910px) {
+  .dp-bar { --desk-tabs-narrow: 1; grid-template-columns: max-content minmax(0, 1fr); }
   /* CSS changes before ResizeObserver teleports the slot; never let it create an implicit third column. */
   .refresh-slot { display: none; }
   .dp-bar .dec-filter { grid-area: 2 / 1 / auto / -1; }
