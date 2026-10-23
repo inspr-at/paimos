@@ -7,6 +7,18 @@ import ReleaseName from './ReleaseName.vue'
 function act(id: number, run: () => void) { dismiss(id); run() }
 // The release sheet's icons for each kind of note (AEON-1655).
 const KIND_ICON: Record<ToastCounts['items'][number]['kind'], IconName> = { features: 'sparkle', fixes: 'bug', other: 'gear' }
+// Measure the visible sentence after layout and on resize: a one-line desktop
+// confirmation keeps its pill, while two lines use the phone's softer corners.
+const lineObservers = new WeakMap<HTMLElement, ResizeObserver>()
+const vToastLines = {
+  mounted(el: HTMLElement) {
+    const measure = () => el.parentElement?.toggleAttribute('data-multiline', el.getBoundingClientRect().height > parseFloat(getComputedStyle(el).lineHeight))
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el); lineObservers.set(el, observer)
+  },
+  unmounted(el: HTMLElement) { lineObservers.get(el)?.disconnect(); lineObservers.delete(el) },
+}
 // While a modal dialog is open the page under it is inert and hidden behind the
 // top layer: toasts show inside the topmost modal instead, and follow it as
 // modals open and close (an Undo stays reachable after its dialog closes).
@@ -30,9 +42,10 @@ onBeforeUnmount(() => dialogs?.disconnect())
   <Teleport :to="layer ?? 'body'" :disabled="!layer">
   <div class="toast-host" aria-live="polite" :style="{ '--toast-obstacle-bottom': !layer && toastBottomClearance ? `calc(var(--footer-h, 0px) + ${toastBottomClearance + 12}px)` : '0px' }">
     <TransitionGroup name="toast">
-      <div v-for="item in toasts" :key="item.id" class="toast" :class="[item.tone, { sticky: item.sticky }]">
+      <div v-for="item in toasts" :key="item.id" class="toast" :class="[item.tone, { sticky: item.sticky, wrapping: item.compactMessage !== undefined }]">
         <AppIcon v-if="item.tone === 'error'" name="alert" :size="14" />
         <span v-if="item.release">{{ item.release.before }}<ReleaseName :version="item.release.version" :name="item.release.name" />{{ item.release.after }}</span>
+        <span v-else-if="item.compactMessage !== undefined" v-toast-lines class="toast-message" :aria-label="item.message"><span class="sr-only">{{ item.message }}</span><span class="toast-wide" aria-hidden="true">{{ item.desktopMessage ?? item.message }}</span><span class="toast-phone" aria-hidden="true">{{ item.compactMessage }}</span></span>
         <span v-else>{{ item.message }}</span>
         <span v-if="item.release?.counts" class="toast-counts"><span class="sr-only">{{ item.release.counts.spoken }}</span><span v-for="c in item.release.counts.items" :key="c.kind" class="toast-count" :data-kind="c.kind" aria-hidden="true"><AppIcon :name="KIND_ICON[c.kind]" :size="13" /><strong>{{ c.count }}</strong> {{ c.label }}</span></span>
         <button v-for="a in item.actions" :key="a.label" class="toast-action" type="button" @click="act(item.id, a.run)">{{ a.label }}</button>
@@ -53,6 +66,12 @@ onBeforeUnmount(() => dialogs?.disconnect())
 }
 .toast.error svg { color: var(--inverse-danger); }
 .toast span { min-width: 0; }
+.toast-phone { display: none; }
+.toast.wrapping { max-width: min(100%, 48rem); }
+.toast.wrapping[data-multiline] { border-radius: 12px; }
+.toast.wrapping .toast-message { flex: 1; min-width: 0; line-height: 18px; }
+.toast.wrapping .toast-wide { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.toast.wrapping :is(.toast-action, .toast-close) { flex-shrink: 0; }
 /* A release's stamp on the toast's dark glass: the toast's own ink and a hairline, in both themes.
    It shows over the name without widening it, so the sentence ends at the name (AEON-1655). */
 .toast :deep(.release-name) { position: relative; }
@@ -75,6 +94,9 @@ onBeforeUnmount(() => dialogs?.disconnect())
 /* Phones: 44px targets without a heavier toast. The toast loses its vertical
    padding and the buttons fill its height; the visible pill stays 28px. */
 @media (max-width: 600px) {
+  .toast.wrapping { max-width: 100%; border-radius: 12px; }
+  .toast.wrapping .toast-wide { display: none; }
+  .toast.wrapping .toast-phone { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
   .toast-counts { margin-left: 0; }
   .toast:not(.sticky) { min-height: 44px; padding-block: 0; }
   .toast-action, .toast-close { position: relative; height: 44px; background: transparent; }

@@ -687,7 +687,11 @@ func createRunTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, orderID str
 			return nil, workorders.Fail(400, "one-off task context exceeds the execution bound")
 		}
 		allowed := in.mutationAllowed()
-		dispatchTrace.RunOnce = &runOnceBinding{Instruction: instruction, RepositoryMutationAllowed: &allowed, RequestDigest: in.RequestDigest}
+		ticket, err := bindRunOnceTicketTx(ctx, tx, o.NodeID)
+		if err != nil {
+			return nil, err
+		}
+		dispatchTrace.RunOnce = &runOnceBinding{Instruction: instruction, RepositoryMutationAllowed: &allowed, RequestDigest: in.RequestDigest, Ticket: ticket}
 	}
 	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override,residency,prefs_person_id,trace,id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,coalesce($12::uuid,gen_random_uuid())) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride, modelprefs.Stamp(requirement), person, dispatchTrace, requestedRunID(p.TenantID, in.RequestID)))
 	if err != nil {

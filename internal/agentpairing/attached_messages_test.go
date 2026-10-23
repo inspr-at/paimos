@@ -221,7 +221,8 @@ func TestAttachedSendResponsesMatchContract(t *testing.T) {
 			t.Fatalf("%s %s missing response schema", method, path)
 		}
 		defs := map[string]any{}
-		for _, name := range []string{"InboxSend", "InboxMessage", "InboxReceipt", "InboxSendResponse", "InboxReceiptResponse", "AttachedInboxMessage", "AttachedInboxReceipt", "AttachedMessageStatus"} {
+		// InboxMessage embeds InboxSend, including its structured lane status.
+		for _, name := range []string{"InboxSend", "InboxLaneStatus", "InboxMessage", "InboxReceipt", "InboxSendResponse", "InboxReceiptResponse", "AttachedInboxMessage", "AttachedInboxReceipt", "AttachedMessageStatus"} {
 			if defs[name] = doc.Components.Schemas[name]; defs[name] == nil {
 				t.Fatalf("missing response schema %s", name)
 			}

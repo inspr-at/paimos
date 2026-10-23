@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/inbox
+paths:
+  /inbox/lanes:
+    get:
+      operationId: listInboxLanes
+      summary: 'Latest structured inbox status per session and goal or ticket'
+      description: 'AEON-1629. Active, unarchived lanes only. Status is deliberately published to readers with inbox.read, harness.read and nodes.read in the target scope; ordinary private chat is never included. A lane is a session and target node pair. Ticket-bound sessions with no report are included, with silence measured from session creation. Other silence and age values are measured from the latest accepted status, irrespective of message acknowledgement or delivery. Plain chat and heartbeats never reset silence. Keyset pagination orders by session UUID and target UUID; use next_after with the same filters. No check-in cron or UI changes.'
+      security: *auth
+      parameters:
+        - {name: target, in: query, description: 'Goal or ticket UUID', schema: {type: string, format: uuid}}
+        - {name: session, in: query, schema: {type: string, format: uuid}}
+        - {name: silent_minutes, in: query, description: 'Strictly more than this many minutes without a status', schema: {type: integer, minimum: 1, maximum: 525600}}
+        - {name: after, in: query, description: 'Opaque keyset cursor from next_after', schema: {type: string, maxLength: 73}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: 'Latest lane status page', content: {application/json: {schema: {$ref: '#/components/schemas/InboxLanePage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    InboxLaneStatus:
+      type: object
+      additionalProperties: false
+      required: [target_node_id, done, blocker, blocker_owner, next, eta]
+      description: 'A structured status, never an instruction or authority to act. A nonempty blocker requires blocker_owner; both are empty when unblocked. ETA may be null when unknown. Requires kind=status and an exact active sender_session_id owned by the caller. Cannot be a reply, action request, attached note or expiring message. Body is rendered from these fields. Publishing never changes the target work status or ETA.'
+      properties:
+        target_node_id: {type: string, format: uuid}
+        done: {type: string, minLength: 1, maxLength: 2000, description: 'Done since the preceding report'}
+        blocker: {type: string, maxLength: 2000}
+        blocker_owner: {type: string, maxLength: 300, description: 'Who can resolve the blocker'}
+        next: {type: string, minLength: 1, maxLength: 2000}
+        eta: {type: [string, 'null'], format: date-time, description: 'Estimated next completion, RFC3339 or null'}
+    InboxLane:
+      type: object
+      additionalProperties: false
+      required: [session_id, target_node_id, sender_principal_id, label, message_id, status, line, reported_at, age_seconds, silent_seconds]
+      properties:
+        session_id: {type: string, format: uuid}
+        target_node_id: {type: string, format: uuid}
+        sender_principal_id: {type: string, format: uuid}
+        label: {type: string}
+        message_id: {type: [string, 'null'], format: uuid}
+        status: {oneOf: [{$ref: '#/components/schemas/InboxLaneStatus'}, {type: 'null'}]}
+        line: {type: string, description: 'Latest status line; empty before the first report'}
+        reported_at: {type: [string, 'null'], format: date-time}
+        age_seconds: {type: [integer, 'null'], format: int64, minimum: 0, description: 'Age of the latest report; null before the first report'}
+        silent_seconds: {type: integer, format: int64, minimum: 0}
+    InboxLanePage:
+      type: object
+      additionalProperties: false
+      required: [items, next_after, as_of]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/InboxLane'}}
+        next_after: {type: string, description: 'Empty when there is no next page'}
+        as_of: {type: string, format: date-time, description: 'Database clock used for all ages and silence comparisons in this response'}

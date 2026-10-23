@@ -163,7 +163,7 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
               AND sent_event_id > $2
 			  AND acked_at IS NULL
 			  AND (expires_at IS NULL OR expires_at > clock_timestamp())
-			  AND (NOT (`+personSessionChatSQL+`) OR (`+chatPickupAvailableSQL+`))
+			  AND (m.recipient_session_id IS NULL OR (`+chatPickupAvailableSQL+`))
 			ORDER BY sent_event_id
 			LIMIT $3`, p.ID, after, limit, sessionID, exact)
 		if err != nil {

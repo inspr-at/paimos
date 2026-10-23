@@ -107,6 +107,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     await expect(firstField).toHaveAttribute('id', await task.getAttribute('id') as string)
     const summary = form.locator('.run-settings-summary')
     const summaryLine = form.locator('.run-summary-line')
+    await expect(summary).toHaveCSS('border-bottom-width', '0px')
     await expect(summary).toContainText('Runs on Laptop · Claude Code · Laptop account · Max · other-model · Medium')
     await expect(summaryLine).toHaveCSS('height', '44px')
     await expect(summaryLine.locator('p')).toHaveAttribute('title', 'Runs on Laptop · Claude Code · Laptop account · Max · other-model · Medium')
@@ -122,9 +123,9 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     await expect(form.getByText('Read-only: no tools, no repository access, no external actions.', { exact: true })).toBeVisible()
     const ordered = await form.locator('.launch-fields input:not([type="checkbox"]), .launch-fields select, .launch-fields textarea, .restriction-field').evaluateAll(elements => elements.filter(el => (el as HTMLElement).offsetParent !== null).map(el => el.id || el.className))
     expect(ordered.slice(0, 4).map(id => id.split('-').at(-1))).toEqual(['task', 'context', 'project', 'instruction'])
-    await form.screenshot({ path: info.outputPath(`AEON-1512-${width}-${theme}.png`) })
+    await form.screenshot({ path: info.outputPath(`AEON-1688/start-agent-${width}-${theme}.png`) })
     // Explicit expansion can grow downward; existing controls stay anchored.
-    await expectStableControls({
+    await expectStableControls({ tolerance: 0,
       controls: { queue, cancel: form.getByRole('button', { name: 'Cancel', exact: true }), task, summary: summaryLine, context: form.getByLabel('Context', { exact: true }), project: form.getByLabel('Project', { exact: true }), instruction: form.getByLabel('Instruction (optional)', { exact: true }), ...(width === 390 ? { phone: form } : {}) },
       scrollAreas: { body: form.locator('.launch-body') },
       interactions: [{ name: 'expand run settings', run: async () => {

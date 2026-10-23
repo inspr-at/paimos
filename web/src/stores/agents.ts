@@ -268,21 +268,30 @@ export const useAgents = defineStore('agents', () => {
     const sessionRead = refreshSessions()
     if (loadFlight) return loadFlight
     loading.value = true
-    loadFlight = (async () => {
-        // Sessions do not wait for optional project or account metadata.
-        await Promise.all([projects.load(), refreshApprovals(), sessionRead, refreshRuns(), refreshAccounts(), refreshModels()])
-        await Promise.all([refreshMessaging(), resourceNodes()])
-        // The first visible bundle includes the grants used by its controls.
-        // Session ledger admission above remains immediate; a failed permission
-        // read still grants nothing, and later refreshes keep the current frame.
-        if (!loaded.value) {
-          await ensurePermissions()
-          await all([...new Set(sessions.value.map(session => session.project_id).filter(Boolean))], async projectId => { await ensurePermissions(projectId) })
-        }
-        loaded.value = true
-        needsAt = Date.now()
-    })().finally(() => { loadFlight = undefined; loading.value = false; now.value = Math.max(now.value, Date.now()) })
-    return loadFlight
+    // Sessions do not wait for optional project or account metadata.
+    const current: Promise<void> = Promise.all([
+      projects.load(), refreshApprovals(), sessionRead, refreshRuns(), refreshAccounts(), refreshModels(),
+    ]).then(async () => {
+      if (loadFlight !== current) return
+      await Promise.all([refreshMessaging(), resourceNodes()])
+      if (loadFlight !== current) return
+      // The first visible bundle includes the grants used by its controls.
+      // Session ledger admission above remains immediate; a failed permission
+      // read still grants nothing, and later refreshes keep the current frame.
+      if (!loaded.value) {
+        await ensurePermissions()
+        if (loadFlight !== current) return
+        await all([...new Set(sessions.value.map(session => session.project_id).filter(Boolean))], async projectId => { await ensurePermissions(projectId) })
+      }
+      if (loadFlight !== current) return
+      loaded.value = true
+      needsAt = Date.now()
+    }).finally(() => {
+      if (loadFlight !== current) return
+      loadFlight = undefined; loading.value = false; now.value = Math.max(now.value, Date.now())
+    })
+    loadFlight = current
+    return current
   }
   // The badge follows the approvals and held requests displayed by Agents.
   async function loadNeeds(force = false) {
@@ -523,7 +532,13 @@ export const useAgents = defineStore('agents', () => {
     writeReaders.add(reader)
     return () => { writeReaders.delete(reader) }
   }
-  function invalidatePolls() { sessionsRead.invalidate(); approvalsRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate() }
+  function invalidatePolls() {
+    // A wake must start a new bundle as well as new individual reads. The old
+    // bundle's completion cannot clear the replacement's flight or loading state.
+    loadFlight = undefined
+    loading.value = false
+    sessionsRead.invalidate(); approvalsRead.invalidate(); accountsRead.invalidate(); modelsRead.invalidate(); runsRead.invalidate()
+  }
   let rereadAfterWrite: Promise<void> | undefined
   // Every write raises the floor in api(), so a read the server ordered by position
   // that started before it is read again or dropped by its data. Superseding is for

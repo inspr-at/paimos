@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { api, RequestFailure, retryable, retryDelay, sessionEnded } from '../src/lib/api'
 import { initialRefreshStatus, refreshStatus } from '../src/lib/usePolledData'
 
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); sessionEnded.blocked = false })
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); sessionEnded.blocked = false })
 
 it('retries only idempotent GET transport failures, with bounded exponential jitter', async () => {
   expect(retryable('GET', new RequestFailure('timeout'))).toBe(true)
@@ -29,6 +29,25 @@ it('stops after two GET retries, and never retries a 4xx or a write', async () =
   fetch.mockReset().mockResolvedValue(new Response('{}', { status: 403 }))
   expect((await api('/health')).status).toBe(403)
   expect(fetch).toHaveBeenCalledTimes(1)
+})
+
+it('stops a pending GET retry while offline and allows a fresh read after reconnect', async () => {
+  vi.useFakeTimers()
+  vi.stubGlobal('navigator', { onLine: true })
+  const fetch = vi.fn().mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValue(new Response('{}'))
+  vi.stubGlobal('fetch', fetch)
+  const pending = api('/harness-sessions/live').then(response => ({ response }), error => ({ error }))
+  // Settle the first transport failure and enter its backoff before losing the
+  // connection. Advancing the clock proves no retry escapes after that point.
+  await vi.advanceTimersByTimeAsync(0)
+  expect(fetch).toHaveBeenCalledTimes(1)
+  Object.assign(navigator, { onLine: false })
+  await vi.advanceTimersByTimeAsync(1_000)
+  expect(await pending).toMatchObject({ error: { kind: 'network', message: 'No connection' } })
+  expect(fetch).toHaveBeenCalledTimes(1)
+  Object.assign(navigator, { onLine: true })
+  await expect(api('/harness-sessions/live')).resolves.toBeInstanceOf(Response)
+  expect(fetch).toHaveBeenCalledTimes(2)
 })
 
 it('keeps a good snapshot through two failures and flags the third without losing its timestamp', () => {

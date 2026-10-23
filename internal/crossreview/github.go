@@ -391,6 +391,55 @@ func (g *GitHubApp) readInstallation(ctx context.Context, shipping bool, read fu
 }
 
 func (g *GitHubApp) readScopedInstallation(ctx context.Context, jwt string, scopes map[string]string, read func(func(string, any) error, func(int64, string) (bool, string, error), func(int64) ([]byte, error)) error) error {
+	return g.withReadToken(ctx, jwt, scopes, func(token string) error {
+		return read(func(path string, out any) error {
+			return g.requestBounded(ctx, token, "GET", "/repos/"+g.Config.Repository+path, nil, out, 4<<20)
+		}, func(number int64, head string) (bool, string, error) {
+			if number <= 0 || number > 2147483647 || !reviewgate.ValidSHA(head) {
+				return false, "", errGitHub
+			}
+			owner, name, _ := strings.Cut(g.Config.Repository, "/")
+			var response struct {
+				Data struct {
+					Repository struct {
+						Pull *struct {
+							Number int64  `json:"number"`
+							Head   string `json:"headRefOid"`
+							Entry  *struct {
+								ID   string `json:"id"`
+								Head *struct {
+									OID string `json:"oid"`
+								} `json:"headCommit"`
+							} `json:"mergeQueueEntry"`
+						} `json:"pullRequest"`
+					} `json:"repository"`
+				} `json:"data"`
+				Errors []json.RawMessage `json:"errors"`
+			}
+			query := `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number headRefOid mergeQueueEntry{id headCommit{oid}}}}}`
+			if err := g.request(ctx, token, "POST", "/graphql", map[string]any{"query": query, "variables": map[string]any{"owner": owner, "name": name, "number": number}}, &response); err != nil {
+				return false, "", err
+			}
+			pull := response.Data.Repository.Pull
+			if len(response.Errors) > 0 || pull == nil || pull.Number != number || pull.Head != head {
+				return false, "", errGitHub
+			}
+			if pull.Entry == nil {
+				return false, "", nil
+			}
+			queueHead := ""
+			if pull.Entry.Head != nil {
+				queueHead = pull.Entry.Head.OID
+				if !reviewgate.ValidSHA(queueHead) {
+					return false, "", errGitHub
+				}
+			}
+			return true, queueHead, nil
+		}, func(id int64) ([]byte, error) { return g.artifactArchive(ctx, token, id) })
+	})
+}
+
+func (g *GitHubApp) withReadToken(ctx context.Context, jwt string, scopes map[string]string, read func(string) error) error {
 	var token struct {
 		Token        string            `json:"token"`
 		Permissions  map[string]string `json:"permissions"`
@@ -422,48 +471,5 @@ func (g *GitHubApp) readScopedInstallation(ctx context.Context, jwt string, scop
 			return errGitHub
 		}
 	}
-	return read(func(path string, out any) error {
-		return g.requestBounded(ctx, token.Token, "GET", "/repos/"+g.Config.Repository+path, nil, out, 4<<20)
-	}, func(number int64, head string) (bool, string, error) {
-		if number <= 0 || number > 2147483647 || !reviewgate.ValidSHA(head) {
-			return false, "", errGitHub
-		}
-		owner, name, _ := strings.Cut(g.Config.Repository, "/")
-		var response struct {
-			Data struct {
-				Repository struct {
-					Pull *struct {
-						Number int64  `json:"number"`
-						Head   string `json:"headRefOid"`
-						Entry  *struct {
-							ID   string `json:"id"`
-							Head *struct {
-								OID string `json:"oid"`
-							} `json:"headCommit"`
-						} `json:"mergeQueueEntry"`
-					} `json:"pullRequest"`
-				} `json:"repository"`
-			} `json:"data"`
-			Errors []json.RawMessage `json:"errors"`
-		}
-		query := `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number headRefOid mergeQueueEntry{id headCommit{oid}}}}}`
-		if err := g.request(ctx, token.Token, "POST", "/graphql", map[string]any{"query": query, "variables": map[string]any{"owner": owner, "name": name, "number": number}}, &response); err != nil {
-			return false, "", err
-		}
-		pull := response.Data.Repository.Pull
-		if len(response.Errors) > 0 || pull == nil || pull.Number != number || pull.Head != head {
-			return false, "", errGitHub
-		}
-		if pull.Entry == nil {
-			return false, "", nil
-		}
-		queueHead := ""
-		if pull.Entry.Head != nil {
-			queueHead = pull.Entry.Head.OID
-			if !reviewgate.ValidSHA(queueHead) {
-				return false, "", errGitHub
-			}
-		}
-		return true, queueHead, nil
-	}, func(id int64) ([]byte, error) { return g.artifactArchive(ctx, token.Token, id) })
+	return read(token.Token)
 }

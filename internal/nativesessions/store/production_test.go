@@ -99,18 +99,20 @@ func (p compositionProfiles) Resolve(_ context.Context, q nativecontract.Profile
 }
 
 type compositionProvider struct {
-	mu        sync.Mutex
-	identity  nativecontract.NativeIdentity
-	binding   nativecontract.Binding
-	events    chan nativecontract.ProviderEvent
-	input     nativecontract.Input
-	closed    bool
-	sequence  uint64
-	confirmed bool
-	closes    int
-	now       time.Time
-	age       time.Duration
-	opens     int
+	written     chan nativecontract.Input
+	unconfirmed bool
+	mu          sync.Mutex
+	identity    nativecontract.NativeIdentity
+	binding     nativecontract.Binding
+	events      chan nativecontract.ProviderEvent
+	input       nativecontract.Input
+	closed      bool
+	sequence    uint64
+	confirmed   bool
+	closes      int
+	now         time.Time
+	age         time.Duration
+	opens       int
 }
 
 func (p *compositionProvider) Open(_ context.Context, s nativecontract.LaunchSpec) (nativecontract.NativeTransport, error) {
@@ -136,6 +138,12 @@ func (p *compositionProvider) Send(_ context.Context, in nativecontract.Input) (
 	defer p.mu.Unlock()
 	p.input = in
 	p.sequence++
+	if p.written != nil {
+		p.written <- in
+	}
+	if p.unconfirmed {
+		return nativecontract.NativeEvidence{}, errors.New("fixture provider acknowledgement lost")
+	}
 	return nativecontract.NativeEvidence{Stage: "write_acknowledged", InputID: in.InputID, RequestID: in.RequestID, SourceSequence: p.sequence, ObservedAt: p.now}, nil
 }
 func (p *compositionProvider) Interrupt(_ context.Context, in nativecontract.Interrupt) (nativecontract.NativeEvidence, error) {
@@ -259,6 +267,9 @@ func (c *productionComposition) approve(t *testing.T, scope string) string {
 type compositionOptions struct {
 	disableRetention bool
 	configure        func(*startFixture, *consent.Authority, *agentd.NativeSessionConfig)
+	notifications    http.HandlerFunc
+	afterReceipt     func(nativecontract.Receipt)
+	onDaemonRequest  func(*http.Request)
 }
 
 func composeProduction(t *testing.T, options ...compositionOptions) *productionComposition {
@@ -306,6 +317,9 @@ func composeProduction(t *testing.T, options ...compositionOptions) *productionC
 	module.Mount(mux)
 	chatModule.Mount(mux)
 	approvals.New(f.d.App).Mount(mux)
+	if option.notifications != nil {
+		mux.HandleFunc("GET /api/projects/{projectId}/harness-sessions/{sessionId}/notifications", option.notifications)
+	}
 	finalDone, turnDone, turnStarted := make(chan struct{}, 2), make(chan struct{}, 2), make(chan struct{}, 4)
 	exitDone := make(chan struct{}, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -317,6 +331,9 @@ func composeProduction(t *testing.T, options ...compositionOptions) *productionC
 			r.Body = ioNop(raw)
 		}
 		r = r.WithContext(tenant.WithPrincipal(r.Context(), f.agent))
+		if option.onDaemonRequest != nil {
+			option.onDaemonRequest(r)
+		}
 		if strings.HasPrefix(r.URL.Path, "/api/agentd/native-sessions/") {
 			if _, _, err := f.s.DaemonRequest(r); err != nil {
 				t.Logf("private daemon admission failed: %T %v", err, err)
@@ -329,6 +346,9 @@ func composeProduction(t *testing.T, options ...compositionOptions) *productionC
 		if r.URL.Path == "/api/agentd/native-sessions/receipts" {
 			var v nativecontract.Receipt
 			_ = json.Unmarshal(raw, &v)
+			if option.afterReceipt != nil {
+				option.afterReceipt(v)
+			}
 			if v.State == "turn_started" {
 				turnStarted <- struct{}{}
 			}
@@ -379,6 +399,7 @@ func composeProduction(t *testing.T, options ...compositionOptions) *productionC
 // The real person approvals, issued pairing key and transaction authorities
 // surround a fake owned provider; channels establish each observation.
 func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
+	t.Run("live inbox priority, evidence and offline fallback", exerciseLiveInbox)
 	c := composeProduction(t)
 	f, config, provider, root := c.f, c.config, c.provider, c.root
 	finalDone, turnDone, turnStarted, denials := c.finalDone, c.turnDone, c.turnStarted, c.denials

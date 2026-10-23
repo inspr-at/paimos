@@ -24,6 +24,7 @@ import (
 // Risk: a three-scope assistant needs extra authority to use the CLI, loses
 // reply/identity fields, or acknowledges content it could not print.
 func TestMessagingOnlyInboxCLI(t *testing.T) {
+	t.Run("structured lane status", testLaneStatusCLI)
 	const sender = "00000000-0000-4000-8000-000000000008"
 	const recipient = "00000000-0000-4000-8000-000000000003"
 	const id = "00000000-0000-4000-8000-000000000004"
