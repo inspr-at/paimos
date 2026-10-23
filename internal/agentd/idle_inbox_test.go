@@ -46,7 +46,7 @@ func (a *replayInboxAPI) HeartbeatHarness(ctx context.Context, s HarnessSession,
 }
 
 func TestUncertainDeliveryDoesNotMaskHeartbeatFailure(t *testing.T) {
-	s, a, e, p := managedFixture(t)
+	s, a, e, p := managedServiceFixture(t)
 	e.mu.Lock()
 	e.inboxCapable = true
 	e.mu.Unlock()
@@ -112,7 +112,7 @@ func TestIdleInboxLeaseReplayAndTerminalFence(t *testing.T) {
 }
 
 func TestInboxUnconfirmedDoesNotReinject(t *testing.T) {
-	s, a, e, p := managedFixture(t)
+	s, a, e, p := managedServiceFixture(t)
 	e.mu.Lock()
 	e.inboxCapable = true
 	e.mu.Unlock()

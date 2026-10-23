@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  canLaunchLead, canPause, canResume, decisionLine, LEAD_WORDS, leadBand, leadLaunchReason, leadLine, leadWords, modelByRole, pluralWord, setLeadWords, ticketSteps, waitCopy,
+  canLaunchLead, canPause, canResume, decisionLine, LEAD_WORDS, leadBand, leadActionReason, leadLaunchReason, leadLine, leadWords, modelByRole, pluralWord, setLeadWords, ticketSteps, waitCopy,
   type LeadDecision, type ProjectLead,
 } from '../src/lib/lead.ts'
 import { parentQueueSummary, type ParentQueueSnapshot } from '../src/lib/workQueue.ts'
@@ -94,6 +94,8 @@ test('AEON-1038: unclaimed starts and launch-off policy never invent admission f
   assert.equal(canLaunchLead(fresh), false)
   assert.equal(canLaunchLead(lead()), false)
   assert.equal(canLaunchLead(null), false)
+  assert.equal(leadActionReason(null, 'start'), "Couldn't load lead actions. Reload to try again.")
+  assert.equal(leadActionReason(lead(), 'start'), "Couldn't load lead actions. Reload to try again.")
   assert.equal(canLaunchLead({ ...fresh, automatic_launch_enabled: true }), true)
   assert.match(leadLaunchReason(fresh), /not enabled/)
   assert.match(leadLaunchReason(lead()), /could not be read/)

@@ -67,7 +67,7 @@ func (m *Module) auditActor(ctx context.Context, tid string) (tenant.Principal, 
 }
 
 func auditLink(ctx context.Context, tx pgx.Tx, repo string, f MergeFact) (Observation, error) {
-	o := Observation{Repository: repo, PR: f.PR, Branch: f.Branch, Head: f.Head}
+	o := Observation{Repository: repo, PR: f.PR, Branch: f.Branch, Head: f.Head, Base: f.Base, At: f.At}
 	if f.PR != nil {
 		err := tx.QueryRow(ctx, `SELECT ticket_node_id::text,project_id::text FROM delivery_items WHERE repository=$1 AND pull_request=$2`, repo, f.PR).Scan(&o.Ticket, &o.Project)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -131,15 +131,21 @@ func auditLink(ctx context.Context, tx pgx.Tx, repo string, f MergeFact) (Observ
 	return o, nil
 }
 
-type auditReviewBinding struct{ Order, Base, Head string }
+type auditReviewBinding struct{ Order, Run, Base, Head string }
+
+func (b auditReviewBinding) present() bool { return b.Order != "" || b.Run != "" }
 
 func auditReviewCandidate(ctx context.Context, tx pgx.Tx, o Observation) (auditReviewBinding, error) {
 	var b auditReviewBinding
 	if o.Ticket == nil || o.PR == nil {
 		return b, nil
 	}
+	harness, err := auditHarnessCandidate(ctx, tx, o)
+	if err != nil || harness.present() {
+		return harness, err
+	}
 	var pr *int64
-	err := tx.QueryRow(ctx, `SELECT work_order_id::text,base_sha,head_sha,pull_request FROM work_order_reviews WHERE ticket_node_id=$1 AND repository=$2 ORDER BY created_at DESC,work_order_id DESC LIMIT 1`, o.Ticket, o.Repository).Scan(&b.Order, &b.Base, &b.Head, &pr)
+	err = tx.QueryRow(ctx, `SELECT work_order_id::text,base_sha,head_sha,pull_request FROM work_order_reviews WHERE ticket_node_id=$1 AND repository=$2 ORDER BY created_at DESC,work_order_id DESC LIMIT 1`, o.Ticket, o.Repository).Scan(&b.Order, &b.Base, &b.Head, &pr)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return auditReviewBinding{}, nil
 	}
@@ -154,7 +160,7 @@ func auditReviewCandidate(ctx context.Context, tx pgx.Tx, o Observation) (auditR
 
 func auditReview(ctx context.Context, tx pgx.Tx, o Observation, carried auditReviewBinding) (bool, error) {
 	b, err := auditReviewCandidate(ctx, tx, o)
-	if err != nil || b.Order == "" {
+	if err != nil || !b.present() {
 		return false, err
 	}
 	// The external proof binds this precise review range and merge head. A
@@ -162,7 +168,7 @@ func auditReview(ctx context.Context, tx pgx.Tx, o Observation, carried auditRev
 	if b.Head != o.Head && b != carried {
 		return false, nil
 	}
-	return reviewgate.VerifiedLatestTx(ctx, tx, b.Order, *o.Ticket)
+	return auditReviewVerified(ctx, tx, o, b)
 }
 
 func auditQueued(ctx context.Context, tx pgx.Tx, repo, sha string) (bool, error) {
@@ -231,7 +237,11 @@ func auditFlags(a MergeAudit) []string {
 		flags = append(flags, "checks_missing")
 	}
 	if !a.ReviewOK {
-		flags = append(flags, "no_review")
+		if beforeEvidenceCapture(a) {
+			flags = append(flags, "before_evidence_capture")
+		} else {
+			flags = append(flags, "no_review")
+		}
 	}
 	if a.PR == nil {
 		flags = append(flags, "direct_push")
@@ -309,6 +319,12 @@ func auditAlert(ctx context.Context, tx pgx.Tx, actor tenant.Principal, a MergeA
 	return deliveryNoticeTx(ctx, tx, actor, a.Project, to, key, body)
 }
 
+// r138 enabled authenticated evidence capture for this repository at this instant.
+// Older unverified reviews stay unknown, rather than being called missing.
+func beforeEvidenceCapture(a MergeAudit) bool {
+	return a.Repository == "inspr-at/paimos" && a.PR != nil && a.At.Before(time.Date(2026, 10, 22, 10, 44, 0, 0, time.UTC))
+}
+
 const auditProvenanceGrace = 10 * time.Minute
 
 func auditAlertReady(a MergeAudit, now time.Time) bool {
@@ -319,6 +335,8 @@ func auditAlertBody(a MergeAudit) string {
 	classification := "bypassed delivery safeguards"
 	if a.PR != nil {
 		switch {
+		case !a.ReviewOK && beforeEvidenceCapture(a):
+			classification = "before evidence capture"
 		case !a.ViaQueue && !a.ReviewOK:
 			classification = "provenance pending; review not in reviewgate"
 		case !a.ViaQueue:
@@ -364,6 +382,7 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 	// to the SHA chosen here; the final write discards it if that SHA changes.
 	var cs []Check
 	complete := false
+	queueProvenance := false
 	proof := ""
 	var candidate, carried auditReviewBinding
 	err = db.InTenant(db.AllProjects(ctx, "merge audit stored checks"), m.pool, tid, func(tx pgx.Tx) error {
@@ -375,8 +394,8 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 		if err != nil {
 			return err
 		}
-		if candidate.Order != "" && candidate.Head != f.Head {
-			verified, err := reviewgate.VerifiedLatestTx(ctx, tx, candidate.Order, *o.Ticket)
+		if candidate.present() && candidate.Head != f.Head {
+			verified, err := auditReviewVerified(ctx, tx, o, candidate)
 			if err != nil {
 				return err
 			}
@@ -392,6 +411,7 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 		if err != nil {
 			return err
 		}
+		queueProvenance = auditViaQueue(queued, f.MergedBy)
 		proof = auditProofSHA(queued, f)
 		cs, err = auditChecksTx(ctx, tx, m.config.Repository, proof, s)
 		complete = allSuccess(Observation{Settings: s, Checks: cs})
@@ -399,6 +419,17 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 	})
 	if err != nil {
 		return err
+	}
+	if !queueProvenance && f.PR != nil {
+		if history, ok := reader.(auditQueueGitHub); ok {
+			queueProvenance, err = history.AuditQueue(ctx, *f.PR, f.SHA)
+			if err != nil {
+				return err
+			}
+			if queueProvenance && proof != f.SHA {
+				proof, complete = f.SHA, false
+			}
+		}
 	}
 	if !complete {
 		cs, err = reader.AuditChecks(ctx, proof)
@@ -409,7 +440,7 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 	if len(cs) > 4000 {
 		return errRead
 	}
-	if candidate.Order != "" && candidate.Head != f.Head {
+	if candidate.present() && candidate.Head != f.Head {
 		if g, ok := reader.(auditReviewGitHub); ok {
 			clean, err := g.AuditReviewCarry(ctx, candidate.Base, candidate.Head, f.Base, f.Head)
 			if err != nil {
@@ -457,8 +488,8 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 		if err != nil {
 			return err
 		}
-		a.ViaQueue = auditViaQueue(queued, a.MergedBy)
-		want := auditProofSHA(queued, f)
+		a.ViaQueue = queueProvenance || auditViaQueue(queued, a.MergedBy)
+		want := auditProofSHA(queued || queueProvenance, f)
 		switch {
 		case want != proof:
 			// Queue membership changed after the external read. A green

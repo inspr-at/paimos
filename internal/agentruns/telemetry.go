@@ -195,16 +195,19 @@ func lockTelemetryTarget(ctx context.Context, tx pgx.Tx, runID string) error {
 	if err := agentpairing.Lock(ctx, tx); err != nil {
 		return err
 	}
-	var target *string
-	if err := tx.QueryRow(ctx, `SELECT n.parent_id::text FROM agent_runs r JOIN nodes n ON n.id=r.work_order_id WHERE r.id=$1`, runID).Scan(&target); err != nil {
+	var target, launch *string
+	if err := tx.QueryRow(ctx, `SELECT n.parent_id::text,r.trace#>>'{run_once,ticket,id}' FROM agent_runs r JOIN nodes n ON n.id=r.work_order_id WHERE r.id=$1`, runID).Scan(&target, &launch); err != nil {
 		return err
 	}
+	var targets []string
 	if target != nil {
-		if _, err := tx.Exec(ctx, `SELECT id FROM nodes WHERE id=$1 FOR UPDATE`, *target); err != nil {
-			return err
-		}
+		targets = append(targets, *target)
 	}
-	return nil
+	if launch != nil && workorders.UUID(*launch) {
+		targets = append(targets, *launch)
+	}
+	_, err := tx.Exec(ctx, `SELECT id FROM nodes WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE`, targets)
+	return err
 }
 
 // telemetryAuthority is repeated before setup and inside the final mutation.
@@ -421,6 +424,9 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (out 
 		if err = m.reviews(ctx, tx, p, v.ID, *t.ReviewRange, &pending); err != nil {
 			return nil, err
 		}
+	}
+	if err = settleRunOnceTx(ctx, tx, p, v, t, &pending); err != nil {
+		return nil, err
 	}
 	after := struct {
 		RunID    string          `json:"run_id"`

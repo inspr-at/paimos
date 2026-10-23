@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -94,7 +95,8 @@ type metricFactInput struct {
 }
 
 type metricFactsInput struct {
-	Facts []metricFactInput `json:"facts"`
+	Repository string            `json:"repository"`
+	Facts      []metricFactInput `json:"facts"`
 }
 
 var (
@@ -254,6 +256,9 @@ func (m *Module) getMetrics(w http.ResponseWriter, r *http.Request) {
 		}
 		in, err := loadMetricInputTx(r.Context(), tx, *s, now)
 		if err != nil {
+			return err
+		}
+		if err = loadHarnessMetricInputTx(r.Context(), tx, *s, &in, now); err != nil {
 			return err
 		}
 		if err = loadProjectInputTx(r.Context(), tx, project, &in, now); err != nil {
@@ -539,7 +544,22 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 			done = current.DoneAt
 		}
 		_, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1,backfill_since=$3,backfill_done_at=$4,last_read_error=NULL,backfill_retry_at=$5,backfill_pending=$6 WHERE project_id=$1`, project, raw, next.Since, done, retryAt, next.Phase != "done")
-		return err
+		if err != nil {
+			return err
+		}
+		changes, err := preflightEvidenceTx(ctx, tx, project, source.Repository, batch.Runs)
+		if err != nil || len(changes) == 0 {
+			return err
+		}
+		if err := lockMergeEventParentsTx(ctx, tx, p, &project); err != nil {
+			return err
+		}
+		for _, change := range changes {
+			if _, err := events.Append(ctx, tx, p, change); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return BackfillResult{}, err
@@ -636,30 +656,23 @@ func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	if len(in.Facts) < 1 || len(in.Facts) > 100 {
+	if len(in.Facts) < 1 || len(in.Facts) > 100 || in.Repository != "" && !reviewgate.ValidRepository(in.Repository) {
 		respondError(w, fail(400, "report 1 to 100 facts"))
 		return
 	}
 	now := m.now()
-	marks := make([]metricMark, 0, len(in.Facts))
-	var reports []metricReport
 	seen := map[string]bool{}
 	for _, f := range in.Facts {
-		k, report, err := validFact(f, now)
-		if err != nil {
+		if _, _, err := validFact(f, now); err != nil {
 			respondError(w, err)
 			return
 		}
-		if seen[k.Kind+"\x00"+k.Key] {
+		key := f.Kind + "\x00" + f.Key
+		if seen[key] {
 			respondError(w, fail(400, "duplicate fact key"))
 			return
 		}
-		seen[k.Kind+"\x00"+k.Key] = true
-		if report != nil {
-			reports = append(reports, *report)
-			continue
-		}
-		marks = append(marks, k)
+		seen[key] = true
 	}
 	stored := 0
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
@@ -679,13 +692,23 @@ func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
 		if s == nil {
 			return fail(409, "link a repository to this project first")
 		}
-		if err = upsertMarksTx(r.Context(), tx, p.TenantID, s.Repository, "report", marks, now); err != nil {
+		if in.Repository != "" && in.Repository != s.Repository {
+			return fail(409, "project repository changed; discard the captured report")
+		}
+		if err := lockMergeEventParentsTx(r.Context(), tx, p, &project); err != nil {
 			return err
 		}
-		if err = upsertReportsTx(r.Context(), tx, p.TenantID, s.Repository, reports, now); err != nil {
+		changes, err := metricEvidenceTx(r.Context(), tx, p.TenantID, project, s.Repository, in.Facts, now)
+		if err != nil {
 			return err
 		}
-		stored = len(marks) + len(reports)
+		// All rows and parents are locked before the event counter.
+		for _, change := range changes {
+			if _, err := events.Append(r.Context(), tx, p, change); err != nil {
+				return err
+			}
+		}
+		stored = len(in.Facts)
 		return nil
 	})
 	if err != nil {

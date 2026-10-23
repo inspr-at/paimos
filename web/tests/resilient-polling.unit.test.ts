@@ -168,6 +168,25 @@ it('mounted consumers share one keyed read and stream; event bursts fence held d
   expect(close).toHaveBeenCalledOnce()
 })
 
+it('stops a pending GET retry while offline and allows a fresh read after reconnect', async () => {
+  vi.useFakeTimers()
+  vi.stubGlobal('navigator', { onLine: true })
+  const fetch = vi.fn().mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValue(new Response('{}'))
+  vi.stubGlobal('fetch', fetch)
+  const pending = api('/harness-sessions/live').then(response => ({ response }), error => ({ error }))
+  // Settle the first transport failure and enter its backoff before losing the
+  // connection. Advancing the clock proves no retry escapes after that point.
+  await vi.advanceTimersByTimeAsync(0)
+  expect(fetch).toHaveBeenCalledTimes(1)
+  Object.assign(navigator, { onLine: false })
+  await vi.advanceTimersByTimeAsync(1_000)
+  expect(await pending).toMatchObject({ error: { kind: 'network', message: 'No connection' } })
+  expect(fetch).toHaveBeenCalledTimes(1)
+  Object.assign(navigator, { onLine: true })
+  await expect(api('/harness-sessions/live')).resolves.toBeInstanceOf(Response)
+  expect(fetch).toHaveBeenCalledTimes(2)
+})
+
 it('keeps a good snapshot through two failures and flags the third without losing its timestamp', () => {
   const first = refreshStatus(initialRefreshStatus(), { ok: true, at: 100 })
   const one = refreshStatus(first, { ok: false, error: 'No connection' })
