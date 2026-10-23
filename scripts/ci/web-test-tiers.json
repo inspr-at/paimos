@@ -12716,11 +12716,11 @@
     ,
     {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"AEON-1682: native prose edit, measurement history and CAS save survive a reload with stable IDs","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"draft save converts measurements in old browser recovery without changing money","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"draft save converts measurements in old browser recovery without changing money","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"numbering restart, explicit start, continuation across prose and section binding","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"numbering restart, explicit start, continuation across prose and section binding","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"structured prose, all six levels, numbering, section and row changes survive JSON and history","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"structured prose, all six levels, numbering, section and row changes survive JSON and history","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"typed P1 client sends CAS and stable document to the mocked draft API","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

@@ -27,6 +27,8 @@ test('AEON-1682 worker runtime and negative-control proof', async ({}, testInfo)
     expect(positive.status, positive.output).toBe(0)
     const node = run('node-positive', ['--experimental-strip-types', '--test', '--test-concurrency=1', 'tests/business.test.ts', 'tests/crm.test.ts', 'tests/business-setup-owner.test.ts'])
     expect(node.status, node.output).toBe(0)
+    const policy = run('policy-positive', ['--test', '--test-concurrency=1', '../scripts/test-tiers/test-tiers.test.mjs', 'scripts/ci-web-shard.test.mjs'])
+    expect(policy.status, policy.output).toBe(0)
     const mutations = [
       { file: 'src/stores/business.ts', before: 'Math.min(6, pending.length)', after: 'Math.min(7, pending.length)', suite: 'business-periods.unit.test.ts', name: '200 units use at most six', error: /to be called 6 times|expected.*6/i },
       { file: 'src/stores/business.ts', before: 'rate.effective_until > day', after: 'rate.effective_until >= day', suite: 'business-periods.unit.test.ts', name: 'effective rates use the selected day', error: /AssertionError|expected/ },
