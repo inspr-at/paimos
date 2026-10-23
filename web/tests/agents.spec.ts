@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
-import { agentData, mockAgents, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
+import { agentData, assistantEvidence, mockAgents, mockAssistants, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { controlStability } from './control-stability'
@@ -732,3 +732,154 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [1600,
     await page.screenshot({ path: testInfo.outputPath(`sc2-${colorScheme}-${width}-ticket.png`), fullPage: true })
   })
 }
+
+// AEON-1705 §9: the risk is false live facts, duplicate session identities, or
+// policy actions drifting to another record/person while the right panel updates.
+test('assistants use the existing Agents dock with stable tabs, locked policy and audited revision saves', async ({ page }, testInfo) => {
+  test.setTimeout(120_000)
+  const errors = watchErrors(page)
+  await setup(page)
+  const { items } = assistantEvidence(Date.now(), me.id)
+  const { writes, events } = await mockAssistants(page, items, me.id)
+  let policyAccess = true
+  await page.route('**/api/me/permissions*', route => {
+    const permissions = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    permissions.workspace.permissions.push('events.read')
+    if (policyAccess) permissions.workspace.permissions.push('agents.create')
+    return route.fulfill({ json: permissions })
+  })
+  const shot = async (name: string) => page.screenshot({ path: testInfo.outputPath(`aeon-1705-${name}.png`), fullPage: true })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
+  await openAgents(page)
+  const section = page.locator('.assistants')
+  await expect(section.getByRole('heading')).toHaveText('Assistants · 2')
+  await expect(section.locator('.assistant-row')).toHaveCount(2)
+  expect(await section.locator('.assistant-row').evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height))).toEqual([56, 56])
+  const positions = await page.evaluate(() => ({ capacity: document.querySelector('.cap-row')!.getBoundingClientRect().bottom, assistants: document.querySelector('.assistants')!.getBoundingClientRect(), sessions: document.querySelector('.sessions')!.getBoundingClientRect().top }))
+  expect(positions.capacity).toBeLessThanOrEqual(positions.assistants.top)
+  expect(positions.assistants.bottom).toBeLessThanOrEqual(positions.sessions)
+  await expect(page.locator(`[data-row="s:${session(5)}"]`)).toHaveCount(0)
+  // B/C/D are not on this main: no invented zero spend, healthy adapter,
+  // pending approvals or owned routines. Their renderer is proven by the unit fixture.
+  await expect(section.locator('.assistant-state').first()).toHaveText('Status unavailable')
+  await expect(section.locator('.budget-unknown')).toHaveCount(2)
+  await shot('1440-light-typical')
+  await page.emulateMedia({ colorScheme: 'dark' }); await shot('1440-dark-typical')
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.setViewportSize({ width: 1024, height: 1000 })
+  await expect(section.locator('.last-column').first()).toBeHidden()
+  await expect(section.locator('.folded-facts').first()).toBeVisible()
+  await shot('1024-light-folded')
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const amy = items.find(item => item.display_name === 'Amy')!
+  await section.getByRole('button', { name: 'Amy · Status unavailable', exact: true }).click()
+  const details = page.getByRole('complementary', { name: 'Assistant details', exact: true })
+  await expect(details).toBeVisible()
+  await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
+  const tabs = details.getByRole('tablist')
+  const controls = { tabs, close: details.getByRole('button', { name: 'Close assistant details' }), frame: details, ...Object.fromEntries(['Overview', 'Approvals', 'Routines', 'Policy', 'Activity'].map(name => [name, tabs.getByRole('tab', { name, exact: true })])) }
+  await expectStableControls({ controls, scrollAreas: { content: details.locator('.assistant-panel-scroll') }, interactions: ['Approvals', 'Routines', 'Policy', 'Activity', 'Overview'].map(name => ({ name, run: async () => {
+    await tabs.getByRole('tab', { name, exact: true }).click()
+    if (name === 'Approvals') {
+      const pane = details.getByRole('tabpanel', { name: 'Approvals', exact: true })
+      await expect(pane).toContainText('Assistant approvals are not available yet.')
+      await expect(pane.getByRole('button')).toHaveCount(0)
+    }
+    if (name === 'Policy') {
+      for (const locked of ['outward', 'secrets']) await expect(details.locator(`[data-locked-rule="${locked}"] input, [data-locked-rule="${locked}"] select`)).toHaveCount(0)
+    }
+    await shot(`1440-light-panel-${name.toLowerCase()}`)
+  } })) })
+  await details.getByRole('button', { name: 'More assistant actions' }).click()
+  await page.getByRole('menuitem', { name: 'Edit policy', exact: true }).click()
+  const budget = details.getByRole('textbox', { name: 'Weekly budget', exact: true })
+  await expect(budget).toHaveValue('10')
+  await budget.scrollIntoViewIfNeeded()
+  const save = details.getByRole('button', { name: /^Save/ })
+  const saveGuard = await controlStability(page, { budget, save, cancel: details.getByRole('button', { name: /^Cancel/ }), tabs })
+  await saveGuard.check(() => budget.fill('15'))
+  saveGuard.done()
+  await shot('1440-light-panel-policy-edit')
+  await save.click()
+  await expect(details.getByRole('status')).toHaveText('Policy saved')
+  expect(writes).toHaveLength(1)
+  expect(writes[0]).toMatchObject({ id: amy.principal_id, body: { expected_revision: 1, policy: { weekly_budget: { amount: '15', unit: 'USD' }, outward_action_rule: 'approval_required', never_ask_person_for_secrets_or_manual_steps: true } } })
+  expect(events).toHaveLength(1)
+  await expect(details.locator('.policy-audit')).toContainText(/Changed by .*: Weekly budget: \$10 → \$15/)
+  // A conflicting write must retain the draft and never report a successful save.
+  await details.getByRole('button', { name: 'More assistant actions' }).click()
+  await page.getByRole('menuitem', { name: 'Edit policy', exact: true }).click()
+  await budget.fill('20'); amy.revision++
+  await save.click()
+  await expect(details.getByRole('status')).toContainText('The policy changed while this draft was open')
+  await expect(budget).toHaveValue('20')
+  expect(writes.at(-1)?.body.expected_revision).toBe(2)
+  await details.getByRole('button', { name: /^Cancel/ }).click()
+  await details.getByRole('button', { name: 'Close assistant details' }).click()
+  await expect(details).toHaveCount(0)
+  policyAccess = false
+  await page.reload()
+  await section.getByRole('button', { name: 'Amy · Status unavailable', exact: true }).click()
+  await details.getByRole('tab', { name: 'Policy', exact: true }).click()
+  await expect(details).toContainText('Only people with Policy access can change this.')
+  await expect(details.getByRole('textbox')).toHaveCount(0)
+  await expect(details.getByRole('button', { name: 'More assistant actions' })).toHaveCount(0)
+  await shot('1440-light-panel-policy-readonly')
+  for (const width of [390, 320]) {
+    await details.getByRole('button', { name: 'Close assistant details' }).click()
+    await page.setViewportSize({ width, height: 844 })
+    expect(await section.locator('.assistant-row').first().evaluate(el => el.getBoundingClientRect().height)).toBe(64)
+    if (width === 390) await shot('390-light-cards')
+    await section.getByRole('button', { name: 'Amy · Status unavailable', exact: true }).click()
+    const sheet = await details.boundingBox()
+    expect(sheet?.height).toBe(844)
+    expect(await details.getByRole('tab', { name: 'Overview', exact: true }).evaluate(el => el.getBoundingClientRect().height)).toBe(44)
+    await expectStableControls({ controls: { tabs: details.getByRole('tablist'), close: details.getByRole('button', { name: 'Close assistant details' }), sheet: details }, scrollAreas: { body: details.locator('.assistant-panel-scroll') }, interactions: ['Overview', 'Policy'].map(name => ({ name, run: async () => { await details.getByRole('tab', { name, exact: true }).click(); if (width === 390) await shot(`390-light-sheet-${name.toLowerCase()}`) } })) })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+  }
+  expect(errors).toEqual([])
+})
+
+test('zero assistants show the permission-gated existing connect flow without sample rows', async ({ page }, testInfo) => {
+  test.setTimeout(90_000)
+  await setup(page)
+  const items: ReturnType<typeof assistantEvidence>['items'] = []
+  await mockAssistants(page, items, me.id)
+  let connectAccess = true
+  await page.route('**/api/me/permissions*', route => {
+    const permissions = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    if (connectAccess) permissions.workspace.permissions.push('agents.create')
+    return route.fulfill({ json: permissions })
+  })
+  await page.goto('/agents')
+  const section = page.locator('.assistants')
+  for (const permitted of [true, false]) {
+    connectAccess = permitted
+    await page.reload()
+    await expect(section).toContainText('No assistants yet.')
+    await expect(section.locator('.assistant-row')).toHaveCount(0)
+    const connect = section.getByRole('link', { name: 'Connect an assistant', exact: true })
+    await expect(connect).toHaveCount(permitted ? 1 : 0)
+    if (permitted) await expect(connect).toHaveAttribute('href', '/agents/register-agent?kind=assistant')
+    for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+      await page.screenshot({ path: testInfo.outputPath(`aeon-1705-${width}-${theme}-empty-${permitted ? 'connect' : 'readonly'}.png`), fullPage: true })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+    }
+  }
+  connectAccess = true
+  await page.reload()
+  await section.getByRole('link', { name: 'Connect an assistant', exact: true }).click()
+  await expect(page).toHaveURL('/agents/register-agent?kind=assistant')
+  await expect(page.getByRole('heading', { name: 'Connect an assistant', exact: true })).toBeVisible()
+  await expect(page.getByText('Creates an identity without credentials, project access or spend authority.', { exact: false })).toBeVisible()
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Harbor Clerk')
+  await page.getByRole('button', { name: 'Connect an assistant', exact: false }).click()
+  await expect(page).toHaveURL(/\/agents\?assistant=/)
+  await expect(page.getByRole('complementary', { name: 'Assistant details' }).getByRole('heading', { name: /Harbor Clerk/ })).toBeVisible()
+  expect(items).toHaveLength(1)
+  expect(items[0]!.policy.allowed_projects).toEqual([])
+  expect(items[0]!.policy.weekly_budget.amount).toBe('0')
+})

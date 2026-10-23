@@ -6,6 +6,7 @@
 import type { Page, Route } from '@playwright/test'
 import { defaultSchedule, type CapacityWorld } from './capacity-fixtures'
 import type { QuotaOutlook } from '../src/lib/quotaOutlook'
+import { assistantDeskLink, unavailableAssistantFacts, type Assistant, type AssistantEvent, type AssistantFacts } from '../src/lib/assistants'
 
 export interface AgentWorld {
   me: string
@@ -370,3 +371,49 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
 // write on the page reads it again (AEON-449): compare the count before and after.
 export const sessionListReads = (calls: { path: string; method: string; query?: URLSearchParams }[]) =>
   calls.filter(call => call.method === 'GET' && call.path === '/api/harness-sessions' && call.query?.get('view') === 'current').length
+
+// Tick §10. Runtime metrics stay in test fixtures until B/C/D have real reads.
+// A-only browser captures show their unavailable state, rather than claim that
+// these future facts came from a service which has not shipped.
+export function assistantEvidence(now: number, owner: string) {
+  const amy: Assistant = { principal_id: agent(5), owner_person_id: owner, status: 'active', revision: 1, kind: 'assistant', principal_kind: 'agent', display_name: 'Amy', vendor: 'grok', messaging_only: true, policy: { allowed_projects: ['p-aeon', 'p-pharos'], allowed_scopes: ['nodes.read', 'nodes.write', 'knowledge.write', 'inbox.read', 'inbox.send', 'inbox.receipt'], weekly_budget: { amount: '10', unit: 'USD' }, outward_action_rule: 'approval_required', never_ask_person_for_secrets_or_manual_steps: true } }
+  const scout: Assistant = { ...amy, principal_id: agent(9), display_name: 'Scout', policy: { ...amy.policy, allowed_projects: ['p-aeon'] } }
+  const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString()
+  const facts: Record<string, AssistantFacts> = {
+    [amy.principal_id]: { ...unavailableAssistantFacts(), adapter: { state: 'ok', lastReceipt: ago(1) }, spend: { amount: '3.20', daily: Array.from({ length: 7 }, (_, n) => ({ day: String(n + 1), amount: n === 4 ? '3.20' : '0' })) }, approvals: [1, 2].map(n => ({ id: `action-${n}`, title: n === 1 ? 'Send the research summary' : 'Publish the knowledge entry', target: n === 1 ? 'PHAROS' : 'AEON', at: ago(n * 3), href: assistantDeskLink(amy.principal_id) })), routines: [1, 2, 3].map(n => ({ id: `routine-${n}`, name: `Inbox triage ${n}`, schedule: 'Weekdays at 08:00', next: new Date(now + n * 60_000).toISOString(), paused: false, revision: 1 })), lastActivity: { at: ago(12), text: 'Replied' } },
+    [scout.principal_id]: { ...unavailableAssistantFacts(), adapter: { state: 'ok', lastReceipt: ago(2) }, spend: { amount: '8.40', daily: Array.from({ length: 7 }, (_, n) => ({ day: String(n + 1), amount: n === 4 ? '8.40' : '0' })) }, approvals: [], routines: [], lastActivity: { at: ago(30), text: 'Replied' } },
+  }
+  return { items: [scout, amy], facts }
+}
+
+export async function mockAssistants(page: Page, items: Assistant[], owner: string) {
+  const writes: { id: string; body: { expected_revision: number; policy: Assistant['policy'] } }[] = []
+  const events: AssistantEvent[] = []
+  await page.route('**/api/assistants**', async route => {
+    const url = new URL(route.request().url()), method = route.request().method()
+    if (url.pathname === '/api/assistants' && method === 'GET') return route.fulfill({ json: { assistants: items } })
+    const policy = /^\/api\/assistants\/([^/]+)\/policy$/.exec(url.pathname)
+    if (policy) {
+      const item = items.find(row => row.principal_id === policy[1])
+      if (!item) return route.fulfill({ status: 404, json: { error: 'Assistant not found' } })
+      if (method === 'PUT') {
+        const body = route.request().postDataJSON() as typeof writes[number]['body']
+        writes.push({ id: item.principal_id, body })
+        if (body.expected_revision !== item.revision) return route.fulfill({ status: 409, json: { error: 'Revision changed' } })
+        const before = structuredClone(item)
+        item.policy = body.policy; item.revision++
+        events.push({ id: events.length + 1, type: 'assistant.policy_updated', at: new Date().toISOString(), actor_principal_id: owner, before, after: structuredClone(item) })
+      }
+      return route.fulfill({ json: item })
+    }
+    if (url.pathname === '/api/assistants' && method === 'POST') {
+      const body = route.request().postDataJSON()
+      const item: Assistant = { ...body, principal_id: agent(8), status: 'active', revision: 1, kind: 'assistant', principal_kind: 'agent', messaging_only: true }
+      items.push(item)
+      return route.fulfill({ status: 201, json: item })
+    }
+    return route.fulfill({ status: 404, json: { error: 'Assistant route not available' } })
+  })
+  await page.route('**/api/events?*', route => new URL(route.request().url()).searchParams.get('type')?.startsWith('assistant.') ? route.fulfill({ json: { items: events, next_after: null } }) : route.fallback())
+  return { writes, events }
+}

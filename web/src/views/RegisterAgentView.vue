@@ -3,6 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../components/AppIcon.vue'
+import ConnectAssistant from '../components/agents/ConnectAssistant.vue'
 import ConnectedComputers from '../components/agents/ConnectedComputers.vue'
 import HarnessMark from '../components/agents/HarnessMark.vue'
 import PairingUsePreview from '../components/agents/PairingUsePreview.vue'
@@ -197,6 +198,7 @@ const stopAccess = onAccessRevalidate({ reset: clearSignedInPreview })
 watch(() => session.requiresSignIn, ended => { if (ended) clearSignedInPreview() })
 
 onMounted(async () => {
+  if (route.query.kind === 'assistant') return
   stopLive = subscribePairingEvents(() => pairingEventScope(current.value), () => follower.poke())
   window.addEventListener('online', onLine)
   window.addEventListener('offline', onLine)
@@ -515,7 +517,8 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 </script>
 
 <template>
-  <article ref="pageRoot" class="connect" data-aeon-pairing-guide="pairing-v1">
+  <ConnectAssistant v-if="route.query.kind === 'assistant'" />
+  <article v-else ref="pageRoot" class="connect" data-aeon-pairing-guide="pairing-v1">
     <header v-if="!asking && !ended" class="intro">
       <p class="eyebrow">Agents</p>
       <h1>Connect your machine</h1>
