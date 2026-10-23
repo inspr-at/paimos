@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/session-recovery.spec.ts",
-    "listedTests": 15,
+    "listedTests": 11,
     "tierTiming": {
       "caseSeconds": {
         "max": 6.299,

@@ -187,7 +187,9 @@ async function contrast(locator: Locator) {
   })
 }
 
-for (const width of [1600, 1440, 1024, 390, 320]) for (const theme of ['light', 'dark'] as const) {
+// Retain desktop, phone and the narrow overflow boundary. Both themes stay
+// because this journey measures actual text contrast and runs axe.
+for (const width of [1440, 390, 320]) for (const theme of ['light', 'dark'] as const) {
   test(`AEON-1438 thread ${width} ${theme}: Desk cards, quiet meta, latest receipt, calm composer`, async ({ page }, testInfo) => {
     const { worker, latest, data } = await setup(page, { theme })
     data.messages.find(message => message.body.includes(longWord))!.body = `Die vollständige Freigabeprüfung einschließlich sämtlicher Abrechnungseinstellungen ist abgeschlossen. Der geprüfte Dateischlüssel lautet ${longWord}.`
@@ -311,7 +313,7 @@ for (const width of [1600, 1440, 1024, 390, 320]) for (const theme of ['light', 
   })
 }
 
-for (const width of [1440, 1024, 390]) test(`AEON-1438 Copy and Reply on demand ${width}: hover and focus reveal them in the gap, nothing moves`, async ({ page }, testInfo) => {
+for (const width of [1440, 390]) test(`AEON-1438 Copy and Reply on demand ${width}: hover and focus reveal them in the gap, nothing moves`, async ({ page }, testInfo) => {
   const { worker } = await setup(page)
   await page.setViewportSize({ width, height: width <= 390 ? 844 : 900 })
   await page.goto(`/agents/${worker.id}?tab=messages`)

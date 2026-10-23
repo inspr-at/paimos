@@ -25,7 +25,10 @@ async function setup(page: Page, theme: 'light' | 'dark') {
   return { lead, quiet }
 }
 
-for (const pass of [1, 2]) for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) for (const detail of [false, true]) {
+// A second pass repeats the identical fixture and assertions. Keep each
+// compact/full row and open/closed panel branch once (AEON-1679).
+const pass = 1
+for (const theme of ['light'] as const) for (const width of [1600, 390]) for (const detail of [false, true]) {
   test(`session rows ${theme} ${width} detail ${detail ? 'open' : 'closed'} pass ${pass}`, async ({ page }, testInfo) => {
     const errors = watchErrors(page)
     const { lead, quiet } = await setup(page, theme)

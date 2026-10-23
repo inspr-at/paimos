@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/session-inbox.spec.ts",
-    "listedTests": 4,
+    "listedTests": 2,
     "tierTiming": {
       "caseSeconds": {
         "max": 7.084,

@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/approval-feedback.spec.ts",
-    "listedTests": 18,
+    "listedTests": 9,
     "tierTiming": {
       "caseSeconds": {
         "max": 9.337,
