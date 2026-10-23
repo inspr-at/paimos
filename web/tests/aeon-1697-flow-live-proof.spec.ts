@@ -111,7 +111,7 @@ test('AEON-1697 manual Expert Live proof from harness records', async ({ browser
         await expect(builder.locator('b')).toHaveText('Builder')
         await expect(moment.locator('.idle')).not.toContainText('Builder')
         const momentText = await page.getByTestId('flow-moment-head').textContent()
-        expect(momentText).toContain(width === 1440 ? 'Builder on “Being built”' : 'Builder: „Wird gebaut“')
+        expect(momentText).toContain(width === 1440 ? 'Builder on “Being built · round 2”' : 'Builder: „Wird gebaut · Runde 2“')
         await expect(host.locator('[data-step]')).toHaveCount(21)
         const geometry = await host.evaluate(host => {
           const box = (element: Element) => { const r = element.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height } }

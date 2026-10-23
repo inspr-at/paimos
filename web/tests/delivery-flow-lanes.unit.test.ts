@@ -75,7 +75,7 @@ it('ten concurrent builders take ten rows; above twelve a lane folds into "+N mo
   expect(recorded!.items.find(item => item.step === avatarStep)).toMatchObject({ run: main, lane: 'build' })
   const moment = momentOf({ data: live, sets: [recorded!], T: now, selected: null, level: 'expert', lang: 'en', text: flowText('en') })
   expect(moment.lines.find(line => line.lane === 'build')).toMatchObject({ who: 'Builder', kind: 'work', label: '1674 · Build r2 · gpt-6.1-sol', more: 4 })
-  expect(moment.sentence).toContain('Builder on “Being built”')
+  expect(moment.sentence).toBe('Builder on “Being built · round 2”; LEAD, OPS, Reviewer, CI & queue are idle; nothing waiting on you.')
   expect(moment.idle).not.toContain('Builder')
   const builders = (n: number) => Array.from({ length: n }, (_, k) => step(10 + k, 60 + k, 'build'))
   const lanes = (steps: FlowStep[]): FlowData => { const d = data(steps); d.sets[0]!.lanes = ['build', 'ci']; return d }
