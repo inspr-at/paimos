@@ -118,6 +118,29 @@ async function setup(page: Page, w: BrandWorld, options: { admin?: boolean; loca
   return mockBrand(page, w, options)
 }
 
+test('P02 an admin uploads a bounded sanitized logo and reloads the saved workspace brand', async ({ page }) => {
+  const world = brandWorld()
+  await setup(page, world)
+  await page.goto('/settings/workspace#brand')
+  const card = page.locator('#brand'), upload = card.getByLabel('Logo file', { exact: true })
+  await expect(card.getByRole('heading', { name: 'Brand', exact: true })).toBeVisible()
+  await upload.setInputFiles({ name: 'oversize.svg', mimeType: 'image/svg+xml', buffer: Buffer.alloc(300 * 1024, 32) })
+  await expect(card.getByRole('alert')).toHaveText('The file is 300 KB; the limit is 256 KB.')
+  expect(world.puts).toEqual([])
+  await upload.setInputFiles({ name: 'brand.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(WIDE.replace('</svg>', '<!-- export metadata --></svg>')) })
+  await expect(page.locator('.toast')).toContainText('Saved. SVG comments were removed.')
+  expect(world.logos.light!.body).not.toContain('<!--')
+  expect(world.puts).toHaveLength(1)
+  const name = card.getByRole('textbox', { name: 'Short name' })
+  await name.fill('  Northwind   Traders '); await name.press('Enter')
+  await expect(lockup(page).locator('.tenant-name')).toHaveText('Northwind Traders')
+  await expect(lockup(page).locator('.tenant-logo img')).toHaveAttribute('src', /^\/api\/brand\/logo\/light\?v=/)
+  await page.reload()
+  await expect(lockup(page).locator('.tenant-name')).toHaveText('Northwind Traders')
+  await expect(lockup(page).locator('.tenant-logo img')).toBeVisible()
+  expect(world.short_name).toBe('Northwind Traders')
+})
+
 const lockup = (page: Page) => page.locator('.app-header .lockup')
 const footerName = (page: Page) => page.locator('footer.app-footer .footer-name')
 

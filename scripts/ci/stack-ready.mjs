@@ -72,6 +72,7 @@ export function uiStackTarget(env = process.env, cwd = process.cwd()) {
 // must not start a Go server.
 export const mockOnlyCiJobs = [
   ['ci.yml', 'web-shard'],
+  ['ci.yml', 'visual-reference-capture'],
   ['nightly-full.yml', 'nightly-web-shard'],
   ['full-ui-qa.yml', 'qa-shard'],
   ['agents-dial-ui.yml', 'agents-dial-ui'],

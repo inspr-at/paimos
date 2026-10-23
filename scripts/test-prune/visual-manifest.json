@@ -1,32 +1,174 @@
 {
   "version": 1,
-  "ticket": "AEON-1673",
+  "ticket": "AEON-1674",
   "source": "AEON-1668 section 8 and Tick addendum (2026-10-22)",
   "approval": {
     "reviewer": "Tick",
-    "status": "pending",
-    "approvedAt": null,
-    "evidence": null
+    "status": "awaiting-set-3",
+    "states": [],
+    "checkpoints": [],
+    "evidence": "LEAD-M AEON-1674 round 12, 2026-10-23: every checkpoint reports awaiting re-capture under the final renderer. AEON-1692 pins reference set 3 and flips comparison.mode to blocking; historical sets authorize no cuts."
   },
   "baselineAuthority": {
-    "status": "pending-review",
+    "status": "historical-only",
     "source": {
       "kind": "existing-ppm-ticket-attachment",
       "ticket": "AEON-1670",
       "instance": "PPM / INSPR",
-      "attachmentId": null,
-      "sha256": null
+      "attachmentId": "9d4055fd-5c9f-4383-b46a-1eb39e99c9da",
+      "name": "AEON-1674-linux-6fea542010.tar",
+      "bytes": 36823040,
+      "sha256": "3c53666ddd810275cef073191449bebe20e73d6c0b162de4fe65f441a20e4511",
+      "format": "tar",
+      "captureSHA": "6fea542010b4c699dadadd74529fdaf7a1ef4c9a",
+      "captureRun": "39912019882",
+      "manifest": {
+        "attachmentId": "7a3d7b74-c973-4333-89bb-39708c2a245d",
+        "name": "AEON-1674-linux-6fea542010.tar.manifest.json",
+        "bytes": 44954,
+        "sha256": "dfb4ad0c42e8fb6b714ed3a44e164a145e99785dfba8c8e3f1346d214538af12"
+      },
+      "baselineBundle": {
+        "attachmentMember": "baseline.json",
+        "sha256": "d463a91a35a273ab041d4f333889d19d4d420b7c715f549630c3baa96cb9b939"
+      },
+      "archiveManifest": {
+        "attachmentMember": "manifest.json",
+        "sha256": "855e3f92303f4cc275d2eea8436a4a7b8477900ef42fd9b565a9bec34c71d227"
+      },
+      "unapprovedMembers": [
+        {
+          "id": "V-delivery-numbers-390-light",
+          "attachmentMember": "V-delivery-numbers-390-light.png",
+          "sha256": "17312744d399a608b51eb16e0fb9c45e1ef605fac4c57452d9fa3abe31e57076"
+        },
+        {
+          "id": "V-delivery-numbers-390-dark",
+          "attachmentMember": "V-delivery-numbers-390-dark.png",
+          "sha256": "a15f0f5aca9f62ea113dcbe3b7d67a3ebf875c6eb0c7759bf4196a1cb4e4ea51"
+        },
+        {
+          "id": "V-capacity-390-light",
+          "attachmentMember": "V-capacity-390-light.png",
+          "sha256": "47f33ca8cc634dd61b31f5eb92be0eded994d439753fde9eb13dc43aa973af78"
+        },
+        {
+          "id": "V-capacity-390-dark",
+          "attachmentMember": "V-capacity-390-dark.png",
+          "sha256": "c55aa765b5060649364a2b8395e80c667a789d62f568d3224e55ca8769c245f9"
+        },
+        {
+          "id": "V-capacity-1440-light",
+          "attachmentMember": "V-capacity-1440-light.png",
+          "sha256": "d1fa127f96e0ae46b5c0dd1790bc1910403fce4824ddec8225ed82d6ae300d57"
+        },
+        {
+          "id": "V-capacity-1440-dark",
+          "attachmentMember": "V-capacity-1440-dark.png",
+          "sha256": "efc6c54704ca1d617ff117ac6afb2c1a09e65d153f28cc74234c2bfb7cdf6545"
+        },
+        {
+          "id": "V-projects-390-light",
+          "attachmentMember": "V-projects-390-light.png",
+          "sha256": "2fa66284535f811b1dbadbc782a7d6bcbbdbc5e7a8307a7475159f1235ad4c04"
+        },
+        {
+          "id": "V-decision-desk-1024-light",
+          "attachmentMember": "V-decision-desk-1024-light.png",
+          "sha256": "64d8882b641eab1969b5a0c79a3e9c14d40c60eb382bf0a0fbaaca11ae25e521"
+        },
+        {
+          "id": "V-decision-desk-1024-dark",
+          "attachmentMember": "V-decision-desk-1024-dark.png",
+          "sha256": "a278dbfc41b8e0d4adfac4969a3d785a359119d5f2b33f4d2907a2533446bd2a"
+        },
+        {
+          "id": "V-account-use-matrix-1024-light",
+          "attachmentMember": "V-account-use-matrix-1024-light.png",
+          "sha256": "e8ce18d4ec5700770a8007b511ac68805af6a623f996b3a0c8d293fe40c79831"
+        },
+        {
+          "id": "V-account-use-matrix-1024-dark",
+          "attachmentMember": "V-account-use-matrix-1024-dark.png",
+          "sha256": "0cbba35916de3af644d4f64b7a3238d51d90ea8e5dc5fd3119646611ffb4a652"
+        },
+        {
+          "id": "V-account-use-matrix-1440-light",
+          "attachmentMember": "V-account-use-matrix-1440-light.png",
+          "sha256": "e5bdccc5faf328a91d4a341f30df161f99c81bdeeff8d780f97bd332e57e679c"
+        },
+        {
+          "id": "V-account-use-matrix-1440-dark",
+          "attachmentMember": "V-account-use-matrix-1440-dark.png",
+          "sha256": "6efccd126575a7b6c5c2fe8b8b333d42de8fd324c3efe3799c7a78abf3df6444"
+        },
+        {
+          "id": "V-quote-editor-1440-light",
+          "attachmentMember": "V-quote-editor-1440-light.png",
+          "sha256": "1322262fa77a24db996990ef1bb002fa23ace8151f6496e5796a6b3bfc420637"
+        },
+        {
+          "id": "V-agent-rules-390-dark",
+          "attachmentMember": "V-agent-rules-390-dark.png",
+          "sha256": "9c407e75a426b9883fe283c509e55c5ce3c360c17ea72a17cda06feb153ed444"
+        },
+        {
+          "id": "V-hours-390-light",
+          "attachmentMember": "V-hours-390-light.png",
+          "sha256": "b61b1e447bd42b8e91f42e5e3de08be85e2cb0fd4185fd84075562d997d74e8f"
+        },
+        {
+          "id": "V-hours-390-dark",
+          "attachmentMember": "V-hours-390-dark.png",
+          "sha256": "5a273380e0a050ce10540e764682f4d87367a317bec327cb4cc124e18018cdfe"
+        },
+        {
+          "id": "V-hours-1440-light",
+          "attachmentMember": "V-hours-1440-light.png",
+          "sha256": "e5b1f427dc4e04f8508ebe0be0f196e0db29e11f8c4ae35f6808bc2a6672b6e1"
+        },
+        {
+          "id": "V-hours-1440-dark",
+          "attachmentMember": "V-hours-1440-dark.png",
+          "sha256": "6a475cd2370de7df8673d70347e834a1231e98a95b8074a57c8297909d8115c0"
+        }
+      ],
+      "unapprovedMemberPolicy": "Digest verification only. These rejected capture bytes never enter the comparison reference map. Checkpoint deferrals and the exact approval list govern authority.",
+      "mirror": {
+        "kind": "github-prerelease",
+        "repository": "inspr-at/paimos",
+        "tag": "test-references-2",
+        "releaseURL": "https://github.com/inspr-at/paimos/releases/tag/test-references-2",
+        "archive": {
+          "name": "AEON-1674-linux-6fea542010.tar",
+          "url": "https://github.com/inspr-at/paimos/releases/download/test-references-2/AEON-1674-linux-6fea542010.tar"
+        },
+        "manifest": {
+          "name": "AEON-1674-linux-6fea542010.tar.manifest.json",
+          "url": "https://github.com/inspr-at/paimos/releases/download/test-references-2/AEON-1674-linux-6fea542010.tar.manifest.json"
+        },
+        "authority": "Read-only transport of byte-identical AEON-1670 attachments. The archive contains 72 captures; only the 70 explicitly approved checkpoints are comparison authority."
+      }
     },
     "retention": {
-      "policy": "Keep the approved reference attachment for the lifetime of this visual set; do not rely on expiring CI captures. Removal or loss requires a newly reviewed reference.",
-      "availability": "P02 must verify download through the existing authorized PPM attachment path, then CI materializes the pinned bytes and verifies SHA-256 before comparison. No new credentials.",
-      "verifiedAt": null
+      "policy": "Retain the immutable reference archive and detached manifest permanently for this visual set; loss or changed bytes fail closed and require a newly reviewed set.",
+      "availability": "AEON-1670 attachments are mirrored byte-for-byte as named test-references-2 prerelease assets. Built-in CI contents:read downloads and verifies both assets before tar reads; all 72 transport members are checked, and only 70 approved PNGs are exposed for comparison. The macOS set remains history only.",
+      "verifiedAt": "2026-10-23T06:47:54.936437+00:00",
+      "verificationScope": "LEAD round-9 publication attestation plus authenticated local GitHub download and digest verification; hosted CI remains to run after coordinator push.",
+      "ciVerifiedAt": null
     },
     "onMissing": "fail",
     "onExpired": "fail",
     "onDigestMismatch": "fail",
     "automaticRewrite": false,
-    "currentRunMayBeReference": false
+    "currentRunMayBeReference": false,
+    "ciMaterialization": {
+      "status": "implemented-awaiting-hosted-ci",
+      "transport": "source.mirror; built-in GITHUB_TOKEN, contents:read only",
+      "entrypoint": "node scripts/test-prune/visual-baselines.mjs download tmp/visual-baselines",
+      "consumerVerification": "node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines",
+      "workflow": "web-setup downloads and verifies; web-runtime transports the original assets; each web-shard verifies again before comparison."
+    }
   },
   "profiles": {
     "phone": {
@@ -85,7 +227,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Set-2 pixels fail in PR #891 under the recorded frozen-clock renderer."
         },
         {
           "id": "V-projects-390-dark",
@@ -94,7 +241,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-projects-1440-light",
@@ -103,7 +255,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-projects-1440-dark",
@@ -112,9 +269,19 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Live-chip ages, project dates and shell release history derive from the fixed work-fixture instant; mock live-feed elapsed time does not enter captured text. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "tickets",
@@ -137,7 +304,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-tickets-390-dark",
@@ -146,7 +318,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-tickets-1440-light",
@@ -155,7 +332,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-tickets-1440-dark",
@@ -164,9 +346,19 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Ticket dates and ages plus shell release history use the fixed work-fixture instant. Release-name fixture is explicitly Full Fin in both version and history."
+      }
     },
     {
       "id": "goals",
@@ -222,6 +414,17 @@
       "fixturesByProfile": {
         "phone": "Simple; 56 px rows; candy bar frozen by reduced motion",
         "desktop": "Expert; one goal expanded; pace badges; a late Lands with \"at this pace\"; numbered steps with stage tracks; waits marker"
+      },
+      "referenceStatus": "deferred",
+      "deferredUntil": [
+        "AEON-1621",
+        "AEON-1625"
+      ],
+      "deferredReason": "Tick 2026-10-23: exclude every Goals checkpoint from the first pinned set; review against the v6 canvas after both product packages land.",
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Deferred canvas: reserve the work-fixture clock for the later product capture. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
       }
     },
     {
@@ -246,7 +449,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-agents-390-dark",
@@ -255,7 +463,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-agents-1024-light",
@@ -264,7 +477,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-agents-1024-dark",
@@ -273,7 +491,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-agents-1440-light",
@@ -282,7 +505,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-agents-1440-dark",
@@ -291,15 +519,25 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Heartbeat ages, session elapsed time, approval expiry and account quota facts use agentData(NOW), injected mockAgents now and the fixed browser clock. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "session-chat",
       "label": "Session Chat",
       "owner": "tests/visual/session-chat.spec.ts",
-      "fixture": "Long post/code/link, receipt and composer in the open panel",
+      "fixture": "AEON-1438/1687 shared conversation subset: answered and waiting Desk cards; Today separator; latest sent message and receipt, all fully in the viewport",
       "profiles": [
         "phone",
         "desktop"
@@ -316,7 +554,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-session-chat-390-dark",
@@ -325,7 +568,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-session-chat-1440-light",
@@ -334,7 +582,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-session-chat-1440-dark",
@@ -343,9 +596,26 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         }
-      ]
+      ],
+      "expectedResponses": [
+        {
+          "path": "/api/projects/p-pharos/harness-sessions/5e000000-0000-4000-8000-000000000001/native-context",
+          "status": 503,
+          "reason": "feature_disabled"
+        }
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Today separator, message times, read receipts and Desk card dates use mockChatThread now; visual chrome restores that same fixed instant after its business mock. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "decision-desk",
@@ -369,7 +639,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-decision-desk-390-dark",
@@ -378,7 +653,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-decision-desk-1024-light",
@@ -387,7 +667,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "AEON-1616 changed the Desk gap on current main; set-2 pixels fail in PR #891."
         },
         {
           "id": "V-decision-desk-1024-dark",
@@ -396,7 +681,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "AEON-1616 changed the Desk gap on current main; set-2 pixels fail in PR #891."
         },
         {
           "id": "V-decision-desk-1440-light",
@@ -405,7 +695,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-decision-desk-1440-dark",
@@ -414,9 +709,19 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Question dates, approval expiry and projectionTime explicitly use NOW. No real-clock approval data reaches the captured state. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "account-use-matrix",
@@ -440,7 +745,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-account-use-matrix-390-dark",
@@ -449,7 +759,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-account-use-matrix-1024-light",
@@ -458,7 +773,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "AEON-1689 changed the desktop matrix on current main; set-2 pixels fail in PR #891."
         },
         {
           "id": "V-account-use-matrix-1024-dark",
@@ -467,7 +787,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "AEON-1689 changed the desktop matrix on current main; set-2 pixels fail in PR #891."
         },
         {
           "id": "V-account-use-matrix-1440-light",
@@ -476,7 +801,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "AEON-1689 changed the desktop matrix on current main; set-2 pixels fail in PR #891."
         },
         {
           "id": "V-account-use-matrix-1440-dark",
@@ -485,9 +815,19 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "AEON-1689 changed the desktop matrix on current main; set-2 pixels fail in PR #891."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-29T12:02:00.000Z",
+        "audit": "Account facts use CAPACITY_NOW; save has a revision only and Undo has no displayed countdown. Browser clock stays at that same fixed instant. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "models",
@@ -510,7 +850,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-models-390-dark",
@@ -519,7 +864,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-models-1440-light",
@@ -528,7 +878,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-models-1440-dark",
@@ -537,9 +892,19 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "The selected fallback/locked design picker uses fixed registry facts. The shared real-time CAP_UNTIL is read only by down:true, which this visual state does not select. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "access",
@@ -562,7 +927,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-access-390-dark",
@@ -571,7 +941,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-access-1440-light",
@@ -580,7 +955,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-access-1440-dark",
@@ -589,9 +969,19 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Role descriptions and permissions are static; key ages and shell dates use the fixed work/access fixture instant. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "knowledge",
@@ -614,7 +1004,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-knowledge-390-dark",
@@ -623,7 +1018,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-knowledge-1440-light",
@@ -632,7 +1032,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-knowledge-1440-dark",
@@ -641,9 +1046,19 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Entry created/updated dates use the fixed work/knowledge fixture instant; create-entry real-clock dates are not used by this read-only state. Release-name fixture is explicitly Full Fin in both version and history."
+      }
     },
     {
       "id": "delivery-numbers",
@@ -666,7 +1081,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Tick requested changes to the 390px Delivery capture: heading top must be at least app-header bottom +12 px, with the full on-target headline in view. Re-capture and approval belong to AEON-1692 / reference set 3; these old PNGs remain transport evidence only."
         },
         {
           "id": "V-delivery-numbers-390-dark",
@@ -675,7 +1095,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Tick requested changes to the 390px Delivery capture: heading top must be at least app-header bottom +12 px, with the full on-target headline in view. Re-capture and approval belong to AEON-1692 / reference set 3; these old PNGs remain transport evidence only."
         },
         {
           "id": "V-delivery-numbers-1440-light",
@@ -684,7 +1109,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-delivery-numbers-1440-dark",
@@ -693,9 +1123,19 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Metrics and empty flow use recorded fixture dates; shell dates use NOW. Phone positioning is geometry only. Release-name fixture is explicitly Full Fin in both version and history."
+      }
     },
     {
       "id": "hours",
@@ -718,7 +1158,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
         },
         {
           "id": "V-hours-390-dark",
@@ -727,7 +1172,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
         },
         {
           "id": "V-hours-1440-light",
@@ -736,7 +1186,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
         },
         {
           "id": "V-hours-1440-dark",
@@ -745,9 +1200,19 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-24T08:00:00.000Z",
+        "audit": "mockBusiness deliberately replaces the work clock with its own fixed 2026-09-24T08:00:00.000Z; retain this existing instant so the approved editor and period dates do not change. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "quote-editor",
@@ -771,7 +1236,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-quote-editor-390-dark",
@@ -780,7 +1250,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-quote-editor-1024-light",
@@ -789,7 +1264,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-quote-editor-1024-dark",
@@ -798,7 +1278,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-quote-editor-1440-light",
@@ -807,7 +1292,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Set-2 pixels fail in PR #891 under the recorded frozen-clock renderer."
         },
         {
           "id": "V-quote-editor-1440-dark",
@@ -816,9 +1306,19 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Quote document dates and the bundled profile revision are fixed; no live quote-list creation or issue path is selected. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "public-quote",
@@ -841,7 +1341,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-public-quote-390-dark",
@@ -850,7 +1355,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-public-quote-1440-light",
@@ -859,7 +1369,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-public-quote-1440-dark",
@@ -868,9 +1383,19 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Public quote now is explicitly NOW, so validity and accepted timestamps share the browser clock. Shared quote-list module real dates are unused. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "start-agent",
@@ -893,7 +1418,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-start-agent-390-dark",
@@ -902,7 +1432,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-start-agent-1440-light",
@@ -911,7 +1446,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-start-agent-1440-dark",
@@ -920,9 +1460,19 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-29T12:02:00.000Z",
+        "audit": "Catalog as_of, probe ages, quota windows, wait deadline, projection and outlook all derive from CAPACITY_NOW; the browser uses the same instant. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "agent-rules",
@@ -945,7 +1495,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-agent-rules-390-dark",
@@ -954,7 +1509,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Set-2 pixels fail in PR #891 under the recorded frozen-clock renderer."
         },
         {
           "id": "V-agent-rules-1440-light",
@@ -963,7 +1523,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         },
         {
           "id": "V-agent-rules-1440-dark",
@@ -972,15 +1537,25 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Awaiting re-capture under the final renderer; set-2 bytes are historical comparison evidence only (LEAD-M round 12)."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Import preview and selected Secrets draft are static. Shell release dates use NOW; there are no selected relative-time reads. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "capacity",
       "label": "Capacity & load",
       "owner": "tests/visual/capacity.spec.ts",
-      "fixture": "Quota/pace rows with stale or partial evidence and an open editor",
+      "fixture": "Daily limit for Claude Code popover open; fonts and layout settled before opening; identical scroll in both themes",
       "profiles": [
         "phone",
         "desktop"
@@ -997,7 +1572,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
         },
         {
           "id": "V-capacity-390-dark",
@@ -1006,7 +1586,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
         },
         {
           "id": "V-capacity-1440-light",
@@ -1015,7 +1600,12 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
         },
         {
           "id": "V-capacity-1440-dark",
@@ -1024,15 +1614,25 @@
           "reference": {
             "attachmentMember": null,
             "sha256": null
-          }
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-29T12:02:00.000Z",
+        "audit": "Quota bars, reset labels and pace depend on now. Both mockAgents and dailyPlan use CAPACITY_NOW; assert the browser after setup and before capture/comparison. The old unasserted-clock pins are transport history only: re-capture with a frozen clock in AEON-1692 / reference set 3. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "ticket-workspace",
       "label": "Ticket workspace",
       "owner": "tests/visual/ticket-workspace.spec.ts",
-      "fixture": "Long title and key; properties panel; attachment strip with one preview; checklist with the focus ring; chat dock open",
+      "fixture": "Long title and key; properties panel; attachment strip with one preview and its focus ring; read-only checklist; chat dock open",
       "profiles": [
         "phone",
         "desktop"
@@ -1078,7 +1678,2211 @@
             "sha256": null
           }
         }
+      ],
+      "referenceStatus": "deferred",
+      "deferredUntil": [
+        "AEON-1674"
+      ],
+      "deferredReason": "Deferred until the separately owned Tick product ticket fixes attachment action hit-area overlap and classification feedback semantics. Round 6 reverts both product changes; no quality checks or captures run for this state.",
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Deferred attachment preview: reserve the work-fixture clock for the later product capture. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
+    }
+  ],
+  "history": [
+    {
+      "status": "historical-only",
+      "reason": "AEON-1674 round 6: macOS capture cannot authorize hosted Linux comparisons. Superseded pending capture, Tick review and LEAD publication of test-references-2.",
+      "renderer": {
+        "platform": "darwin",
+        "hostRole": "approved remote Mac browser lane",
+        "imageVersion": "not recorded"
+      },
+      "approval": {
+        "reviewer": "Tick",
+        "status": "approved",
+        "approvedAt": "2026-10-23 (03:3x Europe/Vienna; exact minute/second not supplied)",
+        "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94",
+        "states": [
+          "projects",
+          "access",
+          "knowledge",
+          "public-quote",
+          "agent-rules",
+          "start-agent",
+          "quote-editor"
+        ],
+        "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+        "recordedBy": "LEAD-M",
+        "scope": "Only these seven states and their exact 30 checkpoint bytes are approved. Each comparison requires verified materialization; no cuts are authorized in round 5."
+      },
+      "baselineAuthority": {
+        "status": "approved",
+        "source": {
+          "kind": "existing-ppm-ticket-attachment",
+          "ticket": "AEON-1670",
+          "instance": "PPM / INSPR",
+          "attachmentId": "a2b2206f-adbc-429e-afee-eeaf42422a69",
+          "sha256": "2c17e829b380a9d3d357871f0f18ba8c2d6f021b00bb15c74f2884406a436055",
+          "nodeId": "9b233c96-f176-4151-bba1-d82cea3ccc89",
+          "name": "AEON-1674-approved-1-2e6c7938e.tar",
+          "bytes": 13977600,
+          "format": "tar",
+          "captureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+          "manifest": {
+            "attachmentId": "b204962a-03a0-4cff-8b28-64abdf136a94",
+            "name": "AEON-1674-approved-1-2e6c7938e.tar.manifest.json",
+            "bytes": 29816,
+            "sha256": "e826bde57eccd7bbb711072474f9dea94f5710bfb5313cb1469518ddac89dc16"
+          },
+          "baselineBundle": {
+            "attachmentMember": "baseline.json",
+            "sha256": "c7673b146cc62d0e055bbe8fe9020bfa7f314b89a052a6ee75123e88cbacefe8"
+          },
+          "archiveManifest": {
+            "attachmentMember": "manifest.json",
+            "sha256": "b5e7c215b92ce31ff4ac19fb1e8d4fbeea3d56ed18a6b6a9447e8cd5c3cd9ab5"
+          },
+          "mirror": {
+            "kind": "github-prerelease",
+            "repository": "inspr-at/paimos",
+            "tag": "test-references-1",
+            "releaseURL": "https://github.com/inspr-at/paimos/releases/tag/test-references-1",
+            "archive": {
+              "name": "AEON-1674-approved-1-2e6c7938e.tar",
+              "url": "https://github.com/inspr-at/paimos/releases/download/test-references-1/AEON-1674-approved-1-2e6c7938e.tar"
+            },
+            "manifest": {
+              "name": "AEON-1674-approved-1-2e6c7938e.tar.manifest.json",
+              "url": "https://github.com/inspr-at/paimos/releases/download/test-references-1/AEON-1674-approved-1-2e6c7938e.tar.manifest.json"
+            },
+            "authority": "CI transport only; AEON-1670 records Tick approval, and the pinned archive and detached-manifest SHA-256 values govern both copies."
+          }
+        },
+        "retention": {
+          "policy": "Keep the approved reference attachment for the lifetime of this visual set; do not rely on expiring CI captures. Removal or loss requires a newly reviewed reference.",
+          "availability": "Permanent AEON-1670 approval attachments are mirrored byte-for-byte as named assets on GitHub prerelease test-references-1. CI downloads with its built-in GITHUB_TOKEN (contents:read), verifies the archive and detached manifest before reading tar members, and re-verifies both assets in every browser shard.",
+          "verifiedAt": "2026-10-23T02:30:54Z",
+          "verificationScope": "local-authorized-ppm-cli and local GitHub release download; every consumer verifies executable materialization",
+          "ciVerifiedAt": null,
+          "mirrorVerifiedAt": "2026-10-23T02:47:47.418135Z"
+        },
+        "onMissing": "fail",
+        "onExpired": "fail",
+        "onDigestMismatch": "fail",
+        "automaticRewrite": false,
+        "currentRunMayBeReference": false,
+        "ciMaterialization": {
+          "status": "implemented-awaiting-hosted-ci",
+          "transport": "source.mirror; gh release download test-references-1 --repo inspr-at/paimos; built-in GITHUB_TOKEN; contents:read only",
+          "entrypoint": "node scripts/test-prune/visual-baselines.mjs download tmp/visual-baselines",
+          "consumerVerification": "node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines",
+          "workflow": "web-setup downloads and verifies; web-runtime includes both original assets; web-shard verifies again before any browser run",
+          "baselineFile": "tmp/visual-baselines/baseline.json",
+          "report": "tmp/visual-baselines/reference-gates.json and reference-gates.md; workflow step summary and per-checkpoint evidence",
+          "onUnavailable": "fail required web setup/shard with an explicit materialization error",
+          "newCredentialCreated": false,
+          "workflowChanged": true,
+          "cutsAuthorized": false
+        }
+      },
+      "states": [
+        {
+          "id": "projects",
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "reportedLocalTime": "03:3x",
+            "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+            "recordedBy": "LEAD-M",
+            "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+            "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+          },
+          "checkpoints": [
+            {
+              "id": "V-projects-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-projects-390-light.png",
+                "sha256": "8519c93e2a7a952f30d6ce1d0ab48e32ddd79463459c86199bff6538a0e1efab"
+              }
+            },
+            {
+              "id": "V-projects-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-projects-390-dark.png",
+                "sha256": "ddc43d9b15fa1930dc9bcf549787470657516f12a18e21293a6c116bfc99e02b"
+              }
+            },
+            {
+              "id": "V-projects-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-projects-1440-light.png",
+                "sha256": "0175d598db47e8b029c3536e4aa2a4cb0754a5e19ba8a5e12ce282aae1433462"
+              }
+            },
+            {
+              "id": "V-projects-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-projects-1440-dark.png",
+                "sha256": "e6cbde33b03c58a63f0cae97a2d766586df240ab30b8fbafeda9f64ec7308431"
+              }
+            }
+          ]
+        },
+        {
+          "id": "access",
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "reportedLocalTime": "03:3x",
+            "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+            "recordedBy": "LEAD-M",
+            "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+            "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+          },
+          "checkpoints": [
+            {
+              "id": "V-access-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-access-390-light.png",
+                "sha256": "743a8fe55ec54f8798c192578a9a23b6f23815c0ea662823e193808358c146e5"
+              }
+            },
+            {
+              "id": "V-access-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-access-390-dark.png",
+                "sha256": "f3d1b4b1d2be51203155ff02d5dd3599112783fd95f18451652a888b4c2fb8c1"
+              }
+            },
+            {
+              "id": "V-access-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-access-1440-light.png",
+                "sha256": "008eda61cf1a578bb48f9e5cf79e2ad429517eb04dfd8ccb85053949731b2d96"
+              }
+            },
+            {
+              "id": "V-access-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-access-1440-dark.png",
+                "sha256": "8db78eae4a67f02137b5c7a1b377cdad35dacc7246dd9c0168f8fcc10c2af359"
+              }
+            }
+          ]
+        },
+        {
+          "id": "knowledge",
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "reportedLocalTime": "03:3x",
+            "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+            "recordedBy": "LEAD-M",
+            "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+            "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+          },
+          "checkpoints": [
+            {
+              "id": "V-knowledge-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-knowledge-390-light.png",
+                "sha256": "ff28b405b63815af0fe2a70f09e59f4eecde859ea5df9038f217b0f1fd6c3b5e"
+              }
+            },
+            {
+              "id": "V-knowledge-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-knowledge-390-dark.png",
+                "sha256": "17919f4494b5822072960c2368dd0e2900a6c188f82c3a65b62cd47e0fc4b785"
+              }
+            },
+            {
+              "id": "V-knowledge-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-knowledge-1440-light.png",
+                "sha256": "fccfca14678a5c7468be9b75765c7df1582bfe070abd23ca1e012bc081137532"
+              }
+            },
+            {
+              "id": "V-knowledge-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-knowledge-1440-dark.png",
+                "sha256": "287843c87f236fa98c221a779147daa68852b33a389fb0bfb19b0532b5758640"
+              }
+            }
+          ]
+        },
+        {
+          "id": "quote-editor",
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "reportedLocalTime": "03:3x",
+            "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+            "recordedBy": "LEAD-M",
+            "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+            "nonBlockingFollowUp": "AEON-1688",
+            "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+          },
+          "checkpoints": [
+            {
+              "id": "V-quote-editor-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-quote-editor-390-light.png",
+                "sha256": "64ddaad52116ec3a450ac8bda3a8442dbaae2a9d977aad306ec13e89df3618e0"
+              }
+            },
+            {
+              "id": "V-quote-editor-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-quote-editor-390-dark.png",
+                "sha256": "cafe304c9208107a3bc0215cc26c3853148293465f2c0ba483abd6b66ba76502"
+              }
+            },
+            {
+              "id": "V-quote-editor-1024-light",
+              "profile": "tablet",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-quote-editor-1024-light.png",
+                "sha256": "6275bc483c8a5b285ac72d2d7c1f25051f3e93836d2bb4da4e136155cbab384a"
+              }
+            },
+            {
+              "id": "V-quote-editor-1024-dark",
+              "profile": "tablet",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-quote-editor-1024-dark.png",
+                "sha256": "f90ddbb1d4dc3945bde50069751f354aafa184e5d7cb536a23b8349b50614943"
+              }
+            },
+            {
+              "id": "V-quote-editor-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-quote-editor-1440-light.png",
+                "sha256": "5a2005772e7f7ed0ebde03fb1e5cbc07ed6fcb205fcadc62d667032c671e1226"
+              }
+            },
+            {
+              "id": "V-quote-editor-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-quote-editor-1440-dark.png",
+                "sha256": "624d2d15f950370c1f04a79a8f70c1bdf40c1b1a1747200ba6c49753f5056372"
+              }
+            }
+          ]
+        },
+        {
+          "id": "public-quote",
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "reportedLocalTime": "03:3x",
+            "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+            "recordedBy": "LEAD-M",
+            "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+            "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+          },
+          "checkpoints": [
+            {
+              "id": "V-public-quote-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-public-quote-390-light.png",
+                "sha256": "51546bea03be63529e63f592564ad11fe800084f654920ffff09b78bf4f8a837"
+              }
+            },
+            {
+              "id": "V-public-quote-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-public-quote-390-dark.png",
+                "sha256": "72f868b23dd7e1287ad057e6766bd7a342fb44ce82138d6ac5c9eae3984a38d0"
+              }
+            },
+            {
+              "id": "V-public-quote-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-public-quote-1440-light.png",
+                "sha256": "af715164cc53349e7cfd0e7d3d72a21b7dbfd27cb9d7a9b7e7ae25a904ee9d2d"
+              }
+            },
+            {
+              "id": "V-public-quote-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-public-quote-1440-dark.png",
+                "sha256": "d5fc77516559612ee0cf117d6bf524c0be456fcc0f48a13c3a0eecec076572bf"
+              }
+            }
+          ]
+        },
+        {
+          "id": "start-agent",
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "reportedLocalTime": "03:3x",
+            "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+            "recordedBy": "LEAD-M",
+            "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+            "nonBlockingFollowUp": "AEON-1688",
+            "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+          },
+          "checkpoints": [
+            {
+              "id": "V-start-agent-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-start-agent-390-light.png",
+                "sha256": "98369040c4211f53fbccdff6647ffce94f4405894058c624b050e63a348226c6"
+              }
+            },
+            {
+              "id": "V-start-agent-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-start-agent-390-dark.png",
+                "sha256": "67c4a299ae66225290fda59e5e0fe774559fb6ec4c0b2d8996bc421b89a09054"
+              }
+            },
+            {
+              "id": "V-start-agent-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-start-agent-1440-light.png",
+                "sha256": "bee1ff8ca8cf33f69e6508d7df6f2c23b55a830ba2a2b31626cc452a9b6d7ced"
+              }
+            },
+            {
+              "id": "V-start-agent-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-start-agent-1440-dark.png",
+                "sha256": "ca2dfc4b987393b1b8f792a7e45d541a363af52a296fe3a50ad4415ca046dd15"
+              }
+            }
+          ]
+        },
+        {
+          "id": "agent-rules",
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "reportedLocalTime": "03:3x",
+            "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+            "recordedBy": "LEAD-M",
+            "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+            "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+          },
+          "checkpoints": [
+            {
+              "id": "V-agent-rules-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-agent-rules-390-light.png",
+                "sha256": "516241b932cf0bd0605abc8581da43f10958c63e5f9d2ce332a7f9cf58fea018"
+              }
+            },
+            {
+              "id": "V-agent-rules-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-agent-rules-390-dark.png",
+                "sha256": "f6921129daabc4c0354267dcc53bd972cf783b54e2bbcdf4b115fa403d90f276"
+              }
+            },
+            {
+              "id": "V-agent-rules-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-agent-rules-1440-light.png",
+                "sha256": "961a9ad53b88bc6dcb18585035d2ff0428c00d83b3f6f87e6c245ae56a2fb0c5"
+              }
+            },
+            {
+              "id": "V-agent-rules-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-agent-rules-1440-dark.png",
+                "sha256": "c04d48809cfae61c3ab7f9a363f9f4a232339cc16fe5e7aba15ff9f180699e72"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "referenceSet": 2,
+      "status": "historical-only",
+      "reason": "LEAD-M round 12: all set-2 approvals and pins, including delivery-390 rejection and round-10/11 withdrawals, are history only. Final frozen-clock, confined-font renderer requires AEON-1692 / reference set 3. No cut authority.",
+      "approval": {
+        "reviewer": "Tick",
+        "status": "approved",
+        "approvedAt": "2026-10-23",
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2. Round 10: LEAD-M requires the four Capacity checkpoints to be deferred until AEON-1692 / reference set 3, with a recorded and asserted frozen clock. Round 11: LEAD-M explicitly withdraws exactly nine failed checkpoint pins for AEON-1692 / reference set 3; these report awaiting reference, and the remaining checkpoint pins retain strict comparison authority. The attached raw job 120309394777 log additionally lists all four Hours checkpoints in its actual 8-failed summary and FAIL browser records; those pins are withdrawn under the same failed-pins-only instruction.",
+        "states": [
+          "tickets",
+          "agents",
+          "session-chat",
+          "models",
+          "access",
+          "knowledge",
+          "public-quote",
+          "start-agent"
+        ],
+        "checkpoints": [
+          "V-projects-390-dark",
+          "V-projects-1440-light",
+          "V-projects-1440-dark",
+          "V-tickets-390-light",
+          "V-tickets-390-dark",
+          "V-tickets-1440-light",
+          "V-tickets-1440-dark",
+          "V-agents-390-light",
+          "V-agents-390-dark",
+          "V-agents-1024-light",
+          "V-agents-1024-dark",
+          "V-agents-1440-light",
+          "V-agents-1440-dark",
+          "V-session-chat-390-light",
+          "V-session-chat-390-dark",
+          "V-session-chat-1440-light",
+          "V-session-chat-1440-dark",
+          "V-decision-desk-390-light",
+          "V-decision-desk-390-dark",
+          "V-decision-desk-1440-light",
+          "V-decision-desk-1440-dark",
+          "V-account-use-matrix-390-light",
+          "V-account-use-matrix-390-dark",
+          "V-models-390-light",
+          "V-models-390-dark",
+          "V-models-1440-light",
+          "V-models-1440-dark",
+          "V-access-390-light",
+          "V-access-390-dark",
+          "V-access-1440-light",
+          "V-access-1440-dark",
+          "V-knowledge-390-light",
+          "V-knowledge-390-dark",
+          "V-knowledge-1440-light",
+          "V-knowledge-1440-dark",
+          "V-delivery-numbers-1440-light",
+          "V-delivery-numbers-1440-dark",
+          "V-quote-editor-390-light",
+          "V-quote-editor-390-dark",
+          "V-quote-editor-1024-light",
+          "V-quote-editor-1024-dark",
+          "V-quote-editor-1440-dark",
+          "V-public-quote-390-light",
+          "V-public-quote-390-dark",
+          "V-public-quote-1440-light",
+          "V-public-quote-1440-dark",
+          "V-start-agent-390-light",
+          "V-start-agent-390-dark",
+          "V-start-agent-1440-light",
+          "V-start-agent-1440-dark",
+          "V-agent-rules-390-light",
+          "V-agent-rules-1440-light",
+          "V-agent-rules-1440-dark"
+        ],
+        "sourceCaptureSHA": "6fea542010b4c699dadadd74529fdaf7a1ef4c9a",
+        "captureRun": "39912019882",
+        "recordedBy": "LEAD-M",
+        "scope": "Exactly 53 checkpoints are comparison authority. Thirteen stale set-2 checkpoints report awaiting reference (needs re-capture) for AEON-1692 / reference set 3: nine named in round 11 plus four Hours failures proven by the attached CI log. Existing 14 explicit deferrals remain. No protected cuts are authorized in P02; P03–P11 own their subsequent cut rounds."
+      },
+      "baselineAuthority": {
+        "status": "approved",
+        "source": {
+          "kind": "existing-ppm-ticket-attachment",
+          "ticket": "AEON-1670",
+          "instance": "PPM / INSPR",
+          "attachmentId": "9d4055fd-5c9f-4383-b46a-1eb39e99c9da",
+          "name": "AEON-1674-linux-6fea542010.tar",
+          "bytes": 36823040,
+          "sha256": "3c53666ddd810275cef073191449bebe20e73d6c0b162de4fe65f441a20e4511",
+          "format": "tar",
+          "captureSHA": "6fea542010b4c699dadadd74529fdaf7a1ef4c9a",
+          "captureRun": "39912019882",
+          "manifest": {
+            "attachmentId": "7a3d7b74-c973-4333-89bb-39708c2a245d",
+            "name": "AEON-1674-linux-6fea542010.tar.manifest.json",
+            "bytes": 44954,
+            "sha256": "dfb4ad0c42e8fb6b714ed3a44e164a145e99785dfba8c8e3f1346d214538af12"
+          },
+          "baselineBundle": {
+            "attachmentMember": "baseline.json",
+            "sha256": "d463a91a35a273ab041d4f333889d19d4d420b7c715f549630c3baa96cb9b939"
+          },
+          "archiveManifest": {
+            "attachmentMember": "manifest.json",
+            "sha256": "855e3f92303f4cc275d2eea8436a4a7b8477900ef42fd9b565a9bec34c71d227"
+          },
+          "unapprovedMembers": [
+            {
+              "id": "V-delivery-numbers-390-light",
+              "attachmentMember": "V-delivery-numbers-390-light.png",
+              "sha256": "17312744d399a608b51eb16e0fb9c45e1ef605fac4c57452d9fa3abe31e57076"
+            },
+            {
+              "id": "V-delivery-numbers-390-dark",
+              "attachmentMember": "V-delivery-numbers-390-dark.png",
+              "sha256": "a15f0f5aca9f62ea113dcbe3b7d67a3ebf875c6eb0c7759bf4196a1cb4e4ea51"
+            },
+            {
+              "id": "V-capacity-390-light",
+              "attachmentMember": "V-capacity-390-light.png",
+              "sha256": "47f33ca8cc634dd61b31f5eb92be0eded994d439753fde9eb13dc43aa973af78"
+            },
+            {
+              "id": "V-capacity-390-dark",
+              "attachmentMember": "V-capacity-390-dark.png",
+              "sha256": "c55aa765b5060649364a2b8395e80c667a789d62f568d3224e55ca8769c245f9"
+            },
+            {
+              "id": "V-capacity-1440-light",
+              "attachmentMember": "V-capacity-1440-light.png",
+              "sha256": "d1fa127f96e0ae46b5c0dd1790bc1910403fce4824ddec8225ed82d6ae300d57"
+            },
+            {
+              "id": "V-capacity-1440-dark",
+              "attachmentMember": "V-capacity-1440-dark.png",
+              "sha256": "efc6c54704ca1d617ff117ac6afb2c1a09e65d153f28cc74234c2bfb7cdf6545"
+            },
+            {
+              "id": "V-projects-390-light",
+              "attachmentMember": "V-projects-390-light.png",
+              "sha256": "2fa66284535f811b1dbadbc782a7d6bcbbdbc5e7a8307a7475159f1235ad4c04"
+            },
+            {
+              "id": "V-decision-desk-1024-light",
+              "attachmentMember": "V-decision-desk-1024-light.png",
+              "sha256": "64d8882b641eab1969b5a0c79a3e9c14d40c60eb382bf0a0fbaaca11ae25e521"
+            },
+            {
+              "id": "V-decision-desk-1024-dark",
+              "attachmentMember": "V-decision-desk-1024-dark.png",
+              "sha256": "a278dbfc41b8e0d4adfac4969a3d785a359119d5f2b33f4d2907a2533446bd2a"
+            },
+            {
+              "id": "V-account-use-matrix-1024-light",
+              "attachmentMember": "V-account-use-matrix-1024-light.png",
+              "sha256": "e8ce18d4ec5700770a8007b511ac68805af6a623f996b3a0c8d293fe40c79831"
+            },
+            {
+              "id": "V-account-use-matrix-1024-dark",
+              "attachmentMember": "V-account-use-matrix-1024-dark.png",
+              "sha256": "0cbba35916de3af644d4f64b7a3238d51d90ea8e5dc5fd3119646611ffb4a652"
+            },
+            {
+              "id": "V-account-use-matrix-1440-light",
+              "attachmentMember": "V-account-use-matrix-1440-light.png",
+              "sha256": "e5bdccc5faf328a91d4a341f30df161f99c81bdeeff8d780f97bd332e57e679c"
+            },
+            {
+              "id": "V-account-use-matrix-1440-dark",
+              "attachmentMember": "V-account-use-matrix-1440-dark.png",
+              "sha256": "6efccd126575a7b6c5c2fe8b8b333d42de8fd324c3efe3799c7a78abf3df6444"
+            },
+            {
+              "id": "V-quote-editor-1440-light",
+              "attachmentMember": "V-quote-editor-1440-light.png",
+              "sha256": "1322262fa77a24db996990ef1bb002fa23ace8151f6496e5796a6b3bfc420637"
+            },
+            {
+              "id": "V-agent-rules-390-dark",
+              "attachmentMember": "V-agent-rules-390-dark.png",
+              "sha256": "9c407e75a426b9883fe283c509e55c5ce3c360c17ea72a17cda06feb153ed444"
+            },
+            {
+              "id": "V-hours-390-light",
+              "attachmentMember": "V-hours-390-light.png",
+              "sha256": "b61b1e447bd42b8e91f42e5e3de08be85e2cb0fd4185fd84075562d997d74e8f"
+            },
+            {
+              "id": "V-hours-390-dark",
+              "attachmentMember": "V-hours-390-dark.png",
+              "sha256": "5a273380e0a050ce10540e764682f4d87367a317bec327cb4cc124e18018cdfe"
+            },
+            {
+              "id": "V-hours-1440-light",
+              "attachmentMember": "V-hours-1440-light.png",
+              "sha256": "e5b1f427dc4e04f8508ebe0be0f196e0db29e11f8c4ae35f6808bc2a6672b6e1"
+            },
+            {
+              "id": "V-hours-1440-dark",
+              "attachmentMember": "V-hours-1440-dark.png",
+              "sha256": "6a475cd2370de7df8673d70347e834a1231e98a95b8074a57c8297909d8115c0"
+            }
+          ],
+          "unapprovedMemberPolicy": "Digest verification only. These rejected capture bytes never enter the comparison reference map. Checkpoint deferrals and the exact approval list govern authority.",
+          "mirror": {
+            "kind": "github-prerelease",
+            "repository": "inspr-at/paimos",
+            "tag": "test-references-2",
+            "releaseURL": "https://github.com/inspr-at/paimos/releases/tag/test-references-2",
+            "archive": {
+              "name": "AEON-1674-linux-6fea542010.tar",
+              "url": "https://github.com/inspr-at/paimos/releases/download/test-references-2/AEON-1674-linux-6fea542010.tar"
+            },
+            "manifest": {
+              "name": "AEON-1674-linux-6fea542010.tar.manifest.json",
+              "url": "https://github.com/inspr-at/paimos/releases/download/test-references-2/AEON-1674-linux-6fea542010.tar.manifest.json"
+            },
+            "authority": "Read-only transport of byte-identical AEON-1670 attachments. The archive contains 72 captures; only the 70 explicitly approved checkpoints are comparison authority."
+          }
+        },
+        "retention": {
+          "policy": "Retain the immutable reference archive and detached manifest permanently for this visual set; loss or changed bytes fail closed and require a newly reviewed set.",
+          "availability": "AEON-1670 attachments are mirrored byte-for-byte as named test-references-2 prerelease assets. Built-in CI contents:read downloads and verifies both assets before tar reads; all 72 transport members are checked, and only 70 approved PNGs are exposed for comparison. The macOS set remains history only.",
+          "verifiedAt": "2026-10-23T06:47:54.936437+00:00",
+          "verificationScope": "LEAD round-9 publication attestation plus authenticated local GitHub download and digest verification; hosted CI remains to run after coordinator push.",
+          "ciVerifiedAt": null
+        },
+        "onMissing": "fail",
+        "onExpired": "fail",
+        "onDigestMismatch": "fail",
+        "automaticRewrite": false,
+        "currentRunMayBeReference": false,
+        "ciMaterialization": {
+          "status": "implemented-awaiting-hosted-ci",
+          "transport": "source.mirror; built-in GITHUB_TOKEN, contents:read only",
+          "entrypoint": "node scripts/test-prune/visual-baselines.mjs download tmp/visual-baselines",
+          "consumerVerification": "node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines",
+          "workflow": "web-setup downloads and verifies; web-runtime transports the original assets; each web-shard verifies again before comparison."
+        }
+      },
+      "states": [
+        {
+          "id": "projects",
+          "label": "Projects",
+          "owner": "tests/visual/projects.spec.ts",
+          "fixture": "Long project names; live worker faces; one useful empty/error cue",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-projects-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "needs-re-capture",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "Set-2 pixels fail in PR #891 under the recorded frozen-clock renderer."
+            },
+            {
+              "id": "V-projects-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-projects-390-dark.png",
+                "sha256": "9e286dfc9b6d0579e6290464da9cf15f0a29cc2c4f1877d3783ebc32b4fcfb84"
+              }
+            },
+            {
+              "id": "V-projects-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-projects-1440-light.png",
+                "sha256": "4625f1b868482183e1042167c7b50fd6d71c779dfa60fabb5116321dc14c2b9f"
+              }
+            },
+            {
+              "id": "V-projects-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-projects-1440-dark.png",
+                "sha256": "f9964229029e35283917081553634154302bdf8e63b4a39cb51b3752d9db4656"
+              }
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "partially-approved",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+            "reason": "Round 11 LEAD-M: only unchanged checkpoint pins remain authority; failed pins require AEON-1692 / reference set 3 re-capture and Tick review."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "Live-chip ages, project dates and shell release history derive from the fixed work-fixture instant; mock live-feed elapsed time does not enter captured text. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "tickets",
+          "label": "Tickets / grouped list",
+          "owner": "tests/visual/tickets.spec.ts",
+          "fixture": "Long keys and parent names; visible filters; scoped figures",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-tickets-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-tickets-390-light.png",
+                "sha256": "296f3429d8c1c3652a0095cab4efd911574594f611e10587aca40be48a17ac51"
+              }
+            },
+            {
+              "id": "V-tickets-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-tickets-390-dark.png",
+                "sha256": "711e7bce3f1efb5a5b99b59bcf8c705987169f04b21d55f33e1bb160299562c0"
+              }
+            },
+            {
+              "id": "V-tickets-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-tickets-1440-light.png",
+                "sha256": "76f45d04be5559a17040a20f3652be82e569b9aa74d11a5c9baa7c6e4d0cbdd4"
+              }
+            },
+            {
+              "id": "V-tickets-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-tickets-1440-dark.png",
+                "sha256": "678eda52f244ae55b679d71cadf53d6f2ac16d41458e0db9fd45f462b20425da"
+              }
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "Ticket dates and ages plus shell release history use the fixed work-fixture instant. Release-name fixture is explicitly Full Fin in both version and history."
+          }
+        },
+        {
+          "id": "goals",
+          "label": "Goals",
+          "owner": "tests/visual/goals.spec.ts",
+          "fixture": "Long title and key; desktop Expert and phone Simple with profile-specific fixtures",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-goals-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              }
+            },
+            {
+              "id": "V-goals-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              }
+            },
+            {
+              "id": "V-goals-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              }
+            },
+            {
+              "id": "V-goals-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              }
+            }
+          ],
+          "fixturesByProfile": {
+            "phone": "Simple; 56 px rows; candy bar frozen by reduced motion",
+            "desktop": "Expert; one goal expanded; pace badges; a late Lands with \"at this pace\"; numbered steps with stage tracks; waits marker"
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1621",
+            "AEON-1625"
+          ],
+          "deferredReason": "Tick 2026-10-23: exclude every Goals checkpoint from the first pinned set; review against the v6 canvas after both product packages land.",
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "Deferred canvas: reserve the work-fixture clock for the later product capture. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "agents",
+          "label": "Agents",
+          "owner": "tests/visual/agents.spec.ts",
+          "fixture": "Deep live/stopped tree, Needs you and long host/account labels",
+          "profiles": [
+            "phone",
+            "tablet",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-agents-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-agents-390-light.png",
+                "sha256": "0fcfb101810a0f740f35b9ff7f358c5ed2033e8b22c054c0deef352f6919a8d9"
+              }
+            },
+            {
+              "id": "V-agents-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-agents-390-dark.png",
+                "sha256": "121124231afe2458de165a76d8f40845c152abdcf91ce95bbb7a7084b6deb052"
+              }
+            },
+            {
+              "id": "V-agents-1024-light",
+              "profile": "tablet",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-agents-1024-light.png",
+                "sha256": "409609da9542d0cbf0bb4f7677f9365080d3731a0a4eeac753f47a60049355e3"
+              }
+            },
+            {
+              "id": "V-agents-1024-dark",
+              "profile": "tablet",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-agents-1024-dark.png",
+                "sha256": "ec0d8cdfd27ef8881d5c834f567ff21701841185412aa4020f48e7ee574c9540"
+              }
+            },
+            {
+              "id": "V-agents-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-agents-1440-light.png",
+                "sha256": "3885f1fe8baf6604009e25ec9565f1af1465064755e4edf2115b36721b12f697"
+              }
+            },
+            {
+              "id": "V-agents-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-agents-1440-dark.png",
+                "sha256": "b7fb5aee0cc2ec172c29f684056778c12c1f8aa96bd81102cd9d9db260456682"
+              }
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "Heartbeat ages, session elapsed time, approval expiry and account quota facts use agentData(NOW), injected mockAgents now and the fixed browser clock. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "session-chat",
+          "label": "Session Chat",
+          "owner": "tests/visual/session-chat.spec.ts",
+          "fixture": "AEON-1438/1687 shared conversation subset: answered and waiting Desk cards; Today separator; latest sent message and receipt, all fully in the viewport",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-session-chat-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-session-chat-390-light.png",
+                "sha256": "745824d66d8551380fbe08ef9501c51733783a010ff45b02ee0ad33b009beabc"
+              }
+            },
+            {
+              "id": "V-session-chat-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-session-chat-390-dark.png",
+                "sha256": "37073b641cccda32ddf640019a7d4d908b3caed32067b59032c45a89968909ae"
+              }
+            },
+            {
+              "id": "V-session-chat-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-session-chat-1440-light.png",
+                "sha256": "1786d67aa8e0933ac4299b97154c97b795481d194d0b7c0f957ba45757133e41"
+              }
+            },
+            {
+              "id": "V-session-chat-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-session-chat-1440-dark.png",
+                "sha256": "897acaa7a7843ae2712fe185966b4f9d3b35d915fa17b66570f2b2665b77e24a"
+              }
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+          },
+          "expectedResponses": [
+            {
+              "path": "/api/projects/p-pharos/harness-sessions/5e000000-0000-4000-8000-000000000001/native-context",
+              "status": 503,
+              "reason": "feature_disabled"
+            }
+          ],
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "Today separator, message times, read receipts and Desk card dates use mockChatThread now; visual chrome restores that same fixed instant after its business mock. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "decision-desk",
+          "label": "Decision Desk memo",
+          "owner": "tests/visual/decision-desk.spec.ts",
+          "fixture": "Long request/context, explicit choices, disabled reason and fixed actions",
+          "profiles": [
+            "phone",
+            "tablet",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-decision-desk-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-decision-desk-390-light.png",
+                "sha256": "acd508e3dc0633f0386b8a99d7a25915f7bbeb0ac4d73abd37aab62be4175785"
+              }
+            },
+            {
+              "id": "V-decision-desk-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-decision-desk-390-dark.png",
+                "sha256": "0ef706609a32d8eb0ca5c1edb900c17c36c9385179ce6f534677fae75782e22e"
+              }
+            },
+            {
+              "id": "V-decision-desk-1024-light",
+              "profile": "tablet",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "needs-re-capture",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "AEON-1616 changed the Desk gap on current main; set-2 pixels fail in PR #891."
+            },
+            {
+              "id": "V-decision-desk-1024-dark",
+              "profile": "tablet",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "needs-re-capture",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "AEON-1616 changed the Desk gap on current main; set-2 pixels fail in PR #891."
+            },
+            {
+              "id": "V-decision-desk-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-decision-desk-1440-light.png",
+                "sha256": "0a0581be5450dcd29915c928cb90594f148a3d20fedfe626939b7a78b3b4a9db"
+              }
+            },
+            {
+              "id": "V-decision-desk-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-decision-desk-1440-dark.png",
+                "sha256": "7cd6e344a7f66b0915d6139ad233bbb9a6883ef15d919c22edf281732ceaf360"
+              }
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "partially-approved",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+            "reason": "Round 11 LEAD-M: only unchanged checkpoint pins remain authority; failed pins require AEON-1692 / reference set 3 re-capture and Tick review."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "Question dates, approval expiry and projectionTime explicitly use NOW. No real-clock approval data reaches the captured state. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "account-use-matrix",
+          "label": "Settings · Account use matrix",
+          "owner": "tests/visual/account-use-matrix.spec.ts",
+          "fixture": "Long account/context names, partial selection and visible Undo",
+          "profiles": [
+            "phone",
+            "tablet",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-account-use-matrix-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-account-use-matrix-390-light.png",
+                "sha256": "d766314a3e62db86a31a7141fc73b4ecb564018e62a3bcfb8fde3e7171ee4e8a"
+              }
+            },
+            {
+              "id": "V-account-use-matrix-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-account-use-matrix-390-dark.png",
+                "sha256": "c431842b740244501a78e3c7091ebd0b8b5aea011a4068d082c29a56247cd2cc"
+              }
+            },
+            {
+              "id": "V-account-use-matrix-1024-light",
+              "profile": "tablet",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "needs-re-capture",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "AEON-1689 changed the desktop matrix on current main; set-2 pixels fail in PR #891."
+            },
+            {
+              "id": "V-account-use-matrix-1024-dark",
+              "profile": "tablet",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "needs-re-capture",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "AEON-1689 changed the desktop matrix on current main; set-2 pixels fail in PR #891."
+            },
+            {
+              "id": "V-account-use-matrix-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "needs-re-capture",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "AEON-1689 changed the desktop matrix on current main; set-2 pixels fail in PR #891."
+            },
+            {
+              "id": "V-account-use-matrix-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "needs-re-capture",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "AEON-1689 changed the desktop matrix on current main; set-2 pixels fail in PR #891."
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "partially-approved",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+            "reason": "Round 11 LEAD-M: only unchanged checkpoint pins remain authority; failed pins require AEON-1692 / reference set 3 re-capture and Tick review."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-29T12:02:00.000Z",
+            "audit": "Account facts use CAPACITY_NOW; save has a revision only and Undo has no displayed countdown. Browser clock stays at that same fixed instant. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "models",
+          "label": "Models",
+          "owner": "tests/visual/models.spec.ts",
+          "fixture": "A locked selection with registry/situation disclosure and long names",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-models-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-models-390-light.png",
+                "sha256": "3c6a484b4c889106f829279e9ae135de193d5bbe910b8212409c8726d4543c23"
+              }
+            },
+            {
+              "id": "V-models-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-models-390-dark.png",
+                "sha256": "f55801af4c180b8623bfed02feb95326dda5ae1e1255513fde6d1c1b651cbd0c"
+              }
+            },
+            {
+              "id": "V-models-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-models-1440-light.png",
+                "sha256": "33ea533dcf31337201759c3c80739bb9a6b5bb96f211d1ef9afda4423e9978a3"
+              }
+            },
+            {
+              "id": "V-models-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-models-1440-dark.png",
+                "sha256": "03469a29911e410c8300c7096ff46f8d5da0318d46bf155afcf713d5a4c3dbfa"
+              }
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "The selected fallback/locked design picker uses fixed registry facts. The shared real-time CAP_UNTIL is read only by down:true, which this visual state does not select. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "access",
+          "label": "Access · role/scopes picker",
+          "owner": "tests/visual/access.spec.ts",
+          "fixture": "Long role descriptions, bounded choices and authority explanation",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-access-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-access-390-light.png",
+                "sha256": "97713adc30e1ca92eb978a31836313602381e6e7c17e7c2f59f4e28a2bae5cba"
+              }
+            },
+            {
+              "id": "V-access-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-access-390-dark.png",
+                "sha256": "39248a48200154bbb10ce7e194e33b8fd4ed8df6ef1a121db570c559acc959f4"
+              }
+            },
+            {
+              "id": "V-access-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-access-1440-light.png",
+                "sha256": "ee99983e80cfa5b5926618566e7370c78acf784ef7a0ffe475aa37ce0527bf92"
+              }
+            },
+            {
+              "id": "V-access-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-access-1440-dark.png",
+                "sha256": "83b81f7c688d8cb973c7edac8a0ab905ca17c82f2882b3e23546524fe6a0de66"
+              }
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "Role descriptions and permissions are static; key ages and shell dates use the fixed work/access fixture instant. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "knowledge",
+          "label": "Knowledge",
+          "owner": "tests/visual/knowledge.spec.ts",
+          "fixture": "Docked long entry with headings/table; phone full-page equivalent",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-knowledge-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-knowledge-390-light.png",
+                "sha256": "7aab11274677fdc8f729664d7bcae85d876213584076d82c295bf96690763bf0"
+              }
+            },
+            {
+              "id": "V-knowledge-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-knowledge-390-dark.png",
+                "sha256": "eb54a83cdfb84ec6673bdf5c1f181838113216ec642efc5c17fea76d3c916712"
+              }
+            },
+            {
+              "id": "V-knowledge-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-knowledge-1440-light.png",
+                "sha256": "470d45ced54f7593853b6dbc5dd8d64cb907ee15eb30c942ed219ffc69a817c1"
+              }
+            },
+            {
+              "id": "V-knowledge-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-knowledge-1440-dark.png",
+                "sha256": "1ed516b9e2edbd006135c686c2cab9952b151417aa3eaba27185bfac62af0732"
+              }
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "Entry created/updated dates use the fixed work/knowledge fixture instant; create-entry real-clock dates are not used by this read-only state. Release-name fixture is explicitly Full Fin in both version and history."
+          }
+        },
+        {
+          "id": "delivery-numbers",
+          "label": "Delivery · Numbers",
+          "owner": "tests/visual/delivery-numbers.spec.ts",
+          "fixture": "Representative counts/chart plus honest partial-data label",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-delivery-numbers-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "deferred",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "Tick requested changes to the 390px Delivery capture: heading top must be at least app-header bottom +12 px, with the full on-target headline in view. Re-capture and approval belong to AEON-1692 / reference set 3; these old PNGs remain transport evidence only."
+            },
+            {
+              "id": "V-delivery-numbers-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "deferred",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "Tick requested changes to the 390px Delivery capture: heading top must be at least app-header bottom +12 px, with the full on-target headline in view. Re-capture and approval belong to AEON-1692 / reference set 3; these old PNGs remain transport evidence only."
+            },
+            {
+              "id": "V-delivery-numbers-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-delivery-numbers-1440-light.png",
+                "sha256": "d343061ed1e1446007bc2f0ccb10f6f8f6b3c2d74a6eaee0433a11dd5a9cd103"
+              }
+            },
+            {
+              "id": "V-delivery-numbers-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-delivery-numbers-1440-dark.png",
+                "sha256": "4d2444245bf45602691656bd1db45f904282b3739e019e25983a64ced8d13af2"
+              }
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "partially-approved",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+            "reason": "Tick requested changes to the 390px Delivery capture: scroll the Delivery heading below the app header and show the on-target headline. These two old captures are transport evidence only; a fresh capture and Tick approval are required before they can become references."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "Metrics and empty flow use recorded fixture dates; shell dates use NOW. Phone positioning is geometry only. Release-name fixture is explicitly Full Fin in both version and history."
+          }
+        },
+        {
+          "id": "hours",
+          "label": "Business · Hours",
+          "owner": "tests/visual/hours.spec.ts",
+          "fixture": "Week/period entries, correction control and approval state",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-hours-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "needs-re-capture",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
+            },
+            {
+              "id": "V-hours-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "needs-re-capture",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
+            },
+            {
+              "id": "V-hours-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "needs-re-capture",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
+            },
+            {
+              "id": "V-hours-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "needs-re-capture",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "partially-approved",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+            "reason": "Round 11: raw PR #891 job 120309394777 records all four Hours pins as actual screenshot failures; AEON-1692 / reference set 3 owns their re-capture and review."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-24T08:00:00.000Z",
+            "audit": "mockBusiness deliberately replaces the work clock with its own fixed 2026-09-24T08:00:00.000Z; retain this existing instant so the approved editor and period dates do not change. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "quote-editor",
+          "label": "Quote editor / inspector",
+          "owner": "tests/visual/quote-editor.spec.ts",
+          "fixture": "Long marked prose, native editor and selected inspector controls",
+          "profiles": [
+            "phone",
+            "tablet",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-quote-editor-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-quote-editor-390-light.png",
+                "sha256": "fe118cc78496b99c10e5563d47c84f4750c7322dcec51192b1472102a27cde32"
+              }
+            },
+            {
+              "id": "V-quote-editor-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-quote-editor-390-dark.png",
+                "sha256": "86bd94769bb39683eae196f444817411bf134091f4a2cb0f90d660f73af98e65"
+              }
+            },
+            {
+              "id": "V-quote-editor-1024-light",
+              "profile": "tablet",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-quote-editor-1024-light.png",
+                "sha256": "011f03a80e3d9f590ebed7c00f8c6228fc171a85dc91ca9995b9e240223e8a8c"
+              }
+            },
+            {
+              "id": "V-quote-editor-1024-dark",
+              "profile": "tablet",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-quote-editor-1024-dark.png",
+                "sha256": "57d1c24a2ffc1a6b23744878db29edb7bb3cd4f61bcdaf9713272a1579477562"
+              }
+            },
+            {
+              "id": "V-quote-editor-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "needs-re-capture",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "Set-2 pixels fail in PR #891 under the recorded frozen-clock renderer."
+            },
+            {
+              "id": "V-quote-editor-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-quote-editor-1440-dark.png",
+                "sha256": "d37417b2b163f10886f075610c18ac06136a7dadc628d7e98ddd448c72781c9f"
+              }
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "partially-approved",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+            "reason": "Round 11 LEAD-M: only unchanged checkpoint pins remain authority; failed pins require AEON-1692 / reference set 3 re-capture and Tick review."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "Quote document dates and the bundled profile revision are fixed; no live quote-list creation or issue path is selected. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "public-quote",
+          "label": "Public quote",
+          "owner": "tests/visual/public-quote.spec.ts",
+          "fixture": "Representative issued document and explicit acceptance controls",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-public-quote-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-public-quote-390-light.png",
+                "sha256": "be6210b61e83cee1b7adcedf7bb1875a02985d211fe9b1d2cc20b320abf1647e"
+              }
+            },
+            {
+              "id": "V-public-quote-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-public-quote-390-dark.png",
+                "sha256": "effddc7fe2dda9257758aa1233402b4203d16c2fdb5091c6c9acea49508a2093"
+              }
+            },
+            {
+              "id": "V-public-quote-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-public-quote-1440-light.png",
+                "sha256": "ab8ada66010d02ca1409a4e8bcf2b3ebffcb43118e7a272fc01dbb4228e37227"
+              }
+            },
+            {
+              "id": "V-public-quote-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-public-quote-1440-dark.png",
+                "sha256": "85a3f1e309f2ebf0ba60fb981c196067305ee50eea10859749ba95487693bd66"
+              }
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "Public quote now is explicitly NOW, so validity and accepted timestamps share the browser clock. Shared quote-list module real dates are unused. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "start-agent",
+          "label": "Start agent / Run once",
+          "owner": "tests/visual/start-agent.spec.ts",
+          "fixture": "Run once mode; task filled; \"Create a ticket in a project\"; read-only; folded \"Runs on …\" row with a capacity warning",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-start-agent-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-start-agent-390-light.png",
+                "sha256": "f54807e522950631eb619febb547688e6ec141f761b946a1b8e3d199a60d264e"
+              }
+            },
+            {
+              "id": "V-start-agent-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-start-agent-390-dark.png",
+                "sha256": "575774aad370b11cfe54f3628eea6e39d8d05e65519dfdfa1f130305e87332b9"
+              }
+            },
+            {
+              "id": "V-start-agent-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-start-agent-1440-light.png",
+                "sha256": "54845c9b72af98373de89efb4d361e4c217aa6581be28436286c43063188a185"
+              }
+            },
+            {
+              "id": "V-start-agent-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-start-agent-1440-dark.png",
+                "sha256": "33cb559b446f104bb76ad8b8a33650b2e4a277588186aac9eb19163b966e3069"
+              }
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "ok-to-pin",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-29T12:02:00.000Z",
+            "audit": "Catalog as_of, probe ages, quota windows, wait deadline, projection and outlook all derive from CAPACITY_NOW; the browser uses the same instant. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "agent-rules",
+          "label": "Agent rules / import review",
+          "owner": "tests/visual/agent-rules.spec.ts",
+          "fixture": "Long explanation/diff with explicit draft/publish distinction",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-agent-rules-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-agent-rules-390-light.png",
+                "sha256": "55502b45d2b879cd4b5c4d7982d930ad494fa940301eb61417a07760061892a6"
+              }
+            },
+            {
+              "id": "V-agent-rules-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "needs-re-capture",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "Set-2 pixels fail in PR #891 under the recorded frozen-clock renderer."
+            },
+            {
+              "id": "V-agent-rules-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": "V-agent-rules-1440-light.png",
+                "sha256": "f5d270617736519e4d982ff8ca01cf49e0d3273002822a20fa5ba37f815915e7"
+              }
+            },
+            {
+              "id": "V-agent-rules-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": "V-agent-rules-1440-dark.png",
+                "sha256": "073d618886607e1ba42924807c550c57b1a1cba82063b71baf457dd641297d96"
+              }
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "partially-approved",
+            "reviewedOn": "2026-10-23",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+            "reason": "Round 11 LEAD-M: only unchanged checkpoint pins remain authority; failed pins require AEON-1692 / reference set 3 re-capture and Tick review."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "Import preview and selected Secrets draft are static. Shell release dates use NOW; there are no selected relative-time reads. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "capacity",
+          "label": "Capacity & load",
+          "owner": "tests/visual/capacity.spec.ts",
+          "fixture": "Daily limit for Claude Code popover open; fonts and layout settled before opening; identical scroll in both themes",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-capacity-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "deferred",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
+            },
+            {
+              "id": "V-capacity-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "deferred",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
+            },
+            {
+              "id": "V-capacity-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "deferred",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
+            },
+            {
+              "id": "V-capacity-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              },
+              "referenceStatus": "deferred",
+              "deferredUntil": [
+                "AEON-1692"
+              ],
+              "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
+            }
+          ],
+          "approval": {
+            "reviewer": "Tick",
+            "decision": "deferred",
+            "recordedBy": "LEAD-M",
+            "evidence": "LEAD-M AEON-1674 round-10 brief, 2026-10-23: demote all four Capacity checkpoints; re-capture with a frozen clock in AEON-1692 / reference set 3."
+          },
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-29T12:02:00.000Z",
+            "audit": "Quota bars, reset labels and pace depend on now. Both mockAgents and dailyPlan use CAPACITY_NOW; assert the browser after setup and before capture/comparison. The old unasserted-clock pins are transport history only: re-capture with a frozen clock in AEON-1692 / reference set 3. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        },
+        {
+          "id": "ticket-workspace",
+          "label": "Ticket workspace",
+          "owner": "tests/visual/ticket-workspace.spec.ts",
+          "fixture": "Long title and key; properties panel; attachment strip with one preview and its focus ring; read-only checklist; chat dock open",
+          "profiles": [
+            "phone",
+            "desktop"
+          ],
+          "themes": [
+            "light",
+            "dark"
+          ],
+          "checkpoints": [
+            {
+              "id": "V-ticket-workspace-390-light",
+              "profile": "phone",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              }
+            },
+            {
+              "id": "V-ticket-workspace-390-dark",
+              "profile": "phone",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              }
+            },
+            {
+              "id": "V-ticket-workspace-1440-light",
+              "profile": "desktop",
+              "theme": "light",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              }
+            },
+            {
+              "id": "V-ticket-workspace-1440-dark",
+              "profile": "desktop",
+              "theme": "dark",
+              "reference": {
+                "attachmentMember": null,
+                "sha256": null
+              }
+            }
+          ],
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1674"
+          ],
+          "deferredReason": "Deferred until the separately owned Tick product ticket fixes attachment action hit-area overlap and classification feedback semantics. Round 6 reverts both product changes; no quality checks or captures run for this state.",
+          "clock": {
+            "mode": "fixed",
+            "now": "2026-09-23T12:00:00.000Z",
+            "audit": "Deferred attachment preview: reserve the work-fixture clock for the later product capture. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+          }
+        }
       ]
     }
-  ]
+  ],
+  "renderer": {
+    "version": 1,
+    "runner": {
+      "label": "ubuntu-24.04",
+      "imageOS": "ubuntu24",
+      "imageVersion": "20261012.334.1",
+      "platform": "linux",
+      "arch": "x64"
+    },
+    "playwright": "1.64.1",
+    "browser": {
+      "name": "chromium-headless-shell",
+      "revision": "1248",
+      "version": "156.0.8078.4",
+      "headless": true,
+      "args": [
+        "--disable-gpu"
+      ]
+    },
+    "deviceScaleFactor": 1,
+    "colourScheme": [
+      "light",
+      "dark"
+    ],
+    "reducedMotion": "reduce",
+    "timezone": "Europe/Vienna",
+    "locale": "en-GB",
+    "fonts": [
+      {
+        "family": "Inter Variable",
+        "asset": "web/tests/visual/fonts/inter-v4.1.ttf",
+        "sha256": "4989b125924991b90d05b2d16e0e388c48f7d5bb8b30539bbf9c755278d0ccaf",
+        "source": "https://raw.githubusercontent.com/rsms/inter/e3a3d4c57d5ecc01453a575621882a384c1995a3/docs/font-files/InterVariable.ttf",
+        "license": "web/tests/visual/fonts/Inter-OFL.txt"
+      },
+      {
+        "family": "JetBrains Mono",
+        "asset": "web/tests/visual/fonts/jetbrains-mono-v2.304.ttf",
+        "sha256": "662a196d58f1183bf2d77428b6d5283fe3f45161ab021bea4036bc98e5cac016",
+        "source": "https://github.com/JetBrains/JetBrainsMono/blob/cd5227bd1f61dff3bbd6c814ceaf7ffd95e947d9/fonts/variable/JetBrainsMono%5Bwght%5D.ttf",
+        "license": "web/tests/visual/fonts/OFL.txt"
+      },
+      {
+        "family": "JetBrains Mono",
+        "asset": "web/src/assets/fonts/jetbrains.woff2",
+        "sha256": "18be452724bfdc236c074ca94a249a7f41a86752c7d04ab258ce9ed5651f6a7e",
+        "license": "web/tests/visual/fonts/OFL.txt"
+      },
+      {
+        "family": "Source Sans 3",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSans3-Regular.ttf.woff2",
+        "sha256": "53492fb3a0def77354f166a55d09b63a10855e91c206c7620a81cf56e97f8ec3",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSans3-OFL-1.1.txt"
+      },
+      {
+        "family": "Source Sans 3",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSans3-It.ttf.woff2",
+        "sha256": "4d80b3b801f4c457f1b4adbd3911d8501338e6d282141663770c38d3a2e97859",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSans3-OFL-1.1.txt"
+      },
+      {
+        "family": "Source Sans 3",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSans3-Semibold.ttf.woff2",
+        "sha256": "47b9b661b9f395fe7f0d0e119637fba5c8dad97bde3df60066fd24229c0792f4",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSans3-OFL-1.1.txt"
+      },
+      {
+        "family": "Source Sans 3",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSans3-SemiboldIt.ttf.woff2",
+        "sha256": "552d2d08e719d09413fbfff81f6fa16f153ad87edf6a49d69df9c303fea71ae6",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSans3-OFL-1.1.txt"
+      },
+      {
+        "family": "Source Sans 3",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSans3-Bold.ttf.woff2",
+        "sha256": "8d35c6d40e750a4ee23bbbba2bd604ad098d172907369b43281507e16b8e2e7a",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSans3-OFL-1.1.txt"
+      },
+      {
+        "family": "Source Sans 3",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSans3-BoldIt.ttf.woff2",
+        "sha256": "8c4b66aea0e7887dfd1e296b03ae53b76ce25256fae1437777514933acaef0f3",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSans3-OFL-1.1.txt"
+      },
+      {
+        "family": "Source Serif 4 Display",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSerif4Display-Regular.ttf.woff2",
+        "sha256": "c75301c83bef55b3787f3060c2f62cb5d902a6706419149b7ff9d0c7927055ac",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSerif4-OFL-1.1.txt"
+      }
+    ],
+    "fontPolicy": "Renderer only: digest-verified vendored Inter 4.1; fontconfig maps -apple-system, system-ui and sans-serif to Inter. Production font stacks stay intact. Body computed family and resolved Inter, painted font families, and all quote-profile faces are guarded before captures and comparisons. Full JetBrains Mono is reserved for mono text; profile documents use their Source Sans 3 / Source Serif 4 Display faces.",
+    "imageVersionPolicy": "Capture records ImageVersion. Tick-approved Linux pins must set this exact value before comparison; a later hosted image requires a new review.",
+    "fontconfig": {
+      "aliases": {
+        "-apple-system": "Inter Variable",
+        "system-ui": "Inter Variable",
+        "sans-serif": "Inter Variable",
+        "monospace": "JetBrains Mono"
+      },
+      "installer": "node scripts/test-prune/visual-renderer.mjs install-fonts"
+    }
+  },
+  "comparison": {
+    "threshold": 0,
+    "maxDiffPixels": 0,
+    "justification": "No pixel tolerance: the same hosted image, bundled browser, scale, emulation and self-hosted glyphs must render identically. No layout or colour change is permitted; no anti-aliasing allowance is currently needed.",
+    "mode": "report-only"
+  },
+  "capture": {
+    "workflow": ".github/workflows/ci.yml",
+    "event": "workflow_dispatch",
+    "states": [
+      "projects",
+      "access",
+      "knowledge",
+      "public-quote",
+      "agent-rules",
+      "start-agent",
+      "quote-editor",
+      "session-chat",
+      "hours",
+      "capacity",
+      "tickets",
+      "agents",
+      "decision-desk",
+      "account-use-matrix",
+      "delivery-numbers",
+      "models"
+    ],
+    "retentionDays": 7,
+    "approval": "pending-Tick-review",
+    "writes": "Only Playwright testInfo.outputPath() captures and the run artifact under web/test-results; never reference paths, tickets, releases or Git.",
+    "input": "visual_capture",
+    "job": "visual-reference-capture"
+  }
 }

@@ -408,3 +408,53 @@ test('dev version remains plain text', async ({ page }) => {
   await expect(page.locator('.version-coordinate')).toHaveText(['dev'])
   await expect(page.locator('.version-coordinate[role="button"]')).toHaveCount(0)
 })
+
+// P02 replacements are additive until their execution and initial references
+// have been reviewed. The original catalogue remains runnable in this round.
+test('P02 OIDC callback restores the protected return path and workspace title', async ({ page }) => {
+  const auth = { signedIn: false }
+  const calls = await mockAPI(page, { auth })
+  await page.goto('/signin?error=expired&return=/agents')
+  await expect(page.getByRole('heading', { name: 'Sign in', level: 1 })).toBeVisible()
+  await expect(page.getByLabel('Email address')).toHaveCount(0)
+  await page.getByRole('link', { name: 'Sign in', exact: true }).click()
+  await expect(page).toHaveURL('/api/auth/login')
+  auth.signedIn = true
+  await page.goto('/') // Full-page OIDC callback, with a newly issued session.
+  await expect(page).toHaveURL('/agents')
+  await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible()
+  await expect(page).toHaveTitle(/Agents.*PAIMOS AEON/)
+  expect(calls.filter(call => call.path === '/api/auth/login')).toHaveLength(1)
+})
+
+test('P02 session expiry refuses protected navigation and resumes after sign-in', async ({ page }) => {
+  const auth = { signedIn: true }
+  const calls = await mockAPI(page, { auth, devMode: true })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
+  auth.signedIn = false
+  // Dispatch the actual native link; the router must revalidate this session.
+  await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Agents', exact: true }).click()
+  await expect(page).toHaveURL('/signin?error=expired&return=/agents')
+  await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toHaveCount(0)
+  expect(calls.filter(call => call.path === '/api/me').length).toBeGreaterThanOrEqual(2)
+  await page.getByLabel('Email address').fill('person@example.invalid')
+  await page.getByRole('button', { name: 'Continue with email', exact: true }).click()
+  await expect(page).toHaveURL('/agents')
+  await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible()
+})
+
+test('P02 a failed route chunk offers an honest reload of its intended destination', async ({ page }) => {
+  await mockAPI(page)
+  let refused = 0
+  await page.route('**/src/views/AgentsView.vue', route => { refused++; return route.abort('failed') })
+  await page.goto('/')
+  await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Agents', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'PAIMOS AEON was updated.', exact: true })).toBeVisible()
+  expect(refused).toBe(1)
+  await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toHaveCount(0)
+  await page.unroute('**/src/views/AgentsView.vue')
+  await page.getByRole('button', { name: 'Reload', exact: true }).click()
+  await expect(page).toHaveURL('/agents')
+  await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible()
+})

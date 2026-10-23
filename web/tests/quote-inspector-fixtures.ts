@@ -3,6 +3,7 @@
 // record, presence and its stream, the plugin catalog and the signed-in admin,
 // layered over mockWork. Document content is German like real quotes; every name
 // and number is invented.
+import type { QuoteProfileSnapshot } from '../src/lib/quotes/types'
 import type { Page, Route } from '@playwright/test'
 import { me } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
@@ -46,7 +47,7 @@ export function quoteDocument() {
     net_total_cents: 556000,
   }
 }
-export type QuoteDoc = ReturnType<typeof quoteDocument>
+export type QuoteDoc = ReturnType<typeof quoteDocument> & { profile?: QuoteProfileSnapshot }
 export interface QuoteMockOptions { role?: 'admin' | 'member'; state?: 'draft' | 'issued' }
 export interface QuoteCall { path: string; method: string; body: unknown }
 

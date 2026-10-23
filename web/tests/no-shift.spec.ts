@@ -6,6 +6,7 @@ import { expectStableControls } from './helpers/stable'
 import { expectDialRowsFitContent } from './helpers/dial-layout'
 import type { Shell } from './helpers/no-shift-shells'
 import { mockDecisionDesk, sampleQuestion } from './decision-desk-fixtures'
+import { mockAgentTheme } from './agent-theme-fixtures'
 
 for (const width of [1440, 1024, 390]) {
   test(`ticket relation popover keeps its selectors through result changes at ${width}`, async ({ page }) => {
@@ -149,4 +150,127 @@ test('dial content budget rejects fixed whitespace, clipped controls and overflo
   await expect(expectDialRowsFitContent(dial)).rejects.toThrow(/content stays inside row (top|bottom)/)
   await row.evaluate(el => { Object.assign((el as HTMLElement).style, { minHeight: '76px', height: 'auto' }); (el.lastElementChild as HTMLElement).style.width = '600px' })
   await expect(expectDialRowsFitContent(dial)).rejects.toThrow(/content stays inside row right/)
+})
+
+test('P02 desktop top actions stay anchored while content grows and scrolls', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  await page.goto('/p/PHAROS')
+  await expect(page.locator('.confirm')).toHaveCount(1)
+  const open = (body: string) => page.evaluate(async body => {
+    const { confirmAction } = await import('/src/lib/confirm.ts')
+    void confirmAction({ title: 'Confirm change', body, confirmLabel: 'Accept', danger: true })
+  }, body)
+  await open('A short explanation.')
+  const dialog = page.locator('.confirm[open]')
+  await expect(dialog).toBeVisible()
+  const initial = (await dialog.boundingBox())!
+  expect(initial.height, 'short content remains short').toBeLessThan(240)
+  await expectStableControls({
+    controls: { title: dialog.getByRole('heading'), actions: dialog.locator('.actions'), accept: dialog.getByRole('button', { name: 'Accept', exact: true }), cancel: dialog.getByRole('button', { name: 'Cancel', exact: true }) },
+    scrollAreas: { body: dialog.locator('#confirm-body') },
+    interactions: [
+      { name: 'long background grows below the actions', run: async () => { await open('An explanation that needs to wrap and scroll. '.repeat(160)); expect((await dialog.boundingBox())!.height).toBeGreaterThan(initial.height) } },
+      { name: 'read the background', run: () => dialog.locator('#confirm-body').evaluate(el => { el.scrollTop = 100 }) },
+      { name: 'short background returns', run: () => open('A short explanation.') },
+    ],
+  })
+  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused()
+})
+
+test('P02 phone choices and pinned actions retain geometry and focus across a memo series', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, reducedMotion: 'reduce' })
+  const page = await context.newPage()
+  try {
+    const world = await mockDecisionDesk(page, { long: true })
+    await page.goto('/decision-desk')
+    await page.getByTestId('desk-row-q:question-1').click()
+    const decide = page.getByTestId('desk-decide'), skip = page.getByTestId('desk-skip')
+    await expect(decide).toBeEnabled()
+    const frame = page.getByTestId('desk-frame'), body = page.getByTestId('desk-body')
+    await expectStableControls({
+      controls: { frame, decide, skip, actions: page.getByTestId('desk-actions').locator('.action-buttons'), close: page.getByTestId('desk-close'),
+        selectors: page.getByTestId('desk-choices'), clickedRow: page.getByTestId('choice-row-0') },
+      scrollAreas: { body },
+      interactions: [
+        { name: 'tap another answer', run: async () => { await page.getByTestId('choice-1').tap(); await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true') } },
+        { name: 'return to the first answer', run: async () => { await page.getByTestId('choice-0').tap(); await expect(page.getByTestId('choice-0')).toHaveAttribute('aria-checked', 'true') } },
+        { name: 'scroll long context', run: () => body.evaluate(el => { el.scrollTop = 100 }) },
+      ],
+    })
+    const controls = { frame, decide, skip, close: page.getByTestId('desk-close'), pager: page.getByTestId('desk-pager') }
+    await expectStableControls({ controls, scrollAreas: { body }, interactions: [
+      { name: 'decide and advance to a short memo', run: async () => { await decide.tap(); await expect.poll(() => world.calls.length).toBe(1); await expect(page.getByTestId('desk-pager')).toContainText('3 of'); await expect(decide).toBeFocused() } },
+      { name: 'return to the previous memo', run: async () => { await page.getByTestId('desk-paper').press('ArrowLeft'); await expect(page.getByTestId('desk-pager')).toContainText('2 of') } },
+    ] })
+    for (const button of [decide, skip, controls.close]) {
+      const bounds = (await button.boundingBox())!
+      expect(bounds.width).toBeGreaterThan(0); expect(bounds.height).toBeGreaterThan(0)
+      const reach = await button.evaluate(el => {
+        const rect = el.getBoundingClientRect(), x = rect.x + rect.width / 2, y = rect.y + rect.height / 2
+        const own = (dx: number, dy: number) => { const hit = document.elementFromPoint(x + dx, y + dy); return hit === el || !!hit && el.contains(hit) }
+        return { x: [own(-22, 0), own(21.99, 0)], y: [own(0, -22), own(0, 21.99)] }
+      })
+      // Small visual buttons use the shared ::before hit extension. Assert
+      // the actual 44px reach, including collisions with neighbouring actions.
+      if (bounds.width < 44) expect(reach.x).toEqual([true, true])
+      if (bounds.height < 44) expect(reach.y).toEqual([true, true])
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(844)
+    }
+  } finally { await context.close() }
+})
+
+test('P02 floating search and selectors keep positive geometry through loading, empty and returned results', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const data = fixtures()
+  let release!: () => void, requested!: () => void
+  const held = new Promise<void>(resolve => { release = resolve }), started = new Promise<void>(resolve => { requested = resolve })
+  let hold = false
+  await mockWork(page, data, { hold: request => request.path === '/api/nodes' && hold ? { until: held, computed: requested } : undefined })
+  await page.goto('/p/PHAROS/PHAROS-12')
+  const ticket = page.getByRole('complementary', { name: 'Ticket details' })
+  await expect(ticket.getByRole('heading', { name: 'Add an Oracle Cloud connector', exact: true })).toBeVisible()
+  await ticket.focus(); await ticket.press('r')
+  const dialog = page.getByRole('dialog', { name: 'Link PHAROS-12 to another ticket' })
+  const search = dialog.getByRole('combobox')
+  await search.fill('PHAROS-1')
+  await expect(dialog.getByRole('option').first()).toBeVisible()
+  const controls = { search, selectors: dialog.getByRole('radiogroup'), clickedRow: dialog.getByRole('radio', { name: 'Blocked by', exact: true }) }
+  await expectStableControls({ controls, scrollAreas: { dialog }, interactions: [
+    { name: 'another relation type', run: async () => { await controls.clickedRow.click(); await expect(controls.clickedRow).toHaveAttribute('aria-checked', 'true') } },
+    { name: 'held search response', run: async () => { hold = true; await search.fill('PHAROS-14'); await started; await expect(search).toBeFocused() } },
+    { name: 'response arrives', run: async () => { hold = false; release(); await expect(dialog.getByRole('option')).toHaveCount(1) } },
+    { name: 'empty query result', run: async () => { await search.fill('nothing-matches-this-record'); await expect(dialog.getByText(/Nothing matches/)).toBeVisible() } },
+    { name: 'results return', run: async () => { await search.fill('PHAROS-1'); await expect(dialog.getByRole('option').first()).toContainText('PHAROS-1') } },
+  ] })
+})
+
+test('P02 physical switch geometry and the stability guard reject displaced, collapsed and overflowing controls', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await mockWork(page, fixtures(), { admin: true })
+  await mockAgentTheme(page)
+  await page.goto('/settings/theme#agents')
+  const control = page.locator('#agents').getByRole('switch', { name: 'Hover', exact: true })
+  const label = control.locator('..')
+  const geometry = async () => control.evaluate(el => {
+    const box = el.getBoundingClientRect(), knob = getComputedStyle(el, '::after'), transform = new DOMMatrixReadOnly(knob.transform)
+    const x = parseFloat(knob.left) + transform.m41, y = parseFloat(knob.top) + transform.m42
+    return { width: box.width, height: box.height, knobWidth: parseFloat(knob.width), knobHeight: parseFloat(knob.height), left: x, right: box.width - x - parseFloat(knob.width), top: y, bottom: box.height - y - parseFloat(knob.height) }
+  })
+  await expect(control).toBeVisible()
+  const hit = (await label.boundingBox())!
+  expect(hit.width).toBeGreaterThanOrEqual(44); expect(hit.height).toBeGreaterThanOrEqual(44)
+  await expectStableControls({ controls: { switch: control, hit: label }, interactions: [{ name: 'toggle shared switch', run: async () => { await label.click(); await expect(control).toBeChecked() } }] })
+  const measured = await geometry()
+  expect(measured.knobWidth).toBeCloseTo(measured.knobHeight, 1)
+  expect(measured.top).toBeCloseTo(2, 1); expect(measured.bottom).toBeCloseTo(2, 1); expect(measured.right).toBeCloseTo(2, 1)
+  await page.setContent('<div id="scroll" style="height:120px;width:200px;overflow:auto"><div style="height:600px"><button id="control" style="margin-top:60px;width:100px;height:44px">Choose</button></div></div>')
+  const controls = { choose: page.locator('#control') }, scrollAreas = { body: page.locator('#scroll') }
+  await expectStableControls({ controls, scrollAreas, interactions: [{ name: 'intentional scroll', run: () => page.locator('#scroll').evaluate(el => { el.scrollTop = 30 }) }] })
+  await expect(expectStableControls({ controls, interactions: [] })).rejects.toThrow(/at least one interaction/)
+  await expect(expectStableControls({ controls, interactions: [{ name: 'wrong movement', run: () => controls.choose.evaluate(el => { el.style.marginLeft = '2px' }) }] })).rejects.toThrow(/choose.x/)
+  await expect(expectStableControls({ controls, scrollAreas, interactions: [{ name: 'wrong overflow', run: () => page.locator('#scroll > div').evaluate(el => { (el as HTMLElement).style.width = '300px' }) }] })).rejects.toThrow(/horizontal overflow/)
+  await page.locator('#scroll > div').evaluate(el => { (el as HTMLElement).style.width = '' })
+  await expect(expectStableControls({ controls, interactions: [{ name: 'wrong collapse', run: () => controls.choose.evaluate(el => { el.style.width = '0'; el.style.height = '0'; el.style.padding = '0'; el.style.border = '0' }) }] })).rejects.toThrow(/positive|visible/)
 })

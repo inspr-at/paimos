@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/role-picker-layout.spec.ts",
-    "listedTests": 83,
+    "listedTests": 86,
     "tierTiming": {
       "caseSeconds": {
         "max": 12.362,

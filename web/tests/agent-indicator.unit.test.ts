@@ -41,7 +41,12 @@ it('loads one account preference for every consumer and preserves independent fi
 
 it('a late load cannot overwrite a choice made while loading', async () => {
   let finish!: (response: Response) => void
-  vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => init.method === 'PUT' ? Promise.resolve(response(null)) : new Promise<Response>(resolve => { finish = resolve })))
+  let written!: () => void
+  const saved = new Promise<void>(resolve => { written = resolve })
+  vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => {
+    if (init.method === 'PUT') { written(); return Promise.resolve(response(null)) }
+    return new Promise<Response>(resolve => { finish = resolve })
+  }))
   const { useAgentIndicator } = await import('../src/lib/agentIndicator')
   const pref = useAgentIndicator()
   pref.setStyle('robot-5')
@@ -49,8 +54,9 @@ it('a late load cannot overwrite a choice made while loading', async () => {
   finish(response({ style: 'robot-1', hovering: false }))
   await pref.ready
   expect(pref.choice.value).toEqual({ style: 'robot-5', hovering: true })
-  // Let the shared zero-delay write finish before restoring fetch.
-  await new Promise(resolve => setTimeout(resolve, 20))
+  await saved
+  const { usePreference } = await import('../src/lib/preferences')
+  expect(await usePreference('agent-indicator').done()).toBe(true)
 })
 
 it('a failed read keeps the defaults and a failed write notifies Settings', async () => {

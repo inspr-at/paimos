@@ -10,6 +10,11 @@ on:
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
+    inputs:
+      visual_capture:
+        description: 'Capture Linux visual candidates for Tick review (artifact only)'
+        type: boolean
+        default: false
 
 # New main pushes supersede older main runs (AEON-585); PR cancellation stays per PR.
 concurrency:
@@ -28,6 +33,60 @@ env:
   CI_IMPACT: ${{ vars.CI_IMPACT }}
 
 jobs:
+  visual-reference-capture:
+    if: github.event_name == 'workflow_dispatch' && inputs.visual_capture == true
+    # The manual capture uses a fixed image; ordinary shards keep their hosted
+    # route. Comparison validates the actual ImageOS and reviewed ImageVersion.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PW_RETRIES: '0'
+      PW_WORKERS: '1'
+      AEON_REQUIRE_BACKEND: 'off'
+      AEON_VISUAL_CAPTURE: '1'
+      AEON_VISUAL_RUNNER: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24.22.1"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Install the comparison browser build
+        working-directory: web
+        run: npx --no-install playwright install chromium
+      - name: Install comparison browser system dependencies
+        timeout-minutes: 13
+        working-directory: web
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install-deps chromium
+      - name: Capture the sixteen states awaiting Linux review
+        run: |
+          set -euo pipefail
+          node scripts/test-prune/visual-candidates.mjs specs > "$RUNNER_TEMP/visual-specs.txt"
+          mapfile -t specs < "$RUNNER_TEMP/visual-specs.txt"
+          npm --prefix web test -- "${specs[@]}" --workers=1 --retries=0 --reporter=line --output=test-results/capture-run
+      - name: Package quality-checked candidates and all digests
+        run: node scripts/test-prune/visual-candidates.mjs web/test-results/capture-run web/test-results/linux-candidate
+      - name: Record approval handoff
+        run: |
+          echo 'Pending Tick review: Linux candidates only. No references were changed or published.' >> "$GITHUB_STEP_SUMMARY"
+          cat web/test-results/linux-candidate/*.tar.sha256 >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload capture evidence and candidate archive
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-linux-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            web/test-results/capture-run/
+            web/test-results/linux-candidate/
+          retention-days: 7
+          if-no-files-found: error
+
   # Read-only proof. Merge-group lookup is opt-in; failures retain full CI.
   tree-reuse:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'merge_group' && vars.CI_MG_REUSE == 'on'
@@ -770,6 +829,8 @@ jobs:
     if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
     outputs:
       browser-cache-key: ${{ steps.web-cache-keys.outputs.browsers }}
     steps:
@@ -781,6 +842,12 @@ jobs:
           node-version: "24.22.1"
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Download and verify approved visual reference assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/test-prune/visual-baselines.mjs download tmp/visual-baselines
+          cat tmp/visual-baselines/reference-gates.md >> "$GITHUB_STEP_SUMMARY"
       - name: Resolve lockfile and Playwright cache keys
         id: web-cache-keys
         env:
@@ -835,7 +902,7 @@ jobs:
       # Tar preserves executable bits, symlinks and hidden dependency files.
       # Build output is run-specific; never replay a dist cache for another commit.
       - name: Pack web runtime for shards
-        run: tar -cf "$RUNNER_TEMP/web-runtime.tar" web/node_modules web/dist
+        run: tar -cf "$RUNNER_TEMP/web-runtime.tar" web/node_modules web/dist tmp/visual-baselines
       - name: Share web runtime with shards
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -927,6 +994,8 @@ jobs:
     needs: [ci-plan, web-setup, tree-reuse, apt-bundle]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -935,6 +1004,10 @@ jobs:
       PW_RETRIES: '0'
       # Mocked UI specs. The e2e job is the backend-required shard.
       AEON_REQUIRE_BACKEND: 'off'
+      AEON_VISUAL_BASELINE_FILE: ${{ github.workspace }}/tmp/visual-baselines/baseline.json
+      # Renderer identity is checked against ImageOS and ImageVersion at runtime;
+      # Report-only until AEON-1692 pins set 3; renderer mismatches stay visible.
+      AEON_VISUAL_RUNNER: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -981,6 +1054,10 @@ jobs:
         timeout-minutes: 13
         working-directory: web
         run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install-deps chromium
+      - name: Verify visual reference transport before comparison
+        run: |
+          node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines
+          cat tmp/visual-baselines/reference-gates.md >> "$GITHUB_STEP_SUMMARY"
       - name: Download affected browser execution plan
         if: github.event_name == 'pull_request' && needs.ci-plan.outputs.browser_scope == 'affected'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -1005,6 +1082,9 @@ jobs:
           else
             node scripts/test-tiers/cli.mjs run web --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
           fi
+      - name: Report every visual checkpoint and preserve comparison failures
+        if: always()
+        run: node scripts/test-prune/visual-baselines.mjs report web/test-results >> "$GITHUB_STEP_SUMMARY"
       - name: Confirm full tier execution
         if: github.event_name != 'pull_request' || (needs.ci-plan.outputs.lane == 'full' && needs.ci-plan.outputs.mode != 'essential')
         env:

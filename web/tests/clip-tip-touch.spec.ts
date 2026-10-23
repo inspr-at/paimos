@@ -7,6 +7,40 @@ import { expectStableControls } from './helpers/stable'
 import { longName } from './clip-tip-fixtures'
 import { shots, touchShots, tableShots, noOverflow, pauseForGesture, setupHarness } from './clip-tip-playwright-fixtures'
 
+test('P02 real phone hold reveals text, scrolling cancels a pending hold and the next tap still activates', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 400 }, hasTouch: true, reducedMotion: 'reduce' })
+  const page = await context.newPage(), touch = await context.newCDPSession(page)
+  try {
+    await setupHarness(page, 'light'); await page.clock.install()
+    const name = page.locator('.standalone'), row = page.locator('.child-row').first()
+    await expectStableControls({ controls: { name, row, change: page.getByRole('button', { name: 'Change name' }) }, interactions: [
+      { name: 'a real hold reveals at the threshold without activation', run: async () => {
+        await pauseForGesture(page)
+        const box = (await name.boundingBox())!, x = box.x + box.width / 2, y = box.y + box.height / 2
+        await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+        await page.clock.runFor(499); await expect(page.locator('.tooltip')).toHaveCount(0)
+        await page.clock.runFor(1); await expect(page.locator('.tooltip')).toHaveText(longName)
+        await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await page.clock.resume()
+        await expect(page.getByRole('status')).toBeEmpty()
+      } },
+      { name: 'outside tap dismisses the held text', run: async () => { await page.getByRole('heading', { name: 'Ganze Namen', exact: true }).tap(); await expect(page.locator('.tooltip')).toHaveCount(0) } },
+      { name: 'native touch scroll cancels the next hold', run: async () => {
+        await pauseForGesture(page)
+        const box = (await name.boundingBox())!, x = box.x + box.width / 2, y = box.y + box.height / 2
+        await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+        await page.clock.runFor(200)
+        for (const distance of [10, 30, 60, 90]) await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - distance }] })
+        await page.clock.runFor(500)
+        await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await page.clock.resume()
+        await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(0)
+        await expect(page.locator('.tooltip')).toHaveCount(0)
+      } },
+      { name: 'the next row tap activates normally', run: async () => { await row.tap(); await expect(page.getByRole('status')).toHaveText('PHAROS-11'); await expect(page.locator('.tooltip')).toHaveCount(0) } },
+    ] })
+    await noOverflow(page)
+  } finally { await page.clock.resume(); await touch.detach(); await context.close() }
+})
+
 test('touch selection reveals the same full graph card after leaving ticket details', async ({ browser }) => {
   test.setTimeout(60_000)
   for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
