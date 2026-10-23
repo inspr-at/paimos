@@ -111,6 +111,8 @@ components:
       additionalProperties: false
       required: [to, body, idempotency_key]
       properties:
+        kind: {type: string, enum: [status], description: 'Optional structured lane status kind'}
+        lane_status: {$ref: './openapi.yaml#/components/schemas/InboxLaneStatus'}
         resend_of: {type: string, format: uuid, description: "Original terminal or cancelled message from this sender to the same session. Requires a new idempotency key; never recalls an offered message."}
         to: {type: string, description: 'harness:agent or principal UUID'}
         recipient_message_generation: {type: string, format: uuid, description: Required for attached owner notes; new grants never inherit it}
@@ -126,6 +128,8 @@ components:
     Message:
       type: object
       properties:
+        kind: {type: string, enum: [status]}
+        lane_status: {$ref: './openapi.yaml#/components/schemas/InboxLaneStatus'}
         cancelled: {type: boolean, description: "Sender cancelled this session message before it was offered. Retained in inspection history; omit it from the conversation."}
         resend_of: {type: string, format: uuid, description: "Original same-sender session message for an explicit linked resend."}
         id: {type: string, format: uuid}

@@ -70,9 +70,13 @@ export interface FlowData {
   sets: FlowSetInput[]
 }
 
-/** At most this many rows per lane; anything beyond stacks in the last row. */
-export const MAX_ROWS = 4
+/**
+ * A lane grows to every row its concurrent steps need, so no two bars ever overlap (AEON-1656).
+ * Above this many rows a collapsed lane shows ROW_CAP - 1 rows and one "+N more" row.
+ */
+export const ROW_CAP = 12
 export interface LaneItem { run: FlowRun; step: FlowStep; lane: Lane; row: number }
+/** `rows` is what each lane needs, uncapped; laneRows decides what a lane shows. */
 export interface LaneSet extends FlowSetInput { rows: Record<string, number>; items: LaneItem[] }
 
 /** Reserve rows per lane for the whole data set: the first row free at a step's start, else a new one. */
@@ -85,7 +89,7 @@ export function laneModel(data: FlowData): LaneSet[] {
       const ends: number[] = []
       for (const { run, step } of steps) {
         let row = ends.findIndex(end => end <= step.start + 1e-6)
-        if (row < 0) { row = Math.min(ends.length, MAX_ROWS - 1); if (row === ends.length) ends.push(0) }
+        if (row < 0) { row = ends.length; ends.push(0) }
         ends[row] = Math.max(ends[row]!, step.end)
         items.push({ run, step, lane, row })
       }
@@ -93,6 +97,38 @@ export function laneModel(data: FlowData): LaneSet[] {
     }
     return { ...set, rows, items }
   })
+}
+
+export interface LaneRows {
+  /** Rows drawn with bars: every needed row, or ROW_CAP - 1 while collapsed above the cap. */
+  bars: number
+  /** The row after the bars: "+N more" (collapsed) or "fewer" (expanded); null within the cap. */
+  fold: { kind: 'more' | 'fewer'; hidden: LaneItem[] } | null
+  /** Rows the lane is tall: bars plus the fold row. */
+  total: number
+}
+/** What one lane shows. Within the cap every row; above it a person expands or collapses the lane. */
+export function laneRows(set: LaneSet, lane: string, expanded: boolean): LaneRows {
+  const need = set.rows[lane] ?? 1
+  if (need <= ROW_CAP) return { bars: need, fold: null, total: need }
+  if (expanded) return { bars: need, fold: { kind: 'fewer', hidden: [] }, total: need + 1 }
+  const bars = ROW_CAP - 1
+  return { bars, fold: { kind: 'more', hidden: set.items.filter(i => i.lane === lane && i.row >= bars) }, total: ROW_CAP }
+}
+
+/** Where a lane sits in the stage: top, height and the height of each of its rows, in px. */
+export interface LaneGeo { y: number; h: number; rowH: number }
+/**
+ * Place one lane at `y` (AEON-1656). Without an anchor it is `total` rows of `rowH`. With one
+ * (the pointer, in stage px) a live update never moves what is above it: a lane that ended
+ * above the anchor keeps its height and fits its rows inside; the lane under the anchor keeps
+ * its row height and grows or shrinks downward; lanes below follow. `prev` is the lane as last drawn.
+ */
+export function placeLane(prev: LaneGeo | undefined, total: number, y: number, rowH: number, gaps: number, anchor: number | null): LaneGeo {
+  const natural = { y, h: total * rowH + gaps, rowH }
+  if (anchor == null || !prev || Math.abs(prev.y - y) > 0.01 || prev.y > anchor) return natural
+  if (prev.y + prev.h <= anchor) return { y, h: prev.h, rowH: Math.min(rowH, (prev.h - gaps) / total) }
+  return { y, h: total * prev.rowH + gaps, rowH: prev.rowH }
 }
 
 /** The steps a run walks through, alongside work left out. */

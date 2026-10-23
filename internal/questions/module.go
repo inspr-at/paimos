@@ -37,6 +37,8 @@ func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
 // WithDoctrine must be called before mounting or starting the dispatcher.
 func (m *Module) WithDoctrine(adapter DoctrineAdapter) *Module { m.doctrine = adapter; return m }
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/settings/question-reminders", m.handleReminderSettings)
+	mux.HandleFunc("PUT /api/settings/question-reminders", m.handleReminderSettings)
 	mux.HandleFunc("POST /api/projects/{projectId}/questions", m.handleAsk)
 	mux.HandleFunc("GET /api/projects/{projectId}/questions", m.handleList)
 	mux.HandleFunc("GET /api/questions/{questionId}", m.handleGet)

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { displayLanguage } from '../../lib/displayLanguage'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import type { MessageStatus, ProjectMessage } from '../../lib/agents'
 import type { Question } from '../../lib/decisionDeskApi'
 import { useSession } from '../../stores/session'
@@ -39,6 +39,13 @@ const mine = (message: MessageGroup) => message.sender_principal_id === me.value
 const fromAgent = (message: MessageGroup) => message.sender_principal_id === props.principalId
 // The divider sits above the row that holds the first unread post, a Desk card included.
 const divider = (row: ThreadRow) => !!props.newFrom && row.type !== 'day' && (row.type === 'desk' ? row.members.includes(props.newFrom) : row.message.members.includes(props.newFrom))
+// Visual dividers take the same grid slots without becoming list items. The
+// following message describes them, including when their text is aria-hidden.
+const threadId = useId()
+const description = (row: ThreadRow, index: number) => {
+  const previous = rows.value[index - 1]
+  return [previous?.type === 'day' ? `${threadId}-${previous.key}` : '', divider(row) ? `${threadId}-new` : ''].filter(Boolean).join(' ') || undefined
+}
 const statusOf = (m: ProjectMessage): MessageStatus | undefined => {
   if (m.sender_principal_id !== me.value) return undefined
   if (m.send_failed) return { message_id: m.id, status: 'not_delivered', delivered_at: null, read_at: null, deliver_by: null }
@@ -142,15 +149,15 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="session-messages" :class="{ quiet }" aria-label="Conversation">
-    <ol v-if="rows.length" class="thread" aria-label="Messages">
-      <template v-for="row in rows" :key="row.key">
-        <li v-if="row.type === 'day'" class="day" role="separator" :aria-label="row.label"><span aria-hidden="true">{{ row.label }}</span></li>
+    <div v-if="rows.length" class="thread" role="list" aria-label="Messages">
+      <template v-for="(row, index) in rows" :key="row.key">
+        <div v-if="row.type === 'day'" class="day" aria-hidden="true"><span :id="`${threadId}-${row.key}`">{{ row.label }}</span></div>
         <template v-else>
-          <li v-if="divider(row)" class="new-divider" role="separator" :aria-label="`${newCount ?? 1} new`"><span>{{ words.newDivider }}</span></li>
-          <li v-if="row.type === 'desk'" class="msg desk" :data-event="row.message.optimistic ? undefined : row.lastEvent" :data-id="row.message.id">
+          <div v-if="divider(row)" class="new-divider" aria-hidden="true"><span :id="`${threadId}-new`" :aria-label="`${newCount ?? 1} new`">{{ words.newDivider }}</span></div>
+          <div v-if="row.type === 'desk'" class="msg desk" role="listitem" :aria-describedby="description(row, index)" :data-event="row.message.optimistic ? undefined : row.lastEvent" :data-id="row.message.id">
             <ChatDeskCard :question-id="row.questionId" :answer="row.answer" :corrected="row.corrected" :at="row.message.created_at" :questions="questions" :session-id="sessionId" />
-          </li>
-          <li v-else-if="mine(row.message)" class="msg mine" :class="{ pressed: menu?.id === row.message.id }"
+          </div>
+          <div v-else-if="mine(row.message)" class="msg mine" role="listitem" :aria-describedby="description(row, index)" :class="{ pressed: menu?.id === row.message.id }"
             :tabindex="coarse ? 0 : undefined" :aria-haspopup="coarse ? 'menu' : undefined"
             :data-event="row.message.optimistic ? undefined : row.message.last_event" :data-id="row.message.id" :data-receipt="row.message.answered ? 'answered' : statusOf(row.message)?.status"
             @pointerdown="press($event, row.message)" @pointermove="pressMove" @pointerup="cancelPress" @pointercancel="cancelPress"
@@ -173,8 +180,8 @@ onBeforeUnmount(() => {
               </template>
             </p>
             <p v-if="failed(row.message)" class="undelivered" data-status="not_delivered" :data-tip="tip(row.message)"><AppIcon name="alert" :size="12" /><span>{{ label(statusOf(row.message)!) }}</span><button v-if="canReply" type="button" class="retry" @click="emit('retry', row.message)">{{ words.retry }}</button></p>
-          </li>
-          <li v-else class="msg" :class="{ agent: fromAgent(row.message), pressed: menu?.id === row.message.id }"
+          </div>
+          <div v-else class="msg" role="listitem" :aria-describedby="description(row, index)" :class="{ agent: fromAgent(row.message), pressed: menu?.id === row.message.id }"
             :tabindex="coarse && fromAgent(row.message) ? 0 : undefined" :aria-haspopup="coarse && fromAgent(row.message) ? 'menu' : undefined"
             :data-event="row.message.optimistic ? undefined : row.message.last_event" :data-id="row.message.id"
             @pointerdown="press($event, row.message)" @pointermove="pressMove" @pointerup="cancelPress" @pointercancel="cancelPress"
@@ -191,10 +198,10 @@ onBeforeUnmount(() => {
               <button type="button" class="icon-btn sm flat" :aria-label="words.copy" :data-tip="words.copy" @click="copy(row.message)"><AppIcon name="copy" :size="15" /></button>
               <button v-if="canReply" type="button" class="icon-btn sm flat" :aria-label="words.reply" :data-tip="words.reply" @click="emit('reply', row.message)"><AppIcon name="reply" :size="15" /></button>
             </div>
-          </li>
+          </div>
         </template>
       </template>
-    </ol>
+    </div>
     <div v-if="menu" class="msg-scrim" aria-hidden="true" />
     <FloatingPanel v-if="menu" :anchor="menu.anchor" :align="mine(menu.message) ? 'end' : 'start'" :width="216" :label="words.actions" @close="closeMenu">
       <div class="msg-menu" :class="{ quiet }" role="menu" :aria-label="words.actions">
@@ -209,6 +216,9 @@ onBeforeUnmount(() => {
 .session-messages { min-width: 0; }
 /* One gap between every two items, whatever their kind (20 px, 16 px on phones). */
 .thread { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--thread-gap, 20px); margin: 0; padding: 0; list-style: none; }
+/* Keep markdown's markers as they were under the native outer list. */
+.thread :deep(ul) { list-style-type: circle; }
+.thread :deep(:is(ul, ol) ul) { list-style-type: square; }
 .day { justify-self: center; font-size: 12px; font-weight: 600; color: var(--ink-3); }
 /* Each message paints on its own: its actions sit above its hover strip, and the next item stays on top of both. */
 .msg { position: relative; isolation: isolate; min-width: 0; width: 100%; padding: 0; }

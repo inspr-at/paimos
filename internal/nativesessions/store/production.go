@@ -361,10 +361,12 @@ func (s *Store) runtimeTx(ctx context.Context, d nativecontract.DaemonActor, b n
 	return s.runtime(ctx, d, b, draining, false, fn)
 }
 
-// stopTx serves only the exact owner's stop (its listing, claim and exit):
+// stopTx serves the exact owner's stop (its listing, claim and exit) and
+// release-only cleanup of never-claimed inbox leases:
 // withdrawn consent passes fn a StopOnly session instead of a refusal, while
 // the paired lease and worker permission are still required. fn must refuse
-// anything but a stop for a StopOnly session.
+// new native work for a StopOnly session. Inbox cleanup may only release a
+// lease with no durable claim; queueInboxTx refuses admission for StopOnly.
 func (s *Store) stopTx(ctx context.Context, d nativecontract.DaemonActor, b nativecontract.Binding, draining bool, fn func(context.Context, pgx.Tx, consent.Session, receipts.RuntimeProof) error) error {
 	return s.runtime(ctx, d, b, draining, true, fn)
 }

@@ -416,10 +416,10 @@ watch([ids, () => layout.value.dropped.join(',')], ([value]) => emit('layout', v
 // Live widths while dragging a column edge; saved when the drag ends.
 const measuring = ref(false)
 const foldSpace = ref(0)
-// Stays false while a fit used the fallback face. font-display:swap can load
-// JetBrains Mono afterwards; the next navigation then measures the real face
-// and the title shifts by however far the key grew past its design width.
+// A fit using the fallback face still owes a font measurement. Card samples
+// also move Title's remainder, so readiness must cover both (AEON-1641).
 const columnsSettled = ref(false)
+const cardWidthSettled = ref(false)
 let fitGeneration = 0
 let fittedColumns = new Set<string>()
 let columnsAlive = true
@@ -427,7 +427,9 @@ let fontRefitPending = false
 function fontsLoaded() {
   return typeof document === 'undefined' || !document.fonts || document.fonts.status === 'loaded'
 }
-function columnsAreSettled() { return fontsLoaded() && !fontRefitPending }
+function columnsAreSettled() {
+  return !props.loading && !measuring.value && fontsLoaded() && !fontRefitPending && cardWidthSettled.value
+}
 async function fitLoaded() {
   const generation = ++fitGeneration
   if (!columnsAlive) return
@@ -565,7 +567,6 @@ let shrinkBefore: number | null = null
 // the list spec installs a clock that stubs requestAnimationFrame, so two of those frames are
 // not two paints (AEON-1594).
 const cardEpoch = ref(0)
-const cardWidthSettled = ref(false)
 function measureWidth() {
   const live = readCardWidth()
   if (live !== null && live > 0) width.value = live
@@ -586,12 +587,15 @@ function finishCardSettle(frame: number) {
   shrinkBefore = null
   cardEpoch.value++
   cardWidthSettled.value = true
+  // Publish readiness in the same update as the width this window adopted.
+  if (!phone.value) columnsSettled.value = columnsAreSettled()
 }
 function settleCardWidth(viewportGrew = false) {
   const frame = ++cardFrame
   const ceiling = shrinkCeiling
   const before = shrinkBefore
   cardWidthSettled.value = false
+  if (!phone.value) columnsSettled.value = false
   const samples: (number | null)[] = []
   const take = () => {
     requestAnimationFrame(() => {

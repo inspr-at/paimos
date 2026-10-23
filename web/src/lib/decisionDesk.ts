@@ -73,12 +73,12 @@ export function suggestedUnavailableNote(item: DeskItem): string {
   if (!outcomeUnavailable(item, item.outcome) || item.outcome === 'once') return ''
   return `Suggested: ${outcomeLabels[item.outcome]} · not available for this question`
 }
-const PLAIN_WHY: Record<string, (project: string) => string> = {
+const PLAIN_WHY: Record<string, (project: string, compact: boolean) => string> = {
   'Requirement needs a linked editable ticket.': () => 'Not available: this question has no ticket, so there are no acceptance criteria to add to.',
   'The linked ticket is no longer editable.': () => 'Not available: the ticket can’t be edited any more.',
   'Requirement needs text acceptance criteria; review the ticket\'s list or structured criteria first.': () => 'Not available: the ticket’s acceptance criteria aren’t plain text. Review them on the ticket first.',
-  'Doctrine needs an authorized source, rule and exact base mapping.': () => 'Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.',
-  'Doctrine needs a confirmed source, rule and exact base mapping.': () => 'Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.',
+  'Doctrine needs an authorized source, rule and exact base mapping.': (_, compact) => compact ? 'Not available: the agent named no rule.' : 'Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.',
+  'Doctrine needs a confirmed source, rule and exact base mapping.': (_, compact) => compact ? 'Not available: the agent named no rule.' : 'Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.',
   'This outcome requires knowledge.write permission.': project => `Not available: you can’t write decisions to ${project}’s Knowledge.`,
   'This outcome requires nodes.write permission.': project => `Not available: you can’t edit tickets in ${project}.`,
   'Doctrine requires workspace rules.write permission.': () => 'Not available: you can’t propose rule changes.',
@@ -86,11 +86,11 @@ const PLAIN_WHY: Record<string, (project: string) => string> = {
   'Question decision permission is required.': project => `Not available: you can’t decide questions in ${project}.`,
 }
 /** The reason a stamp is off, in plain words for the memo (the server sentence stays the authority). */
-export function stampWhy(item: DeskItem, outcome: DeskOutcome): string {
+export function stampWhy(item: DeskItem, outcome: DeskOutcome, compact = false): string {
   const why = outcomeUnavailable(item, outcome)
   if (!why) return ''
   const plain = PLAIN_WHY[why]
-  if (plain) return plain(item.projectName)
+  if (plain) return plain(item.projectName, compact)
   if (why.endsWith('availability could not be confirmed.')) return `Couldn’t check whether ${outcomeLabels[outcome]} is available. Try again in a moment.`
   return why
 }

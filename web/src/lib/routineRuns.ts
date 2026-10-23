@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { IconName } from '../components/AppIcon.vue'
-import { effortVerb, effortWord, routineState, waitReasonWords, type Recurrence, type RecurrenceTrigger, type RoutineScopeKind, type RoutineState } from './recurrences'
+import { effortVerb, effortWord, elapsedCadence, routineState, waitReasonWords, type Recurrence, type RecurrenceTrigger, type RoutineScopeKind, type RoutineState } from './recurrences'
 import { compactCount } from './usageFormat'
 
 // The routine logbook in the UI (AEON-1192, S24): S21's closed run states, its usage
@@ -227,6 +227,8 @@ const DAY_SHORT: Record<string, string> = { MO: 'Mon', TU: 'Tue', WE: 'Wed', TH:
 export function triggerShort(trigger: RecurrenceTrigger): string {
   if (trigger.kind === 'event') return ({ 'release.published': 'After each release', 'node.done': 'When work is done', 'knowledge.changed': 'When knowledge changes', 'external.tag': 'After a signed tag', 'external.deploy': 'After a signed deploy' } as Record<string, string>)[trigger.event || 'release.published'] ?? 'After an event'
   const rule = Object.fromEntries((trigger.rrule ?? '').split(';').map(part => part.split('='))) as Record<string, string>
+  const cadence = elapsedCadence(rule)
+  if (cadence) return `${cadence[0]!.toUpperCase()}${cadence.slice(1)}`
   const at = trigger.time_of_day ?? ''
   if (rule.FREQ === 'WEEKLY') { const days = (rule.BYDAY ?? '').split(',').map(day => DAY_SHORT[day]).filter(Boolean); return `${days.length === 7 ? 'Daily' : days.join(', ') || 'Weekly'} ${at}`.trim() }
   if (rule.FREQ === 'MONTHLY') return `${rule.BYMONTHDAY === '-1' ? 'Last day' : `Day ${rule.BYMONTHDAY || '1'}`}${rule.INTERVAL && rule.INTERVAL !== '1' ? ` every ${rule.INTERVAL} months` : ' monthly'} ${at}`.trim()

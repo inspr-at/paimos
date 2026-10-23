@@ -2,6 +2,7 @@
 // Coordinator: PLAYWRIGHT_PORT=5825 npm test -- agents-hierarchy.spec.ts
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
+import { writeFile } from 'node:fs/promises'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { controlStability } from './control-stability'
@@ -77,13 +78,13 @@ test('workers nest by session ID, display their label, harness and ticket, and e
 
 // Risk: wrong project/ticket attribution, duplicate children under a project
 // filter, or a list inventing/fetching an ancestor outside the visible rows.
-test('AEON-1360 cross-project children nest with their own work and survive their project filter once', async ({ page }) => {
+test('AEON-1360 cross-project children nest with their own work and survive their project filter once', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1600 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   const { data, calls } = await setup(page)
   Object.assign(data.sessions[1]!, {
     project_id: 'p-aeon', project: { id: 'p-aeon', key: 'AEON', title: 'Aeon' },
-    ticket_node_id: 'n-a1', ticket: { id: 'n-a1', key: 'AEON-42', title: 'Child project work' },
+    ticket_node_id: 'n-a1', ticket: { id: 'n-a1', key: 'AEON-42', title: 'Projektübergreifende Fortschrittszählung für ausführlich beschriebene Hilfsagenten' },
     parent_harness_session_id: null, cross_project_parent_harness_session_id: lead,
   })
   await page.goto('/agents')
@@ -91,6 +92,60 @@ test('AEON-1360 cross-project children nest with their own work and survive thei
   await expect(row(page, child)).toHaveAttribute('data-parent', lead)
   await expect(row(page, child).locator('.key-inline')).toHaveText('AEON-42 ·')
   await expect(row(page, child)).toHaveCount(1)
+  // AEON-1649: the server knows a second worker outside this page. The client
+  // renders its count and project breakdown without resizing any row/control.
+  const counts = { current: 2, all: 2, cross_project: [] as { project_key: string; current: number; all: number }[], omitted_projects: 0 }
+  Object.assign(data.sessions[0]!, { child_counts: counts, progress_pct: 60 })
+  const checks = []
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    counts.cross_project = []
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await signal(page, 'harness.registered')
+    const parent = row(page, lead), fold = parent.locator('[data-fold="family"]')
+    await expect(fold).toHaveAccessibleName('Fold Release lead’s workers: 2 workers, 1 working')
+    const controls = { parent, fold, actions: parent.locator('.c-actions'), filter: page.locator('.sessions .tb-filter') }
+    const stable = await controlStability(page, controls)
+    await stable.check(async () => {
+      await fold.click()
+      await expect(row(page, child)).toHaveCount(0)
+      await expect(parent.locator('.l2t')).toContainText('2 workers')
+      await expect(parent.locator('.l2t')).not.toContainText('includes 1 from AEON')
+    })
+    const before = await Promise.all(Object.values(controls).map(control => control.boundingBox()))
+    await stable.check(async () => {
+      counts.cross_project = [{ project_key: 'AEON', current: 1, all: 1 }]
+      await signal(page, 'harness.registered')
+      await expect(parent.locator('.l2t')).toContainText('2 workers')
+      await expect(parent.locator('.l2t')).toContainText('includes 1 from AEON')
+      await expect(fold).toHaveAccessibleName(/2 workers, 1 working · includes 1 from AEON/)
+    })
+    const after = await Promise.all(Object.values(controls).map(control => control.boundingBox()))
+    expect(after, `AEON-1649 ${width} ${theme}: 0 px count-label layout change`).toEqual(before)
+    if (width === 390) {
+      await stable.check(async () => {
+        await expect(parent.locator('.l2t')).toHaveAttribute('data-clip-tip', '')
+        await fold.focus()
+        await page.keyboard.press('Tab')
+        await expect(parent.locator('.agent-link')).toBeFocused()
+        await expect(page.locator('.tooltip')).toContainText('includes 1 from AEON')
+      })
+      await page.locator('.tooltip').screenshot({ path: info.outputPath(`aeon-1649-${width}-${theme}-full-label.png`), animations: 'disabled' })
+    }
+    await page.locator('.sessions').screenshot({ path: info.outputPath(`aeon-1649-${width}-${theme}.png`), animations: 'disabled' })
+    checks.push({ width, theme, label: await parent.locator('.l2t').textContent(), layout_change_px: 0, before, after })
+    await stable.check(async () => {
+      await fold.click()
+      await expect(row(page, child)).toBeVisible()
+    })
+    stable.done()
+  }
+  await writeFile(info.outputPath('aeon-1649-checks.json'), JSON.stringify(checks, null, 2))
+  await writeFile(info.outputPath('aeon-1649-checks.md'), '```json\n' + JSON.stringify(checks, null, 2) + '\n```\n')
+  // Keep the existing project-filter assertion in its original tall viewport;
+  // resizing evidence must not leave the page scrolled beneath its popover.
+  await page.setViewportSize({ width: 1440, height: 1600 })
   const filter = page.locator('.sessions .tb-filter')
   const guard = await controlStability(page, { filter })
   await guard.check(async () => {
@@ -110,7 +165,15 @@ test('AEON-1360 cross-project children nest with their own work and survive thei
   await expect(row(page, child)).not.toHaveClass(/filter-context/)
   await expect(row(page, lead)).toHaveClass(/filter-context/)
   await expect(row(page, child).locator('.key-inline')).toHaveText('AEON-42 ·')
+  // AEON-1649 M1: a facet counts only the offered children, even when the
+  // unfiltered server projection includes another worker outside this page.
+  await expect(row(page, lead).locator('[data-fold="family"]')).toHaveAccessibleName('Fold Release lead’s workers: 1 worker, 1 working')
   guard.done()
+  // Search has the same scope rule, without an active project facet.
+  await page.goto('/agents?q=hierarchy')
+  await expect(row(page, child)).toHaveCount(1)
+  await expect(row(page, lead)).toHaveClass(/filter-context/)
+  await expect(row(page, lead).locator('[data-fold="family"]')).toHaveAccessibleName('Fold Release lead’s workers: 1 worker, 1 working')
   // With the ancestor absent from the authorized page, its child stays a root.
   data.sessions.splice(0, 1)
   await signal(page, 'harness.registered')
@@ -121,12 +184,17 @@ test('AEON-1360 cross-project children nest with their own work and survive thei
 })
 
 test('new workers update through the live channel; a stopped worker keeps its place for 10 minutes, then folds into recoverable history', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
   const { data } = await setup(page)
   const worker = data.sessions.pop()!
+  const peer = { ...worker, id: '5e000000-0000-4000-8000-000000000003', display_label: 'Live peer' }
+  // The all-time projection also knows 238 old cross-project descendants that
+  // are outside the current list's 24-hour window.
+  Object.assign(data.sessions[0]!, { child_counts: { current: 2, all: 240, cross_project: [{ project_key: 'AEON', current: 0, all: 238 }], omitted_projects: 0 } })
   await page.clock.install()
   await page.goto('/agents')
   await expect(row(page, lead)).toBeVisible()
-  data.sessions.push(worker)
+  data.sessions.push(worker, peer)
   await signal(page, 'harness.registered')
   await page.clock.runFor(500)
   await expect(row(page, child)).toBeVisible({ timeout: 3000 })
@@ -136,12 +204,35 @@ test('new workers update through the live channel; a stopped worker keeps its pl
   // AEON-1211: it keeps its place and end state, and says when it moves; then, with the pointer away, it folds away.
   await expect(row(page, child)).toHaveClass(/stopped/)
   await expect(row(page, child).locator('.l2t')).toContainText('moves to Ended at')
+  // AEON-1649 M2: lingering stopped rows still belong to the folded current
+  // count, but the coordinator's activity names only its one live worker.
+  await expect(row(page, lead).locator('.l2t')).toHaveText('Coordinating 1 worker')
   await page.mouse.move(0, 0)
   await page.clock.runFor(10 * 60_000 + 2_000)
   await expect(row(page, child)).toHaveCount(0)
   await row(page, lead).getByRole('button', { name: 'Show stopped workers of Release lead' }).click()
   await expect(row(page, child)).toBeVisible()
   await expect(row(page, child)).toHaveClass(/stopped/)
+  // M1: Show stopped offers this list's history, never all-time/removed rows.
+  const parent = row(page, lead), fold = parent.locator('[data-fold="family"]')
+  await expect(fold).toHaveAccessibleName(/^Fold Release lead’s workers: 2 workers, \d+ working$/)
+  await fold.click()
+  await expect(parent.locator('.l2t')).toContainText('2 workers')
+  await expect(parent.locator('.l2t')).not.toContainText('from AEON')
+  await fold.click()
+  await expect(row(page, child)).toBeVisible()
+  await expect(row(page, peer.id)).toBeVisible()
+  // Removed history is a separate forest. Its two loaded descendants must
+  // not inherit the parent's all-time server count or project breakdown.
+  const stoppedAt = worker.stopped_at
+  Object.assign(data.sessions[0]!, { phase: 'stopped', stopped_at: stoppedAt, stop_reason: 'completed', revision: 3 })
+  Object.assign(peer, { phase: 'stopped', stopped_at: stoppedAt, stop_reason: 'completed', revision: 3 })
+  Object.assign(worker, { archived_at: stoppedAt, revision: 3 })
+  await page.getByRole('button', { name: 'Show history: every ended or removed session' }).click()
+  await expect(page.getByRole('treegrid', { name: 'Ended sessions' })).toBeVisible()
+  await expect(fold).toHaveAccessibleName(/^Fold Release lead’s workers: 2 workers, 0 working$/)
+  await expect(row(page, child)).toBeVisible()
+  await expect(row(page, peer.id)).toBeVisible()
 })
 
 test('returning to a visible tab refreshes immediately and failed reads keep the last success visible', async ({ page }) => {

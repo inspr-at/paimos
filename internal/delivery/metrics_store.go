@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -293,6 +295,13 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 	for _, run := range runs {
 		needsJobs = needsJobs || run.Attempt == 1 && jobRunEvent(run.Event) && scope.ci(run) && !run.JobsComplete
 	}
+	var actor tenant.Principal
+	if len(preflightRuns(runs)) > 0 {
+		actor, err = m.auditActor(ctx, m.config.TenantID)
+		if err != nil {
+			return webhookFailed, nil, err
+		}
+	}
 	err = db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
 			return err
@@ -316,10 +325,48 @@ func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte
 			return err
 		}
 		if needsJobs {
-			// A completed history job otherwise sleeps forever after a live
-			// best-effort job read failed. Resume its idempotent jobs pass.
-			_, err := tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_pending=true WHERE repository=$1 AND backfill_actor_id IS NOT NULL`, m.config.Repository)
-			return err
+			// Resume the existing jobs pass after a best-effort live read failed.
+			if _, err := tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_pending=true WHERE repository=$1 AND backfill_actor_id IS NOT NULL`, m.config.Repository); err != nil {
+				return err
+			}
+		}
+		if actor.ID != "" {
+			rows, err := tx.Query(ctx, `SELECT project_id::text FROM delivery_metric_sources WHERE repository=$1 ORDER BY project_id LIMIT 101`, m.config.Repository)
+			if err != nil {
+				return err
+			}
+			var projects []string
+			for rows.Next() {
+				var project string
+				if err := rows.Scan(&project); err != nil {
+					rows.Close()
+					return err
+				}
+				projects = append(projects, project)
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			if len(projects) > 100 {
+				return errRead
+			}
+			var changes []events.Change
+			for _, project := range projects {
+				if err := lockMergeEventParentsTx(ctx, tx, actor, &project); err != nil {
+					return err
+				}
+				observed, err := preflightEvidenceTx(ctx, tx, project, m.config.Repository, runs)
+				if err != nil {
+					return err
+				}
+				changes = append(changes, observed...)
+			}
+			for _, change := range changes {
+				if _, err := events.Append(ctx, tx, actor, change); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 	})

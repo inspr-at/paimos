@@ -24,6 +24,8 @@ type Trigger struct {
 	External      *ExternalSender `json:"external,omitempty"`
 }
 type schedule struct {
+	anchor       time.Time
+	stepSeconds  int64
 	location     *time.Location
 	start        time.Time // Calendar dates are advanced in UTC, never by 24h in a zone.
 	hour, minute int
@@ -67,6 +69,27 @@ func parseSchedule(t Trigger) (*schedule, error) {
 	}
 	s.frequency = parts["FREQ"]
 	switch s.frequency {
+	case "MINUTELY", "HOURLY":
+		if parts["BYDAY"] != "" || parts["BYMONTHDAY"] != "" {
+			return nil, fmt.Errorf("elapsed schedules support only FREQ and INTERVAL")
+		}
+		limit, unit := 1440, int64(60)
+		if s.frequency == "HOURLY" {
+			limit, unit = 168, 3600
+		}
+		if raw := parts["INTERVAL"]; raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 1 || n > limit || strconv.Itoa(n) != raw {
+				return nil, fmt.Errorf("%s INTERVAL must be 1..%d", s.frequency, limit)
+			}
+			s.interval = n
+		}
+		var exists bool
+		s.anchor, exists = s.instant(s.start)
+		if !exists {
+			return nil, fmt.Errorf("elapsed schedule anchor falls in a timezone gap")
+		}
+		s.stepSeconds = int64(s.interval) * unit
 	case "DAILY":
 		if len(parts) != 1 {
 			return nil, fmt.Errorf("DAILY supports only FREQ")
@@ -113,7 +136,7 @@ func parseSchedule(t Trigger) (*schedule, error) {
 			}
 		}
 	default:
-		return nil, fmt.Errorf("FREQ must be DAILY, WEEKLY or MONTHLY")
+		return nil, fmt.Errorf("FREQ must be MINUTELY, HOURLY, DAILY, WEEKLY or MONTHLY")
 	}
 	return s, nil
 }
@@ -156,6 +179,13 @@ func (s *schedule) instant(d time.Time) (time.Time, bool) {
 	return first, !first.IsZero()
 }
 func (s *schedule) next(after time.Time) (time.Time, error) {
+	if s.stepSeconds > 0 {
+		if after.Before(s.anchor) {
+			return s.anchor, nil
+		}
+		steps := (after.Unix()-s.anchor.Unix())/s.stepSeconds + 1
+		return time.Unix(s.anchor.Unix()+steps*s.stepSeconds, 0).UTC(), nil
+	}
 	local := after.In(s.location)
 	day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
 	if day.Before(s.start) {
@@ -174,6 +204,13 @@ func (s *schedule) next(after time.Time) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("no occurrence within four years")
 }
 func (s *schedule) latest(now time.Time) (time.Time, error) {
+	if s.stepSeconds > 0 {
+		if now.Before(s.anchor) {
+			return time.Time{}, fmt.Errorf("no occurrence before schedule anchor")
+		}
+		steps := (now.Unix() - s.anchor.Unix()) / s.stepSeconds
+		return time.Unix(s.anchor.Unix()+steps*s.stepSeconds, 0).UTC(), nil
+	}
 	local := now.In(s.location)
 	day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 4*366 && !day.Before(s.start); i++ {

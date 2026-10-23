@@ -84,6 +84,12 @@ const changeSteps = (): StepSpec[] => [
   { n: 301, item: C9, key: 'build', kind: 'work', actor: 'agent', label: 'Builder', from: '19:47', to: null, model: 'Opus 5.5', p50: 35, p90: 46, arion: 30 },
 ]
 
+// AEON-1656: a burst of `n` more changes whose builders all start between 20:00 and 20:19 and are still running at 20:25.
+const burstAt = (k: number) => `20:${String(k).padStart(2, '0')}`
+const burstSteps = (n: number): StepSpec[] => Array.from({ length: n }, (_, k) => ({
+  n: 400 + k, item: id(1700 + k), key: 'build', kind: 'work', actor: 'agent', label: 'Builder', from: burstAt(k), to: null, model: 'Opus 5.5', p50: 35,
+} satisfies StepSpec))
+
 const eta = (p50: string | null, p90: string | null, reason: string | null = null) => ({ p50_at: p50 ? iso(p50) : null, p90_at: p90 ? iso(p90) : null, basis: p50 ? 'history' : 'none', reason })
 /** The release record facts the server always returns: null until a rollout record reports them. */
 const noRecord = { qualification_evidence: null, rollback_class: null }
@@ -98,13 +104,18 @@ const items = (final: boolean, record = false) => [
   { id: C9, kind: 'change', ref: 'AEON-993', title: 'delivery numbers', prs: [], started_at: iso('19:47'), ended_at: null, pct_done: 0, current_step_id: id(10_301),
     eta: eta(null, null, 'fewer than 3 finished build steps in 30 days'), target: null, next_human_gate: null, ...noRecord },
 ]
+const burstItems = (n: number) => Array.from({ length: n }, (_, k) => ({
+  id: id(1700 + k), kind: 'change', ref: `AEON-${1700 + k}`, title: `change ${k + 1}`, prs: [], started_at: iso(burstAt(k)), ended_at: null, pct_done: 10, current_step_id: id(10_400 + k),
+  eta: eta(null, null, 'fewer than 3 finished build steps in 30 days'), target: null, next_human_gate: null, ...noRecord,
+}))
 const incident = (final: boolean) => ({ id: id(900), item_id: R, started_at: iso('20:14:31'), ended_at: final ? iso('20:34:01') : null, severity: 'degraded', summary: 'ready 503, DB pool starved', recovery_step_ids: [26, 27, 28, ...(final ? [29, 30] : [])].map(n => id(10_000 + n)) })
 
-/** GET /delivery/flow at `now` (20:25 by default): the runs in flight. */
-export function flowAnswer(now = '20:25', record = false, merge = false) {
+/** GET /delivery/flow at `now` (20:25 by default): the runs in flight, plus `burst` concurrent builders. */
+export function flowAnswer(now = '20:25', record = false, merge = false, burst = 0) {
   return {
     project_id: id(1), now: iso(now), at: iso(now), from: iso('16:25'), to: iso(now),
-    items: items(false, record), steps: [...releaseSteps(false), ...(record ? recordSteps() : []), ...(merge ? mergeStep() : []), ...changeSteps()].map(step), incidents: [incident(false)], truncated: false,
+    items: [...items(false, record), ...burstItems(burst)],
+    steps: [...releaseSteps(false), ...(record ? recordSteps() : []), ...(merge ? mergeStep() : []), ...changeSteps(), ...burstSteps(burst)].map(step), incidents: [incident(false)], truncated: false,
   }
 }
 /** GET /delivery/flow/runs/{itemId}: release 126 is final; the changes are as at 20:25. */
@@ -124,11 +135,13 @@ export interface FlowMock {
   setNow(now: string): void
   /** Switches between no recorded run and the recorded runs for the next read. */
   setEmpty(empty: boolean): void
+  /** How many burst builders the next read carries (AEON-1656). */
+  setBurst(n: number): void
 }
 /** Mocks the flow reads and the hint stream. The stream waits until a test sends a hint. */
-export async function mockFlow(page: Page, options: { empty?: boolean; record?: boolean; merge?: boolean; derived?: boolean } = {}): Promise<FlowMock> {
+export async function mockFlow(page: Page, options: { empty?: boolean; record?: boolean; merge?: boolean; derived?: boolean; burst?: number } = {}): Promise<FlowMock> {
   const reads: string[] = []
-  let now = '20:25', empty = !!options.empty
+  let now = '20:25', empty = !!options.empty, burst = options.burst ?? 0
   let release: (frame: string) => void = () => {}
   let waiting = new Promise<string>(resolve => { release = resolve })
   const observed = <T extends { steps: ReturnType<typeof flowAnswer>['steps'] }>(answer: T): T => {
@@ -138,7 +151,7 @@ export async function mockFlow(page: Page, options: { empty?: boolean; record?: 
   }
   await page.route(/\/api\/projects\/[^/]+\/delivery\/flow(\?|$)/, route => {
     reads.push(new URL(route.request().url()).pathname + new URL(route.request().url()).search)
-    return route.fulfill({ json: empty ? emptyFlow() : observed(flowAnswer(now, options.record, options.merge)) })
+    return route.fulfill({ json: empty ? emptyFlow() : observed(flowAnswer(now, options.record, options.merge, burst)) })
   })
   await page.route(/\/api\/projects\/[^/]+\/delivery\/flow\/runs\/[^/?]+/, route => {
     const itemId = new URL(route.request().url()).pathname.split('/').pop()!
@@ -156,5 +169,6 @@ export async function mockFlow(page: Page, options: { empty?: boolean; record?: 
     hint(type, itemId) { seq++; release(`id: ${seq}\nevent: ${type}\ndata: ${JSON.stringify({ id: seq, type, at: iso(now), item_id: itemId, step_id: id(10_028) })}\n\n`) },
     setNow(value) { now = value },
     setEmpty(value) { empty = value },
+    setBurst(value) { burst = value },
   }
 }

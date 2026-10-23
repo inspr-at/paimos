@@ -81,6 +81,7 @@ type flowIncidentInput struct {
 }
 
 type flowBatch struct {
+	Evidence  []metricFactInput
 	Item      flowItemInput
 	Steps     []flowStepInput
 	Incidents []flowIncidentInput
@@ -250,6 +251,19 @@ func applyFlowTx(ctx context.Context, tx pgx.Tx, tid string, batches []flowBatch
 		}
 		if itemChanged {
 			changes = append(changes, flowChange(after.Project, "delivery.item", map[string]string{"item_id": id}))
+		}
+		if len(b.Evidence) > 0 {
+			source, err := loadMetricSourceTx(ctx, tx, after.Project, false)
+			if err != nil {
+				return nil, err
+			}
+			if source != nil {
+				evidence, err := metricEvidenceTx(ctx, tx, tid, after.Project, source.Repository, b.Evidence, now)
+				if err != nil {
+					return nil, err
+				}
+				changes = append(changes, evidence...)
+			}
 		}
 	}
 	return changes, nil

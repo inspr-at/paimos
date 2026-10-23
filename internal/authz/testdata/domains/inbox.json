@@ -22,6 +22,11 @@
       "inbox.read"
     ]
   },
+  "project_filtered": {
+    "GET /api/inbox/lanes": true,
+    "GET /api/peers": true,
+    "POST /api/peers/{sessionId}/messages": true
+  },
   "registry": [
     {
       "agent_grantable": true,
@@ -75,11 +80,13 @@
   "routes": {
     "DELETE /api/inbox/targets/{targetId}": "inbox.send|inbox.manage",
     "GET /api/inbox/feedback-recipient": "inbox.send",
+    "GET /api/inbox/lanes": "inbox.read",
     "GET /api/inbox/message-status": "inbox.receipt",
     "GET /api/inbox/messages": "inbox.read",
     "GET /api/inbox/messages/{messageId}/receipt": "inbox.receipt",
     "GET /api/inbox/stream": "inbox.read",
     "GET /api/inbox/targets": "inbox.read",
+    "GET /api/peers": "harness.read",
     "GET /api/projects/{projectId}/message-deliveries": "inbox.manage",
     "GET /api/projects/{projectId}/message-targets": "inbox.manage",
     "GET /api/projects/{projectId}/messages": "inbox.manage|harness.read",
@@ -89,6 +96,7 @@
     "POST /api/inbox/messages/{messageId}/ack": "inbox.send",
     "POST /api/inbox/messages/{messageId}/cancel": "inbox.send",
     "POST /api/inbox/targets": "inbox.send|inbox.manage",
+    "POST /api/peers/{sessionId}/messages": "inbox.send",
     "POST /api/projects/{projectId}/message-targets": "inbox.manage",
     "POST /api/projects/{projectId}/messages": "inbox.send",
     "POST /api/projects/{projectId}/messages/delivery-claim": "inbox.send",

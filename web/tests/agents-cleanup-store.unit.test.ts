@@ -74,3 +74,49 @@ it('a poll in flight during Cancel does not overwrite cancelled with queued', as
   await store.refreshAgentRuns('agent')
   expect(store.runs.r?.status).toBe('cancelled')
 })
+
+// Risk: network recovery invalidates the individual reads but rejoins their old
+// bundle, so the accounts tile never reads the recovered (possibly empty) list.
+it('a reconnect refreshes accounts before an invalidated bundle finishes and keeps the new bundle owned', async () => {
+  vi.mocked(listAccounts).mockResolvedValueOnce([account('a')])
+  const store = useAgents()
+  await store.refreshAccounts()
+  expect(store.accounts.map(a => a.id)).toEqual(['a'])
+
+  const oldAccounts = deferred<AgentAccount[]>()
+  const oldRuns = deferred<RunPage>(), newRuns = deferred<RunPage>()
+  vi.mocked(listAccounts).mockReturnValueOnce(oldAccounts.promise).mockResolvedValue([])
+  vi.mocked(listRuns).mockReturnValueOnce(oldRuns.promise).mockReturnValueOnce(newRuns.promise)
+  const oldLoad = store.loadAll()
+  let newLoad: Promise<void> | undefined
+  try {
+    store.invalidatePolls()
+    newLoad = store.loadAll()
+    // Both bundles are held at explicit barriers; recovery cannot join the old one.
+    expect(listAccounts).toHaveBeenCalledTimes(3)
+    expect(listRuns).toHaveBeenCalledTimes(2)
+    await store.refreshAccounts()
+    expect(store.accounts).toEqual([])
+
+    oldAccounts.resolve([account('a')])
+    oldRuns.resolve(wiredPage([]))
+    await oldLoad
+    expect(store.accounts).toEqual([])
+    expect(store.loaded).toBe(false)
+    expect(store.loading).toBe(true)
+    // An obsolete bundle's finally must not clear the replacement's single flight.
+    const joinedLoad = store.loadAll()
+    expect(listAccounts).toHaveBeenCalledTimes(3)
+    expect(listRuns).toHaveBeenCalledTimes(2)
+    newRuns.resolve(wiredPage([]))
+    await Promise.all([newLoad, joinedLoad])
+    expect(store.loaded).toBe(true)
+    expect(store.loading).toBe(false)
+    expect(store.accounts).toEqual([])
+  } finally {
+    oldAccounts.resolve([account('a')])
+    oldRuns.resolve(wiredPage([]))
+    newRuns.resolve(wiredPage([]))
+    await Promise.allSettled([oldLoad, newLoad])
+  }
+})
