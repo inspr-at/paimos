@@ -16234,6 +16234,8 @@
     ,
     {"kind":"node","file":"tests/vendor-signals.test.ts","name":"status line copy names whose computer it is","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/visual-baselines.test.ts","name":"live prepared-only visual renderer keeps comparisons report-only pending cross-machine proof","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/visual-baselines.test.ts","name":"visual references require approval, immutable attachment bytes and every exact member","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/visual-baselines.test.ts","name":"visual report-only switch records failures and restores blocking without granting historical cut authority","tier":"ESSENTIAL"}

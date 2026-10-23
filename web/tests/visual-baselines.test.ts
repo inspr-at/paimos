@@ -172,9 +172,13 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.throws(() => verifyReferenceArchive(archive, detached, wrongManifestDigest, noExtraction), { message: 'Visual detached manifest SHA-256 mismatch' })
   assert.throws(() => verifyReferenceArchive(Buffer.alloc(0), detached, mirrored, noExtraction), /archive size mismatch/)
 
-  const gates = referenceGates(manifest)
+  // Exercise the approved pins under an explicit blocking fixture while the
+  // live switch waits for cross-machine identity and reviewed set 4.
+  const activated = structuredClone(manifest)
+  activated.comparison.mode = 'blocking'
+  const gates = referenceGates(activated)
   assert.equal(manifest.referenceSet, 3)
-  assert.equal(manifest.comparison.mode, 'blocking')
+  assert.equal(manifest.comparison.mode, 'report-only')
   assert.equal(manifest.approval.reviewer, 'Tick')
   assert.equal(manifest.approval.status, 'approved')
   assert.deepEqual(manifest.approval.states, [])
@@ -196,7 +200,7 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.equal(deferred.flatMap(gate => gate.checkpointIds).length, 20)
   assert.ok(deferred.every(gate => gate.status === 'deferred'))
   assert.equal(compared.length + deferred.length, gates.length)
-  const report = referenceReport(manifest).markdown
+  const report = referenceReport(activated).markdown
   assert.match(report, /deferred checkpoints report only/)
   assert.match(report, /strict image comparison \+ quality/)
   for (const state of manifest.states) for (const checkpoint of state.checkpoints) {
@@ -538,7 +542,7 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.equal(partialRefs.has(`${receipt.checkpoints[0]}.png`), false)
     assert.equal(preparation.comparison.mode, 'report-only')
     assert.equal(preparation.approval.checkpoints.length, 0)
-    assert.equal(manifest.comparison.mode, 'blocking')
+    assert.equal(manifest.comparison.mode, 'report-only')
     assert.deepEqual(manifest.approval.checkpoints, approvedSet3Checkpoints)
     assert.match(publicationCommands(output, candidate), /gh release create test-references-3.*--prerelease/)
     assert.doesNotMatch(publicationCommands(output, candidate), /--clobber|--latest|release upload/)
@@ -838,6 +842,18 @@ test('visual references require approval, immutable attachment bytes and every e
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })
 
+// Risk: within-run repeat identity does not prove that the 60 approved pins
+// render identically on different machines. Set 4 and its full proof are still
+// pending; the live policy must not turn hosted raster variance into a gate.
+test('live prepared-only visual renderer keeps comparisons report-only pending cross-machine proof', () => {
+  assert.equal(manifest.referenceSet, 3)
+  assert.equal(manifest.rendererPreparation.status, 'prepared-only')
+  assert.equal(manifest.comparison.mode, 'report-only',
+    'Blocking requires cross-machine identity for all 60 checkpoints and reviewed reference set 4')
+  assert.throws(() => validateVisual(manifest, { cuts: true, checkpointIds: approvedSet3Checkpoints }),
+    /Protected visual cuts stay closed/)
+})
+
 // Risk: switching visual CI to reports could hide failures or accidentally
 // authorize protected pruning with historical set-1/set-2 approvals.
 test('visual report-only switch records failures and restores blocking without granting historical cut authority', async () => {
@@ -864,15 +880,22 @@ test('visual report-only switch records failures and restores blocking without g
   const revivedHistory = { ...blocking, ...structuredClone(manifest.history.find(row => row.referenceSet === 2)), comparison: blocking.comparison }
   revivedHistory.approval.status = 'historical-only'
   assert.throws(() => validateVisual(revivedHistory, { cuts: true, stateIds: ['agents'] }), /Cuts require Tick approval/)
-  assert.equal(manifest.comparison.mode, 'blocking')
-  await assert.rejects(visualCheckResult(manifest, run), error => error === failure)
-  assert.equal(validateVisual(manifest, { cuts: true, checkpointIds: approvedSet3Checkpoints }), 80)
+  assert.equal(manifest.comparison.mode, 'report-only')
+  assert.deepEqual(await visualCheckResult(manifest, run), { status: 'failed', error: String(failure) })
+  assert.throws(() => validateVisual(manifest, { cuts: true, checkpointIds: approvedSet3Checkpoints }), /Protected visual cuts stay closed/)
+  // The switch remains reversible, without treating the pending live renderer
+  // as permission to cut tests. Strict rejection and pin coverage still apply.
+  const activated = structuredClone(manifest)
+  activated.comparison.mode = 'blocking'
+  await assert.rejects(visualCheckResult(activated, run), error => error === failure)
+  assert.equal(validateVisual(activated, { cuts: true, checkpointIds: approvedSet3Checkpoints }), 80)
   for (const state of manifest.states) {
+    assert.throws(() => validateVisual(manifest, { cuts: true, stateIds: [state.id] }), /Protected visual cuts stay closed/)
     const unapproved = state.checkpoints.find(checkpoint => !approvedSet3Checkpoints.includes(checkpoint.id))
     if (!unapproved)
-      assert.equal(validateVisual(manifest, { cuts: true, stateIds: [state.id] }), 80)
+      assert.equal(validateVisual(activated, { cuts: true, stateIds: [state.id] }), 80)
     else
-      assert.throws(() => validateVisual(manifest, { cuts: true, stateIds: [state.id] }),
+      assert.throws(() => validateVisual(activated, { cuts: true, stateIds: [state.id] }),
         { message: `Deferred visual reference: ${unapproved.id} (${unapproved.deferredUntil.join(', ')})` })
   }
   const missingMode = structuredClone(manifest)
@@ -892,7 +915,10 @@ test('visual report-only switch records failures and restores blocking without g
     assert.match(summary, /V-projects-390-light-diff\.png/)
     assert.match(summary, /V-tickets-390-light.*not run in this shard/)
     assert.match(summary, /awaiting re-capture under the final renderer/)
-    const activatedSummary = checkpointReport(directory, manifest)
+    const liveSummary = checkpointReport(directory, manifest)
+    assert.match(liveSummary, /comparison.mode=report-only/)
+    assert.match(liveSummary, /V-projects-390-light.*failed.*different.*synthetic font guard failure/)
+    const activatedSummary = checkpointReport(directory, activated)
     assert.match(activatedSummary, /comparison.mode=blocking/)
     assert.match(activatedSummary, /V-projects-390-light.*Tick-approved, digest-pinned reference.*failed.*different/)
     assert.match(activatedSummary, /V-hours-390-light.*deferred until AEON-1699/)

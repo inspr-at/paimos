@@ -3639,7 +3639,7 @@
     "threshold": 0,
     "maxDiffPixels": 0,
     "justification": "No pixel tolerance: the same digest-pinned Playwright container, bundled browser, fontconfig file, scale, emulation and vendored glyphs must render identically. Zero tolerance requires two byte-identical captures of the same commit before pinning.",
-    "mode": "blocking"
+    "mode": "report-only"
   },
   "capture": {
     "workflow": ".github/workflows/ci.yml",
