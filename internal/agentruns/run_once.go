@@ -129,7 +129,15 @@ func settleRunOnceTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, 
 			closed = true
 		}
 	}
-	resultURL := "/agents?run=" + v.ID
+	// Session links also resolve through History after the current list's 24h
+	// window. A run that never registered a session still has its durable record.
+	resultURL := "/api/runs/" + v.ID
+	var sessionID string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM harness_sessions WHERE run_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1`, v.ID).Scan(&sessionID); err == nil {
+		resultURL = "/agents/" + sessionID
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
 	body := fmt.Sprintf("Run once [result](%s): %s.", resultURL, v.Status)
 	if v.OutcomeDetail != nil {
 		body += " Outcome: " + *v.OutcomeDetail + "."

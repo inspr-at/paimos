@@ -46,7 +46,8 @@ runs. One-off runs require a fresh Run once request to restart; automatic vendor
 continuation and the generic restart path cannot widen the saved ceiling.
 
 Terminal telemetry records one `run_once.settled` event and one ticket comment
-per run, linking its result in Agents. Successful runs move the leaf to **Done**
+per run, linking its session in Agents (including History), or its run record
+when no session was registered. Successful runs move the leaf to **Done**
 in the same transaction, provided the initiating person still has `nodes.write`
 on its current project and the normal Done entry checks pass. This never supplies
 a person override, grants a permission, or changes a parent's status directly.

@@ -196,6 +196,7 @@ func exerciseRunOnceSettlement(t *testing.T) {
 				return tx.QueryRow(t.Context(), `SELECT parent_id::text FROM nodes WHERE id=$1`, run.OrderID).Scan(&ticket)
 			})
 			path := "/api/runs/" + run.ID
+			resultURL := "/api/runs/" + run.ID
 			var report map[string]any
 			if tc.name == "queued-cancel" {
 				f.reserve(t, run)
@@ -215,6 +216,14 @@ func exerciseRunOnceSettlement(t *testing.T) {
 				f.mux.ServeHTTP(w, r)
 				if w.Code != 200 {
 					t.Fatalf("claim: %d %s", w.Code, w.Body.String())
+				}
+				if tc.name == "success" {
+					sessionID := uuid()
+					f.tx(t, f.person, func(tx pgx.Tx) error {
+						_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,run_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,phase,stopped_at,stop_reason) VALUES($1,$2,$3,$4,$5,'codex','test','unmanaged','worker','unknown','{}',decode(repeat('ab',32),'hex'),decode(repeat('cd',32),'hex'),'stopped',clock_timestamp(),'completed')`, f.person.TenantID, sessionID, contextID, f.agent.ID, run.ID)
+						return err
+					})
+					resultURL = "/agents/" + sessionID
 				}
 				switch tc.name {
 				case "person-status", "person-away-and-back":
@@ -236,8 +245,16 @@ func exerciseRunOnceSettlement(t *testing.T) {
 							return err
 						}
 						_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, f.person.ID, role)
+						if err != nil {
+							return err
+						}
+						// A custom workspace role does not imply every project's
+						// visibility. Keep this explicit membership while removing writes.
+						_, err = tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.person.TenantID, f.person.ID, role, contextID)
 						return err
 					})
+					f.call(t, f.person, "GET", "/api/nodes/"+ticket, nil, 200, nil)
+					f.call(t, f.person, "PATCH", "/api/nodes/"+ticket, map[string]any{"state": "done"}, 403, nil)
 				case "historical":
 					f.tx(t, f.person, func(tx pgx.Tx) error {
 						_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=trace#-'{run_once,ticket}' WHERE id=$1`, run.ID)
@@ -257,10 +274,10 @@ func exerciseRunOnceSettlement(t *testing.T) {
 			if f.count(t, f.person, `SELECT count(*) FROM nodes WHERE id=$1 AND state=$2 AND deleted_at IS NULL`, ticket, tc.state) != 1 {
 				t.Fatalf("ticket did not retain expected state %s", tc.state)
 			}
-			if f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='run_once.settled' AND after->>'run_id'=$2 AND after->>'status'=$3 AND after->>'reason'=$4 AND (after->>'ticket_closed')::bool=$5 AND after->>'result_url'=$6`, ticket, run.ID, tc.status, tc.reason, tc.state == "done", "/agents?run="+run.ID) != 1 {
+			if f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='run_once.settled' AND after->>'run_id'=$2 AND after->>'status'=$3 AND after->>'reason'=$4 AND (after->>'ticket_closed')::bool=$5 AND after->>'result_url'=$6`, ticket, run.ID, tc.status, tc.reason, tc.state == "done", resultURL) != 1 {
 				t.Fatal("missing, divergent or duplicated settlement receipt")
 			}
-			if f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='comment.created' AND after->>'run_id'=$2 AND position($3 in after->>'body_markdown')>0 AND position($4 in after->>'body_markdown')>0`, ticket, run.ID, "/agents?run="+run.ID, tc.reason) != 1 {
+			if f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='comment.created' AND after->>'run_id'=$2 AND position($3 in after->>'body_markdown')>0 AND position($4 in after->>'body_markdown')>0`, ticket, run.ID, resultURL, tc.reason) != 1 {
 				t.Fatal("missing, divergent or duplicated result comment")
 			}
 			closed := int64(0)
