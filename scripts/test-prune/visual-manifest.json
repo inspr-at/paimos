@@ -1286,7 +1286,7 @@
       "deferredUntil": [
         "AEON-1674"
       ],
-      "deferredReason": "New strict quality findings exposed by the approved attachment-preview focus: attachment Open/Delete buttons overlap; the sticky key overlaps a scrolled placement selector; axe reports aria-prohibited-attr on #v-5. Reported to LEAD on AEON-1674 for product-owner routing; no product fix or audit exception is introduced here."
+      "deferredReason": "Fix4: all four strict quality checkpoints passed at 52342dd9b after separating attachment actions, preserving classification definition semantics around a named live status, and measuring only visible control intersections. Initial reference approval remains pending; no image was pinned or recaptured."
     }
   ]
 }

@@ -2,9 +2,9 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "round5-mirror-materialization-and-state-gates-implemented",
+  "status": "fix4-workflow-and-workspace-fixed-renderer-and-product-prerequisites-open",
   "cuts": false,
-  "note": "Round 5 complete: byte-identical GitHub prerelease transport, digest verification before tar reads, per-shard re-verification, strict comparison + quality for seven approved states/30 checkpoints, explicit awaiting-reference + quality for six changes-requested states/30 checkpoints and five deferred states/20 checkpoints. Actual mirror verification passed; archive tamper, wrong digests, missing bytes, lost-pin refusal, changed pinned image, nonblocking awaiting dispatch and preserved quality-failure controls all passed. Remote affected browser set: 29 passed in 16.0s; final complete-runner guard: 2 passed in 4.9s. Node transport, ledger and five workflow-classification tests passed. Static remains hosted CI per the brief; no hosted result is claimed. All approved pins/attachment identities and every original registration retained. No cuts, tier changes, product reference recaptures, origin push, deployment or review/model calls.",
+  "note": "Fix4: merged origin/main through c3aab754e; corrected historical workflow projections while explicitly checking blocking read-only reference download, runtime packing and per-shard verification. Both reported workflow regressions pass. Existing attachment, placement and overlap regressions were strengthened without changing native identities; all 29 affected browser cases pass, including every strict workspace quality checkpoint and 390/1024/1440 light/dark action stability. Exact 96907f1c counterexamples fail at both workflow assertions and all four intended browser cases. Main fixes also make all Hours and Capacity quality cases pass. Approved image pins, original cases, tiers, no-cut status and quality assertions remain in force. Completion is not claimed: hosted approved-image comparisons still differ, Goals lacks approved v6 controls, Session Chat intentionally returns a native-context 503 rejected by strict quality, and full remote validation has runner/static limitations. No push to origin, deploy, review gate or other model call.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -19,33 +19,35 @@
   },
   "blockers": [
     {
+      "kind": "reference-renderer",
+      "states": [
+        "projects",
+        "access",
+        "knowledge",
+        "public-quote",
+        "agent-rules",
+        "start-agent",
+        "quote-editor"
+      ],
+      "reason": "All 30 approved image comparisons failed on hosted Linux. Access expected PNG digests match all four approved pins, with zero layout/axe/console/HTTP findings; received text widths and weights differ. The application uses an OS system-font stack. Approved renderer metadata is absent, so matching the capture environment or newly reviewed environment-compatible bytes requires coordinator ownership; no pins, tolerances or image content were rewritten."
+    },
+    {
       "kind": "product-prerequisite",
       "state": "goals",
-      "reason": "Current Goals lacks v6 Expert/Simple controls and stage tracks. Product packages AEON-1621 / AEON-1625 remain prerequisites; AEON-1625 is open and carries the approved Expanded/ExpandedSimple HTML boards."
+      "reason": "The required v6 Expert/Simple controls are absent; all four checkpoints fail at the explicit fixture prerequisite. Keep the approved design and AEON-1621/AEON-1625 dependencies rather than substitute another UI or skip assertions."
     },
     {
       "kind": "quality-finding",
       "state": "session-chat",
-      "reason": "Serious axe list failures in all four profiles and phone-light state-word contrast remain owned by AEON-1687. Fix3 completes the bound chat fixture and models the exact native feature_disabled 503; strict visual console/HTTP checks still reject that refusal, without filtering or an exception. A valid native snapshot would select a different owned-session UI and remove legacy chat, so it cannot stand in for this reference."
-    },
-    {
-      "kind": "quality-finding",
-      "state": "hours",
-      "reason": "Phone week-grid descendants exceed the scroll container by 56 px; strict overflow checks remain in force."
-    },
-    {
-      "kind": "quality-finding",
-      "state": "capacity",
-      "reason": "The selected daily-limit description fails color contrast in both dark profiles; it remains a failure."
-    },
-    {
-      "kind": "quality-finding",
-      "state": "ticket-workspace",
-      "reason": "Approved attachment-preview focus exposes Open/Delete overlap in all four profiles, sticky key/placement selector overlap on desktop, and aria-prohibited-attr on #v-5. Deferred on AEON-1674 for LEAD product-owner routing. No product code or audit exception changed."
+      "reason": "AEON-1687 fixes the chat semantics, but all four strict quality cases still reject the typed feature_disabled 503 from the legacy session native-context read. A valid NativeSessionView selects the owned-session UI and removes the requested legacy composer; replacing the refusal with a fabricated success would change the state under test. No console/HTTP exception was added."
     },
     {
       "kind": "reference-review",
-      "reason": "Six changes-requested states await AEON-1688 and the next reviewed capture round; deferred state prerequisites and quality findings remain with their existing product owners. These states report awaiting reference; missing approval alone does not block their required check, while actual quality failures still do."
+      "reason": "Six changes-requested states await AEON-1688 and the next reviewed capture round. Workspace, Hours and Capacity now pass strict quality while retaining their existing deferred reference status. No reference recapture or cuts were made."
+    },
+    {
+      "kind": "validation-environment",
+      "reason": "Full scripts/releaseworkflow remote run on agm2 fails in unrelated fixture executables because /bin/bash is absent, and a shell-path fixture cannot find bash. Both affected workflow cases pass in a separate remote run. Static entry point exits 3 under the night protocol. Only a 132ms single-file audit unit fallback was run locally; no local browser or full suite."
     }
   ],
   "measurements": [
@@ -2247,6 +2249,14 @@
     {
       "file": "web/playwright.ui.config.ts",
       "reason": "Places verified reference PNGs in ignored output and forbids automatic snapshot rewriting."
+    },
+    {
+      "file": "web/src/components/work/AttachmentStrip.vue",
+      "reason": "Outside the P02 test package: reserve a stationary Delete/Cancel row above the existing preview and give coarse pointers a separate 44px action target; fixes the named blocking Open/Delete collision without an audit exception."
+    },
+    {
+      "file": "web/src/components/work/TicketPlacement.vue",
+      "reason": "Outside the P02 test package: retain the definition-list element and put the named live status inside it, eliminating aria-prohibited-attr while preserving feedback geometry."
     }
   ],
   "unprovenRuntimeFiles": [],
@@ -3709,5 +3719,131 @@
     },
     "handoffPercent": 100,
     "remainingInRound5": []
+  },
+  "fix4": {
+    "brief": "aeon-1674-prune-p02-shell-visual-fix4.md",
+    "baseSHA": "96907f1cb6cd7ee9b747ca9e815f91bf31a674d8",
+    "mergedMain": "c3aab754e",
+    "implementationSHA": "52342dd9b",
+    "workflow": {
+      "tests": [
+        "TestParallelWebUnitsShareRuntimeAndRunOnce",
+        "TestFullFallbackPreservesPinnedMainJobs"
+      ],
+      "passed": 2,
+      "remote": "remote-test.sh / agm2-ci",
+      "negativeBaseExitCode": 1,
+      "historicalHashesChanged": false,
+      "checks": [
+        "contents:read only on producer and consumer",
+        "exact unconditional download+summary step after Node setup",
+        "original reference assets included in runtime tar",
+        "exact unconditional re-verification+summary before browser execution",
+        "AEON_VISUAL_BASELINE_FILE binds every shard to the verified bundle"
+      ]
+    },
+    "workspace": {
+      "remote": "remote-spec.sh / mbp2606, one Chromium worker",
+      "passed": 29,
+      "seconds": 38.8,
+      "evidenceDirectory": "web/test-results/AEON-1674-fix4-workspace-final",
+      "strictQualityPassed": 4,
+      "actionEvidence": "attachment-actions-{390,1024,1440}-{light,dark}.png",
+      "stabilityTolerancePx": 0.5,
+      "coarseDeleteTargetPx": 44,
+      "comparisonOverlapThresholdUnchanged": 16,
+      "changes": [
+        "disjoint stationary attachment Open/Delete hit areas",
+        "named classification status inside native dd",
+        "visible scrollport bounds for overlap calculation; two-pixel true collision remains a failure"
+      ]
+    },
+    "negativeControls": {
+      "baseSHA": "96907f1c",
+      "testsOnlySHA": "56ccb10f43",
+      "evidenceDirectory": "web/test-results/AEON-1674-fix4-negative",
+      "browserExitCode": 1,
+      "intendedBrowserFailures": 4,
+      "otherBrowserPasses": 21,
+      "seconds": 36.2,
+      "expectedFailures": [
+        "Open and Delete overlap (576 square pixels on old UI)",
+        "named classification status absent at 390 and 1440",
+        "old auditor reports 2500 square pixels of entirely scrollport-clipped overlap"
+      ],
+      "invalidAttemptNotCounted": "An initial multiword grep was interpolated by remote-spec.sh and broke its shell pipeline; the complete unfiltered 25-case rerun supplied the actual counterexample proof.",
+      "deliveryBranchRestored": true,
+      "negativeCommitOnDeliveryBranch": false
+    },
+    "mainQualityRepairs": {
+      "states": [
+        "hours",
+        "capacity"
+      ],
+      "passed": 8,
+      "source": "AEON-1687 merged from main; no local edits to these product paths",
+      "referenceGuardsPassed": 2,
+      "evidenceDirectory": "web/test-results/AEON-1674-fix4-quality"
+    },
+    "unitFallback": {
+      "command": "node node_modules/vitest/vitest.mjs run tests/ui-audit-rules.unit.test.ts --maxWorkers=1",
+      "passed": 1,
+      "milliseconds": 132,
+      "scope": "One small file after the remote browser guard refused capacity; no browser or broad local suite."
+    },
+    "hostedComparisonEvidence": {
+      "runId": "39892274437",
+      "jobId": "120216669344",
+      "artifactId": "12476520325",
+      "directory": "web/test-results/AEON-1674-fix4-ci-3",
+      "approvedAccessPinsMatchExpected": 4,
+      "accessLayoutAxeConsoleHTTPFindings": 0,
+      "accessDifferentPixels": {
+        "390-light": 15472,
+        "390-dark": 14707,
+        "1440-light": 40012,
+        "1440-dark": 36037
+      },
+      "diagnosis": "System-font rendering environment mismatch is indicated by text geometry and weight differences; exact approved renderer metadata was not pinned.",
+      "fontSource": "web/src/styles/tokens.css --font",
+      "newReferenceApprovalClaimed": false
+    },
+    "static": {
+      "entrypoint": "ci-static-remote.sh",
+      "exitCode": 3,
+      "reason": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job",
+      "green": false
+    },
+    "needsDesign": "needs Opus design review of the minimal existing attachment action layout; no new design or approval was invented and no review gate was run.",
+    "finalEvidence": "web/test-results/AEON-1674-fix4-final/verification.json records actual final HEAD and post-commit validation",
+    "invariants": {
+      "originalCaseIdentitiesRetained": true,
+      "newCaseRegistrations": 0,
+      "tierChanges": false,
+      "approvedPinsUnchanged": true,
+      "baselineToleranceChanged": false,
+      "newAuditExceptions": false,
+      "referenceRecaptures": false,
+      "cuts": false,
+      "originPush": false,
+      "deploy": false,
+      "reviewGates": false,
+      "otherModelCalls": false
+    },
+    "awaitingQuality": {
+      "states": [
+        "tickets",
+        "agents",
+        "decision-desk",
+        "account-use-matrix",
+        "models",
+        "delivery-numbers"
+      ],
+      "passed": 30,
+      "seconds": 44.4,
+      "evidenceDirectory": "web/test-results/AEON-1674-fix4-awaiting",
+      "referenceCaptures": 0,
+      "awaitingAnnotations": 30
+    }
   }
 }
