@@ -68,8 +68,23 @@ func (m *module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	defer rows.Close()
 	out := runPage{Items: []Run{}}
+	// Count scanned rows, including rejected bindings, so pagination always
+	// advances past corrupt rows without making an unbounded replacement read.
+	var last Run
+	read := 0
 	for rows.Next() {
 		v, e := scan(rows)
+		read++
+		if read > limit {
+			b, _ := json.Marshal(runCursor{fingerprint, last.CreatedAt, last.ID})
+			next := base64.RawURLEncoding.EncodeToString(b)
+			out.NextCursor = &next
+			break
+		}
+		last = v
+		if skipInvalidRunBinding(r.Context(), p, v, e) {
+			continue
+		}
 		if e != nil {
 			return nil, e
 		}
@@ -77,13 +92,6 @@ func (m *module) list(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
-	}
-	if len(out.Items) > limit {
-		out.Items = out.Items[:limit]
-		last := out.Items[limit-1]
-		b, _ := json.Marshal(runCursor{fingerprint, last.CreatedAt, last.ID})
-		next := base64.RawURLEncoding.EncodeToString(b)
-		out.NextCursor = &next
 	}
 	rows.Close()
 	waitIDs := make([]string, 0, len(out.Items))

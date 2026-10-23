@@ -56,7 +56,7 @@ export interface CatalogAccount {
   remaining_fraction: number | null; windows: CatalogWindow[]; models: CatalogModel[]
   default_model_profile_id: string | null
 }
-export interface CatalogHarness { harness: string; accounts: CatalogAccount[]; default_account_id: string | null }
+export interface CatalogHarness { harness: string; accounts: CatalogAccount[]; default_account_id: string | null; read_only_run?: { supported: boolean; policy: string; reason: string } }
 export interface CatalogHost { daemon_id: string; label: string; harnesses: CatalogHarness[] }
 export interface AgentAccountCatalog { as_of: string; role: string; hosts: CatalogHost[] }
 export type CatalogGap = 'failed' | 'forbidden' | 'family' | null
@@ -509,7 +509,7 @@ function statusFor(account: CatalogAccount | undefined, accounts: CatalogAccount
   if (!account) return { label: 'Choose an account', detail: 'The run is pinned to the account you choose. It does not fall back to another one.', tone: 'warn' }
   if (account.wait) return {
     label: accountWaitText(account, harness, `${harnessLabel(harness)} agents`),
-    detail: account.wait.code === 'sign_in' ? 'Runs start once this login is active on the computer.' : account.wait.run_now_allowed ? 'Queue it for then, or run this one now.' : 'The run can queue and starts when this account is ready.',
+    detail: account.wait.code === 'sign_in' ? 'Runs start once this login is active on the computer.' : account.wait.run_now_allowed ? 'Queue it for then, or run this one now.' : 'The run queues and starts when this account is ready.',
     tone: 'warn',
   }
   if (!account.available) {

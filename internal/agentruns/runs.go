@@ -8,7 +8,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/escalation"
 	"github.com/inspr-at/paimos/internal/events"
@@ -48,6 +51,8 @@ type Run struct {
 	QueueTargetAgentID        *string                     `json:"queue_target_agent_id,omitempty"`
 	QueueRoutedAt             *time.Time                  `json:"queue_routed_at,omitempty"`
 	ReadOnlyReview            bool                        `json:"read_only_review,omitempty"`
+	RunOnce                   bool                        `json:"run_once,omitempty"`
+	Instruction               string                      `json:"instruction,omitempty"`
 	VerificationError         string                      `json:"verification_error,omitempty"`
 	VerificationReason        string                      `json:"verification_reason,omitempty"`
 	CapacityHandoff           bool                        `json:"capacity_handoff,omitempty"`
@@ -204,11 +209,31 @@ const columns = `id::text,work_order_id::text,agent_principal_id::text,model_pro
  EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at,trace,waiting_ms,
  coalesce((SELECT q.handover FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),'null'::jsonb),
  coalesce((SELECT q.service_tier FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),''),
- (SELECT q.display_label FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),routine_launch_id::text,acting_person_id::text`
+ (SELECT q.display_label FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),routine_launch_id::text,acting_person_id::text,
+ coalesce(trace ? 'run_once',false),CASE WHEN trace ? 'run_once' THEN coalesce(trace->'run_once'->'repository_mutation_allowed'='true'::jsonb,false) ELSE true END`
+
+var errInvalidRunOnceBinding = workorders.Fail(409, "invalid one-off run binding")
+
+func skipInvalidRunBinding(ctx context.Context, p tenant.Principal, v Run, err error) bool {
+	if !errors.Is(err, errInvalidRunOnceBinding) {
+		return false
+	}
+	slog.WarnContext(ctx, "skipping run with invalid one-off binding", "tenant_id", p.TenantID, "run_id", v.ID)
+	return true
+}
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace, &v.WaitingMS, &v.recoveryHandover, &v.RecoveryTier, &v.RecoveryLabel, &v.RoutineLaunchID, &v.ActingPersonID)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace, &v.WaitingMS, &v.recoveryHandover, &v.RecoveryTier, &v.RecoveryLabel, &v.RoutineLaunchID, &v.ActingPersonID, &v.RunOnce, &v.RepositoryMutationAllowed)
+	if err == nil && v.RunOnce && len(v.Trace) > 0 {
+		var binding struct {
+			RunOnce *runOnceBinding `json:"run_once"`
+		}
+		if json.Unmarshal(v.Trace, &binding) != nil || binding.RunOnce == nil || binding.RunOnce.RepositoryMutationAllowed == nil || binding.RunOnce.RequestDigest == "" {
+			return v, errInvalidRunOnceBinding
+		}
+		v.Instruction = binding.RunOnce.Instruction
+	}
 
 	var compact bytes.Buffer
 	if err == nil && json.Compact(&compact, v.recoveryHandover) == nil {
@@ -221,7 +246,7 @@ func scan(row pgx.Row) (Run, error) {
 	if v.VerificationReason != "" {
 		v.VerificationError = "verification_unavailable"
 	}
-	v.RepositoryMutationAllowed = !v.ReadOnlyReview
+	v.RepositoryMutationAllowed = v.RepositoryMutationAllowed && !v.ReadOnlyReview
 	if v.Purpose == "pairing_verification" {
 		v.VerificationTask = agentpairing.VerificationTask
 		v.MaxDurationSeconds = agentpairing.VerificationSeconds
@@ -347,12 +372,13 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
    OR (agent_runs.purpose='managed' AND e.ongoing_approved_at IS NOT NULL))))
 	 AND EXISTS(SELECT 1 FROM work_orders w JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id
 	 WHERE w.node_id=agent_runs.work_order_id AND (w.kind<>'review' OR $4::bool) AND w.status IN ('ready','running') AND n.deleted_at IS NULL)
+	 AND (NOT coalesce(trace ? 'run_once',false) OR $6::bool)
 	 AND (queue_node_id IS NULL OR ((queue_target_agent_id IS NOT NULL OR queue_routed_at IS NOT NULL)
 	 AND EXISTS(SELECT 1 FROM nodes ticket WHERE ticket.id=agent_runs.queue_node_id AND ticket.deleted_at IS NULL AND ticket.state='open')))
 	 ORDER BY (queue_target_agent_id IS NOT NULL) DESC,
 	 CASE WHEN queue_target_agent_id IS NOT NULL THEN queue_at END DESC,queue_rank NULLS LAST,
 	 (SELECT CASE ticket.fields->>'priority' WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'low' THEN 3 ELSE 2 END FROM nodes ticket WHERE ticket.id=agent_runs.queue_node_id),
-	 queue_at,created_at,id LIMIT $2`, p.ID, limit, agentpairing.VerificationTargets(), r.Header.Get(reviewgate.PolicyHeader) == reviewgate.Policy, ledgerAllowed)
+	 queue_at,created_at,id LIMIT $2`, p.ID, limit, agentpairing.VerificationTargets(), r.Header.Get(reviewgate.PolicyHeader) == reviewgate.Policy, ledgerAllowed, r.Header.Get(agentverification.RunOncePolicyHeader) == agentverification.RunOncePolicy)
 	if err != nil {
 		return nil, err
 	}
@@ -360,6 +386,9 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	out := []Run{}
 	for rows.Next() {
 		v, err := scan(rows)
+		if skipInvalidRunBinding(r.Context(), p, v, err) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -384,14 +413,15 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 }
 
 func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func() error) (any, error) {
-	var in struct {
-		Agent            string  `json:"agent_principal_id"`
-		Profile          string  `json:"model_profile_id"`
-		Account          *string `json:"requested_account_id"`
-		Retry            *string `json:"retry_of_run_id"`
-		CapacityOverride string  `json:"capacity_override"`
-	}
+	var in CreateInput
 	if err := workorders.Decode(r, &in); err != nil {
+		return nil, err
+	}
+	return createRunTx(r.Context(), tx, p, r.PathValue("workOrderId"), in, workerlease.Read(r), deferred)
+}
+
+func createRunTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, orderID string, in CreateInput, lease string, deferred *[]func() error) (any, error) {
+	if err := validateRunOnce(p, in); err != nil {
 		return nil, err
 	}
 	if !workorders.UUID(in.Agent) || !workorders.UUID(in.Profile) || (in.Account != nil && !workorders.UUID(*in.Account)) || (in.Retry != nil && !workorders.UUID(*in.Retry)) {
@@ -403,8 +433,7 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 	if in.CapacityOverride != "" && p.Kind != tenant.Person {
 		return nil, workorders.Fail(403, "only a person can run now once")
 	}
-	ctx := r.Context()
-	o, err := workorders.Load(ctx, tx, r.PathValue("workOrderId"), true)
+	o, err := workorders.Load(ctx, tx, orderID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -422,6 +451,24 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 			return nil, err
 		}
 	}
+	if in.RequestID != nil {
+		var project string
+		if err := tx.QueryRow(ctx, `SELECT coalesce(project_id::text,'') FROM nodes WHERE id=$1`, o.NodeID).Scan(&project); err != nil {
+			return nil, err
+		}
+		for _, permission := range []string{"nodes.read", "work_orders.write", "run.create"} {
+			if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: project}); err != nil {
+				return nil, err
+			}
+		}
+		if in.RequestDigest == "" {
+			in.RequestDigest = RunRequestDigest(orderID, in)
+		}
+		previous, err := FindRequestedRunTx(ctx, tx, p, in)
+		if err != nil || previous != nil {
+			return previous, err
+		}
+	}
 	if o.Assignee != nil && *o.Assignee != in.Agent {
 		return nil, workorders.Fail(409, "run agent must match order assignee")
 	}
@@ -431,6 +478,12 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 	var model, harness string
 	if err = tx.QueryRow(ctx, `SELECT model,harness FROM model_profiles WHERE id=$1 AND enabled`, in.Profile).Scan(&model, &harness); err != nil {
 		return nil, err
+	}
+	if in.RequestID != nil && !in.mutationAllowed() {
+		capability := agentverification.ReadOnlyRunFor(harness)
+		if !capability.Supported {
+			return nil, workorders.Fail(409, "Read-only is not available: "+capability.Reason)
+		}
 	}
 	person := modelprefs.PrefsPerson(ctx, tx, p)
 	requirement, trace, err := modelprefs.OrderRequirementTrace(ctx, tx, o.NodeID, person)
@@ -535,16 +588,20 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 	}
 	if in.Retry != nil {
 		var orderID, agentID string
-		err = tx.QueryRow(ctx, `SELECT work_order_id::text, agent_principal_id::text FROM agent_runs WHERE id=$1`, *in.Retry).Scan(&orderID, &agentID)
+		var oneOff bool
+		err = tx.QueryRow(ctx, `SELECT work_order_id::text, agent_principal_id::text,coalesce(trace ? 'run_once',false) FROM agent_runs WHERE id=$1`, *in.Retry).Scan(&orderID, &agentID, &oneOff)
 		if err != nil || orderID != o.NodeID || agentID != in.Agent {
 			return nil, workorders.Fail(400, "retry_of_run_id must be an earlier run of this work order and agent")
+		}
+		if oneOff {
+			return nil, workorders.Fail(409, "restart this one-off through Run once to retain its instruction and file permissions")
 		}
 	}
 	personRule, source := "personal", ""
 	if in.Retry != nil {
 		personRule, source = "recovery", *in.Retry
 	}
-	if lease := workerlease.Read(r); in.Retry == nil && p.Kind == tenant.Agent && lease != "" {
+	if in.Retry == nil && p.Kind == tenant.Agent && lease != "" {
 		// The existing worker proof identifies its parent run. No caller-chosen
 		// person, run-identity header or additional request field is accepted.
 		sum := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
@@ -611,8 +668,28 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 		modelprefs.RequirementTrace
 		Placement  *modelregistry.WorkPlacement `json:"work_placement,omitempty"`
 		Escalation map[string]any               `json:"escalation,omitempty"`
-	}{trace, placement, escalationTrace}
-	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override,residency,prefs_person_id,trace) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride, modelprefs.Stamp(requirement), person, dispatchTrace))
+		RunOnce    *runOnceBinding              `json:"run_once,omitempty"`
+	}{RequirementTrace: trace, Placement: placement, Escalation: escalationTrace}
+	if in.RequestID != nil {
+		instruction := ""
+		if in.Instruction != nil {
+			instruction = *in.Instruction
+		}
+		if in.EffectiveInstruction != "" {
+			instruction = in.EffectiveInstruction
+		}
+		if strings.TrimSpace(instruction) == "" {
+			if err := tx.QueryRow(ctx, `SELECT CASE WHEN btrim(body)<>'' THEN body ELSE title END FROM nodes WHERE id=$1`, o.NodeID).Scan(&instruction); err != nil {
+				return nil, err
+			}
+		}
+		if len(instruction) > 240<<10 {
+			return nil, workorders.Fail(400, "one-off task context exceeds the execution bound")
+		}
+		allowed := in.mutationAllowed()
+		dispatchTrace.RunOnce = &runOnceBinding{Instruction: instruction, RepositoryMutationAllowed: &allowed, RequestDigest: in.RequestDigest}
+	}
+	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override,residency,prefs_person_id,trace,id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,coalesce($12::uuid,gen_random_uuid())) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride, modelprefs.Stamp(requirement), person, dispatchTrace, requestedRunID(p.TenantID, in.RequestID)))
 	if err != nil {
 		return nil, err
 	}
@@ -757,6 +834,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if v.ReadOnlyReview && r.Header.Get(reviewgate.PolicyHeader) != reviewgate.Policy {
 		return nil, workorders.Fail(409, "review-capable daemon policy required")
 	}
+	if v.RunOnce && r.Header.Get(agentverification.RunOncePolicyHeader) != agentverification.RunOncePolicy {
+		return nil, workorders.Fail(409, "one-off-capable daemon policy required")
+	}
 	// Enrollment precedes the person and revocation checks. A classic or
 	// never-enrolled daemon is ledger_enrollment_required, not permission_revoked.
 	if err = agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
@@ -764,6 +844,24 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	if err = workqueue.RequireRunPersonTx(ctx, tx, p, v.ID); err != nil {
 		return nil, err
+	}
+	if v.RunOnce {
+		if v.ActingPersonID == nil {
+			return nil, workorders.Fail(403, "one-off acting person required")
+		}
+		var project string
+		if err := tx.QueryRow(ctx, `SELECT coalesce(project_id::text,'') FROM nodes WHERE id=$1`, v.OrderID).Scan(&project); err != nil {
+			return nil, err
+		}
+		actor := tenant.Principal{ID: *v.ActingPersonID, TenantID: p.TenantID, Kind: tenant.Person}
+		for _, permission := range []string{"work_orders.write", "run.create"} {
+			if err := authz.RequireTx(ctx, tx, actor, permission, authz.Scope{ProjectID: project}); err != nil {
+				if errors.Is(err, authz.ErrForbidden) {
+					return nil, &workqueue.PersonAdmissionError{Code: "permission_revoked"}
+				}
+				return nil, err
+			}
+		}
 	}
 	admission := workorders.BuildAdmission{Candidate: o.BuildDelivery}
 	if err = queueClaimable(ctx, tx, p, v, &admission); err != nil {
