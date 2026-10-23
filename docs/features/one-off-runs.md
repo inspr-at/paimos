@@ -60,9 +60,14 @@ The run pins the leaf's identity, state and revision at launch. **Any ticket edi
 after launch preserves its status**, including a person changing the state away
 and back. A changed binding, a new work child, an already terminal ticket, missing
 permission, failed Done check, reported error, or an unconfirmed/unstarted process
-also preserves its status; the result comment records why. Historical runs without a launch binding
-can record a result but cannot auto-close. Deleted tickets are never restored.
-The ticket remains the durable record after a successful run.
+also preserves its status; the result comment records why. Historical runs without
+a launch binding can record a result but cannot auto-close. Deleted tickets are
+never restored. The ticket remains the durable record after a successful run.
+
+The existing `TestRunOnceBindsContextOptionsAndCurrentAuthority/settlement` server
+guard covers project-created and selected leaves, lost launch responses, repeated
+settlement and cancellation, person edits and status changes, permission
+revocation, Done checks, and explicit process failure evidence.
 
 Host, harness, account, model and thinking use the existing computed defaults,
 shown in one summary. **Change** opens these settings below it; a quota, sign-in,
