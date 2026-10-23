@@ -25,6 +25,18 @@ test('AEON-1683: live and static status icons respect native focus and reduced m
   await expect(progress.locator('span.st-ip')).toBeVisible()
   await expect(qa.locator('svg.st-qa .ring')).toBeVisible()
   await expect.poll(async () => (await slides(page)).filter(slide => slide.state === 'running').length).toBeGreaterThan(0)
+    const geometry = await grid(page).evaluate(table => [...table.querySelectorAll('tr.ticket-row:not(.ghost) .status-btn, tr.ticket-row:not(.ghost) .phone-state > [role="img"]')].map(button => {
+      const icon = button.querySelector('.status-icon')!
+      const iconBox = icon.getBoundingClientRect(), label = button.querySelector(':scope > span:not(.status-icon)')!.getBoundingClientRect(), box = button.getBoundingClientRect()
+      return { tag: icon.tagName.toLowerCase(), width: iconBox.width, height: iconBox.height, iconLeft: iconBox.left - box.left, labelLeft: label.left - box.left, centre: iconBox.top + iconBox.height / 2 - (label.top + label.height / 2) }
+    }))
+    expect(geometry.map(item => item.tag)).toContain('span'); expect(geometry.map(item => item.tag)).toContain('svg')
+    for (const item of geometry) {
+      expect(item.width).toBeCloseTo(14, 0); expect(item.height).toBeCloseTo(14, 0)
+      expect(Math.abs(item.iconLeft - geometry[0].iconLeft)).toBeLessThanOrEqual(.5)
+      expect(Math.abs(item.labelLeft - geometry[0].labelLeft)).toBeLessThanOrEqual(.5)
+      expect(Math.abs(item.centre)).toBeLessThanOrEqual(1)
+    }
   const guard = await controlStability(page, { progress, qa, new: statusButton(page, 'PHAROS-14') })
   let count = await oneOffs(page)
   await guard.check(() => qa.hover({ position: { x: 4, y: 4 } }))
