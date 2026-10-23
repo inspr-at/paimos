@@ -14,6 +14,7 @@ import (
 )
 
 func TestTellReceiptOutput(t *testing.T) {
+	t.Run("owned peers and selected instance", testPeerCLI)
 	const id = "00000000-0000-4000-8000-000000000004"
 	const projectID = "00000000-0000-4000-8000-000000000002"
 	for _, tc := range []struct {
