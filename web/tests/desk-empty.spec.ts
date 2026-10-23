@@ -82,7 +82,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     }
     const filled = await spacing()
     await page.screenshot({ path: testInfo.outputPath(`AEON-1616-items-${width}-${theme}.png`) })
-    const anchors = { heading: page.getByRole('heading', { level: 1, name: 'Decision Desk' }), tabs: page.getByRole('radiogroup', { name: 'Show' }), open: page.getByTestId('desk-tab-open'), decided: page.getByTestId('desk-tab-decided'), round: page.getByTestId('desk-one-by-one'), row, slot: page.getByTestId('desk-refresh-slot') }
+    const anchors = { heading: page.getByRole('heading', { level: 1, name: 'Decision Desk' }), tabs: page.getByRole('radiogroup', { name: 'Show' }), open: page.getByTestId('desk-tab-open'), decided: page.getByTestId('desk-tab-decided'), row, slot: page.getByTestId('desk-refresh-slot') }
     const before = await Promise.all(Object.values(anchors).map(control => control.boundingBox()))
     await expectStableControls({ controls: anchors, scrollAreas: { page: page.locator('html'), list }, interactions: [
       { name: 'one 429 keeps the row without a hint', run: async () => { await refresh(429); await expect(hint).toHaveCount(0) } },
@@ -135,7 +135,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
       // The scoped fixture retracts its publication before the rest of this existing case continues.
       const notice = page.locator('.compact-notice'), toastHost = page.locator('.toast-host')
       const retry = hint.getByRole('button', { name: 'Try again', exact: true })
-      const controls = { heading: anchors.heading, tabs: anchors.tabs, open: anchors.open, decided: anchors.decided, round: anchors.round, row, list }
+      const controls = { heading: anchors.heading, tabs: anchors.tabs, open: anchors.open, decided: anchors.decided, row, list }
       const controlsAt = await Promise.all(Object.values(controls).map(control => control.boundingBox()))
       const stacks: { state: string; hint: Awaited<ReturnType<typeof box>>; obstacle: Awaited<ReturnType<typeof box>>; gap: number; retryHit: boolean }[] = []
       const above = async (state: string, obstacle: Locator) => {
