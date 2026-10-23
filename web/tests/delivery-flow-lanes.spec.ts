@@ -303,10 +303,26 @@ test('AEON-1683: phone timeline edge handles resize and the brush and playhead r
   expect(minuteOf(later)).toBeGreaterThan(minuteOf(end))
   // Moving the brush pans the window while keeping its span and the chosen time.
   const span = minuteOf(later?.split('–')[1] ?? null) - minuteOf(later)
-  await drag(await center(page, '[data-testid="flow-overview"] .ln-brush'), 24)
+  // Resize leaves fractional-minute endpoints. Pan by whole minutes so both
+  // minute-only labels advance equally, regardless of the platform's plot width.
+  const panMinutes = 20
+  const brush = await overview(page).evaluate((host, minutes) => {
+    const svg = host.querySelector('svg')!
+    const lane = host.querySelector<SVGLineElement>('.ln-ovlane')!
+    const rect = host.querySelector<SVGRectElement>('.ln-brush')!
+    const box = rect.getBoundingClientRect()
+    const range = Number(host.getAttribute('aria-valuemax')) - Number(host.getAttribute('aria-valuemin'))
+    const scale = svg.getBoundingClientRect().width / svg.viewBox.baseVal.width
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2, width: rect.width.baseVal.value,
+      dx: minutes * (lane.x2.baseVal.value - lane.x1.baseVal.value) / range * scale }
+  }, panMinutes)
+  await drag(brush, brush.dx)
   const panned = await windowText(page)
   expect(panned).not.toBe(later)
   expect(minuteOf(panned?.split('–')[1] ?? null) - minuteOf(panned)).toBe(span)
+  expect(minuteOf(panned) - minuteOf(later)).toBe(panMinutes)
+  expect(minuteOf(panned?.split('–')[1] ?? null) - minuteOf(later?.split('–')[1] ?? null)).toBe(panMinutes)
+  expect(await overview(page).locator('.ln-brush').evaluate(rect => (rect as SVGRectElement).width.baseVal.value)).toBeCloseTo(brush.width, 9)
   await expect(clock(page)).toHaveText('At 20:25 (now)')
   await overview(page).focus()
   await guard.check(() => page.keyboard.press('ArrowRight'))
