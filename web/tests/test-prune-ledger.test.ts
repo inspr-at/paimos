@@ -230,9 +230,15 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
     checkpoint.reference = { attachmentMember: null, sha256: null }
   assert.throws(() => validateVisual(reportOnly, { cuts: true, stateIds: ['goals'] }), /Protected visual cuts stay closed/)
   assert.throws(() => validateVisual(reportOnly, { cuts: true, checkpointIds: ['V-projects-390-light'] }), /Protected visual cuts stay closed/)
-  assert.throws(() => validateVisual(original.visual, { cuts: true, stateIds: ['goals'] }),
+  assert.throws(() => validateVisual(original.visual, { cuts: true, stateIds: ['goals'] }), /Protected visual cuts stay closed/)
+  assert.throws(() => validateVisual(original.visual, { cuts: true, checkpointIds: ['V-projects-390-light'] }), /Protected visual cuts stay closed/)
+  // Preserve the per-checkpoint approval and deferral proof independently of
+  // the live report-only switch while cross-machine renderer proof is pending.
+  const approvedBlocking = structuredClone(original.visual)
+  approvedBlocking.comparison.mode = 'blocking'
+  assert.throws(() => validateVisual(approvedBlocking, { cuts: true, stateIds: ['goals'] }),
     { message: 'Deferred visual reference: V-goals-390-light (AEON-1621, AEON-1625)' })
-  assert.equal(validateVisual(original.visual, { cuts: true, checkpointIds: ['V-projects-390-light'] }), 80)
+  assert.equal(validateVisual(approvedBlocking, { cuts: true, checkpointIds: ['V-projects-390-light'] }), 80)
   const missingCheckpoint = structuredClone(original.visual)
   missingCheckpoint.states[0].checkpoints.pop()
   assert.throws(() => validateVisual(missingCheckpoint), /Missing\/duplicate visual checkpoint/)
