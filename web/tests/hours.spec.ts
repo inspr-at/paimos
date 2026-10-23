@@ -106,7 +106,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
   // AEON-1687: the complete seven-day grid must fit its own container on a
   // phone, rather than concealing a wider table in a horizontal scroller.
   const measurements = []
-  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  for (const width of [390, 560, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 900 })
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     await page.evaluate(() => document.fonts.ready)
@@ -142,6 +142,21 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     expect(dayCells.some(cell => cell.text === '10:30'), 'the grid includes a five-character day value').toBe(true)
     expect(dayCells.filter(cell => cell.scrollWidth > cell.clientWidth), `${width} ${theme}: every day value fits its cell`).toEqual([])
     expect(dayCells.filter(cell => cell.textWidth > cell.contentWidth + 0.5), `${width} ${theme}: day text stays inside the content box`).toEqual([])
+    // At 521–600px the Total cell can fit while its text spills into Sunday.
+    // Check the text edges against the padded content box in every grid row.
+    const totalCells = await grid(page).locator('.c-total').evaluateAll(cells => cells.map(cell => {
+      const style = getComputedStyle(cell), box = cell.getBoundingClientRect(), range = document.createRange()
+      range.selectNodeContents(cell)
+      const text = range.getBoundingClientRect()
+      return { value: cell.textContent?.trim(), text: { left: text.left, right: text.right, width: text.width, height: text.height },
+        content: { left: box.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+          right: box.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight) } }
+    }))
+    expect(totalCells).toHaveLength(5) // Header, all three tickets and the grand total.
+    expect(totalCells.some(cell => cell.value === '14:00'), 'Total includes a five-character clock').toBe(true)
+    expect(totalCells.every(cell => cell.text.width > 0 && cell.text.height > 0), `${width} ${theme}: Total text boxes have positive size`).toBe(true)
+    expect(totalCells.filter(cell => cell.text.left < cell.content.left - 0.5 || cell.text.right > cell.content.right + 0.5),
+      `${width} ${theme}: every Total text box stays inside its content box`).toEqual([])
     // Measure actual text, including both lines of the header. Cell boxes can
     // fit perfectly while the adjacent time values still read as one number.
     const textRows = await grid(page).locator('tr').evaluateAll(rows => rows.map(row => {
@@ -192,7 +207,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     })
     expect(unchangedWideLayout.fixedTotals, `${width} ${theme}: Total keeps its position, size and font`).toEqual(unchangedWideLayout.previousTotals)
     if (width >= 1024) expect(unchangedWideLayout.fixed, `${width} ${theme}: 0 px change from the pre-fix layout`).toEqual(unchangedWideLayout.previous)
-    measurements.push({ width, theme, textRows, unchangedWideLayout })
+    measurements.push({ width, theme, textRows, totalCells, unchangedWideLayout })
     const crowdedTickets = await grid(page).locator('tbody th').evaluateAll(cells => cells.flatMap(cell => {
       const chip = cell.querySelector('.ticket-chip')!, edge = chip.getBoundingClientRect().right
       const range = document.createRange(); range.selectNodeContents(cell.nextElementSibling!)

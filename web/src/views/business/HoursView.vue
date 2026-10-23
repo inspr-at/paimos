@@ -746,7 +746,7 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .t-cell .t-title { display: none; }
   .c-day { width: auto; padding: 0 1px 0 0 !important; font-size: 10.5px; }
   .d-date { font-size: 10.5px; }
-  .c-total { width: 44px; padding-left: 2px; padding-right: 6px !important; font-size: 11.5px; }
+  .week-grid .c-total { width: 44px; padding-left: 2px; padding-right: 6px !important; font-size: 11.5px; }
   .day-group { padding: 0 12px 8px; }
   .entry { grid-template-columns: max-content minmax(0, 1fr) 48px 28px; grid-template-areas: "time text dur act" "chip text dur act"; padding: 6px 0; }
   .entry > .ticket-chip { justify-self: start; }
@@ -764,7 +764,5 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .week-grid .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
   .week-grid .c-day { font-size: 11px; }
   .week-grid thead .c-day { padding-right: 5px !important; }
-  /* Preserve the Total column's intended inset over the base cell padding. */
-  .week-grid .c-total { padding-left: 2px; }
 }
 </style>
