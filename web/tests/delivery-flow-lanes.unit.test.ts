@@ -4,13 +4,14 @@
 // keys or a follow tick move the time when they should move only the window.
 import { expect, it } from 'vitest'
 import {
-  CHAR_W, createTimeline, fitAll, fitLabel, following, followTick, keyInput, laneFrame, laneModel, laneRows, panBy, placeIncidentCaption, placeLane, placeOverviewTargets, resetTimeline, ROW_CAP, rowPieces, setTime, timeLabel, wheelInput, zoomPreset, zoomTo,
+  CHAR_W, createTimeline, criticalPath, fitAll, fitLabel, following, followTick, keyInput, laneFrame, laneModel, laneRows, panBy, placeIncidentCaption, placeLane, placeOverviewTargets, resetTimeline, ROW_CAP, rowPieces, setTime, stepAt, timeLabel, wheelInput, zoomPreset, zoomTo,
   type FlowData, type FlowRun, type FlowStep, type Lane, type LaneSet, type OverviewHit,
 } from '../src/lib/deliveryFlow'
 import { exampleLive, EXAMPLE_NOW } from './delivery-flow-example-fixtures'
 import { hintParts, flowText } from '../src/lib/deliveryFlowText'
 import { liveData, recordedRuns } from '../src/lib/deliveryFlowData'
 import { liveHarnessFlow } from './delivery-flow-live-fixtures'
+import { currentStep, momentOf } from '../src/lib/deliveryFlowModes'
 
 const words = (en: string) => ({ en, de: en })
 const step = (start: number, end: number, lane: Lane = 'ops', kind: FlowStep['kind'] = 'work'): FlowStep => ({ start, end, lane, kind, expert: words(`s${start}`), simple: words(`s${start}`) })
@@ -43,7 +44,7 @@ it('rows are reserved once per data set: each step takes the first free row and 
 })
 
 it('ten concurrent builders take ten rows; above twelve a lane folds into "+N more" until a person expands it', () => {
-  // AEON-1697: the actual wave-A start/stop intervals, including later attempts,
+  // AEON-1697: the wave-A intervals, including open current attempts,
   // must survive the API projection → Live → packing path, not just fake steps.
   const answer = liveHarnessFlow()
   const live = liveData(recordedRuns(answer, { extendOpen: true }))!
@@ -55,6 +56,24 @@ it('ten concurrent builders take ten rows; above twelve a lane folds into "+N mo
   expect(overlaps(recorded!)).toEqual([])
   expect(laneRows(recorded!, 'build', false)).toEqual({ bars: 10, fold: null, total: 10 })
   expect(laneRows(recorded!, 'build', true)).toEqual({ bars: 10, fold: null, total: 10 })
+  // An unfinished current step cannot end before the playhead while the headline
+  // still calls it running. The moment and avatar must point at that open step.
+  expect(answer.steps.filter(step => step.ended_at == null)).toHaveLength(10)
+  for (const item of answer.items) {
+    expect(answer.steps.find(step => step.id === item.current_step_id)).toMatchObject({ item_id: item.id, ended_at: null })
+  }
+  const now = live.now!, main = recorded!.main
+  const current = currentStep(main, now)!
+  expect(main.tag).toBe('1674')
+  expect(current.facts).toMatchObject({ id: main.facts!.currentStepId, open: true, round: 2 })
+  expect(current.end).toBeGreaterThan(now)
+  const avatarStep = stepAt(criticalPath(main), now)!
+  expect(avatarStep).toBe(current)
+  expect(recorded!.items.find(item => item.step === avatarStep)).toMatchObject({ run: main, lane: 'build' })
+  const moment = momentOf({ data: live, sets: [recorded!], T: now, selected: null, level: 'expert', lang: 'en', text: flowText('en') })
+  expect(moment.lines.find(line => line.lane === 'build')).toMatchObject({ who: 'Builder', kind: 'work', label: '1674 · Build r2 · gpt-6.1-sol', more: 9 })
+  expect(moment.sentence).toContain('Builder on “Being built”')
+  expect(moment.idle).not.toContain('Builder')
   const builders = (n: number) => Array.from({ length: n }, (_, k) => step(10 + k, 60 + k, 'build'))
   const lanes = (steps: FlowStep[]): FlowData => { const d = data(steps); d.sets[0]!.lanes = ['build', 'ci']; return d }
   const [ten] = laneModel(lanes(builders(10)))

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1697: Builder runs reconstructed from harness records on 23 Oct 2026,
-// 08:00–11:00 UTC. Starts: start-queue log; ends: harness list stopped_at.
+// 08:00–11:00 UTC. Starts: start-queue log; superseded attempts: harness stopped_at.
 // These are worker intervals, not a captured /delivery/flow API answer. Only
 // Builder work is known; outcomes, estimates and ticket completion are unknown.
-// Tickets remain unfinished in the harness. No review/CI work is inferred.
+// The last attempt on each unfinished ticket stays open at capture: a harness
+// process stopping is not evidence that its delivery step completed (fix2).
+// No review/CI work is inferred.
 // Public fixture: synthetic record IDs, no principal/session/host/account data,
 // and neutral titles with exactly the original title lengths. Times are intact.
 import type { ApiFlow } from '../src/lib/deliveryFlowData'
@@ -12,7 +14,7 @@ export const LIVE_HARNESS_NOW = '2026-10-23T10:06:00Z'
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const utc = (clock: string) => `2026-10-23T${clock}Z`
 
-// [ticket number, attempt within this window, start UTC, stop UTC, title length].
+// [ticket number, attempt within this window, start UTC, end UTC or open, title length].
 // Every row has the same two source classes; the handover note identifies each
 // start-log line and the matching harness stopped_at without session IDs.
 const runs = [
@@ -23,20 +25,20 @@ const runs = [
   [1678, 1, '08:36:33', '09:08:11.730678', 58],
   [1679, 1, '08:37:05', '08:56:45.546593', 71],
   [1680, 1, '08:37:37', '08:58:10.098082', 72],
-  [1681, 1, '08:38:09', '09:23:31.24244', 76],
+  [1681, 1, '08:38:09', null, 76],
   [1682, 1, '08:38:40', '09:11:07.795626', 59],
   [1683, 1, '08:39:11', '09:38:02.910928', 52],
-  [1675, 2, '09:13:44', '09:18:02.036817', 63],
-  [1679, 2, '09:17:16', '09:42:04.028543', 71],
-  [1680, 2, '09:19:18', '09:44:54.366755', 72],
+  [1675, 2, '09:13:44', null, 63],
+  [1679, 2, '09:17:16', null, 71],
+  [1680, 2, '09:19:18', null, 72],
   [1676, 2, '09:23:50', '09:27:16.249815', 52],
-  [1674, 2, '09:24:22', '09:59:26.794285', 91],
+  [1674, 2, '09:24:22', null, 91],
   [1678, 2, '09:28:53', '09:32:19.476435', 58],
-  [1682, 2, '09:33:25', '10:05:53.153846', 59],
-  [1676, 3, '09:46:57', '10:05:55.298912', 52],
-  [1677, 2, '09:47:30', '10:03:09.666841', 59],
-  [1678, 3, '09:55:07', '10:05:52.879373', 58],
-  [1683, 2, '09:58:09', '10:05:56.77714', 52],
+  [1682, 2, '09:33:25', null, 59],
+  [1676, 3, '09:46:57', null, 52],
+  [1677, 2, '09:47:30', null, 59],
+  [1678, 3, '09:55:07', null, 58],
+  [1683, 2, '09:58:09', null, 52],
 ] as const
 
 /** A fresh ApiFlow projection of the 21 recorded worker intervals on ten tickets. */
@@ -44,7 +46,7 @@ export function liveHarnessFlow(): ApiFlow {
   const steps: ApiFlow['steps'] = runs.map(([ticket, round, start, end], k) => ({
     id: id(20_000 + k), item_id: id(ticket), step_key: 'build', round, kind: 'work',
     actor: { type: 'agent', principal_id: null, label: 'Builder', model: 'gpt-6.1-sol' },
-    started_at: utc(start), ended_at: utc(end), outcome: null, wait_reason: null, waits_for: null,
+    started_at: utc(start), ended_at: end == null ? null : utc(end), outcome: null, wait_reason: null, waits_for: null,
     side: false, source: 'paimos', norm: { p50_min: null, p90_min: null, arion_min: null },
   }))
   const first = runs.filter((run, k) => runs.findIndex(other => other[0] === run[0]) === k)
@@ -54,7 +56,8 @@ export function liveHarnessFlow(): ApiFlow {
     items: first.map(([ticket, , start, , length]) => ({
       id: id(ticket), kind: 'change', ref: `AEON-${ticket}`,
       title: 'Recorded change '.repeat(Math.ceil(length / 16)).slice(0, length),
-      prs: [], started_at: utc(start), ended_at: null, pct_done: 0, current_step_id: null,
+      prs: [], started_at: utc(start), ended_at: null, pct_done: 0,
+      current_step_id: steps.find(step => step.item_id === id(ticket) && step.ended_at == null)!.id,
       eta: { p50_at: null, p90_at: null, basis: 'none', reason: null },
       target: null, next_human_gate: null, qualification_evidence: null, rollback_class: null,
     })),
