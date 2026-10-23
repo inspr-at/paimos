@@ -29,7 +29,7 @@ watch(() => props.pulse, () => {
   <p class="desk-sync" :class="{ warn: line.warn }" :data-state="line.state" data-testid="desk-sync">
     <span class="sync-text" tabindex="0" :data-tip="line.tip || undefined">
       <span v-if="line.icon" ref="mark" class="sync-mark"><span v-if="line.icon === 'dot'" class="sync-dot" role="img" :aria-label="words.live" data-testid="desk-sync-dot" /><AppIcon v-else class="sync-icon" :class="{ spin: line.spin }" :name="line.icon" :size="12" /></span>
-      <span class="sync-words" aria-hidden="true"><template v-for="(part, index) in line.parts" :key="index"><span v-if="'n' in part" class="sync-n">{{ part.n }}</span><template v-else>{{ short && part.short !== undefined ? part.short : part.text }}</template></template></span>
+      <span class="sync-words" aria-hidden="true"><template v-for="(part, index) in line.parts" :key="index"><span v-if="'n' in part" class="sync-n"><span>{{ part.n }}</span></span><template v-else>{{ short && part.short !== undefined ? part.short : part.text }}</template></template></span>
       <span class="sr-only">{{ line.sentence }}</span>
     </span>
     <template v-if="line.retry"><span class="sync-sep" aria-hidden="true">·</span><button type="button" class="sync-retry" :disabled="busy" data-testid="desk-sync-retry" @click="emit('retry')">{{ words.tryAgain }}</button></template>
@@ -39,16 +39,18 @@ watch(() => props.pulse, () => {
 <style scoped>
 /* One line, 20 px tall, muted ink-2 words with tabular numbers; warn ink only for a real problem. */
 .desk-sync { display: flex; align-items: center; gap: 0 6px; min-width: 0; min-height: 20px; margin: 0; font-size: 12px; line-height: 20px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.sync-text { display: inline-flex; align-items: center; gap: 6px; min-width: 0; border-radius: 4px; outline: none; }
+/* Inline flow: the icon belongs to the first line, so a line that must wrap (a narrow free end) keeps them together. */
+.sync-text { min-width: 0; border-radius: 4px; outline: none; text-wrap: balance; }
 .sync-text:focus-visible { box-shadow: var(--focus-ring); }
-.sync-words { min-width: 0; text-wrap: balance; }
-/* A number slot reserves "59", so 9 s → 10 s and 3 min → 59 min never shift the words. */
-.sync-n { display: inline-block; min-width: 2ch; text-align: right; }
-.sync-icon { flex: none; color: var(--ink-3); }
+/* A number slot reserves "59" (an invisible layer under it), so 9 s → 10 s and 3 min → 59 min never shift the words. */
+.sync-n { display: inline-grid; justify-items: end; }
+.sync-n::before { content: '59'; visibility: hidden; }
+.sync-n::before, .sync-n > span { grid-area: 1 / 1; }
+.sync-icon { display: block; color: var(--ink-3); }
 .warn .sync-icon { color: inherit; }
 .warn { color: var(--warn-ink); }
 /* One 12 px icon slot for the dot and the icons; the 6 px dot sits centred in it. */
-.sync-mark { flex: none; display: grid; place-items: center; width: 12px; height: 12px; }
+.sync-mark { display: inline-grid; place-items: center; width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; }
 .sync-mark > * { grid-area: 1 / 1; }
 .sync-dot { display: grid; place-items: center; width: 12px; height: 12px; }
 .sync-dot::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); }

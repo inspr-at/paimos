@@ -266,6 +266,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     if (wide) expect(cleared).toEqual(filled)
     else expect(cleared.gap, 'without its line the phone row goes straight to the card').toBeCloseTo(cleared.token, 1)
     expect((await box(page.getByTestId('desk-clear'))).y, 'the empty state begins inside the same card hairline').toBe(await list.evaluate(element => element.getBoundingClientRect().y + element.clientTop))
+    await expect(sync, 'the empty card settles to the normal line').toHaveAttribute('data-state', 'just')
     expect(await contrast(words), 'the card line is at least 4.5:1').toBeGreaterThanOrEqual(4.5)
     await onePicture(page, theme)
     await page.screenshot({ path: testInfo.outputPath(`AEON-1700-empty-${width}-${theme}.png`) })
@@ -678,8 +679,8 @@ async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: numb
   await page.screenshot({ path: testInfo.outputPath(`AEON-1700-normal-${width}-${theme}.png`) })
   // The number slots reserve "59": the same width for 9, 12 and 59, so a tick never shifts the words.
   const slots = await sync.locator('.sync-n').evaluateAll(numbers => numbers.map(number => {
-    const probe = number.cloneNode() as HTMLElement
-    const widths = ['9', '12', '59'].map(text => { probe.textContent = text; number.after(probe); const w = probe.getBoundingClientRect().width; probe.remove(); return w })
+    const probe = number.cloneNode(true) as HTMLElement
+    const widths = ['9', '12', '59'].map(text => { probe.firstElementChild!.textContent = text; number.after(probe); const w = probe.getBoundingClientRect().width; probe.remove(); return w })
     return [number.getBoundingClientRect().width, ...widths]
   }))
   expect(slots).toHaveLength(2)
