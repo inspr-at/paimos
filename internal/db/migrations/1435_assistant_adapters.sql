@@ -52,4 +52,3 @@ CREATE POLICY assistant_adapters_tenant ON assistant_adapters
 CREATE POLICY assistant_adapters_visible ON assistant_adapters AS RESTRICTIVE FOR SELECT
     USING (EXISTS (SELECT 1 FROM inbox_message_targets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.project_id
         WHERE t.tenant_id=assistant_adapters.tenant_id AND t.id=assistant_adapters.target_id));
-
