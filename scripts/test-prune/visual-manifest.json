@@ -6,7 +6,7 @@
     "reviewer": "Tick",
     "status": "approved",
     "approvedAt": "2026-10-23",
-    "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2. Round 10: LEAD-M requires the four Capacity checkpoints to be deferred until AEON-1692 / reference set 3, with a recorded and asserted frozen clock. Round 11: LEAD-M explicitly withdraws exactly nine failed checkpoint pins for AEON-1692 / reference set 3; these report awaiting reference, and the remaining checkpoint pins retain strict comparison authority.",
+    "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2. Round 10: LEAD-M requires the four Capacity checkpoints to be deferred until AEON-1692 / reference set 3, with a recorded and asserted frozen clock. Round 11: LEAD-M explicitly withdraws exactly nine failed checkpoint pins for AEON-1692 / reference set 3; these report awaiting reference, and the remaining checkpoint pins retain strict comparison authority. The attached raw job 120309394777 log additionally lists all four Hours checkpoints in its actual 8-failed summary and FAIL browser records; those pins are withdrawn under the same failed-pins-only instruction.",
     "states": [
       "tickets",
       "agents",
@@ -14,7 +14,6 @@
       "models",
       "access",
       "knowledge",
-      "hours",
       "public-quote",
       "start-agent"
     ],
@@ -56,10 +55,6 @@
       "V-knowledge-1440-dark",
       "V-delivery-numbers-1440-light",
       "V-delivery-numbers-1440-dark",
-      "V-hours-390-light",
-      "V-hours-390-dark",
-      "V-hours-1440-light",
-      "V-hours-1440-dark",
       "V-quote-editor-390-light",
       "V-quote-editor-390-dark",
       "V-quote-editor-1024-light",
@@ -80,7 +75,7 @@
     "sourceCaptureSHA": "6fea542010b4c699dadadd74529fdaf7a1ef4c9a",
     "captureRun": "39912019882",
     "recordedBy": "LEAD-M",
-    "scope": "Exactly 57 checkpoints are comparison authority. Nine stale set-2 checkpoints report awaiting reference (needs re-capture) for AEON-1692 / reference set 3. Existing 14 explicit deferrals remain. No protected cuts are authorized in P02; P03–P11 own their subsequent cut rounds."
+    "scope": "Exactly 53 checkpoints are comparison authority. Thirteen stale set-2 checkpoints report awaiting reference (needs re-capture) for AEON-1692 / reference set 3: nine named in round 11 plus four Hours failures proven by the attached CI log. Existing 14 explicit deferrals remain. No protected cuts are authorized in P02; P03–P11 own their subsequent cut rounds."
   },
   "baselineAuthority": {
     "status": "approved",
@@ -184,6 +179,26 @@
           "id": "V-agent-rules-390-dark",
           "attachmentMember": "V-agent-rules-390-dark.png",
           "sha256": "9c407e75a426b9883fe283c509e55c5ce3c360c17ea72a17cda06feb153ed444"
+        },
+        {
+          "id": "V-hours-390-light",
+          "attachmentMember": "V-hours-390-light.png",
+          "sha256": "b61b1e447bd42b8e91f42e5e3de08be85e2cb0fd4185fd84075562d997d74e8f"
+        },
+        {
+          "id": "V-hours-390-dark",
+          "attachmentMember": "V-hours-390-dark.png",
+          "sha256": "5a273380e0a050ce10540e764682f4d87367a317bec327cb4cc124e18018cdfe"
+        },
+        {
+          "id": "V-hours-1440-light",
+          "attachmentMember": "V-hours-1440-light.png",
+          "sha256": "e5b1f427dc4e04f8508ebe0be0f196e0db29e11f8c4ae35f6808bc2a6672b6e1"
+        },
+        {
+          "id": "V-hours-1440-dark",
+          "attachmentMember": "V-hours-1440-dark.png",
+          "sha256": "6a475cd2370de7df8673d70347e834a1231e98a95b8074a57c8297909d8115c0"
         }
       ],
       "unapprovedMemberPolicy": "Digest verification only. These rejected capture bytes never enter the comparison reference map. Checkpoint deferrals and the exact approval list govern authority.",
@@ -1098,44 +1113,65 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": "V-hours-390-light.png",
-            "sha256": "b61b1e447bd42b8e91f42e5e3de08be85e2cb0fd4185fd84075562d997d74e8f"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
         },
         {
           "id": "V-hours-390-dark",
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": "V-hours-390-dark.png",
-            "sha256": "5a273380e0a050ce10540e764682f4d87367a317bec327cb4cc124e18018cdfe"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
         },
         {
           "id": "V-hours-1440-light",
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": "V-hours-1440-light.png",
-            "sha256": "e5b1f427dc4e04f8508ebe0be0f196e0db29e11f8c4ae35f6808bc2a6672b6e1"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
         },
         {
           "id": "V-hours-1440-dark",
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": "V-hours-1440-dark.png",
-            "sha256": "6a475cd2370de7df8673d70347e834a1231e98a95b8074a57c8297909d8115c0"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "ok-to-pin",
+        "decision": "partially-approved",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+        "reason": "Round 11: raw PR #891 job 120309394777 records all four Hours pins as actual screenshot failures; AEON-1692 / reference set 3 owns their re-capture and review."
       },
       "clock": {
         "mode": "fixed",

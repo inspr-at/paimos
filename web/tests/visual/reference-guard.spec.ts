@@ -86,7 +86,12 @@ test('visual comparison rejects a changed control and never creates a missing re
   const renderer = structuredClone(visual.renderer)
   for (const state of visual.states) {
     delete state.approval
-    for (const checkpoint of state.checkpoints) checkpoint.reference = { attachmentMember: null, sha256: null }
+    for (const checkpoint of state.checkpoints) {
+      checkpoint.reference = { attachmentMember: null, sha256: null }
+      if (checkpoint.referenceStatus === 'needs-re-capture') {
+        delete checkpoint.referenceStatus; delete checkpoint.deferredUntil; delete checkpoint.deferredReason
+      }
+    }
   }
   const png = await page.screenshot()
   const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')

@@ -2,9 +2,9 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "round10-clock-audited-66-pins-awaiting-hosted-proof",
+  "status": "round11-renderer-confined-53-pins-awaiting-hosted-proof",
   "cuts": false,
-  "note": "Round 10 adds recorded/asserted per-state fixed clocks and candidate clock evidence, defers all four Capacity checkpoints to AEON-1692/reference set 3, positions Delivery 390 at header bottom +12px with a matching assertion, and stabilizes delayed release-name fixture data without product changes. There are 66 strict references and 14 explicit deferrals. The alleged lead-panel failures are passing in the raw hosted log and a fresh unchanged 56/56 remote run; fixtures and expectations remain unchanged. All 72 fixtures pass remote clock/quality checks, all six guards and both transport/ledger tests pass. Exact Linux comparisons and final hosted static proof remain coordinator-owned; no cuts, push, deploy or model review.",
+  "note": "Round 11 confines fontconfig to the child environment of the tests/visual browser fixture and relocates all six guards beneath that directory without changing their ESSENTIAL tier. Job-wide FONTCONFIG_FILE export was the non-visual font leak; the fixed clock already belonged only to visual pages. Thirteen failed set-2 pins (nine brief-listed plus four actual Hours failures in attached job 120309394777) now report awaiting reference / needs-re-capture for AEON-1692 reference set 3. The 53 unchanged pins remain exact comparisons; 14 original deferrals remain. Non-visual batch A passes 113/113 remotely and ten affected workflow tests pass. Hosted static and Linux comparison proof remain coordinator-owned; no push, deploy, cut or model review.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -20,7 +20,26 @@
   "blockers": [
     {
       "kind": "hosted-verification",
-      "reason": "The remaining 66 zero-pixel Linux comparisons must run on the approved hosted renderer after coordinator push; the remote Mac clock/quality lane cannot claim this proof. Final hosted static proof is also pending."
+      "reason": "The remaining 53 zero-pixel Linux comparisons and hosted static must run after coordinator push; the approved remote Mac lane cannot claim Linux pixel proof."
+    },
+    {
+      "kind": "awaiting-reference",
+      "checkpoints": [
+        "V-projects-390-light",
+        "V-decision-desk-1024-light",
+        "V-decision-desk-1024-dark",
+        "V-account-use-matrix-1024-light",
+        "V-account-use-matrix-1024-dark",
+        "V-account-use-matrix-1440-light",
+        "V-account-use-matrix-1440-dark",
+        "V-hours-390-light",
+        "V-hours-390-dark",
+        "V-hours-1440-light",
+        "V-hours-1440-dark",
+        "V-quote-editor-1440-light",
+        "V-agent-rules-390-dark"
+      ],
+      "reason": "Actual failed set-2 pins are unpinned, retain their old transport digests and report needs re-capture for AEON-1692 / reference set 3. No new reference authority is granted."
     },
     {
       "kind": "deferred-reference",
@@ -4098,5 +4117,80 @@
     "pushed": false,
     "deployed": false,
     "modelReviewsRun": false
+  },
+  "round11": {
+    "baseMain": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
+    "leak": "scripts/test-prune/visual-renderer.mjs install-fonts appended FONTCONFIG_FILE to GITHUB_ENV; web-shard ran it unconditionally for all specs.",
+    "confinement": "Only tests/visual specs import the extended test fixture in checkpoint.ts. Its launchOptions worker fixture provisions fonts before browser launch and supplies FONTCONFIG_FILE in that child environment only. The CLI no longer writes GITHUB_ENV; no workflow step installs visual fonts. Date.setFixedTime remains page-scoped in visual setup only.",
+    "guardRelocation": {
+      "from": "tests/visual-reference-guard.spec.ts",
+      "to": "tests/visual/reference-guard.spec.ts",
+      "count": 6,
+      "tier": "ESSENTIAL",
+      "nativeTitlesUnchanged": true
+    },
+    "gates": {
+      "strict": 53,
+      "awaitingReference": 13,
+      "deferred": 14
+    },
+    "needsRecapture": [
+      "V-projects-390-light",
+      "V-decision-desk-1024-light",
+      "V-decision-desk-1024-dark",
+      "V-account-use-matrix-1024-light",
+      "V-account-use-matrix-1024-dark",
+      "V-account-use-matrix-1440-light",
+      "V-account-use-matrix-1440-dark",
+      "V-hours-390-light",
+      "V-hours-390-dark",
+      "V-hours-1440-light",
+      "V-hours-1440-dark",
+      "V-quote-editor-1440-light",
+      "V-agent-rules-390-dark"
+    ],
+    "additionalFailureEvidence": {
+      "job": "120309394777",
+      "source": "review-ci891-1021.out",
+      "actualSummary": "8 failed: four matrix checkpoints and all four Hours checkpoints; explicit FAIL browser lines confirm them."
+    },
+    "tests": [
+      {
+        "check": "Node visual transport and prune ledger",
+        "result": "PASS 2/2"
+      },
+      {
+        "check": "Non-visual batch A",
+        "sourceSHA": "d985e3690c8f78297caa3a43e11ede194b045bd8",
+        "result": "PASS 113/113 remote Mac",
+        "specs": [
+          "tests/coarse-hit-area.spec.ts",
+          "tests/delivery-flow-lanes.spec.ts",
+          "tests/delivery-flow-modes.spec.ts",
+          "tests/delivery-polish.spec.ts",
+          "tests/models-registry.spec.ts",
+          "tests/release-ticket-links.spec.ts"
+        ]
+      },
+      {
+        "check": "Affected release workflow preservation",
+        "sourceSHA": "d985e3690c8f78297caa3a43e11ede194b045bd8",
+        "result": "PASS 10/10 remote agm2"
+      },
+      {
+        "check": "Frozen renderer/remaining pins and immutable archive",
+        "result": "All 72 PNG/payload digests verify; exactly 53 references exposed. No archive bytes changed."
+      },
+      {
+        "check": "Non-visual batch B and relocated guard",
+        "result": "Pending remote run"
+      },
+      {
+        "check": "Hosted Linux comparisons and static",
+        "result": "Pending coordinator push; remote static refused: remote busy (mbp2606 host guard OPS-300)."
+      }
+    ],
+    "negativeControl": "On temporary scratch/aeon-1674-r11-font-leak, restoring only the previous workflow makes the new no-job-font-provisioning assertion fail on install-fonts. Scratch ref removed with no negative-control commit.",
+    "outsideWriteSet": "No explicit write-set paths in round-11 brief; shared workflow/configuration hook and CI registry/tier entries are minimal required isolation/relocation changes. No product source changes."
   }
 }

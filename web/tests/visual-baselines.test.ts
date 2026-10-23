@@ -120,10 +120,11 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.throws(() => verifyReferenceArchive(Buffer.alloc(0), detached, mirrored, noExtraction), /archive size mismatch/)
 
   const gates = referenceGates(manifest)
-  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').reduce((sum, gate) => sum + gate.checkpoints, 0), 57)
+  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').reduce((sum, gate) => sum + gate.checkpoints, 0), 53)
   const staleIds = ['V-projects-390-light', 'V-decision-desk-1024-light', 'V-decision-desk-1024-dark',
     'V-account-use-matrix-1024-light', 'V-account-use-matrix-1024-dark', 'V-account-use-matrix-1440-light',
-    'V-account-use-matrix-1440-dark', 'V-quote-editor-1440-light', 'V-agent-rules-390-dark']
+    'V-account-use-matrix-1440-dark', 'V-hours-390-light', 'V-hours-390-dark', 'V-hours-1440-light',
+    'V-hours-1440-dark', 'V-quote-editor-1440-light', 'V-agent-rules-390-dark']
   assert.deepEqual(gates.filter(gate => gate.mode === 'awaiting-reference').flatMap(gate => gate.checkpointIds), staleIds)
   for (const id of staleIds) {
     assert.equal(referenceGate(manifest, id).status, 'needs-re-capture')
