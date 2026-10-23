@@ -59,7 +59,7 @@ cancellation creates no duplicate event, comment or status transition.
 The run pins the leaf's identity, state and revision at launch. **Any ticket edit
 after launch preserves its status**, including a person changing the state away
 and back. A changed binding, a new work child, an already terminal ticket, missing
-permission, failed Done check or unconfirmed process exit also preserves its
+permission, failed Done check, reported error, or an unconfirmed/unstarted process also preserves its
 status; the result comment records why. Historical runs without a launch binding
 can record a result but cannot auto-close. Deleted tickets are never restored.
 The ticket remains the durable record after a successful run.

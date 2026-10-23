@@ -160,6 +160,8 @@ func exerciseRunOnceSettlement(t *testing.T) {
 		{"permission-revoked", "completed", "", "open", "permission_revoked"},
 		{"done-check", "completed", "", "open", "entry_checks_failed"},
 		{"unconfirmed-exit", "completed", "", "open", "process_exit_unconfirmed"},
+		{"completed-with-error", "completed", "turn_failed", "open", "turn_failed"},
+		{"not-started", "completed", "", "open", "process_not_started"},
 		{"historical", "completed", "", "open", "launch_revision_unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -264,6 +266,9 @@ func exerciseRunOnceSettlement(t *testing.T) {
 				report = map[string]any{"sequence": 1, "kind": "finished", "status": tc.status, "error_code": tc.errorCode, "process_state": "exited"}
 				if tc.name == "unconfirmed-exit" {
 					report["process_state"] = "unconfirmed"
+				}
+				if tc.name == "not-started" {
+					report["process_state"] = "not_attempted"
 				}
 				f.call(t, f.agent, "POST", path+"/telemetry", report, 200, &run)
 				f.call(t, f.agent, "POST", path+"/telemetry", report, 200, nil)

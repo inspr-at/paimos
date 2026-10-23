@@ -155,8 +155,14 @@ func settleRunOnceTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, 
 }
 
 func runOnceCloseCheckTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, report Telemetry, launch, current *runOnceTicket, target workorders.EntryTicket) (string, *workorders.EntryRecord, error) {
+	if report.ErrorCode != "" {
+		return report.ErrorCode, nil, nil
+	}
 	if report.ProcessState == "unconfirmed" {
 		return "process_exit_unconfirmed", nil, nil
+	}
+	if report.ProcessState == "not_attempted" {
+		return "process_not_started", nil, nil
 	}
 	if launch == nil {
 		return "launch_revision_unavailable", nil, nil
