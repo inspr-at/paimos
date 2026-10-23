@@ -138,8 +138,9 @@ const shortcutDisposers = [
 ]
 let stopShortcuts: (() => void) | undefined
 watch(() => [session.identity?.tenant.id, session.identity?.principal.id], cancelShortcutSequence)
-// One canonical Decision Desk count, independent of live sessions.
-const needsPoll = usePoller(() => desk.refresh(), 30_000, { enabled: () => session.identity?.principal.kind === 'person', invalidate: desk.cancelRefresh })
+// One canonical Decision Desk count, independent of live sessions. Its schedule feeds the Desk's sync line (AEON-1700).
+const headerDeskPoll = Symbol('header-desk-poll')
+const needsPoll = usePoller(() => desk.refresh(), 30_000, { enabled: () => session.identity?.principal.kind === 'person', invalidate: desk.cancelRefresh, due: at => desk.notePoll(headerDeskPoll, at) })
 // The doctrine inbox (AEON-444): people who can send a proposal to git see a dot
 // while proposals wait, and one toast per new proposal.
 const doctrineReviewer = () => session.identity?.principal.kind === 'person' && can('rules.write')
