@@ -188,6 +188,9 @@ func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
 			reads, _ := plan["Shared Read Blocks"].(float64)
 			buffers := hits + reads
 			t.Logf("picker %s: %.0f shared buffers", mode, buffers)
+			if buffers <= 0 {
+				return fmt.Errorf("picker plan omitted buffer work")
+			}
 			if budget := float64(128*(leaves+3) + 512*(query.Limit+1)); buffers > budget {
 				return fmt.Errorf("picker repeated work inside leaf filter: %.0f shared buffers, budget %.0f", buffers, budget)
 			}
@@ -246,6 +249,49 @@ func TestShapeLeafExcludesHiddenChild(t *testing.T) {
 			t.Error(err)
 		}
 	})
+	// The canonical probe may see hidden children, but must restore the
+	// caller's visibility before any later page enrichment in this transaction.
+	err := db.InTenant(tenant.WithPrincipal(t.Context(), p), appPool, p.TenantID, func(tx pgx.Tx) error {
+		settings := `SELECT coalesce(current_setting('aeon.visible_projects',true),''),coalesce(current_setting('aeon.system',true),'')`
+		var beforeVisible, beforeSystem, afterVisible, afterSystem string
+		if err := tx.QueryRow(t.Context(), settings).Scan(&beforeVisible, &beforeSystem); err != nil {
+			return err
+		}
+		rows, err := tx.Query(t.Context(), `SELECT id::text,is_leaf FROM aeon_work_leaf_flags_bounded($1::uuid[])`, []string{parent.ID, leaf.ID, parent.ID, project.ID})
+		if err != nil {
+			return err
+		}
+		flags := map[string]bool{}
+		count := 0
+		for rows.Next() {
+			var id string
+			var isLeaf bool
+			if err := rows.Scan(&id, &isLeaf); err != nil {
+				rows.Close()
+				return err
+			}
+			flags[id] = isLeaf
+			count++
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if count != 2 || len(flags) != 2 || flags[parent.ID] || !flags[leaf.ID] {
+			return fmt.Errorf("canonical flags changed hidden-child, duplicate or non-work semantics: %v", flags)
+		}
+		if err := tx.QueryRow(t.Context(), settings).Scan(&afterVisible, &afterSystem); err != nil {
+			return err
+		}
+		if beforeVisible != afterVisible || beforeSystem != afterSystem {
+			return fmt.Errorf("canonical probe did not restore caller visibility")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	status, body := call(t, &p, http.MethodGet, "/api/nodes?kind=work&shape=leaf&rollups=omit&within="+project.ID, "")
 	if status != http.StatusOK || strings.Contains(string(body), parent.ID) || strings.Contains(string(body), child.ID) || !strings.Contains(string(body), leaf.ID) {
 		t.Fatalf("hidden child changed the leaf set: %d %s", status, body)
