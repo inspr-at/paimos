@@ -180,20 +180,25 @@ func (m *Module) decide(ctx context.Context, p tenant.Principal, id, decision, r
 
 // DecideVerified preserves the person-only permission checks, lock, grant and audit
 // transaction. The verifier must consume a fresh proof in that same transaction.
-func DecideVerified(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, id, decision, reason string, verify func(pgx.Tx, Approval) error) (Approval, error) {
+func DecideVerified(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, id, decision, reason string, verify func(pgx.Tx, Approval) error, outcome ...ActionOutcomeWriter) (Approval, error) {
 	if verify == nil {
 		return Approval{}, fail(http.StatusForbidden, "fresh verification required")
 	}
 	if _, err := validateDecision(decisionWrite{Decision: decision, Reason: &reason}); err != nil {
 		return Approval{}, err
 	}
-	return (&Module{pool: pool, inTenant: db.InTenant}).decideVerified(ctx, p, id, decision, reason, verify)
+	m := New(pool, outcome...).(*Module)
+	return m.decideVerified(ctx, p, id, decision, reason, verify)
 }
 
 func (m *Module) decideVerified(ctx context.Context, p tenant.Principal, id, decision, reason string, verify func(pgx.Tx, Approval) error) (Approval, error) {
+	ctx = tenant.WithPrincipal(ctx, p)
 	var out Approval
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
+			return err
+		}
+		if err := actionDecisionFence(ctx, tx, id, p.TenantID); err != nil {
 			return err
 		}
 		before, expired, err := lockRequest(ctx, tx, id)
@@ -227,6 +232,10 @@ func (m *Module) decideVerified(ctx context.Context, p tenant.Principal, id, dec
 			if err := verify(tx, before); err != nil {
 				return err
 			}
+		}
+		if hasActionScope(before.Scope) {
+			out, err = m.decideActionTx(ctx, tx, p, before, decision, reason)
+			return err
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO approval_decisions (
@@ -550,6 +559,9 @@ func Review(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Appr
 
 // CanDecide applies the same live actor and permission policy used by decision writes.
 func CanDecide(ctx context.Context, tx pgx.Tx, p tenant.Principal, a Approval) error {
+	if hasActionScope(a.Scope) {
+		return canDecideAction(ctx, tx, p, a)
+	}
 	if consent.Scope(a.Scope) && (p.Kind != tenant.Person || p.KeyID != "" || p.AuthKeyID != "" || p.KeyCreatorID != "") {
 		return fail(http.StatusForbidden, "native consent requires a person session")
 	}

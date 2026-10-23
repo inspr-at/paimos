@@ -4,7 +4,7 @@ import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useSession } from './session'
 import { onAccessRevalidate } from '../lib/authz'
 import { deskReadAborted, loadDeskProjection, type DeskProjection } from '../lib/decisionDesk'
-import { onProjectionWake } from '../lib/agents'
+import { onProjectionLive, onProjectionWake } from '../lib/agents'
 import { getDoctrineInbox } from '../lib/doctrine'
 import { readDoctrineProjects } from '../lib/decisionDeskApi'
 
@@ -17,6 +17,21 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
   const failures = ref(0), failedSince = ref<number | null>(null), refreshedAt = ref<number | null>(null)
   let generation = 0, controller: AbortController | undefined, flight: Promise<boolean> | undefined
   let wakeTimer: ReturnType<typeof setTimeout> | undefined, wake: object | undefined
+  // AEON-1700: what the Desk's sync line shows. `live`: the wakes arrive live; `liveEvents` counts named
+  // live events (each pulses the line once); `changeArrived`: a named event's window and its read are
+  // under way. A reconnect's catch-up names no event, so it is never a change.
+  const live = ref(false), liveEvents = ref(0), changeArrived = ref(false)
+  // The real timers that read the Desk report when they fire next; the line counts down to the earliest.
+  const pollsDue = ref(new Map<symbol, number>())
+  function notePoll(poll: symbol, at: number | null) {
+    // The same due time again is not a change. A frozen clock would otherwise replace the map on every tick.
+    if (at === null) { if (!pollsDue.value.has(poll)) return }
+    else if (pollsDue.value.get(poll) === at) return
+    const next = new Map(pollsDue.value)
+    if (at === null) next.delete(poll); else next.set(poll, at)
+    pollsDue.value = next
+  }
+  const nextPollAt = computed(() => pollsDue.value.size ? Math.min(...pollsDue.value.values()) : null)
   // A rule change names no project; its ticket does. One cache for the Agents panel and the
   // header preview, so the preview opens with what the panel already read (AEON-1339).
   const ruleProjects = ref(new Map<string, string>()), ruleProjectError = ref('')
@@ -25,7 +40,7 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
   // Identity/permission resets still clear everything synchronously below.
   function cancelRefresh() {
     generation++; controller?.abort(); controller = undefined; flight = undefined
-    dropWake(); loading.value = false
+    dropWake(); loading.value = false; changeArrived.value = false
   }
   function dropWake() { clearTimeout(wakeTimer); wakeTimer = undefined; wake = undefined }
   function invalidate() {
@@ -86,7 +101,7 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
           if (!projection.value) error.value = cause instanceof Error ? cause.message : 'Decision Desk could not be read. Retry.'
         }
         return false
-      } finally { if (current()) { loading.value = false; flight = undefined; controller = undefined } }
+      } finally { if (current()) { loading.value = false; flight = undefined; controller = undefined; if (!wake) changeArrived.value = false } }
     })()
     return flight
   }
@@ -102,18 +117,26 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
   // end, after any read already running, so a burst refetches at most once per
   // window and its last event is still read. Explicit reads (Try again,
   // opening the Desk, the header poll) call refresh() directly and run at once.
-  function requestRefresh() {
-    if (wake || !owner.value || !session.authenticationCurrent()) return
+  function requestRefresh(event?: string) {
+    if (!owner.value || !session.authenticationCurrent()) return
+    if (event) { liveEvents.value++; changeArrived.value = true }
+    if (wake) return
     const token = wake = {}
     wakeTimer = setTimeout(async () => {
       wakeTimer = undefined
       if (flight) await flight
-      if (wake === token) void refresh()
+      if (wake !== token) return
+      void refresh()
+      // A read that did not start (signed out) or joined one already running leaves the window open: close it,
+      // so the next event opens its own and the sync line never keeps saying a change is updating (AEON-1700).
+      if (wake === token) { dropWake(); if (!flight) changeArrived.value = false }
     }, wakeWindow)
   }
   watch(owner, () => { invalidate(); void refresh() }, { immediate: true, flush: 'sync' })
   const stopAccess = onAccessRevalidate({ reset: invalidate, refresh: () => { void refresh() } })
-  const stopWakes = onProjectionWake(requestRefresh)
-  onScopeDispose(() => { stopWakes(); stopAccess(); invalidate() })
-  return { projection, error, loading, failures, failedSince, refreshedAt, refresh, refreshPastCancel, cancelRefresh, invalidate, ruleProjects, ruleProjectError, resolveRuleProjects, count: computed(() => projection.value?.counts.open ?? null) }
+  const stopWakes = onProjectionWake(event => requestRefresh(event))
+  const stopLive = onProjectionLive(value => { live.value = value })
+  onScopeDispose(() => { stopWakes(); stopLive(); stopAccess(); invalidate() })
+  return { projection, error, loading, failures, failedSince, refreshedAt, refresh, refreshPastCancel, cancelRefresh, invalidate, ruleProjects, ruleProjectError, resolveRuleProjects, count: computed(() => projection.value?.counts.open ?? null),
+    live, liveEvents, changeArrived, notePoll, nextPollAt }
 })
