@@ -40,7 +40,7 @@ const matrix = ref<Matrix | null>(null), set = ref<Set<string>>(new Set()), stat
 const busy = ref(''), said = ref(''), confirmedHere = ref(false)
 /** The last save of this person on this screen, a cell set or one rule: Undo is valid only while nothing changed since. */
 type UndoStep = { cells: UseCell[] } | { rule: RuleKey; value: string }
-const last = ref<{ owner: string; revision: number; undo: UndoStep; what: string } | null>(null)
+const last = ref<{ owner: string; revision: number; undo: UndoStep; what: string; names?: string[] } | null>(null)
 /** A context action belongs to the context and matrix revision on screen when the menu or form opened; a later change answers 409. */
 const menu = ref<{ context: WorkContext; revision: number; anchor: HTMLElement } | null>(null)
 const form = ref<{ mode: 'add' | 'rename'; context?: WorkContext; revision: number; anchor: HTMLElement; name: string; error: string } | null>(null)
@@ -111,7 +111,7 @@ function write<T>(what: string, send: (expected: number, signal: AbortSignal) =>
   })
   return true
 }
-function saved(result: CellResult, what: string, undoing = false) {
+function saved(result: CellResult, what: string, undoing = false, names: string[] = []) {
   const m = matrix.value
   if (!m) return
   set.value = applyCells(set.value, result.changes)
@@ -124,25 +124,26 @@ function saved(result: CellResult, what: string, undoing = false) {
   }
   const changed = result.changes.filter((c, i) => c.allowed !== result.undo[i]?.allowed).length
   said.value = undoing ? `Undone: ${what}.` : `${what}: ${changed === 1 ? '1 cell changed' : `${changed} cells changed`}.`
-  last.value = undoing ? null : { owner: scope.owner.value, revision: result.revision, undo: { cells: result.undo }, what }
-  toast(said.value, undoing ? {} : { key: 'account-use', timeout: 10_000, action: { label: 'Undo', run: undo } })
+  last.value = undoing ? null : { owner: scope.owner.value, revision: result.revision, undo: { cells: result.undo }, what, names }
+  const compactMessage = names.reduce((text, name) => text.replaceAll(name, Array.from(name).length > 18 ? `${Array.from(name).slice(0, 17).join('')}…` : name), said.value)
+  toast(said.value, { compactMessage, ...(undoing ? {} : { key: 'account-use', timeout: 10_000, action: { label: 'Undo', run: undo } }) })
   load(true)
 }
-function cells(change: { changes: UseCell[] } | { bulk: Bulk }, what: string) {
-  return write(what, (expected, signal) => saveCells(expected, change, signal), result => saved(result, what))
+function cells(change: { changes: UseCell[] } | { bulk: Bulk }, what: string, names: string[] = []) {
+  return write(what, (expected, signal) => saveCells(expected, change, signal), result => saved(result, what, false, names))
 }
 function undo() {
   const step = last.value
   if (!step || !canUndo.value) { if (step) toast('The matrix changed since, so nothing was undone.', { tone: 'error' }); return }
   const back = step.undo
-  if ('cells' in back) { write(`Undo ${step.what}`, (_expected, signal) => saveCells(step.revision, { changes: back.cells }, signal), result => saved(result, step.what, true)); return }
+  if ('cells' in back) { write(`Undo ${step.what}`, (_expected, signal) => saveCells(step.revision, { changes: back.cells }, signal), result => saved(result, step.what, true, step.names)); return }
   const def = RULES.find(d => d.key === back.rule)
   if (def) write(`Undo ${step.what}`, (_expected, signal) => saveRules(step.revision, { [back.rule]: back.value }, signal), rules => ruleSaved(def, rules, '', true))
 }
 function toggleCell(event: Event, accountId: string, contextId: string) {
   const input = event.target as HTMLInputElement, want = input.checked
   const a = rows.value.find(r => r.id === accountId), c = columns.value.find(col => col.id === contextId)
-  if (!a || !c || !cells({ changes: [{ account_id: accountId, context_id: contextId, allowed: want }] }, `${want ? 'Allowed' : 'Not allowed'} ${accountName(a)} in ${c.name}`)) { input.checked = !want; return }
+  if (!a || !c || !cells({ changes: [{ account_id: accountId, context_id: contextId, allowed: want }] }, `${want ? 'Allowed' : 'Not allowed'} ${accountName(a)} in ${c.name}`, [accountName(a), c.name])) { input.checked = !want; return }
   // Shown at once; a failed save reads the server state again.
   set.value = applyCells(set.value, [{ account_id: accountId, context_id: contextId, allowed: want }])
 }
@@ -151,13 +152,13 @@ function bulkRow(event: Event, accountId: string) {
   const now = rowState(accountId, columns.value, set.value), want = nextFromTri(now)
   // The box shows the saved state until the server answers.
   input.checked = now === 'all'; input.indeterminate = now === 'some'
-  if (a) cells({ bulk: { scope: 'account', account_id: accountId, allowed: want } }, `${want ? 'Allowed' : 'Not allowed'} ${accountName(a)} everywhere`)
+  if (a) cells({ bulk: { scope: 'account', account_id: accountId, allowed: want } }, `${want ? 'Allowed' : 'Not allowed'} ${accountName(a)} everywhere`, [accountName(a)])
 }
 function bulkColumn(event: Event, context: WorkContext) {
   const input = event.target as HTMLInputElement
   const now = columnState(context.id, rows.value, set.value), want = nextFromTri(now)
   input.checked = now === 'all'; input.indeterminate = now === 'some'
-  cells({ bulk: { scope: 'context', context_id: context.id, allowed: want } }, `${want ? 'Allowed every account' : 'Allowed no account'} in ${context.name}`)
+  cells({ bulk: { scope: 'context', context_id: context.id, allowed: want } }, `${want ? 'Allowed every account' : 'Allowed no account'} in ${context.name}`, [context.name])
 }
 function bulkAll(event: Event) {
   const input = event.target as HTMLInputElement

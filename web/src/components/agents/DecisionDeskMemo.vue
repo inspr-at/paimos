@@ -93,7 +93,13 @@ const ticketRef = computed<DeskTicket | undefined>(() => {
 })
 const suggestedNote = computed(() => item.value && question.value ? suggestedUnavailableNote(item.value) : '')
 // An unavailable stamp's row reads its reason instead.
-const stampWords = (row: DeskItem, outcome: DeskOutcome) => stampWhy(row, outcome) || (outcome === 'requirement' ? `add to ${ticketRef.value?.key || 'the ticket'}` : STAMP_WORDS[outcome])
+const stampWords = (row: DeskItem, outcome: DeskOutcome) => {
+  const why = stampWhy(row, outcome)
+  // The full server reason remains the accessible description. The phone row says
+  // the same thing in two lines, without a tooltip over the neighbouring choice.
+  if (narrow.value && why === 'Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.') return 'Not available: the agent didn’t name the rule to change.'
+  return why || (outcome === 'requirement' ? `add to ${ticketRef.value?.key || 'the ticket'}` : STAMP_WORDS[outcome])
+}
 // Source only where no ticket names the origin. Phones show it on the answer line in the head (AEON-1535).
 const sourceShown = computed(() => { const row = item.value; return !!row?.source && !row.lesson && !row.approval && (!!row.rule || (!row.ticketId && !row.ticketKey)) })
 // Why Decide cannot decide yet, and what to focus. Empty when it can (Markus 10-14 09:57: never a silent no-op).
@@ -891,7 +897,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                 <div v-if="question" class="stamps">
                   <h3 id="desk-h-stamp" class="eyebrow">Stamp it as</h3>
                   <div class="stamp-row" role="radiogroup" aria-labelledby="desk-h-stamp" data-testid="desk-stamps">
-                    <button v-for="(outcome, at) in outcomes" :key="outcome" type="button" class="stamp" :class="`t-${STAMP[outcome].tone}`" role="radio" :aria-checked="draft.outcome === outcome" :aria-disabled="stampWhy(item, outcome) || decidedView || !editable ? 'true' : undefined" :data-off="stampWhy(item, outcome) ? '' : undefined" :data-faded="decidedView && draft.outcome !== outcome && !stampWhy(item, outcome) ? '' : undefined" :tabindex="decidedView ? -1 : undefined" :aria-keyshortcuts="stampWhy(item, outcome) ? undefined : outcomeKeys[at]" :data-tip="stampWhy(item, outcome) || `${stampDescription({ ...item, suggested: undefined }, outcome)} · key ${outcomeKeys[at]}`" :aria-describedby="`desk-stamp-about-${outcome}`" :data-testid="`stamp-${outcome}`" @click="stamp(outcome)"><AppIcon class="st-icon" :name="STAMP[outcome].icon" :size="13" /><span v-if="stampWhy(item, outcome)" class="st-label">{{ outcomeLabels[outcome] }}</span><span v-else class="st-label"><u>{{ outcomeLabels[outcome].charAt(0) }}</u>{{ outcomeLabels[outcome].slice(1) }}</span><span class="st-words" aria-hidden="true" :data-testid="`stamp-words-${outcome}`">{{ stampWords(item, outcome) }}</span><span class="st-check" aria-hidden="true"><AppIcon name="check" :size="16" /></span></button>
+                    <button v-for="(outcome, at) in outcomes" :key="outcome" type="button" class="stamp" :class="`t-${STAMP[outcome].tone}`" role="radio" :aria-checked="draft.outcome === outcome" :aria-disabled="stampWhy(item, outcome) || decidedView || !editable ? 'true' : undefined" :data-off="stampWhy(item, outcome) ? '' : undefined" :data-faded="decidedView && draft.outcome !== outcome && !stampWhy(item, outcome) ? '' : undefined" :tabindex="decidedView ? -1 : undefined" :aria-keyshortcuts="stampWhy(item, outcome) ? undefined : outcomeKeys[at]" :data-tip="narrow && stampWhy(item, outcome) ? undefined : stampWhy(item, outcome) || `${stampDescription({ ...item, suggested: undefined }, outcome)} · key ${outcomeKeys[at]}`" :aria-describedby="`desk-stamp-about-${outcome}`" :data-testid="`stamp-${outcome}`" @click="stamp(outcome)"><AppIcon class="st-icon" :name="STAMP[outcome].icon" :size="13" /><span v-if="stampWhy(item, outcome)" class="st-label">{{ outcomeLabels[outcome] }}</span><span v-else class="st-label"><u>{{ outcomeLabels[outcome].charAt(0) }}</u>{{ outcomeLabels[outcome].slice(1) }}</span><span class="st-words" aria-hidden="true" :data-testid="`stamp-words-${outcome}`">{{ stampWords(item, outcome) }}</span><span class="st-check" aria-hidden="true"><AppIcon name="check" :size="16" /></span></button>
                   </div>
                   <span v-for="outcome in outcomes" :id="`desk-stamp-about-${outcome}`" :key="`about-${outcome}`" hidden>{{ stampWhy(item, outcome) || stampDescription({ ...item, suggested: undefined }, outcome) }}</span>
                   <p class="stamp-desc" data-testid="desk-stamp-desc">{{ stampDescription(item, draft.outcome) }}<template v-if="suggestedNote && !decidedView">{{ ' ' }}<span class="sug-off" tabindex="0" :data-tip="stampWhy(item, item.suggested ?? item.outcome)" data-testid="desk-suggest-off">{{ suggestedNote }}</span></template></p>
@@ -1335,6 +1341,9 @@ a.res-key:hover { text-decoration: underline; }
   @media (hover: hover) { .stamp:hover:not([aria-disabled="true"]):not([aria-checked="true"]) { background: var(--row-hover); } }
   .stamp[data-off] { color: var(--ink-3); cursor: not-allowed; }
   .stamp[data-off] .st-icon { color: var(--ink-3); opacity: .7; }
+  .stamp[data-off] { grid-template-rows: 20px auto; padding-block: 8px; }
+  .stamp[data-off] .st-words { grid-column: 2 / -1; grid-row: 2; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+  .stamp[data-off] .st-check { grid-column: 4; grid-row: 1; }
   .stamp-desc { height: 60px; -webkit-line-clamp: 3; line-clamp: 3; }
   .desk-foot { display: none; }
   .choice > .field-row, .choice > .c-answer { padding-left: 10px; }
