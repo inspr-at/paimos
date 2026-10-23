@@ -112,8 +112,9 @@ async function syncGlyph(page: Page): Promise<GlyphSample> {
       if (found) break
     }
     if (!found) return { ...blank, error: 'no glyph' }
-    const box = mark.getBoundingClientRect()
-    return { error: '', glyph: range.getBoundingClientRect().x, markW: box.width, icon: mark.getAttribute('data-icon'), state: line.getAttribute('data-state'), text: words.textContent ?? '' }
+    // The slot's laid-out width, not its painted box: a live event's pulse scales the slot as paint only, on the
+    // real animation timeline the paused test clock does not hold, so the painted box depends on when it is read.
+    return { error: '', glyph: range.getBoundingClientRect().x, markW: parseFloat(getComputedStyle(mark).width), icon: mark.getAttribute('data-icon'), state: line.getAttribute('data-state'), text: words.textContent ?? '' }
   })
 }
 async function oneSyncLine(page: Page, step: string) {
