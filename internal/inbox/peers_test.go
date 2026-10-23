@@ -5,6 +5,7 @@ package inbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,10 +15,12 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/attachedmsg"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Risk: discovery or a cross-project send can escape its current owner/tenant,
@@ -172,7 +175,27 @@ func testPeerDirectoryAndDelivery(t *testing.T) {
 	// Workstation keys can own several sessions under the same principal.
 	// Delivery is still exact-session; it must not become a principal broadcast.
 	sibling := peerTestSession(t, w, project, w.sender, owner, "same-principal-peer")
-	workspaceStatus(t, post(w.sender, sibling, "same-principal", nil), 201)
+	siblingResponse := post(w.sender, sibling, "same-principal", nil)
+	workspaceStatus(t, siblingResponse, 201)
+	siblingMessage := mustJSON[CompatMessage](t, siblingResponse.Body.Bytes())
+	// The constraint adjustment must preserve tenant FKs and the ban on
+	// unbound or same-generation principal self-messages, even below the API.
+	for _, probe := range []struct {
+		sql, id, value, code string
+	}{
+		{`UPDATE inbox_compat_messages SET sender_session_id=$2 WHERE id=$1`, sent.ID, foreignSession, "23503"},
+		{`UPDATE inbox_messages SET sender_session_id=recipient_session_id WHERE id=$1 AND $2::text IS NOT NULL`, siblingMessage.ID, "bound", "23514"},
+		{`UPDATE inbox_compat_messages SET sender_session_id=NULL WHERE id=$1 AND $2::text IS NOT NULL`, siblingMessage.ID, "unbound", "23514"},
+	} {
+		err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, owner.TenantID, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), probe.sql, probe.id, probe.value)
+			return err
+		})
+		var pgerr *pgconn.PgError
+		if !errors.As(err, &pgerr) || pgerr.Code != probe.code {
+			t.Fatalf("constraint failed for the wrong reason: got %v, want SQLSTATE %s", err, probe.code)
+		}
+	}
 
 	t.Run("final ownership fence", func(t *testing.T) { testPeerFinalFence(t, w, m, w.sender, target, source, w.other.ID, false) })
 	t.Run("final permission fence", func(t *testing.T) { testPeerFinalFence(t, w, m, w.sender, sibling, source, w.other.ID, true) })
@@ -198,6 +221,24 @@ func peerTestSession(t *testing.T, w *world, project string, agent, owner tenant
 }
 
 func testPeerFinalFence(t *testing.T, w *world, m *messaging, sender tenant.Principal, target, source, nextOwner string, revoke bool) {
+	var role string
+	if revoke {
+		// Built-in grants are assembled from the registry, so use an explicit
+		// custom role whose single send permission can actually be revoked.
+		workspaceTx(t, w, sender, func(tx pgx.Tx) error {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'peer_sender','Peer sender') RETURNING id::text`, sender.TenantID).Scan(&role); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,p FROM unnest(ARRAY['nodes.read','harness.read','inbox.send']) p`, sender.TenantID, role); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, sender.ID); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, sender.TenantID, sender.ID, role)
+			return err
+		})
+	}
 	// Pause after directory resolution, before the final mutation transaction.
 	pool, barrier, ctx := dbtest.BarrierPool(t, w.db.App, func(sql string) bool {
 		return strings.Contains(sql, "ORDER BY s.id LIMIT $8")
@@ -220,8 +261,14 @@ func testPeerFinalFence(t *testing.T, w *world, m *messaging, sender tenant.Prin
 			return err
 		}
 		if revoke {
-			_, err := tx.Exec(ctx, `DELETE FROM role_permissions WHERE permission='inbox.send' AND role_id IN (SELECT role_id FROM role_bindings WHERE principal_id=$1)`, sender.ID)
-			return err
+			tag, err := tx.Exec(ctx, `DELETE FROM role_permissions WHERE permission='inbox.send' AND role_id=$1`, role)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 1 || authz.RequireTx(ctx, tx, sender, "harness.read", authz.Scope{}) != nil || authz.RequireTx(ctx, tx, sender, "inbox.send", authz.Scope{}) == nil {
+				return fmt.Errorf("fixture did not revoke only the current send permission")
+			}
+			return nil
 		}
 		_, err := tx.Exec(ctx, `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, target, nextOwner)
 		return err
