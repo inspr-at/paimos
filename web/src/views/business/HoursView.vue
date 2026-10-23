@@ -747,7 +747,7 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .t-cell .t-title { display: none; }
   .c-day { width: auto; padding: 0 !important; font-size: 10.5px; }
   .d-date { font-size: 10.5px; }
-  .c-total { width: 56px; padding-right: 10px !important; font-size: 11.5px; }
+  .c-total { width: 52px; padding-right: 6px !important; font-size: 11.5px; }
   .day-group { padding: 0 12px 8px; }
   .entry { grid-template-columns: max-content minmax(0, 1fr) 48px 28px; grid-template-areas: "time text dur act" "chip text dur act"; padding: 6px 0; }
   .entry > .ticket-chip { justify-self: start; }
