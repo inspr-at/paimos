@@ -746,7 +746,7 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .t-cell .t-title { display: none; }
   .c-day { width: auto; padding: 0 1px 0 0 !important; font-size: 10.5px; }
   .d-date { font-size: 10.5px; }
-  .c-total { width: 44px; padding-left: 2px; padding-right: 6px !important; font-size: 11.5px; }
+  .c-total { width: 54px; padding-left: 2px; padding-right: 6px !important; font-size: 11.5px; }
   .week-grid thead .c-day { padding-right: 5px !important; }
   /* Preserve the Total inset over base cell padding at every compact width. */
   .week-grid .c-total { padding-left: 2px; }
@@ -760,11 +760,13 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .conflict .btn { margin-left: 24px; }
   .hint { display: none; }
 }
-/* Compact keys leave visible space between day values on narrow phones. */
+/* Reclaim key padding before the 1 px type step: even adjacent full-day
+   values need 6 px of clear space in the bundled mono font on Linux. */
 @media (max-width: 520px) {
-  .week-grid .c-ticket { width: 74px; padding-left: 6px; }
-  .week-grid .ticket-chip { padding: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--ink); }
+  .week-grid .c-ticket { width: 58px; padding-left: 0; }
+  .week-grid .ticket-chip { padding: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--ink); font-size: 10.5px; }
   .week-grid .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
-  .week-grid .c-day { font-size: 11px; }
+  .week-grid .c-day { font-size: 10px; }
+  .week-grid .c-total { width: 44px; padding-left: 1px; padding-right: 1px !important; font-size: 10.5px; }
 }
 </style>

@@ -4,6 +4,7 @@
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { setupBrowserFonts } from "./playwright-global-setup.mjs";
 
 const BASE = "https://aeon.barta.cm";
 export function allowLiveRead(method, rawURL, base = BASE) {
@@ -15,6 +16,12 @@ export function allowLiveRead(method, rawURL, base = BASE) {
 }
 
 export async function smoke(env = process.env, base = BASE) {
+  const cleanupFonts = await setupBrowserFonts();
+  try { await runSmoke(env, base); }
+  finally { cleanupFonts?.(); }
+}
+
+async function runSmoke(env, base) {
   const require = createRequire(new URL("../web/package.json", import.meta.url));
   const { chromium } = require("@playwright/test");
   const browser = await chromium.launch({ headless: true });
