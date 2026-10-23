@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { test as base, expect, type Browser, type Page, type TestInfo } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { readBaselineBundle, referenceGate } from '../../../scripts/test-prune/visual-baselines.mjs'
+import { visualReportOnly, visualCheckResult } from '../../../scripts/test-prune/check.mjs'
 import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, rendererIdentity, verifyFontAssets, installRendererFonts } from '../../../scripts/test-prune/visual-renderer.mjs'
 import { domAudit } from '../ui-audit-rules'
 
@@ -41,11 +42,28 @@ export function visualCases(id: string): Checkpoint[] {
 }
 
 export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoint, setup: VisualSetup, { visual = manifest } = {}) {
+  if (captureEnabled(visual)) return runVisual(browser, info, checkpoint, setup, visual)
+  const result = await visualCheckResult(visual, () => runVisual(browser, info, checkpoint, setup, visual))
+  if (result.status === 'failed') {
+    const path = info.outputPath(`${checkpoint.id}.md`)
+    const previous = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}
+    const report = { ...previous, id: checkpoint.id, reference: referenceGate(visual, checkpoint.id),
+      requirementsRun: true, quality: { status: 'failed', error: result.error },
+      comparison: previous.comparison ?? { status: 'not run: quality/setup failed' } }
+    writeFileSync(path, JSON.stringify(report, null, 2))
+    info.annotations.push({ type: 'report-only quality failure', description: `${checkpoint.id}: ${result.error}` })
+    await info.attach(`${checkpoint.id}-quality-failure`, { body: JSON.stringify(report), contentType: 'application/json' })
+    console.log(`${checkpoint.id}: REPORT-ONLY quality failed: ${result.error}`)
+  }
+}
+
+async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoint, setup: VisualSetup, visual: typeof manifest) {
     const capture = captureEnabled(visual)
+    const reportOnly = visualReportOnly(visual) && !capture
     const gate = await reportReference(info, checkpoint, visual, capture)
-    // Ordinary CI reports deferred/stale references before setup. Only manual
-    // capture can inspect their candidates pending the next reference review.
-    if ((gate.mode === 'deferred' || gate.status === 'needs-re-capture') && !(capture && visual.capture.states.includes(gate.state))) {
+    // Report-only checks all states. Explicit deferrals apply again when the
+    // reviewed set-3 comparison policy becomes blocking.
+    if (!reportOnly && (gate.mode === 'deferred' || gate.status === 'needs-re-capture') && !(capture && visual.capture.states.includes(gate.state))) {
       writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify({ id: checkpoint.id, reference: gate,
         requirementsRun: false, baselineCompared: false, pngSHA256: null }, null, 2))
       return
@@ -58,7 +76,6 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
       colorScheme: checkpoint.theme, reducedMotion: visual.renderer.reducedMotion,
       hasTouch: checkpoint.profile === 'phone', locale: visual.renderer.locale, timezoneId: visual.renderer.timezone })
     const page = await context.newPage()
-    await prepareVisualFonts(page, String(info.project.use.baseURL))
     const errors: string[] = []
     const responses: { path: string; status: number }[] = []
     page.on('response', response => { if (response.status() >= 400) responses.push({ path: new URL(response.url()).pathname, status: response.status() }) })
@@ -74,6 +91,7 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
     }
     await page.clock.setFixedTime(new Date(policy.now))
     try {
+      await prepareVisualFonts(page, String(info.project.use.baseURL))
       await setup(page, checkpoint.profile, checkpoint.theme)
       await sampleClock('after-fixture')
       await page.evaluate(async theme => {
@@ -93,7 +111,7 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
       const fonts = await fontEvidence(page, gate.state)
       await sampleClock('before-capture')
       console.log(`${checkpoint.id}: font guard ok; computed body: ${fonts.body.computedFamily}; resolved: ${fonts.body.renderedFamilies.join(', ')}; profile faces loaded: ${fonts.profile.length}`)
-      const png = capture || gate.mode === 'compare' ? await page.screenshot({ path: info.outputPath(`${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }) : null
+      const png = capture || reportOnly || gate.mode === 'compare' ? await page.screenshot({ path: info.outputPath(`${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }) : null
       const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
       const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
       const violations = axe.violations.map(row => ({ id: row.id, impact: row.impact, nodes: row.nodes.map(node => node.target) }))
@@ -106,20 +124,31 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
       const report = { id: checkpoint.id, owner: checkpoint.owner, fixture: checkpoint.fixture,
         captureSHA, pngSHA256: png ? createHash('sha256').update(png).digest('hex') : null, baselineCompared: false,
         reference: gate, viewport, theme: checkpoint.theme, renderer, fonts, clock, requirementsRun: true,
+        quality: { status: 'pending' }, comparison: { status: 'not run' },
         captureMode: capture, layout, axe: violations, console: unexpectedErrors, responses: unexpectedResponses, expectedReads }
       const saveReport = () => writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify(report, null, 2))
       saveReport()
-      expect(expectedReads, 'declared fixture refusal must be observed exactly once').toEqual(expectedResponses.map(({ path, status }: { path: string; status: number }) => ({ path, status })))
-      expect(unexpectedErrors, 'unexpected console/page failure').toEqual([])
-      expect(unexpectedResponses, 'unexpected failed HTTP reads').toEqual([])
-      expect(layout, 'unexpected clipping, overlap or overflow').toEqual([])
-      expect(violations, 'WCAG A/AA violations').toEqual([])
-      await sampleClock('before-comparison')
-      assertClockEvidence(clock, policy)
-      report.baselineCompared = !capture && gate.mode === 'compare' ? await compareVisualReference(page, info, checkpoint, { renderer, visual }) : false
+      report.quality = await visualCheckResult(capture ? { ...visual, comparison: { ...visual.comparison, mode: 'blocking' } } : visual, async () => {
+        expect(expectedReads, 'declared fixture refusal must be observed exactly once').toEqual(expectedResponses.map(({ path, status }: { path: string; status: number }) => ({ path, status })))
+        expect(unexpectedErrors, 'unexpected console/page failure').toEqual([])
+        expect(unexpectedResponses, 'unexpected failed HTTP reads').toEqual([])
+        expect(layout, 'unexpected clipping, overlap or overflow').toEqual([])
+        expect(violations, 'WCAG A/AA violations').toEqual([])
+        await sampleClock('before-comparison')
+        assertClockEvidence(clock, policy)
+      })
+      if (!capture && (reportOnly || gate.mode === 'compare')) {
+        await compareVisualReference(page, info, checkpoint, { renderer, visual })
+        report.comparison = JSON.parse(readFileSync(info.outputPath(`${checkpoint.id}-comparison.md`), 'utf8'))
+        report.baselineCompared = ['matched', 'different'].includes(report.comparison.status)
+      }
       saveReport()
+      if (reportOnly) {
+        await info.attach(`${checkpoint.id}-result`, { body: JSON.stringify(report), contentType: 'application/json' })
+        console.log(`${checkpoint.id}: REPORT-ONLY quality ${report.quality.status}; comparison ${report.comparison.status}; awaiting re-capture under the final renderer`)
+      }
     } catch (error) {
-      if (capture || gate.mode === 'compare') await page.screenshot({ path: info.outputPath(`failed-${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }).catch(() => {})
+      if (capture || reportOnly || gate.mode === 'compare') await page.screenshot({ path: info.outputPath(`failed-${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }).catch(() => {})
       writeFileSync(info.outputPath(`failed-${checkpoint.id}.md`), `${checkpoint.id}: ${String(error)}\n${JSON.stringify({ console: errors, responses }, null, 2)}\n`)
       throw error
     } finally { await context.close() }
@@ -127,7 +156,14 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
 
 async function reportReference(info: TestInfo, checkpoint: { id: string }, visual = manifest, capture = false) {
   const gate = referenceGate(visual, checkpoint.id)
-  if (gate.mode !== 'compare') {
+  if (gate.mode === 'report-only') {
+    const message = `${checkpoint.id}: ${gate.reason}; quality checks required; ${gate.historicalReference ? 'historical comparison is report-only' : 'no historical PNG available'}.`
+    info.annotations.push({ type: 'awaiting reference', description: message })
+    await info.attach(`${checkpoint.id}-awaiting-reference`, { body: message, contentType: 'text/plain' })
+    console.log(message)
+    return gate
+  }
+  if (!['compare', 'report-only'].includes(gate.mode)) {
     const pending = capture && visual.capture.states.includes(gate.state)
     const message = gate.mode === 'deferred' ? `${checkpoint.id}: ${gate.reason}; ${capture && visual.capture.states.includes(gate.state) ? 'manual candidate capture requires quality checks; comparison remains deferred.' : 'product requirement checks not run.'}` :
       `${checkpoint.id}: awaiting reference (${gate.status}); ${gate.status === 'needs-re-capture' ? pending ? 'manual candidate capture requires quality checks; comparison remains awaiting reference' : 'report only; product requirement checks not run' : 'quality checks required'}. ${gate.reason}`
@@ -144,16 +180,27 @@ export async function compareVisualReference(page: Page, info: TestInfo, checkpo
   { visual = manifest, baselineFile = process.env.AEON_VISUAL_BASELINE_FILE, timeout, renderer = rendererIdentity(visual, page.context().browser()!.version(), { browserOptions: info.project.use }) }:
     { visual?: typeof manifest; baselineFile?: string; timeout?: number; renderer?: Record<string, unknown> } = {}) {
   const gate = referenceGate(visual, checkpoint.id)
-  if (gate.mode !== 'compare') {
+  if (!['compare', 'report-only'].includes(gate.mode)) {
     await reportReference(info, checkpoint, visual)
     return false
   }
-  assertRenderer(renderer, visual.renderer)
-  await fontEvidence(page, gate.state)
-  materializeReference(info, checkpoint, { visual, baselineFile })
-  await expect(page).toHaveScreenshot(`${checkpoint.id}.png`, { fullPage: false, animations: 'disabled', caret: 'hide',
-    threshold: visual.comparison.threshold, maxDiffPixels: visual.comparison.maxDiffPixels, timeout })
-  return true
+  const comparison: { id: string; status: string; error?: string } = { id: checkpoint.id, status: 'unavailable' }
+  const result = await visualCheckResult(visual, async () => {
+    assertRenderer(renderer, visual.renderer)
+    await fontEvidence(page, gate.state)
+    materializeReference(info, checkpoint, { visual, baselineFile })
+    comparison.status = 'different'
+    await expect(page).toHaveScreenshot(`${checkpoint.id}.png`, { fullPage: false, animations: 'disabled', caret: 'hide',
+      threshold: visual.comparison.threshold, maxDiffPixels: visual.comparison.maxDiffPixels, timeout })
+    comparison.status = 'matched'
+  })
+  if (result.status === 'failed') comparison.error = result.error
+  writeFileSync(info.outputPath(`${checkpoint.id}-comparison.md`), JSON.stringify(comparison, null, 2))
+  if (gate.mode === 'report-only') {
+    await info.attach(`${checkpoint.id}-comparison`, { body: JSON.stringify(comparison), contentType: 'application/json' })
+    console.log(`${checkpoint.id}: REPORT-ONLY comparison ${comparison.status}${comparison.error ? `: ${comparison.error}` : ''}`)
+  }
+  return comparison.status === 'matched'
 }
 
 // Linux uses the private fontconfig installed before browser launch. The remote
@@ -286,7 +333,7 @@ export function materializeReference(info: TestInfo, checkpoint: { id: string; r
   const state = visual.states.find((state: { checkpoints: { id: string }[] }) => state.checkpoints.some(row => row.id === checkpoint.id))
   if (!state) throw new Error(`Unknown visual checkpoint: ${checkpoint.id}`)
   const references = readBaselineBundle(baselineFile, visual, { checkpointIds: [checkpoint.id] })
-  const reference = references.get(checkpoint.reference.attachmentMember)
+  const reference = references.get(checkpoint.reference.attachmentMember ?? `${checkpoint.id}.png`)
   if (!reference) throw new Error(`Missing approved visual reference: ${checkpoint.id}`)
   const path = info.snapshotPath(`${checkpoint.id}.png`)
   mkdirSync(dirname(path), { recursive: true })

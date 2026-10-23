@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { validateVisual } from './check.mjs'
+import { validateVisual, visualReportOnly } from './check.mjs'
 import { assertRenderer } from './visual-renderer.mjs'
 
 const MAX_BUNDLE = 48 * 1024 * 1024
@@ -15,18 +15,23 @@ const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
 const need = (condition, message) => { if (!condition) throw new Error(message) }
 
 const hasPin = checkpoint => checkpoint.reference?.attachmentMember || checkpoint.reference?.sha256
-const pinnedCheckpoints = visual => visual.states.flatMap(state => state.checkpoints.filter(hasPin))
+// Set 2 is usable only as historical diff input while reporting. Blocking mode
+// never consults history: set 3 must provide its own active approvals and pins.
+const transportSnapshot = visual => visualReportOnly(visual) ? visual.history?.find(row => row.referenceSet === 2) ?? visual : visual
+const pinnedCheckpoints = visual => transportSnapshot(visual).states.flatMap(state => state.checkpoints.filter(hasPin))
+const validateTransport = (visual, options) => validateVisual(visual, visualReportOnly(visual) ? {} : { cuts: true, ...selection(visual, options) })
 const selection = (visual, options) => options.stateIds ? { stateIds: options.stateIds } :
   { checkpointIds: options.checkpointIds ?? pinnedCheckpoints(visual).map(checkpoint => checkpoint.id) }
 
 // Rejected captures remain digest-checked transport evidence. They never enter
 // the returned reference map, even though the immutable bundle contains them.
 function transportMembers(visual) {
+  const snapshot = transportSnapshot(visual)
   const pinned = pinnedCheckpoints(visual).map(checkpoint => ({ id: checkpoint.id, ...checkpoint.reference }))
-  const unapproved = visual.baselineAuthority.source.format === 'tar' ? visual.baselineAuthority.source.unapprovedMembers ?? [] : []
+  const unapproved = snapshot.baselineAuthority.source.format === 'tar' ? snapshot.baselineAuthority.source.unapprovedMembers ?? [] : []
   need(Array.isArray(unapproved) && unapproved.length <= 80, 'Invalid unapproved visual transport inventory')
   for (const member of unapproved) {
-    const checkpoint = visual.states.flatMap(state => state.checkpoints).find(checkpoint => checkpoint.id === member.id)
+    const checkpoint = snapshot.states.flatMap(state => state.checkpoints).find(checkpoint => checkpoint.id === member.id)
     need(['deferred', 'needs-re-capture'].includes(checkpoint?.referenceStatus) && !hasPin(checkpoint) && member.attachmentMember === `${member.id}.png` &&
       /^[a-f0-9]{64}$/.test(member.sha256 ?? ''), 'Unapproved visual transport member must be explicitly deferred and unpinned')
   }
@@ -38,7 +43,7 @@ function transportMembers(visual) {
 // AEON-1670 remains the approval record. The GitHub prerelease is only a
 // read-only transport for the same pinned bytes, never a browser-generated input.
 export function readBaselineBundle(path, visual, options = {}) {
-  validateVisual(visual, { cuts: true, ...selection(visual, options) })
+  validateTransport(visual, options)
   need(pinnedCheckpoints(visual).length > 0, 'Missing approved visual reference states')
   need(typeof path === 'string' && path.length > 0, 'Missing approved visual baseline attachment (AEON_VISUAL_BASELINE_FILE)')
   let stat
@@ -48,7 +53,7 @@ export function readBaselineBundle(path, visual, options = {}) {
 }
 
 export function verifyBaselineBundle(bytes, visual, options = {}) {
-  validateVisual(visual, { cuts: true, ...selection(visual, options) })
+  validateTransport(visual, options)
   need(pinnedCheckpoints(visual).length > 0, 'Missing approved visual reference states')
   need(bytes.length > 0 && bytes.length <= MAX_BUNDLE, 'Visual baseline bundle exceeds 48 MiB')
   const source = visual.baselineAuthority.source
@@ -73,7 +78,7 @@ export function verifyBaselineBundle(bytes, visual, options = {}) {
     need(png.toString('base64') === file.base64, 'Invalid visual baseline base64')
     need(png.length > 24 && png.length <= MAX_PNG && png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])), 'Visual baseline member is not a bounded PNG')
     need(sha256(png) === expected.get(file.name), `Visual baseline member SHA-256 mismatch: ${file.name}`)
-    if (pinned.has(file.name)) files.set(file.name, png)
+    if (visualReportOnly(visual) || pinned.has(file.name)) files.set(file.name, png)
   }
   return files
 }
@@ -82,6 +87,15 @@ export function verifyBaselineBundle(bytes, visual, options = {}) {
 // list allows a reviewed subset while explicit deferrals remain report-only.
 export function referenceGates(visual) {
   validateVisual(visual)
+  if (visualReportOnly(visual)) {
+    const historical = new Set(transportMembers(visual).map(member => member.id))
+    return visual.states.flatMap(state => state.checkpoints.map(checkpoint => ({
+      state: state.id, checkpoints: 1, checkpointIds: [checkpoint.id], mode: 'report-only', status: 'awaiting-re-capture',
+      historicalReference: historical.has(checkpoint.id),
+      reason: 'awaiting re-capture under the final renderer (AEON-1692 / reference set 3)',
+      deferral: checkpoint.deferredReason ?? state.deferredReason ?? null,
+    })))
+  }
   const declared = visual.approval.checkpoints
   if (declared !== undefined) need(Array.isArray(declared) && new Set(declared).size === declared.length &&
     declared.every(id => visual.states.some(state => state.checkpoints.some(checkpoint => checkpoint.id === id))),
@@ -119,12 +133,42 @@ export function referenceGate(visual, checkpointId) {
 
 export function referenceReport(visual) {
   const gates = referenceGates(visual)
+  if (visualReportOnly(visual)) return { gates, markdown: [
+    'Visual comparisons: REPORT-ONLY. Quality checks and historical diffs run; protected cuts remain closed until reference set 3 is pinned.', '',
+    '| Checkpoint | State | Reference status | Comparison input |', '| --- | --- | --- | --- |',
+    ...gates.map(gate => `| ${gate.checkpointIds[0]} | ${gate.state} | ${gate.reason} | ${gate.historicalReference ? 'set 2 history only' : 'no historical PNG'} |`), '',
+  ].join('\n') }
   const labels = gate => gate.checkpoints === visual.states.find(state => state.id === gate.state).checkpoints.length ? gate.state :
     `${gate.state} (${gate.checkpointIds.map(id => id.replace(`V-${gate.state}-`, '')).join(', ')})`
   return { gates, markdown: ['Visual reference gates (deferred checkpoints report only in ordinary CI; comparisons require quality checks).', '',
     '| State | Checkpoints | Reference gate |', '| --- | ---: | --- |',
     ...gates.map(gate => `| ${labels(gate)} | ${gate.checkpoints} | ${gate.mode === 'deferred' ? gate.reason : gate.mode === 'compare' ? 'strict image comparison + quality' :
       `awaiting reference (${gate.status}); ${gate.status === 'needs-re-capture' ? 'report only' : 'quality required'} — ${gate.reason}`} |`), ''].join('\n') }
+}
+
+// Called with always() after each shard, including failed/partial execution.
+// Every manifest checkpoint gets a row; an absent result is never a quiet pass.
+export function checkpointReport(directory, visual) {
+  const results = new Map()
+  if (existsSync(directory)) {
+    const paths = readdirSync(directory, { recursive: true })
+    need(paths.length <= 30_000, 'Visual report file inventory exceeds its bound')
+    for (const path of paths) {
+      const name = path.split(/[\\/]/).at(-1)
+      if (!/^V-[a-z0-9-]+\.md$/.test(name) || name.endsWith('-comparison.md')) continue
+      const bytes = boundedFile(join(directory, path), MAX_MANIFEST, 'Visual checkpoint report')
+      const report = JSON.parse(bytes)
+      if (name === `${report.id}.md`) results.set(report.id, report)
+    }
+  }
+  const cell = value => String(value ?? '').replaceAll('|', '\\|').replace(/[\r\n]+/g, ' ').slice(0, 1200)
+  return ['Visual checkpoint execution (comparison.mode=' + visual.comparison.mode + '). PNGs, diffs and full quality reports are retained in the shard evidence artifact.', '',
+    '| Checkpoint | Reference state | Quality | Comparison | Detail |', '| --- | --- | --- | --- | --- |',
+    ...referenceGates(visual).flatMap(gate => gate.checkpointIds.map(id => {
+      const report = results.get(id)
+      return `| ${id} | ${cell(gate.reason)} | ${cell(report?.quality?.status ?? (report?.requirementsRun ? 'checks ran; outcome unavailable' : 'not run in this shard'))} | ${cell(report?.comparison?.status ?? 'not run in this shard')} | ${cell(report?.quality?.error ?? report?.comparison?.error)} |`
+    })), '',
+  ].join('\n')
 }
 
 function boundedFile(path, limit, label) {
@@ -160,7 +204,7 @@ export function verifyReferenceArchive(archive, detachedBytes, visual, { tar = e
     detached.baselineBundle?.member === source.baselineBundle.attachmentMember &&
     detached.baselineBundle.sha256 === source.baselineBundle.sha256 &&
     Array.isArray(detached.states) && JSON.stringify([...detached.states].sort()) === JSON.stringify([...capturedStates].sort()), 'Visual detached manifest authority mismatch')
-  need(approved.length > 0, 'Missing approved visual reference states')
+  need(visualReportOnly(visual) ? membersExpected.length > 0 : approved.length > 0, 'Missing approved visual reference states')
   const sorted = rows => [...rows].sort((a, b) => a.id.localeCompare(b.id))
   need(Array.isArray(detached.members) && JSON.stringify(sorted(detached.members)) === JSON.stringify(sorted(membersExpected)), 'Visual detached manifest reference pins mismatch')
   need(Array.isArray(detached.payload) && detached.payload.length === membersExpected.length * 2 + 1,
@@ -202,7 +246,7 @@ export function materializeBaseline(directory, visual, { download = false, run =
   mkdirSync(directory, { recursive: true })
   writeFileSync(join(directory, 'reference-gates.json'), JSON.stringify(report.gates, null, 2) + '\n')
   writeFileSync(join(directory, 'reference-gates.md'), report.markdown)
-  if (!report.gates.some(gate => gate.mode === 'compare')) {
+  if (!visualReportOnly(visual) && !report.gates.some(gate => gate.mode === 'compare')) {
     console.log('No active visual comparison authority; Linux capture awaits Tick approval and explicit pins. Historical assets are not downloaded.')
     console.log(report.markdown)
     return null
@@ -233,13 +277,22 @@ export function materializeBaseline(directory, visual, { download = false, run =
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const visual = JSON.parse(readFileSync(new URL('./visual-manifest.json', import.meta.url), 'utf8'))
   try {
     const [mode, directory] = process.argv.slice(2)
-    need(['download', 'verify'].includes(mode) && directory, 'Usage: node scripts/test-prune/visual-baselines.mjs <download|verify> <directory>')
-    const visual = JSON.parse(readFileSync(new URL('./visual-manifest.json', import.meta.url), 'utf8'))
-    materializeBaseline(directory, visual, { download: mode === 'download' })
+    need(['download', 'verify', 'report'].includes(mode) && directory, 'Usage: node scripts/test-prune/visual-baselines.mjs <download|verify|report> <directory>')
+    if (mode === 'report') console.log(checkpointReport(directory, visual))
+    else materializeBaseline(directory, visual, { download: mode === 'download' })
   } catch (error) {
     console.error(`Visual reference materialization failed: ${error.message}`)
-    process.exitCode = 1
+    if (visualReportOnly(visual) && ['download', 'verify'].includes(process.argv[2])) {
+      // Invalid/unavailable history never reaches a comparator. Still publish
+      // all pending checkpoints; their runtime reports expose the missing input.
+      const directory = process.argv[3]
+      mkdirSync(directory, { recursive: true })
+      writeFileSync(join(directory, 'reference-gates.md'), referenceReport(visual).markdown + `\nHistorical transport unavailable: ${error.message}\n`)
+      console.log(referenceReport(visual).markdown)
+      console.log(`REPORT-ONLY historical transport unavailable: ${error.message}`)
+    } else process.exitCode = 1
   }
 }

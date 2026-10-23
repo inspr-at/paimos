@@ -658,6 +658,32 @@ func normalizeAEON1674VisualReferences(t *testing.T, id string, job map[string]a
 		pack["run"] = `tar -cf "$RUNNER_TEMP/web-runtime.tar" web/node_modules web/dist`
 	case "web-shard":
 		normalizeAEON1674RendererFonts(t, job)
+		// Round 12 reports every checkpoint even after partial shard failure.
+		// Verify this addition before projecting onto immutable pre-visual pins.
+		reportName := "Report every visual checkpoint and preserve comparison failures"
+		report := reuseStep(t, job, reportName)
+		if !reflect.DeepEqual(report, map[string]any{
+			"name": reportName,
+			"if":   "always()",
+			"run":  "node scripts/test-prune/visual-baselines.mjs report web/test-results >> \"$GITHUB_STEP_SUMMARY\"",
+		}) {
+			t.Fatal("every visual checkpoint must be reported after shard execution, including failure")
+		}
+		steps := reuseSteps(job)
+		var retained []any
+		for i, value := range steps {
+			if treeMap(value)["name"] == reportName {
+				if i == 0 || treeMap(steps[i-1])["name"] != "Run selected UI cases without retries" {
+					t.Fatal("visual checkpoint report must follow the actual shard run")
+				}
+				continue
+			}
+			retained = append(retained, value)
+		}
+		if len(retained) != len(steps)-1 {
+			t.Fatal("visual checkpoint report must run exactly once")
+		}
+		job["steps"] = retained
 		name = "Verify visual reference transport before comparison"
 		command = "verify"
 		previous = "Install Chromium system dependencies"

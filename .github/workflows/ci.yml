@@ -1006,7 +1006,7 @@ jobs:
       AEON_REQUIRE_BACKEND: 'off'
       AEON_VISUAL_BASELINE_FILE: ${{ github.workspace }}/tmp/visual-baselines/baseline.json
       # Renderer identity is checked against ImageOS and ImageVersion at runtime;
-      # a hosted image change must fail comparison until its reference is reviewed.
+      # Report-only until AEON-1692 pins set 3; renderer mismatches stay visible.
       AEON_VISUAL_RUNNER: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -1082,6 +1082,9 @@ jobs:
           else
             node scripts/test-tiers/cli.mjs run web --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
           fi
+      - name: Report every visual checkpoint and preserve comparison failures
+        if: always()
+        run: node scripts/test-prune/visual-baselines.mjs report web/test-results >> "$GITHUB_STEP_SUMMARY"
       - name: Confirm full tier execution
         if: github.event_name != 'pull_request' || (needs.ci-plan.outputs.lane == 'full' && needs.ci-plan.outputs.mode != 'essential')
         env:

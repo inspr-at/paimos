@@ -5,10 +5,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGate, referenceGates, referenceReport, materializeBaseline } from '../../scripts/test-prune/visual-baselines.mjs'
+import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGate, referenceGates, referenceReport, materializeBaseline, checkpointReport } from '../../scripts/test-prune/visual-baselines.mjs'
 import { collectCandidates, packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
 
 import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, verifyFontAssets, captureEnabled, rendererIdentity, installRendererFonts } from '../../scripts/test-prune/visual-renderer.mjs'
+import { validateVisual, visualCheckResult } from '../../scripts/test-prune/check.mjs'
 import { parseWorkflow } from '../../scripts/ci-static.mjs'
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
@@ -19,6 +20,7 @@ test('visual references require approval, immutable attachment bytes and every e
   // independently proves that actual differing pixels reject the comparison.
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jS1cAAAAASUVORK5CYII=', 'base64')
   const visual = structuredClone(manifest)
+  visual.comparison.mode = 'blocking'
   visual.renderer.runner.imageVersion = 'synthetic-image'
   for (const state of visual.states) {
     delete state.referenceStatus; delete state.deferredUntil; delete state.deferredReason
@@ -61,6 +63,7 @@ test('visual references require approval, immutable attachment bytes and every e
   // Risk: a mutable release tag, a corrupt download or an incorrect digest
   // must never reach tar, even when the reviewed baseline itself is valid.
   const mirrored = structuredClone(manifest)
+  mirrored.comparison.mode = 'blocking'
   mirrored.approval = structuredClone(manifest.history[0].approval)
   mirrored.baselineAuthority = structuredClone(manifest.history[0].baselineAuthority)
   mirrored.renderer.runner.imageVersion = 'synthetic-image'
@@ -120,38 +123,23 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.throws(() => verifyReferenceArchive(Buffer.alloc(0), detached, mirrored, noExtraction), /archive size mismatch/)
 
   const gates = referenceGates(manifest)
-  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').reduce((sum, gate) => sum + gate.checkpoints, 0), 53)
-  const staleIds = ['V-projects-390-light', 'V-decision-desk-1024-light', 'V-decision-desk-1024-dark',
-    'V-account-use-matrix-1024-light', 'V-account-use-matrix-1024-dark', 'V-account-use-matrix-1440-light',
-    'V-account-use-matrix-1440-dark', 'V-hours-390-light', 'V-hours-390-dark', 'V-hours-1440-light',
-    'V-hours-1440-dark', 'V-quote-editor-1440-light', 'V-agent-rules-390-dark']
-  assert.deepEqual(gates.filter(gate => gate.mode === 'awaiting-reference').flatMap(gate => gate.checkpointIds), staleIds)
-  for (const id of staleIds) {
-    assert.equal(referenceGate(manifest, id).status, 'needs-re-capture')
-    const c = manifest.states.flatMap(state => state.checkpoints).find(checkpoint => checkpoint.id === id)
-    assert.deepEqual(c.reference, { attachmentMember: null, sha256: null })
-    assert.deepEqual(c.deferredUntil, ['AEON-1692'])
-  }
-  assert.match(referenceReport(manifest).markdown, /awaiting reference \(needs-re-capture\); report only/)
-  const revived = structuredClone(manifest)
-  revived.approval.checkpoints.push(staleIds[0])
-  assert.throws(() => referenceGates(revived), /Stale visual reference still has comparison authority/)
-  assert.deepEqual(gates.filter((gate: { mode: string }) => gate.mode === 'deferred').map((gate: { state: string }) => gate.state), ['goals', 'delivery-numbers', 'capacity', 'ticket-workspace'])
-  assert.equal(gates.filter(gate => gate.mode === 'deferred').reduce((sum, gate) => sum + gate.checkpoints, 0), 14)
-  for (const checkpoint of manifest.states.find(state => state.id === 'capacity').checkpoints) {
-    assert.equal(referenceGate(manifest, checkpoint.id).mode, 'deferred')
+  assert.equal(gates.length, 80)
+  assert.ok(gates.every(gate => gate.mode === 'report-only' && gate.status === 'awaiting-re-capture'))
+  assert.equal(gates.filter(gate => gate.historicalReference).length, 72)
+  assert.equal(gates.filter(gate => !gate.historicalReference).length, 8)
+  assert.match(referenceReport(manifest).markdown, /awaiting re-capture under the final renderer/)
+  for (const state of manifest.states) for (const checkpoint of state.checkpoints)
     assert.deepEqual(checkpoint.reference, { attachmentMember: null, sha256: null })
-    assert.deepEqual(checkpoint.deferredUntil, ['AEON-1692'])
-  }
-  assert.deepEqual(gates.find(gate => gate.state === 'delivery-numbers' && gate.mode === 'compare')?.checkpointIds,
-    ['V-delivery-numbers-1440-light', 'V-delivery-numbers-1440-dark'])
-  assert.deepEqual(gates.find(gate => gate.state === 'delivery-numbers' && gate.mode === 'deferred')?.checkpointIds,
-    ['V-delivery-numbers-390-light', 'V-delivery-numbers-390-dark'])
-  assert.match(referenceReport(manifest).markdown, /deferred until AEON-1621 and AEON-1625/)
   assert.equal(manifest.history[0].states.flatMap((state: { checkpoints: unknown[] }) => state.checkpoints).length, 30)
+  const linuxHistory = manifest.history.find(row => row.referenceSet === 2)
+  assert.equal(linuxHistory.status, 'historical-only')
+  assert.equal(linuxHistory.approval.checkpoints.length, 53)
+  assert.equal(linuxHistory.baselineAuthority.source.unapprovedMembers.length, 19)
+  assert.equal(linuxHistory.states.find(state => state.id === 'delivery-numbers').checkpoints[0].referenceStatus, 'deferred')
   const noDownload = mkdtempSync(join(tmpdir(), 'aeon-1674-no-authority-'))
   try {
     const awaiting = structuredClone(manifest)
+    awaiting.comparison.mode = 'blocking'
     awaiting.approval = { states: [], checkpoints: [] }
     for (const state of awaiting.states) {
       delete state.approval
@@ -336,6 +324,7 @@ test('visual references require approval, immutable attachment bytes and every e
     // The generated archive can be consumed only after explicit synthetic
     // approval and pins. This proves next-round transport compatibility too.
     const pinned = structuredClone(manifest)
+    pinned.comparison.mode = 'blocking'
     pinned.renderer = renderer
     pinned.approval = { reviewer: 'Tick', status: 'approved', approvedAt: 'synthetic-only', evidence: 'Synthetic approval for transport test', states: candidate.states }
     pinned.baselineAuthority = structuredClone(mirrored.baselineAuthority)
@@ -397,5 +386,38 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.throws(() => verifyBaselineBundle(duplicatedBytes, repinnedTransport), { message: 'Unknown or duplicate visual baseline member' })
     const tampered = Buffer.from(archive); tampered[600] ^= 1
     assert.throws(() => verifyReferenceArchive(tampered, detached, pinned, noExtraction), /archive SHA-256 mismatch/)
+  } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
+// Risk: switching visual CI to reports could hide failures or accidentally
+// authorize protected pruning with historical set-1/set-2 approvals.
+test('visual report-only switch records failures and restores blocking without granting historical cut authority', async () => {
+  const failure = new Error('synthetic differing pixels')
+  const run = async () => { throw failure }
+  assert.deepEqual(await visualCheckResult(manifest, run), { status: 'failed', error: String(failure) })
+  assert.deepEqual(await visualCheckResult(manifest, async () => 'comparison ran'), { status: 'passed', value: 'comparison ran' })
+  const blocking = structuredClone(manifest)
+  blocking.comparison.mode = 'blocking'
+  await assert.rejects(visualCheckResult(blocking, run), error => error === failure)
+  assert.deepEqual(await visualCheckResult(blocking, async () => 'comparison ran'), { status: 'passed', value: 'comparison ran' })
+  assert.throws(() => validateVisual(manifest, { cuts: true, stateIds: ['agents'] }), /Protected visual cuts stay closed/)
+  assert.throws(() => validateVisual(blocking, { cuts: true, stateIds: ['agents'] }), /Unpinned visual reference/)
+  const revivedHistory = { ...blocking, ...structuredClone(manifest.history.find(row => row.referenceSet === 2)), comparison: blocking.comparison }
+  revivedHistory.approval.status = 'historical-only'
+  assert.throws(() => validateVisual(revivedHistory, { cuts: true, stateIds: ['agents'] }), /Cuts require Tick approval/)
+  const missingMode = structuredClone(manifest)
+  delete missingMode.comparison.mode
+  assert.throws(() => validateVisual(missingMode), /Missing visual comparison mode/)
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-1674-reports-'))
+  try {
+    const id = 'V-projects-390-light'
+    writeFileSync(join(directory, `${id}.md`), JSON.stringify({ id, requirementsRun: true,
+      quality: { status: 'failed', error: 'synthetic font guard failure' }, comparison: { status: 'different', error: 'synthetic pixel diff' } }))
+    const summary = checkpointReport(directory, manifest)
+    assert.equal(summary.split('\n').filter(line => line.startsWith('| V-')).length, 80)
+    assert.match(summary, /V-projects-390-light.*failed.*different.*synthetic font guard failure/)
+    assert.match(summary, /V-tickets-390-light.*not run in this shard/)
+    assert.match(summary, /awaiting re-capture under the final renderer/)
+    assert.equal(checkpointReport(join(directory, 'absent'), manifest).split('\n').filter(line => line.startsWith('| V-')).length, 80)
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })

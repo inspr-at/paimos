@@ -2,9 +2,9 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "round11-implemented-capacity-handoff-53-strict-13-awaiting",
+  "status": "round12-report-only-validation-in-progress",
   "cuts": false,
-  "note": "Round 11 confines visual renderer fontconfig to the visual browser child environment under tests/visual and retains six relocated ESSENTIAL guards. All affected non-visual specs pass remotely: 239 passed, with 54 unchanged optional header screenshot cases skipped. Thirteen failed set-2 pins explicitly await AEON-1692 / reference set 3, while 53 unchanged pins remain strict and 14 original deferrals remain. Node transport/ledger, archive verification and ten workflow tests pass. Five initial visual guards pass; the sixth exposed AEON-1690 day-label semantics and is fixed in visual assertions at 49a779c6d. Final guard/deferral rerun and static attempts are refused for remote 2/2 capacity; 53 Linux comparisons and hosted static remain unproven until coordinator push. No product changes, new references, cuts, origin push, deploy or model review.",
+  "note": "Round 12: all 80 checkpoints report-only, comparison.mode is the single blocking switch. All set-1/set-2 pins are historical; active pins and protected cuts are zero. Final renderer unchanged. All 72 historical PNGs and payloads verify; the focused transport, switch and ledger unit tests pass. Remote browser and static validation pending; no hosted-green claim, reference capture, new pin, cut, origin push, deployment or review gate.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -20,42 +20,7 @@
   "blockers": [
     {
       "kind": "hosted-verification",
-      "reason": "The remaining 53 zero-pixel Linux comparisons and hosted static must run after coordinator push; the approved remote Mac lane cannot claim Linux pixel proof."
-    },
-    {
-      "kind": "awaiting-reference",
-      "checkpoints": [
-        "V-projects-390-light",
-        "V-decision-desk-1024-light",
-        "V-decision-desk-1024-dark",
-        "V-account-use-matrix-1024-light",
-        "V-account-use-matrix-1024-dark",
-        "V-account-use-matrix-1440-light",
-        "V-account-use-matrix-1440-dark",
-        "V-hours-390-light",
-        "V-hours-390-dark",
-        "V-hours-1440-light",
-        "V-hours-1440-dark",
-        "V-quote-editor-1440-light",
-        "V-agent-rules-390-dark"
-      ],
-      "reason": "Actual failed set-2 pins are unpinned, retain their old transport digests and report needs re-capture for AEON-1692 / reference set 3. No new reference authority is granted."
-    },
-    {
-      "kind": "deferred-reference",
-      "states": [
-        "capacity",
-        "delivery-numbers-390"
-      ],
-      "reason": "Four Capacity checkpoints require frozen-clock re-capture, and two Delivery phone checkpoints require the +12px heading crop; AEON-1692/reference set 3 owns re-capture and approval."
-    },
-    {
-      "kind": "deferred-product",
-      "states": [
-        "goals",
-        "ticket-workspace"
-      ],
-      "reason": "Existing explicit product deferrals remain; no protected cuts are authorized."
+      "reason": "PR #891 CI must run after coordinator push; the worker cannot push and cannot claim hosted green. AEON-1692 owns set-3 re-capture and pins."
     }
   ],
   "measurements": [
@@ -4232,6 +4197,26 @@
       "originPush": false,
       "deploy": false,
       "modelReview": false
+    }
+  },
+  "round12": {
+    "comparisonMode": "report-only",
+    "switch": "scripts/test-prune/visual-manifest.json comparison.mode: report-only -> blocking",
+    "checkpoints": 80,
+    "historicalComparisonInputs": 72,
+    "withoutHistoricalPNG": 8,
+    "activePins": 0,
+    "protectedCuts": false,
+    "rendererChanged": false,
+    "ciSummary": "Every shard always reports all 80 checkpoint IDs, awaiting-re-capture state, actual quality/comparison result or explicit not-run state; diffs remain in shard evidence.",
+    "verification": {
+      "node": "3 tests passed (transport, mode switch, ledger)",
+      "immutableArchive": "All payloads and 72 historical PNGs verify",
+      "history": "Set-1 byte-for-byte JSON unchanged; set-2 approval/baselineAuthority/states snapshot exactly matches round 11",
+      "staticInventory": "38 static commands classified",
+      "browser": "pending remote run",
+      "fullStatic": "pending remote run",
+      "hostedCI": "coordinator-owned after push"
     }
   }
 }

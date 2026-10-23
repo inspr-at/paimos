@@ -15,6 +15,22 @@ const need = (condition, message) => { if (!condition) throw new Error(message) 
 const text = value => typeof value === 'string' && value.trim().length > 0
 const digest = value => /^[a-f0-9]{64}$/.test(value ?? '')
 
+export function visualReportOnly(visual) {
+  need(['report-only', 'blocking'].includes(visual.comparison?.mode), 'Missing visual comparison mode')
+  return visual.comparison.mode === 'report-only'
+}
+
+// Both the browser runner and comparator use this policy. A report retains the
+// actual failure; switching to blocking rethrows that same failure unchanged.
+export async function visualCheckResult(visual, run) {
+  const reportOnly = visualReportOnly(visual)
+  try { return { status: 'passed', value: await run() } }
+  catch (error) {
+    if (!reportOnly) throw error
+    return { status: 'failed', error: String(error) }
+  }
+}
+
 function indexed(rows, name) {
   need(Array.isArray(rows) && rows.length <= 20_000, `Invalid ${name} rows`)
   const result = new Map()
@@ -59,6 +75,7 @@ function currentAnchors(source, baseline) {
 
 export function validateVisual(visual, { cuts = false, stateIds = visual.states?.map(state => state.id), checkpointIds } = {}) {
   need(visual.version === 1, 'Invalid visual manifest version')
+  const reportOnly = visualReportOnly(visual)
   const expected = ['projects', 'tickets', 'goals', 'agents', 'session-chat', 'decision-desk',
     'account-use-matrix', 'models', 'access', 'knowledge', 'delivery-numbers', 'hours',
     'quote-editor', 'public-quote', 'start-agent', 'agent-rules', 'capacity', 'ticket-workspace']
@@ -73,6 +90,8 @@ export function validateVisual(visual, { cuts = false, stateIds = visual.states?
     checkpointIds.every(id => visual.states.some(state => state.checkpoints?.some(checkpoint => checkpoint.id === id))),
   'Unknown/duplicate required visual checkpoint')
   const requiredCheckpoints = new Set(cuts ? checkpointIds : [])
+  if (required.size || requiredCheckpoints.size) need(!reportOnly,
+    'Protected visual cuts stay closed until reference set 3 is pinned and comparisons are blocking')
   const checkpoints = new Set()
   for (const state of visual.states) {
     visualClock(visual, state.id)

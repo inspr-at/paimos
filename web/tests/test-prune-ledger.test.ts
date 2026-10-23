@@ -36,7 +36,7 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   const summary = checkRepository()
   assert.deepEqual(summary, { browserCases: 5318, specs: 378, core: 29, protectedRisks: 647,
     driftCases: 455, candidateGroups: 31, candidateCases: 155, visualCases: 80,
-    visualApproval: 'approved', phase: 'P01', cuts: false })
+    visualApproval: 'awaiting-set-3', phase: 'P01', cuts: false })
   const original = {
     baseline,
     ledger: json('scripts/test-prune/risk-ledger.json'),
@@ -158,6 +158,7 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   // set must be complete, reviewed and available; unrelated pending Projects
   // and deferred Goals/quality fixes must never block that cut.
   const areaCut = structuredClone(original)
+  areaCut.visual.comparison.mode = 'blocking'
   const areaRisk = areaCut.ledger.risks.find((row: { source: { file: string } }) => row.source.file === 'tests/agents-phone-rows.spec.ts')
   assert.deepEqual(areaRisk.destinations, ['visual:agents'])
   const removedKey = areaRisk.currentKeys[0]
@@ -173,7 +174,10 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   Object.assign(areaCut.visual.baselineAuthority.source, { attachmentId: 'synthetic-only', sha256: 'a'.repeat(64) })
   areaCut.visual.baselineAuthority.retention.verifiedAt = 'synthetic-proof'
   const area = areaCut.visual.states.find((row: { id: string }) => row.id === 'agents')
-  for (const checkpoint of area.checkpoints) checkpoint.reference = { attachmentMember: `${checkpoint.id}.png`, sha256: 'b'.repeat(64) }
+  for (const checkpoint of area.checkpoints) {
+    delete checkpoint.referenceStatus; delete checkpoint.deferredUntil; delete checkpoint.deferredReason
+    checkpoint.reference = { attachmentMember: `${checkpoint.id}.png`, sha256: 'b'.repeat(64) }
+  }
   assert.equal(validateLedger({ ...areaCut, sourceHash }).cuts, true,
     'A pinned Agents cut passes while unrelated Projects is unpinned and Goals is deferred')
   assert.throws(() => validateLedger({ ...areaCut, sourceHash, p01: true }), /P01 cannot remove or demote/)
@@ -204,8 +208,8 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   assert.throws(() => validateLedger({ ...frozen, sourceHash: () => '0'.repeat(64), p01: true }), /Frozen launch-policy changed/)
   frozen.currentWeb.defaultNewTier = 'ESSENTIAL'
   assert.throws(() => validateLedger({ ...frozen, sourceHash: frozenHash, p01: true }), /P01 changed catalogue selection\/tagging\/timing policy/)
-  assert.throws(() => validateVisual(original.visual, { cuts: true, stateIds: ['goals'] }), /Deferred visual reference/)
-  assert.throws(() => validateVisual(original.visual, { cuts: true, checkpointIds: ['V-projects-390-light'] }), /Unpinned visual reference: V-projects-390-light/)
+  assert.throws(() => validateVisual(original.visual, { cuts: true, stateIds: ['goals'] }), /Protected visual cuts stay closed/)
+  assert.throws(() => validateVisual(original.visual, { cuts: true, checkpointIds: ['V-projects-390-light'] }), /Protected visual cuts stay closed/)
   const missingCheckpoint = structuredClone(original.visual)
   missingCheckpoint.states[0].checkpoints.pop()
   assert.throws(() => validateVisual(missingCheckpoint), /Missing\/duplicate visual checkpoint/)
