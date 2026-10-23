@@ -957,6 +957,16 @@ test('zero assistants show the permission-gated existing connect flow without sa
   expect(items).toHaveLength(1)
   expect(items[0]!.policy.allowed_projects).toEqual([])
   expect(items[0]!.policy.weekly_budget.amount).toBe('0')
+  const phonePanel = page.getByRole('complementary', { name: 'Assistant details' })
+  await phonePanel.getByRole('button', { name: 'More assistant actions' }).click()
+  await page.getByRole('menuitem', { name: 'Edit policy', exact: true }).click()
+  const phoneBudget = phonePanel.getByRole('textbox', { name: 'Weekly budget', exact: true })
+  await phoneBudget.scrollIntoViewIfNeeded()
+  await expectStableControls({ controls: { sheet: phonePanel, save: phonePanel.getByRole('button', { name: /^Save/ }), cancel: phonePanel.getByRole('button', { name: /^Cancel/ }), budget: phoneBudget, tabs: phonePanel.getByRole('tablist') }, scrollAreas: { body: phonePanel.locator('.assistant-panel-scroll') }, interactions: [{ name: 'edit a policy on the phone', run: () => phoneBudget.fill('2') }] })
+  await page.screenshot({ path: testInfo.outputPath('aeon-1705-390-dark-sheet-policy-edit.png'), fullPage: true })
+  await phoneBudget.press('ControlOrMeta+Enter')
+  await expect(phonePanel.getByRole('status')).toHaveText('Policy saved')
+  expect(items[0]!.policy.weekly_budget.amount).toBe('2')
   // Even a principal carrying person-only permission names must use its own
   // self-policy route and never acquire Policy editing controls as an agent.
   const self = items[0]!, agentRequests: string[] = []
