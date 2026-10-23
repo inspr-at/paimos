@@ -2,12 +2,16 @@
 package auth
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/decisiondesk"
-	"net/http"
-	"net/http/httptest"
-	"testing"
 )
 
 // AEON-1709 replaces the accepted-cookie tests by an explicit no-cookie proof.
@@ -56,6 +60,43 @@ func TestDeskSummaryRejectsSessionAndRetiredPeekCookies(t *testing.T) {
 			t.Fatal("discovery issued a peek cookie")
 		}
 	}
+
+	// A real summary grant cannot authenticate another API route.
+	r = httptest.NewRequest("POST", "/api/decision-desk/connections", strings.NewReader(`{"origin":"https://pma.example","state":"`+strings.Repeat("a", 43)+`"}`))
+	r.Header.Set("Origin", "http://example.com")
+	r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	_, r.Pattern = mux.Handler(r)
+	w = httptest.NewRecorder()
+	secured.ServeHTTP(w, r)
+	if w.Code != 201 {
+		t.Fatalf("grant issuance: %d", w.Code)
+	}
+	var out struct {
+		Address string `json:"redirect_url"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &out) != nil {
+		t.Fatal("invalid grant response")
+	}
+	address, err := url.Parse(out.Address)
+	if err != nil {
+		t.Fatal("invalid return address")
+	}
+	fragment, err := url.ParseQuery(address.Fragment)
+	if err != nil || fragment.Get("token") == "" {
+		t.Fatal("missing fragment grant")
+	}
+	for _, path := range []string{"/api/me", "/api/decision-desk/projection", "/api/decision-desk/connections"} {
+		r = httptest.NewRequest("GET", path, nil)
+		r.Header.Set("Authorization", "Bearer "+fragment.Get("token"))
+		r.Header.Set("Origin", "https://pma.example")
+		_, r.Pattern = mux.Handler(r)
+		w = httptest.NewRecorder()
+		secured.ServeHTTP(w, r)
+		if w.Code != 401 {
+			t.Fatalf("summary grant authenticated %s: %d", path, w.Code)
+		}
+	}
+
 }
 
 func TestDeskPeekClearFollowsBrowserCookiePath(t *testing.T) {
