@@ -42,8 +42,7 @@ async function expectCountdownGap(page: Page, step: string) {
     const empty: CountdownRow[] = []
     const slot = line.querySelector('.sync-count') as HTMLElement | null
     const inner = slot?.querySelector(':scope > span') as HTMLElement | null
-    const digit = inner?.firstChild
-    if (!slot || !inner || !digit) return { error: 'countdown slot is not in place', rows: empty }
+    if (!slot || !inner || !inner.firstChild) return { error: 'countdown slot is not in place', rows: empty }
     // Vue may leave an empty text node between the phrase and the box. The last real text before the box is "…in ".
     const words = slot.parentElement
     let phrase: Text | null = null
@@ -66,6 +65,8 @@ async function expectCountdownGap(page: Page, step: string) {
       range.setStart(phrase, at + 2)
       range.setEnd(phrase, at + 3)
       const space = range.getBoundingClientRect().width
+      // textContent replaces the text node, so read the digit that is on screen now.
+      const digit = inner.firstChild!
       range.setStart(digit, 0)
       range.setEnd(digit, 1)
       const number = range.getBoundingClientRect().left
