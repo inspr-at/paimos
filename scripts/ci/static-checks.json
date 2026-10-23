@@ -915,7 +915,7 @@
     },
     {
       "id": "desk-instance-units",
-      "command": "node node_modules/vitest/vitest.mjs run tests/desk-connections.unit.test.ts tests/desk-elsewhere.unit.test.ts tests/decision-desk-cutover.unit.test.ts tests/desk-notifications.unit.test.ts tests/desk-tab-lifecycle.unit.test.ts tests/goals-waiting-toggle.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+      "command": "node node_modules/vitest/vitest.mjs run tests/desk-connections.unit.test.ts tests/desk-elsewhere.unit.test.ts tests/decision-desk-cutover.unit.test.ts tests/desk-notifications.unit.test.ts tests/desk-tab-lifecycle.unit.test.ts tests/goals-waiting-toggle.unit.test.ts tests/settings-routing.unit.test.ts tests/import-draft-routing.unit.test.ts tests/quote-switch-race.unit.test.ts tests/dead-screens.unit.test.ts tests/work-kinds.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
       "cwd": "web",
       "ci": {
         "job": "web-unit",
@@ -928,7 +928,7 @@
         "npm-installed"
       ],
       "timeout_seconds": 90,
-      "supplement": "AEON-1709: exercise the ESSENTIAL person-bound instance connection, consolidated Desk and notification units directly in the approved remote static lane, without a database or browser."
+      "supplement": "AEON-1709: exercise the ESSENTIAL person-bound instance connection, consolidated Desk, notification and affected router-boundary units directly in the approved remote static lane, without a database or browser."
     }
   ]
 }

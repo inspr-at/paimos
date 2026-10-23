@@ -106,6 +106,10 @@ for (const width of [1440, 1024, 390] as const) {
     await expect.poll(() => page.title()).toMatch(/^\(5\)/)
     const header = page.locator('header .needs-badge').first()
     await expect(header).toHaveText('5')
+    // The consolidated total has one stable accessible name; the breakdown stays in its tooltip.
+    const deskPlace = page.locator('header .places').getByRole('link', { name: 'Decision Desk, 5 open', exact: true })
+    await expect(deskPlace).toBeVisible()
+    await expect(deskPlace).toHaveAttribute('data-tip', /3 here · 2 on pma/)
     expect(errors).toEqual([])
     if (width < 720) { await page.getByRole('button', { name: /^Account for / }).click(); await page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Preview the Decision Desk' }).click() }
     else await page.getByRole('button', { name: 'Preview the Decision Desk', exact: true }).click()

@@ -10,10 +10,6 @@ export type ElsewhereDiscovery = 'pending' | 'known' | 'unknown'
 
 const TAG = /^[a-z][a-z0-9-]{0,15}$/
 const SUMMARY_LINES = 5, TITLE_MAX = 200, NAME_MAX = 120, READ_TIMEOUT = 8_000, SIBLING_BODY_MAX = 64_000
-export const ELSEWHERE_REFRESH = 30_000
-// Lines one sibling may occupy in the band. The band keeps this many slots when a read fails.
-export const ELSEWHERE_LINES = 2
-
 const text = (value: unknown, max: number) => typeof value === 'string' ? value.trim().slice(0, max) : ''
 function origin(value: unknown): string {
   if (typeof value !== 'string') return ''

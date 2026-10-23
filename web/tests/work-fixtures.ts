@@ -408,6 +408,9 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = request.postData() }
     calls.push({ path, method, query, body, headers: request.headers() })
+    // Single-instance fixtures must confirm that discovery found no siblings.
+    // A missing discovery response deliberately cannot establish an all-clear Desk.
+    if (path === '/api/decision-desk/instances' && method === 'GET') return route.fulfill({ json: { here: 'ppm', siblings: [] } })
     const personStepNode = /^\/api\/nodes\/([^/]+)\/person-steps$/.exec(path)
     if (personStepNode && method === 'GET') {
       const node = data.nodes.find(n => n.id === personStepNode[1]), completion = node?.fields.human_check_completed as { text?: string } | undefined
