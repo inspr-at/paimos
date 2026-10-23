@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/quotes/print-receipt.spec.ts",
-    "listedTests": 3,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
         "max": 1.405,

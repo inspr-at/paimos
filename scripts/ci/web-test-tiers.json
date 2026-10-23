@@ -12702,6 +12702,8 @@
     ,
     {"kind":"browser","file":"tests/quote-dock-layout.spec.ts","name":"what folds out of the dock title bar is in its … menu, and works there","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"AEON-1682: native prose edit, measurement history and CAS save survive a reload with stable IDs","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"draft save converts measurements in old browser recovery without changing money","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"numbering restart, explicit start, continuation across prose and section binding","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -12903,6 +12905,8 @@
     {"kind":"browser","file":"tests/quotes-tab.spec.ts","name":"without a sender the dialog says what to set up first and creates nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/quotes/parity-flow.spec.ts","name":"customer → quote → inspector save → issue → public acceptance race → receipt","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"AEON-1682: emitted multipage receipt preserves Unicode marks, fixed evidence and unclipped A4 text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"print entry keeps inline marks and accepted receipt evidence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -20337,6 +20341,14 @@
     {"kind":"vitest","file":"tests/quote-switch-race.unit.test.ts","name":"AEON-1421: a receipt retry stays usable when the refresh shows generation failed again","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/quote-switch-race.unit.test.ts","name":"AEON-1421: switching quotes drops the other quote’s link read and refuses its revoke","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"AEON-1682: loading refuses writes and a held reload cannot replace an edit made after it began","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"AEON-1682: merge review preserves text overlaps, deleted anchors and competing order","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"AEON-1682: refused saves preserve work and distinguish corrected mutations from uncertain same-id retry","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"AEON-1682: revision watch backs off on the injected clock and focus rechecks without waiting","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"waits for a deferred discarded recovery decision even after the old 400ms window","tier":"GATED-FULL"}
     ,

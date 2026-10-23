@@ -2,6 +2,43 @@
 import { expect, test } from '@playwright/test'
 import fixture from './fixtures/synthetic-document.json' with { type: 'json' }
 
+test('AEON-1682: emitted multipage receipt preserves Unicode marks, fixed evidence and unclipped A4 text', async ({ page }, testInfo) => {
+  const document = structuredClone(fixture) as any
+  const paragraph = 'A bold opening and an italic continuation with enough words to wrap across the paper width. '
+  const digest = 'a'.repeat(64)
+  document.sections = Array.from({ length: 12 }, (_, index) => ({
+    id: `11111111-1111-4111-8111-${String(index + 1).padStart(12, '0')}`,
+    heading: `Part ${index + 1}`, body: '',
+    nodes: [{ id: `22222222-2222-4222-8222-${String(index + 1).padStart(12, '0')}`, kind: 'paragraph',
+      text: index === 0 ? 'Bold 😀 and italic' : paragraph.repeat(3),
+      marks: index === 0 ? [{ start: 0, end: 4, bold: true }, { start: 5, end: 7, bold: true, italic: true }, { start: 8, end: 11, italic: true }]
+        : [{ start: 2, end: 6, bold: true }, { start: 19, end: 25, italic: true }],
+    }],
+  }))
+  await page.route('**/payload', route => route.fulfill({ json: { document, offer_no: 'A260924-01',
+    accepted: { name: 'Example Signer', company: 'Example Customer', at: '2026-09-24T12:00:00Z', digest } } }))
+  await page.goto('/quote-print.html')
+  await expect(page.locator('html')).toHaveAttribute('data-pdf-ready', 'true')
+  await page.evaluate(() => document.fonts.ready)
+  const prose = page.locator('.quote-page .quote-prose-text').first()
+  await expect(prose.locator('strong')).toHaveCount(2)
+  await expect(prose.locator('strong em')).toHaveText('😀')
+  await expect(prose.locator(':scope > em')).toHaveText('and')
+  await expect(page.locator('.quote-stamp')).toContainText('Example Signer')
+  await expect(page.locator('.quote-stamp')).toContainText(digest)
+  await expect(page.locator('.quote-final-qr')).toHaveCount(0)
+  const pages = await page.locator('.quote-page').count()
+  expect(pages).toBeGreaterThan(1)
+  const clipped = await page.locator('.quote-page .quote-prose-text').evaluateAll(nodes => nodes.some(node => {
+    const text = node.getBoundingClientRect(), sheet = node.closest('.quote-page')!.getBoundingClientRect()
+    return text.left < sheet.left - 1 || text.right > sheet.right + 1 || text.bottom > sheet.bottom + 1
+  }))
+  expect(clipped).toBe(false)
+  const pdf = await page.pdf({ format: 'A4', printBackground: true, path: testInfo.outputPath('receipt.pdf') })
+  expect(pdf.subarray(0, 5).toString()).toBe('%PDF-')
+  expect((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length).toBe(pages)
+})
+
 test('print entry keeps inline marks and accepted receipt evidence', async ({ page }) => {
   const document = structuredClone(fixture)
   document.sections[0]!.nodes[0]!.text = 'Bold 😀 and italic'

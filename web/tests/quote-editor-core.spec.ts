@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test, type Page } from '@playwright/test'
+import { fixtures, mockWork } from './work-fixtures'
+import { mockQuoteEditor, NODES, QUOTE_ID, quoteDocument } from './quote-inspector-fixtures'
 
 const sectionId = '11111111-1111-4111-8111-111111111111'
 const nodeId = '22222222-2222-4222-8222-222222222222'
@@ -21,6 +23,50 @@ async function blank(page: Page) {
   await page.route('**/api/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }))
   await page.goto('/')
 }
+
+test('AEON-1682: native prose edit, measurement history and CAS save survive a reload with stable IDs', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  const document = quoteDocument()
+  Object.assign(document.sections[1]!.nodes[2]!, { marker_x_mm: '3', text_start_mm: '1.5' })
+  const { draft } = await mockQuoteEditor(page, document)
+  const writes: { revision: string; document: typeof document }[] = []
+  page.on('request', request => {
+    if (new URL(request.url()).pathname === `/api/quotes/${QUOTE_ID}/draft` && request.method() === 'PATCH')
+      writes.push({ revision: request.headers()['if-match']!, document: request.postDataJSON().document })
+  })
+  await page.goto(`/business/quotes/${QUOTE_ID}`)
+  await expect(page.locator('.quote-document')).toHaveAttribute('data-quote-ready', 'true')
+  const paragraph = page.locator(`[data-text-id="${NODES[0]}"]`)
+  await paragraph.click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' Revised.')
+  await expect(paragraph).toContainText('Revised.')
+  await expect.poll(() => draft.document.sections[0]!.nodes[0]!.text).toBe(`${document.sections[0]!.nodes[0]!.text} Revised.`)
+  const item = page.locator(`[data-text-id="${NODES[4]}"]`)
+  await item.click()
+  const marker = page.getByRole('complementary', { name: 'Format' }).getByRole('spinbutton', { name: 'Marker across' })
+  await expect(marker).toHaveValue('3')
+  await marker.fill('3.5'); await marker.press('Enter')
+  await expect.poll(() => (draft.document.sections[1]!.nodes[2] as { marker_x_mm?: string }).marker_x_mm).toBe('3.5')
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(marker).toHaveValue('3')
+  await page.getByRole('button', { name: 'Redo', exact: true }).click()
+  await expect(marker).toHaveValue('3.5')
+  await expect(page.locator('.quote-titlebar .save-state')).toHaveText('Saved')
+  expect(writes.length).toBeGreaterThan(0)
+  expect(writes.map(write => write.revision)).toEqual(writes.map((_write, i) => `"qd-${i + 1}"`))
+  const saved = structuredClone(draft.document)
+  expect(saved.sections.flatMap(section => [section.id, ...section.nodes.map(node => node.id)]))
+    .toEqual(document.sections.flatMap(section => [section.id, ...section.nodes.map(node => node.id)]))
+  expect(saved.positions.map(position => position.unit_price_cents)).toEqual(document.positions.map(position => position.unit_price_cents))
+  await page.reload()
+  await expect(page.locator('.quote-document')).toHaveAttribute('data-quote-ready', 'true')
+  await expect(paragraph).toHaveText(saved.sections[0]!.nodes[0]!.text)
+  expect(draft.document).toEqual(saved)
+  await item.click()
+  await expect(marker).toHaveValue('3.5')
+})
 
 test('draft save converts measurements in old browser recovery without changing money', async ({ page }) => {
   await blank(page)

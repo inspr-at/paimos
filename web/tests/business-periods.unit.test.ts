@@ -270,6 +270,8 @@ it('AEON-1682: effective rates use the selected day, unit and currency and rejec
   const after = { ...hourlyRate('cu-0'), id: 'after', effective_from: '2026-10-01', bill_amount: '99.5' }
   const dollars = { ...after, id: 'dollars', currency: 'USD', bill_amount: '120' }
   const daily = { ...after, id: 'daily', unit: 'day' as const, bill_amount: '720' }
+  store.setRates('cu-0', [before])
+  expect(store.rateOn('cu-0', 'hour', 'EUR', '2026-10-01')).toBeNull()
   store.setRates('cu-0', [daily, dollars, after, before])
   expect(store.rateOn('cu-0', 'hour', 'EUR', '2026-09-30')).toEqual(before)
   expect(store.rateOn('cu-0', 'hour', 'EUR', '2026-10-01')).toEqual(after)

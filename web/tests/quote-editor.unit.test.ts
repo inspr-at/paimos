@@ -114,7 +114,8 @@ describe('AEON-1682: persisted editor vectors', () => {
     let nodes: TextNode[] = ids.map((id, i) => ({ id, kind: i === 3 ? 'paragraph' : 'item', text: `Line ${i}`,
       ...(i === 3 ? {} : { marker: 'decimal' as const, numbering: 'outline' as const, depth: i === 2 || i === 4 ? 1 : 0 }) }))
     nodes = prose.setNumbering(nodes, [ids[0]!], { mode: 'start', start: 3 })
-    nodes = prose.setNumbering(nodes, [ids[2]!, ids[4]!], { mode: 'continue' })
+    nodes = prose.setNumbering(nodes, [ids[2]!], { mode: 'continue' })
+    nodes = prose.setNumbering(nodes, [ids[4]!], { mode: 'continue' })
     nodes = prose.setNumbering(nodes, [ids[5]!], { mode: 'restart' })
     nodes = prose.setNumbering(nodes, [ids[5]!], { mode: 'section' })
     nodes = prose.setNumbering(nodes, [ids[6]!], { mode: 'continue', sectionBound: true })
