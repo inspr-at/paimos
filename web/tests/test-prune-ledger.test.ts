@@ -159,3 +159,51 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   missingCheckpoint.states[0].checkpoints.pop()
   assert.throws(() => validateVisual(missingCheckpoint), /Missing\/duplicate visual checkpoint/)
 })
+
+test('P11 pruning rejects missing original-case mappings and dangling current destinations', () => {
+  const baseline = json('scripts/test-prune/baseline.json')
+  const ledger = json('scripts/test-prune/risk-ledger.json')
+  const execution = json('scripts/test-prune/p11-execution.json')
+  const owners = new Set(ledger.specs.filter((row: { package: string }) => row.package === 'P11').map((row: { file: string }) => row.file))
+  const originals = baseline.catalogue.filter((row: { kind: string; file: string }) => row.kind === 'browser' && owners.has(row.file))
+  const current = new Map(json('scripts/ci/web-test-tiers.json').tests.map((row: Parameters<typeof key>[0]) => [key(row), row]))
+  const protectedKeys = new Set(ledger.risks.flatMap((row: { currentKeys: string[] }) => row.currentKeys))
+  type Mapping = { source: string; disposition: string; destinations: string[]; approval?: string }
+  type Execution = { baselineSha256: string; actualAfter: number; unchangedSpecs: string[]; specs: { file: string; before: number; actualAfter: number; replacement: string; mappings: Mapping[] }[] }
+  const validate = (proof: Execution) => {
+    assert.equal(proof.baselineSha256, ledger.baselineSha256)
+    const files = [...proof.unchangedSpecs, ...proof.specs.map(row => row.file)]
+    assert.equal(new Set(files).size, files.length, 'Duplicate P11 source owner')
+    assert.deepEqual([...new Set(files)].sort(), [...owners].sort(), 'Missing P11 source owner')
+    for (const group of proof.specs) {
+      const source = originals.filter((row: { file: string }) => row.file === group.file)
+      assert.equal(group.before, source.length)
+      assert.equal(new Set(group.mappings.map(row => row.source)).size, group.mappings.length, 'Duplicate P11 original mapping')
+      assert.deepEqual(group.mappings.map(row => row.source).sort(), source.map(key).sort(), 'Missing P11 original mapping')
+      assert.ok(current.has(group.replacement), 'Missing P11 replacement identity')
+      for (const mapping of group.mappings) {
+        assert.ok(mapping.destinations.length > 0 && mapping.destinations.every(id => current.has(id)), 'Missing P11 current destination')
+        if (mapping.disposition === 'retained') assert.deepEqual(mapping.destinations, [mapping.source])
+        else {
+          assert.ok(!protectedKeys.has(mapping.source), 'P11 protected cuts remain closed')
+          assert.ok(!current.has(mapping.source), 'A consolidated original must leave the catalogue')
+          if (mapping.disposition === 'approved-retirement') assert.equal(mapping.approval, ledger.approval.id)
+          else assert.equal(mapping.disposition, 'consolidated')
+        }
+      }
+      assert.equal(group.actualAfter, [...current.values()].filter((row: Parameters<typeof key>[0]) => row.kind === 'browser' && row.file === group.file).length)
+    }
+    for (const row of originals.filter((row: { file: string }) => proof.unchangedSpecs.includes(row.file))) {
+      const { key: ignored, ...entry } = row
+      assert.deepEqual(current.get(key(row)), entry, 'An unmapped P11 original changed')
+    }
+    assert.equal(proof.actualAfter, [...current.values()].filter((row: Parameters<typeof key>[0]) => row.kind === 'browser' && owners.has(row.file)).length)
+  }
+  validate(execution)
+  const missing = structuredClone(execution)
+  missing.specs[0].mappings.pop()
+  assert.throws(() => validate(missing), /Missing P11 original mapping/)
+  const dangling = structuredClone(execution)
+  dangling.specs[0].mappings[0].destinations = ['browser:tests/status-icons.spec.ts:missing P11 replacement']
+  assert.throws(() => validate(dangling), /Missing P11 current destination/)
+})
