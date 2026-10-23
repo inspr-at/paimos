@@ -325,5 +325,19 @@
     "Complete positive/negative evidence for remaining P10 groups before deleting their originals.",
     "Resolve the P01/P02 visual-reference prerequisite without bypassing the ledger guard.",
     "Remove proven duplicates, remap current obligations, and regenerate tiers/shard source records; measure actual before/after runner time."
-  ]
+  ],
+  "handoff": {
+    "status": "blocked-incomplete",
+    "mainCommit": "af8da694874992ab76d4161a94a5e69eee3e056e",
+    "finalChecks": {
+      "canonicalManifests": "passed",
+      "riskLedger": "passed; cuts=false; visualApproval=pending",
+      "diffWhitespace": "passed",
+      "fullStatic": "exit 3: remote static check paused at night"
+    },
+    "noOriginPush": true,
+    "noDeploy": true,
+    "noReviewGate": true,
+    "noOtherModelCLI": true
+  }
 }
