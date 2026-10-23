@@ -139,7 +139,7 @@ async function setupSessionChat(page: Page, theme: Theme, unavailable: boolean) 
 export const sessionChat: VisualSetup = async (page, _profile, theme) => setupSessionChat(page, theme, false)
 export const sessionChatUnavailable: VisualSetup = async (page, _profile, theme) => setupSessionChat(page, theme, true)
 
-export const decisionDesk: VisualSetup = async (page, _profile, theme) => {
+export const decisionDesk: VisualSetup = async (page, profile, theme) => {
   await work(page, theme)
   const world = await mockDecisionDesk(page, { theme, long: true, phone: true })
   await visualChrome(page, fixtures(), NOW, { agents: false })
@@ -155,7 +155,16 @@ export const decisionDesk: VisualSetup = async (page, _profile, theme) => {
   await page.getByTestId('stamp-doctrine').scrollIntoViewIfNeeded()
   await page.getByTestId('stamp-doctrine').press('Tab')
   await page.keyboard.press('Shift+Tab')
-  await expect(page.locator('.tooltip')).toHaveText('Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.')
+  const reason = 'Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.'
+  await expect(page.getByTestId('stamp-doctrine')).toHaveAccessibleDescription(reason)
+  if (profile === 'phone') {
+    // AEON-1688 moved the phone reason into the row. Preserve that approved
+    // presentation and the full accessible reason, rather than opening an
+    // obsolete tooltip over its neighbouring choice.
+    await expect(page.getByTestId('stamp-doctrine')).toBeFocused()
+    await expect(page.getByTestId('stamp-words-doctrine')).toHaveText('Not available: the agent named no rule.')
+    await expect(page.locator('.tooltip')).toHaveCount(0)
+  } else await expect(page.locator('.tooltip')).toHaveText(reason)
 }
 
 export const access: VisualSetup = async (page, _profile, theme) => {
