@@ -112,6 +112,15 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     await page.evaluate(() => document.fonts.ready)
     const scroll = page.getByRole('region', { name: 'Weekly hours', exact: true })
     await scroll.focus()
+    const dimensions = await scroll.evaluate(element => ({
+      overflow: element.scrollWidth - element.clientWidth, width: element.clientWidth,
+      cells: Array.from(element.querySelectorAll('th, td')).map(cell => {
+        const range = document.createRange(); range.selectNodeContents(cell)
+        return { text: cell.textContent, width: cell.getBoundingClientRect().width,
+          textWidth: range.getBoundingClientRect().width, font: getComputedStyle(cell).font }
+      }),
+    }))
+    expect(dimensions.overflow, `${width} ${theme}: 0 px horizontal overflow; ${JSON.stringify(dimensions)}`).toBe(0)
     const controls = { navigation: page.getByRole('group', { name: 'Week', exact: true }),
       person: page.getByRole('button', { name: 'Hours of You. Choose a person or agent' }),
       row: rows.first(), grid: scroll }
@@ -120,7 +129,6 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
       { name: 'read the last day with the keyboard', run: async () => { await scroll.press('ArrowRight') } },
       { name: 'return to the first day', run: async () => { await scroll.press('ArrowLeft') } },
     ] })
-    expect(await scroll.evaluate(element => element.scrollWidth - element.clientWidth), 'week grid has 0 px horizontal overflow').toBe(0)
     const dayCells = await grid(page).locator('.c-day').evaluateAll(cells => cells.map(cell => {
       const style = getComputedStyle(cell), range = document.createRange()
       range.selectNodeContents(cell)
