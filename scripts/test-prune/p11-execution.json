@@ -5,9 +5,8 @@
   "status": "verified-overlap-applied-partial-package",
   "baseline": "scripts/test-prune/baseline.json",
   "baselineSha256": "e017c08a8cbad7451c9c1615a98f03cb10de1f1c85bef0d561c86fec1faaafc0",
-  "before": 493,
+  "before": 500,
   "targetCeiling": 22,
-  "plannedAfter": 450,
   "unchangedSpecs": [
     "tests/aeon-635.spec.ts",
     "tests/delivery-arion-v5.spec.ts",
@@ -45,7 +44,7 @@
     "tests/version-reveal.spec.ts",
     "tests/webcore-recovery.spec.ts"
   ],
-  "unchangedMapping": "Every frozen browser identity in unchangedSpecs maps to itself, retaining its tier and assertions. No protected original identity is cut or demoted.",
+  "unchangedMapping": "Every frozen browser identity in unchangedSpecs maps to itself, retaining its tier and assertions. Upstream additional cases are retained too. No protected original identity is cut or demoted.",
   "specs": [
     {
       "file": "tests/status-icons.spec.ts",
@@ -620,5 +619,37 @@
     "Unexecuted runtime recipients keep their browser donors; the new stream-lifetime test is additive until its runtime execution and negative control pass.",
     "Remote static checks are paused at night; performance config and affected unit suites require hosted CI or an approved remote entry point."
   ],
-  "actualAfter": 450
+  "actualAfter": 457,
+  "frozenBefore": 493,
+  "afterOnInitialBase": 450,
+  "latestMainCommit": "396567da01c9b7cf80d59661368d960bcbf88a17",
+  "upstreamAdditionalCases": [
+    "browser:tests/release-update-notice.spec.ts:the update toast ends at the release name and counts its public notes by kind, without a gap or a shift",
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1024 dark",
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1024 light",
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 dark",
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 light",
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 dark",
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 light"
+  ],
+  "measurements": {
+    "scope": "Five changed specs, identical mbp2606 LEAD entry point and one worker per spec; not the full P11 package.",
+    "before": {
+      "sourceCommit": "653660d89",
+      "cases": 68,
+      "passed": 66,
+      "failed": 2,
+      "runnerDisplay": "1.8m",
+      "approximateRunnerSeconds": 108
+    },
+    "after": {
+      "sourceCommit": "16c33fe8c",
+      "cases": 25,
+      "passed": 25,
+      "failed": 0,
+      "runnerSeconds": 49.2
+    },
+    "approximateRunnerSecondsSaved": 58.8,
+    "limits": "The before summary rounds to tenths of a minute and contains two pre-existing 960px hidden-label geometry failures. This is an observed affected-set comparison, not a clean-green benchmark or a measured full-P11 saving."
+  }
 }
