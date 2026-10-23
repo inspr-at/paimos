@@ -114,6 +114,11 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
       { name: 'return to the first day', run: async () => { await scroll.press('ArrowLeft') } },
     ] })
     expect(await scroll.evaluate(element => element.scrollWidth - element.clientWidth), 'week grid has 0 px horizontal overflow').toBe(0)
+    const crowdedTickets = await grid(page).locator('tbody th').evaluateAll(cells => cells.flatMap(cell => {
+      const chip = cell.querySelector('.ticket-chip')!, edge = chip.getBoundingClientRect().right
+      return edge > cell.getBoundingClientRect().right ? [chip.textContent] : []
+    }))
+    expect(crowdedTickets, 'ticket names stay inside their column, clear of the first day').toEqual([])
     expect(await Promise.all(Object.values(controls).map(control => control.boundingBox())), 'week controls and rows move by 0 px').toEqual(boxes)
     const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
     expect(layout, `${width} ${theme}: week descendants fit without clipping or overlap`).toEqual([])
