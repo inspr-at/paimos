@@ -362,11 +362,16 @@ test('AEON-1336 native runner uses the trusted plan without another map fetch an
     base, affectedLane: 'on', plannerMode: 'essential', plannerLayout: 'full', inventory: { tests: catalogue } },
   { browserCoverage: () => { throw new Error('execution must not fetch another impact map') } })
   assert.equal(result.full, false); assert.equal(result.scope, 'affected')
-  assert.deepEqual(result.tests.map(browserIdentity).sort(), selected.map(browserIdentity).sort())
+  const ordinarySelected=selected.filter(row=>row.executionJob!=='visual-comparison')
+  assert.deepEqual(result.tests.map(browserIdentity).sort(), ordinarySelected.map(browserIdentity).sort())
+  const visual=plan('web',{full:true,visual:true,event:'pull_request',paths,inventory:{tests:catalogue}})
+  const visualExpected=fullGateTests(catalogue).filter(row=>row.executionJob==='visual-comparison')
+  assert.deepEqual(visual.tests.map(browserIdentity).sort(),visualExpected.map(browserIdentity).sort())
+  assert.deepEqual([...result.tests,...visual.tests].map(browserIdentity).sort(),[...ordinarySelected,...visualExpected].map(browserIdentity).sort())
   assert.throws(() => checkFull({ version: 1, full: true, scope: result.scope, exitCode: 0 }), /scope is not proven/)
   const jobs = requiredJobs.map(name => ({ name, run_attempt: 1, status: 'completed', conclusion: 'success', steps: [
     { name: executionSteps[name] ?? (name.startsWith('go-test (') ? 'Test this shard (essential plus changed area, or full on main)' : name.startsWith('web-unit (') ? 'Run selected web units without retries' : 'Run selected UI cases without retries'), status: 'completed', conclusion: 'success' },
-    { name: 'Confirm full tier execution', status: 'completed', conclusion: name.startsWith('web-shard (') ? 'skipped' : 'success' },
+    { name: name === 'visual-comparison' ? 'Confirm full visual tier execution' : 'Confirm full tier execution', status: 'completed', conclusion: name.startsWith('web-shard (') ? 'skipped' : 'success' },
     ...(name === 'ci-plan' ? [{ name: 'Plan test tiers', status: 'completed', conclusion: 'success' }] : [])] }))
   const fullJobs = structuredClone(jobs)
   for (const job of fullJobs) for (const step of job.steps) step.conclusion = 'success'
@@ -385,25 +390,26 @@ test('AEON-1336 browser aggregate accepts only explicit planned scopes and rejec
   'scope validation must precede the unchanged proof sequence and its early reuse exits')
   const script = [steps[0].run, steps.at(-1).run].join('\n')
   const env = { PATH: process.env.PATH, BROWSER_SCOPE: 'affected', CI_IMPACT: 'on', CI_AFFECTED_LANE: 'on',
-    GITHUB_EVENT_NAME: 'pull_request', TIER_MODE: 'essential', TIER_LAYOUT: 'full', CI_LANE: 'full', WEB_SHARD: 'success',
+    GITHUB_EVENT_NAME: 'pull_request', TIER_MODE: 'essential', TIER_LAYOUT: 'full', CI_LANE: 'full', WEB_SHARD: 'success', VISUAL_COMPARISON: 'success',
     CI_PLAN: 'success', TIER_PLAN: 'success', REUSE: 'none', REUSE_PROOF: 'skipped', SOURCE_RUN: '', CACHE_PRIME: 'skipped',
     WEB_CATALOGUE: 'success', WEB_SETUP: 'success', WEB_UNIT: 'success', GITHUB_STEP_SUMMARY: resolve(directory, 'summary') }
   const run = overrides => spawnSync('bash', ['-c', script], { cwd: directory, env: { ...env, ...overrides }, encoding: 'utf8' }).status
   assert.equal(run({}), 0)
   for (const override of [{ BROWSER_SCOPE: '' }, { BROWSER_SCOPE: 'typo' }, { CI_IMPACT: 'off' }, { CI_AFFECTED_LANE: 'off' },
     { GITHUB_EVENT_NAME: 'merge_group' }, { TIER_MODE: 'full' }, { TIER_LAYOUT: 'static' }, { CI_LANE: 'spec-only' },
-    ...['failure', 'cancelled', 'skipped', ''].map(WEB_SHARD => ({ WEB_SHARD }))]) assert.notEqual(run(override), 0, JSON.stringify(override))
-  assert.equal(run({ BROWSER_SCOPE: 'none', TIER_LAYOUT: 'static', WEB_SHARD: 'skipped' }), 0)
-  assert.equal(run({ BROWSER_SCOPE: 'none', CI_LANE: 'docs-only', WEB_CATALOGUE: 'skipped', WEB_SETUP: 'skipped', WEB_UNIT: 'skipped', WEB_SHARD: 'skipped' }), 0)
-  assert.notEqual(run({ BROWSER_SCOPE: 'none', TIER_LAYOUT: 'full', WEB_SHARD: 'skipped' }), 0)
+    ...['failure', 'cancelled', 'skipped', ''].map(WEB_SHARD => ({ WEB_SHARD })),
+    ...['failure', 'cancelled', 'skipped', ''].map(VISUAL_COMPARISON => ({ VISUAL_COMPARISON }))]) assert.notEqual(run(override), 0, JSON.stringify(override))
+  assert.equal(run({ BROWSER_SCOPE: 'none', TIER_LAYOUT: 'static', WEB_SHARD: 'skipped', VISUAL_COMPARISON: 'skipped' }), 0)
+  assert.equal(run({ BROWSER_SCOPE: 'none', CI_LANE: 'docs-only', WEB_CATALOGUE: 'skipped', WEB_SETUP: 'skipped', WEB_UNIT: 'skipped', WEB_SHARD: 'skipped', VISUAL_COMPARISON: 'skipped' }), 0)
+  assert.notEqual(run({ BROWSER_SCOPE: 'none', TIER_LAYOUT: 'full', WEB_SHARD: 'skipped', VISUAL_COMPARISON: 'skipped' }), 0)
   assert.equal(run({ BROWSER_SCOPE: 'gated-full', CI_IMPACT: 'off' }), 0)
-  for (const dependency of ['CI_PLAN', 'TIER_PLAN', 'WEB_CATALOGUE', 'WEB_SETUP', 'WEB_UNIT']) {
+  for (const dependency of ['CI_PLAN', 'TIER_PLAN', 'WEB_CATALOGUE', 'WEB_SETUP', 'WEB_UNIT', 'VISUAL_COMPARISON']) {
     for (const result of ['failure', 'cancelled', 'skipped', '']) assert.notEqual(run({ [dependency]: result }), 0, `${dependency}=${result}`)
   }
   for (const reuse of [{ REUSE: 'pull_request', GITHUB_EVENT_NAME: 'merge_group', CACHE_PRIME: 'skipped' },
     { REUSE: 'merge_group', GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main', CACHE_PRIME: 'success' }]) {
     const proof = { ...reuse, BROWSER_SCOPE: 'gated-full', TIER_MODE: 'full', REUSE_PROOF: 'success', SOURCE_RUN: '42',
-      PR_CONFIRM_REUSE: 'pull_request', PR_CONFIRM_RUN: '42', WEB_CATALOGUE: 'skipped', WEB_SETUP: 'skipped', WEB_UNIT: 'skipped', WEB_SHARD: 'skipped' }
+      PR_CONFIRM_REUSE: 'pull_request', PR_CONFIRM_RUN: '42', WEB_CATALOGUE: 'skipped', WEB_SETUP: 'skipped', WEB_UNIT: 'skipped', WEB_SHARD: 'skipped', VISUAL_COMPARISON: 'skipped' }
     assert.equal(run(proof), 0, `${reuse.REUSE} full proof must remain reusable`)
     assert.notEqual(run({ ...proof, BROWSER_SCOPE: 'affected' }), 0, 'reuse must not bypass scope validation')
   }

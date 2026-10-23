@@ -2637,6 +2637,13 @@ test('unit measurement artifacts are required for every executed shard and legac
   assert.deepEqual(exact.classes,{})
   assert.deepEqual(exact.missingEvidence,[])
   assert.match(exact.caseScope,/no tier passes are claimed/)
+  const visual={kind:'browser',file:'tests/visual/projects.spec.ts',name:'synthetic visual',tier:'ESSENTIAL'}
+  const visualReport=reportCases([visual],[{key:key(visual),status:'passed',started:true}],1,'visual-comparison')
+  const withVisual=aggregate([visualReport],[job('web-unit (1)'),job('web-shard (1)'),job('visual-comparison')],{lane:'spec-only'})
+  assert.equal(withVisual.classes.ESSENTIAL.passed,1)
+  assert.deepEqual(withVisual.missingEvidence,[])
+  assert.match(withVisual.caseScope,/dedicated visual job reports its actual tier cases/)
+
   assert.deepEqual(aggregate([], [job('web-unit (1)'),job('web-shard (1)')],{lane:'full'}).missingEvidence,['web-unit-1','web-shard-1'])
 })
 
