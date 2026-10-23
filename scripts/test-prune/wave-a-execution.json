@@ -1964,5 +1964,146 @@
       "web/scripts/ci-web-shard.mjs"
     ],
     "scratchLaunchersAbsentFromDelivery": true
+  },
+  "fix2": {
+    "base": "ffde83c58c662f75d4367153ca63402c6a3a4c7e",
+    "sourceHead": "86ac3dbc3c0a04d6f4cbec82177a96c35ba8540f",
+    "recordedAt": "2026-10-23T13:10:32.189013+00:00",
+    "blockingFindings": [
+      "picker HTTP 503 under stale statistics",
+      "retired Flow redirect inherits navigation query"
+    ],
+    "changes": {
+      "picker": "Keep selected node lookups dependent on their IDs and visible child membership in a hashed subplan; retain RLS and the original node-work and HTTP assertions.",
+      "regression": "Extend the existing picker case to bound matched/leaf_flags/selected CTE visits and explain with the same audience and lead preferences as HTTP.",
+      "router": "Explicitly clear the query on the retired /p/:projectKey/journey redirect; extend its retained test with trailing slashes, repeated parameters and preserved hashes."
+    },
+    "negativeControls": {
+      "picker": {
+        "scratchHead": "c93a4771d41416644615434ea343b7de290bbb23",
+        "originalSource": "ffde83c58c662f75d4367153ca63402c6a3a4c7e",
+        "test": "TestPickerSearchAnswersWithoutWorkAggregates",
+        "candidateVisits": 266497,
+        "unchangedBudget": 17392,
+        "expectedFailure": "picker rescanned candidates: 266497 visits, budget 17392",
+        "deliveryAncestor": false
+      },
+      "router": {
+        "testedSource": "ffde83c58c662f75d4367153ca63402c6a3a4c7e",
+        "test": "retired Flow routes resolve to tickets and remove retired navigation parameters",
+        "expectedFailure": "stage query parameter survives",
+        "transportHead": "e3fba0e5f836cef67eac186c6e6f319101d22295"
+      }
+    },
+    "positiveProof": {
+      "pickerPreFinalAudience": {
+        "sourceHead": "904cbd8e2",
+        "entryPoint": "remote-test.sh",
+        "host": "agm2-ci",
+        "candidateVisits": 12359,
+        "unchangedBudget": 17392,
+        "passed": 2,
+        "failed": 0
+      },
+      "web": {
+        "transportHead": "e3fba0e5f836cef67eac186c6e6f319101d22295",
+        "entryPoint": "remote-spec.sh",
+        "host": "agm2-ci",
+        "specs": [
+          "tests/aeon-1696-fix2-runtime-proof.spec.ts",
+          "tests/ticket-panel.spec.ts",
+          "tests/aeon-974-typefilter.spec.ts"
+        ],
+        "browserPassed": 54,
+        "temporaryTransportPassed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "routingUnitPassed": 39,
+        "p04RuntimePassed": 13,
+        "ledgerPassed": 2,
+        "cleanupComplete": true,
+        "artifacts": "web/test-results/aeon-1696-fix2-runtime"
+      },
+      "go": {
+        "sourceHead": "86ac3dbc3c0a04d6f4cbec82177a96c35ba8540f",
+        "entryPoint": "remote-test.sh",
+        "host": "agm2-ci",
+        "command": "./internal/nodes -exec 'env CI=1' -count=1 -v",
+        "passedRootTests": 239,
+        "failed": 0,
+        "skipped": 0,
+        "packageSeconds": 218.308,
+        "candidateVisits": 12359,
+        "unchangedBudget": 17392,
+        "exitCode": 0,
+        "environment": "CI=1 matches hosted CI; the raw baseline run used workstation timing budgets."
+      },
+      "static": {
+        "sourceHead": "86ac3dbc3c0a04d6f4cbec82177a96c35ba8540f",
+        "entryPoint": "ci-static-locked.sh",
+        "mode": "--merge-main",
+        "host": "mbp2606",
+        "exitCode": 1,
+        "seconds": 449.97,
+        "passed": 43,
+        "optionalSkipped": 0,
+        "testTiers": {
+          "passed": true,
+          "seconds": 169.99
+        },
+        "webShardSuite": {
+          "passed": true,
+          "seconds": 333.39,
+          "command": "npm run ci:web:shard:test"
+        },
+        "aptBounds": {
+          "passed": true,
+          "seconds": 45.72
+        },
+        "remainingTimeout": {
+          "check": "web-shard-spec-tests",
+          "budgetSeconds": 120,
+          "seconds": 120.02,
+          "failedAssertions": 0,
+          "cancelled": 1,
+          "error": "ci-static: web-shard-spec-tests exceeded timeout_seconds=120 after 120.02s (process group termination requested)",
+          "command": "cd web && node --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs",
+          "equivalentAssertionProof": "The larger web-shard-tests command passes the same two files plus aeon-681-ci.test.mjs and the shard inventory check."
+        },
+        "classification": "Known shared-runner environment item 3, explicitly accepted in the Tick brief LEAD note: unchanged duplicate wrapper timeout; no shard source/tests changed in fix2."
+      },
+      "manifests": {
+        "strictGo": true,
+        "strictWeb": true,
+        "strictSpecInventory": true,
+        "auditTests": true,
+        "auditCoverage": true,
+        "typecheck": true,
+        "lint": true,
+        "newRegistrations": 0
+      }
+    },
+    "constraints": {
+      "newNativeRegistrations": 0,
+      "protectedCuts": false,
+      "newMigrations": false,
+      "originPush": false,
+      "deployment": false,
+      "reviewGate": false,
+      "otherModelCLI": false,
+      "temporaryLaunchersInDelivery": false
+    },
+    "pending": [
+      "Hosted PR CI must complete the duplicate web-shard-spec-tests wrapper within its unchanged 120-second deadline."
+    ],
+    "status": "functional acceptance passed; authoritative hosted static proof outstanding",
+    "workerPct": 95,
+    "proofRef": "scratch/aeon-1696-fix2-proof",
+    "sourceWriteSet": [
+      "internal/nodes/list.go",
+      "internal/nodes/picker_search_test.go",
+      "web/src/router.ts",
+      "web/tests/settings-routing.unit.test.ts"
+    ]
   }
 }
