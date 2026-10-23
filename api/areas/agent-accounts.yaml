@@ -1518,6 +1518,13 @@ components:
                   required: [harness, accounts, default_account_id]
                   properties:
                     harness: {type: string}
+                    read_only_run:
+                      type: object
+                      required: [supported, policy, reason]
+                      properties:
+                        supported: {type: boolean}
+                        policy: {type: string, enum: [no_tools, unavailable]}
+                        reason: {type: string, description: 'Qualified reason when ordinary read-only one-off work is unavailable. No repository, external or managed tools are available under no_tools.'}
                     default_account_id: {type: [string, 'null'], format: uuid, description: 'Eligible account with greatest known minimum remaining fraction; UUID breaks ties. Null when no eligible account has fully measured active windows. Provisional accounts remain manually selectable under existing queue policy, but are not ranked as measured allowance.'}
                     accounts: {type: array, items: {$ref: '#/components/schemas/AccountCatalogChoice'}}
     AgentAccountMetadataWrite:

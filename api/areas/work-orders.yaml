@@ -76,6 +76,9 @@ components:
       type: object
       required: [agent_principal_id, model_profile_id]
       properties:
+        request_id: {type: string, format: uuid, description: 'Person-only immutable request identity. Identical retries return the same run, including after completion; changed context or options return 409.'}
+        instruction: {type: string, maxLength: 2000, description: 'Optional one-off task instruction. Empty uses the work-order body, or its title when the body is empty. Requires request_id; read-only is the default.'}
+        repository_mutation_allowed: {type: boolean, default: false, description: 'One-off run ceiling. False requires a qualified no-tools adapter and scratch workspace outside the repository. True requires explicit person selection. Requires request_id.'}
         capacity_override: {type: string, enum: [now], description: 'Person only. Skip the schedule and reserve for this run; never approval, vendor truth, sign-in, freshness or concurrency.'}
         agent_principal_id: {type: string, format: uuid}
         model_profile_id: {type: string, format: uuid}

@@ -247,6 +247,7 @@ func BufferBody(w http.ResponseWriter, r *http.Request) error {
 func workBindingMutation(r *http.Request) bool {
 	switch r.Pattern {
 	case "POST /api/work-orders", "PATCH /api/work-orders/{workOrderId}",
+		"POST /api/nodes/{nodeId}/run-once",
 		"POST /api/work-orders/{workOrderId}/runs", "POST /api/runs/{runId}/claim",
 		"POST /api/projects/{projectId}/harness-sessions",
 		"PATCH /api/projects/{projectId}/harness-sessions/{sessionId}/binding",
