@@ -129,7 +129,10 @@ export const setAccountState = (id: string, state: AgentAccount['state']) => req
 // Person-only Remove: the account leaves the lists; its runs and history stay (AEON-402).
 export const archiveAccount = (id: string) => request<AgentAccount>(`/agent-accounts/${enc(id)}/archive`, 'POST')
 export const listApprovals = () => request<Approval[]>('/approvals?limit=200')
-export const decideApproval = (id: string, decision: 'approved' | 'denied', reason: string) => request<Approval>(`/approvals/${enc(id)}/decision`, 'POST', { decision, reason })
+export const decideApproval = (id: string, decision: 'approved' | 'denied', reason: string, source?: Pick<Approval, 'scope' | 'resource_kind' | 'resource_id'>) => {
+  const project = source?.scope.startsWith('approvals.request.outward_') && source.resource_kind === 'node' ? source.resource_id : undefined
+  return request<Approval>(project ? `/projects/${enc(project)}/action-approvals/${enc(id)}/decision` : `/approvals/${enc(id)}/decision`, 'POST', { decision, reason })
+}
 export const revokeApproval = (id: string) => request<Approval>(`/approvals/${enc(id)}/revoke`, 'POST')
 export const listModels = () => request<ModelProfile[]>('/models')
 export const listTargets = (projectId: string) => request<MessageTarget[]>(`/projects/${enc(projectId)}/message-targets`)
@@ -181,11 +184,16 @@ export const DELIVERY_EVENTS = ['delivery.stall_alerted', 'inbox.message_fetched
 const projectionWakes = new Set<(event?: string, node?: string | null) => void>()
 export function onProjectionWake(listener: (event?: string, node?: string | null) => void) { projectionWakes.add(listener); return () => { projectionWakes.delete(listener) } }
 const wakeProjection = (event?: string, node?: string | null) => projectionWakes.forEach(listener => listener(event, node))
+// Whether those wakes arrive live: subscribed and their stream open. The Desk's sync line says "Live" only then (AEON-1700).
+let projectionLive = false
+const projectionLiveListeners = new Set<(live: boolean) => void>()
+function setProjectionLive(live: boolean) { if (projectionLive !== live) { projectionLive = live; projectionLiveListeners.forEach(listener => listener(live)) } }
+export function onProjectionLive(listener: (live: boolean) => void) { projectionLiveListeners.add(listener); listener(projectionLive); return () => { projectionLiveListeners.delete(listener) } }
 let agentSubscribers = 0
 let stopProjectionEvents: (() => void) | undefined
 export function subscribeAgents(changed: (event?: string, identity?: AgentEventIdentity) => void, connection: (live: boolean) => void = () => {}, delivery: () => void = () => {}, telemetry = false, recover: () => void = changed): () => void {
   if (typeof EventSource === 'undefined') return () => {}
-  if (++agentSubscribers === 1) stopProjectionEvents = subscribeBrowserEvents(PROJECTION_EVENTS, (name, data) => wakeProjection(name, eventNode(data)))
+  if (++agentSubscribers === 1) stopProjectionEvents = subscribeBrowserEvents(PROJECTION_EVENTS, (name, data) => wakeProjection(name, eventNode(data)), setProjectionLive)
   let stopped = false
   const changes = new Set([...HARNESS_EVENTS.map(kind => `harness.${kind}`), ...OTHER_EVENTS])
   const stop = subscribeBrowserEvents([...changes, ...DELIVERY_EVENTS, 'harness.heartbeat'], (name, data) => {
@@ -197,7 +205,7 @@ export function subscribeAgents(changed: (event?: string, identity?: AgentEventI
   return () => {
     if (stopped) return
     stopped = true; stop()
-    if (--agentSubscribers === 0) { stopProjectionEvents?.(); stopProjectionEvents = undefined }
+    if (--agentSubscribers === 0) { stopProjectionEvents?.(); stopProjectionEvents = undefined; setProjectionLive(false) }
   }
 }
 
