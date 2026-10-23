@@ -149,7 +149,18 @@
       "passed": 6,
       "failed": 1,
       "runnerWallSecondsRounded": 12.3,
-      "result": "Added axe checks passed Role/Settings. Account menu reported only decorative version-coordinate contrast; its existing exact accessible-counterpart exception was restored at 1f4553aa1; rerun pending."
+      "result": "Added axe checks passed Role/Settings. Account menu reported only decorative version-coordinate contrast; the exact existing accessible-counterpart exception was restored at 1f4553aa1, then both menu journeys passed at 12514183f."
+    },
+    {
+      "sha": "12514183f",
+      "selection": [
+        "tests/nav.spec.ts"
+      ],
+      "filter": "P02",
+      "passed": 2,
+      "failed": 0,
+      "runnerWallSecondsRounded": 5.7,
+      "result": "Both native keyboard/menu journeys, including axe in the open Account menu, passed after preserving the exact existing decoration exception."
     }
   ],
   "measuredRunnerTimeChange": null,
@@ -2204,6 +2215,15 @@
       "qualityClean": 16,
       "passedImageComparisons": 0,
       "note": "Decision Desk setup found the real disabled explanation differed from the invented fixture copy; its exact expected text was corrected at e4ec81821 before the final recapture."
+    },
+    {
+      "sourceSHA": "12514183f7b63fc251017428a2591edf0cca4a87",
+      "directory": "web/test-results/AEON-1674-final-head",
+      "attemptedCases": 6,
+      "qualityRecords": 6,
+      "qualityClean": 6,
+      "passedImageComparisons": 0,
+      "note": "All six Decision Desk profiles reach the real disabled Doctrine explanation and pass strict quality checks. All stop at the unpinned-reference guard; none is an approved image comparison."
     }
   ],
   "launchProof": {
@@ -2268,5 +2288,17 @@
       "tests/hide-states.spec.ts: unspecified -> 47"
     ],
     "sourceOwnership": "Existing scripts/**, web/scripts/**, web/src/** and web/tests/** slice globs cover all additions; no slice registry change."
+  },
+  "handoffVerification": {
+    "mainMerged": "396567da0",
+    "fetchConfirmedNoNewMain": true,
+    "diffCheck": "passed",
+    "pruneInvariantCheck": "passed; phase P01 and cuts false",
+    "allNewCodeAssignedToExistingSlices": true,
+    "newSourceSPDX": "all 28 new TS/MJS files carry AGPL-3.0-only",
+    "staticExit": 3,
+    "staticRefusal": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job",
+    "noPushOrDeploy": true,
+    "noModelOrReviewGateCalls": true
   }
 }
