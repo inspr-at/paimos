@@ -1908,6 +1908,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPTYUnconfirmedExitKeepsOccupancy","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeHostPersonInputSurvivesUnfinishedTurn","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPinnedPTYStartsReadsWritesAndExits","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeHostPollIsolatesSessionWithRefusedReports","tier":"ESSENTIAL"}
@@ -7950,6 +7952,8 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestDeliveryLeaseFollowsDatabaseClock","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestDeskFYIDoesNotStallPersonChat","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestDeskReplyReservesBeforeEventWithConcurrentSend","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestDirectSessionSendBindingAndLegacyShape","tier":"GATED-FULL"}
@@ -8949,6 +8953,10 @@
     {"kind":"go","package":"internal/nativesessions/store","name":"TestComputerStartNativeClaimRechecksAfterObservation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestCoordinatorClaimsReserveQuotaBudgets","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestNativeInboxLongTurnKeepsMessageAvailable","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestNativeInboxUnclaimedLeaseRecovery","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestNativeSessionDSARInventoryMatchesSchema","tier":"ESSENTIAL"}
     ,

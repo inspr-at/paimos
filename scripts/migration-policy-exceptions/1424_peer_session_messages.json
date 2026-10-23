@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1424_peer_session_messages.sql",
+      "sha256": "5dff93373ea05bc1a99307a1bd4828114a0e990f85addbef7f235da79509fc3d",
+      "ticket": "AEON-1521",
+      "reason": "Broaden the released 0898 session-message expansion for exact owned peer generations: the compatibility sender FK retains tenant/session isolation while allowing another project, and both participant CHECKs retain every old-writer row while admitting same-principal messages only between two distinct non-null sessions. No rows or columns are removed or rewritten. DROP/ADD constraint replacement is outside the syntactic expand-safe allowlist; 1425 validates after the exclusive DDL locks are released. The contract-phase header retains the actual expansion release, which is newer than the historical policy-test baseline. These exact bytes remain subject to coordinator cross-family review and previous-binary migration compatibility CI before merge or release; this artifact grants no push or deployment authority."
+    }
+  ]
+}

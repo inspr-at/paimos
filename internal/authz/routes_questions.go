@@ -5,6 +5,8 @@ package authz
 // Route and scope declarations for questions.
 func init() {
 	registerRoutes("questions", map[string]string{
+		"GET /api/settings/question-reminders":      "settings.read|settings.manage",
+		"PUT /api/settings/question-reminders":      "settings.manage",
 		"GET /api/decision-desk":                    "questions.read",
 		"GET /api/projects/{projectId}/questions":   "questions.read",
 		"GET /api/questions/{questionId}":           "questions.read",

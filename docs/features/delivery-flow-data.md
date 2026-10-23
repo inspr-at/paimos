@@ -134,6 +134,16 @@ or notifications keep arriving. A connection lasts at most 30 minutes and
 resumes with `Last-Event-ID`. Agents can also read the same hints through
 `/api/events/subscribe?topics=delivery`.
 
+## Lanes (UI)
+
+Each actor has one lane. A step takes the first row of its lane that is free
+when it starts, and a lane grows to as many rows as its concurrent steps need,
+so no two bars overlap; the lanes grow the card downward (AEON-1656). Above
+twelve rows a lane shows eleven rows and a "+N more" row; a click or Enter on
+it shows every row in place, and "fewer" folds the lane again. A live update
+grows only what lies below the pointer: lanes above it keep their place until
+the pointer leaves, then take their new heights.
+
 ## Release record (UI)
 
 Below the Flow card, Live, Replay and Compare show the **release record** of the

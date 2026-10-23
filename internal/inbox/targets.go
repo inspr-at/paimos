@@ -78,6 +78,8 @@ type messaging struct {
 }
 
 func (m *messaging) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/peers", m.listPeers)
+	mux.HandleFunc("POST /api/peers/{sessionId}/messages", m.sendPeerMessage)
 	mux.HandleFunc("POST /api/projects/{projectId}/message-targets", m.setTarget)
 	mux.HandleFunc("GET /api/projects/{projectId}/message-targets", m.getTargets)
 	mux.HandleFunc("POST /api/projects/{projectId}/messages", m.sendMessage)

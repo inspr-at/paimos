@@ -565,7 +565,7 @@ type levelHintAPI struct {
 func (a *levelHintAPI) DrainHarnessInput(_ context.Context, _ HarnessSession, level string) ([]HarnessDelivery, error) {
 	a.levels = append(a.levels, level)
 	for _, item := range a.queued {
-		if level == "" || item.Level == level {
+		if level == "" || item.Level == level || item.Priority {
 			return []HarnessDelivery{item}, nil
 		}
 	}
@@ -584,6 +584,7 @@ func (a *levelHintAPI) CompleteHarnessDelivery(ctx context.Context, session Harn
 // Risk: after-turn input is injected while busy, or blocks a later steer and
 // controls. Explicit adapter activity, with no timers, establishes the boundary.
 func TestAfterTurnInputWaitsWhileSteerAndControlsStayAvailable(t *testing.T) {
+	t.Run("exact-session priority survives a lost completion", exercisePriorityInboxReplay)
 	s, api, process := testSupervisor(t)
 	entry := &owned{record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", Generation: s.generation, State: "running", PID: process.PID(), Controls: map[string]replay{}}, harness: HarnessSession{ID: "session", ProjectID: "project", Activity: "busy"}, process: process, inboxCapable: true, replies: map[string]InboxReplyTarget{}, harnessWake: make(chan struct{}, 1)}
 	s.runs["run"] = entry

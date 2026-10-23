@@ -9,9 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/ticketbenefits"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
@@ -33,9 +37,190 @@ type CreateInput struct {
 }
 
 type runOnceBinding struct {
-	Instruction               string `json:"instruction"`
-	RepositoryMutationAllowed *bool  `json:"repository_mutation_allowed"`
-	RequestDigest             string `json:"request_digest"`
+	Instruction               string         `json:"instruction"`
+	RepositoryMutationAllowed *bool          `json:"repository_mutation_allowed"`
+	RequestDigest             string         `json:"request_digest"`
+	Ticket                    *runOnceTicket `json:"ticket,omitempty"`
+}
+
+// The launch revision is deliberately conservative: any intervening ticket
+// edit preserves its status, including a person changing it away and back.
+type runOnceTicket struct {
+	ID        string    `json:"id"`
+	State     string    `json:"state"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func bindRunOnceTicketTx(ctx context.Context, tx pgx.Tx, order string) (*runOnceTicket, error) {
+	var ticket runOnceTicket
+	err := tx.QueryRow(ctx, `SELECT n.id::text,n.state,n.updated_at FROM nodes o
+ JOIN nodes n ON n.id=o.parent_id AND n.tenant_id=o.tenant_id
+ JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id
+ WHERE o.id=$1 AND n.deleted_at IS NULL AND k.slug IN ('work','ticket','task')`, order).Scan(&ticket.ID, &ticket.State, &ticket.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil // Standalone work orders have no ticket to close.
+	}
+	return &ticket, err
+}
+
+// settleRunOnceTx runs under the existing tenant/tree/access fence and the
+// target -> order -> run locks. It never appends an event before resource work
+// finishes. The run lock and durable receipt make both telemetry and cancel
+// replays idempotent without a new table or a second transaction.
+func settleRunOnceTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, report Telemetry, pending *[]events.Change) error {
+	if !v.RunOnce || !terminal(v.Status) {
+		return nil
+	}
+	var trace struct {
+		RunOnce *runOnceBinding `json:"run_once"`
+	}
+	if err := json.Unmarshal(v.Trace, &trace); err != nil {
+		return err
+	}
+	if trace.RunOnce == nil {
+		return errInvalidRunOnceBinding
+	}
+	current, err := bindRunOnceTicketTx(ctx, tx, v.OrderID)
+	if err != nil {
+		return err
+	}
+	ticket := trace.RunOnce.Ticket
+	if ticket == nil {
+		ticket = current // Historical runs can record results, never auto-close.
+	}
+	if ticket == nil {
+		return nil
+	}
+	var recorded bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE node_id=$1 AND type='run_once.settled' AND after->>'run_id'=$2)`, ticket.ID, v.ID).Scan(&recorded); err != nil || recorded {
+		return err
+	}
+	target, err := workorders.EntryTicketTx(ctx, tx, ticket.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // A person-deleted ticket is never resurrected.
+	}
+	if err != nil {
+		return err
+	}
+	reason := v.Status
+	if report.ErrorCode != "" {
+		reason = report.ErrorCode
+	}
+	var entry *workorders.EntryRecord
+	closed := false
+	if v.Status == "completed" {
+		reason, entry, err = runOnceCloseCheckTx(ctx, tx, p, v, report, trace.RunOnce.Ticket, current, target)
+		if err != nil {
+			return err
+		}
+		if reason == "" {
+			var before, after json.RawMessage
+			if err := tx.QueryRow(ctx, `SELECT to_jsonb(n) FROM nodes n WHERE id=$1`, ticket.ID).Scan(&before); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(ctx, `UPDATE nodes SET state='done',status_autopilot='{}',updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING to_jsonb(nodes)`, ticket.ID).Scan(&after); err != nil {
+				return err
+			}
+			metadata, err := json.Marshal(map[string]any{"run_id": v.ID, "entry_checks": entry})
+			if err != nil {
+				return err
+			}
+			*pending = append(*pending, events.Change{NodeID: &ticket.ID, Type: "node.updated", Before: before, After: after, Metadata: metadata})
+			closed = true
+		}
+	}
+	// Session links also resolve through History after the current list's 24h
+	// window. A run that never registered a session still has its durable record.
+	resultURL := "/api/runs/" + v.ID
+	var sessionID string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM harness_sessions WHERE run_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1`, v.ID).Scan(&sessionID); err == nil {
+		resultURL = "/agents/" + sessionID
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	body := fmt.Sprintf("Run once [result](%s): %s.", resultURL, v.Status)
+	if v.OutcomeDetail != nil {
+		body += " Outcome: " + *v.OutcomeDetail + "."
+	}
+	if closed {
+		body += "\n\nTicket moved to Done."
+	} else {
+		body += "\n\nTicket status unchanged. Reason: " + reason + "."
+	}
+	*pending = append(*pending,
+		events.Change{NodeID: &ticket.ID, Type: "run_once.settled", After: map[string]any{"run_id": v.ID, "work_order_id": v.OrderID, "status": v.Status, "outcome_detail": v.OutcomeDetail, "result_url": resultURL, "ticket_closed": closed, "reason": reason}},
+		events.Change{NodeID: &ticket.ID, Type: "comment.created", After: map[string]any{"body_markdown": body, "run_id": v.ID}},
+	)
+	return nil
+}
+
+func runOnceCloseCheckTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, report Telemetry, launch, current *runOnceTicket, target workorders.EntryTicket) (string, *workorders.EntryRecord, error) {
+	if report.ErrorCode != "" {
+		return report.ErrorCode, nil, nil
+	}
+	if report.ProcessState == "unconfirmed" {
+		return "process_exit_unconfirmed", nil, nil
+	}
+	if report.ProcessState == "not_attempted" {
+		return "process_not_started", nil, nil
+	}
+	if launch == nil {
+		return "launch_revision_unavailable", nil, nil
+	}
+	if current == nil || current.ID != launch.ID {
+		return "ticket_binding_changed", nil, nil
+	}
+	if target.State != launch.State || !target.Revision.Equal(launch.UpdatedAt) {
+		return "ticket_changed", nil, nil
+	}
+	var kindID string
+	var leaf bool
+	if err := tx.QueryRow(ctx, `SELECT kind_id::text,CASE WHEN $2='work' THEN aeon_work_leaf(id) ELSE NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds k ON k.id=c.kind_id AND k.tenant_id=c.tenant_id WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND k.slug IN ('work','ticket','task')) END FROM nodes n WHERE id=$1`, target.ID, target.Kind).Scan(&kindID, &leaf); err != nil {
+		return "", nil, err
+	}
+	if !leaf {
+		return "not_a_leaf", nil, nil
+	}
+	category, err := workorders.EntryStatusTx(ctx, tx, kindID, target.State)
+	if err != nil {
+		return "", nil, err
+	}
+	if workqueue.Terminal(category) {
+		return "ticket_already_terminal", nil, nil
+	}
+	done, err := workorders.EntryStatusTx(ctx, tx, kindID, "done")
+	if err != nil {
+		return "", nil, err
+	}
+	if done != "done" {
+		return "done_status_unavailable", nil, nil
+	}
+	if v.ActingPersonID == nil {
+		return "permission_revoked", nil, nil
+	}
+	actor := tenant.Principal{TenantID: p.TenantID, ID: *v.ActingPersonID, Kind: tenant.Person}
+	scope := authz.Scope{}
+	if target.ProjectID != nil {
+		scope.ProjectID = *target.ProjectID
+	}
+	if err := authz.RequireTx(ctx, tx, actor, "nodes.write", scope); errors.Is(err, authz.ErrForbidden) {
+		return "permission_revoked", nil, nil
+	} else if err != nil {
+		return "", nil, err
+	}
+	fields, err := json.Marshal(target.Fields)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(ticketbenefits.PillIssues(fields)) > 0 {
+		return "invalid_completion_copy", nil, nil
+	}
+	entry, err := workorders.RequireEntryTx(ctx, tx, p, target, "done", nil)
+	var refused *workorders.EntryFailure
+	if errors.As(err, &refused) {
+		return "entry_checks_failed", nil, nil
+	}
+	return "", entry, err
 }
 
 func (in CreateInput) mutationAllowed() bool {

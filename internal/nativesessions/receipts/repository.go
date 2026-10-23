@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/chat"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -213,6 +214,9 @@ func (s *Repository) Report(ctx context.Context, daemon nativecontract.DaemonAct
 			_, err = tx.Exec(ctx, `UPDATE native_session_receipts SET receipt=$3,updated_at=$4 WHERE tenant_id=$1 AND operation_id=$2`, p.TenantID, in.OperationID, raw, in.UpdatedAt)
 		}
 		if err != nil {
+			return err
+		}
+		if err = inbox.RecordNativeInputTx(ctx, tx, p, in); err != nil {
 			return err
 		}
 		// Audit payload is the C0 content-free shape. Event counter is LAST.
