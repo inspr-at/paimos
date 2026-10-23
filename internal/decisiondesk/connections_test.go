@@ -89,6 +89,25 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 		t.Fatal("issued connection absent")
 		return "", ""
 	}
+
+	// The same entry rule as the home Desk includes a custom settings-only role.
+	settingsPerson := tenant.Principal{TenantID: owner.TenantID, Kind: tenant.Person, BrowserSession: true}
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Settings-only person') RETURNING id::text`, owner.TenantID).Scan(&settingsPerson.ID); err != nil {
+		t.Fatal(err)
+	}
+	var role string
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'settings_only_desk','Settings-only Desk') RETURNING id::text`, owner.TenantID).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	f.exec(t, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'settings.manage')`, owner.TenantID, role)
+	f.exec(t, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, owner.TenantID, settingsPerson.ID, role)
+	settingsToken, _ := issue(settingsPerson, strings.Repeat("z", 43))
+	settingsPage := f.page(t, settingsPerson, 5, nil)
+	settingsRead := request(tenant.Principal{}, "GET", "/api/decision-desk/owner-summary", nil, sibling.Origin, settingsToken)
+	var settingsSummary OwnerSummary
+	if settingsRead.Code != 200 || json.Unmarshal(settingsRead.Body.Bytes(), &settingsSummary) != nil || settingsSummary.Counts.Open != settingsPage.Counts.Open || len(settingsSummary.Items) != len(settingsPage.Items) {
+		t.Fatal("custom person role differs from its home Desk")
+	}
 	state := strings.Repeat("a", 43)
 	token, id := issue(member, state) // No owner role on this person.
 	hash := sha256.Sum256([]byte(token))

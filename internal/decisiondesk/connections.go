@@ -97,11 +97,21 @@ func (m *Module) connectionWrite(ctx context.Context, p tenant.Principal, fn fun
 		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
 			return err
 		}
-		if err := authz.RequireTx(ctx, tx, p, "profile.read", authz.Scope{AnyProject: true}); err != nil {
+		if err := requireDeskAccessTx(ctx, tx, p); err != nil {
 			return err
 		}
 		return fn(tx)
 	})
+}
+
+// Match the home Desk's entry rule, including custom person roles. Native
+// source permissions in ReadTx continue to narrow the actual summary.
+func requireDeskAccessTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	err := authz.RequireTx(ctx, tx, p, "profile.read", authz.Scope{AnyProject: true})
+	if err == nil || !errors.Is(err, authz.ErrForbidden) {
+		return err
+	}
+	return authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{})
 }
 
 func connectionError(w http.ResponseWriter, r *http.Request, err error) {
@@ -199,7 +209,7 @@ func (m *Module) listConnections(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	out := []Connection{}
 	err := db.InTenantReadSnapshot(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := authz.RequireTx(ctx, tx, p, "profile.read", authz.Scope{AnyProject: true}); err != nil {
+		if err := requireDeskAccessTx(ctx, tx, p); err != nil {
 			return err
 		}
 		rows, err := tx.Query(ctx, `SELECT id::text,origin,instance_tag,created_at,expires_at,last_used_at FROM desk_instance_connections WHERE tenant_id=$1 AND principal_id=$2 AND revoked_at IS NULL AND expires_at>now() ORDER BY created_at DESC,id DESC LIMIT 100`, p.TenantID, p.ID)

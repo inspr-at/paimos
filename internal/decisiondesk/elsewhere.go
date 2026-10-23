@@ -172,7 +172,7 @@ func (m *Module) listInstances(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 	err := db.InTenantReadSnapshot(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		return authz.RequireTx(ctx, tx, p, "profile.read", authz.Scope{AnyProject: true})
+		return requireDeskAccessTx(ctx, tx, p)
 	})
 	if err != nil {
 		connectionError(w, r, err)
@@ -245,7 +245,7 @@ func (m *Module) ownerSummary(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err = authz.RequireTx(ctx, tx, p, "profile.read", authz.Scope{AnyProject: true}); err != nil {
+		if err = requireDeskAccessTx(ctx, tx, p); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `UPDATE desk_instance_connections SET last_used_at=now() WHERE tenant_id=$1 AND id=$2`, tid, id)
