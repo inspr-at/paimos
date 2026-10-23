@@ -5051,7 +5051,7 @@
     "recordedCases": 455,
     "unresolvedRecordedCases": 25,
     "missingFromCurrentManifest": 0,
-    "nightlyCasesInDriftFiles": 1520,
+    "nightlyCasesInDriftFiles": 1496,
     "gatedCasesAlreadyInFull": 209,
     "fullExtraNightlyCases": 501,
     "addedNightlySeconds": 2358,

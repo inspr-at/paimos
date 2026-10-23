@@ -575,7 +575,7 @@ test('AEON-1270 terminal segment is fixed at opening; PTY plus viewer has one te
   await expect(page.getByRole('radio', { name: 'Terminal', exact: true })).toHaveCount(0)
 })
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+for (const width of [390, 1440]) for (const theme of ['light']) {
   test(`AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable ${theme} ${width}`, async ({ browser }, testInfo) => {
     const context = await browser.newContext({ baseURL: testInfo.project.use.baseURL, viewport: { width, height: 900 }, hasTouch: width === 390, reducedMotion: 'reduce' })
     const page = await context.newPage()

@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/aeon-1062-qapolish.spec.ts",
-    "listedTests": 20,
+    "listedTests": 10,
     "tierTiming": {
       "caseSeconds": {
         "max": 4.023,

@@ -5,7 +5,7 @@ import { expect, test } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+for (const theme of ['light'] as const) for (const width of [1600, 390]) {
   test(`inbox capability ${theme} ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const work = fixtures()

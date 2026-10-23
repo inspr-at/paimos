@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/native-expert-stream.spec.ts",
-    "listedTests": 12,
+    "listedTests": 8,
     "tierTiming": {
       "caseSeconds": {
         "max": 5.763,

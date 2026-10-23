@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/aeon-1637-session-tab-events.spec.ts",
-    "listedTests": 4,
+    "listedTests": 1,
     "weightSeconds": 48,
     "weightSource": "AEON-1637: unmeasured estimate, 4 cases of about 12 s each on mbp2606 with one worker"
   }

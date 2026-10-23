@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/session-messages.spec.ts",
-    "listedTests": 17,
+    "listedTests": 15,
     "tierTiming": {
       "caseSeconds": {
         "max": 5.445,

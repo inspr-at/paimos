@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/aeon-1071-chat-live.spec.ts",
-    "listedTests": 9,
+    "listedTests": 19,
     "tierTiming": {
       "caseSeconds": {
         "max": 6.123,

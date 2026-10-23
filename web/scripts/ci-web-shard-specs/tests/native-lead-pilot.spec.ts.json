@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/native-lead-pilot.spec.ts",
-    "listedTests": 6,
+    "listedTests": 2,
     "tierTiming": {
       "caseSeconds": {
         "max": 4.332,

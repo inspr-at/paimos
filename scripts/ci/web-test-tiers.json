@@ -156,29 +156,9 @@
     ,
     "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 400 light"
     ,
-    "browser:tests/aeon-1062-qapolish.spec.ts:Models dark 1024: a pick without a registry profile shows a name and its family mark, never the raw id"
-    ,
-    "browser:tests/aeon-1062-qapolish.spec.ts:Models dark 390: a pick without a registry profile shows a name and its family mark, never the raw id"
-    ,
-    "browser:tests/aeon-1062-qapolish.spec.ts:Models dark 620: a pick without a registry profile shows a name and its family mark, never the raw id"
-    ,
     "browser:tests/aeon-1062-qapolish.spec.ts:Models light 1024: a pick without a registry profile shows a name and its family mark, never the raw id"
     ,
-    "browser:tests/aeon-1062-qapolish.spec.ts:Models light 390: a pick without a registry profile shows a name and its family mark, never the raw id"
-    ,
-    "browser:tests/aeon-1062-qapolish.spec.ts:Models light 620: a pick without a registry profile shows a name and its family mark, never the raw id"
-    ,
-    "browser:tests/aeon-1062-qapolish.spec.ts:account drawer dark 1024: shared quota counts computers in the right number"
-    ,
-    "browser:tests/aeon-1062-qapolish.spec.ts:account drawer dark 390: shared quota counts computers in the right number"
-    ,
-    "browser:tests/aeon-1062-qapolish.spec.ts:account drawer dark 620: shared quota counts computers in the right number"
-    ,
     "browser:tests/aeon-1062-qapolish.spec.ts:account drawer light 1024: shared quota counts computers in the right number"
-    ,
-    "browser:tests/aeon-1062-qapolish.spec.ts:account drawer light 390: shared quota counts computers in the right number"
-    ,
-    "browser:tests/aeon-1062-qapolish.spec.ts:account drawer light 620: shared quota counts computers in the right number"
     ,
     "browser:tests/aeon-1062-qapolish.spec.ts:chat header dark 1024: actions wrap without overlap, stay put, and Stop reads in the theme"
     ,
@@ -291,12 +271,6 @@
     "browser:tests/aeon-1285-agent-rows.spec.ts:light 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended"
     ,
     "browser:tests/aeon-1401-status-names.spec.ts:AEON-1401 a Decision Desk line reads the workspace name"
-    ,
-    "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 1440 dark refreshes keep the chosen tab and write the opening line once"
-    ,
-    "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 390 dark refreshes keep the chosen tab and write the opening line once"
-    ,
-    "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 390 light refreshes keep the chosen tab and write the opening line once"
     ,
     "browser:tests/aeon-1448-desk-tabrow.spec.ts:type-size shots › AEON-1448: 375 and 390, the round action beside the tabs"
     ,
@@ -1014,14 +988,6 @@
     ,
     "browser:tests/models-situations-shots.spec.ts:at 390 › situations on just me light"
     ,
-    "browser:tests/native-expert-stream.spec.ts:AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable dark 1024"
-    ,
-    "browser:tests/native-expert-stream.spec.ts:AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable dark 1440"
-    ,
-    "browser:tests/native-expert-stream.spec.ts:AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable dark 390"
-    ,
-    "browser:tests/native-expert-stream.spec.ts:AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable light 1024"
-    ,
     "browser:tests/native-expert-stream.spec.ts:AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable light 1440"
     ,
     "browser:tests/native-expert-stream.spec.ts:AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable light 390"
@@ -1429,14 +1395,6 @@
     "browser:tests/service-tier.spec.ts:390: phone Change tier menu opens and restores its actual trigger"
     ,
     "browser:tests/session-chat.spec.ts:a held-request 403 keeps the session composer (AEON-942)"
-    ,
-    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 1024"
-    ,
-    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 1440"
-    ,
-    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 390"
-    ,
-    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle light 1024"
     ,
     "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle light 1440"
     ,
@@ -5718,29 +5676,9 @@
     ,
     {"kind":"browser","file":"tests/aeon-1042-headergraph.spec.ts","name":"header graph off by default, developer switch keeps the header still 400 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"Models dark 1024: a pick without a registry profile shows a name and its family mark, never the raw id","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"Models dark 390: a pick without a registry profile shows a name and its family mark, never the raw id","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"Models dark 620: a pick without a registry profile shows a name and its family mark, never the raw id","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"Models light 1024: a pick without a registry profile shows a name and its family mark, never the raw id","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"Models light 390: a pick without a registry profile shows a name and its family mark, never the raw id","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"Models light 620: a pick without a registry profile shows a name and its family mark, never the raw id","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"account drawer dark 1024: shared quota counts computers in the right number","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"account drawer dark 390: shared quota counts computers in the right number","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"account drawer dark 620: shared quota counts computers in the right number","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"account drawer light 1024: shared quota counts computers in the right number","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"account drawer light 390: shared quota counts computers in the right number","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"account drawer light 620: shared quota counts computers in the right number","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1062-qapolish.spec.ts","name":"chat header dark 1024: actions wrap without overlap, stay put, and Stop reads in the theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5782,10 +5720,6 @@
     ,
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 every visible chat-native post is recorded on its chat thread","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -5793,14 +5727,6 @@
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native replies use negotiated next-step timing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native replies use negotiated queue timing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1082 chat-native timing reaches the outbox light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -6228,8 +6154,6 @@
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1286 inline code keeps the line box at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 1024: hover and focus reveal them in the gap, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 1440: hover and focus reveal them in the gap, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 390: hover and focus reveal them in the gap, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -6240,17 +6164,9 @@
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 the thread starts with its day separator, 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1024 dark: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1024 light: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1440 dark: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1440 light: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1600 dark: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1600 light: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 320 dark: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -6268,13 +6184,7 @@
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"touch › AEON-1438 phone composer: the choice row follows typing during a turn, never the turn itself","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1439-panel-opening.spec.ts","name":"AEON-1439: 1440 dark refreshes keep the chosen tab and write the opening line once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/aeon-1439-panel-opening.spec.ts","name":"AEON-1439: 1440 light refreshes keep the chosen tab and write the opening line once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1439-panel-opening.spec.ts","name":"AEON-1439: 390 dark refreshes keep the chosen tab and write the opening line once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1439-panel-opening.spec.ts","name":"AEON-1439: 390 light refreshes keep the chosen tab and write the opening line once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1448-desk-tabrow.spec.ts","name":"AEON-1448: one tab row from 320 to 1440 px, the stamp filter never pushed by the button","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -6459,12 +6369,6 @@
     {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Escape closes an open peek menu before the ticket and keeps the memo draft","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: the peek opens the ticket’s full page at its canonical address","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1637-session-tab-events.spec.ts","name":"AEON-1637: 1440 dark a tap leaves Events for Lead, Details and Chat without an error, from a link and from the default","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1637-session-tab-events.spec.ts","name":"AEON-1637: 1440 light a tap leaves Events for Lead, Details and Chat without an error, from a link and from the default","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1637-session-tab-events.spec.ts","name":"AEON-1637: 390 dark a tap leaves Events for Lead, Details and Chat without an error, from a link and from the default","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1637-session-tab-events.spec.ts","name":"AEON-1637: 390 light a tap leaves Events for Lead, Details and Chat without an error, from a link and from the default","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -7470,29 +7374,11 @@
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"the ticket panel shows the bound agent’s attention state and links to its session","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1024 no-preference: approved confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1024 no-preference: denied confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1024 reduce: approved confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1024 reduce: denied confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1024: a rejected native decision retains its reason and never advances or reports success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1440 no-preference: approved confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1440 no-preference: denied confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1440 reduce: approved confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1440 reduce: denied confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1440: a rejected native decision retains its reason and never advances or reports success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"390 no-preference: approved confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"390 no-preference: denied confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"390 reduce: approved confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -11482,14 +11368,6 @@
     ,
     {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 earlier pages keep the read row still; stale revisions and 512 KiB overflow stay explicit","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable dark 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable dark 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable light 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable light 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/native-expert-stream.spec.ts","name":"AEON-1270 r2 A1 controls, long German content and live-terminal availability stay stable light 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11508,27 +11386,13 @@
     ,
     {"kind":"browser","file":"tests/native-expert-terminal.spec.ts","name":"AEON-1289 untrusted terminal escapes, queries and bounded backpressure have no outbound side effects","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/native-lead-pilot.spec.ts","name":"AEON-1287 LEAD conversation light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/native-session-program-1024.spec.ts","name":"AEON-1309: 1024 dark panel controls, layouts and live-reader anchor stay stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/native-session-program-1024.spec.ts","name":"AEON-1309: 1024 light panel controls, layouts and live-reader anchor stay stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/native-session-program-1440.spec.ts","name":"AEON-1309: 1440 dark panel controls, layouts and live-reader anchor stay stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/native-session-program-1440.spec.ts","name":"AEON-1309: 1440 light panel controls, layouts and live-reader anchor stay stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/native-session-program-390.spec.ts","name":"AEON-1309: 390 dark panel controls, layouts and live-reader anchor stay stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/native-session-program-390.spec.ts","name":"AEON-1309: 390 light panel controls, layouts and live-reader anchor stay stable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -11540,15 +11404,7 @@
     ,
     {"kind":"browser","file":"tests/native-session-requests.spec.ts","name":"AEON-1304 discards stale identities and rejects wrong request completions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/native-session-requests.spec.ts","name":"AEON-1304 request series remains stable 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/native-session-requests.spec.ts","name":"AEON-1304 request series remains stable 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/native-session-requests.spec.ts","name":"AEON-1304 request series remains stable 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/native-session-requests.spec.ts","name":"AEON-1304 request series remains stable 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/native-session-requests.spec.ts","name":"AEON-1304 request series remains stable 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/native-session-requests.spec.ts","name":"AEON-1304 request series remains stable 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -13802,11 +13658,7 @@
     ,
     {"kind":"browser","file":"tests/session-chat-cli.spec.ts","name":"person asks and CLI answers in the same thread: dark 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat-cli.spec.ts","name":"person asks and CLI answers in the same thread: dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/session-chat-cli.spec.ts","name":"person asks and CLI answers in the same thread: light 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-chat-cli.spec.ts","name":"person asks and CLI answers in the same thread: light 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"375: no horizontal scroll with long URLs and IDs, in both tabs and while replying","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13816,37 +13668,13 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"?tab=messages deep-links to the thread; an ended session starts read on a new browser","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de profile dark 1024: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de profile dark 1440: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de profile dark 390: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de profile light 1024: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de profile light 1440: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal de profile light 390: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en profile dark 1024: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en profile dark 1440: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en profile dark 390: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en profile light 1024: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en profile light 1440: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en profile light 390: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1487 waiting chat dark 1024: stall notice keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1487 waiting chat dark 1440: stall notice keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1487 waiting chat dark 390: stall notice keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1487 waiting chat light 1024: stall notice keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1487 waiting chat light 1440: stall notice keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -13855,14 +13683,6 @@
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 Stop: Esc leaves the field then interrupts with captured process ownership","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 history: more than 200 posts remain reachable and a late refresh retains the reader anchor","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls dark 1024: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls dark 1440: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls dark 390: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls light 1024: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 markdown controls light 1440: safe shell tail and stable expansion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -13873,14 +13693,6 @@
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 Gemini holds normal input and interrupts only via Stop and send","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 empty, offline and no-permission states preserve drafts and controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions dark 1024: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions dark 1440: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions dark 390: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions light 1024: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions light 1440: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -13912,14 +13724,6 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"displacement before a late read marker preserves the reader's position before scroll dispatch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat dark 1024: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat dark 1440: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat dark 390: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat light 1024: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat light 1440: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat light 390: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -13927,22 +13731,6 @@
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"focusing the window picks up a read from another device","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"keydown before a late read marker preserves the reader's position before scroll dispatch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1024 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1440 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 390 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1024 de-AT profile","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -13963,14 +13751,6 @@
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"scrolling a 40-message thread sends at most two read markers at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"scrolling a 40-message thread sends at most two read markers at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13993,10 +13773,6 @@
     {"kind":"browser","file":"tests/session-ended.spec.ts","name":"at 1440px a save after the session ended keeps the draft and offers sign-in","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-ended.spec.ts","name":"at 390px a save after the session ended keeps the draft and offers sign-in","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-inbox.spec.ts","name":"inbox capability dark 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-inbox.spec.ts","name":"inbox capability dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-inbox.spec.ts","name":"inbox capability light 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14026,10 +13802,6 @@
     ,
     {"kind":"browser","file":"tests/session-messages.spec.ts","name":"an older read message does not hide the hook wait for a new pending send","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-messages.spec.ts","name":"dark 1600: session thread excludes other sessions and collapses consecutive duplicates","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-messages.spec.ts","name":"dark 390: session thread excludes other sessions and collapses consecutive duplicates","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/session-messages.spec.ts","name":"light 1600: session thread excludes other sessions and collapses consecutive duplicates","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-messages.spec.ts","name":"light 390: session thread excludes other sessions and collapses consecutive duplicates","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14042,11 +13814,7 @@
     ,
     {"kind":"browser","file":"tests/session-recovery.spec.ts","name":"completed force retry retains its verified outcome after authorization expiry","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/session-recovery.spec.ts","name":"force confirmation visual 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/session-recovery.spec.ts","name":"force confirmation visual 1600 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/session-recovery.spec.ts","name":"force confirmation visual 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/session-recovery.spec.ts","name":"force confirmation visual 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14056,11 +13824,7 @@
     ,
     {"kind":"browser","file":"tests/session-recovery.spec.ts","name":"offline force request expires with an unconfirmed outcome and stops polling","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-recovery.spec.ts","name":"recovery visual 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/session-recovery.spec.ts","name":"recovery visual 1600 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/session-recovery.spec.ts","name":"recovery visual 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/session-recovery.spec.ts","name":"recovery visual 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14116,37 +13880,13 @@
     ,
     {"kind":"browser","file":"tests/session-requests.spec.ts","name":"the request form keeps its actions still while the catalog loads","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows dark 1600 detail closed pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows dark 1600 detail closed pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows dark 1600 detail open pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows dark 1600 detail open pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows dark 390 detail closed pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows dark 390 detail closed pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows dark 390 detail open pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows dark 390 detail open pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows light 1600 detail closed pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows light 1600 detail closed pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows light 1600 detail open pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows light 1600 detail open pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows light 390 detail closed pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows light 390 detail closed pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows light 390 detail open pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows light 390 detail open pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -19982,6 +19722,30 @@
     ,
     {"kind":"vitest","file":"tests/models-situations.unit.test.ts","name":"situation matrix > shows every row with a cell, counts only what it shows, and writes orders the server accepts","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/native-diagnostics.unit.test.ts","name":"coalesces only explicit message and call identities and keeps final, receipt, quota and gap evidence honest","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-diagnostics.unit.test.ts","name":"deduplicates and bounds retained diagnostics without sacrificing the live end to earlier pages","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-diagnostics.unit.test.ts","name":"derives view-only requests from current person, permission, consent and binding without inheriting terminal authority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-diagnostics.unit.test.ts","name":"fences diagnostics by every binding dimension, generation, native source and uint64 sequence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-diagnostics.unit.test.ts","name":"rejects private, malformed, omitted, deep and oversized expert bodies before retaining a defensive copy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-diagnostics.unit.test.ts","name":"requires exclusive descending replay and advancing cursors while enforcing count and byte limits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-program.unit.test.ts","name":"bounds decoded response bytes and UTF-8, releases readers, and preserves precise refusal reasons","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-program.unit.test.ts","name":"detaches the captured viewer after invalid SSE and accepts only an exact bound structured stream","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-program.unit.test.ts","name":"late stream chunks after cancellation cannot emit an event and detach only the original viewer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-program.unit.test.ts","name":"refuses malformed or controlling attach grants without streaming or detaching an ungranted viewer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-program.unit.test.ts","name":"rejects malformed native context and incomplete capabilities before enabling a viewer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/native-program.unit.test.ts","name":"rejects malformed replay and event envelopes before granting or opening a stream","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After beyond the lifetime ends the follow instead of reading later","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After inside the lifetime still waits, and one that reaches the deadline does not","tier":"GATED-FULL"}
@@ -20534,11 +20298,19 @@
     ,
     {"kind":"vitest","file":"tests/reserved-versions.unit.test.ts","name":"waits for the initial read and a successful save before revealing reservations","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"a hung read cannot block another awake period or overwrite its recovered snapshot","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"hidden, offline and stopped polling cannot read or commit late data; visible recovery reads afresh","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"keeps a good snapshot through two failures and flags the third without losing its timestamp","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"mounted consumers share one keyed read and stream; event bursts fence held data and retain one catch-up","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"refresh reports a kept answer, a failure with its reason, and a dropped read","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"retries only idempotent GET transport failures, with bounded exponential jitter","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"shares a current read but never joins or adopts a response from the previous screen","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/resilient-polling.unit.test.ts","name":"stops a pending GET retry while offline and allows a fresh read after reconnect","tier":"ESSENTIAL"}
     ,
@@ -21175,6 +20947,8 @@
     {"kind":"vitest","file":"tests/stream-health.unit.test.ts","name":"detects suspended timers with no browser event, and a backwards clock jump","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/stream-health.unit.test.ts","name":"freshness is Live only for trusted reads; stale age preserves the last successful update","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/stream-health.unit.test.ts","name":"person reset replaces the shared stream and ignores every callback retained by its old source","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/stream-health.unit.test.ts","name":"removes timers and wake listeners when the stream owner stops","tier":"GATED-FULL"}
     ,

@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/native-session-requests.spec.ts",
-    "listedTests": 7,
+    "listedTests": 3,
     "tierTiming": {
       "caseSeconds": {
         "max": 0.633,

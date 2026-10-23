@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/native-session-program-390.spec.ts",
-    "listedTests": 2,
+    "listedTests": 1,
     "tierTiming": {
       "caseSeconds": {
         "max": 17.851,
