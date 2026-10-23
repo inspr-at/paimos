@@ -9,6 +9,21 @@ const noop = () => undefined
 const said = (summary: FooterSummary | null) => summary ? { tone: summary.tone, full: plain(summary.full), short: plain(summary.short), plainText: !summary.action } : null
 const agents = { loaded: true, total: 11, working: 10, problems: 0, asks: 0, paused: 0, wind: null, act: { problem: noop, ask: noop, wind: noop, paused: noop, top: noop } }
 
+it('P02 footer actions route to the named exception and loading or hidden authority cannot claim one', () => {
+  const calls: string[] = [], act = (name: string) => () => { calls.push(name) }
+  const ticketActions = { blocked: act('blocked'), top: act('top'), clear: act('clear') }
+  const blocked = ticketsFooter({ loaded: true, total: 4, withAgents: 1, withAgentsPartial: true, blocked: 1, filtered: true, act: ticketActions })
+  expect(plain(blocked.full)).toBe('4 tickets · 1 with agent loaded · 1 blocked')
+  blocked.action!()
+  ticketsFooter({ loaded: true, total: 0, withAgents: 0, blocked: 0, filtered: true, act: ticketActions }).action!()
+  const failed = settingsFooter({ failed: true, saving: true, needs: 2, act: { retry: act('retry'), needs: act('needs') } })!
+  expect(plain(failed.full)).toBe('Not saved · Try again'); failed.action!()
+  accessFooter({ loaded: true, people: 3, keys: 0, expiring: null, act: { expiring: act('private'), top: act('top'), invite: null } }).action!()
+  expect(calls).toEqual(['blocked', 'clear', 'retry', 'top'])
+  expect(ticketsFooter({ loaded: false, total: 4, withAgents: 1, blocked: 1, filtered: true, act: ticketActions }).action).toBeUndefined()
+  expect(accessFooter({ loaded: true, people: 1, keys: 0, expiring: null, act: { expiring: act('private'), top: act('top'), invite: null } }).action).toBeUndefined()
+})
+
 describe('what each screen says', () => {
   it.each([
     ['agents with a problem', agentsFooter({ ...agents, problems: 1 }), { tone: 'problem', full: '11 agents · 10 working · 1 problem', short: '1 problem', plainText: false }],

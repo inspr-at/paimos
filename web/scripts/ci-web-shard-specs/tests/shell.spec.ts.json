@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/shell.spec.ts",
-    "listedTests": 32,
+    "listedTests": 41,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.401,

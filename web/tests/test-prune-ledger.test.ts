@@ -36,18 +36,29 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   const summary = checkRepository()
   assert.deepEqual(summary, { browserCases: 5318, specs: 378, core: 29, protectedRisks: 647,
     driftCases: 455, candidateGroups: 31, candidateCases: 155, visualCases: 80,
-    visualApproval: 'pending', phase: 'P01', cuts: false })
+    visualApproval: 'awaiting-set-3', phase: 'P01', cuts: false })
   const original = {
     baseline,
     ledger: json('scripts/test-prune/risk-ledger.json'),
     visual: json('scripts/test-prune/visual-manifest.json'),
     currentWeb: json('scripts/ci/web-test-tiers.json'), currentGo: json('scripts/ci/go-test-tiers.json'),
   }
+  const staged = json('scripts/test-prune/p02-execution.json')
+  assert.equal(staged.cuts, false)
+  const p02Owners = new Set(original.ledger.specs.filter((row: { package: string }) => row.package === 'P02').map((row: { file: string }) => row.file))
+  const p02Originals = original.baseline.catalogue.filter((row: { kind: string; file: string }) => row.kind === 'browser' && p02Owners.has(row.file))
+  assert.deepEqual(staged.originalCaseDestinations.flatMap((row: { oldNativeKeys: string[] }) => row.oldNativeKeys).sort(),
+    p02Originals.map((row: { key: string }) => row.key).sort(), 'Staged P02 mapping cannot drop an original identity')
+  const currentKeys = new Set(original.currentWeb.tests.map(key))
+  assert.ok(staged.candidateNativeKeys.every((id: string) => currentKeys.has(id)), 'Every staged destination has a real native registration')
+  for (const core of original.ledger.core.filter((row: { package: string }) => row.package === 'P02')) {
+    assert.ok(currentKeys.has(core.nativeBinding.key), `P02 core registration missing: ${core.id}`)
+  }
   const sourceHash = (path: string) => createHash('sha256').update(read(path)).digest('hex')
   // Risk: pruning the old tours before Tick's replacement fixtures are encoded
   // would lose the central workspace/start surfaces and Goals profile coverage.
   for (const [id, fixture] of [
-    ['ticket-workspace', 'Long title and key; properties panel; attachment strip with one preview; checklist with the focus ring; chat dock open'],
+    ['ticket-workspace', 'Long title and key; properties panel; attachment strip with one preview and its focus ring; read-only checklist; chat dock open'],
     ['start-agent', 'Run once mode; task filled; "Create a ticket in a project"; read-only; folded "Runs on …" row with a capacity warning'],
   ]) {
     const state = original.visual.states.find((row: { id: string }) => row.id === id)
@@ -62,6 +73,9 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
     assert.equal(destination?.risk, fixture)
   }
   const goals = original.visual.states.find((row: { id: string }) => row.id === 'goals')
+  assert.equal(goals.referenceStatus, 'deferred')
+  assert.deepEqual(goals.deferredUntil, ['AEON-1621', 'AEON-1625'])
+  assert.match(goals.deferredReason, /v6 canvas/)
   assert.deepEqual(goals.fixturesByProfile, {
     phone: 'Simple; 56 px rows; candy bar frozen by reduced motion',
     desktop: 'Expert; one goal expanded; pace badges; a late Lands with "at this pace"; numbered steps with stage tracks; waits marker',
@@ -139,6 +153,48 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   assert.notEqual(protectedRow.tier, 'NIGHTLY', 'The demotion counterexample must start in the full gate')
   protectedRow.tier = 'NIGHTLY'
   assert.throws(() => validateLedger({ ...demoted, sourceHash }), /Removed risk has no verified destination/)
+
+  // A real protected Agents identity isolates per-area authority. Its reference
+  // set must be complete, reviewed and available; unrelated pending Projects
+  // and deferred Goals/quality fixes must never block that cut.
+  const areaCut = structuredClone(original)
+  areaCut.visual.comparison.mode = 'blocking'
+  const areaRisk = areaCut.ledger.risks.find((row: { source: { file: string } }) => row.source.file === 'tests/agents-phone-rows.spec.ts')
+  assert.deepEqual(areaRisk.destinations, ['visual:agents'])
+  const removedKey = areaRisk.currentKeys[0]
+  areaCut.currentWeb.tests = areaCut.currentWeb.tests.filter((row: Parameters<typeof key>[0]) => key(row) !== removedKey)
+  const impactedDestinations = new Set(areaCut.ledger.risks.filter((row: { currentKeys: string[] }) => row.currentKeys.includes(removedKey))
+    .flatMap((row: { destinations: string[] }) => row.destinations))
+  assert.deepEqual([...impactedDestinations], ['visual:agents'])
+  for (const destination of areaCut.ledger.destinations) if (impactedDestinations.has(destination.id))
+    destination.verification = { status: 'verified', evidence: 'Synthetic authority counterexample, never a product approval' }
+  areaCut.visual.approval = { reviewer: 'Tick', status: 'approved', approvedAt: 'synthetic-proof', evidence: 'Synthetic proof only' }
+  areaCut.visual.baselineAuthority.status = 'approved'
+  areaCut.visual.renderer.runner.imageVersion = 'synthetic-image'
+  Object.assign(areaCut.visual.baselineAuthority.source, { attachmentId: 'synthetic-only', sha256: 'a'.repeat(64) })
+  areaCut.visual.baselineAuthority.retention.verifiedAt = 'synthetic-proof'
+  const area = areaCut.visual.states.find((row: { id: string }) => row.id === 'agents')
+  for (const checkpoint of area.checkpoints) {
+    delete checkpoint.referenceStatus; delete checkpoint.deferredUntil; delete checkpoint.deferredReason
+    checkpoint.reference = { attachmentMember: `${checkpoint.id}.png`, sha256: 'b'.repeat(64) }
+  }
+  assert.equal(validateLedger({ ...areaCut, sourceHash }).cuts, true,
+    'A pinned Agents cut passes while unrelated Projects is unpinned and Goals is deferred')
+  assert.throws(() => validateLedger({ ...areaCut, sourceHash, p01: true }), /P01 cannot remove or demote/)
+  const unpinnedArea = structuredClone(areaCut)
+  unpinnedArea.visual.states.find((row: { id: string }) => row.id === 'agents').checkpoints[1].reference.sha256 = null
+  assert.throws(() => validateLedger({ ...unpinnedArea, sourceHash }), { message: 'Unpinned visual reference: V-agents-390-dark' })
+  const deferredArea = structuredClone(areaCut)
+  Object.assign(deferredArea.visual.states.find((row: { id: string }) => row.id === 'agents'), {
+    referenceStatus: 'deferred', deferredUntil: ['AEON-1687'], deferredReason: 'Synthetic required-area refusal',
+  })
+  assert.throws(() => validateLedger({ ...deferredArea, sourceHash }), { message: 'Deferred visual reference: V-agents-390-light (AEON-1687)' })
+  const unapprovedArea = structuredClone(areaCut)
+  unapprovedArea.visual.approval.status = 'pending'
+  assert.throws(() => validateLedger({ ...unapprovedArea, sourceHash }), /Cuts require Tick approval/)
+  const unavailableArea = structuredClone(areaCut)
+  unavailableArea.visual.baselineAuthority.retention.verifiedAt = null
+  assert.throws(() => validateLedger({ ...unavailableArea, sourceHash }), /approved, pinned and available/)
   assert.throws(() => validateLedger({ ...original, sourceHash: () => '0'.repeat(64) }), /Frozen historical-evidence changed/)
   // Snapshot enforcement is explicit: future assertion additions and refreshed
   // timings must not be blocked by P01's one-time no-execution-change check.
@@ -152,7 +208,8 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   assert.throws(() => validateLedger({ ...frozen, sourceHash: () => '0'.repeat(64), p01: true }), /Frozen launch-policy changed/)
   frozen.currentWeb.defaultNewTier = 'ESSENTIAL'
   assert.throws(() => validateLedger({ ...frozen, sourceHash: frozenHash, p01: true }), /P01 changed catalogue selection\/tagging\/timing policy/)
-  assert.throws(() => validateVisual(original.visual, { cuts: true }), /Unpinned visual reference/)
+  assert.throws(() => validateVisual(original.visual, { cuts: true, stateIds: ['goals'] }), /Protected visual cuts stay closed/)
+  assert.throws(() => validateVisual(original.visual, { cuts: true, checkpointIds: ['V-projects-390-light'] }), /Protected visual cuts stay closed/)
   const missingCheckpoint = structuredClone(original.visual)
   missingCheckpoint.states[0].checkpoints.pop()
   assert.throws(() => validateVisual(missingCheckpoint), /Missing\/duplicate visual checkpoint/)

@@ -55,7 +55,7 @@
     "web-shard": {
       "kind": "not-static",
       "reason": "Browser tier execution and infrastructure preparation.",
-      "runs_sha256": "ee9acf06f676c1ec1bd9d32b3e6b42363e3f2ead06a45b43f01f1ebac76d1a1a"
+      "runs_sha256": "99e834fe5793287a33b111fc52e75914601ac4e5ff6defeb4cdee63fa57bd866"
     },
     "web": {
       "kind": "not-static",
@@ -87,6 +87,11 @@
       "kind": "not-static",
       "reason": "Hosted artifact aggregation and reporting.",
       "runs_sha256": "7854095e549016705c7c0757450788386f9d6ba1092f0d46d6b75241ef65e782"
+    },
+    "visual-reference-capture": {
+      "kind": "not-static",
+      "reason": "AEON-1674 manual hosted browser capture and artifact-only review packaging; never a local static check or reference publication.",
+      "runs_sha256": "e4ca19f89832873b284dafa638c32468003f080fb8e527f196bf57bc4709e553"
     }
   },
   "exclusions": [
@@ -143,7 +148,7 @@
       "job": "web-setup",
       "step": "Pack web runtime for shards",
       "cwd": ".",
-      "command": "tar -cf \"$RUNNER_TEMP/web-runtime.tar\" web/node_modules web/dist",
+      "command": "tar -cf \"$RUNNER_TEMP/web-runtime.tar\" web/node_modules web/dist tmp/visual-baselines",
       "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
     },
     {
@@ -229,6 +234,13 @@
       "cwd": ".",
       "command": "if [ -n \"${ImageOS:-}\" ] && [ -n \"${ImageVersion:-}\" ]; then\n  echo \"artifact=apt-bundle-${ImageOS}-${ImageVersion}-${RUNNER_ARCH}\" >> \"$GITHUB_OUTPUT\"\nfi",
       "reason": "AEON-1652: runner image identity for an optional package artifact; no static command or product test is executed here."
+    },
+    {
+      "job": "web-setup",
+      "step": "Download and verify approved visual reference assets",
+      "cwd": ".",
+      "command": "node scripts/test-prune/visual-baselines.mjs download tmp/visual-baselines\ncat tmp/visual-baselines/reference-gates.md >> \"$GITHUB_STEP_SUMMARY\"",
+      "reason": "Read-only GitHub release transport and per-run reference verification require hosted GITHUB_TOKEN authority; not an offline static pre-filter. Integrity and gate regressions remain in the registered visual-baselines behavior test."
     }
   ],
   "checks": [

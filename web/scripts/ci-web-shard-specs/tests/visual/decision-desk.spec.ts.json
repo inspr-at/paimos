@@ -1,0 +1,14 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 60,
+    "selectedTests": 6,
+    "source": "AEON-1674 initial scheduling estimate; comparisons remain unproven until references are approved."
+  },
+  "spec": {
+    "file": "tests/visual/decision-desk.spec.ts",
+    "listedTests": 6,
+    "weightSeconds": 60,
+    "weightSource": "AEON-1674-initial-estimate"
+  }
+}

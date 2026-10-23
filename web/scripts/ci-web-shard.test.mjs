@@ -605,10 +605,11 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const noShiftOnMain = 10.171603
   assert.ok(noShift && noShift.weightSeconds >= noShiftOnMain, 'No-shift regressions must remain in the gate')
   const deskGrowth = deskAdded.reduce((sum, spec) => sum + spec.weightSeconds, 0) + noShift.weightSeconds - noShiftOnMain
-  // AEON-644 adds its ten application regressions to the gate. Preserve the
+  // AEON-644's ten application regressions and P02's two staged replacements
+  // remain registered until their transfer is verified. Preserve the
   // unchanged prior budget, then charge this separately measured spec's weight.
   const themeApply = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/theme-apply.spec.ts')
-  assert.ok(themeApply && themeApply.listedTests === 10, 'Theme application regressions must remain in the gate')
+  assert.ok(themeApply && themeApply.listedTests === 12, 'Theme application regressions and staged replacements must remain in the gate')
   assert.ok(gated.some(spec => spec.file === themeApply.file), 'Theme application must remain gated')
   // AEON-1163 runs the approved design's check against the built Model registry in its own spec (with the
   // screenshots moved out of models-registry.spec.ts); charge its weight like the specs above.

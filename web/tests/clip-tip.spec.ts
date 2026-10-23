@@ -4,7 +4,72 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 
 import { expectStableControls } from './helpers/stable'
 import { longAgent, longComputer, longName } from './clip-tip-fixtures'
-import { shots, noOverflow, keyboardTip, setupHarness } from './clip-tip-playwright-fixtures'
+import { shots, noOverflow, keyboardTip, setupHarness, overflowText, scrollPage } from './clip-tip-playwright-fixtures'
+
+test('P02 keyboard disclosure follows scrolling, reads overflow and restores the same picker option on Escape', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 400 })
+  await setupHarness(page, 'light')
+  const name = page.locator('.standalone'), change = page.getByRole('button', { name: 'Change name' })
+  await name.evaluate((el, text) => { el.textContent = text }, overflowText)
+  await keyboardTip(page, name, overflowText)
+  const tip = page.locator('.tooltip')
+  await expectStableControls({ controls: { name, change }, interactions: [
+    { name: 'focused text follows a real page scroll', run: async () => { await scrollPage(page, 50); await expect(name).toBeFocused(); await expect(tip).toHaveText(overflowText) } },
+    { name: 'return to the source', run: () => scrollPage(page, 0) },
+    { name: 'read the last line inside the disclosure', run: async () => {
+      await page.keyboard.press('Tab'); await expect(tip).toBeFocused()
+      await page.keyboard.press('End')
+      await expect.poll(() => tip.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(1)
+      await expect(tip).toContainText(`20. ${longName}`)
+      expect(await page.evaluate(() => scrollY)).toBe(0)
+      const box = (await tip.boundingBox())!
+      expect(box.y).toBeGreaterThanOrEqual(8); expect(box.y + box.height).toBeLessThanOrEqual(392)
+    } },
+    { name: 'Escape returns to the standalone source', run: async () => { await page.keyboard.press('Escape'); await expect(tip).toHaveCount(0); await expect(name).toBeFocused() } },
+  ] })
+  await page.getByRole('button', { name: 'option', exact: true }).click()
+  const panel = page.getByRole('dialog', { name: 'Assignee of PHAROS-11' }), row = panel.locator('.menu-item').first()
+  await row.locator('.label').evaluate((el, text) => { el.textContent = text }, overflowText)
+  await keyboardTip(page, row, overflowText)
+  await expectStableControls({ controls: { row, selectors: panel.locator('.menu'), title: panel.locator('.menu-title') }, scrollAreas: { picker: panel }, interactions: [
+    { name: 'Tab reads the picker disclosure', run: async () => { await page.keyboard.press('Tab'); await expect(tip).toBeFocused(); await page.keyboard.press('End'); await expect.poll(() => tip.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(1); await expect(panel).toBeVisible() } },
+    { name: 'first Escape restores this option', run: async () => { await page.keyboard.press('Escape'); await expect(tip).toHaveCount(0); await expect(row).toBeFocused(); await expect(panel).toBeVisible() } },
+  ] })
+  await page.keyboard.press('Escape'); await expect(panel).toHaveCount(0)
+  await noOverflow(page)
+})
+
+test('P02 a disclosed reused anchor follows changed text and dismisses when the record disappears', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 700 })
+  await setupHarness(page, 'light')
+  const name = page.locator('.standalone')
+  await keyboardTip(page, name, longName)
+  const next = `Neuer Datensatz · ${longName}`
+  await expectStableControls({ controls: { change: page.getByRole('button', { name: 'Change name' }) }, interactions: [
+    { name: 'same focused anchor receives a different record', run: async () => { await name.evaluate((el, text) => { el.textContent = text }, next); await expect(name).toBeFocused(); await expect(page.locator('.tooltip')).toHaveText(next) } },
+    { name: 'anchor is replaced without a pointer or focus event', run: async () => {
+      await name.evaluate(el => { const replacement = el.cloneNode(false) as HTMLElement; replacement.removeAttribute('data-tip'); replacement.removeAttribute('data-clip-tip'); replacement.removeAttribute('tabindex'); replacement.textContent = 'Removed record'; el.replaceWith(replacement) })
+      await expect(page.locator('.tooltip')).toHaveCount(0)
+    } },
+  ] })
+})
+
+test('P02 a clipped ticket name exposes its full text and keyboard opens that exact record', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const data = fixtures(); data.nodes.find(node => node.id === 'n-1')!.title = longName
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS/tickets')
+  const title = page.locator('#row-n-1 .title-text'), link = title.locator('..')
+  await expect(title).toHaveAttribute('data-tip', longName)
+  await expectStableControls({ controls: { title: link }, interactions: [{ name: 'keyboard reads the complete record name', run: () => keyboardTip(page, link, longName) }] })
+  const grid = page.getByRole('grid', { name: 'Tickets' }); await grid.focus()
+  for (let index = 0; index < 8 && await grid.getAttribute('aria-activedescendant') !== 'row-n-1'; index++) await grid.press('ArrowDown')
+  await expect(grid).toHaveAttribute('aria-activedescendant', 'row-n-1')
+  await expect(page.locator('.tooltip')).toHaveText(longName)
+  await grid.press('Enter')
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
+  await expect(page.getByRole('complementary', { name: 'Ticket details' }).getByRole('heading', { name: longName, exact: true })).toBeVisible()
+})
 
 for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test.describe(`${width}px ${theme}`, () => {

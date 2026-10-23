@@ -763,7 +763,7 @@ function jobEnv(body) {
 
 // Commands that start Playwright specs, and so a stack setup. Unit runs and
 // the no-browser safety suite do not.
-const browserSuite = /npx playwright test|\bnpm test\b|npm run e2e\b|cli\.mjs run web(?![^\n]*--unit)|ci-preflight-browser\.mjs/
+const browserSuite = /npx playwright test|\bnpm(?: --prefix [^\s]+)? test\b|npm run e2e\b|cli\.mjs run web(?![^\n]*--unit)|ci-preflight-browser\.mjs/
 
 test('every CI job that starts browser specs is in the backend inventory', () => {
   const root = new URL('../../.github/workflows/', import.meta.url)
@@ -776,6 +776,7 @@ test('every CI job that starts browser specs is in the backend inventory', () =>
   }
   const inventory = [...mockOnlyCiJobs, ...backendRequiredCiJobs].map(([file, name]) => `${file}:${name}`)
   assert.ok(launchers.includes('ci-preflight.yml:browser'))
+  assert.ok(launchers.includes('ci.yml:visual-reference-capture'))
   assert.deepEqual(launchers.sort(), inventory.sort())
 })
 

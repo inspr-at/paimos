@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/settings-shared.spec.ts",
-    "listedTests": 23,
+    "listedTests": 25,
     "tierTiming": {
       "caseSeconds": {
         "max": 6.368,

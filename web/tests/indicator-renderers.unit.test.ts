@@ -74,6 +74,14 @@ it.each<[string, Component]>([['Pulse', Pulse], ['Robot 1', Robot1], ['Robot 5',
     expect(count(root, 'glint')).toBe(1)
     await vi.advanceTimersByTimeAsync(600)
     expect(count(root, 'glint')).toBe(0)
+    // Replay must be rejected while working too. Waiting/stale states already
+    // hide glints and would let a missing counter fence pass this assertion.
+    props.pulse = 9
+    await nextTick()
+    expect(count(root, 'glint')).toBe(0)
+    props.pulse = 10
+    await nextTick()
+    expect(count(root, 'glint')).toBe(0)
     props.state = 'waiting'
     await nextTick()
     expect(count(root, 'clock')).toBe(1)
