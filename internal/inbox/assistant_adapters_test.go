@@ -632,7 +632,7 @@ func testAssistantPickupRetention(t *testing.T) {
 					PrincipalID string `json:"principal_id"`
 					Token       string `json:"token"`
 				}
-				data := request(owner, "POST", "/api/agents/assistants", fmt.Sprintf(`{"name":"Amy pickup retention","expires_at":%q}`, now.Add(30*24*time.Hour).Format(time.RFC3339Nano)), 201)
+				data := request(owner, "POST", "/api/agents/assistants", fmt.Sprintf(`{"name":"Amy pickup retention","expires_at":%q}`, now.Add(29*24*time.Hour).Format(time.RFC3339Nano)), 201)
 				if err := json.Unmarshal(data, &assistant); err != nil {
 					t.Fatal(err)
 				}
@@ -688,10 +688,18 @@ func testAssistantPickupRetention(t *testing.T) {
 			}
 			// Old writers may already have attached a 30-minute deadline. It cannot
 			// override the recipient's pull mode after upgrade.
+			msg.CreatedAt = msg.CreatedAt.Add(-2 * time.Hour)
+			now = msg.CreatedAt
+			if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_messages SET created_at=$2 WHERE id=$1`, msg.ID, now); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_receipts SET deliver_by=$2 WHERE message_id=$1`, msg.ID, now.Add(30*time.Minute)); err != nil {
 				t.Fatal(err)
 			}
 			now = now.Add(2 * time.Hour)
+			if countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM inbox_receipts WHERE message_id=$1 AND deliver_by<=clock_timestamp()`, msg.ID) != 1 {
+				t.Fatal("fixture never crossed the legacy online deadline")
+			}
 			sweep(0)
 			if got := status(msg.ID); got.Status != "sent" || !got.WaitingForPickup || got.Reason != "" {
 				t.Fatalf("sender does not see waiting for pickup: %+v", got)
@@ -742,7 +750,7 @@ func testAssistantPickupRetention(t *testing.T) {
 				var replacement struct {
 					Token string `json:"token"`
 				}
-				data := request(owner, "POST", "/api/agents/assistants/"+recipient+"/rotate", fmt.Sprintf(`{"expires_at":%q}`, now.Add(30*24*time.Hour).Format(time.RFC3339Nano)), 201)
+				data := request(owner, "POST", "/api/agents/assistants/"+recipient+"/rotate", fmt.Sprintf(`{"expires_at":%q}`, now.Add(29*24*time.Hour).Format(time.RFC3339Nano)), 201)
 				if err := json.Unmarshal(data, &replacement); err != nil {
 					t.Fatal(err)
 				}

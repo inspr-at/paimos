@@ -202,11 +202,10 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
 	}
 	// Pull retention/lifecycle is independent of online deadlines, including
 	// pre-upgrade queued receipts with an elapsed or missing deliver_by.
-	if n, err := s.sweepPull(ctx, tenantID); err != nil && first == nil {
+	n, err := s.sweepPull(ctx, tenantID)
+	failed += n
+	if err != nil && first == nil {
 		first = err
-		failed += n
-	} else {
-		failed += n
 	}
 	// A notice failure must not hold back terminal guarantees for other messages.
 	if err := s.sweepChatPickup(ctx, tenantID); err != nil && first == nil {

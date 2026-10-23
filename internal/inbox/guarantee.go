@@ -124,7 +124,7 @@ const pullFailureReasonSQL = `(SELECT CASE
  AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>pn.now)
  AND (coalesce(k.full_access,false) OR 'inbox.read'=ANY(k.scopes))) THEN 'assistant_revoked'
  WHEN m.expires_at<=pn.now THEN 'deadline'
- WHEN m.created_at+interval '7 days'<=pn.now THEN 'pickup_expired'
+ WHEN m.created_at+interval '168 hours'<=pn.now THEN 'pickup_expired'
  ELSE '' END FROM principals ap WHERE ap.tenant_id=m.tenant_id AND ap.id=m.recipient_principal_id)`
 
 const receiptDeadlineSQL = `(SELECT CASE WHEN rp.kind<>'agent' THEN NULL WHEN ` + pullInboxMessageSQL + ` THEN m.expires_at ELSE LEAST(m.expires_at, m.created_at + make_interval(secs => CASE WHEN m.recipient_session_id IS NOT NULL THEN coalesce(s.session_deadline_seconds,300) ELSE coalesce(s.unbound_deadline_seconds,1800) END)) END
