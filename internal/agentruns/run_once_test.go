@@ -10,6 +10,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/agentverification"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -236,6 +237,10 @@ func exerciseRunOnceSettlement(t *testing.T) {
 				case "person-edit":
 					f.call(t, f.person, "PATCH", "/api/nodes/"+ticket, map[string]any{"title": "Person updated this task"}, 200, nil)
 				case "permission-revoked":
+					permissions, ok := authz.BuiltinPermissions("admin")
+					if !ok {
+						t.Fatal("admin role unavailable")
+					}
 					f.tx(t, f.person, func(tx pgx.Tx) error {
 						var role string
 						if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'settlement_observer','Settlement observer') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
@@ -243,16 +248,10 @@ func exerciseRunOnceSettlement(t *testing.T) {
 						}
 						// Revoke only ticket writes. Keep the creator's live telemetry
 						// ceiling so the exact run can still report its outcome.
-						if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,rp.permission FROM role_permissions rp JOIN roles r ON r.id=rp.role_id AND r.tenant_id=rp.tenant_id WHERE r.key='admin' AND rp.permission<>'nodes.write'`, f.person.TenantID, role); err != nil {
+						if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,permission FROM unnest($3::text[]) permission WHERE permission<>'nodes.write'`, f.person.TenantID, role, permissions); err != nil {
 							return err
 						}
 						_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, f.person.ID, role)
-						if err != nil {
-							return err
-						}
-						// A custom workspace role does not imply every project's
-						// visibility. Keep this explicit membership while removing writes.
-						_, err = tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.person.TenantID, f.person.ID, role, contextID)
 						return err
 					})
 					f.call(t, f.person, "GET", "/api/nodes/"+ticket, nil, 200, nil)
