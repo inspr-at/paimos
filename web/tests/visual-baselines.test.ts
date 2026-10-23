@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGate, referenceGates, referenceReport, materializeBaseline, checkpointReport } from '../../scripts/test-prune/visual-baselines.mjs'
 import { collectCandidates, packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
+import { pinManifest, pngTools, replayCandidates, publicationCommands } from '../../scripts/test-prune/visual-pin.mjs'
+import { pixelChanges } from '../../scripts/test-prune/visual-review.mjs'
 
 import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, verifyFontAssets, captureEnabled, rendererIdentity, installRendererFonts } from '../../scripts/test-prune/visual-renderer.mjs'
 import { validateVisual, visualCheckResult } from '../../scripts/test-prune/check.mjs'
@@ -15,7 +17,7 @@ import { parseWorkflow } from '../../scripts/ci-static.mjs'
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const manifest = JSON.parse(readFileSync(new URL('../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
 
-test('visual references require approval, immutable attachment bytes and every exact member', () => {
+test('visual references require approval, immutable attachment bytes and every exact member', async () => {
   // A tiny synthetic PNG is enough for the transport proof. The browser guard
   // independently proves that actual differing pixels reject the comparison.
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jS1cAAAAASUVORK5CYII=', 'base64')
@@ -338,6 +340,50 @@ test('visual references require approval, immutable attachment bytes and every e
     pinned.baselineAuthority = structuredClone(mirrored.baselineAuthority)
     const source = pinned.baselineAuthority.source
     const detached = readFileSync(join(output, `${candidate.archive.name}.manifest.json`))
+    // Risk: a rehearsal or an approval for different capture bytes could
+    // activate blocking references, revive history, or lift product deferrals.
+    const receipt = { reviewer: 'Tick', status: 'approved', dryRun: true, approvedAt: '2026-10-23T12:00:00Z',
+      evidence: 'DRY RUN ONLY; no product approval', captureSHA: candidate.captureSHA, archiveSHA256: candidate.archive.sha256,
+      checkpoints: candidate.members.map(member => member.id) }
+    const draft = pinManifest(manifest, candidate, detached, receipt, {}, { dryRun: true })
+    assert.equal(draft.referenceSet, 3)
+    assert.equal(draft.comparison.mode, 'blocking')
+    assert.equal(draft.approval.checkpoints.length, 72)
+    assert.deepEqual(draft.history, manifest.history)
+    for (const id of ['goals', 'ticket-workspace']) {
+      assert.deepEqual(draft.states.find(state => state.id === id), manifest.states.find(state => state.id === id))
+      assert.equal(referenceGate(draft, `V-${id}-390-light`).mode, 'deferred')
+    }
+    assert.equal(verifyReferenceArchive(readFileSync(join(output, candidate.archive.name)), detached, draft).references.size, 72)
+    assert.throws(() => pinManifest(manifest, candidate, detached, receipt, {}), /dry-run approval cannot pin/)
+    const realReceipt = { ...receipt, dryRun: false, evidence: 'Synthetic isolated test receipt' }
+    assert.throws(() => pinManifest(manifest, candidate, detached, realReceipt, {}), /Real, distinct AEON-1670/)
+    assert.throws(() => pinManifest(manifest, candidate, detached, { ...receipt, archiveSHA256: '0'.repeat(64) }, {}, { dryRun: true }), /exact capture and archive bytes/)
+    assert.throws(() => pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: ['V-goals-390-light'] }, {}, { dryRun: true }), /enumerate candidate checkpoint IDs/)
+    const partialDraft = pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: receipt.checkpoints.slice(1) }, {}, { dryRun: true })
+    const partialRefs = verifyReferenceArchive(readFileSync(join(output, candidate.archive.name)), detached, partialDraft).references
+    assert.equal(partialRefs.size, 71)
+    assert.equal(partialRefs.has(`${receipt.checkpoints[0]}.png`), false)
+    assert.equal(manifest.comparison.mode, 'report-only')
+    assert.equal(manifest.approval.checkpoints.length, 0)
+    assert.match(publicationCommands(output, candidate), /gh release create test-references-3.*--prerelease/)
+    assert.doesNotMatch(publicationCommands(output, candidate), /--clobber|--latest|release upload/)
+    // Independent decoded-pixel proof: counts and boxes must identify exactly
+    // the changed pixel, and the locked comparator must reject that change.
+    const { PNG } = pngTools(), image = new PNG({ width: 16, height: 16 })
+    image.data.fill(255)
+    const white = PNG.sync.write(image)
+    image.data[0] = 0; image.data[1] = 0; image.data[2] = 0
+    const blackCorner = PNG.sync.write(image), change = pixelChanges(white, blackCorner)
+    assert.equal(change.pixels, 1)
+    assert.equal(change.percent, 100 / 256)
+    assert.deepEqual(change.regions, [{ x: 0, y: 0, width: 1, height: 1, pixels: 1 }])
+    const single = { ...draft, approval: { ...draft.approval, checkpoints: [receipt.checkpoints[0]] } }
+    const replay = await replayCandidates([{ png: white, quality: { id: receipt.checkpoints[0], captureSHA: candidate.captureSHA } }],
+      single, new Map([[`${receipt.checkpoints[0]}.png`, white]]))
+    assert.equal(replay.passed, 1)
+    assert.equal(replay.negative.changedPixels, 1)
+    assert.equal(replay.negative.blocking, 'rejected')
     Object.assign(source, { sha256: candidate.archive.sha256, bytes: candidate.archive.bytes, captureSHA: candidate.captureSHA,
       baselineBundle: candidate.baselineBundle, archiveManifest: { attachmentMember: 'manifest.json', sha256: candidate.manifestSHA256 },
       manifest: { bytes: detached.length, sha256: hash(detached) } })
