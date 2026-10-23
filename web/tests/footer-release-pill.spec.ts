@@ -300,6 +300,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
             if (captureWidth >= 720) await textFits(page)
             await page.screenshot({ path: info.outputPath(`aeon-1691/footer-${captureWidth}-${theme}.png`) })
           }
+          await pill(page).focus()
         }
         await page.keyboard.press('Enter')
         await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
