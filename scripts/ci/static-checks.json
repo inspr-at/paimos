@@ -91,7 +91,7 @@
     "visual-reference-capture": {
       "kind": "not-static",
       "reason": "AEON-1674 manual hosted browser capture and artifact-only review packaging; never a local static check or reference publication.",
-      "runs_sha256": "c89c0fa2263565376bc873784e0b170c4dce5ff906c32a83d4da62448124dbb9"
+      "runs_sha256": "6759857b8ac07455d295ff47af255e801376141e689e149c10f858fc7f8c0088"
     },
     "visual-comparison": {
       "kind": "not-static",

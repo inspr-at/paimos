@@ -31,6 +31,7 @@ export function packCandidates(records, visual) {
     const record = byId.get(checkpoint.id)
     need(record, `Missing review capture: ${checkpoint.id}`)
     const { quality, png } = record, viewport = visual.profiles[checkpoint.profile]
+    need(!quality.diagnosticProbe, 'Raster probe is diagnostic only; it cannot become a reference candidate')
     need(/^[a-f0-9]{40}$/.test(quality.captureSHA ?? ''), `Missing capture source: ${checkpoint.id}`)
     captureSHA ??= quality.captureSHA
     need(quality.captureSHA === captureSHA, 'Review captures must come from one source SHA')
@@ -64,7 +65,7 @@ export function packCandidates(records, visual) {
     })), members } }
 }
 
-export function collectCandidates(directory) {
+export function collectCandidates(directory, { diagnosticProbe = false } = {}) {
   const records = []
   let entries = 0
   function walk(path) {
@@ -75,7 +76,8 @@ export function collectCandidates(directory) {
       else if (entry.isFile() && /^V-[a-z0-9-]+\.md$/.test(entry.name)) {
         need(statSync(child).size <= 256 * 1024, 'Oversized quality report')
         const quality = JSON.parse(readFileSync(child, 'utf8'))
-        if (quality.reference?.mode === 'deferred' && quality.captureMode !== true) continue
+        need(!quality.diagnosticProbe || diagnosticProbe, 'Raster probe is diagnostic only; it cannot become a reference candidate')
+        if (quality.reference?.mode === 'deferred' && quality.captureMode !== true && !diagnosticProbe) continue
         const pngPath = join(path, entry.name.replace(/\.md$/, '.png'))
         need(statSync(pngPath).size <= MAX_PNG, 'Oversized review PNG')
         records.push({ quality, png: readFileSync(pngPath) })

@@ -15,6 +15,10 @@ on:
         description: 'Capture Linux visual candidates for Tick review (artifact only)'
         type: boolean
         default: false
+      visual_probe:
+        description: 'Raster probe only: 1–8 comma-separated checkpoint IDs, six repeats per setting'
+        type: string
+        default: ''
 
 # New main pushes supersede older main runs (AEON-585); PR cancellation stays per PR.
 concurrency:
@@ -34,7 +38,7 @@ env:
 
 jobs:
   visual-reference-capture:
-    if: github.event_name == 'workflow_dispatch' && inputs.visual_capture == true
+    if: github.event_name == 'workflow_dispatch' && (inputs.visual_capture == true || inputs.visual_probe != '')
     runs-on: ubuntu-latest
     # MCR v1.64.1-noble amd64 manifest, resolved 2026-10-23; source in visual-manifest.json.
     # Change this digest only in a PR that also regenerates visual baselines
@@ -74,6 +78,7 @@ jobs:
         working-directory: web
         run: npm ci
       - name: Capture the same commit twice with strict quality checks
+        if: inputs.visual_probe == ''
         run: |
           set -euo pipefail
           node scripts/test-prune/visual-candidates.mjs specs > "$RUNNER_TEMP/visual-specs.txt"
@@ -82,7 +87,13 @@ jobs:
           node scripts/test-prune/visual-candidates.mjs web/test-results/container-run-1/capture-run web/test-results/container-run-1/linux-candidate
           npm --prefix web test -- "${specs[@]}" --workers=1 --retries=0 --reporter=line --output=test-results/container-run-2/capture-run
           node scripts/test-prune/visual-candidates.mjs web/test-results/container-run-2/capture-run web/test-results/container-run-2/linux-candidate
+      - name: Measure candidate raster settings without changing capture defaults
+        if: inputs.visual_probe != ''
+        env:
+          VISUAL_PROBE_CHECKPOINTS: ${{ inputs.visual_probe }}
+        run: node scripts/test-prune/visual-probe.mjs web/test-results/raster-probe
       - name: Download Tick-reviewed runner capture for the identity proof
+        if: inputs.visual_probe == ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: visual-linux-candidate-ecb819ba898f3fcb944f395388fb2c24a8b7ce83-1
@@ -90,16 +101,18 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: web/test-results/reviewed-runner
       - name: Prove non-deferred repeat stability and report runner differences
+        if: inputs.visual_probe == ''
         run: node scripts/test-prune/visual-identity.mjs web/test-results/container-run-1 web/test-results/container-run-2 web/test-results/reviewed-runner web/test-results/container-identity
       - name: Rehearse blocking pin and planted-pixel rejection
+        if: inputs.visual_probe == ''
         run: node scripts/test-prune/visual-pin.mjs prepare web/test-results/container-run-1 web/test-results/container-pin-plan web/test-results/container-identity/identity-proof.json
       - name: Record identity proof and approval handoff
-        if: always()
+        if: always() && inputs.visual_probe == ''
         run: |
-          echo 'Container capture evidence only. No references were changed or published. All 64 non-deferred repeats must match; deferred pixels grant no authority. The declared account-use runner difference requires Tick re-look.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Container capture evidence only. No references were changed or published. All 60 non-deferred repeats and reviewed runner pixels must match; the 20 deferred checkpoints grant no authority. Tick must approve these exact archive bytes.' >> "$GITHUB_STEP_SUMMARY"
           if [ -f web/test-results/container-identity/identity-proof.md ]; then cat web/test-results/container-identity/identity-proof.md >> "$GITHUB_STEP_SUMMARY"; fi
       - name: Upload both captures, identity evidence and guarded pin commands
-        if: always()
+        if: always() && inputs.visual_probe == ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: visual-linux-candidate-${{ github.sha }}-${{ github.run_attempt }}
@@ -108,6 +121,18 @@ jobs:
             web/test-results/container-run-2/
             web/test-results/container-identity/
             web/test-results/container-pin-plan/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Record raster probe measurements
+        if: always() && inputs.visual_probe != ''
+        run: |
+          if [ -f web/test-results/raster-probe/probe-report.md ]; then cat web/test-results/raster-probe/probe-report.md >> "$GITHUB_STEP_SUMMARY"; fi
+      - name: Upload diagnostic raster probe evidence
+        if: always() && inputs.visual_probe != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-raster-probe-${{ github.sha }}-${{ github.run_attempt }}
+          path: web/test-results/raster-probe/
           retention-days: 7
           if-no-files-found: error
 

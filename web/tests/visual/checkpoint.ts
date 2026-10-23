@@ -10,6 +10,7 @@ import { readBaselineBundle, referenceGate } from '../../../scripts/test-prune/v
 import { visualReportOnly, visualCheckResult } from '../../../scripts/test-prune/check.mjs'
 import { assertVisualContainer, assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, rendererIdentity, verifyFontAssets, installRendererFonts, sampleRenderedFont } from '../../../scripts/test-prune/visual-renderer.mjs'
 import { domAudit } from '../ui-audit-rules'
+import { visualProbe } from '../../../scripts/test-prune/visual-probe.mjs'
 
 const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8'))
 // Only tests/visual imports this fixture. Fontconfig belongs to this browser's
@@ -19,8 +20,9 @@ export const test = base.extend({
     // This infrastructure refusal stays outside report-only result handling.
     // Native Linux/macOS browsers must never diff against CI container pixels.
     assertVisualContainer(manifest)
+    const probe = visualProbe(manifest)
     const fontconfig = installRendererFonts(manifest, join(workerInfo.project.outputDir, `visual-fontconfig-${workerInfo.workerIndex}`))
-    await use({ ...launchOptions, env: { ...process.env, ...launchOptions.env,
+    await use({ ...launchOptions, ...(probe ? { args: [...(launchOptions.args ?? []), ...probe.args] } : {}), env: { ...process.env, ...launchOptions.env,
       FONTCONFIG_FILE: fontconfig, XDG_CACHE_HOME: join(dirname(fontconfig), 'cache') } })
   }, { scope: 'worker' }],
 })
@@ -70,6 +72,8 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
 
 async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoint, setup: VisualSetup, visual: typeof manifest) {
     const capture = captureEnabled(visual)
+    const probe = visualProbe(visual)
+    if (probe && !probe.checkpoints.includes(checkpoint.id)) throw new Error(`Checkpoint is outside the raster probe: ${checkpoint.id}`)
     const gate = await reportReference(info, checkpoint, visual, capture)
     const reportOnly = !capture && (visualReportOnly(visual) || gate.mode === 'deferred')
     // Report-only checks all states. Explicit deferrals apply again when the
@@ -80,9 +84,13 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
       return
     }
     if (capture && !visual.capture.states.includes(gate.state)) throw new Error(`State is outside the manual capture set: ${gate.state}`)
-    const renderer = rendererIdentity(visual, browser.version(), { browserOptions: info.project.use,
+    const browserOptions = probe ? { ...info.project.use, launchOptions: { ...info.project.use.launchOptions,
+      args: [...(info.project.use.launchOptions?.args ?? []), ...probe.args] } } : info.project.use
+    const expectedRenderer = probe ? { ...visual.renderer, browser: { ...visual.renderer.browser,
+      args: [...visual.renderer.browser.args, ...probe.args] } } : visual.renderer
+    const renderer = rendererIdentity(visual, browser.version(), { browserOptions,
       fontconfigFile: join(info.project.outputDir, `visual-fontconfig-${info.workerIndex}`, 'fonts.conf') })
-    assertRenderer(renderer, visual.renderer, { capture })
+    assertRenderer(renderer, expectedRenderer, { capture })
     const viewport = visual.profiles[checkpoint.profile]
     const context = await browser.newContext({ viewport, deviceScaleFactor: visual.renderer.deviceScaleFactor,
       colorScheme: checkpoint.theme, reducedMotion: visual.renderer.reducedMotion,
@@ -140,7 +148,8 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
         pngSHA256: png ? createHash('sha256').update(png).digest('hex') : null, baselineCompared: false,
         reference: gate, viewport, theme: checkpoint.theme, renderer, fonts, clock, requirementsRun: true,
         quality: { status: 'pending' }, comparison: { status: gate.mode === 'deferred' && !visualReportOnly(visual) ? 'not run: deferred reference' : 'not run' },
-        captureMode: capture, layout, axe: violations, console: unexpectedErrors, responses: unexpectedResponses, expectedReads }
+        captureMode: capture && !probe, ...(probe ? { diagnosticProbe: { setting: probe.id, args: renderer.browser.args,
+          repeatIndex: info.repeatEachIndex } } : {}), layout, axe: violations, console: unexpectedErrors, responses: unexpectedResponses, expectedReads }
       Object.assign(report, { captureSettling: settled?.evidence ?? null })
       const saveReport = () => writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify(report, null, 2))
       saveReport()

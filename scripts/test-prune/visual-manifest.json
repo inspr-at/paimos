@@ -826,11 +826,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "needs-re-capture",
+          "referenceStatus": "deferred",
           "deferredUntil": [
             "AEON-1692"
           ],
-          "deferredReason": "AEON-1689 changed the desktop matrix on current main; set-2 pixels fail in PR #891."
+          "deferredReason": "raster nondeterminism at rounded outlines; determinism probe AEON-1692 round 5"
         },
         {
           "id": "V-account-use-matrix-1440-dark",
@@ -1211,11 +1211,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "needs-re-capture",
+          "referenceStatus": "deferred",
           "deferredUntil": [
-            "AEON-1692"
+            "AEON-1699"
           ],
-          "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
+          "deferredReason": "AEON-1699 changes the grid header edge at every width"
         },
         {
           "id": "V-hours-1440-dark",
@@ -1225,11 +1225,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "needs-re-capture",
+          "referenceStatus": "deferred",
           "deferredUntil": [
-            "AEON-1692"
+            "AEON-1699"
           ],
-          "deferredReason": "PR #891 job 120309394777 explicitly reports this Hours checkpoint as a failed screenshot comparison (8 failed: 4 matrix + 4 Hours); current frozen-clock capture requires reference set 3 review."
+          "deferredReason": "AEON-1699 changes the grid header edge at every width"
         }
       ],
       "clock": {
@@ -1534,11 +1534,11 @@
             "attachmentMember": null,
             "sha256": null
           },
-          "referenceStatus": "needs-re-capture",
+          "referenceStatus": "deferred",
           "deferredUntil": [
             "AEON-1692"
           ],
-          "deferredReason": "Set-2 pixels fail in PR #891 under the recorded frozen-clock renderer."
+          "deferredReason": "raster nondeterminism at rounded outlines; determinism probe AEON-1692 round 5"
         },
         {
           "id": "V-agent-rules-1440-light",
@@ -3944,11 +3944,9 @@
       "reviewedRunnerRun": "39949629594",
       "reviewedRunnerArchiveSHA256": "3c407f853fd48512b713543726c28bcf7d1c317d02fbf9c5d1479bf0a824e348",
       "reviewedRunnerManifestSHA256": "e3d68ef66a4cd7ca7a93c125be9970c76d1fbf295ed2df3a3e1c39af31cbfb6e",
-      "condition": "Capture all 72 candidates twice at the same commit. All 64 non-deferred PNGs must be byte-identical; deferred noise never supplies reference authority. Runner differences stop pinning except the single declared account-use checkpoint, which requires an explicit Tick re-look receipt for the exact container archive.",
-      "relookCheckpoints": [
-        "V-account-use-matrix-1440-light"
-      ],
-      "relookReason": "If the settled container still differs from the reviewed runner at this checkpoint, preserve its pixels and require Tick to re-review it; never mask it or accept repeat instability."
+      "condition": "Capture all 72 candidates twice at the same commit. All 60 non-deferred PNGs must be byte-identical and pixel-identical to the reviewed runner archive; deferred noise never supplies reference authority. Activation still requires Tick approval for these exact container archive bytes and all 60 checkpoint IDs.",
+      "relookCheckpoints": [],
+      "relookReason": "No runner differences are eligible for the 60-checkpoint selection. Rounded-outline nondeterminism is deferred to the AEON-1692 round-5 diagnostic probe."
     }
   }
 }

@@ -4,11 +4,13 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGate, referenceGates, referenceReport, materializeBaseline, checkpointReport } from '../../scripts/test-prune/visual-baselines.mjs'
 import { collectCandidates, packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
 import { pinCheckpoints, pinManifest, assertPinIdentity, pngTools, replayCandidates, publicationCommands } from '../../scripts/test-prune/visual-pin.mjs'
 import { compareCaptureRecords, proveCaptureIdentity } from '../../scripts/test-prune/visual-identity.mjs'
+import { PROBE_REPEATS, PROBE_SETTINGS, probeCheckpoints, visualProbe, summarizeProbe, runProbe } from '../../scripts/test-prune/visual-probe.mjs'
 import { checkContainerPin } from '../../scripts/test-prune/visual-container-check.mjs'
 import { pixelChanges } from '../../scripts/test-prune/visual-review.mjs'
 
@@ -196,7 +198,7 @@ test('visual references require approval, immutable attachment bytes and every e
   const captureJob = workflow.slice(workflow.indexOf('\n  visual-reference-capture:'), workflow.indexOf('\n  # Read-only proof.'))
   const compareJob = workflow.slice(workflow.indexOf('\n  visual-comparison:'), workflow.indexOf('\n  # Preserve the ruleset'))
   const ordinaryJob = workflow.slice(workflow.indexOf('\n  web-shard:'), workflow.indexOf('\n  visual-comparison:'))
-  assert.match(captureJob, /if: github.event_name == 'workflow_dispatch' && inputs.visual_capture == true/)
+  assert.match(captureJob, /if: github.event_name == 'workflow_dispatch' && \(inputs.visual_capture == true \|\| inputs.visual_probe != ''\)/)
   assert.doesNotMatch(captureJob, /\n    (needs|strategy|continue-on-error):/)
   assert.match(ordinaryJob, /runs-on: ubuntu-latest/)
   assert.doesNotMatch(ordinaryJob, /AEON_VISUAL_|visual-baselines/)
@@ -373,7 +375,7 @@ test('visual references require approval, immutable attachment bytes and every e
       reviewedRunnerArchiveSHA256: manifest.capture.identityProof.reviewedRunnerArchiveSHA256,
       repeat: { byteIdentical: 72, pixelIdentical: 72, checkpoints: identityRows }, runner: { pixelIdentical: 72, checkpoints: identityRows } }
     const options = { dryRun: true, identityProof }
-    assert.throws(() => pinManifest(manifest, candidate, detached, receipt, {}, { dryRun: true }), /64\/64 byte-identical/)
+    assert.throws(() => pinManifest(manifest, candidate, detached, receipt, {}, { dryRun: true }), /60\/60 byte-identical/)
     const unstable = structuredClone(identityProof); unstable.repeat.checkpoints[0].pixels = 1
     assert.throws(() => assertPinIdentity(unstable, candidate, manifest), /STOP before pinning/)
     const encodingOnly = structuredClone(identityProof); encodingOnly.repeat.checkpoints[0].byteIdentical = false
@@ -384,17 +386,17 @@ test('visual references require approval, immutable attachment bytes and every e
     const draft = pinManifest(manifest, candidate, detached, receipt, {}, options)
     assert.equal(draft.referenceSet, 3)
     assert.equal(draft.comparison.mode, 'blocking')
-    assert.equal(draft.approval.checkpoints.length, 64)
+    assert.equal(draft.approval.checkpoints.length, 60)
     assert.deepEqual(draft.history, manifest.history)
     for (const id of ['goals', 'ticket-workspace']) {
       assert.deepEqual(draft.states.find(state => state.id === id), manifest.states.find(state => state.id === id))
       assert.equal(referenceGate(draft, `V-${id}-390-light`).mode, 'deferred')
     }
-    assert.equal(verifyReferenceArchive(readFileSync(join(output, candidate.archive.name)), detached, draft).references.size, 64)
+    assert.equal(verifyReferenceArchive(readFileSync(join(output, candidate.archive.name)), detached, draft).references.size, 60)
     // Risk: deferred noise passes through a complete archive and accidentally
-    // becomes blocking authority. All bytes remain verified, only 64 enter the map.
+    // becomes blocking authority. All bytes remain verified, only 60 enter the map.
     const deferredIDs = manifest.states.flatMap(state => state.checkpoints.filter(checkpoint => checkpoint.referenceStatus === 'deferred').map(checkpoint => checkpoint.id))
-    assert.equal(deferredIDs.length, 16)
+    assert.equal(deferredIDs.length, 20)
     for (const id of deferredIDs) {
       assert.equal(referenceGate(draft, id).mode, 'deferred')
       assert.equal(draft.approval.checkpoints.includes(id), false)
@@ -408,7 +410,7 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.throws(() => pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: ['V-goals-390-light'] }, {}, options), /enumerate candidate checkpoint IDs/)
     const partialDraft = pinManifest(manifest, candidate, detached, { ...receipt, checkpoints: receipt.checkpoints.slice(1) }, {}, options)
     const partialRefs = verifyReferenceArchive(readFileSync(join(output, candidate.archive.name)), detached, partialDraft).references
-    assert.equal(partialRefs.size, 63)
+    assert.equal(partialRefs.size, 59)
     assert.equal(partialRefs.has(`${receipt.checkpoints[0]}.png`), false)
     assert.equal(manifest.comparison.mode, 'report-only')
     assert.equal(manifest.approval.checkpoints.length, 0)
@@ -424,6 +426,91 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.equal(change.pixels, 1)
     assert.equal(change.percent, 100 / 256)
     assert.deepEqual(change.regions, [{ x: 0, y: 0, width: 1, height: 1, pixels: 1 }])
+    // Risk: a probe can report false determinism with missing/duplicate
+    // repeats or leak diagnostic baseline bytes into reference authority.
+    const probeID = 'V-agent-rules-390-dark'
+    const probeEnv = { AEON_VISUAL_CAPTURE: '1', GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_WORKFLOW: 'CI', GITHUB_JOB: 'visual-reference-capture',
+      AEON_VISUAL_PROBE: probeID, AEON_VISUAL_PROBE_SETTING: 'baseline' }
+    assert.equal(visualProbe(manifest, {}), null)
+    assert.throws(() => visualProbe(manifest, { ...probeEnv, GITHUB_EVENT_NAME: 'pull_request' }), /only by the manual/)
+    assert.throws(() => visualProbe(manifest, { ...probeEnv, AEON_VISUAL_CAPTURE: '0' }), /requires manual capture/)
+    assert.throws(() => visualProbe(manifest, { ...probeEnv, AEON_VISUAL_PROBE_SETTING: '--arbitrary-flag' }), /Unknown raster probe setting/)
+    assert.throws(() => visualProbe(manifest, { AEON_VISUAL_PROBE_SETTING: 'baseline' }), /explicit checkpoint list/)
+    for (const input of ['', probeID + ',' + probeID, 'V-not-real', 'x'.repeat(2049)])
+      assert.throws(() => probeCheckpoints(input, manifest), /Probe needs/)
+    assert.deepEqual(probeCheckpoints(probeID + ',V-account-use-matrix-1440-light', manifest), [probeID, 'V-account-use-matrix-1440-light'])
+    assert.equal(PROBE_REPEATS, 6)
+    assert.deepEqual(PROBE_SETTINGS.map(setting => setting.args), [[], ['--num-raster-threads=1'], ['--run-all-compositor-stages-before-draw'],
+      ['--disable-partial-raster'], ['--num-raster-threads=1', '--run-all-compositor-stages-before-draw', '--disable-partial-raster']])
+    const probeVisual = structuredClone(manifest)
+    probeVisual.profiles.phone = { width: 16, height: 16 }
+    for (const setting of PROBE_SETTINGS) {
+      const probeRenderer = { ...renderer, browser: { ...renderer.browser, args: [...renderer.browser.args, ...setting.args] } }
+      const probeRecords = Array.from({ length: PROBE_REPEATS }, (_, repeatIndex) => ({ png: white, quality: {
+        id: probeID, captureSHA: candidate.captureSHA, captureMode: false, baselineCompared: false, requirementsRun: true,
+        quality: { status: 'passed' }, viewport: { width: 16, height: 16 }, pngSHA256: hash(white), renderer: probeRenderer,
+        diagnosticProbe: { setting: setting.id, args: probeRenderer.browser.args, repeatIndex },
+      } }))
+      assert.deepEqual(visualProbe(manifest, { ...probeEnv, AEON_VISUAL_PROBE_SETTING: setting.id }).args, setting.args)
+      const summarize = (rows, options = {}) => summarizeProbe(rows, [probeID], setting, probeVisual, options)
+      assert.equal(summarize(probeRecords).allByteIdentical, true)
+      assert.equal(summarize(probeRecords.slice(1)).complete, false)
+      const duplicate = [...probeRecords.slice(0, -1), probeRecords[0]]
+      assert.equal(summarize(duplicate).complete, false)
+      const changed = probeRecords.map((record, i) => i ? record : { ...record, png: blackCorner, quality: { ...record.quality, pngSHA256: hash(blackCorner) } })
+      assert.equal(summarize(changed).complete, true)
+      assert.equal(summarize(changed).allByteIdentical, false)
+      // PNG encoding bytes alone also fail, with no pixel-tolerance escape.
+      const encoded = Buffer.concat([white, Buffer.from('encoding-only')])
+      assert.equal(summarize(probeRecords.map((record, i) => i ? record : { ...record, png: encoded, quality: { ...record.quality, pngSHA256: hash(encoded) } })).allByteIdentical, false)
+      assert.equal(summarize(probeRecords, { exitCode: 1 }).complete, false)
+      assert.equal(summarize(probeRecords, { error: 'timeout' }).complete, false)
+      assert.equal(summarize(probeRecords.map((record, i) => i ? record : { ...record, quality: { ...record.quality, captureSHA: 'b'.repeat(40) } })).complete, false)
+      const diagnosticCandidates = records.map(record => record.quality.id === probeID ? { ...record, quality: { ...record.quality,
+        diagnosticProbe: probeRecords[0].quality.diagnosticProbe } } : record)
+      assert.throws(() => packCandidates(diagnosticCandidates, manifest), /Raster probe is diagnostic only/)
+    }
+    const probeSteps = captureJob.split('\n      - ')
+    const normalCaptureSteps = probeSteps.filter(step => /^name: (Capture the same|Download Tick|Prove non-deferred|Rehearse blocking)/.test(step))
+    assert.equal(normalCaptureSteps.length, 4)
+    assert.ok(normalCaptureSteps.every(step => step.includes("\n        if: inputs.visual_probe == ''\n")))
+    const probeStep = probeSteps.find(step => step.includes('visual-probe.mjs web/test-results/raster-probe'))
+    assert.ok(probeStep.includes("\n        if: inputs.visual_probe != ''\n"))
+    assert.ok(probeStep.includes('VISUAL_PROBE_CHECKPOINTS: ${{ inputs.visual_probe }}'))
+    const probeOutputRoot = fileURLToPath(new URL('../test-results/', import.meta.url))
+    mkdirSync(probeOutputRoot, { recursive: true })
+    const probeOutput = mkdtempSync(join(probeOutputRoot, 'raster-probe-unit-'))
+    try {
+      const calls: string[] = []
+      const report = await runProbe(probeID, join(probeOutput, 'run'), probeVisual, {
+        platform: 'linux', arch: 'x64',
+        env: { ...probeEnv, AEON_VISUAL_CONTAINER_DIGEST: renderer.container.digest },
+        run: (command, args, options) => {
+          assert.equal(command, 'npm')
+          assert.ok(args.includes('--repeat-each=6') && args.includes('--workers=1') && args.includes('--retries=0'))
+          assert.ok(args.includes('tests/visual/agent-rules.spec.ts'))
+          const setting = PROBE_SETTINGS.find(setting => setting.id === options.env.AEON_VISUAL_PROBE_SETTING)!
+          calls.push(setting.id)
+          const output = args.find(arg => arg.startsWith('--output=')).slice('--output='.length)
+          for (let repeatIndex = 0; repeatIndex < PROBE_REPEATS; repeatIndex++) {
+            const target = join(output, String(repeatIndex))
+            mkdirSync(target, { recursive: true })
+            const probeRenderer = { ...renderer, browser: { ...renderer.browser, args: [...renderer.browser.args, ...setting.args] } }
+            writeFileSync(join(target, `${probeID}.png`), white)
+            writeFileSync(join(target, `${probeID}.md`), JSON.stringify({ id: probeID, captureSHA: candidate.captureSHA,
+              captureMode: false, baselineCompared: false, requirementsRun: true, reference: { mode: 'deferred' },
+              quality: { status: 'passed' }, viewport: { width: 16, height: 16 }, pngSHA256: hash(white), renderer: probeRenderer,
+              diagnosticProbe: { setting: setting.id, args: probeRenderer.browser.args, repeatIndex } }))
+          }
+          return { status: 0, stdout: '', stderr: '' }
+        },
+      })
+      assert.deepEqual(calls, PROBE_SETTINGS.map(setting => setting.id))
+      assert.equal(report.complete, true)
+      assert.ok(report.settings.every(setting => setting.allByteIdentical))
+      assert.equal(JSON.parse(readFileSync(join(probeOutput, 'run/probe-report.json'), 'utf8')).kind, 'raster-determinism-probe')
+      assert.throws(() => collectCandidates(join(probeOutput, 'run/baseline')), /Raster probe is diagnostic only/)
+    } finally { rmSync(probeOutput, { recursive: true, force: true }) }
     const smallRecords = candidate.members.map(member => ({ quality: { id: member.id }, png: white }))
     const baseCapture = { candidate, records: smallRecords, archiveSHA256: candidate.archive.sha256 }
     const reviewedCapture = { ...baseCapture, archiveSHA256: manifest.capture.identityProof.reviewedRunnerArchiveSHA256 }
@@ -432,28 +519,39 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.equal(repeatProof.repeat.byteIdentical, 72)
     assert.equal(repeatProof.runner.pixelIdentical, 72)
     assertPinIdentity(repeatProof, candidate, manifest)
-    assert.equal(repeatProof.pinnable.total, 64)
-    assert.equal(repeatProof.pinnable.byteIdentical, 64)
+    assert.equal(repeatProof.pinnable.total, 60)
+    assert.equal(repeatProof.pinnable.byteIdentical, 60)
     const deferredRecords = smallRecords.map(record => receipt.checkpoints.includes(record.quality.id) ? record : { ...record, png: blackCorner })
     const deferredNoise = proveCaptureIdentity(baseCapture, { ...baseCapture, records: deferredRecords }, reviewedCapture, manifest)
-    assert.equal(deferredNoise.repeat.byteIdentical, 64)
+    assert.equal(deferredNoise.repeat.byteIdentical, 60)
     assert.equal(deferredNoise.status, 'identical')
     assertPinIdentity(deferredNoise, candidate, manifest)
+    // Round 5: both rounded-outline checkpoints and all Hours widths remain
+    // deferred even if runner noise is stable. No re-look exception is active.
+    for (const id of ['V-agent-rules-390-dark', 'V-account-use-matrix-1440-light', 'V-hours-1440-light', 'V-hours-1440-dark']) {
+      assert.equal(receipt.checkpoints.includes(id), false)
+      assert.equal(referenceGate(draft, id).mode, 'deferred')
+    }
+    assert.deepEqual(manifest.capture.identityProof.relookCheckpoints, [])
     const accountID = 'V-account-use-matrix-1440-light'
     const accountRecords = smallRecords.map(record => record.quality.id === accountID ? { ...record, png: blackCorner } : record)
-    const relook = proveCaptureIdentity(baseCapture, baseCapture, { ...reviewedCapture, records: accountRecords }, manifest)
-    assert.equal(relook.status, 'stable-awaiting-Tick-review')
-    assert.deepEqual(relook.reviewRequired, [accountID])
-    assertPinIdentity(relook, candidate, manifest)
-    const unstableAccount = proveCaptureIdentity(baseCapture, { ...baseCapture, records: accountRecords }, reviewedCapture, manifest)
-    assert.equal(unstableAccount.status, 'STOP-before-pinning')
-    assert.throws(() => assertPinIdentity(unstableAccount, candidate, manifest), /STOP before pinning/)
+    const deferredAccount = proveCaptureIdentity(baseCapture, { ...baseCapture, records: accountRecords }, { ...reviewedCapture, records: accountRecords }, manifest)
+    assert.equal(deferredAccount.status, 'identical')
+    assert.deepEqual(deferredAccount.reviewRequired, [])
+    assertPinIdentity(deferredAccount, candidate, manifest)
     const realAttachments = { archive: '11111111-1111-4111-8111-111111111111', manifest: '22222222-2222-4222-8222-222222222222' }
-    assert.throws(() => pinManifest(manifest, candidate, detached, realReceipt, realAttachments, { identityProof: relook }), /Tick must explicitly re-review/)
-    // Pre-publication verification uses dryRun with a real receipt and must
-    // enforce the same re-look gate before any assets can be published.
-    assert.throws(() => pinManifest(manifest, candidate, detached, realReceipt, {}, { dryRun: true, identityProof: relook }), /Tick must explicitly re-review/)
-    assert.equal(pinManifest(manifest, candidate, detached, { ...realReceipt, reReviewedCheckpoints: [accountID] }, realAttachments, { identityProof: relook }).approval.checkpoints.length, 64)
+    // Preserve the receipt regression for a deliberately configured exception;
+    // the production selection above permits no runner differences at all.
+    const relookVisual = structuredClone(manifest), relookID = receipt.checkpoints[0]
+    relookVisual.capture.identityProof.relookCheckpoints = [relookID]
+    const relookRecords = smallRecords.map(record => record.quality.id === relookID ? { ...record, png: blackCorner } : record)
+    const relook = proveCaptureIdentity(baseCapture, baseCapture, { ...reviewedCapture, records: relookRecords }, relookVisual)
+    assert.equal(relook.status, 'stable-awaiting-Tick-review')
+    assert.deepEqual(relook.reviewRequired, [relookID])
+    assertPinIdentity(relook, candidate, relookVisual)
+    assert.throws(() => pinManifest(relookVisual, candidate, detached, realReceipt, realAttachments, { identityProof: relook }), /Tick must explicitly re-review/)
+    assert.throws(() => pinManifest(relookVisual, candidate, detached, realReceipt, {}, { dryRun: true, identityProof: relook }), /Tick must explicitly re-review/)
+    assert.equal(pinManifest(relookVisual, candidate, detached, { ...realReceipt, reReviewedCheckpoints: [relookID] }, realAttachments, { identityProof: relook }).approval.checkpoints.length, 60)
     assert.throws(() => pinManifest(manifest, candidate, detached, { ...realReceipt, checkpoints: receipt.checkpoints.slice(1) }, realAttachments, { identityProof }), /exactly the stable non-deferred/)
     const differentRecords = smallRecords.map((record, index) => index ? record : { ...record, png: blackCorner })
     const unstableProof = proveCaptureIdentity(baseCapture, { ...baseCapture, records: differentRecords }, reviewedCapture, manifest)

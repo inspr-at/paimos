@@ -237,3 +237,37 @@ Fix4 validation: focused transport/switch tests pass **2/2** before and after th
 The final main sync merges **21815206b** in **31830e002**. Its one fixture conflict is resolved by retaining main's shared `sampleRenderedFont` helper alongside the private visual worker fontconfig and the pre-launch container fence; the rest of main's product changes are preserved. The approved remote static run on that merged implementation exits **0** in **262.75 seconds**, with **44 checks passed and zero optional skips**, including the full release-workflow suite, typecheck, lint, tier/shard and browser-safety checks. The preceding run on `7a4b0453e` passed 43 checks and hit the existing 120-second release-workflow wrapper budget; the post-merge rerun resolves that outstanding check. The subsequent CI-summary-only commit changes one capture job's wording and its corresponding `scripts/ci/static-checks.json` command-inventory digest; full registry classification, the container policy check and the focused tests pass afterward. No R0 test, permission, migration, DSAR or ownership rows are added.
 
 The worker exits at **95%**, not 100: fresh post-fix **64/64** same-commit container identity and the extended browser guard remain **unproven**. The approved browser entry point exits **5** with `VISUAL = CI ONLY`; only LEAD's hosted dispatch can provide that evidence. Rounded-outline locations are established from the original pixels, while their precise asynchronous repaint trigger and the new settling behavior require that fresh run. `web/test-results/refset3-run2/fix4-container-evidence/fix4-evidence-index.json` indexes original archives, source crops, negative proof, validation and the exact commands above. No model CLI or review gate is run; no origin push, deployment, capture dispatch, reference activation, release, tag or attachment is performed.
+
+
+AEON-1692 fix round 5 supersedes the 64-checkpoint selection above. The guarded plan now selects exactly **60 of 80 checkpoints**, retaining the original **72-member diagnostic archive**. On top of the existing 16 deferrals, **V-agent-rules-390-dark** and **V-account-use-matrix-1440-light** are deferred for “raster nondeterminism at rounded outlines; determinism probe AEON-1692 round 5”. **V-hours-1440-light/dark** are deferred because “AEON-1699 changes the grid header edge at every width”. All 20 deferrals remain unpinned and report-only after activation. The runner re-look exception is empty: every selected checkpoint must match the reviewed runner pixels, and Tick must still approve the exact container archive and complete 60-ID list.
+
+CI run **39975623900**, source **3d950f488ba70e07a973584f71477f0c102955c6**, was downloaded as data into the fresh directory `web/test-results/refset3-run3/container-39975623900-QTeuKK/`. Both original archives and their detached manifests verify. The first archive SHA-256 is **04130acb4361fb62fafcaa1ec4e201f72017383ef9dd12942b728e1e05ca6d64**; the repeat is **d4b8111aac7a35d3f1c6c3478d99f924d5fb0ed80aa3c6997bbb8e216a9f6d95**. The reviewed runner archive remains **3c407f853fd48512b713543726c28bcf7d1c317d02fbf9c5d1479bf0a824e348**. The full diagnostic set repeats **68/72** PNGs byte-for-byte and matches **67/72** reviewed runner images by decoded pixels. The selected subset passes **60/60 byte identity**, **60/60 pixel identity**, and **60/60 reviewed runner pixel matches**. The locked comparator's blocking replay passes all 60 references and rejects a deliberately planted one-pixel difference. The publication plan copies the original CI archive without repacking. Evidence and every selected ID are indexed in `web/test-results/refset3-run3/fix5-evidence-index.json`; the plan lives at `web/test-results/refset3-run3/guarded-60/pin-plan/`.
+
+Exact LEAD commands for this prepared plan (fill the real Tick receipt before publication):
+
+```sh
+cp web/test-results/refset3-run3/guarded-60/pin-plan/tick-approval.template.json web/test-results/refset3-run3/guarded-60/pin-plan/tick-approval.json
+# Record Tick's actual approval of the exact archive; retain all 60 checkpoint IDs.
+node scripts/test-prune/visual-pin.mjs verify-plan web/test-results/refset3-run3/guarded-60/pin-plan web/test-results/refset3-run3/guarded-60/pin-plan/tick-approval.json
+bash web/test-results/refset3-run3/guarded-60/pin-plan/lead-commands.sh publish
+# Record the two AEON-1670 attachment UUIDs returned above, then:
+bash web/test-results/refset3-run3/guarded-60/pin-plan/lead-commands.sh activate ARCHIVE_ATTACHMENT_UUID MANIFEST_ATTACHMENT_UUID
+```
+
+The generated publication script verifies the real receipt before creating the immutable prerelease and attaching the archive and detached manifest to AEON-1670. Activation verifies the distinct attachment IDs, exact original bytes, full 60-ID receipt and identity proof again before switching local comparison to blocking. The worker leaves the manifest unpinned and report-only. To reconstruct the same plan from the preserved data, use a fresh output directory:
+
+```sh
+bash scripts/test-prune/lead-commands.sh prepare web/test-results/refset3-run3/container-39975623900-QTeuKK web/test-results/refset3/main-39949629594 web/test-results/refset3-run3/rebuilt-60
+```
+
+The manual capture job also accepts `visual_probe`, a comma-separated list of **1–8 checkpoint IDs** from the 72-candidate capture set. A nonempty probe input runs only the probe path. In the same digest-pinned job it recreates each selected fixture **six times per setting**, with one worker and no retries: baseline (`--disable-gpu`), baseline plus `--num-raster-threads=1`, plus `--run-all-compositor-stages-before-draw`, plus `--disable-partial-raster`, and baseline plus all three candidate flags. Default capture and comparison flags stay unchanged. JSON and Markdown report byte identity per setting/checkpoint, all six sample digests and incomplete or failed attempts; original PNGs, quality reports and logs remain in the artifact. Incomplete execution fails the job; measured nondeterminism is a reported result. Probe captures carry diagnostic metadata and cannot be packaged as references, including the baseline setting. There are no masks or pixel tolerances.
+
+LEAD invokes the probe after publishing the reviewed branch:
+
+```sh
+bash scripts/test-prune/lead-commands.sh probe work/aeon-1692-refset3 V-agent-rules-390-dark,V-account-use-matrix-1440-light,V-hours-1440-light,V-hours-1440-dark
+# Equivalent workflow input: -f visual_probe=V-agent-rules-390-dark,V-account-use-matrix-1440-light,V-hours-1440-light,V-hours-1440-dark
+# Download visual-raster-probe-SHA-ATTEMPT from that run; read probe-report.json/.md.
+```
+
+Actual candidate-setting raster measurements belong to that opt-in hosted CI run; the original artifact proves only the 60-checkpoint pin selection. The worker does not dispatch CI or call another model. New source ownership: `scripts/test-prune/visual-probe.mjs` is explicitly assigned to S7. Existing named transport/switch regressions retain their tier identities and now cover 60-ID activation, all 20 deferrals, diagnostic isolation, five-setting/six-repeat orchestration, missing/duplicate repeats, byte-only changes, failures and source mismatches. The capture job's static command digest is updated with its new probe path.
