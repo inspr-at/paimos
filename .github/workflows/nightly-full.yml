@@ -304,8 +304,12 @@ jobs:
         run: npx playwright install chromium
       # Tar preserves executable bits, symlinks and hidden dependency files.
       # Build output is run-specific; never replay a dist cache for another commit.
+      - name: Download and verify visual reference assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/test-prune/visual-baselines.mjs download tmp/visual-baselines
       - name: Pack web runtime for shards
-        run: tar -cf "$RUNNER_TEMP/web-runtime.tar" web/node_modules web/dist
+        run: tar -cf "$RUNNER_TEMP/web-runtime.tar" web/node_modules web/dist tmp/visual-baselines
       - name: Share web runtime with shards
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -428,22 +432,101 @@ jobs:
           retention-days: 7
           overwrite: true
 
+  visual-comparison:
+    needs: nightly-web-setup
+    runs-on: ubuntu-latest
+    # Change this digest only in a PR that also regenerates visual baselines
+    # (capture artifact as evidence), never through an automated bump.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
+      options: --ipc=host --init
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 40
+    env:
+      PW_RETRIES: '0'
+      PW_WORKERS: '1'
+      AEON_REQUIRE_BACKEND: 'off'
+      AEON_VISUAL_CONTAINER_DIGEST: sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # Trust only this checkout, using its actual container path.
+      - name: Trust the visual container checkout
+        run: |
+          git config --global --add safe.directory "$(pwd -P)"
+          echo "AEON_VISUAL_BASELINE_FILE=$(pwd -P)/tmp/visual-baselines/baseline.json" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24.22.1"
+      - name: Record runner CPU evidence before comparison
+        run: node scripts/test-prune/visual-renderer.mjs cpu-evidence web/test-results/cpu-evidence.json
+      - name: Verify the container pin and baseline update policy
+        env:
+          AEON_VISUAL_BASE_SHA: ${{ github.sha }}
+        run: node scripts/test-prune/visual-container-check.mjs
+      - name: Download shared web runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: web-runtime
+          path: tmp/visual-runtime
+      - name: Restore web runtime
+        run: tar -xf tmp/visual-runtime/web-runtime.tar
+      - name: Verify visual reference transport before comparison
+        run: |
+          node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines
+          cat tmp/visual-baselines/reference-gates.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Run every visual case without retries
+        run: node scripts/test-tiers/cli.mjs run web --all --visual --job visual-comparison
+      - name: Report every visual checkpoint and preserve comparison failures
+        if: always()
+        run: node scripts/test-prune/visual-baselines.mjs report web/test-results >> "$GITHUB_STEP_SUMMARY"
+      - name: Confirm full visual tier execution
+        env:
+          TIER_REPORT: tmp/test-tiers/visual-comparison-measurement.json
+        run: node scripts/test-tiers/check-full.mjs
+      - name: Preserve visual tier measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-comparison-tier-measurements
+          overwrite: true
+          path: tmp/test-tiers/
+          if-no-files-found: error
+          retention-days: 8
+      - name: Preserve visual traces and screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-comparison-evidence
+          overwrite: true
+          path: |
+            web/test-results/
+            web/playwright-report/
+          if-no-files-found: error
+          retention-days: 7
+
   # Preserve the ruleset's required check identity, including failed/skipped setup.
   nightly-web:
     name: nightly-web
     if: always()
-    needs: [nightly-web-setup, nightly-web-shard]
+    needs: [nightly-web-setup, nightly-web-shard, visual-comparison]
     runs-on: ubuntu-latest
     steps:
       - name: Require setup and every web shard
         env:
           WEB_SETUP: ${{ needs.nightly-web-setup.result }}
           WEB_SHARD: ${{ needs.nightly-web-shard.result }}
+          VISUAL_COMPARISON: ${{ needs.visual-comparison.result }}
         run: |
           set -euo pipefail
           echo "web-setup=${WEB_SETUP} web-shard=${WEB_SHARD}"
           test "${WEB_SETUP}" = success
           test "${WEB_SHARD}" = success
+          test "${VISUAL_COMPARISON}" = success
 
   nightly-release-check:
     runs-on: ubuntu-latest

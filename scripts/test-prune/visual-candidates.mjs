@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'n
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateVisual } from './check.mjs'
-import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled } from './visual-renderer.mjs'
+import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, captureVisual } from './visual-renderer.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const need = (condition, message) => { if (!condition) throw new Error(message) }
@@ -31,6 +31,7 @@ export function packCandidates(records, visual) {
     const record = byId.get(checkpoint.id)
     need(record, `Missing review capture: ${checkpoint.id}`)
     const { quality, png } = record, viewport = visual.profiles[checkpoint.profile]
+    need(!quality.diagnosticProbe, 'Raster probe is diagnostic only; it cannot become a reference candidate')
     need(/^[a-f0-9]{40}$/.test(quality.captureSHA ?? ''), `Missing capture source: ${checkpoint.id}`)
     captureSHA ??= quality.captureSHA
     need(quality.captureSHA === captureSHA, 'Review captures must come from one source SHA')
@@ -55,7 +56,7 @@ export function packCandidates(records, visual) {
   }
   const bytes = Buffer.from(JSON.stringify({ version: 1, captureSHA, renderer, files }) + '\n')
   need(bytes.length <= 48 * 1024 * 1024, 'Review bundle exceeds 48 MiB')
-  return { bytes, review: { version: 1, status: 'pending-Tick-review', captureSHA, renderer, comparison: visual.comparison, sha256: hash(bytes),
+  return { bytes, review: { version: 1, status: 'pending-Tick-review', captureSHA, captureRun: records[0].quality.captureRun ?? null, renderer, comparison: visual.comparison, sha256: hash(bytes),
     clocks: Object.fromEntries(states.map(state => [state.id, state.clock])),
     states: states.map(state => state.id),
     deferred: visual.states.filter(state => state.referenceStatus === 'deferred').map(state => ({
@@ -64,7 +65,7 @@ export function packCandidates(records, visual) {
     })), members } }
 }
 
-export function collectCandidates(directory) {
+export function collectCandidates(directory, { diagnosticProbe = false } = {}) {
   const records = []
   let entries = 0
   function walk(path) {
@@ -75,7 +76,8 @@ export function collectCandidates(directory) {
       else if (entry.isFile() && /^V-[a-z0-9-]+\.md$/.test(entry.name)) {
         need(statSync(child).size <= 256 * 1024, 'Oversized quality report')
         const quality = JSON.parse(readFileSync(child, 'utf8'))
-        if (quality.reference?.mode === 'deferred' && quality.captureMode !== true) continue
+        need(!quality.diagnosticProbe || diagnosticProbe, 'Raster probe is diagnostic only; it cannot become a reference candidate')
+        if (quality.reference?.mode === 'deferred' && quality.captureMode !== true && !diagnosticProbe) continue
         const pngPath = join(path, entry.name.replace(/\.md$/, '.png'))
         need(statSync(pngPath).size <= MAX_PNG, 'Oversized review PNG')
         records.push({ quality, png: readFileSync(pngPath) })
@@ -116,7 +118,7 @@ export function writeCandidateArchive(records, visual, directory) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [directory, output] = process.argv.slice(2)
-  const visual = JSON.parse(readFileSync(new URL('./visual-manifest.json', import.meta.url), 'utf8'))
+  const visual = captureVisual(JSON.parse(readFileSync(new URL('./visual-manifest.json', import.meta.url), 'utf8')))
   if (directory === 'specs') {
     validateVisual(visual)
     for (const id of visual.capture.states) {

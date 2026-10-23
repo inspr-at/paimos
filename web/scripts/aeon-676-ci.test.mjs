@@ -24,7 +24,7 @@ test('AEON-676 regressions retain hosted launch policy and full nightly coverage
     }
   }
   assert.match(job('web'), /if: always\(\)/)
-  requireDependencies('web', ['web-setup', 'web-unit', 'web-shard'])
+  requireDependencies('web', ['web-setup', 'web-unit', 'web-shard', 'visual-comparison'])
   assert.match(job('web'), /test "\$WEB_SETUP" = success/)
   assert.match(job('web'), /test "\$WEB_SHARD" = success/)
   assert.match(job('web-unit'), /cli\.mjs run web --unit --shard/)
@@ -33,11 +33,17 @@ test('AEON-676 regressions retain hosted launch policy and full nightly coverage
   assert.match(job('ci-plan'), /lane: \$\{\{ steps\.tiers\.outputs\.lane \}\}/)
   assert.match(shard, /needs\.ci-plan\.result == 'success'/)
   assert.doesNotMatch(workflow, /needs\.tier-plan\./)
-  // AEON-1674 round 7 restores the hosted shard route; the visual comparator
-  // checks the observed ImageOS/ImageVersion against the reviewed renderer.
+  // Ordinary hosted shards keep their route; the required visual owner uses
+  // the same digest-pinned container as manual capture.
   assert.match(shard, /^    runs-on: ubuntu-latest$/m)
-  assert.match(shard, /^      AEON_VISUAL_RUNNER: ubuntu-24\.04$/m)
-  assert.match(job('visual-reference-capture'), /^    runs-on: ubuntu-24\.04$/m)
+  assert.doesNotMatch(shard, /AEON_VISUAL_/)
+  const renderer = JSON.parse(readFileSync(new URL('../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8')).renderer
+  for (const name of ['visual-reference-capture', 'visual-comparison']) {
+    assert.ok(job(name).includes(`image: ${renderer.container.image}@${renderer.container.digest}`))
+    assert.ok(job(name).includes(`AEON_VISUAL_CONTAINER_DIGEST: ${renderer.container.digest}`))
+    assert.doesNotMatch(job(name), /playwright install|bounded-apt/)
+  }
+  assert.match(job('web'), /test "\$VISUAL_COMPARISON" = success/)
   assert.match(shard, /cli\.mjs run web --shard \$\{\{ matrix.shard \}\}\/\$\{\{ strategy.job-total \}\}/)
   assert.doesNotMatch(shard, /ci-flake-guard\.mjs/)
   assert.match(shard, /if \[ "\$CI_LANE" = spec-only \]/)
