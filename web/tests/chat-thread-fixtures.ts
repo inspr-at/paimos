@@ -11,7 +11,7 @@ export const answered = '55adee55-145a-4c2e-9b1f-0c7d2e1a9f30'
 export const waiting = '66bdff66-256b-4d3f-8c2a-1d8e3f2b0a41'
 export const longWord = 'sha256:4f9c2a7be1d04c55a3a6c7f1d2e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1'
 
-export async function mockChatThread(page: Page, options: { theme?: 'light' | 'dark'; session?: Record<string, unknown>; today?: boolean; lineProbe?: boolean; now?: number; clock?: boolean } = {}) {
+export async function mockChatThread(page: Page, options: { theme?: 'light' | 'dark'; session?: Record<string, unknown>; today?: boolean; lineProbe?: boolean; now?: number; clock?: boolean; reference?: boolean } = {}) {
   const now = options.now ?? CHAT_THREAD_NOW
   // A scripted EventSource: the agents feed opens quietly; the chat-live stream takes frames from the test.
   await page.addInitScript(() => {
@@ -63,6 +63,13 @@ export async function mockChatThread(page: Page, options: { theme?: 'light' | 'd
       agentPost('With a chip, `origin/main` stayed green through the morning and the queue held only the release notes already written for the train.', 0),
     ] : []),
   ]
+  // The reference uses these same Desk deliveries, answer and latest reply.
+  // This short subset keeps the day, both cards and the sent message visible
+  // together in the phone's reading area above its unchanged composer.
+  if (options.reference) {
+    const last = messages.at(-1)!.id
+    messages.splice(0, messages.length, ...messages.filter(message => message.id === last || message.reply_to === root.id || message.body.startsWith('Decision Desk question ')))
+  }
   data.messages.splice(0, data.messages.length, ...messages)
   const calls = await mockAgents(page, data)
   // A person who may decide Desk questions: an open one waits for them.

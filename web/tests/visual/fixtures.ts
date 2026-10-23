@@ -135,7 +135,7 @@ async function setupSessionChatUnavailable(page: Page, theme: Theme) {
   await expect(panel.getByText('Übergabebericht', { exact: true })).toBeVisible()
 }
 export const sessionChat: VisualSetup = async (page, _profile, theme) => {
-  const { worker } = await mockChatThread(page, { theme, now: NOW, clock: false, today: true })
+  const { worker } = await mockChatThread(page, { theme, now: NOW, clock: false, today: true, reference: true })
   await visualChrome(page, fixtures(), NOW, { agents: false })
   await healthyLead(page)
   await page.goto(`/agents/${worker.id}?tab=messages`)
@@ -149,6 +149,9 @@ export const sessionChat: VisualSetup = async (page, _profile, theme) => {
   await expect(thread.locator('.msg.mine').last()).toContainText('Start it now. Keep the CI fixes in their own PR.')
   await page.evaluate(() => document.fonts.ready)
   await panel.locator('.thread-scroll').evaluate(element => { element.scrollTop = 0 })
+  await expect(thread.getByRole('separator', { name: 'Today', exact: true })).toBeInViewport({ ratio: 1 })
+  for (const card of await thread.locator('.msg.desk').all()) await expect(card).toBeInViewport({ ratio: 1 })
+  await expect(thread.locator('.msg.mine').last()).toBeInViewport({ ratio: 1 })
 }
 export const sessionChatUnavailable: VisualSetup = async (page, _profile, theme) => setupSessionChatUnavailable(page, theme)
 
