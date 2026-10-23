@@ -30,6 +30,10 @@ current `harness.read`; sending also requires current `inbox.send` in both the
 recipient and bound sender projects. Ownership and permissions are checked
 again inside the final write transaction.
 
+Peers may share one workstation principal. The sender and recipient must still
+be two distinct exact session generations; sending to the current generation
+is rejected.
+
 Messages are recorded under the recipient's project. Cross-project messages
 include `sender_project_id` and `sender_project`, and their frozen sender label
 contains the source project key. Counterpart replies using `--reply-to` retain
