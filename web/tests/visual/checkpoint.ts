@@ -48,6 +48,9 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
       await page.evaluate(async theme => {
         document.documentElement.dataset.theme = theme
         await document.fonts.ready
+        // decode() does not start a lazy off-screen image. Load the fixture's
+        // images explicitly so focusing a preview cannot leave readiness stuck.
+        for (const img of document.images) img.loading = 'eager'
         await Promise.all([...document.images].map(img => img.decode().catch(() => {})))
         await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
       }, checkpoint.theme)
