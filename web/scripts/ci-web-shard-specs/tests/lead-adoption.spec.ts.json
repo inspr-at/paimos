@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/lead-adoption.spec.ts",
-    "listedTests": 10,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
         "max": 13.055,

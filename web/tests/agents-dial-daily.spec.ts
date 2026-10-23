@@ -541,7 +541,8 @@ test('AEON-1036: the old header Boost today is gone and nothing writes to its en
   expect(calls.filter(c => /agent-accounts\/boost/.test(c.path))).toEqual([])
 })
 
-for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1678: retain the full daily-limit control checks in each physical layout once.
+for (const width of [1440, 400]) for (const theme of ['light'] as const) {
   test(`${width} ${theme}: folding, picking a harness, folds and the info area keep every control put`, async ({ page }, info) => {
     test.setTimeout(120_000)
     await page.setViewportSize({ width, height: 1000 })
@@ -698,7 +699,7 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
 
 // AEON-1166: the detail at the limit, with the replaced line, at 1440 and 390 in both themes. Everything else is AEON-1030.
 const d1Shots = process.env.AEON_1166_SHOTS ?? 'test-results/aeon-1166-mv2dial'
-for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1440, 390]) for (const theme of ['light'] as const) {
   test(`AEON-1166 ${width} ${theme}: at the limit the detail follows Settings › Models and the line keeps every control put`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })

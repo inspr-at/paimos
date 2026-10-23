@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/lead-card.spec.ts",
-    "listedTests": 18,
+    "listedTests": 14,
     "tierTiming": {
       "caseSeconds": {
         "max": 8.052,

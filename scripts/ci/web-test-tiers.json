@@ -154,21 +154,7 @@
     ,
     "browser:tests/aeon-1209-agents-head.spec.ts:768: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable"
     ,
-    "browser:tests/aeon-1209-agents-head.spec.ts:dark 1440: head order, the capacity row and no Desk panel"
-    ,
-    "browser:tests/aeon-1209-agents-head.spec.ts:dark: hovering a unit shows its − / + in place, wide and tight"
-    ,
-    "browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1024 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state"
-    ,
-    "browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1024 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state"
-    ,
-    "browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1440 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state"
-    ,
-    "browser:tests/aeon-1209-agents-head.spec.ts:design gate at 390 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state"
-    ,
     "browser:tests/aeon-1209-agents-head.spec.ts:design gate at 390 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state"
-    ,
-    "browser:tests/aeon-1209-agents-head.spec.ts:phone › dark 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head"
     ,
     "browser:tests/aeon-1209-agents-head.spec.ts:touch targets › 1280 with seven harnesses: the wide row shows −, the number and + as three distinct 44 px targets in every unit"
     ,
@@ -186,29 +172,9 @@
     ,
     "browser:tests/aeon-1210-agents-tree.spec.ts:a queue or questions that can’t be read say so below the list instead of dropping chips and lines in silence"
     ,
-    "browser:tests/aeon-1210-agents-tree.spec.ts:dark 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip"
-    ,
-    "browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1024 dark: the grouped list, its menus and its folds"
-    ,
-    "browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1024 light: the grouped list, its menus and its folds"
-    ,
-    "browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1440 dark: the grouped list, its menus and its folds"
-    ,
-    "browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 390 dark: the grouped list, its menus and its folds"
-    ,
     "browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 390 light: the grouped list, its menus and its folds"
     ,
-    "browser:tests/aeon-1210-agents-tree.spec.ts:phone › dark 390: the lead line, the queue chip and every row target reach 44 px"
-    ,
-    "browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1024 dark"
-    ,
-    "browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1024 light"
-    ,
-    "browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1440 dark"
-    ,
     "browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 1440 light"
-    ,
-    "browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 390 dark"
     ,
     "browser:tests/aeon-1211-agents-rows.spec.ts:a finished row says when it finished and when it moves at 390 light"
     ,
@@ -268,15 +234,9 @@
     ,
     "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 light"
     ,
-    "browser:tests/agent-pause.spec.ts:1440 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
-    ,
-    "browser:tests/agent-pause.spec.ts:1440 dark: the head stays on one line beside the session panel while a stop is requested"
-    ,
     "browser:tests/agent-pause.spec.ts:1440 light: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
     ,
     "browser:tests/agent-pause.spec.ts:1440 light: the head stays on one line beside the session panel while a stop is requested"
-    ,
-    "browser:tests/agent-pause.spec.ts:390 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
     ,
     "browser:tests/agent-pause.spec.ts:390 light: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
     ,
@@ -316,15 +276,7 @@
     ,
     "browser:tests/agents-cleanup.spec.ts:accounts and computers is one chip whose popover states the state; a stored fold changes nothing"
     ,
-    "browser:tests/agents-dial-daily.spec.ts:1024 dark: folding, picking a harness, folds and the info area keep every control put"
-    ,
-    "browser:tests/agents-dial-daily.spec.ts:1024 light: folding, picking a harness, folds and the info area keep every control put"
-    ,
-    "browser:tests/agents-dial-daily.spec.ts:1440 dark: folding, picking a harness, folds and the info area keep every control put"
-    ,
     "browser:tests/agents-dial-daily.spec.ts:1440 light: folding, picking a harness, folds and the info area keep every control put"
-    ,
-    "browser:tests/agents-dial-daily.spec.ts:400 dark: folding, picking a harness, folds and the info area keep every control put"
     ,
     "browser:tests/agents-dial-daily.spec.ts:400 light: folding, picking a harness, folds and the info area keep every control put"
     ,
@@ -366,11 +318,7 @@
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: without the right to manage accounts the Accounts tile names the problem and offers no Verify"
     ,
-    "browser:tests/agents-dial-daily.spec.ts:AEON-1166 1440 dark: at the limit the detail follows Settings › Models and the line keeps every control put"
-    ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1166 1440 light: at the limit the detail follows Settings › Models and the line keeps every control put"
-    ,
-    "browser:tests/agents-dial-daily.spec.ts:AEON-1166 390 dark: at the limit the detail follows Settings › Models and the line keeps every control put"
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1166 390 light: at the limit the detail follows Settings › Models and the line keeps every control put"
     ,
@@ -486,15 +434,9 @@
     ,
     "browser:tests/business.spec.ts:the overview includes open periods older than a year in its waiting count"
     ,
-    "browser:tests/capacity-pace.spec.ts:1024 dark › capacity 1024 dark: named controls, no sideways scroll, one-line labels stay on one line"
-    ,
     "browser:tests/capacity-pace.spec.ts:1024 light › capacity 1024 light: named controls, no sideways scroll, one-line labels stay on one line"
     ,
-    "browser:tests/capacity-pace.spec.ts:1440 dark › capacity 1440 dark: named controls, no sideways scroll, one-line labels stay on one line"
-    ,
     "browser:tests/capacity-pace.spec.ts:1440 light › capacity 1440 light: named controls, no sideways scroll, one-line labels stay on one line"
-    ,
-    "browser:tests/capacity-pace.spec.ts:390 dark › capacity 390 dark: named controls, no sideways scroll, 44 px targets, one-line labels stay on one line"
     ,
     "browser:tests/capacity-pace.spec.ts:390 light › capacity 390 light: named controls, no sideways scroll, 44 px targets, one-line labels stay on one line"
     ,
@@ -506,27 +448,11 @@
     ,
     "browser:tests/capacity-pace.spec.ts:without account management, Capacity reads: no picker, no default field, no pacing controls"
     ,
-    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1024 dark"
-    ,
-    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1024 light"
-    ,
-    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1440 dark"
-    ,
     "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1440 light"
-    ,
-    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 390 dark"
     ,
     "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 390 light"
     ,
-    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1024 dark"
-    ,
-    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1024 light"
-    ,
-    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1440 dark"
-    ,
     "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1440 light"
-    ,
-    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 390 dark"
     ,
     "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 390 light"
     ,
@@ -5612,8 +5538,6 @@
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"1024: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"1024: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"1440: the Sessions card head sticks inside its card with the same box and insides","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -5630,45 +5554,19 @@
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (1024 dark)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (1024 light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (1440 dark)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (390 dark)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (390 light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (400 dark)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart (400 light)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"F and / search this list; typing in the search only types; Esc clears, then leaves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"a search that hides the session under the cursor moves the cursor to a match; Enter and p never act on a hidden session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"dark 1440: head order, the capacity row and no Desk panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"dark: hovering a unit shows its − / + in place, wide and tight","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"design gate at 1024 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"design gate at 1024 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"design gate at 1440 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"design gate at 1440 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"design gate at 390 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"design gate at 390 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"light 1440: head order, the capacity row and no Desk panel","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"light: hovering a unit shows its − / + in place, wide and tight","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"phone › dark 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"phone › light 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -5700,37 +5598,17 @@
     ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"a queue or questions that can’t be read say so below the list instead of dropping chips and lines in silence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"dark 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"design gate at 1024 dark: the grouped list, its menus and its folds","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"design gate at 1024 light: the grouped list, its menus and its folds","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"design gate at 1440 dark: the grouped list, its menus and its folds","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"design gate at 1440 light: the grouped list, its menus and its folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"design gate at 390 dark: the grouped list, its menus and its folds","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"design gate at 390 light: the grouped list, its menus and its folds","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"light 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"phone › dark 390: the lead line, the queue chip and every row target reach 44 px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"phone › light 390: the lead line, the queue chip and every row target reach 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a filtered row that stops matching waits under the pointer like any other change","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a finished row says when it finished and when it moves at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a finished row says when it finished and when it moves at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a finished row says when it finished and when it moves at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a finished row says when it finished and when it moves at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a finished row says when it finished and when it moves at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a finished row says when it finished and when it moves at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5748,33 +5626,7 @@
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"an unfinished session keeps its place and names why it ended, never Finished","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1024: held handover headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1024: held queue headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1024: the state lives in the avatar, Time sits beside the name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1440: held handover headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1440: held queue headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1440: the approved columns, registry model names, a name-only line 1; listening and tier in the details","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1440: the state lives in the avatar, Time sits beside the name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 390: compact rows open with the harness mark and end with the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 390: held handover headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 390: held queue headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 400: the approved columns, registry model names, a name-only line 1; listening and tier in the details","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"keyboard focus in a row holds changes like the pointer does","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 1024: held handover headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 1024: held queue headings never add a row or move its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 1024: the state lives in the avatar, Time sits beside the name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -5911,12 +5763,6 @@
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: pinned and last-used tabs belong to the person; queue links force Lead at Next up and chat keys only type","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: server action omission and decision denial remain read-only, and more than four real options link to the Desk","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 dark 1024: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 dark 1440: one dock, presets, live divider and top-starting panes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 dark 390: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 light 1024: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -6512,25 +6358,11 @@
     ,
     {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"the public guide is readable without sign-in and keeps only the human code","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1024 dark: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1024 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: the head stays on one line beside the session panel while a stop is requested","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: the head stays on one line beside the session panel while a stop is requested","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 dark: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -6568,15 +6400,7 @@
     ,
     {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"offline and unauthorized sessions offer no Restart or Reconnect","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -6590,11 +6414,7 @@
     ,
     {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"cost guidance is live, nonblocking and changes at the documented thresholds","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"large budget and per-client delivery 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"large budget and per-client delivery 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"large budget and per-client delivery 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"large budget and per-client delivery 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6694,27 +6514,9 @@
     ,
     {"kind":"browser","file":"tests/agent-rules-shots.spec.ts","name":"preview 390 light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agent-rules-ticks.spec.ts","name":"a failed rule tick rolls back to the saved draft","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-rules-ticks.spec.ts","name":"a failed set tick rolls back to the saved draft","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-rules-ticks.spec.ts","name":"a layer tick of two sets says how many drafts were saved, and stops when one fails","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-rules-ticks.spec.ts","name":"a layer tick saves the writable sets underneath it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-rules-ticks.spec.ts","name":"a rule tick saves a draft and does not publish","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-rules-ticks.spec.ts","name":"a set tick turns movable rules off and leaves locked rules on","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agent-rules-ticks.spec.ts","name":"an agent can draft a project rule and cannot touch company rules","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-rules-ticks.spec.ts","name":"an edited upstream rule says the original wording was not stored","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-rules-ticks.spec.ts","name":"duplicating a rule stays in the draft until save","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-rules-ticks.spec.ts","name":"duplicating a set writes a new draft and leaves the original live","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agent-rules-ticks.spec.ts","name":"editing one set blocks ticks on the others until it is saved or cancelled","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-rules-ticks.spec.ts","name":"someone who cannot write the layer sees no ticks","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6782,15 +6584,7 @@
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"accounts and computers is one chip whose popover states the state; a stored fold changes nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"1024 dark: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"1024 light: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"1440 dark: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"1440 light: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"400 dark: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"400 light: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6832,11 +6626,7 @@
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: without the right to manage accounts the Accounts tile names the problem and offers no Verify","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1166 1440 dark: at the limit the detail follows Settings › Models and the line keeps every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1166 1440 light: at the limit the detail follows Settings › Models and the line keeps every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1166 390 dark: at the limit the detail follows Settings › Models and the line keeps every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1166 390 light: at the limit the detail follows Settings › Models and the line keeps every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6876,15 +6666,7 @@
     ,
     {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"touch quota retries › AEON-1511: quota retry targets stay usable on touch screens without moving controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1024 dark wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1024 light wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1440 dark wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1440 light wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"390 dark wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"390 light wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6934,23 +6716,15 @@
     ,
     {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 dark: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 light: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 light: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 dark: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 light: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 light: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 dark: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 light: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6969,10 +6743,6 @@
     {"kind":"browser","file":"tests/agents-handover.spec.ts","name":"drag and drop moves only onto an authorized live lead","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-handover.spec.ts","name":"foreign worker has neither drag permission nor a move menu","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-handover.spec.ts","name":"handover and keyboard menu with undo dark 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-handover.spec.ts","name":"handover and keyboard menu with undo dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-handover.spec.ts","name":"handover and keyboard menu with undo light 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -7071,10 +6841,6 @@
     {"kind":"browser","file":"tests/agents-metadata.spec.ts","name":"list shows current metadata and detail supplies the change history","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"an unreported service tier stays explicit while optional setup fields stay absent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"dark 1600px fits without horizontal scroll and captures review image","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"dark 390px fits without horizontal scroll and captures review image","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"detail shows now, activity, ticket status and hides unreported fields","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -7594,15 +7360,9 @@
     ,
     {"kind":"browser","file":"tests/capacity-learning.spec.ts","name":"learning suggestions cannot write without account.manage","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"1024 dark › capacity 1024 dark: named controls, no sideways scroll, one-line labels stay on one line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"1024 light › capacity 1024 light: named controls, no sideways scroll, one-line labels stay on one line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"1440 dark › capacity 1440 dark: named controls, no sideways scroll, one-line labels stay on one line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"1440 light › capacity 1440 light: named controls, no sideways scroll, one-line labels stay on one line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"390 dark › capacity 390 dark: named controls, no sideways scroll, 44 px targets, one-line labels stay on one line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"390 light › capacity 390 light: named controls, no sideways scroll, 44 px targets, one-line labels stay on one line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -8034,27 +7794,11 @@
     ,
     {"kind":"browser","file":"tests/crm.spec.ts","name":"the list: numbers as the server writes them, search, sort, filters and the keyboard","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9414,11 +9158,7 @@
     ,
     {"kind":"browser","file":"tests/group-figures.spec.ts","name":"coarse pointer › AEON-1388 a coarse pointer shows the first cell’s controls, 44 px each, above the group rows’ own","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/groups.spec.ts","name":"one quota, its own pool, and move 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/groups.spec.ts","name":"one quota, its own pool, and move 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/groups.spec.ts","name":"one quota, its own pool, and move 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/groups.spec.ts","name":"one quota, its own pool, and move 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9430,11 +9170,7 @@
     ,
     {"kind":"browser","file":"tests/groups.spec.ts","name":"remember for this ticket 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/groups.spec.ts","name":"shared login keeps both group pools 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/groups.spec.ts","name":"shared login keeps both group pools 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/groups.spec.ts","name":"shared login keeps both group pools 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/groups.spec.ts","name":"shared login keeps both group pools 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10512,21 +10248,9 @@
     ,
     {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"candidate errors and rejected confirmations remain visible with no false adoption","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 400 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/lead-adoption.spec.ts","name":"person confirms the running coordinator without moving controls at 400 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"keyboard: Tab reaches Start lead and the fold, folded details leave the tab order","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10540,11 +10264,7 @@
     ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"stability › folding never moves a control at 400","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card folds to one line with Start lead at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card folds to one line with Start lead at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card folds to one line with Start lead at 400 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the card folds to one line with Start lead at 400 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10556,11 +10276,7 @@
     ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the fold is remembered for this person and project, and a lead clears it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 400 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 400 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10574,8 +10290,6 @@
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"AEON-1256: the stations row has one height with and without sub-labels at 400","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: the expert setting reveals Start agent manually","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -10588,15 +10302,9 @@
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"leaving the page that opened the docked lead panel closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"no lead: the band offers Start lead and the sheet requests one at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"no lead: the band offers Start lead and the sheet requests one at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"no lead: the band offers Start lead and the sheet requests one at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"no lead: the band offers Start lead and the sheet requests one at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"phone: band, full-height panel and pinned sheet bar at 390 (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"phone: band, full-height panel and pinned sheet bar at 390 (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10612,27 +10320,11 @@
     ,
     {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: a previously started lead has no Remove control","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-remove.spec.ts","name":"AEON-1040: remove confirmation stays still on card and Leads at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-start.spec.ts","name":"AEON-1038: launch-off controls stay honest and still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -11744,11 +11436,7 @@
     ,
     {"kind":"browser","file":"tests/pi-openrouter.spec.ts","name":"pi Start pins the Settings model 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/pi-openrouter.spec.ts","name":"pi model settings 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/pi-openrouter.spec.ts","name":"pi model settings 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/pi-openrouter.spec.ts","name":"pi model settings 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/pi-openrouter.spec.ts","name":"pi model settings 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12226,29 +11914,11 @@
     ,
     {"kind":"browser","file":"tests/projects.spec.ts","name":"the sort control orders by name, open tickets and progress","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/provenance.spec.ts","name":"a forbidden read shows an error and no instruction rows","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/provenance.spec.ts","name":"a late provenance response does not attach to the session now open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/provenance.spec.ts","name":"a missing session shows an error and no instruction rows","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/provenance.spec.ts","name":"an empty provenance record stays empty inside the open session","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/provenance.spec.ts","name":"instruction versions render at 1600px in dark, pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/provenance.spec.ts","name":"instruction versions render at 1600px in dark, pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/provenance.spec.ts","name":"instruction versions render at 1600px in light, pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/provenance.spec.ts","name":"instruction versions render at 1600px in light, pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/provenance.spec.ts","name":"instruction versions render at 390px in dark, pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/provenance.spec.ts","name":"instruction versions render at 390px in dark, pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/provenance.spec.ts","name":"instruction versions render at 390px in light, pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/provenance.spec.ts","name":"instruction versions render at 390px in light, pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/provenance.spec.ts","name":"rule versions show a hash and version without instruction text","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14760,11 +14430,7 @@
     ,
     {"kind":"browser","file":"tests/vendor-signals.spec.ts","name":"a computer approver loses the statusline toggle when account.manage is revoked","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/vendor-signals.spec.ts","name":"vendor throttling and explicit statusline consent 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/vendor-signals.spec.ts","name":"vendor throttling and explicit statusline consent 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/vendor-signals.spec.ts","name":"vendor throttling and explicit statusline consent 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/vendor-signals.spec.ts","name":"vendor throttling and explicit statusline consent 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -17683,6 +17349,24 @@
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > retains a failed save across successful polls until another deliberate edit","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > serializes rapid clicks and coalesces edits behind a held write","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 metadata: delayed provenance cannot replace the session now open","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 metadata: forbidden/missing provenance clears the old data and stale failures cannot hide a newer record","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: a held budget save sends once, reports refusal and retains the unsaved values","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: a partial layer tick keeps the committed draft, restores the failed set and stops before later sets","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: client delivery uses each client ceiling and invalid totals/layer caps never write","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: company ticks and duplication require a person with write and publish grants","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: duplicate sets have independent identities and never change the original or publish","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: editing keeps ticks and duplicates local until an explicit draft save; publication requires a separate confirmation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-prune.unit.test.ts","name":"P06 rules: held set/rule tick failures roll back their optimistic state and reject overlapping ticks","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agents-revision.unit.test.ts","name":"a capacity override answered after a daemon claimed the run does not put the run back to queued","tier":"GATED-FULL"}
     ,

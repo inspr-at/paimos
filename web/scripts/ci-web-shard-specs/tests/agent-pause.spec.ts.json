@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/agent-pause.spec.ts",
-    "listedTests": 15,
+    "listedTests": 18,
     "tierTiming": {
       "caseSeconds": {
         "max": 9.345,
