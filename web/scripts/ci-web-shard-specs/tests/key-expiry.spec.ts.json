@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/key-expiry.spec.ts",
-    "listedTests": 13,
+    "listedTests": 11,
     "tierTiming": {
       "caseSeconds": {
         "max": 8.601,

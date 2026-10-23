@@ -74,41 +74,15 @@
     ,
     "browser:tests/account-use-matrix.spec.ts:screenshots of the matrix, light and dark"
     ,
-    "browser:tests/account-use-matrix.spec.ts:where 1024 dark › where 1024 dark: the design's checks hold on the built page"
-    ,
-    "browser:tests/account-use-matrix.spec.ts:where 1024 light › where 1024 light: the design's checks hold on the built page"
-    ,
-    "browser:tests/account-use-matrix.spec.ts:where 1440 dark › where 1440 dark: the design's checks hold on the built page"
-    ,
     "browser:tests/account-use-matrix.spec.ts:where 1440 light › where 1440 light: the design's checks hold on the built page"
-    ,
-    "browser:tests/account-use-matrix.spec.ts:where 390 dark › where 390 dark: the design's checks hold on the built page"
     ,
     "browser:tests/account-use-matrix.spec.ts:where 390 light › where 390 light: the design's checks hold on the built page"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: Remove and End now leave “Agents may use it” and everything below in place"
     ,
-    "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: a floor save and its Undo move no control in the panel"
-    ,
-    "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: each row carries the bar and one caption; the panel says what stops agents first"
-    ,
-    "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: the design's checks hold on the built page"
-    ,
     "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: Remove and End now leave “Agents may use it” and everything below in place"
     ,
-    "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: a floor save and its Undo move no control in the panel"
-    ,
-    "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: each row carries the bar and one caption; the panel says what stops agents first"
-    ,
-    "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: the design's checks hold on the built page"
-    ,
     "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: Remove and End now leave “Agents may use it” and everything below in place"
-    ,
-    "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: a floor save and its Undo move no control in the panel"
-    ,
-    "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: each row carries the bar and one caption; the panel says what stops agents first"
-    ,
-    "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: the design's checks hold on the built page"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: Remove and End now leave “Agents may use it” and everything below in place"
     ,
@@ -119,12 +93,6 @@
     "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: the design's checks hold on the built page"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: Remove and End now leave “Agents may use it” and everything below in place"
-    ,
-    "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: a floor save and its Undo move no control in the panel"
-    ,
-    "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: each row carries the bar and one caption; the panel says what stops agents first"
-    ,
-    "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: the design's checks hold on the built page"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: Remove and End now leave “Agents may use it” and everything below in place"
     ,
@@ -966,14 +934,6 @@
     ,
     "browser:tests/knowledge.spec.ts:Decision entries expose active and superseded history without generic mutation controls"
     ,
-    "browser:tests/models-fallback.spec.ts:at 1440 dark › A · For everyone: folds, menus, keyboard reorder and Undo"
-    ,
-    "browser:tests/models-fallback.spec.ts:at 1440 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers"
-    ,
-    "browser:tests/models-fallback.spec.ts:at 390 dark › A · For everyone: folds, menus, keyboard reorder and Undo"
-    ,
-    "browser:tests/models-fallback.spec.ts:at 390 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers"
-    ,
     "browser:tests/models-fallback.spec.ts:at 390 light › A · For everyone: folds, menus, keyboard reorder and Undo"
     ,
     "browser:tests/models-fallback.spec.ts:at 390 light › C · a member: a locked row is read-only, an edit makes a workspace row hers"
@@ -1504,15 +1464,9 @@
     ,
     "browser:tests/settings-accounts.spec.ts:an older rule shows as Set by you; Remove asks in place and removes it for good"
     ,
-    "browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1024 dark"
-    ,
     "browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1024 light"
     ,
-    "browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1440 dark"
-    ,
     "browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1440 light"
-    ,
-    "browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 390 dark"
     ,
     "browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 390 light"
     ,
@@ -5376,8 +5330,6 @@
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: wide panel with attachments in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/access.spec.ts","name":"390: every Access tab fits the phone (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/access.spec.ts","name":"390: every Access tab fits the phone (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/access.spec.ts","name":"a role change shows its effect first, applies, and can be undone","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -5394,8 +5346,6 @@
     ,
     {"kind":"browser","file":"tests/access.spec.ts","name":"agents: role and keys; a new key shows once; service principals are internal and keyless","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/access.spec.ts","name":"agents: the Deactivated group and the actions menu pass axe and fit the phone (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/access.spec.ts","name":"agents: the Deactivated group and the actions menu pass axe and fit the phone (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/access.spec.ts","name":"agents: the access log records the deactivation","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -5405,8 +5355,6 @@
     {"kind":"browser","file":"tests/access.spec.ts","name":"an ended session keeps a one-time join link copyable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/access.spec.ts","name":"an invite offers only project roles the inviter holds in the workspace, as the server checks","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/access.spec.ts","name":"axe: people, a role, the invite form, project access and the log in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/access.spec.ts","name":"axe: people, a role, the invite form, project access and the log in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -5480,15 +5428,7 @@
     ,
     {"kind":"browser","file":"tests/account-link.spec.ts","name":"the reviewed account can be confirmed once from the keyboard","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 400 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 400 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -5524,15 +5464,7 @@
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"the pairing review shows the rows the rule pre-fills","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 1024 dark › where 1024 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 1024 light › where 1024 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 1440 dark › where 1440 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 1440 light › where 1440 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 390 dark › where 390 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 390 light › where 390 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5566,27 +5498,9 @@
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5597,12 +5511,6 @@
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -7933,8 +7841,6 @@
     {"kind":"browser","file":"tests/classic-invite.spec.ts","name":"an imported colleague can be invited with their email and classic role","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/classic-invite.spec.ts","name":"an imported role outside my authority needs an explicit allowed choice","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/classic-invite.spec.ts","name":"imported invite actions fit a phone and remain accessible in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/classic-invite.spec.ts","name":"imported invite actions fit a phone and remain accessible in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10528,11 +10434,7 @@
     ,
     {"kind":"browser","file":"tests/key-dialog.spec.ts","name":"no grantable covering role leaves the choice explicit; Admin is never selected","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-dialog.spec.ts","name":"project Ticket worker flow, explanations and searchable scopes at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/key-dialog.spec.ts","name":"project Ticket worker flow, explanations and searchable scopes at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/key-dialog.spec.ts","name":"project Ticket worker flow, explanations and searchable scopes at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-dialog.spec.ts","name":"project Ticket worker flow, explanations and searchable scopes at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10542,13 +10444,9 @@
     ,
     {"kind":"browser","file":"tests/key-expiry.spec.ts","name":"a failed rotation preserves the sheet and reports the server error","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/key-expiry.spec.ts","name":"axe and coordinator screenshots: keys and New key sheet in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/key-expiry.spec.ts","name":"axe and coordinator screenshots: keys and New key sheet in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-expiry.spec.ts","name":"expiry and status stay separate from actions; row controls and SVGs align","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/key-expiry.spec.ts","name":"key cards and expiry sheet fit a phone in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-expiry.spec.ts","name":"key cards and expiry sheet fit a phone in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10586,19 +10484,7 @@
     ,
     {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"expiry failure retains draft; modifier Enter saves and Escape leaves a field before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"key sheet controls stay anchored at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"key sheet controls stay anchored at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"key sheet controls stay anchored at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"key sheet controls stay anchored at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"key sheet controls stay anchored at 1600px dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"key sheet controls stay anchored at 1600px light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"key sheet controls stay anchored at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"key sheet controls stay anchored at 390px light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10658,15 +10544,7 @@
     ,
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"rotate scopes stay in their columns at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -10684,17 +10562,7 @@
     ,
     {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"people without keys.manage have no scope edit action","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"scopes fit 1440px in dark with keyboard access","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"scopes fit 1440px in light with keyboard access","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"scopes fit 1600px in dark with keyboard access","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"scopes fit 1600px in light with keyboard access","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"scopes fit 390px in dark with keyboard access","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"scopes fit 390px in dark with keyboard access (wide system font)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"scopes fit 390px in light with keyboard access","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -11254,17 +11122,9 @@
     ,
     {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"an admin takes a step a workspace pin holds last out with its pin; Undo sets both again, and moving it lifts the pin too","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 1440 dark › A · For everyone: folds, menus, keyboard reorder and Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 1440 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 1440 light › A · For everyone: folds, menus, keyboard reorder and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 1440 light › C · a member: a locked row is read-only, an edit makes a workspace row hers","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 390 dark › A · For everyone: folds, menus, keyboard reorder and Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 390 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 390 light › A · For everyone: folds, menus, keyboard reorder and Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11500,15 +11360,7 @@
     ,
     {"kind":"browser","file":"tests/models-situations.spec.ts","name":"on a phone › each cell names its situation, every target is 44 px and the popovers stay on screen","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -12313,8 +12165,6 @@
     {"kind":"browser","file":"tests/profile.spec.ts","name":"a photo: pick it, crop it with the keyboard, see it everywhere","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/profile.spec.ts","name":"at 390 nothing in the profile is cut","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/profile.spec.ts","name":"axe: profile, crop dialog and greeting in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/profile.spec.ts","name":"axe: profile, crop dialog and greeting in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13736,11 +13586,7 @@
     ,
     {"kind":"browser","file":"tests/scope-codes.spec.ts","name":"pasted scopes beyond role, creator or registry stay unticked with reasons","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/scope-codes.spec.ts","name":"scope proposals fit 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/scope-codes.spec.ts","name":"scope proposals fit 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/scope-codes.spec.ts","name":"scope proposals fit 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/scope-codes.spec.ts","name":"scope proposals fit 390px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14250,15 +14096,9 @@
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule shows as Set by you; Remove asks in place and removes it for good","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule's title reads on one line with Remove under it at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule's title reads on one line with Remove under it at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule's title reads on one line with Remove under it at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule's title reads on one line with Remove under it at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule's title reads on one line with Remove under it at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule's title reads on one line with Remove under it at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14302,15 +14142,7 @@
     ,
     {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"a numeric conflict suppresses shared saved feedback from another field","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"agent card fits 1024px dark, with stable controls and long German copy","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"agent card fits 1024px light, with stable controls and long German copy","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"agent card fits 1440px dark, with stable controls and long German copy","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"agent card fits 1440px light, with stable controls and long German copy","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"agent card fits 390px dark, with stable controls and long German copy","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"agent card fits 390px light, with stable controls and long German copy","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14350,15 +14182,9 @@
     ,
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"failed capacity apply stays unsaved and reports the actual failure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

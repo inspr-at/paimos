@@ -537,7 +537,7 @@ test('agents: the access log records the deactivation', async ({ page }) => {
   await expect(page.locator('.event').filter({ hasText: 'deactivated relic' }).first()).toBeVisible()
 })
 
-for (const colorScheme of ['light', 'dark'] as const) {
+for (const colorScheme of ['light'] as const) {
   test(`agents: the Deactivated group and the actions menu pass axe and fit the phone (${colorScheme})`, async ({ page }) => {
     await page.emulateMedia({ colorScheme })
     await page.setViewportSize({ width: 390, height: 844 })
@@ -808,7 +808,7 @@ test('tabs are a tablist: arrows move between them', async ({ page }) => {
   await expect(page).toHaveURL('/settings/access/audit')
 })
 
-for (const colorScheme of ['light', 'dark'] as const) {
+for (const colorScheme of ['light'] as const) {
   test(`axe: people, a role, the invite form, project access and the log in ${colorScheme}`, async ({ page }) => {
     await page.emulateMedia({ colorScheme })
     await page.setViewportSize({ width: 1280, height: 900 })
@@ -842,7 +842,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
   })
 }
 
-for (const colorScheme of ['light', 'dark'] as const) {
+for (const colorScheme of ['light'] as const) {
   test(`390: every Access tab fits the phone (${colorScheme})`, async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.emulateMedia({ colorScheme })

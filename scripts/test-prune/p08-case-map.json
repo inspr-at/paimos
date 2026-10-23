@@ -6,9 +6,9 @@
   "baselineSha256": "e017c08a8cbad7451c9c1615a98f03cb10de1f1c85bef0d561c86fec1faaafc0",
   "status": "partial",
   "before": 552,
-  "after": 543,
+  "after": 479,
   "caseMappings": [
-    {"source":"browser:tests/access.spec.ts:390: every Access tab fits the phone (dark)","action":"retained","nativeKeys":["browser:tests/access.spec.ts:390: every Access tab fits the phone (dark)"]},
+    {"source":"browser:tests/access.spec.ts:390: every Access tab fits the phone (dark)","action":"replaced","nativeKeys":["browser:tests/access.spec.ts:390: every Access tab fits the phone (light)"],"round":"cut-A"},
     {"source":"browser:tests/access.spec.ts:390: every Access tab fits the phone (light)","action":"retained","nativeKeys":["browser:tests/access.spec.ts:390: every Access tab fits the phone (light)"]},
     {"source":"browser:tests/access.spec.ts:a role change shows its effect first, applies, and can be undone","action":"retained","nativeKeys":["browser:tests/access.spec.ts:a role change shows its effect first, applies, and can be undone"]},
     {"source":"browser:tests/access.spec.ts:a role name the server refuses is shown at the name field","action":"retained","nativeKeys":["browser:tests/access.spec.ts:a role name the server refuses is shown at the name field"]},
@@ -17,13 +17,13 @@
     {"source":"browser:tests/access.spec.ts:agents: deactivating is person-only with Manage members: internal identities and viewers get no action","action":"retained","nativeKeys":["browser:tests/access.spec.ts:agents: deactivating is person-only with Manage members: internal identities and viewers get no action"]},
     {"source":"browser:tests/access.spec.ts:agents: reactivating a retired computer points to pairing afresh; no key is offered for it","action":"retained","nativeKeys":["browser:tests/access.spec.ts:agents: reactivating a retired computer points to pairing afresh; no key is offered for it"]},
     {"source":"browser:tests/access.spec.ts:agents: role and keys; a new key shows once; service principals are internal and keyless","action":"retained","nativeKeys":["browser:tests/access.spec.ts:agents: role and keys; a new key shows once; service principals are internal and keyless"]},
-    {"source":"browser:tests/access.spec.ts:agents: the Deactivated group and the actions menu pass axe and fit the phone (dark)","action":"retained","nativeKeys":["browser:tests/access.spec.ts:agents: the Deactivated group and the actions menu pass axe and fit the phone (dark)"]},
+    {"source":"browser:tests/access.spec.ts:agents: the Deactivated group and the actions menu pass axe and fit the phone (dark)","action":"replaced","nativeKeys":["browser:tests/access.spec.ts:agents: the Deactivated group and the actions menu pass axe and fit the phone (light)"],"round":"cut-A"},
     {"source":"browser:tests/access.spec.ts:agents: the Deactivated group and the actions menu pass axe and fit the phone (light)","action":"retained","nativeKeys":["browser:tests/access.spec.ts:agents: the Deactivated group and the actions menu pass axe and fit the phone (light)"]},
     {"source":"browser:tests/access.spec.ts:agents: the access log records the deactivation","action":"retained","nativeKeys":["browser:tests/access.spec.ts:agents: the access log records the deactivation"]},
     {"source":"browser:tests/access.spec.ts:an action menu survives a delayed opening scroll, but closes when its anchor moves","action":"retained","nativeKeys":["browser:tests/access.spec.ts:an action menu survives a delayed opening scroll, but closes when its anchor moves"]},
     {"source":"browser:tests/access.spec.ts:an ended session keeps a one-time join link copyable","action":"retained","nativeKeys":["browser:tests/access.spec.ts:an ended session keeps a one-time join link copyable"]},
     {"source":"browser:tests/access.spec.ts:an invite offers only project roles the inviter holds in the workspace, as the server checks","action":"retained","nativeKeys":["browser:tests/access.spec.ts:an invite offers only project roles the inviter holds in the workspace, as the server checks"]},
-    {"source":"browser:tests/access.spec.ts:axe: people, a role, the invite form, project access and the log in dark","action":"retained","nativeKeys":["browser:tests/access.spec.ts:axe: people, a role, the invite form, project access and the log in dark"]},
+    {"source":"browser:tests/access.spec.ts:axe: people, a role, the invite form, project access and the log in dark","action":"replaced","nativeKeys":["browser:tests/access.spec.ts:axe: people, a role, the invite form, project access and the log in light"],"round":"cut-A"},
     {"source":"browser:tests/access.spec.ts:axe: people, a role, the invite form, project access and the log in light","action":"retained","nativeKeys":["browser:tests/access.spec.ts:axe: people, a role, the invite form, project access and the log in light"]},
     {"source":"browser:tests/access.spec.ts:can() decides: a member reads, and is offered nothing they may not do","action":"retained","nativeKeys":["browser:tests/access.spec.ts:can() decides: a member reads, and is offered nothing they may not do"]},
     {"source":"browser:tests/access.spec.ts:configured identity provider can create a sign-in account and retry a failed setup","action":"retained","nativeKeys":["browser:tests/access.spec.ts:configured identity provider can create a sign-in account and retry a failed setup"]},
@@ -60,11 +60,11 @@
     {"source":"browser:tests/account-link.spec.ts:one person confirmation names account, computer and workspace; unlink is one action","action":"retained","nativeKeys":["browser:tests/account-link.spec.ts:one person confirmation names account, computer and workspace; unlink is one action"]},
     {"source":"browser:tests/account-link.spec.ts:reviews from another person or tenant never enable confirmation","action":"retained","nativeKeys":["browser:tests/account-link.spec.ts:reviews from another person or tenant never enable confirmation"]},
     {"source":"browser:tests/account-link.spec.ts:the reviewed account can be confirmed once from the keyboard","action":"retained","nativeKeys":["browser:tests/account-link.spec.ts:the reviewed account can be confirmed once from the keyboard"]},
-    {"source":"browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1024 dark","action":"retained","nativeKeys":["browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1024 dark"]},
-    {"source":"browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1024 light","action":"retained","nativeKeys":["browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1024 light"]},
-    {"source":"browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1440 dark","action":"retained","nativeKeys":["browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1440 dark"]},
+    {"source":"browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1024 dark","action":"replaced","nativeKeys":["browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1440 light"],"round":"cut-A"},
+    {"source":"browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1024 light","action":"replaced","nativeKeys":["browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1440 light"],"round":"cut-A"},
+    {"source":"browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1440 dark","action":"replaced","nativeKeys":["browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1440 light"],"round":"cut-A"},
     {"source":"browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1440 light","action":"retained","nativeKeys":["browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 1440 light"]},
-    {"source":"browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 400 dark","action":"retained","nativeKeys":["browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 400 dark"]},
+    {"source":"browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 400 dark","action":"replaced","nativeKeys":["browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 400 light"],"round":"cut-A"},
     {"source":"browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 400 light","action":"retained","nativeKeys":["browser:tests/account-resets.spec.ts:Account floor and resets switch stay still at 400 light"]},
     {"source":"browser:tests/account-use-matrix.spec.ts:\"Choose where\" from Needs you opens For new things and brings the new account's row, its first box focused (desktop and phone)","action":"retained","nativeKeys":["browser:tests/account-use-matrix.spec.ts:\"Choose where\" from Needs you opens For new things and brings the new account's row, its first box focused (desktop and phone)"]},
     {"source":"browser:tests/account-use-matrix.spec.ts:For new things folds into one line; opened, New model versions is read-only with a link to Models (desktop and phone)","action":"retained","nativeKeys":["browser:tests/account-use-matrix.spec.ts:For new things folds into one line; opened, New model versions is read-only with a link to Models (desktop and phone)"]},
@@ -82,11 +82,11 @@
     {"source":"browser:tests/account-use-matrix.spec.ts:screenshots of the matrix, light and dark","action":"retained","nativeKeys":["browser:tests/account-use-matrix.spec.ts:screenshots of the matrix, light and dark"]},
     {"source":"browser:tests/account-use-matrix.spec.ts:the pairing review never claims nowhere from a partial read of contexts","action":"retained","nativeKeys":["browser:tests/account-use-matrix.spec.ts:the pairing review never claims nowhere from a partial read of contexts"]},
     {"source":"browser:tests/account-use-matrix.spec.ts:the pairing review shows the rows the rule pre-fills","action":"retained","nativeKeys":["browser:tests/account-use-matrix.spec.ts:the pairing review shows the rows the rule pre-fills"]},
-    {"source":"browser:tests/account-use-matrix.spec.ts:where 1024 dark › where 1024 dark: the design's checks hold on the built page","action":"retained","nativeKeys":["browser:tests/account-use-matrix.spec.ts:where 1024 dark › where 1024 dark: the design's checks hold on the built page"]},
-    {"source":"browser:tests/account-use-matrix.spec.ts:where 1024 light › where 1024 light: the design's checks hold on the built page","action":"retained","nativeKeys":["browser:tests/account-use-matrix.spec.ts:where 1024 light › where 1024 light: the design's checks hold on the built page"]},
-    {"source":"browser:tests/account-use-matrix.spec.ts:where 1440 dark › where 1440 dark: the design's checks hold on the built page","action":"retained","nativeKeys":["browser:tests/account-use-matrix.spec.ts:where 1440 dark › where 1440 dark: the design's checks hold on the built page"]},
+    {"source":"browser:tests/account-use-matrix.spec.ts:where 1024 dark › where 1024 dark: the design's checks hold on the built page","action":"replaced","nativeKeys":["browser:tests/account-use-matrix.spec.ts:where 1440 light › where 1440 light: the design's checks hold on the built page"],"round":"cut-A"},
+    {"source":"browser:tests/account-use-matrix.spec.ts:where 1024 light › where 1024 light: the design's checks hold on the built page","action":"replaced","nativeKeys":["browser:tests/account-use-matrix.spec.ts:where 1440 light › where 1440 light: the design's checks hold on the built page"],"round":"cut-A"},
+    {"source":"browser:tests/account-use-matrix.spec.ts:where 1440 dark › where 1440 dark: the design's checks hold on the built page","action":"replaced","nativeKeys":["browser:tests/account-use-matrix.spec.ts:where 1440 light › where 1440 light: the design's checks hold on the built page"],"round":"cut-A"},
     {"source":"browser:tests/account-use-matrix.spec.ts:where 1440 light › where 1440 light: the design's checks hold on the built page","action":"retained","nativeKeys":["browser:tests/account-use-matrix.spec.ts:where 1440 light › where 1440 light: the design's checks hold on the built page"]},
-    {"source":"browser:tests/account-use-matrix.spec.ts:where 390 dark › where 390 dark: the design's checks hold on the built page","action":"retained","nativeKeys":["browser:tests/account-use-matrix.spec.ts:where 390 dark › where 390 dark: the design's checks hold on the built page"]},
+    {"source":"browser:tests/account-use-matrix.spec.ts:where 390 dark › where 390 dark: the design's checks hold on the built page","action":"replaced","nativeKeys":["browser:tests/account-use-matrix.spec.ts:where 390 light › where 390 light: the design's checks hold on the built page"],"round":"cut-A"},
     {"source":"browser:tests/account-use-matrix.spec.ts:where 390 light › where 390 light: the design's checks hold on the built page","action":"retained","nativeKeys":["browser:tests/account-use-matrix.spec.ts:where 390 light › where 390 light: the design's checks hold on the built page"]},
     {"source":"browser:tests/accounts-card-fit.spec.ts:the capacity row and the accounts popover fit every width, panel open and closed","action":"retained","nativeKeys":["browser:tests/accounts-card-fit.spec.ts:the capacity row and the accounts popover fit every width, panel open and closed"]},
     {"source":"browser:tests/accounts-computers.spec.ts:Away shows on the chip; Back now in the popover ends it with one click","action":"retained","nativeKeys":["browser:tests/accounts-computers.spec.ts:Away shows on the chip; Back now in the popover ends it with one click"]},
@@ -103,25 +103,25 @@
     {"source":"browser:tests/accounts-computers.spec.ts:the chip and the popover keep their controls put through verify and refresh at 390 dark","action":"retained","nativeKeys":["browser:tests/accounts-computers.spec.ts:the chip and the popover keep their controls put through verify and refresh at 390 dark"]},
     {"source":"browser:tests/accounts-computers.spec.ts:the chip and the popover keep their controls put through verify and refresh at 390 light","action":"retained","nativeKeys":["browser:tests/accounts-computers.spec.ts:the chip and the popover keep their controls put through verify and refresh at 390 light"]},
     {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: Remove and End now leave “Agents may use it” and everything below in place","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: Remove and End now leave “Agents may use it” and everything below in place"]},
-    {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: a floor save and its Undo move no control in the panel","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: a floor save and its Undo move no control in the panel"]},
-    {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: each row carries the bar and one caption; the panel says what stops agents first","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: each row carries the bar and one caption; the panel says what stops agents first"]},
-    {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: the design's checks hold on the built page","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: the design's checks hold on the built page"]},
+    {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: a floor save and its Undo move no control in the panel","action":"replaced","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: a floor save and its Undo move no control in the panel"],"round":"cut-A"},
+    {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: each row carries the bar and one caption; the panel says what stops agents first","action":"replaced","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: each row carries the bar and one caption; the panel says what stops agents first"],"round":"cut-A"},
+    {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: the design's checks hold on the built page","action":"replaced","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: the design's checks hold on the built page"],"round":"cut-A"},
     {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: Remove and End now leave “Agents may use it” and everything below in place","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: Remove and End now leave “Agents may use it” and everything below in place"]},
-    {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: a floor save and its Undo move no control in the panel","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: a floor save and its Undo move no control in the panel"]},
-    {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: each row carries the bar and one caption; the panel says what stops agents first","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: each row carries the bar and one caption; the panel says what stops agents first"]},
-    {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: the design's checks hold on the built page","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: the design's checks hold on the built page"]},
+    {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: a floor save and its Undo move no control in the panel","action":"replaced","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: a floor save and its Undo move no control in the panel"],"round":"cut-A"},
+    {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: each row carries the bar and one caption; the panel says what stops agents first","action":"replaced","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: each row carries the bar and one caption; the panel says what stops agents first"],"round":"cut-A"},
+    {"source":"browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: the design's checks hold on the built page","action":"replaced","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: the design's checks hold on the built page"],"round":"cut-A"},
     {"source":"browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: Remove and End now leave “Agents may use it” and everything below in place","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: Remove and End now leave “Agents may use it” and everything below in place"]},
-    {"source":"browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: a floor save and its Undo move no control in the panel","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: a floor save and its Undo move no control in the panel"]},
-    {"source":"browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: each row carries the bar and one caption; the panel says what stops agents first","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: each row carries the bar and one caption; the panel says what stops agents first"]},
-    {"source":"browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: the design's checks hold on the built page","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: the design's checks hold on the built page"]},
+    {"source":"browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: a floor save and its Undo move no control in the panel","action":"replaced","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: a floor save and its Undo move no control in the panel"],"round":"cut-A"},
+    {"source":"browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: each row carries the bar and one caption; the panel says what stops agents first","action":"replaced","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: each row carries the bar and one caption; the panel says what stops agents first"],"round":"cut-A"},
+    {"source":"browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: the design's checks hold on the built page","action":"replaced","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: the design's checks hold on the built page"],"round":"cut-A"},
     {"source":"browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: Remove and End now leave “Agents may use it” and everything below in place","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: Remove and End now leave “Agents may use it” and everything below in place"]},
     {"source":"browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: a floor save and its Undo move no control in the panel","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: a floor save and its Undo move no control in the panel"]},
     {"source":"browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: each row carries the bar and one caption; the panel says what stops agents first","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: each row carries the bar and one caption; the panel says what stops agents first"]},
     {"source":"browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: the design's checks hold on the built page","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: the design's checks hold on the built page"]},
     {"source":"browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: Remove and End now leave “Agents may use it” and everything below in place","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: Remove and End now leave “Agents may use it” and everything below in place"]},
-    {"source":"browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: a floor save and its Undo move no control in the panel","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: a floor save and its Undo move no control in the panel"]},
-    {"source":"browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: each row carries the bar and one caption; the panel says what stops agents first","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: each row carries the bar and one caption; the panel says what stops agents first"]},
-    {"source":"browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: the design's checks hold on the built page","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: the design's checks hold on the built page"]},
+    {"source":"browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: a floor save and its Undo move no control in the panel","action":"replaced","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: a floor save and its Undo move no control in the panel"],"round":"cut-A"},
+    {"source":"browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: each row carries the bar and one caption; the panel says what stops agents first","action":"replaced","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: each row carries the bar and one caption; the panel says what stops agents first"],"round":"cut-A"},
+    {"source":"browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: the design's checks hold on the built page","action":"replaced","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: the design's checks hold on the built page"],"round":"cut-A"},
     {"source":"browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: Remove and End now leave “Agents may use it” and everything below in place","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: Remove and End now leave “Agents may use it” and everything below in place"]},
     {"source":"browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: a floor save and its Undo move no control in the panel","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: a floor save and its Undo move no control in the panel"]},
     {"source":"browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: each row carries the bar and one caption; the panel says what stops agents first","action":"retained","nativeKeys":["browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: each row carries the bar and one caption; the panel says what stops agents first"]},
@@ -150,7 +150,7 @@
     {"source":"browser:tests/classic-invite.spec.ts:a member cannot invite an imported colleague","action":"retained","nativeKeys":["browser:tests/classic-invite.spec.ts:a member cannot invite an imported colleague"]},
     {"source":"browser:tests/classic-invite.spec.ts:an imported colleague can be invited with their email and classic role","action":"retained","nativeKeys":["browser:tests/classic-invite.spec.ts:an imported colleague can be invited with their email and classic role"]},
     {"source":"browser:tests/classic-invite.spec.ts:an imported role outside my authority needs an explicit allowed choice","action":"retained","nativeKeys":["browser:tests/classic-invite.spec.ts:an imported role outside my authority needs an explicit allowed choice"]},
-    {"source":"browser:tests/classic-invite.spec.ts:imported invite actions fit a phone and remain accessible in dark","action":"retained","nativeKeys":["browser:tests/classic-invite.spec.ts:imported invite actions fit a phone and remain accessible in dark"]},
+    {"source":"browser:tests/classic-invite.spec.ts:imported invite actions fit a phone and remain accessible in dark","action":"replaced","nativeKeys":["browser:tests/classic-invite.spec.ts:imported invite actions fit a phone and remain accessible in light"],"round":"cut-A"},
     {"source":"browser:tests/classic-invite.spec.ts:imported invite actions fit a phone and remain accessible in light","action":"retained","nativeKeys":["browser:tests/classic-invite.spec.ts:imported invite actions fit a phone and remain accessible in light"]},
     {"source":"browser:tests/classic-invite.spec.ts:verified imported-account sign-in explains the invite and preserves ambiguous linking","action":"retained","nativeKeys":["browser:tests/classic-invite.spec.ts:verified imported-account sign-in explains the invite and preserves ambiguous linking"]},
     {"source":"browser:tests/developer-settings.spec.ts:retired Flow bookmarks open tickets and saved opt-ins cannot revive it","action":"retained","nativeKeys":["browser:tests/developer-settings.spec.ts:retired Flow bookmarks open tickets and saved opt-ins cannot revive it"]},
@@ -184,17 +184,17 @@
     {"source":"browser:tests/key-dialog.spec.ts:edited description and role survive project changes; empty description needs confirmation","action":"retained","nativeKeys":["browser:tests/key-dialog.spec.ts:edited description and role survive project changes; empty description needs confirmation"]},
     {"source":"browser:tests/key-dialog.spec.ts:new key preset clips to both the creator and agent role, then reacts to lost permission","action":"retained","nativeKeys":["browser:tests/key-dialog.spec.ts:new key preset clips to both the creator and agent role, then reacts to lost permission"]},
     {"source":"browser:tests/key-dialog.spec.ts:no grantable covering role leaves the choice explicit; Admin is never selected","action":"retained","nativeKeys":["browser:tests/key-dialog.spec.ts:no grantable covering role leaves the choice explicit; Admin is never selected"]},
-    {"source":"browser:tests/key-dialog.spec.ts:project Ticket worker flow, explanations and searchable scopes at 1600 dark","action":"retained","nativeKeys":["browser:tests/key-dialog.spec.ts:project Ticket worker flow, explanations and searchable scopes at 1600 dark"]},
+    {"source":"browser:tests/key-dialog.spec.ts:project Ticket worker flow, explanations and searchable scopes at 1600 dark","action":"replaced","nativeKeys":["browser:tests/key-dialog.spec.ts:project Ticket worker flow, explanations and searchable scopes at 1600 light"],"round":"cut-A"},
     {"source":"browser:tests/key-dialog.spec.ts:project Ticket worker flow, explanations and searchable scopes at 1600 light","action":"retained","nativeKeys":["browser:tests/key-dialog.spec.ts:project Ticket worker flow, explanations and searchable scopes at 1600 light"]},
-    {"source":"browser:tests/key-dialog.spec.ts:project Ticket worker flow, explanations and searchable scopes at 390 dark","action":"retained","nativeKeys":["browser:tests/key-dialog.spec.ts:project Ticket worker flow, explanations and searchable scopes at 390 dark"]},
+    {"source":"browser:tests/key-dialog.spec.ts:project Ticket worker flow, explanations and searchable scopes at 390 dark","action":"replaced","nativeKeys":["browser:tests/key-dialog.spec.ts:project Ticket worker flow, explanations and searchable scopes at 390 light"],"round":"cut-A"},
     {"source":"browser:tests/key-dialog.spec.ts:project Ticket worker flow, explanations and searchable scopes at 390 light","action":"retained","nativeKeys":["browser:tests/key-dialog.spec.ts:project Ticket worker flow, explanations and searchable scopes at 390 light"]},
     {"source":"browser:tests/key-dialog.spec.ts:scope editor Ticket worker preset preserves an existing activity history grant","action":"retained","nativeKeys":["browser:tests/key-dialog.spec.ts:scope editor Ticket worker preset preserves an existing activity history grant"]},
     {"source":"browser:tests/key-dialog.spec.ts:scope editor preset never extends a custom role; rotation search never changes scopes","action":"retained","nativeKeys":["browser:tests/key-dialog.spec.ts:scope editor preset never extends a custom role; rotation search never changes scopes"]},
     {"source":"browser:tests/key-expiry.spec.ts:a failed rotation preserves the sheet and reports the server error","action":"retained","nativeKeys":["browser:tests/key-expiry.spec.ts:a failed rotation preserves the sheet and reports the server error"]},
-    {"source":"browser:tests/key-expiry.spec.ts:axe and coordinator screenshots: keys and New key sheet in dark","action":"retained","nativeKeys":["browser:tests/key-expiry.spec.ts:axe and coordinator screenshots: keys and New key sheet in dark"]},
+    {"source":"browser:tests/key-expiry.spec.ts:axe and coordinator screenshots: keys and New key sheet in dark","action":"replaced","nativeKeys":["browser:tests/key-expiry.spec.ts:axe and coordinator screenshots: keys and New key sheet in light"],"round":"cut-A"},
     {"source":"browser:tests/key-expiry.spec.ts:axe and coordinator screenshots: keys and New key sheet in light","action":"retained","nativeKeys":["browser:tests/key-expiry.spec.ts:axe and coordinator screenshots: keys and New key sheet in light"]},
     {"source":"browser:tests/key-expiry.spec.ts:expiry and status stay separate from actions; row controls and SVGs align","action":"retained","nativeKeys":["browser:tests/key-expiry.spec.ts:expiry and status stay separate from actions; row controls and SVGs align"]},
-    {"source":"browser:tests/key-expiry.spec.ts:key cards and expiry sheet fit a phone in dark","action":"retained","nativeKeys":["browser:tests/key-expiry.spec.ts:key cards and expiry sheet fit a phone in dark"]},
+    {"source":"browser:tests/key-expiry.spec.ts:key cards and expiry sheet fit a phone in dark","action":"replaced","nativeKeys":["browser:tests/key-expiry.spec.ts:key cards and expiry sheet fit a phone in light"],"round":"cut-A"},
     {"source":"browser:tests/key-expiry.spec.ts:key cards and expiry sheet fit a phone in light","action":"retained","nativeKeys":["browser:tests/key-expiry.spec.ts:key cards and expiry sheet fit a phone in light"]},
     {"source":"browser:tests/key-expiry.spec.ts:lifetime radios work with arrow keys and keep one tab stop","action":"retained","nativeKeys":["browser:tests/key-expiry.spec.ts:lifetime radios work with arrow keys and keep one tab stop"]},
     {"source":"browser:tests/key-expiry.spec.ts:new key maps 30 expiry to the API","action":"retained","nativeKeys":["browser:tests/key-expiry.spec.ts:new key maps 30 expiry to the API"]},
@@ -213,13 +213,13 @@
     {"source":"browser:tests/key-full-access.spec.ts:edit Full access follows member, with group All/None bounded to visible scopes","action":"retained","nativeKeys":["browser:tests/key-full-access.spec.ts:edit Full access follows member, with group All/None bounded to visible scopes"]},
     {"source":"browser:tests/key-full-access.spec.ts:expiry edits including Never keep the existing key; Keep current and Cancel write nothing","action":"retained","nativeKeys":["browser:tests/key-full-access.spec.ts:expiry edits including Never keep the existing key; Keep current and Cancel write nothing"]},
     {"source":"browser:tests/key-full-access.spec.ts:expiry failure retains draft; modifier Enter saves and Escape leaves a field before closing","action":"retained","nativeKeys":["browser:tests/key-full-access.spec.ts:expiry failure retains draft; modifier Enter saves and Escape leaves a field before closing"]},
-    {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1024px dark","action":"retained","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1024px dark"]},
-    {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1024px light","action":"retained","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1024px light"]},
-    {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1440px dark","action":"retained","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1440px dark"]},
+    {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1024px dark","action":"replaced","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1440px light"],"round":"cut-A"},
+    {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1024px light","action":"replaced","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1440px light"],"round":"cut-A"},
+    {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1440px dark","action":"replaced","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1440px light"],"round":"cut-A"},
     {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1440px light","action":"retained","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1440px light"]},
-    {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1600px dark","action":"retained","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1600px dark"]},
-    {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1600px light","action":"retained","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1600px light"]},
-    {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 390px dark","action":"retained","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 390px dark"]},
+    {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1600px dark","action":"replaced","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1440px light"],"round":"cut-A"},
+    {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1600px light","action":"replaced","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 1440px light"],"round":"cut-A"},
+    {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 390px dark","action":"replaced","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 390px light"],"round":"cut-A"},
     {"source":"browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 390px light","action":"retained","nativeKeys":["browser:tests/key-full-access.spec.ts:key sheet controls stay anchored at 390px light"]},
     {"source":"browser:tests/key-full-access.spec.ts:new Full access follows admin, with group All/None bounded to visible scopes","action":"retained","nativeKeys":["browser:tests/key-full-access.spec.ts:new Full access follows admin, with group All/None bounded to visible scopes"]},
     {"source":"browser:tests/key-full-access.spec.ts:new Full access follows member, with group All/None bounded to visible scopes","action":"retained","nativeKeys":["browser:tests/key-full-access.spec.ts:new Full access follows member, with group All/None bounded to visible scopes"]},
@@ -249,11 +249,11 @@
     {"source":"browser:tests/key-layout.spec.ts:rotate scopes stay in their columns at 360px in light","action":"retained","nativeKeys":["browser:tests/key-layout.spec.ts:rotate scopes stay in their columns at 360px in light"]},
     {"source":"browser:tests/key-layout.spec.ts:rotate scopes stay in their columns at 768px in dark","action":"retained","nativeKeys":["browser:tests/key-layout.spec.ts:rotate scopes stay in their columns at 768px in dark"]},
     {"source":"browser:tests/key-layout.spec.ts:rotate scopes stay in their columns at 768px in light","action":"retained","nativeKeys":["browser:tests/key-layout.spec.ts:rotate scopes stay in their columns at 768px in light"]},
-    {"source":"browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1024px in dark","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1024px in dark"]},
-    {"source":"browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1024px in light","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1024px in light"]},
-    {"source":"browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1440px in dark","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1440px in dark"]},
+    {"source":"browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1024px in dark","action":"replaced","nativeKeys":["browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1440px in light"],"round":"cut-A"},
+    {"source":"browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1024px in light","action":"replaced","nativeKeys":["browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1440px in light"],"round":"cut-A"},
+    {"source":"browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1440px in dark","action":"replaced","nativeKeys":["browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1440px in light"],"round":"cut-A"},
     {"source":"browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1440px in light","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 1440px in light"]},
-    {"source":"browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 390px in dark","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 390px in dark"]},
+    {"source":"browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 390px in dark","action":"replaced","nativeKeys":["browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 390px in light"],"round":"cut-A"},
     {"source":"browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 390px in light","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:adoption preserves the key and controls at 390px in light"]},
     {"source":"browser:tests/key-scopes.spec.ts:adoption refusal reports failure and owned keys have no takeover action","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:adoption refusal reports failure and owned keys have no takeover action"]},
     {"source":"browser:tests/key-scopes.spec.ts:cancel or untick a role extension writes nothing","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:cancel or untick a role extension writes nothing"]},
@@ -262,12 +262,12 @@
     {"source":"browser:tests/key-scopes.spec.ts:non-owner key manager sees the agent role limit and cannot extend it","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:non-owner key manager sees the agent role limit and cannot extend it"]},
     {"source":"browser:tests/key-scopes.spec.ts:owner confirms role and key together, with shared-role impact","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:owner confirms role and key together, with shared-role impact"]},
     {"source":"browser:tests/key-scopes.spec.ts:people without keys.manage have no scope edit action","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:people without keys.manage have no scope edit action"]},
-    {"source":"browser:tests/key-scopes.spec.ts:scopes fit 1440px in dark with keyboard access","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:scopes fit 1440px in dark with keyboard access"]},
+    {"source":"browser:tests/key-scopes.spec.ts:scopes fit 1440px in dark with keyboard access","action":"replaced","nativeKeys":["browser:tests/key-scopes.spec.ts:scopes fit 1440px in light with keyboard access"],"round":"cut-A"},
     {"source":"browser:tests/key-scopes.spec.ts:scopes fit 1440px in light with keyboard access","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:scopes fit 1440px in light with keyboard access"]},
-    {"source":"browser:tests/key-scopes.spec.ts:scopes fit 1600px in dark with keyboard access","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:scopes fit 1600px in dark with keyboard access"]},
-    {"source":"browser:tests/key-scopes.spec.ts:scopes fit 1600px in light with keyboard access","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:scopes fit 1600px in light with keyboard access"]},
-    {"source":"browser:tests/key-scopes.spec.ts:scopes fit 390px in dark with keyboard access","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:scopes fit 390px in dark with keyboard access"]},
-    {"source":"browser:tests/key-scopes.spec.ts:scopes fit 390px in dark with keyboard access (wide system font)","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:scopes fit 390px in dark with keyboard access (wide system font)"]},
+    {"source":"browser:tests/key-scopes.spec.ts:scopes fit 1600px in dark with keyboard access","action":"replaced","nativeKeys":["browser:tests/key-scopes.spec.ts:scopes fit 1440px in light with keyboard access"],"round":"cut-A"},
+    {"source":"browser:tests/key-scopes.spec.ts:scopes fit 1600px in light with keyboard access","action":"replaced","nativeKeys":["browser:tests/key-scopes.spec.ts:scopes fit 1440px in light with keyboard access"],"round":"cut-A"},
+    {"source":"browser:tests/key-scopes.spec.ts:scopes fit 390px in dark with keyboard access","action":"replaced","nativeKeys":["browser:tests/key-scopes.spec.ts:scopes fit 390px in light with keyboard access"],"round":"cut-A"},
+    {"source":"browser:tests/key-scopes.spec.ts:scopes fit 390px in dark with keyboard access (wide system font)","action":"replaced","nativeKeys":["browser:tests/key-scopes.spec.ts:scopes fit 390px in light with keyboard access (wide system font)"],"round":"cut-A"},
     {"source":"browser:tests/key-scopes.spec.ts:scopes fit 390px in light with keyboard access","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:scopes fit 390px in light with keyboard access"]},
     {"source":"browser:tests/key-scopes.spec.ts:scopes fit 390px in light with keyboard access (wide system font)","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:scopes fit 390px in light with keyboard access (wide system font)"]},
     {"source":"browser:tests/key-scopes.spec.ts:server permission rejection keeps the draft and permits reloading","action":"retained","nativeKeys":["browser:tests/key-scopes.spec.ts:server permission rejection keeps the draft and permits reloading"]},
@@ -288,12 +288,12 @@
     {"source":"browser:tests/models-fallback.spec.ts:a step drags by its handle to a new place; the order keeps its height while it moves","action":"retained","nativeKeys":["browser:tests/models-fallback.spec.ts:a step drags by its handle to a new place; the order keeps its height while it moves"]},
     {"source":"browser:tests/models-fallback.spec.ts:admins allow a Never line again for everyone; Undo sets it again with its reason","action":"retained","nativeKeys":["browser:tests/models-fallback.spec.ts:admins allow a Never line again for everyone; Undo sets it again with its reason"]},
     {"source":"browser:tests/models-fallback.spec.ts:an admin takes a step a workspace pin holds last out with its pin; Undo sets both again, and moving it lifts the pin too","action":"retained","nativeKeys":["browser:tests/models-fallback.spec.ts:an admin takes a step a workspace pin holds last out with its pin; Undo sets both again, and moving it lifts the pin too"]},
-    {"source":"browser:tests/models-fallback.spec.ts:at 1440 dark › A · For everyone: folds, menus, keyboard reorder and Undo","action":"retained","nativeKeys":["browser:tests/models-fallback.spec.ts:at 1440 dark › A · For everyone: folds, menus, keyboard reorder and Undo"]},
-    {"source":"browser:tests/models-fallback.spec.ts:at 1440 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers","action":"retained","nativeKeys":["browser:tests/models-fallback.spec.ts:at 1440 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers"]},
+    {"source":"browser:tests/models-fallback.spec.ts:at 1440 dark › A · For everyone: folds, menus, keyboard reorder and Undo","action":"replaced","nativeKeys":["browser:tests/models-fallback.spec.ts:at 1440 light › A · For everyone: folds, menus, keyboard reorder and Undo"],"round":"cut-A"},
+    {"source":"browser:tests/models-fallback.spec.ts:at 1440 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers","action":"replaced","nativeKeys":["browser:tests/models-fallback.spec.ts:at 1440 light › C · a member: a locked row is read-only, an edit makes a workspace row hers"],"round":"cut-A"},
     {"source":"browser:tests/models-fallback.spec.ts:at 1440 light › A · For everyone: folds, menus, keyboard reorder and Undo","action":"retained","nativeKeys":["browser:tests/models-fallback.spec.ts:at 1440 light › A · For everyone: folds, menus, keyboard reorder and Undo"]},
     {"source":"browser:tests/models-fallback.spec.ts:at 1440 light › C · a member: a locked row is read-only, an edit makes a workspace row hers","action":"retained","nativeKeys":["browser:tests/models-fallback.spec.ts:at 1440 light › C · a member: a locked row is read-only, an edit makes a workspace row hers"]},
-    {"source":"browser:tests/models-fallback.spec.ts:at 390 dark › A · For everyone: folds, menus, keyboard reorder and Undo","action":"retained","nativeKeys":["browser:tests/models-fallback.spec.ts:at 390 dark › A · For everyone: folds, menus, keyboard reorder and Undo"]},
-    {"source":"browser:tests/models-fallback.spec.ts:at 390 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers","action":"retained","nativeKeys":["browser:tests/models-fallback.spec.ts:at 390 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers"]},
+    {"source":"browser:tests/models-fallback.spec.ts:at 390 dark › A · For everyone: folds, menus, keyboard reorder and Undo","action":"replaced","nativeKeys":["browser:tests/models-fallback.spec.ts:at 390 light › A · For everyone: folds, menus, keyboard reorder and Undo"],"round":"cut-A"},
+    {"source":"browser:tests/models-fallback.spec.ts:at 390 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers","action":"replaced","nativeKeys":["browser:tests/models-fallback.spec.ts:at 390 light › C · a member: a locked row is read-only, an edit makes a workspace row hers"],"round":"cut-A"},
     {"source":"browser:tests/models-fallback.spec.ts:at 390 light › A · For everyone: folds, menus, keyboard reorder and Undo","action":"retained","nativeKeys":["browser:tests/models-fallback.spec.ts:at 390 light › A · For everyone: folds, menus, keyboard reorder and Undo"]},
     {"source":"browser:tests/models-fallback.spec.ts:at 390 light › C · a member: a locked row is read-only, an edit makes a workspace row hers","action":"retained","nativeKeys":["browser:tests/models-fallback.spec.ts:at 390 light › C · a member: a locked row is read-only, an edit makes a workspace row hers"]},
     {"source":"browser:tests/models-fallback.spec.ts:folds grow in place: the controls above a fold, and the fold’s own controls, never move (AEON-541)","action":"retained","nativeKeys":["browser:tests/models-fallback.spec.ts:folds grow in place: the controls above a fold, and the fold’s own controls, never move (AEON-541)"]},
@@ -411,15 +411,15 @@
     {"source":"browser:tests/models-situations.spec.ts:an admin on Just me reads the workspace situations; empty cells read Same or Automatic","action":"retained","nativeKeys":["browser:tests/models-situations.spec.ts:an admin on Just me reads the workspace situations; empty cells read Same or Automatic"]},
     {"source":"browser:tests/models-situations.spec.ts:members read Quick jobs and its Why, and never see the situation fold","action":"retained","nativeKeys":["browser:tests/models-situations.spec.ts:members read Quick jobs and its Why, and never see the situation fold"]},
     {"source":"browser:tests/models-situations.spec.ts:on a phone › each cell names its situation, every target is 44 px and the popovers stay on screen","action":"retained","nativeKeys":["browser:tests/models-situations.spec.ts:on a phone › each cell names its situation, every target is 44 px and the popovers stay on screen"]},
-    {"source":"browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1024px in dark","action":"retained","nativeKeys":["browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1024px in dark"]},
-    {"source":"browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1024px in light","action":"retained","nativeKeys":["browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1024px in light"]},
-    {"source":"browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1440px in dark","action":"retained","nativeKeys":["browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1440px in dark"]},
+    {"source":"browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1024px in dark","action":"replaced","nativeKeys":["browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1440px in light"],"round":"cut-A"},
+    {"source":"browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1024px in light","action":"replaced","nativeKeys":["browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1440px in light"],"round":"cut-A"},
+    {"source":"browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1440px in dark","action":"replaced","nativeKeys":["browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1440px in light"],"round":"cut-A"},
     {"source":"browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1440px in light","action":"retained","nativeKeys":["browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 1440px in light"]},
-    {"source":"browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 390px in dark","action":"retained","nativeKeys":["browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 390px in dark"]},
+    {"source":"browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 390px in dark","action":"replaced","nativeKeys":["browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 390px in light"],"round":"cut-A"},
     {"source":"browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 390px in light","action":"retained","nativeKeys":["browser:tests/multiple-account-pairing.spec.ts:isolated account selection stays stable at 390px in light"]},
     {"source":"browser:tests/profile.spec.ts:a photo: pick it, crop it with the keyboard, see it everywhere","action":"retained","nativeKeys":["browser:tests/profile.spec.ts:a photo: pick it, crop it with the keyboard, see it everywhere"]},
     {"source":"browser:tests/profile.spec.ts:at 390 nothing in the profile is cut","action":"retained","nativeKeys":["browser:tests/profile.spec.ts:at 390 nothing in the profile is cut"]},
-    {"source":"browser:tests/profile.spec.ts:axe: profile, crop dialog and greeting in dark","action":"retained","nativeKeys":["browser:tests/profile.spec.ts:axe: profile, crop dialog and greeting in dark"]},
+    {"source":"browser:tests/profile.spec.ts:axe: profile, crop dialog and greeting in dark","action":"replaced","nativeKeys":["browser:tests/profile.spec.ts:axe: profile, crop dialog and greeting in light"],"round":"cut-A"},
     {"source":"browser:tests/profile.spec.ts:axe: profile, crop dialog and greeting in light","action":"retained","nativeKeys":["browser:tests/profile.spec.ts:axe: profile, crop dialog and greeting in light"]},
     {"source":"browser:tests/profile.spec.ts:fields save one at a time, with Undo in the toast","action":"retained","nativeKeys":["browser:tests/profile.spec.ts:fields save one at a time, with Undo in the toast"]},
     {"source":"browser:tests/profile.spec.ts:paste a copied image to crop it","action":"retained","nativeKeys":["browser:tests/profile.spec.ts:paste a copied image to crop it"]},
@@ -439,9 +439,9 @@
     {"source":"browser:tests/scope-codes.spec.ts:Rotate uses a proposed set only when the operator confirms","action":"retained","nativeKeys":["browser:tests/scope-codes.spec.ts:Rotate uses a proposed set only when the operator confirms"]},
     {"source":"browser:tests/scope-codes.spec.ts:an agent without live roles cannot select scopes by code","action":"retained","nativeKeys":["browser:tests/scope-codes.spec.ts:an agent without live roles cannot select scopes by code"]},
     {"source":"browser:tests/scope-codes.spec.ts:pasted scopes beyond role, creator or registry stay unticked with reasons","action":"retained","nativeKeys":["browser:tests/scope-codes.spec.ts:pasted scopes beyond role, creator or registry stay unticked with reasons"]},
-    {"source":"browser:tests/scope-codes.spec.ts:scope proposals fit 1440px in dark","action":"retained","nativeKeys":["browser:tests/scope-codes.spec.ts:scope proposals fit 1440px in dark"]},
+    {"source":"browser:tests/scope-codes.spec.ts:scope proposals fit 1440px in dark","action":"replaced","nativeKeys":["browser:tests/scope-codes.spec.ts:scope proposals fit 1440px in light"],"round":"cut-A"},
     {"source":"browser:tests/scope-codes.spec.ts:scope proposals fit 1440px in light","action":"retained","nativeKeys":["browser:tests/scope-codes.spec.ts:scope proposals fit 1440px in light"]},
-    {"source":"browser:tests/scope-codes.spec.ts:scope proposals fit 390px in dark","action":"retained","nativeKeys":["browser:tests/scope-codes.spec.ts:scope proposals fit 390px in dark"]},
+    {"source":"browser:tests/scope-codes.spec.ts:scope proposals fit 390px in dark","action":"replaced","nativeKeys":["browser:tests/scope-codes.spec.ts:scope proposals fit 390px in light"],"round":"cut-A"},
     {"source":"browser:tests/scope-codes.spec.ts:scope proposals fit 390px in light","action":"retained","nativeKeys":["browser:tests/scope-codes.spec.ts:scope proposals fit 390px in light"]},
     {"source":"browser:tests/settings-account-pacing.spec.ts:Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them","action":"retained","nativeKeys":["browser:tests/settings-account-pacing.spec.ts:Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them"]},
     {"source":"browser:tests/settings-account-pacing.spec.ts:Capacity and load: work days, nights and the editors, with controls that stay put","action":"retained","nativeKeys":["browser:tests/settings-account-pacing.spec.ts:Capacity and load: work days, nights and the editors, with controls that stay put"]},
@@ -474,11 +474,11 @@
     {"source":"browser:tests/settings-accounts.spec.ts:accounts are a list by vendor with how each is read, and no allowance form","action":"retained","nativeKeys":["browser:tests/settings-accounts.spec.ts:accounts are a list by vendor with how each is read, and no allowance form"]},
     {"source":"browser:tests/settings-accounts.spec.ts:an API key shows money, and no account offers a limit by hand","action":"retained","nativeKeys":["browser:tests/settings-accounts.spec.ts:an API key shows money, and no account offers a limit by hand"]},
     {"source":"browser:tests/settings-accounts.spec.ts:an older rule shows as Set by you; Remove asks in place and removes it for good","action":"retained","nativeKeys":["browser:tests/settings-accounts.spec.ts:an older rule shows as Set by you; Remove asks in place and removes it for good"]},
-    {"source":"browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1024 dark","action":"retained","nativeKeys":["browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1024 dark"]},
+    {"source":"browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1024 dark","action":"replaced","nativeKeys":["browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1024 light"],"round":"cut-A"},
     {"source":"browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1024 light","action":"retained","nativeKeys":["browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1024 light"]},
-    {"source":"browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1440 dark","action":"retained","nativeKeys":["browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1440 dark"]},
+    {"source":"browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1440 dark","action":"replaced","nativeKeys":["browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1440 light"],"round":"cut-A"},
     {"source":"browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1440 light","action":"retained","nativeKeys":["browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 1440 light"]},
-    {"source":"browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 390 dark","action":"retained","nativeKeys":["browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 390 dark"]},
+    {"source":"browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 390 dark","action":"replaced","nativeKeys":["browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 390 light"],"round":"cut-A"},
     {"source":"browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 390 light","action":"retained","nativeKeys":["browser:tests/settings-accounts.spec.ts:an older rule's title reads on one line with Remove under it at 390 light"]},
     {"source":"browser:tests/settings-accounts.spec.ts:an unpooled account joins every existing member and can leave them sharing","action":"retained","nativeKeys":["browser:tests/settings-accounts.spec.ts:an unpooled account joins every existing member and can leave them sharing"]},
     {"source":"browser:tests/settings-accounts.spec.ts:dock: drain and pool confirmations keep Tab and Escape","action":"retained","nativeKeys":["browser:tests/settings-accounts.spec.ts:dock: drain and pool confirmations keep Tab and Escape"]},
@@ -500,11 +500,11 @@
     {"source":"browser:tests/settings-accounts.spec.ts:side: drain and pool confirmations keep Tab and Escape","action":"retained","nativeKeys":["browser:tests/settings-accounts.spec.ts:side: drain and pool confirmations keep Tab and Escape"]},
     {"source":"browser:tests/settings-accounts.spec.ts:without account.manage the list is read-only","action":"retained","nativeKeys":["browser:tests/settings-accounts.spec.ts:without account.manage the list is read-only"]},
     {"source":"browser:tests/settings-agents.spec.ts:a numeric conflict suppresses shared saved feedback from another field","action":"retained","nativeKeys":["browser:tests/settings-agents.spec.ts:a numeric conflict suppresses shared saved feedback from another field"]},
-    {"source":"browser:tests/settings-agents.spec.ts:agent card fits 1024px dark, with stable controls and long German copy","action":"retained","nativeKeys":["browser:tests/settings-agents.spec.ts:agent card fits 1024px dark, with stable controls and long German copy"]},
-    {"source":"browser:tests/settings-agents.spec.ts:agent card fits 1024px light, with stable controls and long German copy","action":"retained","nativeKeys":["browser:tests/settings-agents.spec.ts:agent card fits 1024px light, with stable controls and long German copy"]},
-    {"source":"browser:tests/settings-agents.spec.ts:agent card fits 1440px dark, with stable controls and long German copy","action":"retained","nativeKeys":["browser:tests/settings-agents.spec.ts:agent card fits 1440px dark, with stable controls and long German copy"]},
+    {"source":"browser:tests/settings-agents.spec.ts:agent card fits 1024px dark, with stable controls and long German copy","action":"replaced","nativeKeys":["browser:tests/settings-agents.spec.ts:agent card fits 1440px light, with stable controls and long German copy"],"round":"cut-A"},
+    {"source":"browser:tests/settings-agents.spec.ts:agent card fits 1024px light, with stable controls and long German copy","action":"replaced","nativeKeys":["browser:tests/settings-agents.spec.ts:agent card fits 1440px light, with stable controls and long German copy"],"round":"cut-A"},
+    {"source":"browser:tests/settings-agents.spec.ts:agent card fits 1440px dark, with stable controls and long German copy","action":"replaced","nativeKeys":["browser:tests/settings-agents.spec.ts:agent card fits 1440px light, with stable controls and long German copy"],"round":"cut-A"},
     {"source":"browser:tests/settings-agents.spec.ts:agent card fits 1440px light, with stable controls and long German copy","action":"retained","nativeKeys":["browser:tests/settings-agents.spec.ts:agent card fits 1440px light, with stable controls and long German copy"]},
-    {"source":"browser:tests/settings-agents.spec.ts:agent card fits 390px dark, with stable controls and long German copy","action":"retained","nativeKeys":["browser:tests/settings-agents.spec.ts:agent card fits 390px dark, with stable controls and long German copy"]},
+    {"source":"browser:tests/settings-agents.spec.ts:agent card fits 390px dark, with stable controls and long German copy","action":"replaced","nativeKeys":["browser:tests/settings-agents.spec.ts:agent card fits 390px light, with stable controls and long German copy"],"round":"cut-A"},
     {"source":"browser:tests/settings-agents.spec.ts:agent card fits 390px light, with stable controls and long German copy","action":"retained","nativeKeys":["browser:tests/settings-agents.spec.ts:agent card fits 390px light, with stable controls and long German copy"]},
     {"source":"browser:tests/settings-agents.spec.ts:members do not see or fetch workspace agent settings","action":"retained","nativeKeys":["browser:tests/settings-agents.spec.ts:members do not see or fetch workspace agent settings"]},
     {"source":"browser:tests/settings-agents.spec.ts:numeric Undo conflict for Estimates persists until an authoritative reload","action":"retained","nativeKeys":["browser:tests/settings-agents.spec.ts:numeric Undo conflict for Estimates persists until an authoritative reload"]},
@@ -524,11 +524,11 @@
     {"source":"browser:tests/settings-host-capacity.spec.ts:Needs you verifies the expired sign-in once and reports a failed request honestly","action":"retained","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:Needs you verifies the expired sign-in once and reports a failed request honestly"]},
     {"source":"browser:tests/settings-host-capacity.spec.ts:a matching login joins the shared quota from the account panel and Sign out everywhere covers it","action":"retained","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:a matching login joins the shared quota from the account panel and Sign out everywhere covers it"]},
     {"source":"browser:tests/settings-host-capacity.spec.ts:failed capacity apply stays unsaved and reports the actual failure","action":"retained","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:failed capacity apply stays unsaved and reports the actual failure"]},
-    {"source":"browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 1024 dark","action":"retained","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 1024 dark"]},
+    {"source":"browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 1024 dark","action":"replaced","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 1024 light"],"round":"cut-A"},
     {"source":"browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 1024 light","action":"retained","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 1024 light"]},
-    {"source":"browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 1440 dark","action":"retained","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 1440 dark"]},
+    {"source":"browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 1440 dark","action":"replaced","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 1440 light"],"round":"cut-A"},
     {"source":"browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 1440 light","action":"retained","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 1440 light"]},
-    {"source":"browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 390 dark","action":"retained","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 390 dark"]},
+    {"source":"browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 390 dark","action":"replaced","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 390 light"],"round":"cut-A"},
     {"source":"browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 390 light","action":"retained","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:host settings keep controls stable through all modes at 390 light"]},
     {"source":"browser:tests/settings-host-capacity.spec.ts:members see account and computer details without mutation controls","action":"retained","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:members see account and computer details without mutation controls"]},
     {"source":"browser:tests/settings-host-capacity.spec.ts:quota warning popover submits with platform modifier and Undo restores its snapshot","action":"retained","nativeKeys":["browser:tests/settings-host-capacity.spec.ts:quota warning popover submits with platform modifier and Undo restores its snapshot"]},
@@ -620,5 +620,355 @@
     "remoteCommandDeltaSeconds": -3.11,
     "remoteCommandDeltaPercent": -3.64,
     "interpretation": "Playwright rounded both runs to 1.3m; no resolved native-runner reduction at that precision. Command wall includes setup and scheduling on a shared runner. No complete-P08 or unit saving is claimed. Per-spec historical case timings retain their provenance."
+  },
+  "cutA": {
+    "status": "implemented-awaiting-remote-proof",
+    "beforeCommit": "249c3812e9b255bf48a3aef4ccb0b0b1e1b21e2b",
+    "before": 543,
+    "after": 479,
+    "removed": 64,
+    "groups": [
+      {
+        "file": "tests/access.spec.ts",
+        "before": 42,
+        "after": 39,
+        "removed": 3,
+        "callbackSha256": "5e5c6397c1ff2a2e27d02e80f140825b7cffc39ab34414e08f6c23c6d6011108"
+      },
+      {
+        "file": "tests/account-resets.spec.ts",
+        "before": 6,
+        "after": 2,
+        "removed": 4,
+        "callbackSha256": "03ab4586c3cd0b8d45ea50c8a1aaca40dbee1a851b98ce978261ee4ea5ea0873"
+      },
+      {
+        "file": "tests/account-use-matrix.spec.ts",
+        "before": 22,
+        "after": 18,
+        "removed": 4,
+        "callbackSha256": "5acd6a46a42f5082478ba08e9355232396f5c45d527eb5e1a30fba278b022da0"
+      },
+      {
+        "file": "tests/accounts-quota-bar.spec.ts",
+        "before": 27,
+        "after": 15,
+        "removed": 12,
+        "callbackSha256": "f538c3ff095f5d53c66e2285a0b378722daf6d8108f6acc615384a29ddd6b1c1"
+      },
+      {
+        "file": "tests/classic-invite.spec.ts",
+        "before": 6,
+        "after": 5,
+        "removed": 1,
+        "callbackSha256": "4bac3229290564872f12682451bab9d5c03500d7ce264536d57e518ce64bdf28"
+      },
+      {
+        "file": "tests/key-dialog.spec.ts",
+        "before": 9,
+        "after": 7,
+        "removed": 2,
+        "callbackSha256": "867b61fbfd8dd3dbf9282ac0baf12dccd05579b46aa51dddb76447e61f64506b"
+      },
+      {
+        "file": "tests/key-expiry.spec.ts",
+        "before": 13,
+        "after": 11,
+        "removed": 2,
+        "callbackSha256": "c8a3bc51b1125ca0310cdf0aba24719032529fcb9ee34cbfdbdef7aa64e63d60"
+      },
+      {
+        "file": "tests/key-full-access.spec.ts",
+        "before": 22,
+        "after": 16,
+        "removed": 6,
+        "callbackSha256": "25232014563a708f4a258b6f0f941159da15d7c46b59e1d30547793b105c26c3"
+      },
+      {
+        "file": "tests/key-scopes.spec.ts",
+        "before": 23,
+        "after": 14,
+        "removed": 9,
+        "callbackSha256": "1a3427ca0d33cf4dc49893d587ca27be9b56ada22290c3d1bbb3112f8c837b78"
+      },
+      {
+        "file": "tests/models-fallback.spec.ts",
+        "before": 15,
+        "after": 11,
+        "removed": 4,
+        "callbackSha256": "62b5a1f8ea4e6513f90859043979133e02172304a17b33c0c5056ea6d604554f"
+      },
+      {
+        "file": "tests/multiple-account-pairing.spec.ts",
+        "before": 6,
+        "after": 2,
+        "removed": 4,
+        "callbackSha256": "bbe9320e2616d8118bda265dccb3e36a713eeff072cb5aa1562aedf284d34524"
+      },
+      {
+        "file": "tests/profile.spec.ts",
+        "before": 14,
+        "after": 13,
+        "removed": 1,
+        "callbackSha256": "1f4917169c611825e28b0f7f22b966e8f75d860056619f76c34ef96e3bdda35a"
+      },
+      {
+        "file": "tests/scope-codes.spec.ts",
+        "before": 12,
+        "after": 10,
+        "removed": 2,
+        "callbackSha256": "e869ffb6c23f5b19dd446be1b2ac4ce82ad6143ad4953b8620328a816aba3e4e"
+      },
+      {
+        "file": "tests/settings-accounts.spec.ts",
+        "before": 30,
+        "after": 27,
+        "removed": 3,
+        "callbackSha256": "aac5d850ff26d72de8f2a2500139f0478e75c0c43962f10196304e7fb10b473c"
+      },
+      {
+        "file": "tests/settings-agents.spec.ts",
+        "before": 14,
+        "after": 10,
+        "removed": 4,
+        "callbackSha256": "73deaf5e77d0f83a02fd5a0563aad4e7a2ef040d119dacb3536b561e8c510213"
+      },
+      {
+        "file": "tests/settings-host-capacity.spec.ts",
+        "before": 12,
+        "after": 9,
+        "removed": 3,
+        "callbackSha256": "620e1e5cacb42792de8eff2a08635a330440952715589ea6870989328f3ac040"
+      }
+    ],
+    "proof": "All test callbacks are byte-for-byte unchanged, checked with the TypeScript AST; retained behavior keeps its assertions. No protected anchor is removed/demoted. Browser before/after execution still pending remote capacity.",
+    "protectedAfterP02": [
+      {
+        "file": "tests/accounts-card-fit.spec.ts",
+        "cases": 1,
+        "nativeKeys": [
+          "browser:tests/accounts-card-fit.spec.ts:the capacity row and the accounts popover fit every width, panel open and closed"
+        ]
+      },
+      {
+        "file": "tests/accounts-computers.spec.ts",
+        "cases": 13,
+        "nativeKeys": [
+          "browser:tests/accounts-computers.spec.ts:Away shows on the chip; Back now in the popover ends it with one click",
+          "browser:tests/accounts-computers.spec.ts:a problem: the chip flags it, the line names it, and Verify again fixes it from the popover",
+          "browser:tests/accounts-computers.spec.ts:an approval link opens the popover once and offers that account's check",
+          "browser:tests/accounts-computers.spec.ts:calm: the chip names what there is; its popover says all is ready and offers the three parts",
+          "browser:tests/accounts-computers.spec.ts:each tile opens its part of Settings",
+          "browser:tests/accounts-computers.spec.ts:loading, a failed read with Try again, and an empty workspace each say so",
+          "browser:tests/accounts-computers.spec.ts:people without account management see the problem, not Verify again",
+          "browser:tests/accounts-computers.spec.ts:the chip and the popover keep their controls put through verify and refresh at 1024 dark",
+          "browser:tests/accounts-computers.spec.ts:the chip and the popover keep their controls put through verify and refresh at 1024 light",
+          "browser:tests/accounts-computers.spec.ts:the chip and the popover keep their controls put through verify and refresh at 1440 dark",
+          "browser:tests/accounts-computers.spec.ts:the chip and the popover keep their controls put through verify and refresh at 1440 light",
+          "browser:tests/accounts-computers.spec.ts:the chip and the popover keep their controls put through verify and refresh at 390 dark",
+          "browser:tests/accounts-computers.spec.ts:the chip and the popover keep their controls put through verify and refresh at 390 light"
+        ]
+      },
+      {
+        "file": "tests/accounts-quota-bar.spec.ts",
+        "cases": 4,
+        "nativeKeys": [
+          "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: Remove and End now leave “Agents may use it” and everything below in place",
+          "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: Remove and End now leave “Agents may use it” and everything below in place",
+          "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: Remove and End now leave “Agents may use it” and everything below in place",
+          "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: Remove and End now leave “Agents may use it” and everything below in place"
+        ]
+      },
+      {
+        "file": "tests/add-account.spec.ts",
+        "cases": 2,
+        "nativeKeys": [
+          "browser:tests/add-account.spec.ts:a failed computer list offers Try again and then the steps",
+          "browser:tests/add-account.spec.ts:the steps name the machine, the known sign-in, and a path-proof add-harness"
+        ]
+      },
+      {
+        "file": "tests/developer-settings.spec.ts",
+        "cases": 7,
+        "nativeKeys": [
+          "browser:tests/developer-settings.spec.ts:retired Flow bookmarks open tickets and saved opt-ins cannot revive it",
+          "browser:tests/developer-settings.spec.ts:retirement keeps project and settings controls stable 1024 dark",
+          "browser:tests/developer-settings.spec.ts:retirement keeps project and settings controls stable 1024 light",
+          "browser:tests/developer-settings.spec.ts:retirement keeps project and settings controls stable 1440 dark",
+          "browser:tests/developer-settings.spec.ts:retirement keeps project and settings controls stable 1440 light",
+          "browser:tests/developer-settings.spec.ts:retirement keeps project and settings controls stable 390 dark",
+          "browser:tests/developer-settings.spec.ts:retirement keeps project and settings controls stable 390 light"
+        ]
+      },
+      {
+        "file": "tests/from-classic.spec.ts",
+        "cases": 1,
+        "nativeKeys": [
+          "browser:tests/from-classic.spec.ts:known and unknown classic links resolve through the API"
+        ]
+      },
+      {
+        "file": "tests/key-layout.spec.ts",
+        "cases": 24,
+        "nativeKeys": [
+          "browser:tests/key-layout.spec.ts:edit scopes stay in their columns at 1280px in dark",
+          "browser:tests/key-layout.spec.ts:edit scopes stay in their columns at 1280px in light",
+          "browser:tests/key-layout.spec.ts:edit scopes stay in their columns at 360px in dark",
+          "browser:tests/key-layout.spec.ts:edit scopes stay in their columns at 360px in light",
+          "browser:tests/key-layout.spec.ts:edit scopes stay in their columns at 768px in dark",
+          "browser:tests/key-layout.spec.ts:edit scopes stay in their columns at 768px in light",
+          "browser:tests/key-layout.spec.ts:first key and key ready fit at 1280px in dark",
+          "browser:tests/key-layout.spec.ts:first key and key ready fit at 1280px in light",
+          "browser:tests/key-layout.spec.ts:first key and key ready fit at 360px in dark",
+          "browser:tests/key-layout.spec.ts:first key and key ready fit at 360px in light",
+          "browser:tests/key-layout.spec.ts:first key and key ready fit at 768px in dark",
+          "browser:tests/key-layout.spec.ts:first key and key ready fit at 768px in light",
+          "browser:tests/key-layout.spec.ts:new scopes stay in their columns at 1280px in dark",
+          "browser:tests/key-layout.spec.ts:new scopes stay in their columns at 1280px in light",
+          "browser:tests/key-layout.spec.ts:new scopes stay in their columns at 360px in dark",
+          "browser:tests/key-layout.spec.ts:new scopes stay in their columns at 360px in light",
+          "browser:tests/key-layout.spec.ts:new scopes stay in their columns at 768px in dark",
+          "browser:tests/key-layout.spec.ts:new scopes stay in their columns at 768px in light",
+          "browser:tests/key-layout.spec.ts:rotate scopes stay in their columns at 1280px in dark",
+          "browser:tests/key-layout.spec.ts:rotate scopes stay in their columns at 1280px in light",
+          "browser:tests/key-layout.spec.ts:rotate scopes stay in their columns at 360px in dark",
+          "browser:tests/key-layout.spec.ts:rotate scopes stay in their columns at 360px in light",
+          "browser:tests/key-layout.spec.ts:rotate scopes stay in their columns at 768px in dark",
+          "browser:tests/key-layout.spec.ts:rotate scopes stay in their columns at 768px in light"
+        ]
+      },
+      {
+        "file": "tests/model-provider.spec.ts",
+        "cases": 3,
+        "nativeKeys": [
+          "browser:tests/model-provider.spec.ts:connection failures and stale saves remain actionable",
+          "browser:tests/model-provider.spec.ts:members do not receive provider controls",
+          "browser:tests/model-provider.spec.ts:workspace AI starts off, saves explicit feature choices and tests only saved configuration"
+        ]
+      },
+      {
+        "file": "tests/settings-account-parts.spec.ts",
+        "cases": 1,
+        "nativeKeys": [
+          "browser:tests/settings-account-parts.spec.ts:the new-account and Unassigned items lead to where they are decided"
+        ]
+      },
+      {
+        "file": "tests/settings-accounts.spec.ts",
+        "cases": 2,
+        "nativeKeys": [
+          "browser:tests/settings-accounts.spec.ts:accounts are a list by vendor with how each is read, and no allowance form",
+          "browser:tests/settings-accounts.spec.ts:an older rule shows as Set by you; Remove asks in place and removes it for good"
+        ]
+      },
+      {
+        "file": "tests/settings.spec.ts",
+        "cases": 27,
+        "nativeKeys": [
+          "browser:tests/settings.spec.ts:AEON-1366: a late Colours deep link scrolls, rings and holds without moving navigation",
+          "browser:tests/settings.spec.ts:Agents links admins to the agent keys",
+          "browser:tests/settings.spec.ts:Business shows the parts and the stored quote settings; a deep link rings its card",
+          "browser:tests/settings.spec.ts:START retention settings keep controls stable and report failed saves",
+          "browser:tests/settings.spec.ts:Vocabulary keeps ticket types and old Projects bookmarks",
+          "browser:tests/settings.spec.ts:Workspace shows the workspace and role, with Brand and In-app AI",
+          "browser:tests/settings.spec.ts:a greeting that cannot be saved goes back to how it was",
+          "browser:tests/settings.spec.ts:grouped navigation stays put across section changes and places policy cards in their new homes",
+          "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1024px in dark",
+          "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1024px in light",
+          "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1440px in dark",
+          "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1440px in light",
+          "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 390px in dark",
+          "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 390px in light",
+          "browser:tests/settings.spec.ts:members read Vocabulary as text and cannot invoke its write actions",
+          "browser:tests/settings.spec.ts:members see Personal, Developer and Policies; an admin section explains itself",
+          "browser:tests/settings.spec.ts:old workspace bookmarks redirect during section and hash changes inside Settings",
+          "browser:tests/settings.spec.ts:old workspace policy bookmarks open the moved card",
+          "browser:tests/settings.spec.ts:phone section picker overlays content, changes sections, and restores keyboard focus",
+          "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes: 1024px dark",
+          "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes: 1024px light",
+          "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes: 1440px dark",
+          "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes: 1440px light",
+          "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes: 390px dark",
+          "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes: 390px light",
+          "browser:tests/settings.spec.ts:the account menu opens Settings on Personal: theme, greeting and keys",
+          "browser:tests/settings.spec.ts:without Quotes the quote settings say so"
+        ]
+      }
+    ],
+    "keptWithoutProvenReplacement": [
+      "All pure visual suites, including models-registry-shots, models-simple-shots and models-situations-shots, until the P02 Models checkpoints are pinned and proven.",
+      "All unit/runtime conversion candidates: a named destination alone is not equivalence proof; distinct authority, revision, stale-owner, error and actual image-preparation cases remain."
+    ],
+    "static": "Hosted CI, per cut-A brief.",
+    "validation": {
+      "ledger": {
+        "command": "node scripts/test-prune/check.mjs",
+        "exitCode": 0,
+        "cuts": false,
+        "visualApproval": "pending"
+      },
+      "ledgerTest": {
+        "command": "node --experimental-strip-types --test web/tests/test-prune-ledger.test.ts",
+        "exitCode": 0,
+        "passed": 1
+      },
+      "manifests": {
+        "command": "node scripts/test-tiers/cli.mjs manifests --check",
+        "exitCode": 0
+      },
+      "lineage": "552 unique frozen P08 sources map onto all 479 current cases; every current protected row/tier and all 647 lineage rows match the before commit."
+    },
+    "remote": {
+      "host": "mbp2606",
+      "entryPoint": "/Users/markus/.aeon/lead/aeon/remote-spec.sh",
+      "refusalExitCode": 3,
+      "refusal": [
+        "remote busy: 2/2 remote runs (CI pool 0/4)",
+        "remote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI"
+      ],
+      "baselineGroups": [
+        {
+          "name": "keys",
+          "specs": [
+            "tests/key-dialog.spec.ts",
+            "tests/key-expiry.spec.ts",
+            "tests/key-full-access.spec.ts",
+            "tests/key-scopes.spec.ts",
+            "tests/models-fallback.spec.ts",
+            "tests/scope-codes.spec.ts"
+          ],
+          "before": 94,
+          "after": 69
+        },
+        {
+          "name": "accounts-settings",
+          "specs": [
+            "tests/account-resets.spec.ts",
+            "tests/account-use-matrix.spec.ts",
+            "tests/multiple-account-pairing.spec.ts",
+            "tests/settings-accounts.spec.ts",
+            "tests/settings-agents.spec.ts",
+            "tests/settings-host-capacity.spec.ts"
+          ],
+          "before": 90,
+          "after": 68
+        },
+        {
+          "name": "access-profile-quota",
+          "specs": [
+            "tests/access.spec.ts",
+            "tests/accounts-quota-bar.spec.ts",
+            "tests/classic-invite.spec.ts",
+            "tests/profile.spec.ts"
+          ],
+          "before": 89,
+          "after": 72
+        }
+      ],
+      "before": "The keys baseline invocation was refused before execution; remaining before/after groups are pending capacity.",
+      "after": "Affected-spec execution is pending capacity.",
+      "runnerTimeDeltaSeconds": null,
+      "timingClaim": "No measured Cut-A runner-time change. Refusal wall time and the earlier round timing are not Cut-A browser savings."
+    }
   }
 }

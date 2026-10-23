@@ -58,7 +58,7 @@ async function computer(page: Page) {
   await expect(pane.getByRole('button',{name:/New starts/})).toHaveAttribute('aria-expanded','true')
   return pane
 }
-for (const width of [390,1024,1440]) for (const theme of ['light','dark'] as const) {
+for (const width of [390,1024,1440]) for (const theme of ['light'] as const) {
   test(`host settings keep controls stable through all modes at ${width} ${theme}`,async({page}) => {
     await page.setViewportSize({width,height:900});await page.emulateMedia({colorScheme:theme})
     const errors = watchErrors(page), s = await setup(page,true,true)

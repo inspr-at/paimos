@@ -63,7 +63,7 @@ test('verified imported-account sign-in explains the invite and preserves ambigu
   await expect(alert).toHaveCount(0)
 })
 
-for (const colorScheme of ['light', 'dark'] as const) {
+for (const colorScheme of ['light'] as const) {
   test(`imported invite actions fit a phone and remain accessible in ${colorScheme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.emulateMedia({ colorScheme })

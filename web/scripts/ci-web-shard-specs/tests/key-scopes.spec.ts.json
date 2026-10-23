@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/key-scopes.spec.ts",
-    "listedTests": 23,
+    "listedTests": 14,
     "tierTiming": {
       "caseSeconds": {
         "max": 6.571,

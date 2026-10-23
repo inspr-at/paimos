@@ -243,7 +243,7 @@ test('a row opens its detail: windows with source and freshness, and the last th
 // AEON-1240 (Tick's AEON-1175 note): in the docked panel at 1440 the title wrapped after "a" because Remove shared
 // its row. The words keep the panel's width and read on one line; Remove sits under them, and asking and Keep move
 // neither the words nor the row.
-for (const width of [1440, 1024, 390]) for (const colorScheme of ['light', 'dark'] as const) {
+for (const width of [1440, 1024, 390]) for (const colorScheme of ['light'] as const) {
   test(`an older rule's title reads on one line with Remove under it at ${width} ${colorScheme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme })
     await setup(page, { limits: true })

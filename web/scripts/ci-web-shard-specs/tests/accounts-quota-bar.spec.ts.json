@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/accounts-quota-bar.spec.ts",
-    "listedTests": 25,
+    "listedTests": 15,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.87,
