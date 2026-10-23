@@ -95,9 +95,9 @@ const reading = computed(() => hereCount.value === null)
 .waiting, .waiting-head, .waiting-list, .waiting-list > li, .waiting-item { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; }
 .waiting-list { margin: 2px 0 0; padding: 0; list-style: none; }
 .waiting { position: relative; isolation: isolate; padding: 14px 0 12px; align-content: start; }
-.waiting::before { content: ''; position: absolute; inset: 0 -20px; background: var(--gold-wash); z-index: -1; pointer-events: none; }
+.waiting::before { content: ''; position: absolute; inset: 0; background: var(--gold-wash); z-index: -1; pointer-events: none; }
 .waiting.is-empty::before { display: none; }
-.waiting::after { content: ''; position: absolute; left: -20px; right: -20px; bottom: 0; height: 1px; background: var(--line); }
+.waiting::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--line); }
 .waiting-head { align-items: center; min-height: 30px; }
 .w-ic { grid-column: 1; justify-self: center; display: grid; place-items: center; color: var(--gold-ink); }
 .waiting-title { grid-column: 2 / 5; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 650; color: var(--ink); white-space: nowrap; }
@@ -105,7 +105,7 @@ const reading = computed(() => hereCount.value === null)
 .n-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .waiting-open { grid-column: -4 / -1; justify-self: end; gap: 6px; }
 .waiting-item { position: relative; align-items: center; min-height: 34px; color: var(--ink); text-decoration: none; }
-.waiting-item::before { content: ''; position: absolute; inset: 1px -14px; border-radius: 8px; pointer-events: none; }
+.waiting-item::before { content: ''; position: absolute; inset: 1px 0; border-radius: 8px; pointer-events: none; }
 @media (hover: hover) { .waiting-item:hover::before { background: var(--row-hover); } }
 .waiting-item:focus-visible { outline: none; box-shadow: none; }
 .waiting-item:focus-visible::before { box-shadow: var(--focus-ring); }
