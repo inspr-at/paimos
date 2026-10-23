@@ -404,9 +404,14 @@ test('P04 negative control: missing late-renderer disposal is detected', () => n
 test('P04 negative control: accepting an aborted graph context is detected', () => negative(() => staleContext({
   before: 'if (controller.signal.aborted || !allowed.value) return', after: 'if (!allowed.value) return',
 }), 'an old project context must not replace the current graph'))
-test('P04 negative control: ignoring a delivered viewport sample is detected', () => negative(() => deliveredWidth({
-  before: 'if (viewport) observedViewportWidth = viewport.borderBoxSize[0]?.inlineSize ?? viewport.contentRect.width', after: 'if (viewport) observedViewportWidth = Infinity',
-}), 'a delivered narrow width must clear the painted glimpse'))
+test('P04 negative control: ignoring a delivered viewport sample is detected', async () => {
+  await negative(() => deliveredWidth({
+    before: 'if (viewport) observedViewportWidth = viewport.borderBoxSize[0]?.inlineSize ?? viewport.contentRect.width', after: 'if (viewport) observedViewportWidth = Infinity',
+  }), 'a delivered narrow width must clear the painted glimpse')
+  await negative(() => deliveredWidth({
+    before: 'if (body) observedViewportWidth = Math.min(observedViewportWidth, body.borderBoxSize[0]?.inlineSize ?? body.contentRect.width)', after: 'if (body) observedViewportWidth = Infinity',
+  }, 'body'), 'a delivered narrow width must clear the painted glimpse')
+})
 test('P04 negative control: keeping old-scope counts until idle is detected', () => negative(() => changedScope('filter', {
   before: 'dropChanged(id, owner, group)', after: '/* negative control: old scope retained */',
 }), 'a changed scope must clear old figures before idle'))

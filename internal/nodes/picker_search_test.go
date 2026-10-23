@@ -57,6 +57,20 @@ func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
 	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Picker"}`, projectKind.ID))
 	work := kindBySlug(t, p, "work")
 	const leaves = 4097
+	// Pin the pre-import statistics, including during the HTTP requests.
+	// This lock permits normal reads/writes but holds auto-analyze off, so
+	// runner timing cannot decide whether the expensive plan is exercised.
+	if _, err := adminPool.Exec(t.Context(), `ANALYZE nodes`); err != nil {
+		t.Fatal(err)
+	}
+	statistics, err := adminPool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer statistics.Rollback(t.Context())
+	if _, err := statistics.Exec(t.Context(), `LOCK TABLE nodes IN SHARE UPDATE EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
 	var ids []string
 	var parentID, childID string
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
