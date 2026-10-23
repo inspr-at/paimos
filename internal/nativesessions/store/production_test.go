@@ -269,6 +269,7 @@ type compositionOptions struct {
 	configure        func(*startFixture, *consent.Authority, *agentd.NativeSessionConfig)
 	notifications    http.HandlerFunc
 	afterReceipt     func(nativecontract.Receipt)
+	onDaemonRequest  func(*http.Request)
 }
 
 func composeProduction(t *testing.T, options ...compositionOptions) *productionComposition {
@@ -330,6 +331,9 @@ func composeProduction(t *testing.T, options ...compositionOptions) *productionC
 			r.Body = ioNop(raw)
 		}
 		r = r.WithContext(tenant.WithPrincipal(r.Context(), f.agent))
+		if option.onDaemonRequest != nil {
+			option.onDaemonRequest(r)
+		}
 		if strings.HasPrefix(r.URL.Path, "/api/agentd/native-sessions/") {
 			if _, _, err := f.s.DaemonRequest(r); err != nil {
 				t.Logf("private daemon admission failed: %T %v", err, err)

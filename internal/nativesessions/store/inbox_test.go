@@ -2,8 +2,13 @@
 package store
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +17,192 @@ import (
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/jackc/pgx/v5"
 )
+
+// Keep the real paired runtime proof, but give each direct store call a fresh
+// test context instead of retaining an HTTP request's cancelled context.
+func inboxRecoveryFixture(t *testing.T) (*productionComposition, nativecontract.Binding, context.Context, nativecontract.DaemonActor, *atomic.Int64) {
+	t.Helper()
+	requests := make(chan *http.Request, 1)
+	c := composeProduction(t, compositionOptions{disableRetention: true, onDaemonRequest: func(r *http.Request) {
+		if r.URL.Path == "/api/agentd/native-sessions/commands" {
+			select {
+			case requests <- r.Clone(context.Background()):
+			default:
+			}
+		}
+	}})
+	f := c.f
+	clock := &atomic.Int64{}
+	clock.Store(f.now.UnixNano())
+	f.s.now = func() time.Time { return time.Unix(0, clock.Load()).UTC() }
+	f.begin(t)
+	out, err := c.config.Host.Start(t.Context(), nativecontract.LocalStart{Intent: f.intent, Cwd: c.root, AccountKey: "real-own-account"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.config.Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var request *http.Request
+	select {
+	case request = <-requests:
+	case <-time.After(15 * time.Second):
+		t.Fatal("missing authenticated command poll")
+	}
+	ctx, d, err := f.s.DaemonRequest(request.WithContext(f.daemonCtx(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, *out.Session.CurrentBinding, ctx, d, clock
+}
+
+// Risk: an unclaimed native lease hides its durable message forever after
+// expiry, a refused claim, or server queue loss, and blocks every later input.
+// A successful claim is the negative control: queue loss must never release a
+// possibly written input. The store clock advances without sleeping.
+func TestNativeInboxUnclaimedLeaseRecovery(t *testing.T) {
+	for _, scenario := range []string{"expired", "queue lost", "claim refused", "claim expired", "claimed queue lost"} {
+		t.Run(scenario, func(t *testing.T) {
+			c, b, ctx, d, clock := inboxRecoveryFixture(t)
+			f := c.f
+			send := func(body string) inbox.Message {
+				t.Helper()
+				var message inbox.Message
+				f.seed(t, func(tx pgx.Tx) error {
+					var err error
+					message, err = inbox.AcceptMessageTx(t.Context(), tx, f.person, inbox.Acceptance{RecipientPrincipalID: f.agent.ID, RecipientSessionID: &b.HarnessSessionID, Body: body, IdempotencyKey: guuid.NewString()})
+					return err
+				})
+				return message
+			}
+			message := send("durable message before claim")
+			page, err := f.s.Commands(ctx, d, nativecontract.PageQuery{})
+			if err != nil || len(page.Items) != 1 || page.Items[0].RequestID != message.ID {
+				t.Fatal("message was not admitted exactly once", page, err)
+			}
+			item := page.Items[0]
+			claim := nativecontract.Claim{RequestID: guuid.NewString(), OperationID: item.OperationID, DaemonID: d.DaemonID, DaemonGeneration: d.DaemonGeneration, LedgerGeneration: d.LedgerGeneration, CapabilityDigest: d.CapabilityDigest, ExpectedRevision: b.BindingRevision, ClaimKind: "command"}
+			if scenario == "claimed queue lost" {
+				if _, err := f.s.claimCommand(ctx, d, claim); err != nil {
+					t.Fatal("valid claim was refused", err)
+				}
+			}
+			if scenario == "queue lost" || scenario == "claimed queue lost" {
+				f.s.commandMu.Lock()
+				f.s.commands = map[string]queuedCommand{}
+				f.s.commandMu.Unlock()
+			} else if scenario == "claim refused" {
+				f.seed(t, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE inbox_messages SET acked_at=clock_timestamp() WHERE id=$1`, message.ID)
+					return err
+				})
+			}
+			if scenario == "expired" || scenario == "claim expired" || scenario == "claimed queue lost" {
+				clock.Store(item.ExpiresAt.Add(time.Second).UnixNano())
+			}
+			if scenario == "claim refused" || scenario == "claim expired" {
+				_, err := f.s.claimCommand(ctx, d, claim)
+				want := nativecontract.ReasonPermissionRevoked
+				if scenario == "claim expired" {
+					want = nativecontract.ReasonGrantExpired
+				}
+				var refusal *Failure
+				if !errors.As(err, &refusal) || refusal.Reason != want {
+					t.Fatalf("claim failed for the wrong reason: %v, want %s", err, want)
+				}
+			} else if _, err := f.s.Commands(ctx, d, nativecontract.PageQuery{}); err != nil {
+				t.Fatal(err)
+			}
+			var released bool
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT released_at IS NOT NULL FROM harness_deliveries WHERE id=$1`, item.OperationID).Scan(&released); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "claimed queue lost" {
+				if released {
+					t.Fatal("queue loss released a possibly written input")
+				}
+				var state string
+				if err := f.d.Admin.QueryRow(t.Context(), `SELECT receipt->>'state' FROM native_session_receipts WHERE operation_id=$1`, item.OperationID).Scan(&state); err != nil || state != "accepted" {
+					t.Fatal("successful claim lacks durable evidence", state, err)
+				}
+				return
+			}
+			if !released {
+				t.Fatal("unclaimed native lease still hides its inbox message")
+			}
+			f.s.commandMu.Lock()
+			_, retained := f.s.commands[item.OperationID]
+			f.s.commandMu.Unlock()
+			if retained {
+				t.Fatal("retired input still occupies the live queue")
+			}
+			if scenario != "claim refused" {
+				mux := http.NewServeMux()
+				inbox.New(f.d.App).Mount(mux)
+				r := httptest.NewRequest("GET", "/api/inbox/messages?session="+b.HarnessSessionID+"&exact_session=true", nil).WithContext(f.daemonCtx(t))
+				w := httptest.NewRecorder()
+				mux.ServeHTTP(w, r)
+				var fallback inbox.Page
+				if err := json.Unmarshal(w.Body.Bytes(), &fallback); err != nil || w.Code != http.StatusOK || len(fallback.Items) != 1 || fallback.Items[0].ID != message.ID || fallback.Items[0].Body != message.Body {
+					t.Fatalf("durable inbox fallback unavailable: %d %s (%v)", w.Code, w.Body.String(), err)
+				}
+			}
+			next := send("next live message")
+			page, err = f.s.Commands(ctx, d, nativecontract.PageQuery{})
+			if err != nil || len(page.Items) != 1 || page.Items[0].RequestID != next.ID {
+				t.Fatal("retired entry blocked the next message or was reinjected", page, err)
+			}
+		})
+	}
+}
+
+// Risk: a long native turn consumes an inbox input's five-minute claim window.
+// The inbox must remain available while busy, then be admitted at the observed
+// completion boundary. Clock advancement and receipt channels prove both sides.
+func TestNativeInboxLongTurnKeepsMessageAvailable(t *testing.T) {
+	c, b, ctx, d, clock := inboxRecoveryFixture(t)
+	f := c.f
+	input := nativecontract.Input{RequestID: guuid.NewString(), InputID: guuid.NewString(), ExpectedBinding: b, Mode: "now", Text: "long person turn", ExpiresAt: f.now.Add(time.Minute)}
+	var accepted nativecontract.OperationResult
+	c.personCall(t, "/api/projects/"+f.project+"/native-sessions/"+b.OwnedSessionID+"/input", input, &accepted)
+	if out, err := c.config.Host.Input(t.Context(), input); err != nil || out.Receipt.State != "write_acknowledged" {
+		t.Fatal("long turn not established", out, err)
+	}
+	var message inbox.Message
+	f.seed(t, func(tx pgx.Tx) error {
+		var err error
+		message, err = inbox.AcceptMessageTx(t.Context(), tx, f.person, inbox.Acceptance{RecipientPrincipalID: f.agent.ID, RecipientSessionID: &b.HarnessSessionID, Body: "answer during a long turn", IdempotencyKey: guuid.NewString()})
+		return err
+	})
+	for range 2 {
+		page, err := f.s.Commands(ctx, d, nativecontract.PageQuery{})
+		if err != nil || len(page.Items) != 0 {
+			t.Fatal("inbox input was admitted before the provider's safe boundary", page, err)
+		}
+		clock.Store(f.now.Add(6 * time.Minute).UnixNano())
+	}
+	var leases int
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM harness_deliveries WHERE message_id=$1`, message.ID).Scan(&leases); err != nil || leases != 0 {
+		t.Fatal("busy inbox message was hidden behind a native lease", leases, err)
+	}
+	turn := guuid.NewString()
+	c.provider.turn("turn_started", turn, 2)
+	select {
+	case <-c.turnStarted:
+	case <-time.After(15 * time.Second):
+		t.Fatal("missing correlated turn start")
+	}
+	c.provider.turn("turn_completed", turn, 3)
+	select {
+	case <-c.turnDone:
+	case <-time.After(15 * time.Second):
+		t.Fatal("missing correlated turn completion")
+	}
+	page, err := f.s.Commands(ctx, d, nativecontract.PageQuery{})
+	if err != nil || len(page.Items) != 1 || page.Items[0].RequestID != message.ID || !page.Items[0].ExpiresAt.After(f.s.now()) {
+		t.Fatal("safe boundary did not admit a fresh inbox claim window", page, err)
+	}
+}
 
 // Risk: queue/lease acceptance is presented as delivery, input is duplicated on
 // repeated hints, Desk answers wait behind ordinary messages, or an offline

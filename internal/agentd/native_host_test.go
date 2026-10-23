@@ -563,6 +563,24 @@ func TestNativeHostLimitsCountOnlyLiveWork(t *testing.T) {
 	})
 }
 
+// Risk: an unfinished native turn prevents a person's later input from ever
+// reaching the provider. Only inbox admission waits for a safe turn boundary.
+func TestNativeHostPersonInputSurvivesUnfinishedTurn(t *testing.T) {
+	f := newNativeHostFixture(t, 1)
+	b, p := f.start(t, 0)
+	first := f.input(b)
+	if out, err := f.h.Input(t.Context(), first); err != nil || out.Receipt.State != "write_acknowledged" {
+		t.Fatal("first turn was not established", out, err)
+	}
+	second := f.input(b)
+	if err := f.h.Poll(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !p.received(second.InputID) {
+		t.Fatal("person input was withheld behind an unfinished turn")
+	}
+}
+
 // nativeC0Recorder acknowledges writes through the transport's own observer,
 // as the bridge's control_applied frame does.
 type nativeC0Recorder struct {
