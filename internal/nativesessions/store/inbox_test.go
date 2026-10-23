@@ -93,7 +93,7 @@ func TestNativeInboxUnclaimedLeaseRecovery(t *testing.T) {
 				f.s.commandMu.Unlock()
 			} else if scenario == "claim refused" {
 				f.seed(t, func(tx pgx.Tx) error {
-					_, err := tx.Exec(t.Context(), `UPDATE inbox_messages SET acked_at=clock_timestamp() WHERE id=$1`, message.ID)
+					_, err := tx.Exec(t.Context(), `UPDATE inbox_messages SET acked_at=clock_timestamp(),acked_by_principal_id=$2 WHERE id=$1`, message.ID, f.agent.ID)
 					return err
 				})
 			}
@@ -163,8 +163,9 @@ func TestNativeInboxLongTurnKeepsMessageAvailable(t *testing.T) {
 	c, b, ctx, d, clock := inboxRecoveryFixture(t)
 	f := c.f
 	input := nativecontract.Input{RequestID: guuid.NewString(), InputID: guuid.NewString(), ExpectedBinding: b, Mode: "now", Text: "long person turn", ExpiresAt: f.now.Add(time.Minute)}
-	var accepted nativecontract.OperationResult
-	c.personCall(t, "/api/projects/"+f.project+"/native-sessions/"+b.OwnedSessionID+"/input", input, &accepted)
+	if _, err := f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "input", Input: &input}); err != nil {
+		t.Fatal("person input was not accepted", err)
+	}
 	if out, err := c.config.Host.Input(t.Context(), input); err != nil || out.Receipt.State != "write_acknowledged" {
 		t.Fatal("long turn not established", out, err)
 	}
