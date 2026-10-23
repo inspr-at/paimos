@@ -94,12 +94,14 @@ test('AEON-1697 manual Expert Live proof from harness records', async ({ browser
         await page.route(/\/api\/projects\/[^/]+\/delivery\/flow\/stream/, route => route.fulfill({ contentType: 'text/event-stream', body: 'retry: 600000\n\n' }))
         await page.goto(`http://127.0.0.1:${port}/p/AEON/delivery?view=flow`)
         const host = page.getByTestId('flow-lanes')
-        await expect(page.getByRole('radio', { name: width === 1440 ? 'Expert' : 'Experte', exact: true })).toHaveAttribute('aria-checked', 'true')
+        // AEON-1609 pins the production display language to English; region
+        // preferences do not switch it. Narrow captures retain a German region.
+        await expect(page.getByRole('radio', { name: 'Expert', exact: true })).toHaveAttribute('aria-checked', 'true')
         await expect(page.getByTestId('flow-modes').getByRole('radio', { name: 'Live', exact: true })).toHaveAttribute('aria-checked', 'true')
-        await expect(page.getByTestId('flow-clock')).toHaveText(width === 1440 ? 'At 12:06 (now)' : 'Um 12:06 (jetzt)')
+        await expect(page.getByTestId('flow-clock')).toHaveText('At 12:06 (now)')
         await expect(host.locator('.ln-lane')).toHaveCount(6)
         const bar = page.getByTestId('flow-bar')
-        const fit = bar.getByRole('radio', { name: width === 1440 ? 'Fit all' : 'Alles', exact: true })
+        const fit = bar.getByRole('radio', { name: 'Fit all', exact: true })
         const guard = await controlStability(page, { fit, zoom: bar.getByRole('radiogroup'), follow: page.getByTestId('flow-follow'), readout: page.getByTestId('flow-readout'), lanes: host })
         await guard.check(() => fit.click())
         await guard.check(() => bar.getByRole('radio', { name: '15 min', exact: true }).click())
@@ -111,7 +113,7 @@ test('AEON-1697 manual Expert Live proof from harness records', async ({ browser
         await expect(builder.locator('b')).toHaveText('Builder')
         await expect(moment.locator('.idle')).not.toContainText('Builder')
         const momentText = await page.getByTestId('flow-moment-head').textContent()
-        expect(momentText).toContain(width === 1440 ? 'Builder on “Being built · round 2”' : 'Builder: „Wird gebaut · Runde 2“')
+        expect(momentText).toContain('Builder on “Being built · round 2”')
         // A phone can combine the two adjacent tiny historical attempts into
         // the existing +N cluster. All 21 steps must still be represented.
         const clusters = await host.locator('[data-cluster]').evaluateAll(groups => groups.map(group => Number(group.querySelector('.ln-clut')!.textContent!.slice(1))))
