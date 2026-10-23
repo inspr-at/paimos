@@ -53,9 +53,9 @@ function openCell(item: Assistant, event: MouseEvent) {
   const button = (event.currentTarget as HTMLElement).closest('.assistant-row')?.querySelector<HTMLButtonElement>('.assistant-open')
   if (button) emit('open', item.principal_id, button)
 }
-function glance(item: Assistant) {
+function glance(item: Assistant, compact = false) {
   const budget = item.policy.weekly_budget
-  return [item.policy.allowed_projects.length ? item.policy.allowed_projects.map(id => props.projectNames?.[id] ?? id).join(', ') : words.noProjects, words.asks.toLowerCase(), `${assistantMoney(budget.amount, budget.unit)} ${words.week}`].join(' · ')
+  return [item.policy.allowed_projects.length ? item.policy.allowed_projects.map(id => props.projectNames?.[id] ?? id).join(', ') : words.noProjects, ...(compact ? [] : [words.asks.toLowerCase()]), `${assistantMoney(budget.amount, budget.unit)} ${words.week}`].join(' · ')
 }
 function routineLine(item: Assistant) {
   const routines = factsOf(item).routines
@@ -87,7 +87,7 @@ function adapterLine(item: Assistant) {
       <div class="assistant-rows">
         <div v-for="item in shown" :key="item.principal_id" class="assistant-row" :class="{ selected: selected === item.principal_id }" :data-assistant="item.principal_id" :data-status="statusOf(item)">
           <button type="button" class="assistant-open" :aria-label="`${item.display_name} · ${labelOf(item)}`" :aria-describedby="`assistant-glance-${item.principal_id} assistant-last-${item.principal_id} assistant-spend-${item.principal_id} assistant-routines-${item.principal_id} assistant-adapter-${item.principal_id}`" :aria-pressed="selected === item.principal_id" :title="`${item.display_name} · ${glance(item)} · ${policyGroups(item.policy.allowed_scopes).join(', ')}`" @click="emit('open', item.principal_id, $event.currentTarget as HTMLElement)">
-            <span class="assistant-identity"><span class="assistant-name"><HarnessMark :harness="item.vendor" :size="16" /><strong v-clip-tip>{{ item.display_name }}</strong></span><span v-clip-tip :id="`assistant-glance-${item.principal_id}`" class="assistant-glance">{{ glance(item) }}</span><span v-clip-tip class="folded-facts"><span :title="factsOf(item).lastActivity ? undefined : words.notAvailableYet" :data-tip="factsOf(item).lastActivity ? undefined : words.notAvailableYet">{{ activityLine(item) }}</span> · <span :title="factsOf(item).routines === null ? words.notAvailableYet : undefined" :data-tip="factsOf(item).routines === null ? words.notAvailableYet : undefined">{{ factsOf(item).routines ? factsOf(item).routinesTruncated ? words.atLeastRoutines(factsOf(item).routines!.length) : words.routineCount(factsOf(item).routines!.length) : '—' }}</span></span><span v-if="factsOf(item).spend" v-clip-tip class="phone-facts">{{ words.weekAmount(assistantMoney(factsOf(item).spend!.amount, item.policy.weekly_budget.unit, true), assistantMoney(item.policy.weekly_budget.amount, item.policy.weekly_budget.unit)) }}</span><span v-else class="phone-facts" :title="words.notAvailableYet" :data-tip="words.notAvailableYet">—</span></span>
+            <span class="assistant-identity"><span class="assistant-name"><HarnessMark :harness="item.vendor" :size="16" /><strong v-clip-tip>{{ item.display_name }}</strong></span><span v-clip-tip :id="`assistant-glance-${item.principal_id}`" class="assistant-glance">{{ glance(item) }}</span><span v-clip-tip class="folded-facts"><span :title="factsOf(item).lastActivity ? undefined : words.notAvailableYet" :data-tip="factsOf(item).lastActivity ? undefined : words.notAvailableYet">{{ activityLine(item) }}</span> · <span :title="factsOf(item).routines === null ? words.notAvailableYet : undefined" :data-tip="factsOf(item).routines === null ? words.notAvailableYet : undefined">{{ factsOf(item).routines ? factsOf(item).routinesTruncated ? words.atLeastRoutines(factsOf(item).routines!.length) : words.routineCount(factsOf(item).routines!.length) : '—' }}</span></span><span v-if="factsOf(item).spend" v-clip-tip class="phone-facts">{{ words.weekAmount(assistantMoney(factsOf(item).spend!.amount, item.policy.weekly_budget.unit, true), assistantMoney(item.policy.weekly_budget.amount, item.policy.weekly_budget.unit)) }}</span><span v-else v-clip-tip class="phone-facts">{{ glance(item, true) }}</span></span>
             <span class="assistant-state"><AppIcon :name="ASSISTANT_STATUS_ICON[statusOf(item)]" :size="14" />{{ labelOf(item) }}<template v-if="statusOf(item) === 'paused' && factsOf(item).spend && Number(factsOf(item).spend!.amount) >= Number(item.policy.weekly_budget.amount)"> · {{ words.budgetReached }}</template></span>
             <span v-if="factsOf(item).lastActivity" v-clip-tip :id="`assistant-last-${item.principal_id}`" class="last-column">{{ activityLine(item) }}</span><span v-else :id="`assistant-last-${item.principal_id}`" class="last-column" :title="words.notAvailableYet" :data-tip="words.notAvailableYet">—</span>
             <AssistantBudget :id="`assistant-spend-${item.principal_id}`" class="row-budget" :policy="item.policy" :facts="factsOf(item)" />
@@ -119,12 +119,12 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
 .assistant-open { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0; background: transparent; cursor: pointer; color: inherit; font: inherit; text-align: left; }
 .assistant-open:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 .assistant-row > :not(.assistant-open) { pointer-events: none; min-width: 0; }
-.assistant-identity { display: grid; gap: 4px; min-width: 0; }
+.assistant-identity { display: grid; gap: 2px; min-width: 0; }
 .assistant-name { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--ink); }
-.assistant-name strong { font-size: 14px; font-weight: 600; }
-.assistant-name strong, .assistant-glance, .folded-facts, .phone-facts, .last-column, .routines-column, .adapter-column { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.assistant-name strong { font-size: 14px; font-weight: 600; line-height: 18px; }
+.assistant-name strong, .folded-facts, .phone-facts, .last-column, .routines-column, .adapter-column { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .assistant-name :deep(svg) { width: 16px; height: 16px; }
-.assistant-glance { font-size: 12px; }
+.assistant-glance { min-width: 0; font-size: 12px; line-height: 15px; white-space: normal; }
 .assistant-state { display: flex; align-items: center; gap: 6px; color: var(--ink); }
 .assistant-state svg { flex: none; }
 [data-status="down"] .assistant-state, [data-status="down"] .adapter-column { color: var(--danger); }
@@ -162,7 +162,8 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
   .assistant-state { position: absolute; right: 12px; top: 4px; max-width: 48%; font-size: 11px; line-height: 14px; white-space: nowrap; }
   .assistant-state svg { display: none; }
   .folded-facts, .row-budget, .assistant-glance { display: none; }
-  .phone-facts { display: block; max-width: calc(50% - 8px); font-size: 12px; white-space: nowrap; }
+  .phone-facts { display: block; font-size: 12px; white-space: nowrap; }
+  .assistant-row:has(.assistant-approvals a) .phone-facts { max-width: calc(50% - 8px); }
   .assistant-approvals:has(a) { display: block; position: absolute; left: calc(50% + 8px); right: 12px; bottom: 0; }
   .assistant-approvals a { min-height: 44px; min-width: 16ch; justify-content: flex-start; font-variant-numeric: tabular-nums; }
   .assistant-open { display: block; padding: 0; border-radius: var(--radius); }

@@ -757,6 +757,11 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   const errors = watchErrors(page)
   const { work } = await setup(page)
   work.preferences['ui.agents.sections'] = { dial: false }
+  // Capture fixture: an empty queue is a successful read, rather than an
+  // unmocked failure in the adjacent Sessions list (including PRJ-26).
+  await page.route(url => url.pathname === '/api/queue', route => route.fulfill({ json: {
+    items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 4, work_hours: null, warning: false },
+  } }))
   const { items } = assistantEvidence(Date.now(), me.id)
   const { writes, events, routineWrites, routines, runOwners, routineReads } = await mockAssistants(page, items, me.id)
   let policyAccess = true
@@ -766,7 +771,24 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
     if (policyAccess) permissions.workspace.permissions.push('agents.create', 'recurrences.manage')
     return route.fulfill({ json: permissions })
   })
-  const shot = async (name: string) => page.screenshot({ path: testInfo.outputPath(`aeon-1705-${name}-fix1.png`), fullPage: true })
+  const checks: unknown[] = []
+  const shot = async (name: string) => {
+    const measurements = await page.evaluate(() => {
+      const box = (element: Element | null) => element ? (() => { const { x, y, width, height } = element.getBoundingClientRect(); return { x, y, width, height } })() : null
+      const title = document.querySelector('.assistant-panel-title')
+      return {
+        viewport: { width: innerWidth, height: innerHeight }, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+        horizontalOverflow: document.documentElement.scrollWidth - innerWidth,
+        policyLines: [...document.querySelectorAll<HTMLElement>('.assistant-glance')].map(element => ({ text: element.textContent, box: box(element), textOverflow: getComputedStyle(element).textOverflow, whiteSpace: getComputedStyle(element).whiteSpace, clipped: element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight })),
+        cardLines: [...document.querySelectorAll<HTMLElement>('.phone-facts')].map(element => ({ text: element.textContent, box: box(element) })),
+        header: title ? { title: box(title), more: box(title.querySelector('.assistant-more')), close: box(title.querySelector('.assistant-close')), status: box(document.querySelector('.panel-status')), statusLine: box(document.querySelector('.panel-status-line')), tabs: box(document.querySelector('.assistant-tabs')) } : null,
+        scopeHeading: box(document.querySelector('#assistant-policy-scopes')),
+        queueWarning: document.body.textContent?.includes('Queued work can’t be read right now') ?? false,
+      }
+    })
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1705-${name}-fix6.png`), fullPage: true })
+    checks.push({ name, ...measurements })
+  }
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
   await openAgents(page)
@@ -793,6 +815,18 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   expect(cardStyles[0]).toEqual(cardStyles[1])
   await expect(section.locator('.assistant-row')).toHaveCount(2)
   expect(await section.locator('.assistant-row').evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height))).toEqual([56, 56])
+  // U11: the complete policy must fit in up to two lines at 1440, including
+  // while Status has free room. Removing the wrapping fix fails these checks.
+  for (const line of await section.locator('.assistant-glance').all()) {
+    await expect(line).toBeVisible()
+    await expect(line).toHaveCSS('white-space', 'normal')
+    await expect(line).not.toHaveCSS('text-overflow', 'ellipsis')
+    expect(await line.evaluate(element => {
+      const rect = element.getBoundingClientRect(), row = element.closest('.assistant-row')!.getBoundingClientRect()
+      return element.scrollWidth <= element.clientWidth && element.scrollHeight <= element.clientHeight && rect.height <= 2 * parseFloat(getComputedStyle(element).lineHeight) + .5 && rect.top >= row.top && rect.bottom <= row.bottom
+    })).toBe(true)
+  }
+  await expect(page.locator('.sessions')).not.toContainText('Queued work can’t be read right now')
   const positions = await page.evaluate(() => ({ capacity: document.querySelector('.cap-row')!.getBoundingClientRect().bottom, assistants: document.querySelector('.assistants')!.getBoundingClientRect(), sessions: document.querySelector('.sessions')!.getBoundingClientRect().top }))
   expect(positions.capacity).toBeLessThanOrEqual(positions.assistants.top)
   expect(positions.assistants.bottom).toBeLessThanOrEqual(positions.sessions)
@@ -854,6 +888,23 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await section.getByRole('button', { name: 'Amy · Status unavailable', exact: true }).click()
   const details = page.getByRole('complementary', { name: 'Assistant details', exact: true })
   await expect(details).toBeVisible()
+  // U3/U2: unavailable status has no placeholder line or empty action band.
+  // All icon actions share the title row; tabs follow the actual status.
+  await expect(details.locator('.panel-status-line')).toHaveCount(0)
+  await expect(details.locator('.assistant-actions')).toHaveCount(0)
+  const more = details.getByRole('button', { name: 'More assistant actions' })
+  await expect(details.locator('.assistant-panel-title').getByRole('button', { name: 'More assistant actions' })).toBeVisible()
+  const titleBox = (await details.locator('.assistant-panel-title').boundingBox())!, moreBox = (await more.boundingBox())!
+  expect(moreBox.y).toBeGreaterThanOrEqual(titleBox.y)
+  expect(moreBox.y + moreBox.height).toBeLessThanOrEqual(titleBox.y + titleBox.height)
+  const statusBox = (await details.locator('.panel-status').boundingBox())!, tabsBox = (await details.getByRole('tablist').boundingBox())!
+  expect(tabsBox.y - statusBox.y - statusBox.height).toBeLessThanOrEqual(10)
+  // The narrow list beside the dock uses policy, never a dash-only line.
+  for (const card of await section.locator('.assistant-row').all()) {
+    await expect(card.locator('.phone-facts')).toBeVisible()
+    await expect(card.locator('.phone-facts')).toContainText('AEON')
+    await expect(card.locator('.phone-facts')).not.toHaveText('—')
+  }
   const overview = details.getByRole('tabpanel', { name: 'Overview', exact: true })
   await expect(overview.locator('.overview-pending')).toHaveText("Spend and adapter health appear once they're connected.")
   await expect(overview).not.toContainText('Spend and daily totals are not available yet.')
@@ -864,7 +915,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await expect(details.locator('.assistant-panel-head')).not.toContainText('Pause and resume for this assistant are not available yet.')
   await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
   const tabs = details.getByRole('tablist')
-  const controls = { tabs, close: details.getByRole('button', { name: 'Close assistant details' }), frame: details, ...Object.fromEntries(['Overview', 'Approvals', 'Routines', 'Policy', 'Activity'].map(name => [name, tabs.getByRole('tab', { name, exact: true })])) }
+  const controls = { tabs, more, close: details.getByRole('button', { name: 'Close assistant details' }), frame: details, ...Object.fromEntries(['Overview', 'Approvals', 'Routines', 'Policy', 'Activity'].map(name => [name, tabs.getByRole('tab', { name, exact: true })])) }
   await expectStableControls({ controls, scrollAreas: { content: details.locator('.assistant-panel-scroll') }, interactions: ['Approvals', 'Routines', 'Policy', 'Activity', 'Overview'].map(name => ({ name, run: async () => {
     await tabs.getByRole('tab', { name, exact: true }).click()
     if (name === 'Approvals') {
@@ -897,6 +948,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
     }
     if (name === 'Policy') {
       const policy = details.getByRole('tabpanel', { name: 'Policy', exact: true })
+      await expect(policy.getByRole('heading', { name: 'What it may do', exact: true })).toBeVisible()
       await expect(policy).toContainText('Read and write tickets')
       await expect(policy.getByText('nodes.read', { exact: true })).toHaveCount(0)
       for (const locked of ['outward', 'secrets']) await expect(details.locator(`[data-locked-rule="${locked}"] input, [data-locked-rule="${locked}"] select`)).toHaveCount(0)
@@ -913,6 +965,9 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await pause.hover()
   await expect(page.locator('.tooltip:popover-open')).toHaveText('Pause and resume for this assistant are not available yet.')
   await page.getByRole('menuitem', { name: 'Edit policy', exact: true }).click()
+  const scopeGroup = details.getByRole('region', { name: 'What it may do', exact: true })
+  await expect(scopeGroup.getByRole('heading', { name: 'What it may do', exact: true })).toBeVisible()
+  await expect(scopeGroup.getByRole('checkbox')).toHaveCount(6)
   await expect(details.getByRole('heading', { name: 'Budget', exact: true })).toBeVisible()
   const budget = details.getByRole('textbox', { name: 'Per week', exact: true })
   await expect(budget).toHaveValue('10')
@@ -921,6 +976,8 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   const saveGuard = await controlStability(page, { budget, save, cancel: details.getByRole('button', { name: /^Cancel/ }), tabs })
   await saveGuard.check(() => budget.fill('15'))
   saveGuard.done()
+  await details.locator('.assistant-panel-scroll').evaluate(element => { element.scrollTop = 0 })
+  await expect(scopeGroup.getByRole('heading', { name: 'What it may do', exact: true })).toBeVisible()
   await shot('1440-light-panel-policy-edit')
   await page.emulateMedia({ colorScheme: 'dark' }); await shot('1440-dark-panel-policy-edit')
   await page.emulateMedia({ colorScheme: 'light' })
@@ -957,6 +1014,12 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
     await page.setViewportSize({ width, height: 844 })
     await section.scrollIntoViewIfNeeded()
     expect(await section.locator('.assistant-row').first().evaluate(el => el.getBoundingClientRect().height)).toBe(64)
+    for (const card of await section.locator('.assistant-row').all()) {
+      await expect(card.locator('.phone-facts')).toBeVisible()
+      await expect(card.locator('.phone-facts')).toContainText('AEON')
+      await expect(card.locator('.phone-facts')).not.toHaveText('—')
+      expect(await card.locator('.phone-facts').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+    }
     if (width === 390) {
       await shot('390-light-cards')
       await page.emulateMedia({ colorScheme: 'dark' }); await shot('390-dark-cards')
@@ -1000,6 +1063,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   identityGuard.done()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   expect(errors).toEqual([])
+  await testInfo.attach('aeon-1705-fix6-checks.json', { body: JSON.stringify(checks, null, 2), contentType: 'application/json' })
 })
 
 test('assistant Desk approvals keep independent links, waiting order and partial coverage', async ({ page }, testInfo) => {
