@@ -220,6 +220,27 @@ test('with Type applied, the Filters sheet waits for its unfiltered counts; a la
   const counts = await heldLevelCounts(page, true)
   await page.goto('/p/PHAROS?type=leaf')
   await expect(rows(page).first()).toBeVisible()
+  await expect.poll(() => level(calls)).toBe('leaf')
+  const noPhoneOverflow = async () => {
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+      'phone page with Type applied has no horizontal overflow').toBeLessThanOrEqual(1)
+  }
+  await noPhoneOverflow()
+  // Fault control: put twenty pixels beyond the viewport and require the
+  // same page-level assertion to fail, then restore the retained journey.
+  const overflow = await page.evaluateHandle(() => {
+    const element = document.createElement('div')
+    element.style.cssText = 'position:absolute;left:100%;top:0;width:20px;height:1px'
+    document.documentElement.append(element)
+    return element
+  })
+  try {
+    await expect(noPhoneOverflow()).rejects.toThrow(/phone page with Type applied has no horizontal overflow/)
+  } finally {
+    await overflow.evaluate(element => element.remove())
+    await overflow.dispose()
+  }
+  await noPhoneOverflow()
   await expect.poll(() => counts.asked).toBe(true)
   await openListFilters(page)
   const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })

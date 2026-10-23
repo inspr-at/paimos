@@ -179,17 +179,62 @@ test('description edits with preview, Cmd/Ctrl+Enter saves, Esc asks before disc
 test('s, p and a open status, priority and assignee from the panel', async ({ page }) => {
   let releaseGrants!: () => void
   const grants = new Promise<void>(resolve => { releaseGrants = resolve })
-  const calls = await mockWork(page, fixtures(), {
-    hold: request => request.path === '/api/me/permissions' && request.query.get('project_id') === 'p-pharos' ? { until: grants } : undefined,
+  const calls = await mockWork(page, fixtures())
+  let role: 'viewer' | 'member' = 'viewer'
+  await page.route(url => url.pathname === '/api/me/permissions' && url.searchParams.get('project_id') === 'p-pharos', async route => {
+    await grants
+    await route.fulfill({ json: mockEffectivePermissions(role, 'p-pharos') })
   })
   await page.goto('/p/PHAROS/PHAROS-14')
   const ws = panel(page)
-  await expect(ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+  const heading = ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })
+  await expect(heading).toBeVisible()
   // The ticket can render before its project grants arrive. A keyboard press
   // has no Playwright actionability wait, unlike clicking the status button.
   await expect(ws.getByRole('button', { name: /Status: New/ })).toBeDisabled()
+  await ws.focus()
+  await heading.evaluate(async () => { await document.fonts.ready })
+  const before = await heading.boundingBox()
+  if (!before) throw new Error('ticket heading has no baseline box')
+  expect(before.width).toBeGreaterThan(0)
+  expect(before.height).toBeGreaterThan(0)
+  const headingStays = async (step: string) => {
+    const after = await heading.boundingBox()
+    if (!after) throw new Error(`${step}: ticket heading has no box`)
+    for (const axis of ['x', 'y', 'width', 'height'] as const) {
+      expect(Math.abs(after[axis] - before[axis]), `${step}: ticket heading.${axis}`).toBeLessThanOrEqual(0.5)
+    }
+  }
+  await page.keyboard.press('e')
+  await expect(ws.locator('.edit-form')).toHaveCount(0)
+  await headingStays('e while permissions are pending')
+  // Fault control: the same oracle must reject an actual four-pixel shift.
+  const previousStyle = await heading.getAttribute('style')
+  try {
+    await heading.evaluate(element => { element.style.translate = '4px 0' })
+    await expect(headingStays('shift fault control')).rejects.toThrow(/shift fault control: ticket heading\.x/)
+  } finally {
+    await heading.evaluate((element, style) => {
+      if (style === null) element.removeAttribute('style')
+      else element.setAttribute('style', style)
+    }, previousStyle)
+  }
+  await headingStays('restored after shift fault control')
+  const denied = page.waitForResponse(response => {
+    const url = new URL(response.url())
+    return url.pathname === '/api/me/permissions' && url.searchParams.get('project_id') === 'p-pharos'
+  })
   releaseGrants()
+  await denied
+  await heading.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+  await expect(ws.locator('.edit-form')).toHaveCount(0)
+  await headingStays('read-only permissions have arrived')
+  // A denied pending e is spent. A fresh grant enables the existing shortcut
+  // journey without opening an editor or changing its record behind the user.
+  role = 'member'
+  await page.evaluate(() => { window.dispatchEvent(new Event('focus')) })
   await expect(ws.getByRole('button', { name: /Status: New/ })).toBeEnabled()
+  await expect(ws.locator('.edit-form')).toHaveCount(0)
   await ws.focus()
   await page.keyboard.press('s')
   await page.getByRole('menu', { name: 'Status of PHAROS-14' }).getByRole('menuitemradio', { name: 'Backlog' }).click()
