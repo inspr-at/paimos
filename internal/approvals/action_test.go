@@ -29,7 +29,7 @@ func actionFixture(t *testing.T) (*fixture, string, ActionInput) {
 	t.Helper()
 	f := newFixture(t)
 	project := insertNode(t, f.db.Admin, f.tenantA, "project", "ACT-1", "Action project")
-	f.agentA.Scopes = []string{"approvals.request", "approvals.read", "inbox.read"}
+	f.agentA.Scopes = []string{"approvals.request", "approvals.read", "inbox.read", "inbox.send"}
 	f.wide = insertKey(t, f.db.Admin, f.agentA, f.agentA.Scopes, false)
 	f.mux = http.NewServeMux()
 	New(f.db.App, inbox.RecordActionOutcomeTx).Mount(f.mux)
@@ -120,6 +120,10 @@ func checkOutwardActionLifecycle(t *testing.T) {
 	}
 	if w = f.do(f.personA, "", "POST", path, `{"decision":"approved"}`); w.Code != 400 {
 		t.Fatalf("missing reason: %d %s", w.Code, w.Body.String())
+	}
+	otherProject := insertNode(t, f.db.Admin, f.tenantA, "project", "OTHER-ACTION", "Other project")
+	if w = f.do(f.personA, "", "POST", "/api/projects/"+otherProject+"/action-approvals/"+a.ID+"/decision", `{"decision":"approved","reason":"Wrong project on screen"}`); w.Code != 404 {
+		t.Fatalf("decision crossed its project identity: %d %s", w.Code, w.Body.String())
 	}
 	// Only a project binding, with no workspace authority. The new adapter
 	// reaches the native transaction without widening the old decision route.
@@ -245,12 +249,30 @@ func checkOutwardActionLifecycle(t *testing.T) {
 	if err := f.db.Admin.QueryRow(ctx, `SELECT after FROM events WHERE type='action_request.approved' AND after->>'id'=$1`, created.ID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(raw, &eventFacts); err != nil || eventFacts.ExactEffect != in.ExactEffect || eventFacts.Reason != approved.Reason || eventFacts.RequestDigestSHA256 != created.RequestDigestSHA256 || eventFacts.OutcomeReceipt.MessageID != messageID {
+	if err := json.Unmarshal(raw, &eventFacts); err != nil || eventFacts.ExactEffect != in.ExactEffect || eventFacts.Reason != approved.Reason || eventFacts.RequestDigestSHA256 != created.RequestDigestSHA256 || eventFacts.OutcomeReceipt == nil || eventFacts.OutcomeReceipt.MessageID != messageID {
 		t.Fatalf("incomplete exact-effect decision event: %+v err=%v", eventFacts, err)
+	}
+	// A queue failure must roll back the decision, outcome and audit together.
+	next := in
+	next.IdempotencyKey = "outcome-failure"
+	atomic := actionCreate(t, f, project, next)
+	queueUnavailable := errors.New("injected outcome queue failure")
+	mod := &Module{pool: f.db.App, inTenant: db.InTenant, actionOutcome: func(context.Context, pgx.Tx, tenant.Principal, string, string, string, string, string) error {
+		return queueUnavailable
+	}}
+	if _, err := mod.decide(ctx, f.personA, *atomic.ApprovalID, "approved", "Decision must have its outcome receipt"); !errors.Is(err, queueUnavailable) {
+		t.Fatalf("queue failure claimed a decision: %v", err)
+	}
+	if unchanged := actionRead(t, f, f.agentA, project, atomic.ID); unchanged.State != "pending" || unchanged.OutcomeReceipt != nil {
+		t.Fatalf("failed outcome delivery partially committed: %+v", unchanged)
+	}
+	var decisions int
+	if err := f.db.Admin.QueryRow(ctx, `SELECT count(*) FROM approval_decisions WHERE request_id=$1`, *atomic.ApprovalID).Scan(&decisions); err != nil || decisions != 0 {
+		t.Fatalf("failed outcome persisted decision: count=%d err=%v", decisions, err)
 	}
 	// Tenant kind overrides are bounded, revisioned and person-only. Disabled
 	// kinds cannot approve an already pending request, but can still decline it.
-	next := in
+	next = in
 	next.IdempotencyKey = "disabled-after-proposal"
 	pending := actionCreate(t, f, project, next)
 	if w = f.do(f.agentA, f.wide, "PUT", "/api/action-request-kinds/deploy", `{"label":"Deployment","enabled":false,"revision":0}`); w.Code != 403 {
