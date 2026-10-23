@@ -113,6 +113,7 @@ for (const [width, theme, lang] of [[1440, 'light', 'en'], [390, 'light', 'de']]
       await page.mouse.move(0, 0)
       await record.scrollIntoViewIfNeeded()
       await record.screenshot({ path: info.outputPath(`aeon-1022-flowcontract/record-${mode}-${width}-${theme}-${lang}.png`) })
+      if (mode === 'live') await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-1691/flow-${width}-${theme}.png`) })
       if (process.env.AEON1061_CAPTURE === '1' && mode === 'live') {
         await page.screenshot({ path: info.outputPath(`aeon-1061/delivery-${width}-${theme}-${lang}.png`), fullPage: true })
       }

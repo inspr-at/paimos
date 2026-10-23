@@ -4,7 +4,7 @@
 //
 // HEADER_SHOTS=<dir> also writes screenshots of every menu at 375, 390 and 1600,
 // light and dark, for review by eye.
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page, type Route } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
@@ -517,19 +517,31 @@ test.describe('phones', () => {
   // Fonts change the room without resizing the header: a late JetBrains Mono keeps the key whole (Codex round 3).
   test('a late font keeps the ticket key whole on a phone', async ({ page }) => {
     let release!: () => void
+    let arrived!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
-    await page.route('**/jetbrains*.woff2*', async route => { await held; await route.continue() })
+    const requested = new Promise<void>(resolve => { arrived = resolve })
+    const font = readFileSync(new URL('../src/assets/fonts/jetbrains.woff2', import.meta.url))
+    await page.route('**/header-late-mono.woff2', async route => {
+      arrived()
+      await held
+      await route.fulfill({ body: font, contentType: 'font/woff2' })
+    })
     await page.setViewportSize({ width: 390, height: 844 })
     await page.emulateMedia({ colorScheme: 'light' })
     await signIn(page, 'admin', { business: true })
     await page.goto('/p/PHAROS/PHAROS-11?view=full')
     const key = page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')
     await expect(key).toHaveText('PHAROS-11')
-    expect(await page.evaluate(() => document.fonts.check('12px "JetBrains Mono"'))).toBe(false)
-    await page.setViewportSize({ width: 415, height: 844 })
-    release()
-    await page.evaluate(() => document.fonts.ready.then(() => undefined))
-    expect(await page.evaluate(() => document.fonts.check('12px "JetBrains Mono"'))).toBe(true)
+    // A unique face prevents the pinned system JetBrains from satisfying the
+    // probe early. A proportional fallback makes this an actual metric swap.
+    await page.addStyleTag({ content: '@font-face { font-family: HeaderLateMono; src: url("/header-late-mono.woff2"); font-weight: 100 800; font-display: swap; } :root { --mono: HeaderLateMono, var(--font); }' })
+    try {
+      await requested
+      expect(await page.evaluate(() => document.fonts.check('12px HeaderLateMono'))).toBe(false)
+      await page.setViewportSize({ width: 415, height: 844 })
+    } finally { release() }
+    await page.evaluate(async () => { await document.fonts.load('12px HeaderLateMono'); await document.fonts.ready })
+    expect(await page.evaluate(() => document.fonts.check('12px HeaderLateMono'))).toBe(true)
     await expect.poll(() => key.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
     await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeHidden()
   })

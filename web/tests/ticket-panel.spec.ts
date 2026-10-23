@@ -327,7 +327,7 @@ test('comments by others or older than 15 minutes cannot be edited', async ({ pa
   await expect(panel(page).getByRole('button', { name: 'Edit comment' })).toHaveCount(0)
 })
 
-test('full page shows the same ticket in two columns; f and Back return to the panel', async ({ page }) => {
+test('full page shows the same ticket in two columns; f and Back return to the panel', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockWork(page, fixtures())
   await page.goto('/p/PHAROS/PHAROS-11')
@@ -341,6 +341,11 @@ test('full page shows the same ticket in two columns; f and Back return to the p
   await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('PHAROS-11')
   const measure = await article.locator('.markdown-body').first().evaluate(el => el.getBoundingClientRect().width / parseFloat(getComputedStyle(el).fontSize))
   expect(measure).toBeLessThanOrEqual(46)
+  for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme })
+    await page.screenshot({ path: info.outputPath(`aeon-1691/ticket-${width}-${colorScheme}.png`) })
+  }
   await page.goBack()
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
   await expect(panel(page)).toBeVisible()

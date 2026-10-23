@@ -131,6 +131,12 @@ export function placeLane(prev: LaneGeo | undefined, total: number, y: number, r
   return { y, h: total * prev.rowH + gaps, rowH: prev.rowH }
 }
 
+/** Centre the 20 px avatar artwork on its bar, leaving room inside a stacked row. */
+export function placeRowAvatar(barY: number, barH: number, rowH: number): { y: number; scale: number; h: number } {
+  const scale = Math.max(0, Math.min(0.8, (rowH - 2) / 20))
+  return { y: barY + barH / 2, scale, h: 20 * scale }
+}
+
 /** The steps a run walks through, alongside work left out. */
 export const criticalPath = (run: FlowRun) => run.steps.filter(step => !step.side && !step.after).sort((a, b) => a.start - b.start)
 /** Where the run ends: the end of its last critical step. */
@@ -202,25 +208,47 @@ export function tickStep(span: number, px: number, every = 90): number {
 // ---------- Segment labels ----------
 /** Average advance of the 11 px label font; the mock measures the same way. */
 export const CHAR_W = 5.9
-export interface LabelInput { tag?: string; text: string; since?: string; duration?: string; room: number; pad: number }
+export interface LabelInput { tag?: string; text: string; since?: string; duration?: string; room: number; pad: number; textWidth?: (value: string) => number }
 /**
- * The longest label that fits: run tag + text, then the text alone, then (waits and
- * repeats) the duration. A "since" suffix stays on every candidate, including the
- * duration. Then the text cut with an ellipsis, still keeping "· since HH:MM".
- * Nothing when even that does not fit — a cut wait never drops its suffix.
+ * A multi-run bar keeps its complete run tag: shorten the description first,
+ * then show just the tag. Keep "since" while it fits beside the tag. Untagged
+ * bars fall back to text, duration and clipped text, always keeping "since".
+ * Descriptions keep the existing padding; a bare key can use the whole bar.
  */
-export function fitLabel({ tag, text, since = '', duration, room, pad }: LabelInput): string {
+export function fitLabel({ tag, text, since = '', duration, room, pad, textWidth }: LabelInput): string {
+  const advance = (value: string) => textWidth ? textWidth(value) : value.length * CHAR_W
+  const fits = (value: string) => advance(value) + pad + 6 < room
+  const clipped = (prefix: string, suffix: string, minimum: number): string => {
+    let low = 0, high = Math.max(0, text.length - 1)
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2)
+      if (fits(`${prefix}${text.slice(0, mid).trimEnd()}…${suffix}`)) low = mid
+      else high = mid - 1
+    }
+    return low >= minimum ? `${prefix}${text.slice(0, low).trimEnd()}…${suffix}` : ''
+  }
+  if (tag) {
+    // AEON-1698: a shorter label must still identify its run. Never fall back to
+    // description/duration alone, or clip a key into a different-looking key.
+    const full = `${tag} · ${text}${since}`
+    if (fits(full)) return full
+    if (duration && fits(`${tag} · ${duration}${since}`)) return `${tag} · ${duration}${since}`
+    const suffix = fits(tag + since) ? since : ''
+    const base = `${tag} · ${text}`
+    if (fits(base + suffix)) return base + suffix
+    // A bare key may use the entire bar; the renderer centres it and omits the
+    // optional kind icon. Padding must not hide a key that fits by itself.
+    const shortened = clipped(`${tag} · `, suffix, 1)
+    if (shortened) return shortened
+    if (fits(tag + suffix)) return tag + suffix
+    return advance(tag) <= room ? tag : ''
+  }
   const base = text + since
   const durationLabel = duration ? `${duration}${since}` : ''
-  const options = [tag ? `${tag} · ${base}` : base, base, durationLabel].filter(Boolean)
-  const fits = options.find(option => option.length * CHAR_W + pad + 6 < room)
-  if (fits) return fits
+  const candidate = [base, durationLabel].filter(Boolean).find(fits)
+  if (candidate) return candidate
   if (room <= 46) return ''
-  const source = tag ? `${tag} · ${text}` : text
-  const keep = Math.floor((room - pad - 8 - since.length * CHAR_W) / CHAR_W) - 1
-  if (keep > 4) return `${source.slice(0, keep).trimEnd()}…${since}`
-  if (since) return ''
-  return `${source.slice(0, Math.max(3, Math.floor((room - pad - 8) / CHAR_W) - 1)).trimEnd()}…`
+  return clipped('', since, since ? 5 : 3)
 }
 
 /** Plot frame for a lanes stage: actor names sit left of x0, the plot ends at x1. */
@@ -300,7 +328,11 @@ export function rowPieces<T extends { step: { start: number; end: number } }>(ro
       let j = k
       while (j + 1 < row.length && X(row[j + 1]!.step.start) - X(row[j]!.step.end) < 6 && X(row[j + 1]!.step.end) - X(row[j + 1]!.step.start) < SLIVER_PX) j++
       if (j > k) {
-        const items = row.slice(k, j + 1), ca = X(items[0]!.step.start), cb = X(items[items.length - 1]!.step.end)
+        // A pill is at least 26 px wide. Absorb following pieces until its
+        // painted width leaves a 2 px gap, even when the next step is not tiny.
+        const ca = X(item.step.start)
+        while (j + 1 < row.length && X(row[j + 1]!.step.start) < ca + Math.max(26, X(row[j]!.step.end) - ca) + 2) j++
+        const items = row.slice(k, j + 1), cb = X(items[items.length - 1]!.step.end)
         out.push({ kind: 'cluster', items, x: ca, w: Math.max(26, cb - ca), from: items[0]!.step.start, to: items[items.length - 1]!.step.end })
         k = j + 1
         continue
