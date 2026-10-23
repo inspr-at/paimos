@@ -431,7 +431,7 @@ for (const width of [1440, 390]) test(`AEON-1438 the thread starts with its day 
   await page.mouse.wheel(0, -20000)
   await expect.poll(() => scroller.evaluate(el => el.scrollTop)).toBe(0)
   const first = thread.locator(':scope > li').first()
-  await expect(first).toHaveAttribute('role', 'none')
+  await expect(first).toHaveRole('listitem')
   await expect(first.getByRole('separator')).toHaveAccessibleName('Today')
   await expect(first).toBeInViewport()
   await expect(thread.locator('.day')).toHaveCount(1)
