@@ -211,7 +211,7 @@ test('an unconnected sibling contributes nothing to the empty Desk, Goals and pr
 
 test('phone status and project keys expose their full copy with text spacing', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 950 })
-  const projectKey = 'DATENSCHUTZGRUNDVERORDNUNG-VERANTWORTLICHKEITEN'
+  const projectKey = 'DATENSCHUTZVERANTWORTLICHKEITEN-1234'
   const mock = await mockBand(page, { sibling: 'ok', projectKey })
   const band = await openBand(page), row = band.getByTestId('instance-pma')
   await row.locator('.instance-action').click()
@@ -326,8 +326,9 @@ for (const width of [1440, 1024, 390] as const) {
     await mockSettings(page, settingsData())
     await page.route('**/api/decision-desk/connections', route => route.fulfill({ json: { connections: [{ id: 'c1', instance: 'pma', origin, created_at: iso(NOW), expires_at: iso(NOW + 90 * 86400_000) }] } }))
     await page.addInitScript(({ key, origin, account, now }) => localStorage.setItem(key, JSON.stringify({ token: `desk_${'a'.repeat(8)}-${'a'.repeat(4)}-${'a'.repeat(4)}-${'a'.repeat(4)}-${'a'.repeat(12)}_${'b'.repeat(8)}-${'b'.repeat(4)}-${'b'.repeat(4)}-${'b'.repeat(4)}-${'b'.repeat(12)}_${'c'.repeat(43)}`, origin, account, createdAt: new Date(now).toISOString(), expiresAt: new Date(now + 90 * 86400_000).toISOString() })), { key: `aeon.desk-connections.t1:${me.id}.pma`, origin, account, now: NOW })
-    await page.goto('/settings?tab=personal')
+    await page.goto('/settings/personal')
     const receiving = page.locator('#other-instances'), issuing = page.locator('#connected-instances')
+    await expect(receiving).toBeVisible(); await expect(issuing).toBeVisible()
     for (const theme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: theme })
       for (const section of [receiving, issuing]) {
