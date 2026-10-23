@@ -255,7 +255,7 @@ async function controlBoxes(page: Page) {
 for (const colorScheme of ['light', 'dark'] as const) {
   for (const width of [1440, 720]) {
     for (const zoom of [1, 1.25, 1.5]) {
-      test(`release text fits and controls never move: ${width}px, ${zoom * 100}%, ${colorScheme}`, async ({ page }) => {
+      test(`release text fits and controls never move: ${width}px, ${zoom * 100}%, ${colorScheme}`, async ({ page }, info) => {
         await page.setViewportSize({ width, height: 900 })
         await page.emulateMedia({ colorScheme })
         await setup(page, { name: 'Rugged Ratio', fresh: true })
@@ -293,6 +293,14 @@ for (const colorScheme of ['light', 'dark'] as const) {
         expect(await controlBoxes(page)).toEqual(before)
         await page.keyboard.press('Escape')
         await expect(card).toHaveCount(0)
+        if (width === 1440 && zoom === 1 && colorScheme === 'light') {
+          for (const captureWidth of [390, 720, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+            await page.setViewportSize({ width: captureWidth, height: 1000 })
+            await page.emulateMedia({ colorScheme: theme })
+            if (captureWidth >= 720) await textFits(page)
+            await page.screenshot({ path: info.outputPath(`aeon-1691/footer-${captureWidth}-${theme}.png`) })
+          }
+        }
         await page.keyboard.press('Enter')
         await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
       })

@@ -58,9 +58,9 @@ export async function controlStability(page: Page, controls: Record<string, Loca
         for (const dimension of ['x', 'y', 'width', 'height'] as const) {
           const delta = Math.abs(after[name][dimension] - before[name][dimension])
           if (delta > (options.tolerance ?? .5)) {
-            const layout = await controls[name]!.evaluate(el => [el, ...el.querySelectorAll('*')].map(node => {
+            const layout = await controls[name]!.evaluate(el => [el, ...Array.from(el.querySelectorAll('*')).slice(0, 32)].map(node => {
               const style = getComputedStyle(node), rect = node.getBoundingClientRect()
-              return { tag: node.tagName, text: node.textContent, width: rect.width, font: style.font, numbers: style.fontVariantNumeric, flex: style.flex, visibility: style.visibility }
+              return { tag: node.tagName, text: node.textContent?.slice(0, 240), width: rect.width, font: style.font, numbers: style.fontVariantNumeric, flex: style.flex, visibility: style.visibility }
             }))
             await test.info().attach(`unstable-${name}`, { body: JSON.stringify({ before: before[name], after: after[name], layout }, null, 2), contentType: 'application/json' })
           }
