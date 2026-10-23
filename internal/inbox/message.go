@@ -333,6 +333,15 @@ type Acceptance struct {
 // roll back the caller's transaction. Terminal failure notices intentionally
 // use their separate receipt-free path so failures cannot recurse.
 func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acceptance) (Message, error) {
+	return acceptMessageWith(ctx, tx, p, in, func(c events.Change) (int64, error) {
+		event, err := events.Append(ctx, tx, p, c)
+		return event.ID, err
+	})
+}
+
+// System outcomes reuse the same acceptance writes and delivery semantics with
+// the established metadata-only system event writer for project-only callers.
+func acceptMessageWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acceptance, appendEvent func(events.Change) (int64, error)) (Message, error) {
 	if in.Body == "" || len(in.Body) > maxBodyRunes*utf8.UTFMax || strings.ContainsRune(in.Body, 0) || utf8.RuneCountInString(in.Body) > maxBodyRunes {
 		return Message{}, badRequest("invalid body")
 	}
@@ -350,7 +359,7 @@ func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acce
 	if err := recordLaneStatusTx(ctx, tx, p, in.SenderSessionID, in.LaneStatus, id, in.laneReportedAt); err != nil {
 		return Message{}, err
 	}
-	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: in.ProjectID, Type: "inbox.sent", After: messageMeta{
+	eventID, err := appendEvent(events.Change{NodeID: in.ProjectID, Type: "inbox.sent", After: messageMeta{
 		ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: in.RecipientPrincipalID,
 		ReplyToID: in.ReplyToID, IdempotencyKey: in.IdempotencyKey, ExpiresAt: in.ExpiresAt,
 	}})
@@ -362,14 +371,15 @@ func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acce
 		sent_event_id, body, idempotency_key, expires_at,recipient_session_id,sender_session_id,sender_label,lane_status)
 		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9,$10::uuid,$11::uuid,$12,$13::jsonb)
 		RETURNING `+messageCols,
-		p.TenantID, id, p.ID, in.RecipientPrincipalID, in.ReplyToID, ev.ID, in.Body, in.IdempotencyKey, in.ExpiresAt, in.RecipientSessionID, in.SenderSessionID, in.SenderLabel, lanePayload(in.LaneStatus)))
+		p.TenantID, id, p.ID, in.RecipientPrincipalID, in.ReplyToID, eventID, in.Body, in.IdempotencyKey, in.ExpiresAt, in.RecipientSessionID, in.SenderSessionID, in.SenderLabel, lanePayload(in.LaneStatus)))
 	if err != nil {
 		return Message{}, mapWrite(err)
 	}
-	if err := enqueueWakes(ctx, tx, p, out); err != nil {
+	appendChange := func(c events.Change) error { _, err := appendEvent(c); return err }
+	if err := enqueueWakesWith(ctx, tx, p.TenantID, out, appendChange); err != nil {
 		return Message{}, err
 	}
-	if err := insertReceipt(ctx, tx, p, out.ID, "queued", receiptTarget{}, "", ""); err != nil {
+	if err := insertReceiptWith(ctx, tx, p, out.ID, "queued", receiptTarget{}, "", "", appendChange); err != nil {
 		return Message{}, err
 	}
 	return out, nil

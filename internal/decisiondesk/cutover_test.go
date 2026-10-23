@@ -43,7 +43,7 @@ func TestCutoverLinksKeepSourceIdentity(t *testing.T) {
 // decision/notification authority between Desk, phone and inbox integration.
 func checkOutwardActionDesk(t *testing.T) {
 	f := setup(t)
-	approvals.New(f.d.App).Mount(f.mux)
+	approvals.New(f.d.App, inbox.RecordActionOutcomeTx).Mount(f.mux)
 	inbox.New(f.d.App).Mount(f.mux)
 	phoneapprovals.New(f.d.App, nil, "https://actions.example.test", nil, nil).Mount(f.mux)
 	f.agent.Scopes = []string{"approvals.request", "approvals.read", "inbox.read"}

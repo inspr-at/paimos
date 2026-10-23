@@ -21,8 +21,9 @@ import (
 
 // Module serves the approval routes.
 type Module struct {
-	pool     *pgxpool.Pool
-	inTenant func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error
+	pool          *pgxpool.Pool
+	inTenant      func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error
+	actionOutcome ActionOutcomeWriter
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -31,8 +32,12 @@ var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[
 
 // New returns an httpapi.Module for the approval routes. Mount it from the
 // coordinator; queries use db.InTenant.
-func New(pool *pgxpool.Pool) httpapi.Module {
-	return &Module{pool: pool, inTenant: db.InTenant}
+func New(pool *pgxpool.Pool, outcome ...ActionOutcomeWriter) httpapi.Module {
+	m := &Module{pool: pool, inTenant: db.InTenant}
+	if len(outcome) == 1 {
+		m.actionOutcome = outcome[0]
+	}
+	return m
 }
 
 // Mount registers the approval routes on mux.

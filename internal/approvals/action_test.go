@@ -31,6 +31,8 @@ func actionFixture(t *testing.T) (*fixture, string, ActionInput) {
 	project := insertNode(t, f.db.Admin, f.tenantA, "project", "ACT-1", "Action project")
 	f.agentA.Scopes = []string{"approvals.request", "approvals.read", "inbox.read"}
 	f.wide = insertKey(t, f.db.Admin, f.agentA, f.agentA.Scopes, false)
+	f.mux = http.NewServeMux()
+	New(f.db.App, inbox.RecordActionOutcomeTx).Mount(f.mux)
 	inbox.New(f.db.App).Mount(f.mux)
 	var now time.Time
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
@@ -203,7 +205,7 @@ func checkOutwardActionLifecycle(t *testing.T) {
 		}
 		if terminal == "expired" {
 			clock := func(context.Context, pgx.Tx) (time.Time, error) { return next.ExpiresAt.Add(time.Second), nil }
-			mod := &Module{pool: f.db.App, inTenant: db.InTenant}
+			mod := &Module{pool: f.db.App, inTenant: db.InTenant, actionOutcome: inbox.RecordActionOutcomeTx}
 			if worked, err := mod.expireAction(ctx, f.tenantA, clock); err != nil || !worked {
 				t.Fatalf("expiry: worked=%v err=%v", worked, err)
 			}
@@ -283,7 +285,7 @@ func checkOutwardActionAccessFence(t *testing.T) {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-	}}
+	}, actionOutcome: inbox.RecordActionOutcomeTx}
 	finished := make(chan error, 1)
 	go func() {
 		_, err := mod.decide(t.Context(), f.personA, *a.ApprovalID, "approved", "Access was present before the write")
@@ -303,7 +305,7 @@ func checkOutwardActionAccessFence(t *testing.T) {
 	close(proceed)
 	err := <-finished
 	var he *httpError
-	if !errors.As(err, &he) || he.status != http.StatusForbidden || !strings.Contains(he.msg, "approvals.read") {
+	if !errors.As(err, &he) || he.status != http.StatusForbidden || !strings.Contains(he.msg, "outward action facts are missing") {
 		t.Fatalf("revoked decision did not fail on current authority: %v", err)
 	}
 	var count int

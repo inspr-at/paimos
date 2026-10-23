@@ -180,17 +180,19 @@ func (m *Module) decide(ctx context.Context, p tenant.Principal, id, decision, r
 
 // DecideVerified preserves the person-only permission checks, lock, grant and audit
 // transaction. The verifier must consume a fresh proof in that same transaction.
-func DecideVerified(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, id, decision, reason string, verify func(pgx.Tx, Approval) error) (Approval, error) {
+func DecideVerified(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, id, decision, reason string, verify func(pgx.Tx, Approval) error, outcome ...ActionOutcomeWriter) (Approval, error) {
 	if verify == nil {
 		return Approval{}, fail(http.StatusForbidden, "fresh verification required")
 	}
 	if _, err := validateDecision(decisionWrite{Decision: decision, Reason: &reason}); err != nil {
 		return Approval{}, err
 	}
-	return (&Module{pool: pool, inTenant: db.InTenant}).decideVerified(ctx, p, id, decision, reason, verify)
+	m := New(pool, outcome...).(*Module)
+	return m.decideVerified(ctx, p, id, decision, reason, verify)
 }
 
 func (m *Module) decideVerified(ctx context.Context, p tenant.Principal, id, decision, reason string, verify func(pgx.Tx, Approval) error) (Approval, error) {
+	ctx = tenant.WithPrincipal(ctx, p)
 	var out Approval
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {

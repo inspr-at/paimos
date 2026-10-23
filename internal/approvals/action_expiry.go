@@ -17,12 +17,13 @@ import (
 // Tenant keyset batches and per-tenant work are bounded; one broken tenant does
 // not prevent the remaining tenants from progressing.
 type ActionExpiryWorker struct {
-	pool  *pgxpool.Pool
-	after string
+	pool    *pgxpool.Pool
+	after   string
+	outcome ActionOutcomeWriter
 }
 
-func NewActionExpiryWorker(pool *pgxpool.Pool) *ActionExpiryWorker {
-	return &ActionExpiryWorker{pool: pool}
+func NewActionExpiryWorker(pool *pgxpool.Pool, outcome ActionOutcomeWriter) *ActionExpiryWorker {
+	return &ActionExpiryWorker{pool: pool, outcome: outcome}
 }
 
 func (w *ActionExpiryWorker) Run(ctx context.Context) {
@@ -67,7 +68,7 @@ func (w *ActionExpiryWorker) ProcessOnce(ctx context.Context) error {
 		w.after = ids[len(ids)-1]
 	}
 	var failures []error
-	m := &Module{pool: w.pool, inTenant: db.InTenant}
+	m := &Module{pool: w.pool, inTenant: db.InTenant, actionOutcome: w.outcome}
 	for _, id := range ids {
 		for range 8 {
 			worked, err := m.expireAction(ctx, id, databaseActionNow)
@@ -119,7 +120,7 @@ func (m *Module) expireAction(ctx context.Context, tenantID string, clock func(c
 			return err
 		}
 		p := tenant.Principal{ID: systemID, TenantID: tenantID, Kind: tenant.Agent}
-		if err = resolveActionTx(ctx, tx, p, a, "expired", "Expired without a person decision before the request deadline.", now); err != nil {
+		if err = m.resolveActionTx(ctx, tx, p, a, "expired", "Expired without a person decision before the request deadline.", now); err != nil {
 			return err
 		}
 		worked = true

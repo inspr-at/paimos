@@ -17,12 +17,16 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
-	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 const actionScopePrefix = "approvals.request.outward_"
+
+// ActionOutcomeWriter connects the existing inbox acceptance protocol without
+// coupling the approval source to inbox's authentication/phone dependencies.
+// The coordinator injects the same writer into HTTP, phone and expiry paths.
+type ActionOutcomeWriter func(ctx context.Context, tx pgx.Tx, system tenant.Principal, messageID, recipient, project, key, body string) error
 
 // ActionInput freezes one exact effect, rather than asking for a reusable scope.
 type ActionInput struct {
@@ -134,7 +138,7 @@ func lockActionWrite(ctx context.Context, tx pgx.Tx, tenantID string) error {
 func liveActionProject(ctx context.Context, tx pgx.Tx, project string) error {
 	var id string
 	err := tx.QueryRow(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug='project' FOR KEY SHARE OF n`, project).Scan(&id)
+ WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug='project'`, project).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fail(404, "project not found")
 	}
@@ -172,6 +176,9 @@ func databaseActionNow(ctx context.Context, tx pgx.Tx) (time.Time, error) {
 }
 
 func (m *Module) requestAction(ctx context.Context, p tenant.Principal, authorization, project string, in ActionInput) (ActionRequest, error) {
+	if m.actionOutcome == nil {
+		return ActionRequest{}, fail(503, "action outcome delivery is unavailable")
+	}
 	var out ActionRequest
 	err := m.inTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := lockActionWrite(ctx, tx, p.TenantID); err != nil {
@@ -249,7 +256,7 @@ func (m *Module) requestAction(ctx context.Context, p tenant.Principal, authoriz
 			return err
 		}
 		if messageID != nil {
-			if err = notifyActionOutcome(ctx, tx, p.TenantID, &out, *messageID); err != nil {
+			if err = m.notifyActionOutcome(ctx, tx, p.TenantID, &out, *messageID); err != nil {
 				return err
 			}
 		} else if _, err = events.Append(ctx, tx, p, events.Change{Type: eventProposed, NodeID: &project, After: withoutAgentName(approval)}); err != nil {
@@ -349,7 +356,7 @@ func (m *Module) decideActionTx(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	if err = exposeAgentName(ctx, tx, p, &out); err != nil {
 		return Approval{}, err
 	}
-	if err = resolveActionTx(ctx, tx, p, a, decision, reason, now); err != nil {
+	if err = m.resolveActionTx(ctx, tx, p, a, decision, reason, now); err != nil {
 		return Approval{}, err
 	}
 	event := eventDenied
@@ -360,7 +367,7 @@ func (m *Module) decideActionTx(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	return out, err
 }
 
-func resolveActionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, before ActionRequest, state, reason string, now time.Time) error {
+func (m *Module) resolveActionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, before ActionRequest, state, reason string, now time.Time) error {
 	var messageID string
 	if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&messageID); err != nil {
 		return err
@@ -377,7 +384,7 @@ func resolveActionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, before 
 	if tag.RowsAffected() != 1 {
 		return fail(409, "outward action is already resolved")
 	}
-	if err = notifyActionOutcome(ctx, tx, p.TenantID, &a, messageID); err != nil {
+	if err = m.notifyActionOutcome(ctx, tx, p.TenantID, &a, messageID); err != nil {
 		return err
 	}
 	_, err = events.Append(ctx, tx, p, events.Change{Type: "action_request." + state, NodeID: &a.ProjectID, Before: before, After: a})
@@ -386,12 +393,18 @@ func resolveActionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, before 
 
 // All action/request writes precede this call. Fence existing message parents
 // and bound wake targets before AcceptMessageTx first acquires the event counter.
-func notifyActionOutcome(ctx context.Context, tx pgx.Tx, tenantID string, a *ActionRequest, messageID string) error {
+func (m *Module) notifyActionOutcome(ctx context.Context, tx pgx.Tx, tenantID string, a *ActionRequest, messageID string) error {
+	if m.actionOutcome == nil {
+		return fail(503, "action outcome delivery is unavailable")
+	}
 	var systemID string
 	if err := tx.QueryRow(ctx, `SELECT id::text FROM principals WHERE kind='agent' AND name='System' AND roles @> ARRAY['system'] AND status='active'`).Scan(&systemID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `SELECT id FROM principals WHERE id=ANY($1::uuid[]) ORDER BY id FOR KEY SHARE`, []string{systemID, a.AgentPrincipalID}); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT id FROM nodes WHERE id=$1 FOR KEY SHARE`, a.ProjectID); err != nil {
 		return err
 	}
 	var targets int
@@ -402,7 +415,7 @@ func notifyActionOutcome(ctx context.Context, tx pgx.Tx, tenantID string, a *Act
 		return errors.New("action outcome wake target bound exceeded")
 	}
 	body := fmt.Sprintf("Outward action request %s: %s\nReason: %s\nProject: %s\nExact effect: %s\nFacts SHA-256: %s\nThis is a recorded decision, not an execution receipt or a general permission grant. Verify the request's current state before using it.", a.ID, a.State, a.Reason, a.ProjectID, a.ExactEffect, a.RequestDigestSHA256)
-	_, err := inbox.AcceptMessageTx(ctx, tx, tenant.Principal{ID: systemID, TenantID: tenantID, Kind: tenant.Agent}, inbox.Acceptance{MessageID: messageID, RecipientPrincipalID: a.AgentPrincipalID, SenderLabel: "Action approvals", Body: body, IdempotencyKey: "action-outcome:" + a.ID, ProjectID: &a.ProjectID})
+	err := m.actionOutcome(ctx, tx, tenant.Principal{ID: systemID, TenantID: tenantID, Kind: tenant.Agent}, messageID, a.AgentPrincipalID, a.ProjectID, "action-outcome:"+a.ID, body)
 	if err == nil {
 		a.OutcomeReceipt = &ActionReceipt{MessageID: messageID, State: "queued"}
 	}
