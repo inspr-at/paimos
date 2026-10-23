@@ -6,7 +6,7 @@
     "source": "AEON-1674 scheduling estimate: five existing guards plus the two-theme Delivery phone crop regression; hosted comparison evidence remains separate."
   },
   "spec": {
-    "file": "tests/visual-reference-guard.spec.ts",
+    "file": "tests/visual/reference-guard.spec.ts",
     "listedTests": 6,
     "weightSeconds": 24,
     "weightSource": "AEON-1674-initial-estimate"

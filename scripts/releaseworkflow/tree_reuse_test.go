@@ -707,41 +707,18 @@ func normalizeAEON1674VisualReferences(t *testing.T, id string, job map[string]a
 	job["steps"] = append(append([]any{}, steps[:found]...), steps[found+1:]...)
 }
 
-// Prove the new renderer-only install exactly before projecting onto the
-// historical CI pin. The capture job and comparison must use the same blocking
-// command, after browser dependencies and before any browser execution.
+// Renderer fonts belong to tests/visual's browser fixture. Job-wide provisioning
+// would change every non-visual spec on the shard, so neither job may export it.
 func normalizeAEON1674RendererFonts(t *testing.T, comparison map[string]any) {
 	t.Helper()
 	capture := treeMap(treeMap(treeWorkflow(t, "ci.yml")["jobs"])["visual-reference-capture"])
-	for _, target := range []struct {
-		job      map[string]any
-		previous string
-		next     string
-	}{
-		{comparison, "Install Chromium system dependencies", "Verify visual reference transport before comparison"},
-		{capture, "Install comparison browser system dependencies", "Capture the sixteen states awaiting Linux review"},
-	} {
-		steps := reuseSteps(target.job)
-		found := -1
-		for i, value := range steps {
+	for _, job := range []map[string]any{comparison, capture} {
+		for _, value := range reuseSteps(job) {
 			step := treeMap(value)
-			if step["name"] != "Install digest-pinned renderer fonts and verify fontconfig aliases" {
-				continue
+			if strings.Contains(fmt.Sprint(step["run"]), "install-fonts") || strings.Contains(fmt.Sprint(step["run"]), "FONTCONFIG") {
+				t.Fatal("visual renderer fonts must be confined to the visual browser fixture")
 			}
-			want := map[string]any{
-				"name": "Install digest-pinned renderer fonts and verify fontconfig aliases",
-				"run":  "node scripts/test-prune/visual-renderer.mjs install-fonts",
-			}
-			if found != -1 || !reflect.DeepEqual(step, want) || i == 0 || i+1 >= len(steps) ||
-				treeMap(steps[i-1])["name"] != target.previous || treeMap(steps[i+1])["name"] != target.next {
-				t.Fatal("renderer fonts must install exactly once, unconditionally and blocking before capture/comparison")
-			}
-			found = i
 		}
-		if found == -1 {
-			t.Fatal("missing blocking renderer font installation")
-		}
-		target.job["steps"] = append(append([]any{}, steps[:found]...), steps[found+1:]...)
 	}
 }
 

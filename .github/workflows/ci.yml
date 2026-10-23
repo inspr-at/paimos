@@ -64,8 +64,6 @@ jobs:
         timeout-minutes: 13
         working-directory: web
         run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install-deps chromium
-      - name: Install digest-pinned renderer fonts and verify fontconfig aliases
-        run: node scripts/test-prune/visual-renderer.mjs install-fonts
       - name: Capture the sixteen states awaiting Linux review
         run: |
           set -euo pipefail
@@ -1056,8 +1054,6 @@ jobs:
         timeout-minutes: 13
         working-directory: web
         run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install-deps chromium
-      - name: Install digest-pinned renderer fonts and verify fontconfig aliases
-        run: node scripts/test-prune/visual-renderer.mjs install-fonts
       - name: Verify visual reference transport before comparison
         run: |
           node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines

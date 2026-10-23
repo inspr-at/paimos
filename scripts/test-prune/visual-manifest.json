@@ -6,25 +6,19 @@
     "reviewer": "Tick",
     "status": "approved",
     "approvedAt": "2026-10-23",
-    "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2. Round 10: LEAD-M requires the four Capacity checkpoints to be deferred until AEON-1692 / reference set 3, with a recorded and asserted frozen clock.",
+    "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2. Round 10: LEAD-M requires the four Capacity checkpoints to be deferred until AEON-1692 / reference set 3, with a recorded and asserted frozen clock. Round 11: LEAD-M explicitly withdraws exactly nine failed checkpoint pins for AEON-1692 / reference set 3; these report awaiting reference, and the remaining checkpoint pins retain strict comparison authority.",
     "states": [
-      "projects",
       "tickets",
       "agents",
       "session-chat",
-      "decision-desk",
-      "account-use-matrix",
       "models",
       "access",
       "knowledge",
       "hours",
-      "quote-editor",
       "public-quote",
-      "start-agent",
-      "agent-rules"
+      "start-agent"
     ],
     "checkpoints": [
-      "V-projects-390-light",
       "V-projects-390-dark",
       "V-projects-1440-light",
       "V-projects-1440-dark",
@@ -44,16 +38,10 @@
       "V-session-chat-1440-dark",
       "V-decision-desk-390-light",
       "V-decision-desk-390-dark",
-      "V-decision-desk-1024-light",
-      "V-decision-desk-1024-dark",
       "V-decision-desk-1440-light",
       "V-decision-desk-1440-dark",
       "V-account-use-matrix-390-light",
       "V-account-use-matrix-390-dark",
-      "V-account-use-matrix-1024-light",
-      "V-account-use-matrix-1024-dark",
-      "V-account-use-matrix-1440-light",
-      "V-account-use-matrix-1440-dark",
       "V-models-390-light",
       "V-models-390-dark",
       "V-models-1440-light",
@@ -76,7 +64,6 @@
       "V-quote-editor-390-dark",
       "V-quote-editor-1024-light",
       "V-quote-editor-1024-dark",
-      "V-quote-editor-1440-light",
       "V-quote-editor-1440-dark",
       "V-public-quote-390-light",
       "V-public-quote-390-dark",
@@ -87,14 +74,13 @@
       "V-start-agent-1440-light",
       "V-start-agent-1440-dark",
       "V-agent-rules-390-light",
-      "V-agent-rules-390-dark",
       "V-agent-rules-1440-light",
       "V-agent-rules-1440-dark"
     ],
     "sourceCaptureSHA": "6fea542010b4c699dadadd74529fdaf7a1ef4c9a",
     "captureRun": "39912019882",
     "recordedBy": "LEAD-M",
-    "scope": "Exactly 66 checkpoints are comparison authority. Capacity (4) and Delivery 390 light/dark (2) await AEON-1692 / reference set 3; Goals and Ticket Workspace remain deferred. No protected cuts are authorized in P02; P03–P11 own their subsequent cut rounds."
+    "scope": "Exactly 57 checkpoints are comparison authority. Nine stale set-2 checkpoints report awaiting reference (needs re-capture) for AEON-1692 / reference set 3. Existing 14 explicit deferrals remain. No protected cuts are authorized in P02; P03–P11 own their subsequent cut rounds."
   },
   "baselineAuthority": {
     "status": "approved",
@@ -153,6 +139,51 @@
           "id": "V-capacity-1440-dark",
           "attachmentMember": "V-capacity-1440-dark.png",
           "sha256": "efc6c54704ca1d617ff117ac6afb2c1a09e65d153f28cc74234c2bfb7cdf6545"
+        },
+        {
+          "id": "V-projects-390-light",
+          "attachmentMember": "V-projects-390-light.png",
+          "sha256": "2fa66284535f811b1dbadbc782a7d6bcbbdbc5e7a8307a7475159f1235ad4c04"
+        },
+        {
+          "id": "V-decision-desk-1024-light",
+          "attachmentMember": "V-decision-desk-1024-light.png",
+          "sha256": "64d8882b641eab1969b5a0c79a3e9c14d40c60eb382bf0a0fbaaca11ae25e521"
+        },
+        {
+          "id": "V-decision-desk-1024-dark",
+          "attachmentMember": "V-decision-desk-1024-dark.png",
+          "sha256": "a278dbfc41b8e0d4adfac4969a3d785a359119d5f2b33f4d2907a2533446bd2a"
+        },
+        {
+          "id": "V-account-use-matrix-1024-light",
+          "attachmentMember": "V-account-use-matrix-1024-light.png",
+          "sha256": "e8ce18d4ec5700770a8007b511ac68805af6a623f996b3a0c8d293fe40c79831"
+        },
+        {
+          "id": "V-account-use-matrix-1024-dark",
+          "attachmentMember": "V-account-use-matrix-1024-dark.png",
+          "sha256": "0cbba35916de3af644d4f64b7a3238d51d90ea8e5dc5fd3119646611ffb4a652"
+        },
+        {
+          "id": "V-account-use-matrix-1440-light",
+          "attachmentMember": "V-account-use-matrix-1440-light.png",
+          "sha256": "e5bdccc5faf328a91d4a341f30df161f99c81bdeeff8d780f97bd332e57e679c"
+        },
+        {
+          "id": "V-account-use-matrix-1440-dark",
+          "attachmentMember": "V-account-use-matrix-1440-dark.png",
+          "sha256": "6efccd126575a7b6c5c2fe8b8b333d42de8fd324c3efe3799c7a78abf3df6444"
+        },
+        {
+          "id": "V-quote-editor-1440-light",
+          "attachmentMember": "V-quote-editor-1440-light.png",
+          "sha256": "1322262fa77a24db996990ef1bb002fa23ace8151f6496e5796a6b3bfc420637"
+        },
+        {
+          "id": "V-agent-rules-390-dark",
+          "attachmentMember": "V-agent-rules-390-dark.png",
+          "sha256": "9c407e75a426b9883fe283c509e55c5ce3c360c17ea72a17cda06feb153ed444"
         }
       ],
       "unapprovedMemberPolicy": "Digest verification only. These rejected capture bytes never enter the comparison reference map. Checkpoint deferrals and the exact approval list govern authority.",
@@ -247,9 +278,14 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": "V-projects-390-light.png",
-            "sha256": "2fa66284535f811b1dbadbc782a7d6bcbbdbc5e7a8307a7475159f1235ad4c04"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Set-2 pixels fail in PR #891 under the recorded frozen-clock renderer."
         },
         {
           "id": "V-projects-390-dark",
@@ -281,10 +317,11 @@
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "ok-to-pin",
+        "decision": "partially-approved",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+        "reason": "Round 11 LEAD-M: only unchanged checkpoint pins remain authority; failed pins require AEON-1692 / reference set 3 re-capture and Tick review."
       },
       "clock": {
         "mode": "fixed",
@@ -615,18 +652,28 @@
           "profile": "tablet",
           "theme": "light",
           "reference": {
-            "attachmentMember": "V-decision-desk-1024-light.png",
-            "sha256": "64d8882b641eab1969b5a0c79a3e9c14d40c60eb382bf0a0fbaaca11ae25e521"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "AEON-1616 changed the Desk gap on current main; set-2 pixels fail in PR #891."
         },
         {
           "id": "V-decision-desk-1024-dark",
           "profile": "tablet",
           "theme": "dark",
           "reference": {
-            "attachmentMember": "V-decision-desk-1024-dark.png",
-            "sha256": "a278dbfc41b8e0d4adfac4969a3d785a359119d5f2b33f4d2907a2533446bd2a"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "AEON-1616 changed the Desk gap on current main; set-2 pixels fail in PR #891."
         },
         {
           "id": "V-decision-desk-1440-light",
@@ -649,10 +696,11 @@
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "ok-to-pin",
+        "decision": "partially-approved",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+        "reason": "Round 11 LEAD-M: only unchanged checkpoint pins remain authority; failed pins require AEON-1692 / reference set 3 re-capture and Tick review."
       },
       "clock": {
         "mode": "fixed",
@@ -698,44 +746,65 @@
           "profile": "tablet",
           "theme": "light",
           "reference": {
-            "attachmentMember": "V-account-use-matrix-1024-light.png",
-            "sha256": "e8ce18d4ec5700770a8007b511ac68805af6a623f996b3a0c8d293fe40c79831"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "AEON-1689 changed the desktop matrix on current main; set-2 pixels fail in PR #891."
         },
         {
           "id": "V-account-use-matrix-1024-dark",
           "profile": "tablet",
           "theme": "dark",
           "reference": {
-            "attachmentMember": "V-account-use-matrix-1024-dark.png",
-            "sha256": "0cbba35916de3af644d4f64b7a3238d51d90ea8e5dc5fd3119646611ffb4a652"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "AEON-1689 changed the desktop matrix on current main; set-2 pixels fail in PR #891."
         },
         {
           "id": "V-account-use-matrix-1440-light",
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": "V-account-use-matrix-1440-light.png",
-            "sha256": "e5bdccc5faf328a91d4a341f30df161f99c81bdeeff8d780f97bd332e57e679c"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "AEON-1689 changed the desktop matrix on current main; set-2 pixels fail in PR #891."
         },
         {
           "id": "V-account-use-matrix-1440-dark",
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": "V-account-use-matrix-1440-dark.png",
-            "sha256": "6efccd126575a7b6c5c2fe8b8b333d42de8fd324c3efe3799c7a78abf3df6444"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "AEON-1689 changed the desktop matrix on current main; set-2 pixels fail in PR #891."
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "ok-to-pin",
+        "decision": "partially-approved",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+        "reason": "Round 11 LEAD-M: only unchanged checkpoint pins remain authority; failed pins require AEON-1692 / reference set 3 re-capture and Tick review."
       },
       "clock": {
         "mode": "fixed",
@@ -1130,9 +1199,14 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": "V-quote-editor-1440-light.png",
-            "sha256": "1322262fa77a24db996990ef1bb002fa23ace8151f6496e5796a6b3bfc420637"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Set-2 pixels fail in PR #891 under the recorded frozen-clock renderer."
         },
         {
           "id": "V-quote-editor-1440-dark",
@@ -1146,10 +1220,11 @@
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "ok-to-pin",
+        "decision": "partially-approved",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+        "reason": "Round 11 LEAD-M: only unchanged checkpoint pins remain authority; failed pins require AEON-1692 / reference set 3 re-capture and Tick review."
       },
       "clock": {
         "mode": "fixed",
@@ -1313,9 +1388,14 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": "V-agent-rules-390-dark.png",
-            "sha256": "9c407e75a426b9883fe283c509e55c5ce3c360c17ea72a17cda06feb153ed444"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "needs-re-capture",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Set-2 pixels fail in PR #891 under the recorded frozen-clock renderer."
         },
         {
           "id": "V-agent-rules-1440-light",
@@ -1338,10 +1418,11 @@
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "ok-to-pin",
+        "decision": "partially-approved",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+        "reason": "Round 11 LEAD-M: only unchanged checkpoint pins remain authority; failed pins require AEON-1692 / reference set 3 re-capture and Tick review."
       },
       "clock": {
         "mode": "fixed",

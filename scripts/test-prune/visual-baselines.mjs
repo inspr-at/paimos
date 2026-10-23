@@ -27,7 +27,7 @@ function transportMembers(visual) {
   need(Array.isArray(unapproved) && unapproved.length <= 80, 'Invalid unapproved visual transport inventory')
   for (const member of unapproved) {
     const checkpoint = visual.states.flatMap(state => state.checkpoints).find(checkpoint => checkpoint.id === member.id)
-    need(checkpoint?.referenceStatus === 'deferred' && !hasPin(checkpoint) && member.attachmentMember === `${member.id}.png` &&
+    need(['deferred', 'needs-re-capture'].includes(checkpoint?.referenceStatus) && !hasPin(checkpoint) && member.attachmentMember === `${member.id}.png` &&
       /^[a-f0-9]{64}$/.test(member.sha256 ?? ''), 'Unapproved visual transport member must be explicitly deferred and unpinned')
   }
   const members = [...pinned, ...unapproved]
@@ -96,12 +96,13 @@ export function referenceGates(visual) {
       if (approved) validateVisual(visual, { cuts: true, checkpointIds: [checkpoint.id] })
       const deferral = checkpoint.referenceStatus === 'deferred' ? checkpoint : state
       const deferred = deferral.referenceStatus === 'deferred'
+      const stale = checkpoint.referenceStatus === 'needs-re-capture'
       const mode = approved ? 'compare' : deferred ? 'deferred' : 'awaiting-reference'
       const reason = approved ? 'Tick-approved, digest-pinned reference' : deferred ? `deferred until ${deferral.deferredUntil.join(' and ')}: ${deferral.deferredReason}` :
-        state.approval?.reason ?? 'Changes requested; awaiting the next reviewed reference round'
+        stale ? `needs re-capture in AEON-1692 / reference set 3: ${checkpoint.deferredReason}` : state.approval?.reason ?? 'Changes requested; awaiting the next reviewed reference round'
       const key = `${mode}:${reason}`
       if (!groups.has(key)) groups.set(key, { state: state.id, checkpoints: 0, checkpointIds: [], mode,
-        status: approved ? 'approved' : deferred ? 'deferred' : 'changes-requested', reason })
+        status: approved ? 'approved' : deferred ? 'deferred' : stale ? 'needs-re-capture' : 'changes-requested', reason })
       const group = groups.get(key)
       group.checkpoints++
       group.checkpointIds.push(checkpoint.id)
@@ -123,7 +124,7 @@ export function referenceReport(visual) {
   return { gates, markdown: ['Visual reference gates (deferred checkpoints report only in ordinary CI; comparisons require quality checks).', '',
     '| State | Checkpoints | Reference gate |', '| --- | ---: | --- |',
     ...gates.map(gate => `| ${labels(gate)} | ${gate.checkpoints} | ${gate.mode === 'deferred' ? gate.reason : gate.mode === 'compare' ? 'strict image comparison + quality' :
-      `awaiting reference (${gate.status}); quality required — ${gate.reason}`} |`), ''].join('\n') }
+      `awaiting reference (${gate.status}); ${gate.status === 'needs-re-capture' ? 'report only' : 'quality required'} — ${gate.reason}`} |`), ''].join('\n') }
 }
 
 function boundedFile(path, limit, label) {

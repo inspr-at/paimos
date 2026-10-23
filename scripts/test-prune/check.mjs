@@ -89,10 +89,13 @@ export function validateVisual(visual, { cuts = false, stateIds = visual.states?
     for (const checkpoint of state.checkpoints) {
       need(!checkpoints.has(checkpoint.id) && checkpoint.id === `V-${state.id}-${visual.profiles[checkpoint.profile]?.width}-${checkpoint.theme}`, `Invalid visual checkpoint: ${checkpoint.id}`)
       checkpoints.add(checkpoint.id)
-      if (checkpoint.referenceStatus !== undefined) need(checkpoint.referenceStatus === 'deferred' &&
+      if (checkpoint.referenceStatus !== undefined) need(['deferred', 'needs-re-capture'].includes(checkpoint.referenceStatus) &&
         checkpoint.deferredUntil?.length > 0 && checkpoint.deferredUntil.every(ticket => /^AEON-\d+$/.test(ticket)) &&
         text(checkpoint.deferredReason) && !checkpoint.reference?.attachmentMember && !checkpoint.reference?.sha256,
       `Missing checkpoint deferral authority or deferred reference is pinned: ${checkpoint.id}`)
+      if (checkpoint.referenceStatus === 'needs-re-capture') need(same(checkpoint.deferredUntil, ['AEON-1692']) &&
+        !visual.approval.states?.includes(state.id) && !visual.approval.checkpoints?.includes(checkpoint.id) && state.approval?.decision !== 'ok-to-pin',
+      `Stale visual reference still has comparison authority: ${checkpoint.id}`)
       if (checkpointIds === undefined ? required.has(state.id) : requiredCheckpoints.has(checkpoint.id)) {
         const deferred = checkpoint.referenceStatus === 'deferred' ? checkpoint : state
         need(deferred.referenceStatus !== 'deferred', `Deferred visual reference: ${checkpoint.id} (${deferred.deferredUntil?.join(', ')})`)

@@ -2,15 +2,24 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { expect, type Browser, type Page, type TestInfo } from '@playwright/test'
+import { test as base, expect, type Browser, type Page, type TestInfo } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { readBaselineBundle, referenceGate } from '../../../scripts/test-prune/visual-baselines.mjs'
-import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, rendererIdentity, verifyFontAssets } from '../../../scripts/test-prune/visual-renderer.mjs'
+import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, rendererIdentity, verifyFontAssets, installRendererFonts } from '../../../scripts/test-prune/visual-renderer.mjs'
 import { domAudit } from '../ui-audit-rules'
 
 const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8'))
+// Only tests/visual imports this fixture. Fontconfig belongs to this browser's
+// child environment, never the worker, dev server or another spec's browser.
+export const test = base.extend({
+  launchOptions: [async ({ launchOptions }, use, workerInfo) => {
+    if (process.platform !== 'linux') return use(launchOptions)
+    const fontconfig = installRendererFonts(manifest, join(workerInfo.project.outputDir, `visual-fontconfig-${workerInfo.workerIndex}`))
+    await use({ ...launchOptions, env: { ...process.env, ...launchOptions.env, FONTCONFIG_FILE: fontconfig } })
+  }, { scope: 'worker' }],
+})
 const captureSHA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: fileURLToPath(new URL('../../../', import.meta.url)), encoding: 'utf8' }).trim()
 export type Profile = 'phone' | 'tablet' | 'desktop'
 export type Theme = 'light' | 'dark'
@@ -36,7 +45,7 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
     const gate = await reportReference(info, checkpoint, visual, capture)
     // Ordinary CI reports deferrals before setup. Only the explicit manual
     // capture set can inspect a corrected crop pending its next review.
-    if (gate.mode === 'deferred' && !(capture && visual.capture.states.includes(gate.state))) {
+    if ((gate.mode === 'deferred' || gate.status === 'needs-re-capture') && !(capture && visual.capture.states.includes(gate.state))) {
       writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify({ id: checkpoint.id, reference: gate, requirementsRun: false }, null, 2))
       return
     }
@@ -119,7 +128,7 @@ async function reportReference(info: TestInfo, checkpoint: { id: string }, visua
   const gate = referenceGate(visual, checkpoint.id)
   if (gate.mode !== 'compare') {
     const message = gate.mode === 'deferred' ? `${checkpoint.id}: ${gate.reason}; ${capture && visual.capture.states.includes(gate.state) ? 'manual candidate capture requires quality checks; comparison remains deferred.' : 'product requirement checks not run.'}` :
-      `${checkpoint.id}: awaiting reference (${gate.status}); quality checks required. ${gate.reason}`
+      `${checkpoint.id}: awaiting reference (${gate.status}); ${gate.status === 'needs-re-capture' ? 'report only; product requirement checks not run' : 'quality checks required'}. ${gate.reason}`
     info.annotations.push({ type: gate.mode === 'deferred' ? 'deferred' : 'awaiting reference', description: message })
     await info.attach(`${checkpoint.id}-awaiting-reference`, { body: message, contentType: 'text/plain' })
     console.log(message)

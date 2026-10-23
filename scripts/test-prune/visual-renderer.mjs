@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -125,6 +125,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (process.argv[2] !== 'install-fonts' || process.platform !== 'linux') throw new Error('Usage (Linux only): visual-renderer.mjs install-fonts')
   const visual = JSON.parse(readFileSync(new URL('./visual-manifest.json', import.meta.url), 'utf8'))
   const path = installRendererFonts(visual, 'tmp/visual-fontconfig')
-  if (process.env.GITHUB_ENV) appendFileSync(process.env.GITHUB_ENV, `FONTCONFIG_FILE=${path}\n`)
   console.log(`FONTCONFIG_FILE=${path}`)
 }

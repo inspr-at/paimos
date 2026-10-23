@@ -8,7 +8,7 @@ import test from 'node:test'
 import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGate, referenceGates, referenceReport, materializeBaseline } from '../../scripts/test-prune/visual-baselines.mjs'
 import { collectCandidates, packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
 
-import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, verifyFontAssets, captureEnabled, rendererIdentity } from '../../scripts/test-prune/visual-renderer.mjs'
+import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, verifyFontAssets, captureEnabled, rendererIdentity, installRendererFonts } from '../../scripts/test-prune/visual-renderer.mjs'
 import { parseWorkflow } from '../../scripts/ci-static.mjs'
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
@@ -120,8 +120,21 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.throws(() => verifyReferenceArchive(Buffer.alloc(0), detached, mirrored, noExtraction), /archive size mismatch/)
 
   const gates = referenceGates(manifest)
-  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').reduce((sum, gate) => sum + gate.checkpoints, 0), 66)
-  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'awaiting-reference').length, 0)
+  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').reduce((sum, gate) => sum + gate.checkpoints, 0), 57)
+  const staleIds = ['V-projects-390-light', 'V-decision-desk-1024-light', 'V-decision-desk-1024-dark',
+    'V-account-use-matrix-1024-light', 'V-account-use-matrix-1024-dark', 'V-account-use-matrix-1440-light',
+    'V-account-use-matrix-1440-dark', 'V-quote-editor-1440-light', 'V-agent-rules-390-dark']
+  assert.deepEqual(gates.filter(gate => gate.mode === 'awaiting-reference').flatMap(gate => gate.checkpointIds), staleIds)
+  for (const id of staleIds) {
+    assert.equal(referenceGate(manifest, id).status, 'needs-re-capture')
+    const c = manifest.states.flatMap(state => state.checkpoints).find(checkpoint => checkpoint.id === id)
+    assert.deepEqual(c.reference, { attachmentMember: null, sha256: null })
+    assert.deepEqual(c.deferredUntil, ['AEON-1692'])
+  }
+  assert.match(referenceReport(manifest).markdown, /awaiting reference \(needs-re-capture\); report only/)
+  const revived = structuredClone(manifest)
+  revived.approval.checkpoints.push(staleIds[0])
+  assert.throws(() => referenceGates(revived), /Stale visual reference still has comparison authority/)
   assert.deepEqual(gates.filter((gate: { mode: string }) => gate.mode === 'deferred').map((gate: { state: string }) => gate.state), ['goals', 'delivery-numbers', 'capacity', 'ticket-workspace'])
   assert.equal(gates.filter(gate => gate.mode === 'deferred').reduce((sum, gate) => sum + gate.checkpoints, 0), 14)
   for (const checkpoint of manifest.states.find(state => state.id === 'capacity').checkpoints) {
@@ -179,8 +192,26 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.doesNotMatch(compareJob, /AEON_VISUAL_CAPTURE/)
   for (const job of [captureJob, compareJob]) {
     assert.match(job, /AEON_VISUAL_RUNNER: ubuntu-24\.04/)
-    assert.match(job, /node scripts\/test-prune\/visual-renderer\.mjs install-fonts/)
+    assert.doesNotMatch(job, /install-fonts|FONTCONFIG/)
   }
+  // Risk: provisioning a private renderer must not mutate the worker/job env.
+  // Its subprocesses see fontconfig; an ordinary browser inherits no override.
+  const fontconfigBefore = process.env.FONTCONFIG_FILE
+  const installDirectory = mkdtempSync(join(tmpdir(), 'aeon-1674-font-isolation-'))
+  try {
+    const calls: string[] = []
+    const fontconfig = installRendererFonts(manifest, installDirectory, { run: (command, args, options) => {
+      calls.push(command)
+      assert.equal(options.env.FONTCONFIG_FILE, join(installDirectory, 'fonts.conf'))
+      assert.equal(process.env.FONTCONFIG_FILE, fontconfigBefore)
+      return command === 'fc-match' ? manifest.renderer.fontconfig.aliases[args[1].slice(':family='.length)] : Buffer.alloc(0)
+    } })
+    assert.equal(fontconfig, join(installDirectory, 'fonts.conf'))
+    assert.deepEqual(calls, ['fc-cache', 'fc-match', 'fc-match', 'fc-match', 'fc-match'])
+    assert.equal(process.env.FONTCONFIG_FILE, fontconfigBefore)
+  } finally { rmSync(installDirectory, { recursive: true, force: true }) }
+  const rendererSource = readFileSync(new URL('../../scripts/test-prune/visual-renderer.mjs', import.meta.url), 'utf8')
+  assert.doesNotMatch(rendererSource, /GITHUB_ENV/)
   const changedImage = structuredClone(actual)
   changedImage.runner.imageOS = 'different-image'
   assert.throws(() => assertRenderer(changedImage, renderer), /renderer differs from reference: runner/)

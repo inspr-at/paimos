@@ -5,11 +5,11 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { test, expect, type Page, type Response } from '@playwright/test'
-import { agents, capacity, deliveryNumbers, publicQuote, NOW, sessionChat, sessionChatUnavailable } from './visual/fixtures'
-import { checkVisual, compareVisualReference, visualCases, prepareVisualFonts, renderedFonts, fontEvidence } from './visual/checkpoint'
-import { visualChrome } from './visual/chrome-fixture'
-import { fixtures, mockWork } from './work-fixtures'
+import { expect, type Page, type Response } from '@playwright/test'
+import { agents, capacity, deliveryNumbers, publicQuote, NOW, sessionChat, sessionChatUnavailable } from './fixtures'
+import { test, checkVisual, compareVisualReference, visualCases, prepareVisualFonts, renderedFonts, fontEvidence } from './checkpoint'
+import { visualChrome } from './chrome-fixture'
+import { fixtures, mockWork } from '../work-fixtures'
 
 // Risk: a healthy Agents reference accidentally depicts an unmocked permission
 // service, or hiding that banner also hides a real load failure and its retry.
@@ -77,7 +77,7 @@ test('visual comparison rejects a changed control and never creates a missing re
 
   // Exercise the product gate with a synthetic approved/pinned state. Neither
   // this fixture nor its pixels can become a product reference.
-  const visual = JSON.parse(readFileSync(new URL('../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
+  const visual = JSON.parse(readFileSync(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
   visual.approval = { reviewer: 'Tick', status: 'approved', approvedAt: 'synthetic-only', evidence: 'Synthetic comparator proof', states: ['projects'] }
   visual.baselineAuthority.status = 'approved'
   Object.assign(visual.baselineAuthority.source, { attachmentId: 'synthetic-only' })
@@ -92,6 +92,7 @@ test('visual comparison rejects a changed control and never creates a missing re
   const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
   const project = visual.states.find((state: { id: string }) => state.id === 'projects')
   const files = project.checkpoints.map((checkpoint: { id: string; reference: unknown }) => {
+    for (const field of ['referenceStatus', 'deferredUntil', 'deferredReason']) delete checkpoint[field]
     checkpoint.reference = { attachmentMember: `${checkpoint.id}.png`, sha256: hash(png) }
     return { name: `${checkpoint.id}.png`, base64: png.toString('base64') }
   })
@@ -156,6 +157,19 @@ test('visual comparison rejects a changed control and never creates a missing re
     expect(info.annotations.some(row => row.type === 'deferred' && row.description?.includes(deferred.id))).toBe(true)
     expect(existsSync(info.outputPath(`${deferred.id}.png`))).toBe(false)
   }
+  // Stale pins are explicit awaiting-reference reports, never comparisons or
+  // quiet passes. Re-capture and person review belong to reference set 3.
+  const current = JSON.parse(readFileSync(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
+  for (const state of current.states) {
+    for (const checkpoint of state.checkpoints.filter(row => row.referenceStatus === 'needs-re-capture')) {
+      const stale = visualCases(state.id).find(row => row.id === checkpoint.id)!
+      await checkVisual(browser, info, stale, async () => { throw new Error('Stale reference setup must not run') })
+      expect(JSON.parse(readFileSync(info.outputPath(`${stale.id}.md`), 'utf8')))
+        .toMatchObject({ requirementsRun: false, reference: { mode: 'awaiting-reference', status: 'needs-re-capture' } })
+      expect(info.annotations.some(row => row.type === 'awaiting reference' && row.description?.includes(stale.id))).toBe(true)
+      expect(existsSync(info.outputPath(`${stale.id}.png`))).toBe(false)
+    }
+  }
   await expect(checkVisual(browser, info, visualCases('hours')[0]!, async qualityPage => {
     await setupQuality(qualityPage)
     await qualityPage.evaluate(() => console.error('Synthetic quality failure must still block an awaiting state'))
@@ -197,7 +211,7 @@ test('visual comparison rejects a changed control and never creates a missing re
 test('P02 Delivery phone capture includes its heading and on-target headline in both themes', async ({ browser }, info) => {
   // Inspect the pending crop through the same quality runner without claiming
   // either a Linux renderer match or approval of these synthetic test gates.
-  const visual = JSON.parse(readFileSync(new URL('../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
+  const visual = JSON.parse(readFileSync(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
   const delivery = visual.states.find((state: { id: string }) => state.id === 'delivery-numbers')
   for (const checkpoint of delivery.checkpoints) if (checkpoint.profile === 'phone') {
     delete checkpoint.referenceStatus; delete checkpoint.deferredUntil; delete checkpoint.deferredReason

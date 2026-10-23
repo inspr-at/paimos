@@ -204,7 +204,8 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   assert.throws(() => validateLedger({ ...frozen, sourceHash: () => '0'.repeat(64), p01: true }), /Frozen launch-policy changed/)
   frozen.currentWeb.defaultNewTier = 'ESSENTIAL'
   assert.throws(() => validateLedger({ ...frozen, sourceHash: frozenHash, p01: true }), /P01 changed catalogue selection\/tagging\/timing policy/)
-  assert.throws(() => validateVisual(original.visual, { cuts: true }), /Deferred visual reference/)
+  assert.throws(() => validateVisual(original.visual, { cuts: true, stateIds: ['goals'] }), /Deferred visual reference/)
+  assert.throws(() => validateVisual(original.visual, { cuts: true, checkpointIds: ['V-projects-390-light'] }), /Unpinned visual reference: V-projects-390-light/)
   const missingCheckpoint = structuredClone(original.visual)
   missingCheckpoint.states[0].checkpoints.pop()
   assert.throws(() => validateVisual(missingCheckpoint), /Missing\/duplicate visual checkpoint/)
