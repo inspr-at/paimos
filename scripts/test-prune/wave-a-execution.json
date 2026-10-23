@@ -1,0 +1,1537 @@
+{
+  "version": 1,
+  "ticket": "AEON-1696",
+  "status": "merged-verification-blocked",
+  "workerPct": 95,
+  "recordedAt": "2026-10-23T11:25:24.795623+00:00",
+  "baseMain": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
+  "testedIntegrationHead": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+  "mergedHeads": [
+    {
+      "pr": "901",
+      "head": "ded83476f47923a0fff3877f1cf61b15baff73eb",
+      "browser_cut": 31,
+      "added_runtime": 22,
+      "browser_removed": 31,
+      "browser_added": 0,
+      "merge_commit": "8eb2bad5b1ca8adf9ab73e41d7d2b2e32dcf3a87"
+    },
+    {
+      "pr": "902",
+      "head": "405e7463c14e681e47eee679c1b521f15692346e",
+      "browser_cut": 109,
+      "added_runtime": 17,
+      "browser_removed": 109,
+      "browser_added": 0,
+      "merge_commit": "b8cafcf0506d0d4209b0b13fa99e63e07ba3a4a5"
+    },
+    {
+      "pr": "903",
+      "head": "076bd5bfe83c0fffc726e9c71670cd4e8231b9fd",
+      "browser_cut": 73,
+      "added_runtime": 7,
+      "browser_removed": 76,
+      "browser_added": 3,
+      "merge_commit": "845ef4a67cb95bfaf7239761ff5822a11acf44e1"
+    },
+    {
+      "pr": "904",
+      "head": "72e99e7ae07e4cebd2fdec2c7406fee58a0c1f3d",
+      "browser_cut": 25,
+      "added_runtime": 13,
+      "browser_removed": 25,
+      "browser_added": 0,
+      "merge_commit": "8673264458eb9b4b2ac19e0180e323a94ed8af34"
+    },
+    {
+      "pr": "905",
+      "head": "0c9518050af52582e4216c345eb0a4fb8642eb8a",
+      "browser_cut": 130,
+      "added_runtime": 9,
+      "browser_removed": 130,
+      "browser_added": 0,
+      "merge_commit": "68623608bbb09d713ef0ea84ff494f629230f13a"
+    },
+    {
+      "pr": "906",
+      "head": "f2c59aa0c24e3cbee2483557367fd5adc2642732",
+      "browser_cut": 15,
+      "added_runtime": 10,
+      "browser_removed": 17,
+      "browser_added": 2,
+      "merge_commit": "427c6967be0327e66714867f05333f43483c479e"
+    },
+    {
+      "pr": "907",
+      "head": "0f6259dd9ae132c7be767bd6d74ec615473d1e72",
+      "browser_cut": 94,
+      "added_runtime": 22,
+      "browser_removed": 94,
+      "browser_added": 0,
+      "merge_commit": "d80846e89dc842c4ff927b6c250d874e1c3289a3"
+    },
+    {
+      "pr": "908",
+      "head": "c513ff2eb76d6361748b8f9c46e03f75774de74f",
+      "browser_cut": 145,
+      "added_runtime": 22,
+      "browser_removed": 145,
+      "browser_added": 0,
+      "merge_commit": "47123dccbcd85db46baf434b9fc3ce6198d97f3f"
+    },
+    {
+      "pr": "909",
+      "head": "3a8d8bd90f8a87b1747ad5f4c23b14ed2712c75c",
+      "browser_cut": 122,
+      "added_runtime": 2,
+      "browser_removed": 127,
+      "browser_added": 5,
+      "merge_commit": "f431583ec2301f389fb2d0bb368342c12a9fcd0b"
+    }
+  ],
+  "catalogue": {
+    "mainBefore": 5360,
+    "after": 4616,
+    "netBrowserCut": 744,
+    "removedBrowserIdentities": 754,
+    "addedBrowserIdentities": 10,
+    "newRuntimeRegistrations": 124,
+    "survivingPromotions": 6,
+    "survivingDemotions": 0,
+    "exactApprovedDeltaUnion": true
+  },
+  "protected": {
+    "unchangedLineageRows": 647,
+    "unchangedBaselineSha256": "e017c08a8cbad7451c9c1615a98f03cb10de1f1c85bef0d561c86fec1faaafc0",
+    "unchangedVisualManifestSha256": "916319e09a9e5ede9c62a2d4ccde8b71069c98d34295da6c331edead804c8adc",
+    "coreCases": 29,
+    "plannedBrowserCap": 338,
+    "phase": "P11",
+    "protectedCuts": false
+  },
+  "regeneration": {
+    "base": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
+    "method": "Restore main shared registries, replay approved identity-keyed package deltas, and write with mergeManifests/formatManifest/writeManifests and formatSpecSource. Recompute current drift costs; retain historical timing denominators and evidence.",
+    "files": [
+      "scripts/ci/web-test-tiers.json",
+      "scripts/test-prune/risk-ledger.json",
+      "scripts/test-tiers/drift-obligations.json",
+      "web/scripts/ci-web-shard-specs/tests/activity-history.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1532-editor-steady.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1604-edit-key.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/bulk.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/intake-extensions.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/markdown-ticket-links.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/record-ownership.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/ticket-agent-work.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/ticket-benefits.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1062-qapolish.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1071-chat-live.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1438-chat-thread.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1439-panel-opening.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1637-session-tab-events.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/approval-feedback.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/native-expert-stream.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/native-lead-pilot.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/native-session-program-1024.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/native-session-program-1440.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/native-session-program-390.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/native-session-requests.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/session-chat-cli.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/session-chat.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/session-inbox.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/session-messages.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/session-recovery.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/session-rows.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/access.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/account-resets.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/account-use-matrix.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/accounts-quota-bar.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/classic-invite.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/guest.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/html-sandbox.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/key-dialog.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/key-expiry.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/key-full-access.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/key-scopes.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/models-fallback.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/multiple-account-pairing.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/profile.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/scope-codes.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/settings-accounts.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/settings-agents.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/settings-host-capacity.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1028-projheader.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1042-headergraph.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1188-displayhome.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-974-typefilter.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/group-figures.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/project-status-counts.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1209-agents-head.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1210-agents-tree.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1211-agents-rows.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1213-agents-split.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/agent-pause.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/agent-recovery.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/agent-rules-budget-clients.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/agent-rules-ticks.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/agents-dial-daily.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/agents-dial.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/agents-display.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/agents-handover.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/agents-mission.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/capacity-pace.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/dead-screens.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/groups.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/lead-adoption.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/lead-card.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/lead-flow.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/lead-remove.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/lead-start.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/pi-openrouter.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/provenance.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/vendor-signals.spec.ts.json",
+      "web/ci-web-shards.json",
+      "web/scripts/ci-web-shard-specs/tests/business-pickers.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/cost-units.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/import-from-start.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/quote-collaboration.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/quote-dock-layout.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/quote-editor-core.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/quote-public.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/quotes/parity-flow.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/quotes/print-receipt.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/quotes/two-user-presence.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1473-desk-tab.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-1632-desk-links-peek.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/attach-discoverable.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/attach-security.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/attach-watch.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/decision-desk-fix2.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/decision-desk-fix3.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/decision-desk-lessons.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/decision-desk-project.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/desk-empty.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/doctrine-inbox.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/outcome-proposals.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/estimates.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/goals-create-link.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/goals-epics.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/goals-gaps.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/goals-view.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/parent-benefits.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/recurrence-marker.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/recurrences.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/routines-tab.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/work-aggregates.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/work-figures.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/work-history-fix5.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/work-integration.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/work-kinds.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/work-lifecycle-header.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/work-lifecycle.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/work-parent-releases.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/work-parent-status.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/work-surfaces-fix2.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/work-surfaces-fix3.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/work-surfaces-fix4.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/work-vocabulary.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/aeon-635.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/delivery-arion-v5.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/delivery-flow-lanes.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/delivery-flow-modes.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/delivery-numbers.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/delivery-polish.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/delivery-simple.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/delivery-ui.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/deploy-target.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/footer-release-pill.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/policies-rules.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/portal-admin.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/portal-public.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/portal-releases.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/portal-roadmap.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/release-groups.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/release-header.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/release-historic.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/release-own-tenant.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/release-picker.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/release-switches.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/release-tenant-notes.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/release-update-notice.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/reserved-versions.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/status-icons.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/status-time.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/usage-accounts.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/version-reveal.spec.ts.json",
+      "web/scripts/ci-web-shard-specs/tests/webcore-recovery.spec.ts.json"
+    ],
+    "driftCost": {
+      "nightlyCasesInDriftFiles": 1435,
+      "fullExtraNightlyCases": 501
+    }
+  },
+  "integrationFixes": {
+    "web/tests/delivery-flow-lanes.spec.ts": "Compare the unrounded rendered SVG span after panning; retain original edge interactions, exact span equality and stability assertions.",
+    "scripts/test-tiers/test-tiers.test.mjs": "Keep live 860/900-second bounds and exercise historical 800-second lower bounds against the immutable pre-prune population and policy.",
+    "docs/features/test-prune-p11.md": "Use neutral runner descriptions in public feature prose; preserve the underlying verification history.",
+    "scripts/test-tiers/browser-areas.test.mjs": "Pin both retained G7 native identities at ESSENTIAL after the approved profile cuts.",
+    "web/scripts/ci-web-shard.test.mjs": "Combine panel and Desk inventory expectations; charge newly gated quote ownership separately and preserve the historical 300-second packing claim with the frozen launch policy.",
+    "web/tests/test-prune-ledger.test.ts": "Use one valid frozen P01 fixture factory, preserving P08 controls and P11 exact mapping/destination controls.",
+    "web/tests/record-source.ts": "Retain both the injectable Vue dependency and optional setup source input.",
+    "docs/features/test-prune-ledger.md": "Retain every package report and append consolidation evidence."
+  },
+  "singlePackageFilesPreservedExactly": 200,
+  "checks": {
+    "defaultPrune": "passed; 647 protected lineages, cuts=false",
+    "ledgerRegression": "2 passed, 0 skipped",
+    "canonicalManifests": "passed",
+    "nativeCatalogue": "passed via remote strict web-tier validation",
+    "requiredTierCommand": {
+      "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+      "status": "passed",
+      "remoteSeconds": [
+        149.76,
+        152.1
+      ]
+    },
+    "fullWebShardSuite": {
+      "status": "passed",
+      "remoteSeconds": [
+        195.15,
+        166.49
+      ]
+    },
+    "static": {
+      "command": "ci-static-locked.sh --merge-main",
+      "exitCode": 1,
+      "passedCheckIds": [
+        "volatile-identity",
+        "public-names",
+        "request-body-ownership",
+        "go-vet",
+        "rules-bootstrap",
+        "test-tiers",
+        "go-tiers",
+        "go-shards-7",
+        "go-shards-4",
+        "release-metadata",
+        "release-rehearsal-tests",
+        "own-release-notes-tests",
+        "own-release-notes",
+        "release-tool-tests",
+        "live-policy-tests",
+        "cross-family-tests",
+        "release-pin-tests",
+        "release-completion-tests",
+        "audit-tests",
+        "audit-coverage",
+        "tracked-bytecode",
+        "ci-plan-tests",
+        "full-ui-qa-tests",
+        "releaseworkflow-tests",
+        "runner-route-tests",
+        "runner-guard-tests",
+        "runner-guard",
+        "docker-web-inputs",
+        "web-typecheck",
+        "web-lint",
+        "migration-tests",
+        "migrations",
+        "migration-splitter",
+        "migration-probe-tests",
+        "web-shard-tests",
+        "openapi-properties",
+        "web-tiers",
+        "web-spec-inventory",
+        "web-browser-safety",
+        "openapi-sort",
+        "theme-colour-literals",
+        "apt-step-bounds",
+        "web-classification"
+      ],
+      "passed": 43,
+      "optionalSkipped": 0,
+      "remainingCheck": "web-shard-spec-tests",
+      "error": "ci-static: web-shard-spec-tests exceeded timeout_seconds=120 after 120.02s (process group termination requested)",
+      "unchangedSlowPath": "Real-manifest inventory and 1/12/24/256-shard coverage; measured 83.9-85.8s on the shared runner. The larger entry executes the same assertions successfully. No timeout was raised."
+    }
+  },
+  "browser": {
+    "requestedSpecs": 155,
+    "expectedCases": 1468,
+    "passed": 1454,
+    "existingSkips": 12,
+    "unselectedPerformanceCases": 2,
+    "batches": [
+      {
+        "type": "browser",
+        "batch": 1,
+        "head": "94dd5c2c634470db7903b3615a2fa7165e21dc99",
+        "specs": [
+          {
+            "file": "tests/agent-rules-ticks.spec.ts",
+            "changed_lines": 189,
+            "cases": 4
+          },
+          {
+            "file": "tests/quote-editor-core.spec.ts",
+            "changed_lines": 188,
+            "cases": 1
+          },
+          {
+            "file": "tests/delivery-flow-lanes.spec.ts",
+            "changed_lines": 179,
+            "cases": 12
+          },
+          {
+            "file": "tests/delivery-flow-modes.spec.ts",
+            "changed_lines": 176,
+            "cases": 9
+          },
+          {
+            "file": "tests/html-sandbox.spec.ts",
+            "changed_lines": 159,
+            "cases": 2
+          },
+          {
+            "file": "tests/status-icons.spec.ts",
+            "changed_lines": 114,
+            "cases": 5
+          }
+        ],
+        "passed": 33,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-01",
+        "run": "spec-94dd5c2c63-65598"
+      },
+      {
+        "type": "browser",
+        "batch": 2,
+        "head": "94dd5c2c634470db7903b3615a2fa7165e21dc99",
+        "specs": [
+          {
+            "file": "tests/bulk.spec.ts",
+            "changed_lines": 95,
+            "cases": 6
+          },
+          {
+            "file": "tests/business-pickers.spec.ts",
+            "changed_lines": 95,
+            "cases": 2
+          },
+          {
+            "file": "tests/ticket-panel.spec.ts",
+            "changed_lines": 95,
+            "cases": 46
+          },
+          {
+            "file": "tests/quotes/parity-flow.spec.ts",
+            "changed_lines": 88,
+            "cases": 1
+          },
+          {
+            "file": "tests/portal-admin.spec.ts",
+            "changed_lines": 69,
+            "cases": 1
+          },
+          {
+            "file": "tests/quotes/print-receipt.spec.ts",
+            "changed_lines": 69,
+            "cases": 2
+          }
+        ],
+        "passed": 58,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-02",
+        "run": "spec-94dd5c2c63-84649"
+      },
+      {
+        "type": "browser",
+        "batch": 3,
+        "head": "94dd5c2c634470db7903b3615a2fa7165e21dc99",
+        "specs": [
+          {
+            "file": "tests/provenance.spec.ts",
+            "changed_lines": 64,
+            "cases": 4
+          },
+          {
+            "file": "tests/delivery-ui.spec.ts",
+            "changed_lines": 61,
+            "cases": 6
+          },
+          {
+            "file": "tests/quote-collaboration.spec.ts",
+            "changed_lines": 58,
+            "cases": 5
+          },
+          {
+            "file": "tests/aeon-1532-editor-steady.spec.ts",
+            "changed_lines": 55,
+            "cases": 6
+          },
+          {
+            "file": "tests/attachments.spec.ts",
+            "changed_lines": 54,
+            "cases": 13
+          },
+          {
+            "file": "tests/group-figures.spec.ts",
+            "changed_lines": 50,
+            "cases": 11
+          }
+        ],
+        "passed": 45,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-03",
+        "run": "spec-94dd5c2c63-21380"
+      },
+      {
+        "type": "browser",
+        "batch": 4,
+        "head": "94dd5c2c634470db7903b3615a2fa7165e21dc99",
+        "specs": [
+          {
+            "file": "tests/intake-extensions.spec.ts",
+            "changed_lines": 50,
+            "cases": 4
+          },
+          {
+            "file": "tests/relations.spec.ts",
+            "changed_lines": 50,
+            "cases": 7
+          },
+          {
+            "file": "tests/status-time.spec.ts",
+            "changed_lines": 45,
+            "cases": 11
+          },
+          {
+            "file": "tests/release-switches.spec.ts",
+            "changed_lines": 42,
+            "cases": 16
+          },
+          {
+            "file": "tests/guest.spec.ts",
+            "changed_lines": 39,
+            "cases": 1
+          },
+          {
+            "file": "tests/live-panel.spec.ts",
+            "changed_lines": 36,
+            "cases": 7
+          }
+        ],
+        "passed": 46,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-04",
+        "run": "spec-94dd5c2c63-54521"
+      },
+      {
+        "type": "browser",
+        "batch": 5,
+        "head": "94dd5c2c634470db7903b3615a2fa7165e21dc99",
+        "specs": [
+          {
+            "file": "tests/ticket-agent-work.spec.ts",
+            "changed_lines": 33,
+            "cases": 2
+          },
+          {
+            "file": "tests/aeon-974-typefilter.spec.ts",
+            "changed_lines": 32,
+            "cases": 8
+          },
+          {
+            "file": "tests/markdown-ticket-links.spec.ts",
+            "changed_lines": 32,
+            "cases": 5
+          },
+          {
+            "file": "tests/activity-history.spec.ts",
+            "changed_lines": 31,
+            "cases": 1
+          },
+          {
+            "file": "tests/delivery-polish.spec.ts",
+            "changed_lines": 31,
+            "cases": 12
+          },
+          {
+            "file": "tests/release-historic.spec.ts",
+            "changed_lines": 27,
+            "cases": 6
+          }
+        ],
+        "passed": 34,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-05",
+        "run": "spec-94dd5c2c63-83049"
+      },
+      {
+        "type": "browser",
+        "batch": 6,
+        "head": "94dd5c2c634470db7903b3615a2fa7165e21dc99",
+        "specs": [
+          {
+            "file": "tests/release-tenant-notes.spec.ts",
+            "changed_lines": 27,
+            "cases": 10
+          },
+          {
+            "file": "tests/aeon-1473-desk-tab.spec.ts",
+            "changed_lines": 23,
+            "cases": 6
+          },
+          {
+            "file": "tests/record-ownership.spec.ts",
+            "changed_lines": 17,
+            "cases": 1
+          },
+          {
+            "file": "tests/decision-desk-fix3.spec.ts",
+            "changed_lines": 16,
+            "cases": 3
+          },
+          {
+            "file": "tests/outcome-proposals.spec.ts",
+            "changed_lines": 16,
+            "cases": 2
+          },
+          {
+            "file": "tests/session-chat.spec.ts",
+            "changed_lines": 16,
+            "cases": 54
+          }
+        ],
+        "passed": 76,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-06",
+        "run": "spec-94dd5c2c63-8827"
+      },
+      {
+        "type": "browser",
+        "batch": 7,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/cost-units.spec.ts",
+            "changed_lines": 14,
+            "cases": 4
+          },
+          {
+            "file": "tests/parent-benefits.spec.ts",
+            "changed_lines": 13,
+            "cases": 8
+          },
+          {
+            "file": "tests/aeon-1211-agents-rows.spec.ts",
+            "changed_lines": 12,
+            "cases": 23
+          },
+          {
+            "file": "tests/aeon-1209-agents-head.spec.ts",
+            "changed_lines": 11,
+            "cases": 21
+          },
+          {
+            "file": "tests/ticket-benefits.spec.ts",
+            "changed_lines": 11,
+            "cases": 13
+          },
+          {
+            "file": "tests/native-session-program.spec.ts",
+            "changed_lines": 10,
+            "cases": 1
+          }
+        ],
+        "passed": 70,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-07",
+        "run": "spec-dfe3e2d2a1-51314"
+      },
+      {
+        "type": "browser",
+        "batch": 8,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/release-update-notice.spec.ts",
+            "changed_lines": 10,
+            "cases": 13
+          },
+          {
+            "file": "tests/ticket-peek.spec.ts",
+            "changed_lines": 10,
+            "cases": 7
+          },
+          {
+            "file": "tests/aeon-635.spec.ts",
+            "changed_lines": 9,
+            "cases": 15
+          },
+          {
+            "file": "tests/attach-security.spec.ts",
+            "changed_lines": 9,
+            "cases": 14
+          },
+          {
+            "file": "tests/work-vocabulary.spec.ts",
+            "changed_lines": 9,
+            "cases": 8
+          },
+          {
+            "file": "tests/decision-desk-project.spec.ts",
+            "changed_lines": 8,
+            "cases": 9
+          }
+        ],
+        "passed": 64,
+        "skipped": 2,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-08",
+        "run": "spec-dfe3e2d2a1-90999"
+      },
+      {
+        "type": "browser",
+        "batch": 9,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/recurrence-marker.spec.ts",
+            "changed_lines": 8,
+            "cases": 24
+          },
+          {
+            "file": "tests/aeon-1210-agents-tree.spec.ts",
+            "changed_lines": 7,
+            "cases": 13
+          },
+          {
+            "file": "tests/agent-pause.spec.ts",
+            "changed_lines": 7,
+            "cases": 18
+          },
+          {
+            "file": "tests/goals-create-link.spec.ts",
+            "changed_lines": 7,
+            "cases": 10
+          },
+          {
+            "file": "tests/goals-epics.spec.ts",
+            "changed_lines": 7,
+            "cases": 7
+          },
+          {
+            "file": "tests/goals-hide.spec.ts",
+            "changed_lines": 7,
+            "cases": 5
+          }
+        ],
+        "passed": 77,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-09",
+        "run": "spec-dfe3e2d2a1-58774"
+      },
+      {
+        "type": "browser",
+        "batch": 10,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/lead-flow.spec.ts",
+            "changed_lines": 7,
+            "cases": 19
+          },
+          {
+            "file": "tests/webcore-recovery.spec.ts",
+            "changed_lines": 7,
+            "cases": 5
+          },
+          {
+            "file": "tests/access.spec.ts",
+            "changed_lines": 6,
+            "cases": 39
+          },
+          {
+            "file": "tests/accounts-quota-bar.spec.ts",
+            "changed_lines": 6,
+            "cases": 15
+          },
+          {
+            "file": "tests/aeon-1438-chat-thread.spec.ts",
+            "changed_lines": 6,
+            "cases": 16
+          },
+          {
+            "file": "tests/approval-feedback.spec.ts",
+            "changed_lines": 6,
+            "cases": 9
+          }
+        ],
+        "passed": 103,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-10",
+        "run": "spec-dfe3e2d2a1-6308"
+      },
+      {
+        "type": "browser",
+        "batch": 11,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/attach-discoverable.spec.ts",
+            "changed_lines": 6,
+            "cases": 40
+          },
+          {
+            "file": "tests/delivery-simple.spec.ts",
+            "changed_lines": 6,
+            "cases": 6
+          },
+          {
+            "file": "tests/import-from-start.spec.ts",
+            "changed_lines": 6,
+            "cases": 4
+          },
+          {
+            "file": "tests/key-scopes.spec.ts",
+            "changed_lines": 6,
+            "cases": 14
+          },
+          {
+            "file": "tests/lead-card.spec.ts",
+            "changed_lines": 6,
+            "cases": 14
+          },
+          {
+            "file": "tests/quote-dock-layout.spec.ts",
+            "changed_lines": 6,
+            "cases": 6
+          }
+        ],
+        "passed": 84,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-11",
+        "run": "spec-dfe3e2d2a1-54379"
+      },
+      {
+        "type": "browser",
+        "batch": 12,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/work-figures.spec.ts",
+            "changed_lines": 6,
+            "cases": 19
+          },
+          {
+            "file": "tests/agents-dial-daily.spec.ts",
+            "changed_lines": 5,
+            "cases": 32
+          },
+          {
+            "file": "tests/delivery-arion-v5.spec.ts",
+            "changed_lines": 5,
+            "cases": 7
+          },
+          {
+            "file": "tests/goals-gaps.spec.ts",
+            "changed_lines": 5,
+            "cases": 7
+          },
+          {
+            "file": "tests/groups.spec.ts",
+            "changed_lines": 5,
+            "cases": 8
+          },
+          {
+            "file": "tests/routines-tab.spec.ts",
+            "changed_lines": 5,
+            "cases": 12
+          }
+        ],
+        "passed": 85,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-12",
+        "run": "spec-dfe3e2d2a1-93850"
+      },
+      {
+        "type": "browser",
+        "batch": 13,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/session-rows.spec.ts",
+            "changed_lines": 5,
+            "cases": 4
+          },
+          {
+            "file": "tests/work-aggregates.spec.ts",
+            "changed_lines": 5,
+            "cases": 13
+          },
+          {
+            "file": "tests/aeon-1028-projheader.spec.ts",
+            "changed_lines": 4,
+            "cases": 38
+          },
+          {
+            "file": "tests/aeon-1062-qapolish.spec.ts",
+            "changed_lines": 4,
+            "cases": 10
+          },
+          {
+            "file": "tests/aeon-1071-chat-live.spec.ts",
+            "changed_lines": 4,
+            "cases": 19
+          },
+          {
+            "file": "tests/aeon-1188-displayhome.spec.ts",
+            "changed_lines": 4,
+            "cases": 5
+          }
+        ],
+        "passed": 89,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-13",
+        "run": "spec-dfe3e2d2a1-40741"
+      },
+      {
+        "type": "browser",
+        "batch": 14,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/aeon-1439-panel-opening.spec.ts",
+            "changed_lines": 4,
+            "cases": 1
+          },
+          {
+            "file": "tests/attach-watch.spec.ts",
+            "changed_lines": 4,
+            "cases": 23
+          },
+          {
+            "file": "tests/delivery-numbers.spec.ts",
+            "changed_lines": 4,
+            "cases": 6
+          },
+          {
+            "file": "tests/desk-empty.spec.ts",
+            "changed_lines": 4,
+            "cases": 10
+          },
+          {
+            "file": "tests/project-status-counts.spec.ts",
+            "changed_lines": 4,
+            "cases": 7
+          },
+          {
+            "file": "tests/session-chat-cli.spec.ts",
+            "changed_lines": 4,
+            "cases": 2
+          }
+        ],
+        "passed": 47,
+        "skipped": 2,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-14",
+        "run": "spec-dfe3e2d2a1-84826"
+      },
+      {
+        "type": "browser",
+        "batch": 15,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/session-recovery.spec.ts",
+            "changed_lines": 4,
+            "cases": 11
+          },
+          {
+            "file": "tests/aeon-1213-agents-split.spec.ts",
+            "changed_lines": 3,
+            "cases": 12
+          },
+          {
+            "file": "tests/aeon-1637-session-tab-events.spec.ts",
+            "changed_lines": 3,
+            "cases": 1
+          },
+          {
+            "file": "tests/agent-recovery.spec.ts",
+            "changed_lines": 3,
+            "cases": 5
+          },
+          {
+            "file": "tests/agent-rules-budget-clients.spec.ts",
+            "changed_lines": 3,
+            "cases": 8
+          },
+          {
+            "file": "tests/agents-dial.spec.ts",
+            "changed_lines": 3,
+            "cases": 24
+          }
+        ],
+        "passed": 61,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-15",
+        "run": "spec-dfe3e2d2a1-14685"
+      },
+      {
+        "type": "browser",
+        "batch": 16,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/agents-display.spec.ts",
+            "changed_lines": 3,
+            "cases": 13
+          },
+          {
+            "file": "tests/agents-handover.spec.ts",
+            "changed_lines": 3,
+            "cases": 5
+          },
+          {
+            "file": "tests/agents-mission.spec.ts",
+            "changed_lines": 3,
+            "cases": 9
+          },
+          {
+            "file": "tests/capacity-pace.spec.ts",
+            "changed_lines": 3,
+            "cases": 12
+          },
+          {
+            "file": "tests/dead-screens.spec.ts",
+            "changed_lines": 3,
+            "cases": 4
+          },
+          {
+            "file": "tests/estimates.spec.ts",
+            "changed_lines": 3,
+            "cases": 6
+          }
+        ],
+        "passed": 49,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-16",
+        "run": "spec-dfe3e2d2a1-50253"
+      },
+      {
+        "type": "browser",
+        "batch": 17,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/goals-view.spec.ts",
+            "changed_lines": 3,
+            "cases": 14
+          },
+          {
+            "file": "tests/lead-adoption.spec.ts",
+            "changed_lines": 3,
+            "cases": 4
+          },
+          {
+            "file": "tests/lead-remove.spec.ts",
+            "changed_lines": 3,
+            "cases": 3
+          },
+          {
+            "file": "tests/lead-start.spec.ts",
+            "changed_lines": 3,
+            "cases": 3
+          },
+          {
+            "file": "tests/performance.spec.ts",
+            "changed_lines": 3,
+            "cases": 2
+          },
+          {
+            "file": "tests/pi-openrouter.spec.ts",
+            "changed_lines": 3,
+            "cases": 7
+          }
+        ],
+        "passed": 31,
+        "skipped": 0,
+        "unselected": 2,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-17",
+        "run": "spec-dfe3e2d2a1-80432"
+      },
+      {
+        "type": "browser",
+        "batch": 18,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/policies-rules.spec.ts",
+            "changed_lines": 3,
+            "cases": 5
+          },
+          {
+            "file": "tests/portal-public.spec.ts",
+            "changed_lines": 3,
+            "cases": 12
+          },
+          {
+            "file": "tests/portal-releases.spec.ts",
+            "changed_lines": 3,
+            "cases": 3
+          },
+          {
+            "file": "tests/portal-roadmap.spec.ts",
+            "changed_lines": 3,
+            "cases": 2
+          },
+          {
+            "file": "tests/recurrences.spec.ts",
+            "changed_lines": 3,
+            "cases": 13
+          },
+          {
+            "file": "tests/release-groups.spec.ts",
+            "changed_lines": 3,
+            "cases": 9
+          }
+        ],
+        "passed": 44,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-18",
+        "run": "spec-dfe3e2d2a1-18389"
+      },
+      {
+        "type": "browser",
+        "batch": 19,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/release-own-tenant.spec.ts",
+            "changed_lines": 3,
+            "cases": 2
+          },
+          {
+            "file": "tests/reserved-versions.spec.ts",
+            "changed_lines": 3,
+            "cases": 13
+          },
+          {
+            "file": "tests/usage-accounts.spec.ts",
+            "changed_lines": 3,
+            "cases": 7
+          },
+          {
+            "file": "tests/vendor-signals.spec.ts",
+            "changed_lines": 3,
+            "cases": 3
+          },
+          {
+            "file": "tests/work-history-fix5.spec.ts",
+            "changed_lines": 3,
+            "cases": 2
+          },
+          {
+            "file": "tests/work-integration.spec.ts",
+            "changed_lines": 3,
+            "cases": 4
+          }
+        ],
+        "passed": 31,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-19",
+        "run": "spec-dfe3e2d2a1-55182"
+      },
+      {
+        "type": "browser",
+        "batch": 20,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/work-kinds.spec.ts",
+            "changed_lines": 3,
+            "cases": 19
+          },
+          {
+            "file": "tests/work-lifecycle-header.spec.ts",
+            "changed_lines": 3,
+            "cases": 3
+          },
+          {
+            "file": "tests/work-lifecycle.spec.ts",
+            "changed_lines": 3,
+            "cases": 4
+          },
+          {
+            "file": "tests/work-parent-releases.spec.ts",
+            "changed_lines": 3,
+            "cases": 2
+          },
+          {
+            "file": "tests/work-parent-status.spec.ts",
+            "changed_lines": 3,
+            "cases": 2
+          },
+          {
+            "file": "tests/work-surfaces-fix2.spec.ts",
+            "changed_lines": 3,
+            "cases": 4
+          }
+        ],
+        "passed": 34,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-20",
+        "run": "spec-dfe3e2d2a1-76508"
+      },
+      {
+        "type": "browser",
+        "batch": 21,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/work-surfaces-fix3.spec.ts",
+            "changed_lines": 3,
+            "cases": 2
+          },
+          {
+            "file": "tests/work-surfaces-fix4.spec.ts",
+            "changed_lines": 3,
+            "cases": 2
+          },
+          {
+            "file": "tests/account-resets.spec.ts",
+            "changed_lines": 2,
+            "cases": 2
+          },
+          {
+            "file": "tests/account-use-matrix.spec.ts",
+            "changed_lines": 2,
+            "cases": 18
+          },
+          {
+            "file": "tests/aeon-1042-headergraph.spec.ts",
+            "changed_lines": 2,
+            "cases": 2
+          },
+          {
+            "file": "tests/aeon-1632-desk-links-peek.spec.ts",
+            "changed_lines": 2,
+            "cases": 4
+          }
+        ],
+        "passed": 29,
+        "skipped": 1,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-21",
+        "run": "spec-dfe3e2d2a1-90564"
+      },
+      {
+        "type": "browser",
+        "batch": 22,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/classic-invite.spec.ts",
+            "changed_lines": 2,
+            "cases": 5
+          },
+          {
+            "file": "tests/decision-desk-fix2.spec.ts",
+            "changed_lines": 2,
+            "cases": 4
+          },
+          {
+            "file": "tests/decision-desk-lessons.spec.ts",
+            "changed_lines": 2,
+            "cases": 14
+          },
+          {
+            "file": "tests/doctrine-inbox.spec.ts",
+            "changed_lines": 2,
+            "cases": 3
+          },
+          {
+            "file": "tests/key-dialog.spec.ts",
+            "changed_lines": 2,
+            "cases": 7
+          },
+          {
+            "file": "tests/key-expiry.spec.ts",
+            "changed_lines": 2,
+            "cases": 11
+          }
+        ],
+        "passed": 44,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-22",
+        "run": "spec-dfe3e2d2a1-22399"
+      },
+      {
+        "type": "browser",
+        "batch": 23,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/key-full-access.spec.ts",
+            "changed_lines": 2,
+            "cases": 16
+          },
+          {
+            "file": "tests/models-fallback.spec.ts",
+            "changed_lines": 2,
+            "cases": 11
+          },
+          {
+            "file": "tests/multiple-account-pairing.spec.ts",
+            "changed_lines": 2,
+            "cases": 2
+          },
+          {
+            "file": "tests/native-expert-stream.spec.ts",
+            "changed_lines": 2,
+            "cases": 8
+          },
+          {
+            "file": "tests/native-lead-pilot.spec.ts",
+            "changed_lines": 2,
+            "cases": 2
+          },
+          {
+            "file": "tests/native-session-program-1024.spec.ts",
+            "changed_lines": 2,
+            "cases": 1
+          }
+        ],
+        "passed": 40,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-23",
+        "run": "spec-dfe3e2d2a1-50920"
+      },
+      {
+        "type": "browser",
+        "batch": 24,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/native-session-program-1440.spec.ts",
+            "changed_lines": 2,
+            "cases": 1
+          },
+          {
+            "file": "tests/native-session-program-390.spec.ts",
+            "changed_lines": 2,
+            "cases": 1
+          },
+          {
+            "file": "tests/native-session-requests.spec.ts",
+            "changed_lines": 2,
+            "cases": 3
+          },
+          {
+            "file": "tests/profile.spec.ts",
+            "changed_lines": 2,
+            "cases": 13
+          },
+          {
+            "file": "tests/scope-codes.spec.ts",
+            "changed_lines": 2,
+            "cases": 10
+          },
+          {
+            "file": "tests/session-inbox.spec.ts",
+            "changed_lines": 2,
+            "cases": 2
+          }
+        ],
+        "passed": 30,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-24",
+        "run": "spec-dfe3e2d2a1-73018"
+      },
+      {
+        "type": "browser",
+        "batch": 25,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/session-messages.spec.ts",
+            "changed_lines": 2,
+            "cases": 15
+          },
+          {
+            "file": "tests/settings-accounts.spec.ts",
+            "changed_lines": 2,
+            "cases": 27
+          },
+          {
+            "file": "tests/settings-agents.spec.ts",
+            "changed_lines": 2,
+            "cases": 10
+          },
+          {
+            "file": "tests/settings-host-capacity.spec.ts",
+            "changed_lines": 2,
+            "cases": 9
+          }
+        ],
+        "passed": 54,
+        "skipped": 7,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-batch-25",
+        "run": "spec-dfe3e2d2a1-91008"
+      },
+      {
+        "type": "metadata-browser",
+        "batch": 1,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/deploy-target.spec.ts",
+            "cases": 1,
+            "source": "web/scripts/ci-web-shard-specs/tests/deploy-target.spec.ts.json"
+          },
+          {
+            "file": "tests/footer-release-pill.spec.ts",
+            "cases": 42,
+            "source": "web/scripts/ci-web-shard-specs/tests/footer-release-pill.spec.ts.json"
+          },
+          {
+            "file": "tests/quote-public.spec.ts",
+            "cases": 2,
+            "source": "web/scripts/ci-web-shard-specs/tests/quote-public.spec.ts.json"
+          },
+          {
+            "file": "tests/quotes/two-user-presence.spec.ts",
+            "cases": 1,
+            "source": "web/scripts/ci-web-shard-specs/tests/quotes/two-user-presence.spec.ts.json"
+          },
+          {
+            "file": "tests/release-header.spec.ts",
+            "cases": 27,
+            "source": "web/scripts/ci-web-shard-specs/tests/release-header.spec.ts.json"
+          },
+          {
+            "file": "tests/release-picker.spec.ts",
+            "cases": 19,
+            "source": "web/scripts/ci-web-shard-specs/tests/release-picker.spec.ts.json"
+          }
+        ],
+        "passed": 92,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-metadata-batch-01",
+        "run": "spec-dfe3e2d2a1-40696"
+      },
+      {
+        "type": "metadata-browser",
+        "batch": 2,
+        "head": "dfe3e2d2a163ee2a04f6b1eb6bbfd50e7da40bb2",
+        "specs": [
+          {
+            "file": "tests/version-reveal.spec.ts",
+            "cases": 4,
+            "source": "web/scripts/ci-web-shard-specs/tests/version-reveal.spec.ts.json"
+          }
+        ],
+        "passed": 4,
+        "skipped": 0,
+        "unselected": 0,
+        "artifacts": "web/test-results/remote/aeon-1696-metadata-batch-02",
+        "run": "spec-dfe3e2d2a1-85659"
+      }
+    ],
+    "selectedSpecs": 154,
+    "allCompletedBatchesOnApprovedLinuxLane": true,
+    "skipReasons": [
+      {
+        "file": "tests/release-update-notice.spec.ts",
+        "cases": 2,
+        "reason": "existing AEON_325_SHOTS capture opt-in"
+      },
+      {
+        "file": "tests/account-use-matrix.spec.ts",
+        "cases": 1,
+        "reason": "existing AEON1054_SHOTS evidence opt-in"
+      },
+      {
+        "file": "tests/settings-accounts.spec.ts",
+        "cases": 7,
+        "reason": "existing AEON384_SHOTS capture opt-in"
+      },
+      {
+        "file": "tests/session-chat-cli.spec.ts",
+        "cases": 2,
+        "reason": "existing TestSessionChatBrowser real-server/CLI harness opt-in"
+      }
+    ]
+  },
+  "performanceProbe": {
+    "spec": "tests/performance.spec.ts",
+    "expectedCases": 2,
+    "selectedCases": 0,
+    "exitCode": 1,
+    "run": "spec-dfe3e2d2a1-24022",
+    "error": "Total: 0 tests in 0 files; Error: No tests found.",
+    "requiredConfig": "web/playwright.perf.config.ts",
+    "laneEvidence": {
+      "approvedLaneConfig": "../.agm2.playwright.config.ts",
+      "workers": 1,
+      "testIgnore": [
+        "**/performance.spec.ts"
+      ],
+      "source": "Playwright blob onConfigure/onProject metadata from Linux browser batch 12",
+      "requiredConfig": "web/playwright.perf.config.ts",
+      "cases": [
+        "cold Projects home has bounded API requests",
+        "cold ticket page has bounded API requests"
+      ],
+      "constraint": "Approved remote-spec entry point accepts spec paths and grep but exposes no config selector; preserve the production build and request-bound policy.",
+      "batch17": {
+        "expectedCases": 33,
+        "selectedCases": 31,
+        "passed": 31,
+        "unselected": [
+          "tests/performance.spec.ts"
+        ],
+        "selectedChunks": 5
+      }
+    },
+    "artifacts": "web/test-results/remote/aeon-1696-performance"
+  },
+  "remainingProof": [
+    "Run the two cold-load request-bound cases with the production-build performance config on the matching approved Linux/hosted lane. The current remote-spec UI config ignores this file and exposes no config selector.",
+    "Obtain a zero-exit full static result in hosted CI; the only remaining remote miss is the unchanged 120-second short shard-entry deadline."
+  ],
+  "constraints": {
+    "originPushed": false,
+    "deployed": false,
+    "reviewGateRun": false,
+    "otherModelCLIsCalled": false,
+    "productionPerformanceConfigPreserved": true,
+    "visualAuthorityAndHistoricalEvidencePreserved": true
+  }
+}

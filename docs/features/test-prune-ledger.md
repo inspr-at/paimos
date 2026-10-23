@@ -164,3 +164,25 @@ AEON-1678 begins P06 with nine ESSENTIAL runtime cases in `web/tests/agents-prun
 P06 cut A removes **130 unprotected cases: 773 → 643** across the package, with the 24 affected specs going **398 → 268**. The frozen baseline was 757; upstream pairing, usage and start-agent additions account for the 16-case increase before this round. The cuts comprise 118 repeated viewport/theme/pass registrations, nine rule-tick cases and three provenance failure/identity cases. The latter twelve map to the verified production-runtime tests above; each profile cut maps to retained callbacks with identical assertions. Desktop and phone behavior, selected tablet checks, native input, confirmation, pending/refused results and unique incompletely replaced risks remain. Provenance captures now use `testInfo.outputPath()`.
 
 `scripts/test-prune/p06-evidence.json` contains exact removed identities, destinations, per-spec counts and the **151 protected cases** retained for "protected, after P02". All protected lineage rows, surviving tiers, launch policy and historical timings/evidence are unchanged. The default ledger and its regression test pass with pending visual references; canonical tier/shard writing is complete. The nine runtime cases, six negative controls and 22 rules-runtime cases pass. Six affected specs passed all 55 native cases on the remote browser runner (reported 1.8 minutes). The other 18 affected specs (213 cases) and all before-run timing attempts were refused for remote capacity. The same-host before/after runner-time change remains unmeasured; no runtime saving is claimed. Static is assigned to hosted CI by the cut-A brief. This is an interim unprotected cut, while full P06 consolidation and protected cuts remain later work.
+
+## Wave A consolidation — AEON-1696
+
+All nine reviewed heads are retained as exact second parents of normal merge commits, based on main `11b092730e55abd0d0cdb645f0feb0dd970c0076`. The current native browser catalogue changes **5,360 → 4,616**, exactly the **744-case sum** below. The approved delta union retains all **124 runtime additions** and **six promotions**, with no surviving demotion. All 647 protected lineage rows, the immutable baseline and visual authority remain unchanged. The standing checker reports the frozen catalogue separately; its `cuts: false` concerns protected anchors.
+
+| PR | Package | Exact head prefix | Net browser cut |
+|---|---|---|---:|
+| #901 | P03 | `ded83476f479` | 31 |
+| #902 | P07 | `405e7463c14e` | 109 |
+| #903 | P08 | `076bd5bfe83c` | 73 |
+| #904 | P04 | `72e99e7ae07e` | 25 |
+| #905 | P06 | `0c9518050af5` | 130 |
+| #906 | P10 | `f2c59aa0c24e` | 15 |
+| #907 | P09 | `0f6259dd9ae1` | 94 |
+| #908 | P05 | `c513ff2eb76d` | 145 |
+| #909 | P11 | `3a8d8bd90f8a` | 122 |
+
+Shared registries were rebuilt from main through the canonical tier/shard writers and structured package deltas. The two derived drift costs are 1,435 NIGHTLY cases in drift-owner files and 501 extra full-gate NIGHTLY cases. Package evidence, timing denominators and launch settings are retained. The shared ledger regression uses one valid P01 fixture factory; historical packing counterexamples use the immutable pre-prune population and policy while the live 860/900-second bounds remain. The 300-second historical limit is unchanged. The new quote gate is charged as an explicit addition. The timeline pan test compares its exact unrounded rendered span and preserves its original interactions and stability checks.
+
+The default prune check, both ledger regressions, canonical manifests, strict native catalogue validation and the complete tier suite pass. All **155 affected spec owners** were requested in 27 guarded Linux batches: **1,454 cases passed**, **12 existing capture/real-CLI opt-ins skipped**, and **two production performance cases were unselected**. The seven owners changed only in their shard records are included. A standalone performance attempt also selected zero tests and returned “No tests found”: the approved managed UI config excludes `performance.spec.ts`, and its entry point exposes no config selector. The production-build `playwright.perf.config.ts` is preserved.
+
+Verification is handed over at **pct 95, BLOCKED**. The two cold-load cases require the matching production performance lane. Full remote static reports **43 passed, zero optional skips, exit 1**; only `web-shard-spec-tests` exceeds its unchanged **120-second** deadline. The larger shard suite runs the same assertions successfully (195.15 s and 166.49 s), and the required tier suite passes (149.76 s and 152.10 s). Hosted CI remains the full static proof. Exact heads, merge commits, every regenerated file and all per-batch specs/results are recorded in [the Wave A execution record](../../scripts/test-prune/wave-a-execution.json). No origin push, deployment, review gate or other model CLI is run.
