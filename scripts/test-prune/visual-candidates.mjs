@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'n
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateVisual } from './check.mjs'
-import { assertRenderer, assertFontEvidence, captureEnabled } from './visual-renderer.mjs'
+import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled } from './visual-renderer.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const need = (condition, message) => { if (!condition) throw new Error(message) }
@@ -39,6 +39,7 @@ export function packCandidates(records, visual) {
     assertRenderer(quality.renderer, renderer)
     need(quality.requirementsRun === true && quality.captureMode === true && quality.baselineCompared === false, `Missing font/quality evidence: ${checkpoint.id}`)
     assertFontEvidence(quality.fonts, states.find(state => state.owner === checkpoint.owner).id)
+    assertClockEvidence(quality.clock, visualClock(visual, states.find(state => state.owner === checkpoint.owner).id))
     need(quality.owner === checkpoint.owner && quality.fixture === checkpoint.fixture && quality.theme === checkpoint.theme &&
       quality.viewport?.width === viewport.width && quality.viewport?.height === viewport.height, `Wrong review fixture/profile: ${checkpoint.id}`)
     for (const name of ['layout', 'axe', 'console', 'responses']) {
@@ -55,6 +56,7 @@ export function packCandidates(records, visual) {
   const bytes = Buffer.from(JSON.stringify({ version: 1, captureSHA, renderer, files }) + '\n')
   need(bytes.length <= 48 * 1024 * 1024, 'Review bundle exceeds 48 MiB')
   return { bytes, review: { version: 1, status: 'pending-Tick-review', captureSHA, renderer, comparison: visual.comparison, sha256: hash(bytes),
+    clocks: Object.fromEntries(states.map(state => [state.id, state.clock])),
     states: states.map(state => state.id),
     deferred: visual.states.filter(state => state.referenceStatus === 'deferred').map(state => ({
       id: state.id, checkpoints: state.checkpoints.map(checkpoint => checkpoint.id),

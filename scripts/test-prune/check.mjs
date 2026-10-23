@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { assertRenderer } from './visual-renderer.mjs'
+import { assertRenderer, visualClock } from './visual-renderer.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const rank = { NIGHTLY: 0, 'GATED-FULL': 1, ESSENTIAL: 2 }
@@ -75,6 +75,7 @@ export function validateVisual(visual, { cuts = false, stateIds = visual.states?
   const requiredCheckpoints = new Set(cuts ? checkpointIds : [])
   const checkpoints = new Set()
   for (const state of visual.states) {
+    visualClock(visual, state.id)
     const profiles = tablet.has(state.id) ? ['phone', 'tablet', 'desktop'] : ['phone', 'desktop']
     need(state.owner === `tests/visual/${state.id}.spec.ts` && text(state.fixture), `Missing independently owned visual fixture: ${state.id}`)
     need(same(state.profiles, profiles) && same(state.themes, visual.themes), `Unexpected visual matrix: ${state.id}`)

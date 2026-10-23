@@ -8,7 +8,7 @@ import test from 'node:test'
 import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGate, referenceGates, referenceReport, materializeBaseline } from '../../scripts/test-prune/visual-baselines.mjs'
 import { collectCandidates, packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
 
-import { assertRenderer, assertFontEvidence, verifyFontAssets, captureEnabled, rendererIdentity } from '../../scripts/test-prune/visual-renderer.mjs'
+import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, verifyFontAssets, captureEnabled, rendererIdentity } from '../../scripts/test-prune/visual-renderer.mjs'
 import { parseWorkflow } from '../../scripts/ci-static.mjs'
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
@@ -120,9 +120,15 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.throws(() => verifyReferenceArchive(Buffer.alloc(0), detached, mirrored, noExtraction), /archive size mismatch/)
 
   const gates = referenceGates(manifest)
-  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').reduce((sum, gate) => sum + gate.checkpoints, 0), 70)
+  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').reduce((sum, gate) => sum + gate.checkpoints, 0), 66)
   assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'awaiting-reference').length, 0)
-  assert.deepEqual(gates.filter((gate: { mode: string }) => gate.mode === 'deferred').map((gate: { state: string }) => gate.state), ['goals', 'delivery-numbers', 'ticket-workspace'])
+  assert.deepEqual(gates.filter((gate: { mode: string }) => gate.mode === 'deferred').map((gate: { state: string }) => gate.state), ['goals', 'delivery-numbers', 'capacity', 'ticket-workspace'])
+  assert.equal(gates.filter(gate => gate.mode === 'deferred').reduce((sum, gate) => sum + gate.checkpoints, 0), 14)
+  for (const checkpoint of manifest.states.find(state => state.id === 'capacity').checkpoints) {
+    assert.equal(referenceGate(manifest, checkpoint.id).mode, 'deferred')
+    assert.deepEqual(checkpoint.reference, { attachmentMember: null, sha256: null })
+    assert.deepEqual(checkpoint.deferredUntil, ['AEON-1692'])
+  }
   assert.deepEqual(gates.find(gate => gate.state === 'delivery-numbers' && gate.mode === 'compare')?.checkpointIds,
     ['V-delivery-numbers-1440-light', 'V-delivery-numbers-1440-dark'])
   assert.deepEqual(gates.find(gate => gate.state === 'delivery-numbers' && gate.mode === 'deferred')?.checkpointIds,
@@ -212,6 +218,9 @@ test('visual references require approval, immutable attachment bytes and every e
     return { png: sized, quality: { id: checkpoint.id, owner: state.owner,
       fixture: state.fixturesByProfile?.[checkpoint.profile] ?? state.fixture, theme: checkpoint.theme, viewport,
       captureSHA: 'a'.repeat(40), renderer, requirementsRun: true, captureMode: true, baselineCompared: false,
+      clock: { mode: 'fixed', now: visualClock(manifest, state.id).now,
+        samples: ['after-fixture', 'before-capture', 'before-comparison'].map(phase => ({ phase,
+          now: Date.parse(visualClock(manifest, state.id).now), iso: visualClock(manifest, state.id).now })) },
       fonts: {
         body: { computedFamily: 'system-ui', renderedFamilies: ['Inter Variable'] },
         painted: [{ family: 'Inter Variable', custom: false }],
@@ -234,6 +243,18 @@ test('visual references require approval, immutable attachment bytes and every e
   quoteEvidence.profile[0]!.status = 'unloaded'
   assert.throws(() => assertFontEvidence(quoteEvidence, 'public-quote'), /profile faces must all be loaded/)
   const packed = packCandidates(records, manifest)
+  assert.equal(packed.review.clocks.capacity.now, '2026-09-29T12:02:00.000Z')
+  assert.equal(packed.review.clocks.hours.now, '2026-09-24T08:00:00.000Z')
+  const missingClock = records.map((record, index) => index ? record : { ...record, quality: { ...record.quality, clock: undefined } })
+  assert.throws(() => packCandidates(missingClock, manifest), /fixture clock changed or missing/)
+  const driftedClock = structuredClone(records[0]!.quality.clock)
+  driftedClock.samples[2]!.now += 1
+  assert.throws(() => assertClockEvidence(driftedClock, visualClock(manifest, 'projects')), /fixture clock changed or missing/)
+  const driftedRecords = records.map((record, index) => index ? record : { ...record, quality: { ...record.quality, clock: driftedClock } })
+  assert.throws(() => packCandidates(driftedRecords, manifest), /fixture clock changed or missing/)
+  const missingPolicy = structuredClone(manifest)
+  delete missingPolicy.states[0].clock
+  assert.throws(() => visualClock(missingPolicy, 'projects'), /missing fixed fixture clock/)
   assert.equal(packed.review.status, 'pending-Tick-review')
   assert.equal(packed.review.members.length, 72)
   assert.deepEqual(packed.review.deferred.map((state: { id: string }) => state.id), ['goals', 'ticket-workspace'])

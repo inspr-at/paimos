@@ -53,7 +53,7 @@ test('P02 Agents permission requests load successfully and retain explicit error
 
 test('visual comparison rejects a changed control and never creates a missing reference', async ({ page, browser }, info) => {
   expect(info.config.updateSnapshots).toBe('none')
-  await page.route('**/__visual-comparator-proof', route => route.fulfill({ contentType: 'text/html', body: '<style>body { margin: 0; background: white; font-family: var(--font, system-ui); } button { font: inherit; width: 160px; height: 44px; background: white; color: black; border: 1px solid black; }</style><button>Review change</button>' }))
+  await page.route('**/__visual-comparator-proof', route => route.fulfill({ contentType: 'text/html', body: '<style>body { margin: 0; background: white; font-family: var(--font, -apple-system, system-ui, sans-serif); } button { font: inherit; width: 160px; height: 44px; background: white; color: black; border: 1px solid black; }</style><button>Review change</button>' }))
   await page.goto('/__visual-comparator-proof')
   await prepareVisualFonts(page, String(info.project.use.baseURL))
   await fontEvidence(page, 'projects')
@@ -116,7 +116,7 @@ test('visual comparison rejects a changed control and never creates a missing re
   expect(await compareVisualReference(page, info, delivery.checkpoints[2], { visual: mixed, baselineFile: mixedFile, renderer })).toBe(true)
   expect(await compareVisualReference(page, info, delivery.checkpoints[0], { visual: mixed, baselineFile: info.outputPath('absent-bundle.json'), renderer })).toBe(false)
   // Awaiting states retain strict quality checks without PNG captures.
-  const qualityDocument = '<html lang="en"><head><title>Synthetic quality control</title><style>body { font-family: var(--font, system-ui); } button, input { font: inherit; } button { min-width: 80px; height: 44px; }</style></head><body><main><button>Continue</button></main></body></html>'
+  const qualityDocument = '<html lang="en"><head><title>Synthetic quality control</title><style>body { font-family: var(--font, -apple-system, system-ui, sans-serif); } button, input { font: inherit; } button { min-width: 80px; height: 44px; }</style></head><body><main><button>Continue</button></main></body></html>'
   const setupQuality = async (qualityPage: Page) => {
     await qualityPage.route('**/__visual-quality-proof', route => route.fulfill({ contentType: 'text/html', body: qualityDocument }))
     // Fonts stay on the app origin, as in real checkpoints. about:blank would
@@ -130,7 +130,13 @@ test('visual comparison rejects a changed control and never creates a missing re
   expect(report).toMatchObject({ baselineCompared: false, pngSHA256: null, requirementsRun: true,
     reference: { mode: 'awaiting-reference' }, layout: [], axe: [], console: [], responses: [], fonts: { body: { renderedFamilies: ['Inter Variable'] }, painted: expect.arrayContaining([{ family: 'Inter Variable', custom: process.platform !== 'linux' }]) } })
   expect(existsSync(info.outputPath(`${pending.id}.png`))).toBe(false)
-  for (const id of ['goals', 'ticket-workspace', 'delivery-numbers']) {
+  // A shared fixture replacing the selected state's clock must fail before
+  // screenshot or comparison. No wall-clock wait is needed to prove drift.
+  await expect(checkVisual(browser, info, pending, async qualityPage => {
+    await setupQuality(qualityPage)
+    await qualityPage.clock.setFixedTime(new Date(NOW + 60_000))
+  }, { visual })).rejects.toThrow(/fixture clock changed/)
+  for (const id of ['goals', 'ticket-workspace', 'delivery-numbers', 'capacity']) {
     const deferred = visualCases(id)[0]!
     // The setup must never run; an unbuilt product is neither inspected nor
     // failed, and its explicit until/reason report is attached to the test.
@@ -199,8 +205,8 @@ test('P02 Delivery phone capture includes its heading and on-target headline in 
       await expect(headline).toHaveText(/\d+ of 13 numbers are on target\./)
       await expect(headline).toBeInViewport({ ratio: 1 })
       const top = await heading.evaluate(element => element.getBoundingClientRect().top)
-      const headerHeight = await page.locator('.app-header').evaluate(element => element.getBoundingClientRect().height)
-      expect(Math.abs(top - headerHeight), 'Delivery starts immediately below the app header').toBeLessThanOrEqual(0.5)
+      const headerBottom = await page.locator('.app-header').evaluate(element => element.getBoundingClientRect().bottom)
+      expect(top - headerBottom, 'Delivery starts at least 12 px below the app header').toBeGreaterThanOrEqual(12)
       positions.push({ heading: await heading.boundingBox(), headline: await headline.boundingBox() })
       await page.screenshot({ path: info.outputPath(`delivery-numbers-390-${theme}.png`), animations: 'disabled', caret: 'hide' })
     }, { visual })

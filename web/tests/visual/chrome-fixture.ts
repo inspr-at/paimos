@@ -9,12 +9,18 @@ import { groupsWorld, mockProjectGroups } from '../project-groups-fixtures'
 
 // Successful, explicit empty reads for unrelated chrome. A missing mock must
 // not make a reference depict an accidental outage; unknown paths still fail.
-export async function visualChrome(page: Page, data: Fixtures, now: number, options: { agents?: boolean; models?: boolean } = {}) {
+export async function visualChrome(page: Page, data: Fixtures, now: number, options: { agents?: boolean; models?: boolean; namedRelease?: boolean } = {}) {
   await mockSettings(page, settingsData())
   await mockBusiness(page, businessData({ enabled: ['business_costs', 'business_crm', 'business_quotes', 'business_hours'] }), {
     grant: ['account.read', 'account.manage', 'account.use.manage', 'questions.read', 'questions.decide', 'approvals.read', 'approvals.revoke', 'run.create', 'run.read', 'work_orders.read'],
   })
-  await mockReleases(page, releaseHistory(now))
+  // App.vue loads release history on a delayed timer. Select the reviewed
+  // named/unnamed fixture explicitly, so that read cannot change the footer
+  // between capture and comparison (or move a neighbouring control).
+  const history = releaseHistory(now)
+  const current = history.releases.find(release => release.version === history.current)!
+  if (!options.namedRelease) current.codename = ''
+  await mockReleases(page, history, { codename: current.codename })
   await mockProjectGroups(page, data, groupsWorld())
   if (options.agents !== false) await mockAgents(page, agentData({ me: me.id, now, empty: true,
     projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' },

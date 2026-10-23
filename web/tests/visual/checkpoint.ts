@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, type Browser, type Page, type TestInfo } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { readBaselineBundle, referenceGate } from '../../../scripts/test-prune/visual-baselines.mjs'
-import { assertRenderer, assertFontEvidence, captureEnabled, rendererIdentity, verifyFontAssets } from '../../../scripts/test-prune/visual-renderer.mjs'
+import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, rendererIdentity, verifyFontAssets } from '../../../scripts/test-prune/visual-renderer.mjs'
 import { domAudit } from '../ui-audit-rules'
 
 const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8'))
@@ -54,11 +54,18 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
     page.on('response', response => { if (response.status() >= 400) responses.push({ path: new URL(response.url()).pathname, status: response.status() }) })
     page.on('console', message => { if (message.type() === 'error') errors.push(`${message.text()} ${message.location().url}`) })
     page.on('pageerror', error => errors.push(error.message))
-    // All relative fixtures and the application use this one clock. Timers
-    // continue normally so readiness never depends on a frozen animation frame.
-    await page.clock.setFixedTime(new Date('2026-09-23T12:00:00Z'))
+    // Date stays fixed; timers and animation frames still run for readiness.
+    const policy = visualClock(visual, gate.state)
+    const clock = { mode: policy.mode, now: policy.now, samples: [] as { phase: string; now: number; iso: string }[] }
+    const sampleClock = async (phase: string) => {
+      const sample = await page.evaluate(() => ({ now: Date.now(), iso: new Date().toISOString() }))
+      expect(sample, `fixture clock changed: ${checkpoint.id} (${phase})`).toEqual({ now: Date.parse(policy.now), iso: policy.now })
+      clock.samples.push({ phase, ...sample })
+    }
+    await page.clock.setFixedTime(new Date(policy.now))
     try {
       await setup(page, checkpoint.profile, checkpoint.theme)
+      await sampleClock('after-fixture')
       await page.evaluate(async theme => {
         document.documentElement.dataset.theme = theme
         await document.fonts.ready
@@ -74,6 +81,7 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
       expect(emulation, 'renderer differs from reference: browser context settings').toEqual({ scale: renderer.deviceScaleFactor,
         locale: renderer.locale, timezone: renderer.timezone, reduced: true, theme: checkpoint.theme })
       const fonts = await fontEvidence(page, gate.state)
+      await sampleClock('before-capture')
       console.log(`${checkpoint.id}: font guard ok; computed body: ${fonts.body.computedFamily}; resolved: ${fonts.body.renderedFamilies.join(', ')}; profile faces loaded: ${fonts.profile.length}`)
       const png = capture || gate.mode === 'compare' ? await page.screenshot({ path: info.outputPath(`${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }) : null
       const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
@@ -87,7 +95,7 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
         error.startsWith(`Failed to load resource: the server responded with a status of ${row.status} `) && error.endsWith(row.path)))
       const report = { id: checkpoint.id, owner: checkpoint.owner, fixture: checkpoint.fixture,
         captureSHA, pngSHA256: png ? createHash('sha256').update(png).digest('hex') : null, baselineCompared: false,
-        reference: gate, viewport, theme: checkpoint.theme, renderer, fonts, requirementsRun: true,
+        reference: gate, viewport, theme: checkpoint.theme, renderer, fonts, clock, requirementsRun: true,
         captureMode: capture, layout, axe: violations, console: unexpectedErrors, responses: unexpectedResponses, expectedReads }
       const saveReport = () => writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify(report, null, 2))
       saveReport()
@@ -96,6 +104,8 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
       expect(unexpectedResponses, 'unexpected failed HTTP reads').toEqual([])
       expect(layout, 'unexpected clipping, overlap or overflow').toEqual([])
       expect(violations, 'WCAG A/AA violations').toEqual([])
+      await sampleClock('before-comparison')
+      assertClockEvidence(clock, policy)
       report.baselineCompared = !capture && gate.mode === 'compare' ? await compareVisualReference(page, info, checkpoint, { renderer, visual }) : false
       saveReport()
     } catch (error) {

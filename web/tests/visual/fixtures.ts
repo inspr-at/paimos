@@ -39,14 +39,14 @@ function agentsData(now = NOW) {
   return agentData({ me: me.id, now, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' },
     tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes })
 }
-async function work(page: Page, theme: Theme) {
+async function work(page: Page, theme: Theme, options: { namedRelease?: boolean } = {}) {
   const data = fixtures()
   data.preferences.theme = { choice: theme }
   data.projects[0]!.title = LONG
   data.nodes.find(node => node.id === 'n-1')!.title = LONG
   data.nodes.find(node => node.id === 'n-epic')!.title = `Übergeordnetes Arbeitsziel · ${LONG}`
   await mockWork(page, data, { admin: true })
-  await visualChrome(page, data, NOW)
+  await visualChrome(page, data, NOW, options)
   return data
 }
 
@@ -64,7 +64,7 @@ export const projects: VisualSetup = async (page, _profile, theme) => {
 }
 
 export const tickets: VisualSetup = async (page, _profile, theme) => {
-  await work(page, theme)
+  await work(page, theme, { namedRelease: true })
   await page.goto('/p/PHAROS/tickets?group_by=status&priority=high,medium')
   await expect(page.getByRole('grid', { name: 'Tickets' })).toBeVisible()
   await expect(page.locator('#row-n-1 .title-text')).toHaveAttribute('data-tip', LONG)
@@ -197,7 +197,7 @@ export const access: VisualSetup = async (page, _profile, theme) => {
 }
 
 export const knowledge: VisualSetup = async (page, profile, theme) => {
-  await work(page, theme)
+  await work(page, theme, { namedRelease: true })
   const data = knowledgeWorld(), entry = data.entries.find(entry => entry.slug === 'deploy-release')!
   entry.body = `# Freigabeprüfung\n\n${LONG}.\n\n## Prüfplan\n\n| Schritt | Ergebnis |\n| --- | --- |\n| Berechtigungen | Vor der Änderung erneut prüfen |\n| Übergabe | Vollständigen Bericht erhalten |\n\n${LONG}.`
   await mockKnowledge(page, data)
@@ -229,7 +229,7 @@ export const models: VisualSetup = async (page, _profile, theme) => {
 }
 
 export const deliveryNumbers: VisualSetup = async (page, profile, theme) => {
-  await work(page, theme)
+  await work(page, theme, { namedRelease: true })
   await mockDelivery(page, () => ({ status: 200, body: deliveryMetrics() }))
   await mockFlow(page, { empty: true })
   await page.goto('/p/AEON/delivery')
@@ -242,15 +242,16 @@ export const deliveryNumbers: VisualSetup = async (page, profile, theme) => {
     await heading.evaluate(element => {
       element.scrollIntoView({ block: 'start', behavior: 'instant' })
       const header = document.querySelector('.app-header')!
-      // main owns page-flow scrolling on phones. Correct scrollIntoView's
-      // scroll-padding offset so the heading starts just below the app header.
+      // Keep a measured 12 px gap below the app header in the phone crop.
       document.querySelector('main')!.scrollBy({
-        top: element.getBoundingClientRect().top - header.getBoundingClientRect().height, behavior: 'instant',
+        top: element.getBoundingClientRect().top - header.getBoundingClientRect().bottom - 12, behavior: 'instant',
       })
     })
     await expect(heading).toBeInViewport({ ratio: 1 })
     await expect(page.getByTestId('delivery-summary').locator('.big')).toHaveText(/\d+ of 13 numbers are on target\./)
     await expect(page.getByTestId('delivery-summary').locator('.big')).toBeInViewport({ ratio: 1 })
+    const gap = await heading.evaluate(element => element.getBoundingClientRect().top - document.querySelector('.app-header')!.getBoundingClientRect().bottom)
+    expect(gap, 'Delivery heading starts at least 12 px below the app header').toBeGreaterThanOrEqual(12)
   }
 }
 

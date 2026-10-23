@@ -10,6 +10,24 @@ const require = createRequire(new URL('../../web/package.json', import.meta.url)
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const need = (ok, detail) => { if (!ok) throw new Error(`renderer differs from reference: ${detail}`) }
 
+// Clock policy lives per state: Hours intentionally uses the business fixture's
+// date, while Capacity and its account/catalog fixtures share their own instant.
+// Keep it outside renderer identity so old immutable archives remain verifiable.
+export function visualClock(visual, stateId) {
+  const clock = visual.states.find(state => state.id === stateId)?.clock
+  need(clock?.mode === 'fixed' && typeof clock.now === 'string' && Number.isFinite(Date.parse(clock.now)) &&
+    new Date(clock.now).toISOString() === clock.now && typeof clock.audit === 'string' && clock.audit.trim().length > 0,
+  `missing fixed fixture clock: ${stateId}`)
+  return clock
+}
+
+export function assertClockEvidence(evidence, clock) {
+  need(evidence?.mode === 'fixed' && evidence.now === clock.now && Array.isArray(evidence.samples) &&
+    same(evidence.samples.map(sample => sample.phase), ['after-fixture', 'before-capture', 'before-comparison']) &&
+    evidence.samples.every(sample => sample.now === Date.parse(clock.now) && sample.iso === clock.now),
+  `fixture clock changed or missing: ${clock.now}`)
+}
+
 // Read only these non-secret runner metadata fields. ImageVersion is recorded
 // by capture, then pinned by the person-reviewed reference round, never guessed.
 export function rendererIdentity(visual, browserVersion, { env = process.env, platform = process.platform, arch = process.arch,

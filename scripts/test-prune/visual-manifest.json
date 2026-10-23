@@ -6,7 +6,7 @@
     "reviewer": "Tick",
     "status": "approved",
     "approvedAt": "2026-10-23",
-    "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
+    "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2. Round 10: LEAD-M requires the four Capacity checkpoints to be deferred until AEON-1692 / reference set 3, with a recorded and asserted frozen clock.",
     "states": [
       "projects",
       "tickets",
@@ -21,8 +21,7 @@
       "quote-editor",
       "public-quote",
       "start-agent",
-      "agent-rules",
-      "capacity"
+      "agent-rules"
     ],
     "checkpoints": [
       "V-projects-390-light",
@@ -90,16 +89,12 @@
       "V-agent-rules-390-light",
       "V-agent-rules-390-dark",
       "V-agent-rules-1440-light",
-      "V-agent-rules-1440-dark",
-      "V-capacity-390-light",
-      "V-capacity-390-dark",
-      "V-capacity-1440-light",
-      "V-capacity-1440-dark"
+      "V-agent-rules-1440-dark"
     ],
     "sourceCaptureSHA": "6fea542010b4c699dadadd74529fdaf7a1ef4c9a",
     "captureRun": "39912019882",
     "recordedBy": "LEAD-M",
-    "scope": "Exactly 70 checkpoints are comparison authority. Delivery 390 light/dark are explicitly deferred; Goals and Ticket Workspace remain deferred. No protected cuts are authorized in P02; P03–P11 own their subsequent cut rounds."
+    "scope": "Exactly 66 checkpoints are comparison authority. Capacity (4) and Delivery 390 light/dark (2) await AEON-1692 / reference set 3; Goals and Ticket Workspace remain deferred. No protected cuts are authorized in P02; P03–P11 own their subsequent cut rounds."
   },
   "baselineAuthority": {
     "status": "approved",
@@ -138,6 +133,26 @@
           "id": "V-delivery-numbers-390-dark",
           "attachmentMember": "V-delivery-numbers-390-dark.png",
           "sha256": "a15f0f5aca9f62ea113dcbe3b7d67a3ebf875c6eb0c7759bf4196a1cb4e4ea51"
+        },
+        {
+          "id": "V-capacity-390-light",
+          "attachmentMember": "V-capacity-390-light.png",
+          "sha256": "47f33ca8cc634dd61b31f5eb92be0eded994d439753fde9eb13dc43aa973af78"
+        },
+        {
+          "id": "V-capacity-390-dark",
+          "attachmentMember": "V-capacity-390-dark.png",
+          "sha256": "c55aa765b5060649364a2b8395e80c667a789d62f568d3224e55ca8769c245f9"
+        },
+        {
+          "id": "V-capacity-1440-light",
+          "attachmentMember": "V-capacity-1440-light.png",
+          "sha256": "d1fa127f96e0ae46b5c0dd1790bc1910403fce4824ddec8225ed82d6ae300d57"
+        },
+        {
+          "id": "V-capacity-1440-dark",
+          "attachmentMember": "V-capacity-1440-dark.png",
+          "sha256": "efc6c54704ca1d617ff117ac6afb2c1a09e65d153f28cc74234c2bfb7cdf6545"
         }
       ],
       "unapprovedMemberPolicy": "Digest verification only. These rejected capture bytes never enter the comparison reference map. Checkpoint deferrals and the exact approval list govern authority.",
@@ -270,6 +285,11 @@
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Live-chip ages, project dates and shell release history derive from the fixed work-fixture instant; mock live-feed elapsed time does not enter captured text. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
       }
     },
     {
@@ -329,6 +349,11 @@
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Ticket dates and ages plus shell release history use the fixed work-fixture instant. Release-name fixture is explicitly Full Fin in both version and history."
       }
     },
     {
@@ -391,7 +416,12 @@
         "AEON-1621",
         "AEON-1625"
       ],
-      "deferredReason": "Tick 2026-10-23: exclude every Goals checkpoint from the first pinned set; review against the v6 canvas after both product packages land."
+      "deferredReason": "Tick 2026-10-23: exclude every Goals checkpoint from the first pinned set; review against the v6 canvas after both product packages land.",
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Deferred canvas: reserve the work-fixture clock for the later product capture. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "agents",
@@ -469,6 +499,11 @@
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Heartbeat ages, session elapsed time, approval expiry and account quota facts use agentData(NOW), injected mockAgents now and the fixed browser clock. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
       }
     },
     {
@@ -535,7 +570,12 @@
           "status": 503,
           "reason": "feature_disabled"
         }
-      ]
+      ],
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Today separator, message times, read receipts and Desk card dates use mockChatThread now; visual chrome restores that same fixed instant after its business mock. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     },
     {
       "id": "decision-desk",
@@ -613,6 +653,11 @@
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Question dates, approval expiry and projectionTime explicitly use NOW. No real-clock approval data reaches the captured state. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
       }
     },
     {
@@ -691,6 +736,11 @@
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-29T12:02:00.000Z",
+        "audit": "Account facts use CAPACITY_NOW; save has a revision only and Undo has no displayed countdown. Browser clock stays at that same fixed instant. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
       }
     },
     {
@@ -750,6 +800,11 @@
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "The selected fallback/locked design picker uses fixed registry facts. The shared real-time CAP_UNTIL is read only by down:true, which this visual state does not select. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
       }
     },
     {
@@ -809,6 +864,11 @@
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Role descriptions and permissions are static; key ages and shell dates use the fixed work/access fixture instant. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
       }
     },
     {
@@ -868,6 +928,11 @@
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Entry created/updated dates use the fixed work/knowledge fixture instant; create-entry real-clock dates are not used by this read-only state. Release-name fixture is explicitly Full Fin in both version and history."
       }
     },
     {
@@ -938,6 +1003,11 @@
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2.",
         "reason": "Tick requested changes to the 390px Delivery capture: scroll the Delivery heading below the app header and show the on-target headline. These two old captures are transport evidence only; a fresh capture and Tick approval are required before they can become references."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Metrics and empty flow use recorded fixture dates; shell dates use NOW. Phone positioning is geometry only. Release-name fixture is explicitly Full Fin in both version and history."
       }
     },
     {
@@ -997,6 +1067,11 @@
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-24T08:00:00.000Z",
+        "audit": "mockBusiness deliberately replaces the work clock with its own fixed 2026-09-24T08:00:00.000Z; retain this existing instant so the approved editor and period dates do not change. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
       }
     },
     {
@@ -1075,6 +1150,11 @@
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Quote document dates and the bundled profile revision are fixed; no live quote-list creation or issue path is selected. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
       }
     },
     {
@@ -1134,6 +1214,11 @@
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Public quote now is explicitly NOW, so validity and accepted timestamps share the browser clock. Shared quote-list module real dates are unused. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
       }
     },
     {
@@ -1193,6 +1278,11 @@
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-29T12:02:00.000Z",
+        "audit": "Catalog as_of, probe ages, quota windows, wait deadline, projection and outlook all derive from CAPACITY_NOW; the browser uses the same instant. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
       }
     },
     {
@@ -1252,6 +1342,11 @@
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
         "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Import preview and selected Secrets draft are static. Shell release dates use NOW; there are no selected relative-time reads. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
       }
     },
     {
@@ -1273,44 +1368,68 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": "V-capacity-390-light.png",
-            "sha256": "47f33ca8cc634dd61b31f5eb92be0eded994d439753fde9eb13dc43aa973af78"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
         },
         {
           "id": "V-capacity-390-dark",
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": "V-capacity-390-dark.png",
-            "sha256": "c55aa765b5060649364a2b8395e80c667a789d62f568d3224e55ca8769c245f9"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
         },
         {
           "id": "V-capacity-1440-light",
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": "V-capacity-1440-light.png",
-            "sha256": "d1fa127f96e0ae46b5c0dd1790bc1910403fce4824ddec8225ed82d6ae300d57"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
         },
         {
           "id": "V-capacity-1440-dark",
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": "V-capacity-1440-dark.png",
-            "sha256": "efc6c54704ca1d617ff117ac6afb2c1a09e65d153f28cc74234c2bfb7cdf6545"
-          }
+            "attachmentMember": null,
+            "sha256": null
+          },
+          "referenceStatus": "deferred",
+          "deferredUntil": [
+            "AEON-1692"
+          ],
+          "deferredReason": "Re-capture with a frozen clock; Capacity quota bars, reset labels and pace require recorded clock evidence. Reference set 3 owns the new review; the old PNG is transport evidence only."
         }
       ],
       "approval": {
         "reviewer": "Tick",
-        "decision": "ok-to-pin",
-        "reviewedOn": "2026-10-23",
+        "decision": "deferred",
         "recordedBy": "LEAD-M",
-        "evidence": "LEAD-M AEON-1674 round-9 brief, 2026-10-23: Tick approved capture run 39912019882 (6fea5420) at 08:3x Europe/Vienna except delivery-numbers 390 light and dark; LEAD published the byte-identical 72-checkpoint archive to AEON-1670 and test-references-2."
+        "evidence": "LEAD-M AEON-1674 round-10 brief, 2026-10-23: demote all four Capacity checkpoints; re-capture with a frozen clock in AEON-1692 / reference set 3."
+      },
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-29T12:02:00.000Z",
+        "audit": "Quota bars, reset labels and pace depend on now. Both mockAgents and dailyPlan use CAPACITY_NOW; assert the browser after setup and before capture/comparison. The old unasserted-clock pins are transport history only: re-capture with a frozen clock in AEON-1692 / reference set 3. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
       }
     },
     {
@@ -1368,7 +1487,12 @@
       "deferredUntil": [
         "AEON-1674"
       ],
-      "deferredReason": "Deferred until the separately owned Tick product ticket fixes attachment action hit-area overlap and classification feedback semantics. Round 6 reverts both product changes; no quality checks or captures run for this state."
+      "deferredReason": "Deferred until the separately owned Tick product ticket fixes attachment action hit-area overlap and classification feedback semantics. Round 6 reverts both product changes; no quality checks or captures run for this state.",
+      "clock": {
+        "mode": "fixed",
+        "now": "2026-09-23T12:00:00.000Z",
+        "audit": "Deferred attachment preview: reserve the work-fixture clock for the later product capture. Release-name fixture is explicitly unnamed in both version and history; the delayed history read cannot add a footer label."
+      }
     }
   ],
   "history": [
