@@ -49,7 +49,10 @@ func PatternIsPublic(pattern string) bool {
 // Status help is scope-free tenant metadata for agents; people retain nodes.read.
 func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	p, _ := tenant.PrincipalFrom(ctx)
-	if p.MessagingOnly && !MessagingAssistantInboxRoute(pattern) {
+	if p.MessagingOnly && !MessagingAssistantInboxRoute(pattern) && !AssistantPolicyReadRoute(pattern) {
+		return ErrForbidden
+	}
+	if AssistantPolicyReadRoute(pattern) && p.Kind == tenant.Agent && p.KeyID == "" {
 		return ErrForbidden
 	}
 	if MessagingAssistantOperation(pattern) {

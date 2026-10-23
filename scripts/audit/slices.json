@@ -105,7 +105,8 @@
         "internal/agentpairing/routine_launch.go",
         "internal/agentaccounts/probe_batch.go",
         "internal/agentaccounts/probe_batch_test.go",
-        "internal/db/migrations/1359_delivery_admission_publisher.sql"
+        "internal/db/migrations/1359_delivery_admission_publisher.sql",
+        "internal/assistants/**"
       ],
       "exclude": [
         "internal/db/migrations/1333_models_v2_migration.sql",

@@ -118,10 +118,21 @@ function specSubsets(specs, limit) {
   return found
 }
 
+function subsetBound(subsets, weight, upper = false) {
+  let left = 0, right = subsets.length
+  while (left < right) {
+    const middle = Math.floor((left + right) / 2), value = subsets[middle].weightSeconds
+    if (upper ? value <= weight : value < weight) left = middle + 1
+    else right = middle
+  }
+  return left
+}
+
 // Pairwise swaps stop at a local peak. When two branches each add a small
 // gated spec, exchanging up to three specs a side can still lower the
 // descending shard weights. Spec weights themselves do not change.
 function lowerMakespan(shards, passes) {
+  if (shards.length < 2) return
   const descending = values => values.slice().sort((left, right) => right - left)
   const lower = (next, current) => {
     for (let i = 0; i < next.length; i++) {
@@ -133,20 +144,36 @@ function lowerMakespan(shards, passes) {
   for (let pass = 0; pass < passes; pass++) {
     for (const shard of shards) shard.specs.sort((left, right) => compare(left.file, right.file))
     const current = descending(shards.map(shard => shard.weightSeconds))
+    // A pass never mutates its shards until the best exchange is chosen.
+    // Build and weigh each subset once, rather than for every partner shard.
+    const subsets = shards.map(shard => specSubsets(shard.specs, shard.specs.length > 12 ? 2 : 3)
+      .map((specs, order) => ({ specs, weightSeconds: specSum(specs), order })))
+    const byWeight = subsets.map(sets => sets.slice().sort((left, right) => left.weightSeconds - right.weightSeconds || left.order - right.order))
     let best = null
     for (let i = 0; i < shards.length; i++) {
-      const giveSets = specSubsets(shards[i].specs, shards[i].specs.length > 12 ? 2 : 3)
       for (let j = i + 1; j < shards.length; j++) {
-        const takeSets = specSubsets(shards[j].specs, shards[j].specs.length > 12 ? 2 : 3)
-        for (const give of giveSets) {
-          const giveWeight = specSum(give)
-          for (const take of takeSets) {
-            const delta = giveWeight - specSum(take)
+        const pairMaximum = Math.max(shards[i].weightSeconds, shards[j].weightSeconds)
+        const difference = shards[i].weightSeconds - shards[j].weightSeconds
+        const minimumDelta = Math.min(0, difference), maximumDelta = Math.max(0, difference)
+        // Include boundary rounding, then apply the exact comparison below.
+        const margin = 1e-9 + 4 * Number.EPSILON * pairMaximum
+        for (const give of subsets[i]) {
+          // A lower pair maximum needs delta strictly between zero and the
+          // pair's load difference. Index that weight window instead of
+          // scanning the Cartesian product, retaining the original tie order.
+          const first = subsetBound(byWeight[j], give.weightSeconds - maximumDelta - margin)
+          const last = subsetBound(byWeight[j], give.weightSeconds - minimumDelta + margin, true)
+          const candidates = byWeight[j].slice(first, last).sort((left, right) => left.order - right.order)
+          for (const take of candidates) {
+            const delta = give.weightSeconds - take.weightSeconds
             const nextI = shards[i].weightSeconds - delta
             const nextJ = shards[j].weightSeconds + delta
-            if (nextI > current[0] + 1e-9 || nextJ > current[0] + 1e-9) continue
+            // The pair's total is unchanged: its sorted loads can improve
+            // only if its maximum falls. Most exchanges cannot do that;
+            // reject them before allocating and sorting the full shard key.
+            if (Math.max(nextI, nextJ) >= pairMaximum) continue
             const key = descending(shards.map((shard, index) => index === i ? nextI : index === j ? nextJ : shard.weightSeconds))
-            if (lower(key, current) && (!best || lower(key, best.key))) best = { i, j, give, take, key }
+            if (lower(key, current) && (!best || lower(key, best.key))) best = { i, j, give: give.specs, take: take.specs, key }
           }
         }
       }

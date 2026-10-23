@@ -348,6 +348,14 @@ func confirmRunOutcome(ctx context.Context, tx pgx.Tx, run *RunHistoryEntry) err
 	if run.State != RunDone {
 		return nil
 	}
+	var resultConfirmed bool
+	if err := tx.QueryRow(ctx, `SELECT coalesce(agent_owner_config IS NOT NULL AND agent_result->>'status'='succeeded',false) FROM routine_runs WHERE id=$1`, run.ID).Scan(&resultConfirmed); err != nil {
+		return err
+	}
+	if resultConfirmed {
+		run.Reason = "The agent result was stored; process execution and billing are not independently verified."
+		return nil
+	}
 	var proven, failed, runConfirmed bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_attempts WHERE run_id=$1),
  EXISTS(SELECT 1 FROM routine_attempts WHERE run_id=$1 AND (state IN ('failed','ownership_lost') OR (process_receipt->>'exit_confirmed'='true' AND CASE WHEN process_receipt->>'exit_code' ~ '^-?[0-9]{1,9}$' THEN (process_receipt->>'exit_code')::bigint<>0 ELSE false END))),

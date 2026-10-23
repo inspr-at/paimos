@@ -8,6 +8,10 @@ package authz
 // workspace grant, and project definitions a grant in their scope project.
 func init() {
 	registerRoutes("recurrences", map[string]string{
+		"GET /api/recurrences/{recurrenceId}/agent-owner":                        "nodes.read|recurrences.manage",
+		"PUT /api/recurrences/{recurrenceId}/agent-owner":                        "recurrences.manage",
+		"GET /api/recurrences/{recurrenceId}/runs/{runId}/agent-result":          "nodes.read|recurrences.manage",
+		"POST /api/recurrences/{recurrenceId}/runs/{runId}/agent-result":         "recurrences.manage",
 		"GET /api/recurrences/templates":                                         "nodes.read|recurrences.manage",
 		"POST /api/recurrences/templates/{templateId}/{templateVersion}/preview": "recurrences.manage",
 		"POST /api/recurrences/templates/{templateId}/{templateVersion}/apply":   "recurrences.manage",

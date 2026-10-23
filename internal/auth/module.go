@@ -213,7 +213,7 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			}
 			return
 		}
-		if kind == credAgent && p.MessagingOnly && !authz.MessagingAssistantInboxRoute(r.Pattern) {
+		if kind == credAgent && p.MessagingOnly && !authz.MessagingAssistantInboxRoute(r.Pattern) && !authz.AssistantPolicyReadRoute(r.Pattern) {
 			writeForbidden(w)
 			return
 		}
@@ -423,6 +423,8 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return "", false
 	case "POST /api/agents/assistants", "POST /api/agents/assistants/{principalId}/rotate", "DELETE /api/agents/assistants/{principalId}":
 		return "agents.create", true
+	case "GET /api/assistants/{principalId}/policy":
+		return "inbox.read", true
 	case "POST /api/agentd/native-sessions/claim", "POST /api/agentd/native-sessions/receipts",
 		"POST /api/agentd/native-sessions/events", "POST /api/agentd/native-sessions/finals",
 		"GET /api/agentd/native-sessions/commands":
@@ -472,6 +474,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return authz.AuthenticatedRoute, true
 		}
 	case "recurrences":
+		if len(parts) == 3 && validRouteUUID(parts[1]) && parts[2] == "agent-owner" && read || len(parts) == 5 && validRouteUUID(parts[1]) && parts[2] == "runs" && validRouteUUID(parts[3]) && parts[4] == "agent-result" && (read || r.Method == http.MethodPost) {
+			return "recurrences.manage", true
+		}
 		// This is an explicit agent allowlist. Every recurrence handler also
 		// checks live role grants and the recurrences.manage key ceiling.
 		if len(parts) >= 2 && parts[1] == "templates" {

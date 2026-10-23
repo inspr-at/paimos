@@ -24,6 +24,8 @@ func TestRecurrenceAgentScopeIsExplicitAndBounded(t *testing.T) {
 		{"GET", base}, {"POST", base}, {"POST", base + "/preview"},
 		{"GET", base + "/templates"}, {"HEAD", base + "/templates"},
 		{"POST", base + "/templates/weekly-cleanup/1/preview"}, {"POST", base + "/templates/weekly-cleanup/1/apply"},
+		{"GET", id + "/agent-owner"}, {"GET", id + "/runs/57000000-0000-4000-8000-000000000002/agent-result"},
+		{"POST", id + "/runs/57000000-0000-4000-8000-000000000002/agent-result"},
 		{"GET", id}, {"PUT", id}, {"DELETE", id}, {"HEAD", id + "/history"},
 		{"GET", id + "/preview"}, {"GET", id + "/history"}, {"GET", id + "/releases"}, {"GET", id + "/guardrails"},
 		{"POST", id + "/pause"}, {"POST", id + "/resume"}, {"POST", id + "/run-now"},
@@ -33,6 +35,8 @@ func TestRecurrenceAgentScopeIsExplicitAndBounded(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ method, path string }{
+		{"PUT", id + "/agent-owner"}, {"POST", id + "/agent-owner"},
+		{"PUT", id + "/runs/57000000-0000-4000-8000-000000000002/agent-result"},
 		{"PUT", id + "/guardrails"}, {"DELETE", base}, {"PATCH", id}, {"POST", id + "/history"},
 		{"POST", base + "/templates"}, {"PUT", base + "/templates"}, {"GET", base + "/templates/weekly-cleanup/1/apply"},
 		{"POST", base + "/templates/weekly-cleanup/1/resume"}, {"POST", base + "/templates/weekly-cleanup/1/apply/extra"},
