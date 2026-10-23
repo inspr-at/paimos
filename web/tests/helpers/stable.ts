@@ -7,6 +7,7 @@ export interface StableOptions {
   interactions: StableInteraction[]
   scrollAreas?: Record<string, Locator>
   tolerance?: number
+  ready?: () => Promise<unknown>
 }
 
 // Scroll-container coordinates distinguish intentional scrolling from layout
@@ -38,9 +39,10 @@ async function box(locator: Locator, name = 'control') {
  * selector groups, actions and the clicked row. Measure frame height only for a
  * phone sheet or an already scrolling body; top-anchored short frames may grow
  * downward. Locators may match the next series item; pass scrolling bodies to
- * catch horizontal overflow as well.
+ * catch horizontal overflow as well. Use ready for view-specific layout work
+ * that finishes after rows appear; it runs before every set of samples.
  */
-export async function expectStableControls({ controls, interactions, scrollAreas = {}, tolerance = 0.5 }: StableOptions) {
+export async function expectStableControls({ controls, interactions, scrollAreas = {}, tolerance = 0.5, ready }: StableOptions) {
   expect(Object.keys(controls).length, 'name at least one control').toBeGreaterThan(0)
   expect(interactions.length, 'provide at least one interaction').toBeGreaterThan(0)
   const overflow = async (step: string) => {
@@ -49,13 +51,21 @@ export async function expectStableControls({ controls, interactions, scrollAreas
       expect(extra, `${step}: ${name} horizontal overflow`).toBeLessThanOrEqual(1)
     }
   }
-  const baseline = new Map<string, Awaited<ReturnType<typeof box>>>()
-  for (const [name, locator] of Object.entries(controls)) baseline.set(name, await box(locator, name))
+  // Settle the named controls together. Serial double-frame waits multiplied
+  // Hours' 12 layouts into 300 frame waits and exhausted its 30-second budget.
+  // Every control still waits for fonts/animations and keeps the same checks.
+  const measure = async () => {
+    await ready?.()
+    return new Map(await Promise.all(Object.entries(controls).map(async ([name, locator]) =>
+      [name, await box(locator, name)] as const)))
+  }
+  const baseline = await measure()
   await overflow('initial')
   for (const interaction of interactions) {
     await interaction.run()
-    for (const [name, locator] of Object.entries(controls)) {
-      const current = await box(locator, name), before = baseline.get(name)!
+    const samples = await measure()
+    for (const [name, current] of samples) {
+      const before = baseline.get(name)!
       for (const axis of ['x', 'y', 'width', 'height'] as const) {
         expect(Math.abs(current[axis] - before[axis]), `${interaction.name}: ${name}.${axis} (${before[axis]} → ${current[axis]})`).toBeLessThanOrEqual(tolerance)
       }

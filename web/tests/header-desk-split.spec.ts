@@ -619,9 +619,13 @@ for (const width of [1024, 1440]) test(`a long request wraps inside the preview 
 // phones pin it at the foot of a full-height sheet.
 for (const width of [1440, 390]) test(`the preview's controls stay put through reading, a failure, Retry and a refresh at ${width}`, async ({ page }) => {
   await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
-  await page.clock.install({ time: new Date('2026-10-11T10:00:00Z') })
+  const at = new Date('2026-10-11T10:00:00Z')
+  await page.clock.install({ time: at })
   const added: DeskProjectionItem[] = []
   const control = await setup(page, { projectedSources: () => added })
+  // mockBusiness freezes Date.now(). AEON-1700 skips polls while it is frozen,
+  // so restore wall time that advances with the installed timers for this case.
+  await page.clock.setSystemTime(at)
   // The first read waits until the preview is open.
   let release!: () => void
   const firstRead = new Promise<void>(resolve => { release = resolve })
@@ -643,8 +647,10 @@ for (const width of [1440, 390]) test(`the preview's controls stay put through r
       } },
       { name: 'a poll fails', run: async () => {
         control.failProjection = true
+        const before = await page.evaluate(() => Date.now())
         const response = page.waitForResponse(response => new URL(response.url()).pathname === '/api/decision-desk/projection' && response.status() === 403)
         await page.clock.runFor(30_000)
+        expect(await page.evaluate(() => Date.now()), 'the poll advances wall time with its timers').toBeGreaterThanOrEqual(before + 30_000)
         await response
         // AEON-1477 retains the last good projection. The preview keeps its
         // rows and count; the full Desk owns the quiet refresh hint and Retry.
