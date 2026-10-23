@@ -179,11 +179,15 @@ export const models: VisualSetup = async (page, _profile, theme) => {
   await page.getByRole('button', { name: 'For everyone' }).click()
   const picker = page.locator('[data-pick="design"]')
   await picker.evaluate(element => {
+    if (!element.closest('main#main')) throw new Error('Models capture must scroll the settings pane')
+    // Limit the native nearest scroll to the Settings pane. Scrolling all
+    // ancestors can push the shell/header out of the approved capture frame.
     const options = { block: 'nearest', inline: 'nearest', container: 'nearest' } as const
     element.scrollIntoView(options)
   })
   await picker.click()
   await expect(page.locator('.mdl-pop .pm-lock')).toBeVisible()
+  await expect(page.locator('.app-header')).toBeVisible()
 }
 
 export const deliveryNumbers: VisualSetup = async (page, _profile, theme) => {

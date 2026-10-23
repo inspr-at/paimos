@@ -6,7 +6,7 @@ import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, type Browser, type Page, type TestInfo } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
-import { readBaselineBundle } from '../../../scripts/test-prune/visual-baselines.mjs'
+import { readBaselineBundle, referenceGate } from '../../../scripts/test-prune/visual-baselines.mjs'
 import { domAudit } from '../ui-audit-rules'
 
 const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8'))
@@ -31,6 +31,7 @@ export function visualCases(id: string): Checkpoint[] {
 }
 
 export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoint, setup: VisualSetup) {
+    const gate = await reportReference(info, checkpoint)
     const viewport = manifest.profiles[checkpoint.profile]
     const context = await browser.newContext({ viewport, colorScheme: checkpoint.theme, reducedMotion: 'reduce',
       hasTouch: checkpoint.profile === 'phone', locale: 'en-GB', timezoneId: 'Europe/Vienna' })
@@ -54,33 +55,61 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
         await Promise.all([...document.images].map(img => img.decode().catch(() => {})))
         await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
       }, checkpoint.theme)
-      // Always keep review evidence even when a quality check or the reference
-      // authority fails. Capturing evidence is not a passing visual comparison.
-      const png = await page.screenshot({ path: info.outputPath(`${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' })
+      // Awaiting states run quality only; round 5 does not recapture their
+      // unapproved images or manufacture a replacement reference.
+      const png = gate.mode === 'compare' ? await page.screenshot({ path: info.outputPath(`${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }) : null
       const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
       const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
       const violations = axe.violations.map(row => ({ id: row.id, impact: row.impact, nodes: row.nodes.map(node => node.target) }))
-      writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify({ id: checkpoint.id, owner: checkpoint.owner, fixture: checkpoint.fixture,
-        captureSHA, pngSHA256: createHash('sha256').update(png).digest('hex'), baselineCompared: false,
-        viewport, theme: checkpoint.theme, layout, axe: violations, console: errors, responses }, null, 2))
+      const report = { id: checkpoint.id, owner: checkpoint.owner, fixture: checkpoint.fixture,
+        captureSHA, pngSHA256: png ? createHash('sha256').update(png).digest('hex') : null, baselineCompared: false,
+        reference: gate, viewport, theme: checkpoint.theme, layout, axe: violations, console: errors, responses }
+      const saveReport = () => writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify(report, null, 2))
+      saveReport()
       expect(errors, 'unexpected console/page failure').toEqual([])
       expect(responses, 'unexpected failed HTTP reads').toEqual([])
       expect(layout, 'unexpected clipping, overlap or overflow').toEqual([])
       expect(violations, 'WCAG A/AA violations').toEqual([])
-      materializeReference(info, checkpoint)
-      await expect(page).toHaveScreenshot(`${checkpoint.id}.png`, { fullPage: false, animations: 'disabled', caret: 'hide', threshold: .2, maxDiffPixels: 0 })
+      report.baselineCompared = gate.mode === 'compare' ? await compareVisualReference(page, info, checkpoint) : false
+      saveReport()
     } catch (error) {
-      await page.screenshot({ path: info.outputPath(`failed-${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }).catch(() => {})
+      if (gate.mode === 'compare') await page.screenshot({ path: info.outputPath(`failed-${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }).catch(() => {})
       writeFileSync(info.outputPath(`failed-${checkpoint.id}.md`), `${checkpoint.id}: ${String(error)}\n${JSON.stringify({ console: errors, responses }, null, 2)}\n`)
       throw error
     } finally { await context.close() }
 }
 
-export function materializeReference(info: TestInfo, checkpoint: { id: string; reference: { attachmentMember: string } }) {
+async function reportReference(info: TestInfo, checkpoint: { id: string }, visual = manifest) {
+  const gate = referenceGate(visual, checkpoint.id)
+  if (gate.mode === 'awaiting-reference') {
+    const message = `${checkpoint.id}: awaiting reference (${gate.status}); quality checks required. ${gate.reason}`
+    info.annotations.push({ type: 'awaiting reference', description: message })
+    await info.attach(`${checkpoint.id}-awaiting-reference`, { body: message, contentType: 'text/plain' })
+    console.log(message)
+  }
+  return gate
+}
+
+// Kept shared with the real checkpoint runner so negative controls exercise
+// the same pinned/awaiting dispatch and pixel comparator as product states.
+export async function compareVisualReference(page: Page, info: TestInfo, checkpoint: { id: string; reference: { attachmentMember: string } },
+  { visual = manifest, baselineFile = process.env.AEON_VISUAL_BASELINE_FILE, timeout }: { visual?: typeof manifest; baselineFile?: string; timeout?: number } = {}) {
+  const gate = referenceGate(visual, checkpoint.id)
+  if (gate.mode === 'awaiting-reference') {
+    await reportReference(info, checkpoint, visual)
+    return false
+  }
+  materializeReference(info, checkpoint, { visual, baselineFile })
+  await expect(page).toHaveScreenshot(`${checkpoint.id}.png`, { fullPage: false, animations: 'disabled', caret: 'hide', threshold: .2, maxDiffPixels: 0, timeout })
+  return true
+}
+
+export function materializeReference(info: TestInfo, checkpoint: { id: string; reference: { attachmentMember: string } },
+  { visual = manifest, baselineFile = process.env.AEON_VISUAL_BASELINE_FILE } = {}) {
   if (info.config.updateSnapshots !== 'none') throw new Error('Visual baseline rewriting is forbidden; use the reviewed attachment')
-  const state = manifest.states.find((state: { checkpoints: { id: string }[] }) => state.checkpoints.some(row => row.id === checkpoint.id))
+  const state = visual.states.find((state: { checkpoints: { id: string }[] }) => state.checkpoints.some(row => row.id === checkpoint.id))
   if (!state) throw new Error(`Unknown visual checkpoint: ${checkpoint.id}`)
-  const references = readBaselineBundle(process.env.AEON_VISUAL_BASELINE_FILE, manifest, { stateIds: [state.id] })
+  const references = readBaselineBundle(baselineFile, visual, { stateIds: [state.id] })
   const reference = references.get(checkpoint.reference.attachmentMember)
   if (!reference) throw new Error(`Missing approved visual reference: ${checkpoint.id}`)
   const path = info.snapshotPath(`${checkpoint.id}.png`)

@@ -18,10 +18,10 @@
     ],
     "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
     "recordedBy": "LEAD-M",
-    "scope": "Only these seven states and their exact 30 checkpoint bytes are approved; CI materialization remains blocked."
+    "scope": "Only these seven states and their exact 30 checkpoint bytes are approved. Each comparison requires verified materialization; no cuts are authorized in round 5."
   },
   "baselineAuthority": {
-    "status": "awaiting-ci-materialization",
+    "status": "approved",
     "source": {
       "kind": "existing-ppm-ticket-attachment",
       "ticket": "AEON-1670",
@@ -46,14 +46,30 @@
       "archiveManifest": {
         "attachmentMember": "manifest.json",
         "sha256": "b5e7c215b92ce31ff4ac19fb1e8d4fbeea3d56ed18a6b6a9447e8cd5c3cd9ab5"
+      },
+      "mirror": {
+        "kind": "github-prerelease",
+        "repository": "inspr-at/paimos",
+        "tag": "test-references-1",
+        "releaseURL": "https://github.com/inspr-at/paimos/releases/tag/test-references-1",
+        "archive": {
+          "name": "AEON-1674-approved-1-2e6c7938e.tar",
+          "url": "https://github.com/inspr-at/paimos/releases/download/test-references-1/AEON-1674-approved-1-2e6c7938e.tar"
+        },
+        "manifest": {
+          "name": "AEON-1674-approved-1-2e6c7938e.tar.manifest.json",
+          "url": "https://github.com/inspr-at/paimos/releases/download/test-references-1/AEON-1674-approved-1-2e6c7938e.tar.manifest.json"
+        },
+        "authority": "CI transport only; AEON-1670 records Tick approval, and the pinned archive and detached-manifest SHA-256 values govern both copies."
       }
     },
     "retention": {
       "policy": "Keep the approved reference attachment for the lifetime of this visual set; do not rely on expiring CI captures. Removal or loss requires a newly reviewed reference.",
-      "availability": "Both permanent AEON-1670 attachments were downloaded through the existing authorized local PPM CLI and byte-verified. Hosted CI has no existing PPM attachment-read mechanism; approval cannot become comparison or cut authority until CI verifies the archive SHA-256 and materializes the reviewed baseline.json.",
+      "availability": "Permanent AEON-1670 approval attachments are mirrored byte-for-byte as named assets on GitHub prerelease test-references-1. CI downloads with its built-in GITHUB_TOKEN (contents:read), verifies the archive and detached manifest before reading tar members, and re-verifies both assets in every browser shard.",
       "verifiedAt": "2026-10-23T02:30:54Z",
-      "verificationScope": "local-authorized-ppm-cli-only",
-      "ciVerifiedAt": null
+      "verificationScope": "local-authorized-ppm-cli and local GitHub release download; every consumer verifies executable materialization",
+      "ciVerifiedAt": null,
+      "mirrorVerifiedAt": "2026-10-23T02:47:47.418135Z"
     },
     "onMissing": "fail",
     "onExpired": "fail",
@@ -61,17 +77,17 @@
     "automaticRewrite": false,
     "currentRunMayBeReference": false,
     "ciMaterialization": {
-      "status": "blocked",
-      "missing": "An existing authorized PPM / INSPR attachment-read mechanism available to GitHub-hosted web-setup and web-shard jobs for the AEON-1670 node and these attachment ids.",
-      "evidence": [
-        "ci.yml web-setup, web-unit and web-shard run on ubuntu-latest without a PPM credential, configured PPM client or attachment download step.",
-        "Repository Actions secret names: empty; organization Actions secret names: empty.",
-        "Repository variable names: AEON_POOL_EVENTS and CI_AFFECTED_LANE; environments: homebrew-tap, release-pinning, release-signing.",
-        "Workflow credential references use GITHUB_TOKEN and release/signing App authorities; no existing PPM token exchange or attachment-read bridge was found."
-      ],
-      "stopAuthority": "AEON-1674 round-4 brief, item 2: If CI has no existing way to read a ppm attachment, STOP and report exactly what is missing.",
+      "status": "implemented-awaiting-hosted-ci",
+      "transport": "source.mirror; gh release download test-references-1 --repo inspr-at/paimos; built-in GITHUB_TOKEN; contents:read only",
+      "entrypoint": "node scripts/test-prune/visual-baselines.mjs download tmp/visual-baselines",
+      "consumerVerification": "node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines",
+      "workflow": "web-setup downloads and verifies; web-runtime includes both original assets; web-shard verifies again before any browser run",
+      "baselineFile": "tmp/visual-baselines/baseline.json",
+      "report": "tmp/visual-baselines/reference-gates.json and reference-gates.md; workflow step summary and per-checkpoint evidence",
+      "onUnavailable": "fail required web setup/shard with an explicit materialization error",
       "newCredentialCreated": false,
-      "workflowChanged": false
+      "workflowChanged": true,
+      "cutsAuthorized": false
     }
   },
   "profiles": {
@@ -222,7 +238,15 @@
             "sha256": null
           }
         }
-      ]
+      ],
+      "approval": {
+        "reviewer": "Tick",
+        "decision": "changes-requested",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "reason": "Awaiting AEON-1688 and the next reviewed reference round; no recapture or pin in round 5.",
+        "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
+      }
     },
     {
       "id": "goals",
@@ -355,7 +379,15 @@
             "sha256": null
           }
         }
-      ]
+      ],
+      "approval": {
+        "reviewer": "Tick",
+        "decision": "changes-requested",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "reason": "Awaiting AEON-1688 and the next reviewed reference round; no recapture or pin in round 5.",
+        "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
+      }
     },
     {
       "id": "session-chat",
@@ -483,7 +515,15 @@
             "sha256": null
           }
         }
-      ]
+      ],
+      "approval": {
+        "reviewer": "Tick",
+        "decision": "changes-requested",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "reason": "Awaiting AEON-1688 and the next reviewed reference round; no recapture or pin in round 5.",
+        "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
+      }
     },
     {
       "id": "account-use-matrix",
@@ -554,7 +594,15 @@
             "sha256": null
           }
         }
-      ]
+      ],
+      "approval": {
+        "reviewer": "Tick",
+        "decision": "changes-requested",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "reason": "Awaiting AEON-1688 and the next reviewed reference round; no recapture or pin in round 5.",
+        "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
+      }
     },
     {
       "id": "models",
@@ -606,7 +654,15 @@
             "sha256": null
           }
         }
-      ]
+      ],
+      "approval": {
+        "reviewer": "Tick",
+        "decision": "changes-requested",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "reason": "Awaiting AEON-1688 and the next reviewed reference round; no recapture or pin in round 5.",
+        "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
+      }
     },
     {
       "id": "access",
@@ -782,7 +838,15 @@
             "sha256": null
           }
         }
-      ]
+      ],
+      "approval": {
+        "reviewer": "Tick",
+        "decision": "changes-requested",
+        "reviewedOn": "2026-10-23",
+        "recordedBy": "LEAD-M",
+        "reason": "Awaiting AEON-1688 and the next reviewed reference round; no recapture or pin in round 5.",
+        "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
+      }
     },
     {
       "id": "hours",

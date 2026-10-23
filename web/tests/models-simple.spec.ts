@@ -132,6 +132,8 @@ test('admins switch between For everyone and Just me; the lock lives in the pick
       await expect(header).toBeVisible()
       expect((await header.boundingBox())!.y).toBe(0)
       expect(await preview.evaluate(() => window.scrollY)).toBe(0)
+      expect(await preview.locator('.app-shell').evaluate(shell => shell.scrollTop)).toBe(0)
+      await expect(preview.locator('[data-pick="design"]')).toBeInViewport()
       const guard = await controlStability(preview, { header })
       await guard.check(() => preview.keyboard.press('Escape'))
       await guard.check(() => preview.locator('[data-pick="design"]').click())

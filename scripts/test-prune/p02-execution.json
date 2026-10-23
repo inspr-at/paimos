@@ -2,9 +2,9 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "round4-approved-attachment-recorded-ci-read-path-blocked",
+  "status": "round5-mirror-materialization-and-state-gates-implemented",
   "cuts": false,
-  "note": "BLOCKED: Round 4 records the permanent AEON-1670 archive and detached-manifest attachment identities/digests, all 30 exact member pins and Tick approval for only seven states. Both attachments downloaded through the existing local PPM CLI and all 62 tar members, 61 payload digests, 30 decoded baseline PNGs and 30 quality reports verified. Hosted web CI has no existing authorized PPM attachment-read mechanism: repository and organization Actions secret-name inventories are empty, and current web jobs have no configured client or download bridge. Item 2 explicitly requires stopping here; LEAD must supply an existing CI-accessible authority. No workflow or per-state gating implementation, acceptance negative-control proof, recaptures, cuts, pushes, deployments or review/model calls are claimed. Static remains for hosted CI under the night protocol.",
+  "note": "Round 5 replaces the missing hosted PPM read path with the byte-identical GitHub prerelease test-references-1 transport. The AEON-1670 attachments remain Tick approval authority. Setup verifies the archive and detached manifest before any tar reads, then validates the internal manifest, exact members, baseline and all 30 PNG pins; browser shards re-verify the original assets. Seven states/30 checkpoints compare strictly plus quality; six changes-requested states/30 checkpoints and five deferred states/20 checkpoints run quality and report awaiting reference without failing for missing approval alone. No changed-state recapture, cuts, tier changes, push, deploy or model/review gates. Validation results are recorded in round5.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -22,10 +22,6 @@
       "kind": "product-prerequisite",
       "state": "goals",
       "reason": "Current Goals lacks v6 Expert/Simple controls and stage tracks. Product packages AEON-1621 / AEON-1625 remain prerequisites; AEON-1625 is open and carries the approved Expanded/ExpandedSimple HTML boards."
-    },
-    {
-      "kind": "reference-authority",
-      "reason": "Permanent attachments and Tick approvals are now recorded and locally verified in round 4. CI materialization remains blocked because GitHub-hosted web jobs have no existing authorized PPM attachment-read mechanism. Round-4 item 2 requires STOP; comparison and cut authority remain disabled. Changed states still await AEON-1688 and the next reference round."
     },
     {
       "kind": "quality-finding",
@@ -48,9 +44,8 @@
       "reason": "Approved attachment-preview focus exposes Open/Delete overlap in all four profiles, sticky key/placement selector overlap on desktop, and aria-prohibited-attr on #v-5. Deferred on AEON-1674 for LEAD product-owner routing. No product code or audit exception changed."
     },
     {
-      "kind": "reference-authority",
-      "round": 3,
-      "reason": "Permanent attachments and Tick approvals are now recorded and locally verified in round 4. CI materialization remains blocked because GitHub-hosted web jobs have no existing authorized PPM attachment-read mechanism. Round-4 item 2 requires STOP; comparison and cut authority remain disabled. Changed states still await AEON-1688 and the next reference round."
+      "kind": "reference-review",
+      "reason": "Six changes-requested states await AEON-1688 and the next reviewed capture round; deferred state prerequisites and quality findings remain with their existing product owners. These states report awaiting reference; missing approval alone does not block their required check, while actual quality failures still do."
     }
   ],
   "measurements": [
@@ -3564,6 +3559,112 @@
     "cuts": false,
     "workflowChanged": false,
     "newCredentialCreated": false,
+    "noPushOrDeploy": true,
+    "noModelOrReviewGateCalls": true
+  },
+  "round5": {
+    "brief": "aeon-1674-prune-p02-shell-visual-r5.md",
+    "mergedMain": "0411c88abf894d35253e289129cfa85273e7ae0e",
+    "sourceOfApproval": "AEON-1670 permanent PPM attachments recorded in round4; unchanged digests and pins",
+    "mirror": {
+      "kind": "github-prerelease",
+      "repository": "inspr-at/paimos",
+      "tag": "test-references-1",
+      "releaseURL": "https://github.com/inspr-at/paimos/releases/tag/test-references-1",
+      "archive": {
+        "name": "AEON-1674-approved-1-2e6c7938e.tar",
+        "url": "https://github.com/inspr-at/paimos/releases/download/test-references-1/AEON-1674-approved-1-2e6c7938e.tar"
+      },
+      "manifest": {
+        "name": "AEON-1674-approved-1-2e6c7938e.tar.manifest.json",
+        "url": "https://github.com/inspr-at/paimos/releases/download/test-references-1/AEON-1674-approved-1-2e6c7938e.tar.manifest.json"
+      },
+      "authority": "CI transport only; AEON-1670 records Tick approval, and the pinned archive and detached-manifest SHA-256 values govern both copies."
+    },
+    "materialization": {
+      "producer": "web-setup: node scripts/test-prune/visual-baselines.mjs download tmp/visual-baselines",
+      "credential": "built-in GITHUB_TOKEN with contents:read only; no new credential",
+      "consumer": "web-shard: node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines; AEON_VISUAL_BASELINE_FILE=tmp/visual-baselines/baseline.json",
+      "integrityOrder": [
+        "bounded archive and detached-manifest reads",
+        "archive SHA-256 and detached-manifest SHA-256 before tar listing/extraction",
+        "detached authority and exact approved-state/checkpoint pins",
+        "exact archive member inventory",
+        "internal manifest digest and payload inventory",
+        "baseline digest, provenance and all 30 decoded PNG digests"
+      ],
+      "localMirrorVerification": "passed; actual GitHub release download is byte-identical to pinned AEON-1670 approval archive",
+      "hostedCIVerification": "pending coordinator push"
+    },
+    "gatingTable": [
+      {
+        "decision": "approved",
+        "states": [
+          "projects",
+          "access",
+          "knowledge",
+          "public-quote",
+          "agent-rules",
+          "start-agent",
+          "quote-editor"
+        ],
+        "checkpoints": 30,
+        "afterMaterialization": "strict image comparison plus quality",
+        "implemented": true
+      },
+      {
+        "decision": "changes-requested",
+        "states": [
+          "tickets",
+          "agents",
+          "decision-desk",
+          "account-use-matrix",
+          "delivery-numbers",
+          "models"
+        ],
+        "checkpoints": 30,
+        "afterMaterialization": "quality checks plus explicit awaiting reference; absence of reference alone is nonblocking",
+        "implemented": true
+      },
+      {
+        "decision": "deferred",
+        "states": [
+          "goals",
+          "session-chat",
+          "hours",
+          "capacity",
+          "ticket-workspace"
+        ],
+        "checkpoints": 20,
+        "afterMaterialization": "quality checks plus explicit awaiting reference; absence of reference alone is nonblocking",
+        "implemented": true
+      }
+    ],
+    "negativeControls": {
+      "tamperedArchive": "passed; SHA-256 mismatch before tar can be invoked",
+      "wrongArchiveDigest": "passed; SHA-256 mismatch before tar can be invoked",
+      "tamperedDetachedManifest": "passed; SHA-256 mismatch before tar can be invoked",
+      "wrongManifestDigest": "passed; SHA-256 mismatch before tar can be invoked",
+      "approvedStateMissingPin": "passed; Unpinned visual reference, never awaiting",
+      "pinnedImageChanged": "implemented; browser validation pending",
+      "awaitingStateNeverBlocks": "implemented for both changes-requested and deferred; browser validation pending"
+    },
+    "tests": {
+      "transport": "passed: node --experimental-strip-types --test web/tests/visual-baselines.test.ts",
+      "ledger": "passed: node --experimental-strip-types --test web/tests/test-prune-ledger.test.ts",
+      "browser": "pending"
+    },
+    "static": {
+      "status": "hosted-CI-pending",
+      "reason": "Round-5 brief assigns static to hosted CI under night protocol.",
+      "countedAsGreen": false
+    },
+    "newTestRegistrations": 0,
+    "newSourceFiles": [],
+    "outsideWriteSet": [],
+    "recapturedChangesRequestedStates": false,
+    "cuts": false,
+    "tierChanges": false,
     "noPushOrDeploy": true,
     "noModelOrReviewGateCalls": true
   }

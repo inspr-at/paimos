@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { verifyBaselineBundle, readBaselineBundle } from '../../scripts/test-prune/visual-baselines.mjs'
+import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGates, referenceReport } from '../../scripts/test-prune/visual-baselines.mjs'
 import { packCandidates } from '../../scripts/test-prune/visual-candidates.mjs'
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
@@ -20,6 +20,7 @@ test('visual references require approval, immutable attachment bytes and every e
   visual.approval = { reviewer: 'Tick', status: 'approved', approvedAt: 'synthetic-proof', evidence: 'Synthetic fixture, never a product approval' }
   Object.assign(visual.baselineAuthority, { status: 'approved' })
   Object.assign(visual.baselineAuthority.source, { attachmentId: 'synthetic-test-only' })
+  visual.baselineAuthority.source.format = 'json'
   visual.baselineAuthority.retention.verifiedAt = 'synthetic-proof'
   const files = visual.states.flatMap((state: { checkpoints: { id: string; reference: { attachmentMember: string; sha256: string } }[] }) => state.checkpoints.map(checkpoint => {
     checkpoint.reference = { attachmentMember: `${checkpoint.id}.png`, sha256: hash(png) }
@@ -46,6 +47,67 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.throws(() => verifyBaselineBundle(duplicate.changed, duplicate.pinned), /duplicate/)
   const mismatch = rehash([{ ...files[0], base64: Buffer.concat([png, Buffer.from('changed')]).toString('base64') }, ...files.slice(1)])
   assert.throws(() => verifyBaselineBundle(mismatch.changed, mismatch.pinned), /member SHA-256 mismatch/)
+
+  // Risk: a mutable release tag, a corrupt download or an incorrect digest
+  // must never reach tar, even when the reviewed baseline itself is valid.
+  const mirrored = structuredClone(manifest)
+  const approved = mirrored.states.filter((state: { approval?: { decision: string } }) => state.approval?.decision === 'ok-to-pin')
+  const approvedFiles = approved.flatMap((state: { checkpoints: { id: string; reference: { attachmentMember: string; sha256: string } }[] }) => state.checkpoints.map(checkpoint => {
+    checkpoint.reference.sha256 = hash(png)
+    return { name: checkpoint.reference.attachmentMember, base64: png.toString('base64') }
+  }))
+  const source = mirrored.baselineAuthority.source
+  const baseline = Buffer.from(JSON.stringify({ version: 1, captureSHA: source.captureSHA, files: approvedFiles }))
+  source.baselineBundle.sha256 = hash(baseline)
+  const payload = [...approvedFiles.flatMap((file: { name: string }) => [
+    { name: file.name, bytes: png }, { name: `quality/${file.name.replace('.png', '.json')}`, bytes: Buffer.from('{}') },
+  ]), { name: 'baseline.json', bytes: baseline }]
+  const members = approved.flatMap((state: { checkpoints: { id: string; reference: { attachmentMember: string; sha256: string } }[] }) =>
+    state.checkpoints.map(checkpoint => ({ id: checkpoint.id, ...checkpoint.reference })))
+  const inner = { version: 1, captureSHA: source.captureSHA, states: mirrored.approval.states, members,
+    payload: payload.map(file => ({ name: file.name, bytes: file.bytes.length, sha256: hash(file.bytes) })) }
+  const innerBytes = Buffer.from(JSON.stringify(inner))
+  source.archiveManifest.sha256 = hash(innerBytes)
+  // A bounded ustar fixture exercises the real system tar reader on both macOS
+  // and Linux, without depending on uncommitted review assets or any network.
+  const entry = ({ name, bytes }: { name: string; bytes: Buffer }) => {
+    const header = Buffer.alloc(512)
+    header.write(name)
+    header.write('0000644\0', 100); header.write('0000000\0', 108); header.write('0000000\0', 116)
+    header.write(bytes.length.toString(8).padStart(11, '0') + '\0', 124)
+    header.write('00000000000\0', 136); header.fill(32, 148, 156); header.write('0', 156)
+    header.write('ustar\0', 257); header.write('00', 263)
+    const checksum = header.reduce((sum, byte) => sum + byte, 0)
+    header.write(checksum.toString(8).padStart(6, '0') + '\0 ', 148)
+    return Buffer.concat([header, bytes, Buffer.alloc((512 - bytes.length % 512) % 512)])
+  }
+  const archive = Buffer.concat([...payload, { name: 'manifest.json', bytes: innerBytes }].map(entry).concat(Buffer.alloc(1024)))
+  Object.assign(source, { sha256: hash(archive), bytes: archive.length })
+  const detached = Buffer.from(JSON.stringify({ ...inner, archive: { sha256: source.sha256, bytes: source.bytes },
+    baselineBundle: { member: 'baseline.json', sha256: source.baselineBundle.sha256 }, manifestSHA256: source.archiveManifest.sha256 }))
+  Object.assign(source.manifest, { sha256: hash(detached), bytes: detached.length })
+  assert.equal(verifyReferenceArchive(archive, detached, mirrored).references.size, 30)
+  const noExtraction = { tar: () => assert.fail('Unverified bytes reached tar') }
+  const tampered = Buffer.from(archive); tampered[600] ^= 1
+  assert.throws(() => verifyReferenceArchive(tampered, detached, mirrored, noExtraction), { message: 'Visual reference archive SHA-256 mismatch' })
+  const wrongDigest = structuredClone(mirrored); wrongDigest.baselineAuthority.source.sha256 = '0'.repeat(64)
+  assert.throws(() => verifyReferenceArchive(archive, detached, wrongDigest, noExtraction), { message: 'Visual reference archive SHA-256 mismatch' })
+  const wrongManifest = Buffer.from(detached); wrongManifest[20] ^= 1
+  assert.throws(() => verifyReferenceArchive(archive, wrongManifest, mirrored, noExtraction), { message: 'Visual detached manifest SHA-256 mismatch' })
+  const wrongManifestDigest = structuredClone(mirrored); wrongManifestDigest.baselineAuthority.source.manifest.sha256 = '0'.repeat(64)
+  assert.throws(() => verifyReferenceArchive(archive, detached, wrongManifestDigest, noExtraction), { message: 'Visual detached manifest SHA-256 mismatch' })
+  assert.throws(() => verifyReferenceArchive(Buffer.alloc(0), detached, mirrored, noExtraction), /archive size mismatch/)
+
+  const gates = referenceGates(manifest)
+  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').length, 7)
+  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').reduce((n: number, gate: { checkpoints: number }) => n + gate.checkpoints, 0), 30)
+  const awaiting = gates.filter((gate: { mode: string }) => gate.mode === 'awaiting-reference')
+  assert.equal(awaiting.length, 11)
+  assert.equal(awaiting.reduce((n: number, gate: { checkpoints: number }) => n + gate.checkpoints, 0), 50)
+  for (const gate of awaiting) assert.ok(referenceReport(manifest).markdown.includes(`| ${gate.state} | ${gate.checkpoints} | awaiting reference (${gate.status})`))
+  const lostPin = structuredClone(manifest)
+  lostPin.states.find((state: { id: string }) => state.id === 'projects').checkpoints[0].reference.sha256 = null
+  assert.throws(() => referenceGates(lostPin), { message: 'Unpinned visual reference: V-projects-390-light' })
 
   // One pinned area does not need reference bytes from unrelated pending or
   // deferred states. The required state's own missing member still rejects.
