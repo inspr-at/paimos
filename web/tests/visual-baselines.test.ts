@@ -72,13 +72,23 @@ test('visual references require approval, immutable attachment bytes and every e
   }))
   const packed = packCandidates(records, manifest)
   assert.equal(packed.review.status, 'pending-Tick-review')
-  assert.equal(packed.review.members.length, 64)
-  assert.deepEqual(packed.review.deferred.map((state: { id: string }) => state.id), ['goals', 'session-chat', 'hours', 'capacity'])
-  assert.throws(() => packCandidates(records.slice(1), manifest), /all 64/)
+  assert.equal(packed.review.members.length, 60)
+  assert.deepEqual(packed.review.deferred.map((state: { id: string }) => state.id), ['goals', 'session-chat', 'hours', 'capacity', 'ticket-workspace'])
+  assert.throws(() => packCandidates(records.slice(1), manifest), /all 60/)
   assert.throws(() => packCandidates([...records.slice(0, -1), records[0]], manifest), /Duplicate/)
   const changedSource = records.map((record: { png: Buffer; quality: Record<string, unknown> }) => ({ png: record.png, quality: { ...record.quality } }))
   changedSource[1].quality.captureSHA = 'b'.repeat(40)
   assert.throws(() => packCandidates(changedSource, manifest), /one source SHA/)
+  const wrongFixture = records.map((record: { quality: Record<string, unknown> }, index: number) => index ? record : { ...record, quality: { ...record.quality, owner: 'tests/visual/unrelated.spec.ts' } })
+  assert.throws(() => packCandidates(wrongFixture, manifest), /Wrong review fixture\/profile: V-projects-390-light/)
+  const deferredCapture = records.map((record: { quality: Record<string, unknown> }, index: number) => index ? record : { ...record, quality: { ...record.quality, id: 'V-goals-390-light' } })
+  assert.throws(() => packCandidates(deferredCapture, manifest), /Missing review capture: V-projects-390-light/)
+  const wrongSize = records.map((record: { png: Buffer }, index: number) => {
+    if (index) return record
+    const png = Buffer.from(record.png); png.writeUInt32BE(1, 16)
+    return { ...record, png }
+  })
+  assert.throws(() => packCandidates(wrongSize, manifest), /Wrong capture dimensions: V-projects-390-light/)
   for (const name of ['layout', 'axe', 'console', 'responses']) {
     const failedQuality = records.map((record: { quality: Record<string, unknown> }, index: number) => index ? record : { ...record, quality: { ...record.quality, [name]: ['Unresolved finding'] } })
     assert.throws(() => packCandidates(failedQuality, manifest), new RegExp(`Unresolved ${name}`))

@@ -1099,7 +1099,12 @@
             "sha256": null
           }
         }
-      ]
+      ],
+      "referenceStatus": "deferred",
+      "deferredUntil": [
+        "AEON-1674"
+      ],
+      "deferredReason": "New strict quality findings exposed by the approved attachment-preview focus: attachment Open/Delete buttons overlap; the sticky key overlaps a scrolled placement selector; axe reports aria-prohibited-attr on #v-5. Reported to LEAD on AEON-1674 for product-owner routing; no product fix or audit exception is introduced here."
     }
   ]
 }

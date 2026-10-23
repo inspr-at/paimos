@@ -2,9 +2,9 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "blocked-before-cuts",
+  "status": "round-2-reference-preparation",
   "cuts": false,
-  "note": "Candidate destinations are native registrations, not a claim of replacement equivalence. Every original stays at its original tier until its vectors and negative control are proven and the approved reference attachment is available.",
+  "note": "Round 2 executes per-area authority and runtime counterexamples, and prepares only quality-clean references. All original cases and tiers remain; initial Tick reference review, AEON-1670 attachment identity, verified availability and CI materialization are round 3 work before cuts.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -24,21 +24,8 @@
       "reason": "Current Goals lacks v6 Expert/Simple controls and stage tracks. Product packages AEON-1621 / AEON-1625 remain prerequisites; AEON-1625 is open and carries the approved Expanded/ExpandedSimple HTML boards."
     },
     {
-      "kind": "product-prerequisite",
-      "state": "ticket-workspace",
-      "reason": "The current rendered Markdown task checkboxes are disabled and cannot receive the requested checklist focus ring."
-    },
-    {
       "kind": "reference-authority",
       "reason": "Tick initial-reference review and permanent AEON-1670 attachment identity/member/bundle digests remain pending. Existing-authority CI materialization still needs verification."
-    },
-    {
-      "kind": "replacement-proof",
-      "reason": "All 25 focused browser candidates passed across remote runs. Runtime conversion equivalence and all individual negative controls still require execution/review. Pure audit filtering now has a registered runtime test; genuine PerformanceObserver and browser geometry originals stay."
-    },
-    {
-      "kind": "runner",
-      "reason": "ci-static-remote.sh exits 3 under the night protocol; changed runtime suites require hosted CI. Remote browser capacity is intermittent."
     },
     {
       "kind": "quality-finding",
@@ -54,6 +41,16 @@
       "kind": "quality-finding",
       "state": "capacity",
       "reason": "The selected daily-limit description fails color contrast in both dark profiles; it remains a failure."
+    },
+    {
+      "kind": "quality-finding",
+      "state": "ticket-workspace",
+      "reason": "Approved attachment-preview focus exposes Open/Delete overlap in all four profiles, sticky key/placement selector overlap on desktop, and aria-prohibited-attr on #v-5. Deferred on AEON-1674 for LEAD product-owner routing. No product code or audit exception changed."
+    },
+    {
+      "kind": "reference-authority",
+      "round": 3,
+      "reason": "LEAD gives the clean bundle to Tick, uploads it to AEON-1670, and supplies the permanent attachment identity. Then record identity, verify availability and CI materialization, and evaluate per-risk cuts."
     }
   ],
   "measurements": [
@@ -2171,8 +2168,8 @@
   "deliberatelyRetainedRisks": [
     "All 1090 original case identities and their tiers, including historical drift aliases.",
     "Native focus/touch/scroll/geometry and PerformanceObserver coverage without equivalent proven runtime proof.",
-    "Theme revision/pagination/identity permutations until runtime equivalence is executed.",
-    "Every audit/axe tour until all 80 reviewed image comparisons and their quality checks can pass.",
+    "Native Theme geometry, focus and scrolling stay in browser owners; revision/pagination/identity runtime vectors now execute with token-fence counterexamples.",
+    "Every audit/axe tour until the approved, pinned visual states protecting that tour's risk have passing image comparisons and quality checks.",
     "Two explicit additional browser infrastructure guards are counted above the 105 product-case ceiling; no hidden matrix or demotion compensates for them."
   ],
   "resolvedPrerequisites": [
@@ -2256,23 +2253,13 @@
       "reason": "Places verified reference PNGs in ignored output and forbids automatic snapshot rewriting."
     }
   ],
-  "unprovenRuntimeFiles": [
-    "tests/agent-appearance.unit.test.ts",
-    "tests/agent-indicator.unit.test.ts",
-    "tests/brandMarks.test.ts",
-    "tests/footer-summary.unit.test.ts",
-    "tests/header-menus.test.ts",
-    "tests/tooltip-focus.unit.test.ts",
-    "tests/ui-audit-rules.unit.test.ts",
-    "tests/visual-baselines.test.ts",
-    "tests/test-prune-ledger.test.ts",
-    "scripts/ci-web-shard.test.mjs"
-  ],
+  "unprovenRuntimeFiles": [],
   "captureBundleNegativeControl": {
     "command": "node scripts/test-prune/visual-candidates.mjs web/test-results/AEON-1674-visual-full-a web/test-results/AEON-1674-incomplete-review-bundle.json",
     "exit": 1,
-    "expectedError": "Review bundle needs all 80 quality-checked captures",
-    "bundleWritten": false
+    "expectedError": "Review bundle needs all 60 quality-checked captures from the non-deferred states",
+    "bundleWritten": false,
+    "note": "Executed the exact CLI counterexample against the current 60-member clean-set policy: exit 1 with the expected all-60 error, and no output bundle. The unit proof also rejects duplicates, mixed source SHA, wrong fixture/dimensions, deferred substitutes, every quality finding category and changed member bytes."
   },
   "sharedRegistrationChanges": {
     "tierWriter": "node scripts/test-tiers/cli.mjs classify --kind web --tier ESSENTIAL --only P02; node scripts/test-tiers/cli.mjs manifests --write",
@@ -2290,7 +2277,7 @@
     "sourceOwnership": "Existing scripts/**, web/scripts/**, web/src/** and web/tests/** slice globs cover all additions; no slice registry change."
   },
   "handoffVerification": {
-    "mainMerged": "396567da0",
+    "mainMerged": "af8da6948",
     "fetchConfirmedNoNewMain": true,
     "diffCheck": "passed",
     "pruneInvariantCheck": "passed; phase P01 and cuts false",
@@ -2299,6 +2286,764 @@
     "staticExit": 3,
     "staticRefusal": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job",
     "noPushOrDeploy": true,
-    "noModelOrReviewGateCalls": true
-  }
+    "noModelOrReviewGateCalls": true,
+    "runtimeEquivalence": "18 planned target suites executed; 33 individual mutation controls detected; native-only risks retained",
+    "round2Cuts": false,
+    "staticDisposition": "Required full static checks run in hosted CI under the night protocol; exit 3 is not green."
+  },
+  "runtimeEquivalence": {
+    "status": "executed-for-runtime-owned-vectors",
+    "sourceSHA": "36b4ee0d5d7a60cfa5f0bd82cc6982e120cc45e3",
+    "scope": "All 18 planned runtime targets; pure data, state, renderer, lifecycle, identity/revision, copy, routing dispatch and audit filtering. Physical geometry/touch/focus, browser security and PerformanceObserver claims remain in browser owners.",
+    "suites": [
+      {
+        "file": "tests/agent-indicator.unit.test.ts",
+        "exit": 0,
+        "seconds": 1.635,
+        "passed": 28,
+        "failed": 0
+      },
+      {
+        "file": "tests/agent-appearance.unit.test.ts",
+        "exit": 0,
+        "seconds": 0.578,
+        "passed": 3,
+        "failed": 0
+      },
+      {
+        "file": "tests/footer-summary.unit.test.ts",
+        "exit": 0,
+        "seconds": 0.463,
+        "passed": 25,
+        "failed": 0
+      },
+      {
+        "file": "tests/ui-audit-rules.unit.test.ts",
+        "exit": 0,
+        "seconds": 0.428,
+        "passed": 1,
+        "failed": 0
+      },
+      {
+        "file": "tests/clip-tip.unit.test.ts",
+        "exit": 0,
+        "seconds": 0.707,
+        "passed": 5,
+        "failed": 0
+      },
+      {
+        "file": "tests/phone-controls.unit.test.ts",
+        "exit": 0,
+        "seconds": 0.535,
+        "passed": 3,
+        "failed": 0
+      },
+      {
+        "file": "tests/display-language.unit.test.ts",
+        "exit": 0,
+        "seconds": 2.47,
+        "passed": 4,
+        "failed": 0
+      },
+      {
+        "file": "tests/indicator-renderers.unit.test.ts",
+        "exit": 0,
+        "seconds": 0.873,
+        "passed": 27,
+        "failed": 0
+      },
+      {
+        "file": "tests/agent-theme.unit.test.ts",
+        "exit": 0,
+        "seconds": 0.543,
+        "passed": 3,
+        "failed": 0
+      },
+      {
+        "file": "tests/theme-editor.unit.test.ts",
+        "exit": 0,
+        "seconds": 0.59,
+        "passed": 1445,
+        "failed": 0
+      },
+      {
+        "file": "tests/tenant-brand.test.ts",
+        "exit": 0,
+        "seconds": 0.188,
+        "passed": 6,
+        "failed": 0
+      },
+      {
+        "file": "tests/hide-states.test.ts",
+        "exit": 0,
+        "seconds": 0.244,
+        "passed": 9,
+        "failed": 0
+      },
+      {
+        "file": "tests/status-colours.test.ts",
+        "exit": 0,
+        "seconds": 0.19,
+        "passed": 1,
+        "failed": 0
+      },
+      {
+        "file": "tests/theme-control-geometry.test.ts",
+        "exit": 0,
+        "seconds": 0.197,
+        "passed": 3,
+        "failed": 0
+      },
+      {
+        "file": "tests/places.test.ts",
+        "exit": 0,
+        "seconds": 0.199,
+        "passed": 4,
+        "failed": 0
+      },
+      {
+        "file": "tests/brandMarks.test.ts",
+        "exit": 0,
+        "seconds": 0.241,
+        "passed": 2,
+        "failed": 0
+      },
+      {
+        "file": "tests/header-menus.test.ts",
+        "exit": 0,
+        "seconds": 0.477,
+        "passed": 6,
+        "failed": 0
+      },
+      {
+        "file": "tests/test-prune-ledger.test.ts",
+        "exit": 0,
+        "seconds": 2.352,
+        "passed": 1,
+        "failed": 0
+      },
+      {
+        "file": "tests/visual-baselines.test.ts",
+        "exit": 0,
+        "seconds": 0.202,
+        "passed": 1,
+        "failed": 0
+      },
+      {
+        "file": "tests/tooltip-focus.unit.test.ts",
+        "exit": 0,
+        "passed": 10,
+        "failed": 0
+      }
+    ],
+    "nodePassed": 33,
+    "vitestPassed": 1554,
+    "fullSuiteRun": false,
+    "execution": "Focused single-file runs, one Vitest worker and no file parallelism; no browser or full suite on the working Mac. Static checks remain hosted CI under the night protocol.",
+    "evidenceDirectory": "web/test-results/AEON-1674-r2-runtime",
+    "negativeControlCount": 33,
+    "negativeControls": [
+      {
+        "id": "touch-nine-pixels",
+        "source": "web/src/components/TooltipHost.vue",
+        "testFile": "tests/tooltip-focus.unit.test.ts",
+        "testName": "P02 a pending touch disclosure is cancelled by nine pixels",
+        "mutation": {
+          "from": "Math.hypot(event.clientX - press.x, event.clientY - press.y) > 8",
+          "to": "Math.hypot(event.clientX - press.x, event.clientY - press.y) > 9"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/touch-nine-pixels.log"
+      },
+      {
+        "id": "touch-scroll",
+        "source": "web/src/components/TooltipHost.vue",
+        "testFile": "tests/tooltip-focus.unit.test.ts",
+        "testName": "P02 a pending touch disclosure is cancelled by scroll",
+        "mutation": {
+          "from": "function scroll(event: Event) {",
+          "to": "function scroll(event: Event) { if (press) return"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/touch-scroll.log"
+      },
+      {
+        "id": "touch-pointer-cancellation",
+        "source": "web/src/components/TooltipHost.vue",
+        "testFile": "tests/tooltip-focus.unit.test.ts",
+        "testName": "P02 a pending touch disclosure is cancelled by pointer cancellation",
+        "mutation": {
+          "from": "document.addEventListener('pointercancel', pointerEnd, true)",
+          "to": "document.addEventListener('pointercancel', () => {}, true)"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/touch-pointer-cancellation.log"
+      },
+      {
+        "id": "touch-changed-record",
+        "source": "web/src/components/TooltipHost.vue",
+        "testFile": "tests/tooltip-focus.unit.test.ts",
+        "testName": "P02 a pending touch disclosure is cancelled by changed record",
+        "mutation": {
+          "from": "element.dataset.tip !== started.value",
+          "to": "false"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/touch-changed-record.log"
+      },
+      {
+        "id": "touch-removed-record",
+        "source": "web/src/components/TooltipHost.vue",
+        "testFile": "tests/tooltip-focus.unit.test.ts",
+        "testName": "P02 a pending touch disclosure is cancelled by removed record",
+        "mutation": {
+          "from": "!element.isConnected",
+          "to": "false"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/touch-removed-record.log"
+      },
+      {
+        "id": "touch-second-contact",
+        "source": "web/src/components/TooltipHost.vue",
+        "testFile": "tests/tooltip-focus.unit.test.ts",
+        "testName": "P02 a pending touch disclosure is cancelled by second contact",
+        "mutation": {
+          "from": "function pointerDown(event: PointerEvent) {",
+          "to": "function pointerDown(event: PointerEvent) { if (event.isPrimary === false) return"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/touch-second-contact.log"
+      },
+      {
+        "id": "touch-exact-threshold",
+        "source": "web/src/components/TooltipHost.vue",
+        "testFile": "tests/tooltip-focus.unit.test.ts",
+        "testName": "P02 an eight-pixel hold reveals at 500 ms and suppresses only its own compatibility click",
+        "mutation": {
+          "from": "}, 500)",
+          "to": "}, 501)"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/touch-exact-threshold.log"
+      },
+      {
+        "id": "focused-record-change",
+        "source": "web/src/components/TooltipHost.vue",
+        "testFile": "tests/tooltip-focus.unit.test.ts",
+        "testName": "P02 focused disclosure follows a changed record and discards a disconnected anchor and late observer",
+        "mutation": {
+          "from": "else if (element.dataset.tip !== text.value && trigger) void show(element, trigger)",
+          "to": "else if (false) void show(element, trigger!)"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/focused-record-change.log"
+      },
+      {
+        "id": "touch-keyboard-click",
+        "source": "web/src/components/TooltipHost.vue",
+        "testFile": "tests/tooltip-focus.unit.test.ts",
+        "testName": "P02 an eight-pixel hold reveals at 500 ms and suppresses only its own compatibility click",
+        "mutation": {
+          "from": "event.detail === 0 || !(event.target instanceof Node)",
+          "to": "!(event.target instanceof Node)"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/touch-keyboard-click.log"
+      },
+      {
+        "id": "brand-live-title",
+        "source": "web/src/lib/brand.ts",
+        "testFile": "tests/brandMarks.test.ts",
+        "testName": "P02 live product branding updates page and overlay titles while invalid brands preserve the confirmed value",
+        "mutation": {
+          "from": "page.value = title",
+          "to": "page.value = ''"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/brand-live-title.log"
+      },
+      {
+        "id": "menu-current-authority",
+        "source": "web/src/components/header/AppMenu.vue",
+        "testFile": "tests/header-menus.test.ts",
+        "testName": "P02 rendered app menus react to current authority, person kind and workspace membership",
+        "mutation": {
+          "from": "const admin = computed(() => can('settings.manage'))",
+          "to": "const admin = computed(() => true)"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/menu-current-authority.log"
+      },
+      {
+        "id": "account-current-identity",
+        "source": "web/src/components/header/AccountMenu.vue",
+        "testFile": "tests/header-menus.test.ts",
+        "testName": "P02 rendered account menus bind the current identity and preserve it when sign-out fails",
+        "mutation": {
+          "from": "const email = computed(() => session.identity ? accountEmail(session.identity) : '')",
+          "to": "const email = ref(session.identity ? accountEmail(session.identity) : '')"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/account-current-identity.log"
+      },
+      {
+        "id": "feedback-recipient-barrier",
+        "source": "web/src/components/header/AppMenu.vue",
+        "testFile": "tests/header-menus.test.ts",
+        "testName": "P02 rendered help waits for its recipient and reuses a refused feedback identity until confirmed",
+        "mutation": {
+          "from": ":disabled=\"!recipient\"",
+          "to": ":disabled=\"false\""
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/feedback-recipient-barrier.log"
+      },
+      {
+        "id": "feedback-idempotent-retry",
+        "source": "web/src/components/header/AppMenu.vue",
+        "testFile": "tests/header-menus.test.ts",
+        "testName": "P02 rendered help waits for its recipient and reuses a refused feedback identity until confirmed",
+        "mutation": {
+          "from": "sendKey ||= crypto.randomUUID()",
+          "to": "sendKey = crypto.randomUUID()"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/feedback-idempotent-retry.log"
+      },
+      {
+        "id": "footer-named-action",
+        "source": "web/src/lib/footerProviders.ts",
+        "testFile": "tests/footer-summary.unit.test.ts",
+        "testName": "P02 footer actions route to the named exception and loading or hidden authority cannot claim one",
+        "mutation": {
+          "from": "t.act.blocked)",
+          "to": "t.act.top)"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/footer-named-action.log"
+      },
+      {
+        "id": "audit-http-outcome",
+        "source": "web/tests/ui-audit-rules.ts",
+        "testFile": "tests/ui-audit-rules.unit.test.ts",
+        "testName": "P02 audit exceptions require the exact fixture, HTTP outcome and decorative accessible counterpart",
+        "mutation": {
+          "from": "path === '/api/me' && match[1] === '401'",
+          "to": "path === '/api/me'"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/audit-http-outcome.log"
+      },
+      {
+        "id": "audit-accessible-counterpart",
+        "source": "web/tests/ui-audit-rules.ts",
+        "testFile": "tests/ui-audit-rules.unit.test.ts",
+        "testName": "P02 audit exceptions require the exact fixture, HTTP outcome and decorative accessible counterpart",
+        "mutation": {
+          "from": "&& labelledVersion",
+          "to": "&& true"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/audit-accessible-counterpart.log"
+      },
+      {
+        "id": "indicator-independent-fields",
+        "source": "web/src/lib/agentIndicator.ts",
+        "testFile": "tests/agent-indicator.unit.test.ts",
+        "testName": "loads one account preference for every consumer and preserves independent fields on save",
+        "mutation": {
+          "from": "hovering: saved.hovering === true",
+          "to": "hovering: false"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/indicator-independent-fields.log"
+      },
+      {
+        "id": "appearance-stored-accessibility",
+        "source": "web/src/lib/agentAppearance.ts",
+        "testFile": "tests/agent-appearance.unit.test.ts",
+        "testName": "personal behaviour writes preserve stored accessibility choices while a theme is active",
+        "mutation": {
+          "from": "normalizeAgentState({ ...normalizeAgentState(preference.value.value), ...patch })",
+          "to": "normalizeAgentState({ ...choice.value, ...patch })"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/appearance-stored-accessibility.log"
+      },
+      {
+        "id": "locale-one-app-language",
+        "source": "web/src/lib/displayLanguage.ts",
+        "testFile": "tests/display-language.unit.test.ts",
+        "testName": "keeps every surface in the one app language and preserves an explicit release-note choice",
+        "mutation": {
+          "from": "return 'en'",
+          "to": "return 'de'"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/locale-one-app-language.log"
+      },
+      {
+        "id": "renderer-evidence-replay",
+        "source": "web/src/components/indicators/Pulse.vue",
+        "testFile": "tests/indicator-renderers.unit.test.ts",
+        "testName": "Pulse uses advancing evidence only, including across stale state and counter replay",
+        "mutation": {
+          "from": "value <= lastPulse",
+          "to": "false"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/renderer-evidence-replay.log"
+      },
+      {
+        "id": "tenant-logo-origin",
+        "source": "web/src/lib/tenantBrand.ts",
+        "testFile": "tests/tenant-brand.test.ts",
+        "testName": "only same-origin logo URLs with sane sizes are accepted",
+        "mutation": {
+          "from": "typeof l.url !== 'string' || !LOGO_URL.test(l.url)",
+          "to": "typeof l.url !== 'string'"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/tenant-logo-origin.log"
+      },
+      {
+        "id": "phone-selection-membership",
+        "source": "web/src/components/work/BulkBar.vue",
+        "testFile": "tests/phone-controls.unit.test.ts",
+        "testName": "offers unloaded matches only after all loaded tickets are selected",
+        "mutation": {
+          "from": "total !== null && count < total && count >= loaded && loaded < total",
+          "to": "total !== null && count < total && loaded < total"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/phone-selection-membership.log"
+      },
+      {
+        "id": "hide-kind-counts",
+        "source": "web/src/lib/hideStates.ts",
+        "testFile": "tests/hide-states.test.ts",
+        "testName": "counts and status visibility use the same kind-aware Hide policy",
+        "mutation": {
+          "from": "if (bucket === 'done') return canonical === 'delivered' || canonical === 'accepted' ? canonical : 'done'",
+          "to": "if (bucket === 'done') return 'done'"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/hide-kind-counts.log"
+      },
+      {
+        "id": "dark-status-distinction",
+        "source": "web/src/styles/tokens.css",
+        "testFile": "tests/status-colours.test.ts",
+        "testName": "both dark themes use the same Blocked copper, apart from New",
+        "mutation": {
+          "from": "--st-blocked: #ee6e45",
+          "to": "--st-blocked: #e2b45a"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/dark-status-distinction.log"
+      },
+      {
+        "id": "switch-css-contract",
+        "source": "web/src/styles/base.css",
+        "testFile": "tests/theme-control-geometry.test.ts",
+        "testName": "the shared switch sizes its knob from the track and the agents label keeps the 44px hit target",
+        "mutation": {
+          "from": "translateX(calc(100cqw - 100% - 4px))",
+          "to": "translateX(0px)"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/switch-css-contract.log"
+      },
+      {
+        "id": "theme-stale-identity",
+        "source": "web/src/stores/themeEditor.ts",
+        "testFile": "tests/agent-theme.unit.test.ts",
+        "testName": "late theme reads cannot overwrite a newer confirmed theme or a different person",
+        "mutation": {
+          "from": "state.pending?.token === event.token",
+          "to": "!!state.pending"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/theme-stale-identity.log"
+      },
+      {
+        "id": "ledger-unpinned-area",
+        "source": "scripts/test-prune/check.mjs",
+        "testFile": "tests/test-prune-ledger.test.ts",
+        "testName": "test-prune ledger rejects removed risks without lineage and keeps P01 execution frozen",
+        "mutation": {
+          "from": "if (required.has(state.id))",
+          "to": "if (false)"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/ledger-unpinned-area.log"
+      },
+      {
+        "id": "ledger-unrelated-area",
+        "source": "scripts/test-prune/check.mjs",
+        "testFile": "tests/test-prune-ledger.test.ts",
+        "testName": "test-prune ledger rejects removed risks without lineage and keeps P01 execution frozen",
+        "mutation": {
+          "from": "stateIds: [...requiredVisualStates]",
+          "to": "stateIds: visual.states.map(state => state.id)"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "Unpinned visual reference: V-projects-390-light",
+        "log": "web/test-results/AEON-1674-r2-runtime/ledger-unrelated-area.log"
+      },
+      {
+        "id": "reference-member-digest",
+        "source": "scripts/test-prune/visual-baselines.mjs",
+        "testFile": "tests/visual-baselines.test.ts",
+        "testName": "visual references require approval, immutable attachment bytes and every exact member",
+        "mutation": {
+          "from": "sha256(png) === expected.get(file.name)",
+          "to": "true"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/reference-member-digest.log"
+      },
+      {
+        "id": "places-business-authority",
+        "source": "web/src/lib/places.ts",
+        "testFile": "tests/places.test.ts",
+        "testName": "Business shows only while one of its parts is open",
+        "mutation": {
+          "from": "place.id !== 'business' || access.business",
+          "to": "true"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/places-business-authority.log"
+      },
+      {
+        "id": "clip-unmounted-owner",
+        "source": "web/src/lib/clipTip.ts",
+        "testFile": "tests/clip-tip.unit.test.ts",
+        "testName": "remeasures after fonts load and disconnects without reacting to late work after unmount",
+        "mutation": {
+          "from": "if (!state.live) return",
+          "to": "if (false) return"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/clip-unmounted-owner.log"
+      },
+      {
+        "id": "theme-editor-result-token",
+        "source": "web/src/stores/themeEditor.ts",
+        "testFile": "tests/theme-editor.unit.test.ts",
+        "testName": "loading → resolved with a stale token is ignored",
+        "mutation": {
+          "from": "state.pending?.token === event.token",
+          "to": "!!state.pending"
+        },
+        "exit": 1,
+        "detected": true,
+        "expectedFailure": "AssertionError",
+        "log": "web/test-results/AEON-1674-r2-runtime/theme-editor-result-token.log"
+      }
+    ],
+    "foundGap": {
+      "file": "web/tests/indicator-renderers.unit.test.ts",
+      "reason": "A working-state replay mutant initially survived because waiting already suppressed glints. Added rollback/replay assertions while working to all three renderer cases; the intended Pulse mutant then fails and the production 27-case suite passes."
+    },
+    "sourceRestored": true,
+    "throwawayCommitsOnDeliveryBranch": false,
+    "commands": {
+      "node": "nice -n 10 node --experimental-strip-types --test <one-file>",
+      "vitest": "nice -n 10 node node_modules/vitest/vitest.mjs run <one-file> --maxWorkers=1 --no-fileParallelism --retry=0",
+      "mutations": "On an uncommitted scratch branch at the recorded source, apply one specified mutation, run only the named assertion, require exit 1 and the intended failure, then restore exact original bytes. Full commands and per-case logs are in the ignored evidence directory."
+    },
+    "refusalAssertions": {
+      "test-prune-ledger.test.ts": {
+        "count": 26,
+        "allPassed": true,
+        "observedErrors": [
+          "Missing Goals fixtures by profile",
+          "P01 cannot remove or demote any existing test execution",
+          "P01 cannot remove or demote any existing test execution",
+          "Removed risk has no verified destination: drift:browser:tests/a11y.spec.ts:axe: agents approve in dark -> visual:projects",
+          "Missing destination: drift:browser:tests/release-ticket-links.spec.ts:a ticket still on its way when the person or workspace changes never shows",
+          "Missing/extra protected risk lineage rows",
+          "Missing/extra protected risk lineage rows",
+          "Missing/extra protected risk lineage rows",
+          "Missing/extra protected risk lineage rows",
+          "Missing/extra protected risk lineage rows",
+          "Missing/extra protected risk lineage rows",
+          "Missing/extra protected risk lineage rows",
+          "Missing/extra protected risk lineage rows",
+          "Unknown destination runtime:nonexistent-replacement: drift:browser:tests/a11y.spec.ts:axe: agents approve in dark",
+          "Removed risk has no verified destination: drift:browser:tests/a11y.spec.ts:axe: agents approve in dark -> visual:projects",
+          "Removed risk has no verified destination: drift:browser:tests/a11y.spec.ts:axe: ticket full page in dark -> visual:projects",
+          "P01 cannot remove or demote any existing test execution",
+          "Unpinned visual reference: V-agents-390-dark",
+          "Deferred visual reference: V-agents-390-light (AEON-1687)",
+          "Cuts require Tick approval of visual fixtures and references",
+          "Cuts require an approved, pinned and available immutable baseline source",
+          "Frozen historical-evidence changed: scripts/test-tiers/affected-replay.json",
+          "Frozen launch-policy changed: scripts/ci/go-test-tiers.json",
+          "P01 changed catalogue selection/tagging/timing policy",
+          "Unpinned visual reference: V-projects-390-light",
+          "Missing/duplicate visual checkpoint: projects"
+        ]
+      },
+      "visual-baselines.test.ts": {
+        "count": 20,
+        "allPassed": true,
+        "observedErrors": [
+          "Missing approved visual reference states",
+          "Missing approved visual baseline attachment (AEON_VISUAL_BASELINE_FILE)",
+          "Visual baseline attachment SHA-256 mismatch",
+          "Visual baseline bundle must contain exactly 80 pinned references",
+          "Unknown or duplicate visual baseline member",
+          "Visual baseline member SHA-256 mismatch: V-projects-390-light.png",
+          "Unpinned visual reference: V-agents-390-light",
+          "Deferred visual reference: V-goals-390-light (AEON-1621, AEON-1625)",
+          "Visual baseline bundle must contain exactly 4 pinned references",
+          "Review bundle needs all 60 quality-checked captures from the non-deferred states",
+          "Duplicate or missing capture identity",
+          "Review captures must come from one source SHA",
+          "Wrong review fixture/profile: V-projects-390-light",
+          "Missing review capture: V-projects-390-light",
+          "Wrong capture dimensions: V-projects-390-light",
+          "Unresolved layout findings: V-projects-390-light",
+          "Unresolved axe findings: V-projects-390-light",
+          "Unresolved console findings: V-projects-390-light",
+          "Unresolved responses findings: V-projects-390-light",
+          "Capture digest mismatch: V-projects-390-light"
+        ]
+      }
+    },
+    "refusalAssertionCount": 46,
+    "infrastructureGuard": {
+      "owner": "tests/visual-reference-guard.spec.ts",
+      "risk": "Differing actual pixels and a missing snapshot must reject comparison; first baseline cannot be generated by the current run.",
+      "status": "Remote rerun scheduled with the final head before handoff."
+    }
+  },
+  "firstReferenceSet": {
+    "status": "pending-final-head-capture-and-Tick-review",
+    "checkpoints": 60,
+    "states": [
+      "projects",
+      "tickets",
+      "agents",
+      "decision-desk",
+      "account-use-matrix",
+      "models",
+      "access",
+      "knowledge",
+      "delivery-numbers",
+      "quote-editor",
+      "public-quote",
+      "start-agent",
+      "agent-rules"
+    ],
+    "deferred": [
+      {
+        "state": "goals",
+        "until": [
+          "AEON-1621",
+          "AEON-1625"
+        ],
+        "reason": "Tick 2026-10-23: exclude every Goals checkpoint from the first pinned set; review against the v6 canvas after both product packages land."
+      },
+      {
+        "state": "session-chat",
+        "until": [
+          "AEON-1687"
+        ],
+        "reason": "Exclude from the first reference bundle until AEON-1687 is on main and the strict layout, axe, console and HTTP checks pass."
+      },
+      {
+        "state": "hours",
+        "until": [
+          "AEON-1687"
+        ],
+        "reason": "Exclude from the first reference bundle until AEON-1687 is on main and the strict layout, axe, console and HTTP checks pass."
+      },
+      {
+        "state": "capacity",
+        "until": [
+          "AEON-1687"
+        ],
+        "reason": "Exclude from the first reference bundle until AEON-1687 is on main and the strict layout, axe, console and HTTP checks pass."
+      },
+      {
+        "state": "ticket-workspace",
+        "until": [
+          "AEON-1674"
+        ],
+        "reason": "New strict quality findings exposed by the approved attachment-preview focus: attachment Open/Delete buttons overlap; the sticky key overlaps a scrolled placement selector; axe reports aria-prohibited-attr on #v-5. Reported to LEAD on AEON-1674 for product-owner routing; no product fix or audit exception is introduced here."
+      }
+    ],
+    "sourcePolicy": "Capture every bundle member from the final committed HEAD through remote-spec.sh; verify member SHA-256 and tar digest; record exact paths/digests in the ignored final status and ticket note. No PNGs committed.",
+    "runner": "Use LEAD remote-spec.sh. Its current implementation has only the mbp2606 browser lane; agm2 browser support is not exposed. Never bypass the entry point or host guard."
+  },
+  "unprovenStaticFiles": [
+    "web/scripts/ci-web-shard.test.mjs"
+  ]
 }
