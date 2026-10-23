@@ -627,7 +627,9 @@ test('stopped records that remain in the feed do not keep the project live', asy
   await expect(card(page, 'p-end').getByRole('button', { name: /^1 agent working: nova on END-1/ })).toBeVisible()
   Object.assign(active, { phase: 'stopped', activity: 'idle', stopped_at: '2026-09-23T12:00:00Z', stop_reason: 'completed' })
   const stoppedFeed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/harness-sessions/live')
-  await page.clock.fastForward(20_500)
+  // Keep stream heartbeats running: one large jump would simulate sleep and
+  // trigger recovery reads as well as the periodic poll being checked here.
+  for (const step of [5_000, 5_000, 5_000, 5_500]) await page.clock.fastForward(step)
   // Both stopped records must still be returned; an emptied feed cannot prove
   // that lifecycle filtering removed the project's last active session.
   expect((await (await stoppedFeed).json()).items).toEqual(data.live)
