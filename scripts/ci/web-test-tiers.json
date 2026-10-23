@@ -1208,6 +1208,18 @@
     ,
     "browser:tests/release-switches.spec.ts:the language is remembered per person and defaults to the app language"
     ,
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1024 dark"
+    ,
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1024 light"
+    ,
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 dark"
+    ,
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 1440 light"
+    ,
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 dark"
+    ,
+    "browser:tests/release-update-notice.spec.ts:update toast counts › toast 390 light"
+    ,
     "browser:tests/role-picker-layout.spec.ts:a description distinguishes duplicate role names when it is present in the payload"
     ,
     "browser:tests/role-picker-layout.spec.ts:a rejected role change and another choice keep actions still at 1440"
@@ -13362,7 +13374,21 @@
     ,
     {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"screenshots › shot outdated 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"the update toast ends at the release name and counts its public notes by kind, without a gap or a shift","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"the update toast uses the codename /api/version gave when the release detail fails, and reveals the version on hover and focus","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"update toast counts › toast 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-update-notice.spec.ts","name":"what’s new opens the one notice for a server version this build does not list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -17320,7 +17346,11 @@
     ,
     {"kind":"node","file":"tests/release-surfaces.test.ts","name":"a control whose owner rewrites its description gets the stamp back","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/release-surfaces.test.ts","name":"a note the server put under other counts as other, in singular words and in German","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/release-surfaces.test.ts","name":"a release nobody has named falls back to its version, still as structured metadata","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/release-surfaces.test.ts","name":"a release without public notes counts nothing, even when its commits name tickets","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/release-surfaces.test.ts","name":"a toast keeps the structured release beside its plain sentence","tier":"GATED-FULL"}
     ,
@@ -17328,9 +17358,11 @@
     ,
     {"kind":"node","file":"tests/release-surfaces.test.ts","name":"copying uses the clipboard, then the hidden field, and says when neither worked","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/release-surfaces.test.ts","name":"public notes count by kind: a bug ticket is a fix, commits are never counted, and kinds with none are left out","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/release-surfaces.test.ts","name":"the control that takes focus carries the stamp as its description","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/release-surfaces.test.ts","name":"the release detail’s own name wins, and its headline follows the name","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/release-surfaces.test.ts","name":"the release detail’s own name wins and ends the sentence, with the counts beside it","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/release-surfaces.test.ts","name":"the update toast names the release by the codename /api/version gave when the release detail fetch failed","tier":"GATED-FULL"}
     ,
