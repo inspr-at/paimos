@@ -175,6 +175,7 @@ it('P03: delayed table resize deliveries settle on the live width and discard su
   let live = 1000
   const frames: (() => void)[] = [], width = ref(1000), cardEpoch = ref(0), cardWidthSettled = ref(false)
   const dependencies = { ...columns, width, cardEpoch, cardWidthSettled, readCardWidth: () => live,
+    phone: ref(false), columnsSettled: ref(false), columnsAreSettled: () => true,
     requestAnimationFrame: (callback: () => void) => { frames.push(callback) }, window: { innerWidth: 1440 } }
   const make = new Function(...Object.keys(dependencies), `let cardFrame = 0, columnsAlive = true, resizing = false, lastInner = 1440, viewportGrew = false, shrinkCeiling = null, shrinkBefore = null; ${body}; return { applyCardSize, measureSoon }`)
   const table = make(...Object.values(dependencies)) as { applyCardSize: (entries: { contentRect: { width: number } }[]) => void; measureSoon: () => void }
