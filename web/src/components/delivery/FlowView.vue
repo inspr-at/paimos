@@ -333,10 +333,13 @@ const emptyText = computed(() => {
 .play:disabled { opacity: .5; }
 .fl-rm { flex: 0 1 auto; max-width: 340px; font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A label slot as wide as its longest wording: switching words never moves a neighbour. */
-.stack { display: inline-grid; }
+.stack { position: relative; display: inline-grid; }
 .stack > span { grid-area: 1 / 1; white-space: nowrap; }
+/* Only the two sizing labels determine the slot. A live clock cannot change
+   its width when a platform font rounds the same tabular figures differently. */
+.stack > .shown { position: absolute; inset: 0 auto auto 0; }
 .stack > span[aria-hidden] { visibility: hidden; }
-.fl-livechip { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); font-size: 12.5px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; font-kerning: none; }
+.fl-livechip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); font-size: 12.5px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .fl-livechip.hist { background: var(--surface-sunken); color: var(--ink-2); }
 .fl-clock { min-width: 0; font: 500 12px var(--mono); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fl-clock.wide { flex: 0 1 200px; }

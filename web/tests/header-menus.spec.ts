@@ -518,27 +518,33 @@ test.describe('phones', () => {
   test('a late font keeps the ticket key whole on a phone', async ({ page }) => {
     let release!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
-    let requested = false
-    await page.route('**/jetbrains*.woff2*', async route => { requested = true; await held; await route.continue() })
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.emulateMedia({ colorScheme: 'light' })
-    await signIn(page, 'admin', { business: true })
-    await page.goto('/p/PHAROS/PHAROS-11?view=full')
-    const key = page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')
-    await expect(key).toHaveText('PHAROS-11')
-    // A font availability check can pass before this weight has been used.
-    // Start the requested face and prove that the network barrier holds it.
-    await page.evaluate(() => { void document.fonts.load('12px "JetBrains Mono"') })
-    await expect.poll(() => requested).toBe(true)
-    const pendingFont = await page.evaluate(() => ({ available: document.fonts.check('12px "JetBrains Mono"'),
-      faces: [...document.fonts].map(face => ({ family: face.family, weight: face.weight, style: face.style, status: face.status })) }))
-    expect(pendingFont.available, JSON.stringify(pendingFont.faces)).toBe(false)
-    await page.setViewportSize({ width: 415, height: 844 })
-    release()
-    await page.evaluate(() => document.fonts.ready.then(() => undefined))
-    expect(await page.evaluate(() => document.fonts.check('12px "JetBrains Mono"'))).toBe(true)
-    await expect.poll(() => key.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
-    await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeHidden()
+    let requested = ''
+    await page.route('**/jetbrains*.woff2*', async route => { requested = route.request().url(); await held; await route.continue() })
+    try {
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.emulateMedia({ colorScheme: 'light' })
+      await signIn(page, 'admin', { business: true })
+      await page.goto('/p/PHAROS/PHAROS-11?view=full')
+      const key = page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')
+      await expect(key).toHaveText('PHAROS-11')
+      await expect.poll(() => requested).not.toBe('')
+      // The pinned renderer also installs JetBrains Mono locally. Load the
+      // same product bytes under a private family so availability cannot be
+      // satisfied by that installed face while the network is still held.
+      await page.evaluate(url => {
+        const face = new FontFace('AEON Delayed Header Mono', `url(${JSON.stringify(url)})`, { weight: '100 800' })
+        document.fonts.add(face)
+        document.documentElement.style.setProperty('--mono', '"AEON Delayed Header Mono", ui-monospace, Menlo, monospace')
+        void face.load()
+      }, requested)
+      expect(await page.evaluate(() => document.fonts.check('12px "AEON Delayed Header Mono"'))).toBe(false)
+      await page.setViewportSize({ width: 415, height: 844 })
+      release()
+      await page.evaluate(() => document.fonts.load('12px "AEON Delayed Header Mono"').then(() => document.fonts.ready).then(() => undefined))
+      expect(await page.evaluate(() => document.fonts.check('12px "AEON Delayed Header Mono"'))).toBe(true)
+      await expect.poll(() => key.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+      await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeHidden()
+    } finally { release() }
   })
   for (const [width, business] of [[720, false], [720, true], [1600, true]] as const) {
     test(`the moon stays in the header at ${width}${business ? ' with three places' : ''}`, async ({ page }) => {
