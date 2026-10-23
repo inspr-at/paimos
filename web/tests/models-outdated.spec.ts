@@ -163,6 +163,16 @@ test('the review sheet overlays the page: inside the viewport, nothing on the pa
 
 test('unticking versions changes what moves and the button label while the actions and boxes stay put (±0.5 px)', async ({ page }) => {
   await setup(page, outdatedWorld())
+  // AEON-1712 fix6: English noun forms must follow PluralRules for the live
+  // selection as well as the reserved label, while the digits stay separate.
+  await page.evaluate(() => {
+    const selections: number[] = [], select = Intl.PluralRules.prototype.select
+    Object.assign(window, { outdatedPluralSelections: selections })
+    Intl.PluralRules.prototype.select = function (count) {
+      if (this.resolvedOptions().locale === 'en') selections.push(count)
+      return select.call(this, count)
+    }
+  })
   await review(page).click()
   const boxes = sheet(page).locator('[data-od]')
   const guard = await controlStability(page, { first: boxes.first(), last: boxes.last(), keep: sheet(page).locator('[data-od-keep]'), go: go(page), close: sheet(page).getByRole('button', { name: 'Close Remove old versions' }) })
@@ -180,6 +190,22 @@ test('unticking versions changes what moves and the button label while the actio
   await guard.check(() => boxes.nth(3).click())
   await expect(sheet(page).locator('.rf:not(.none)')).toHaveCount(1)
   guard.done()
+  expect(await page.evaluate(() => Reflect.get(window, 'outdatedPluralSelections'))).toEqual(expect.arrayContaining([4, 3, 2, 1]))
+
+  // A two-digit maximum keeps the same count slot when only one digit remains.
+  // The extra old identities share a registered successor and have no uses.
+  await page.keyboard.press('Escape')
+  const many = outdatedWorld(), old = many.outdated!.versions[2]!
+  many.outdated!.versions.push(...Array.from({ length: 8 }, (_, index) => ({ ...old, version: `openai:gpt-6-sol-${index + 1}`, uses: [] })))
+  await setup(page, many)
+  await review(page).click()
+  const manyBoxes = sheet(page).locator('[data-od]'), count = go(page).locator('.od-count').first()
+  await expect(manyBoxes).toHaveCount(12)
+  await expect(go(page)).toHaveAccessibleName('Remove 12 old versions')
+  const countGuard = await controlStability(page, { count, go: go(page), keep: sheet(page).locator('[data-od-keep]') })
+  for (let index = 0; index < 11; index++) await countGuard.check(() => manyBoxes.nth(index).uncheck())
+  await expect(go(page)).toHaveAccessibleName('Remove 1 old version')
+  countGuard.done()
 })
 
 test('Remove moves every use and removes the versions in one step; Undo restores the versions and every use', async ({ page }) => {
@@ -276,10 +302,18 @@ test('screenshots of the tray and the sheet at 1440, 1024 and 390 px, light and 
       await expect(sheet(page).locator('.rf').first()).toContainText('Mia')
       await expect(sheet(page).locator('.rf').nth(1)).toContainText('Backend build')
       // AEON-1712: counts 4→0→4 preserve both action boxes in all six layouts.
+      // fix6 also measures the digit: centering the singular label moved it
+      // inside an otherwise stable button. The count is absent at zero.
       const boxes = sheet(page).locator('[data-od]')
       const guard = await controlStability(page, { first: boxes.first(), last: boxes.last(), keep: sheet(page).locator('[data-od-keep]'), go: go(page), close: sheet(page).getByRole('button', { name: 'Close Remove old versions' }) })
-      for (const checked of [false, true]) for (let index = 0; index < 4; index++) await guard.check(() => boxes.nth(index).setChecked(checked))
+      const countGuard = await controlStability(page, { count: go(page).locator('.od-count').first() })
+      for (const checked of [false, true]) for (let index = 0; index < 4; index++) await guard.check(async () => {
+        const change = () => boxes.nth(index).setChecked(checked)
+        if (checked || index < 3) await countGuard.check(change)
+        else await change()
+      })
       guard.done()
+      countGuard.done()
       await page.screenshot({ path: testInfo.outputPath(`sheet-${width}-${scheme}.png`) })
       await page.keyboard.press('Escape')
       await expect(sheet(page)).toHaveCount(0)
