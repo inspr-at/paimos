@@ -700,6 +700,12 @@ func testAssistantPickupRetention(t *testing.T) {
 			if countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM inbox_receipts WHERE message_id=$1 AND deliver_by<=clock_timestamp()`, msg.ID) != 1 {
 				t.Fatal("fixture never crossed the legacy online deadline")
 			}
+			if !implicit {
+				// A replacement may change the online mode. This message keeps
+				// its original pull binding; new push messages keep 30 minutes.
+				body := fmt.Sprintf(`{"vendor":"grok","principal_id":%q,"address":"grok_bot:retention","delivery_mode":"push","endpoint":"https://8.8.8.8/pickup-fixture","webhook_secret":"fixture-pickup-webhook"}`, recipient)
+				request(owner, "POST", "/api/projects/"+project+"/assistant-adapters", body, 201)
+			}
 			sweep(0)
 			if got := status(msg.ID); got.Status != "sent" || !got.WaitingForPickup || got.Reason != "" {
 				t.Fatalf("sender does not see waiting for pickup: %+v", got)
@@ -717,6 +723,21 @@ func testAssistantPickupRetention(t *testing.T) {
 			request(credential, "POST", "/api/inbox/messages/"+msg.ID+"/ack", "{}", 200)
 			if got := receipt(msg.ID); got.State != "handed_off" || got.HandedOffAt == nil {
 				t.Fatalf("missing acknowledgement receipt: %+v", got)
+			}
+			if !implicit {
+				push := send("push-deadline-unchanged")
+				var seconds float64
+				guaranteeRow(t, w, `SELECT extract(epoch FROM r.deliver_by-m.created_at) FROM inbox_receipts r JOIN inbox_messages m ON m.id=r.message_id WHERE m.id=$1`, []any{push.ID}, &seconds)
+				if seconds != 1800 || status(push.ID).WaitingForPickup {
+					t.Fatal("push inherited pull delivery semantics")
+				}
+				expireDeadline(t, w, push.ID)
+				sweep(1)
+				if got := receipt(push.ID); got.State != "failed" || got.FailureReason != ReasonNoListener {
+					t.Fatalf("push deadline changed: %+v", got)
+				}
+				body := fmt.Sprintf(`{"vendor":"grok","principal_id":%q,"address":"grok_bot:retention","delivery_mode":"pull"}`, recipient)
+				adapterID = mustJSON[AssistantAdapterConfig](t, request(owner, "POST", "/api/projects/"+project+"/assistant-adapters", body, 201)).ID
 			}
 			retained := send("retention-bound")
 			now = now.Add(time.Duration(pullRetentionDays)*24*time.Hour - time.Microsecond)
@@ -756,8 +777,8 @@ func testAssistantPickupRetention(t *testing.T) {
 				}
 				credential = replacement.Token
 			} else {
-				credential = receiptAgentKey(t, w, w.agent, "inbox.read")
-				if _, err := w.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET revoked_at=$2 WHERE principal_id=$1 AND 'inbox.send'=ANY(scopes)`, recipient, now); err != nil {
+				credential = receiptAgentKey(t, w, w.agent, "inbox.read", "inbox.send")
+				if _, err := w.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET revoked_at=$2 WHERE principal_id=$1 AND 'inbox.receipt'=ANY(scopes)`, recipient, now); err != nil {
 					t.Fatal(err)
 				}
 			}
