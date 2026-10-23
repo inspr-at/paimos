@@ -2,6 +2,8 @@
 package auth
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -62,7 +64,9 @@ func TestDeskSummaryRejectsSessionAndRetiredPeekCookies(t *testing.T) {
 	}
 
 	// A real summary grant cannot authenticate another API route.
-	r = httptest.NewRequest("POST", "/api/decision-desk/connections", strings.NewReader(`{"origin":"https://pma.example","state":"`+strings.Repeat("a", 43)+`"}`))
+	challengeHash := sha256.Sum256([]byte(strings.Repeat("v", 43)))
+	challenge := base64.RawURLEncoding.EncodeToString(challengeHash[:])
+	r = httptest.NewRequest("POST", "/api/decision-desk/connections", strings.NewReader(`{"origin":"https://pma.example","state":"`+strings.Repeat("a", 43)+`","code_challenge":"`+challenge+`"}`))
 	r.Header.Set("Origin", "http://example.com")
 	r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
 	_, r.Pattern = mux.Handler(r)
@@ -82,12 +86,23 @@ func TestDeskSummaryRejectsSessionAndRetiredPeekCookies(t *testing.T) {
 		t.Fatal("invalid return address")
 	}
 	fragment, err := url.ParseQuery(address.Fragment)
-	if err != nil || fragment.Get("token") == "" {
-		t.Fatal("missing fragment grant")
+	if err != nil || fragment.Get("code") == "" || fragment.Has("token") {
+		t.Fatal("missing fragment code")
+	}
+	r = httptest.NewRequest("POST", "/api/decision-desk/connections/exchange", strings.NewReader(`{"code":"`+fragment.Get("code")+`","state":"`+strings.Repeat("a", 43)+`","code_verifier":"`+strings.Repeat("v", 43)+`"}`))
+	r.Header.Set("Origin", "https://pma.example")
+	_, r.Pattern = mux.Handler(r)
+	w = httptest.NewRecorder()
+	secured.ServeHTTP(w, r)
+	var grant struct {
+		Token string `json:"token"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &grant) != nil || grant.Token == "" {
+		t.Fatalf("grant exchange: %d %s", w.Code, w.Body.String())
 	}
 	for _, path := range []string{"/api/me", "/api/decision-desk/projection", "/api/decision-desk/connections"} {
 		r = httptest.NewRequest("GET", path, nil)
-		r.Header.Set("Authorization", "Bearer "+fragment.Get("token"))
+		r.Header.Set("Authorization", "Bearer "+grant.Token)
 		r.Header.Set("Origin", "https://pma.example")
 		_, r.Pattern = mux.Handler(r)
 		w = httptest.NewRecorder()

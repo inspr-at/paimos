@@ -5,14 +5,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
- "encoding/base64"
- "sync"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -86,7 +86,7 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 	}
 	issue := func(p tenant.Principal, state string) (string, string) {
 		t.Helper()
-		w := request(p, "POST", "/api/decision-desk/connections", map[string]string{"origin": sibling.Origin, "state": state}, "", "")
+		w := request(p, "POST", "/api/decision-desk/connections", map[string]string{"origin": sibling.Origin, "state": state, "code_challenge": testPKCEChallenge()}, "", "")
 		if w.Code != 201 {
 			t.Fatalf("connect: %d %s", w.Code, w.Body.String())
 		}
@@ -101,8 +101,17 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 			t.Fatal("unsafe return address")
 		}
 		fragment, err := url.ParseQuery(u.Fragment)
-		if err != nil || fragment.Get("state") != state || fragment.Get("instance") != "ppm" || fragment.Get("token") == "" {
-			t.Fatal("grant not in fragment with bound state")
+		if err != nil || fragment.Get("state") != state || fragment.Get("instance") != "ppm" || fragment.Get("code") == "" || fragment.Has("token") {
+			t.Fatal("callback must carry a code and bound state, never a bearer")
+		}
+		exchange := request(tenant.Principal{}, "POST", "/api/decision-desk/connections/exchange", map[string]string{"code": fragment.Get("code"), "state": state, "code_verifier": strings.Repeat("v", 43)}, sibling.Origin, "")
+		var credential struct {
+			Token     string    `json:"token"`
+			CreatedAt time.Time `json:"created_at"`
+			ExpiresAt time.Time `json:"expires_at"`
+		}
+		if exchange.Code != 200 || json.Unmarshal(exchange.Body.Bytes(), &credential) != nil || credential.Token == "" {
+			t.Fatalf("exchange: %d %s", exchange.Code, exchange.Body.String())
 		}
 		var rows struct {
 			Connections []Connection `json:"connections"`
@@ -112,8 +121,8 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 			t.Fatalf("list: %d", list.Code)
 		}
 		for _, c := range rows.Connections {
-			if c.CreatedAt.UTC().Format(time.RFC3339) == fragment.Get("created_at") && c.ExpiresAt.UTC().Format(time.RFC3339) == fragment.Get("expires_at") {
-				return fragment.Get("token"), c.ID
+			if c.CreatedAt.Equal(credential.CreatedAt) && c.ExpiresAt.Equal(credential.ExpiresAt) {
+				return credential.Token, c.ID
 			}
 		}
 		t.Fatal("issued connection absent")
@@ -151,11 +160,11 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 	if !bytes.Equal(stored, hash[:]) || bytes.Equal(stored, []byte(token)) || lifespan != 90*24*time.Hour {
 		t.Fatal("grant not hashed or lifetime differs from 90 days")
 	}
-	if w := request(member, "POST", "/api/decision-desk/connections", map[string]string{"origin": sibling.Origin, "state": state}, "", ""); w.Code != 409 {
+	if w := request(member, "POST", "/api/decision-desk/connections", map[string]string{"origin": sibling.Origin, "state": state, "code_challenge": testPKCEChallenge()}, "", ""); w.Code != 409 {
 		t.Fatalf("state reused: %d", w.Code)
 	}
 	for _, origin := range []string{"https://evil.example", sibling.Origin + "/", sibling.Origin + ".evil.example"} {
-		if w := request(member, "POST", "/api/decision-desk/connections", map[string]string{"origin": origin, "state": strings.Repeat("b", 43)}, "", ""); w.Code != 403 {
+		if w := request(member, "POST", "/api/decision-desk/connections", map[string]string{"origin": origin, "state": strings.Repeat("b", 43), "code_challenge": testPKCEChallenge()}, "", ""); w.Code != 403 {
 			t.Fatalf("origin accepted: %d", w.Code)
 		}
 	}
@@ -203,7 +212,7 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 		}
 	}
 	for _, p := range []tenant.Principal{f.agent, func() tenant.Principal { p := owner; p.KeyCreatorID = owner.ID; return p }(), func() tenant.Principal { p := owner; p.BrowserSession = false; return p }()} {
-		if w = request(p, "POST", "/api/decision-desk/connections", map[string]string{"origin": sibling.Origin, "state": strings.Repeat("c", 43)}, "", ""); w.Code != 403 {
+		if w = request(p, "POST", "/api/decision-desk/connections", map[string]string{"origin": sibling.Origin, "state": strings.Repeat("c", 43), "code_challenge": testPKCEChallenge()}, "", ""); w.Code != 403 {
 			t.Fatalf("non-browser person connected: %d", w.Code)
 		}
 	}

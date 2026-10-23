@@ -209,6 +209,66 @@ type SummaryItem struct {
 	Href       string    `json:"href"`
 }
 
+// A bounded, process-local sliding window keyed only by the credential hash.
+// Valid lookups enter here before any subsequent database work. Multiple tabs
+// share a budget, and only one request can perform a due usage write at once.
+type summaryBucket struct {
+	attempts []time.Time
+	writing  bool
+	written  time.Time
+}
+
+func (m *Module) summaryAllowance(hash []byte, due bool) (int, func(bool)) {
+	m.summaryMu.Lock()
+	defer m.summaryMu.Unlock()
+	now := time.Now()
+	if m.summaryNow != nil {
+		now = m.summaryNow()
+	}
+	if m.summaryBuckets == nil {
+		m.summaryBuckets = make(map[string]*summaryBucket)
+	}
+	key := string(hash)
+	bucket := m.summaryBuckets[key]
+	if bucket == nil {
+		if len(m.summaryBuckets) >= 4096 {
+			for k, b := range m.summaryBuckets {
+				if !b.writing && (len(b.attempts) == 0 || !b.attempts[len(b.attempts)-1].Add(time.Minute).After(now)) {
+					delete(m.summaryBuckets, k)
+				}
+			}
+			if len(m.summaryBuckets) >= 4096 {
+				return 60, nil
+			}
+		}
+		bucket = &summaryBucket{}
+		m.summaryBuckets[key] = bucket
+	}
+	recent := bucket.attempts[:0]
+	for _, at := range bucket.attempts {
+		if at.Add(time.Minute).After(now) {
+			recent = append(recent, at)
+		}
+	}
+	bucket.attempts = recent
+	if len(recent) >= 12 {
+		return max(1, int((recent[0].Add(time.Minute).Sub(now)+time.Second-1)/time.Second)), nil
+	}
+	bucket.attempts = append(bucket.attempts, now)
+	if !due || bucket.writing || bucket.written.Add(5*time.Minute).After(now) {
+		return 0, nil
+	}
+	bucket.writing = true
+	return 0, func(success bool) {
+		m.summaryMu.Lock()
+		defer m.summaryMu.Unlock()
+		bucket.writing = false
+		if success {
+			bucket.written = now
+		}
+	}
+}
+
 func (m *Module) ownerSummary(w http.ResponseWriter, r *http.Request) {
 	if !m.summaryOrigin(w, r) {
 		return
@@ -234,10 +294,11 @@ func (m *Module) ownerSummary(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	ctx = db.WithReadStatementTimeout(ctx, 5*time.Second)
 	var id string
+	var usageDue bool
 	activeConnection := func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT c.id::text FROM desk_instance_connections c
+		err := tx.QueryRow(ctx, `SELECT c.id::text,(c.last_used_at IS NULL OR c.last_used_at<clock_timestamp()-interval '5 minutes') FROM desk_instance_connections c
    JOIN principals p ON p.tenant_id=c.tenant_id AND p.id=c.principal_id AND p.kind='person' AND p.status='active'
-   WHERE c.tenant_id=$1 AND c.principal_id=$2 AND c.token_hash=$3 AND c.origin=$4 AND c.revoked_at IS NULL AND c.expires_at>clock_timestamp()`, p.TenantID, p.ID, hash, r.Header.Get("Origin")).Scan(&id)
+   WHERE c.tenant_id=$1 AND c.principal_id=$2 AND c.token_hash=$3 AND c.origin=$4 AND c.revoked_at IS NULL AND c.expires_at>clock_timestamp()`, p.TenantID, p.ID, hash, r.Header.Get("Origin")).Scan(&id, &usageDue)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConnectionEnded
 		}
@@ -246,22 +307,32 @@ func (m *Module) ownerSummary(w http.ResponseWriter, r *http.Request) {
 	credentialCtx := db.NoProjects(ctx, "decision desk: validate a browser summary grant only")
 	err := db.InTenantReadSnapshot(credentialCtx, m.pool, p.TenantID, activeConnection)
 	if err == nil {
-		// Only the usage write needs the access-change fence. Recheck the grant
-		// and current Desk authority under that fence, then commit immediately.
-		err = db.InTenant(credentialCtx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-			if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+		retry, finishUsage := m.summaryAllowance(hash, usageDue)
+		if retry > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(retry))
+			w.Header().Set("Access-Control-Expose-Headers", "Retry-After")
+			httpapi.WriteError(w, 429, "summary read limit reached")
+			return
+		}
+		if finishUsage != nil {
+			// A conditional write rechecks live authority under the access-change fence.
+			err = db.InTenant(credentialCtx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+				if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+					return err
+				}
+				if err := activeConnection(tx); err != nil {
+					return err
+				}
+				if err := requireDeskAccessTx(ctx, tx, p); err != nil {
+					return err
+				}
+				_, err := tx.Exec(ctx, `UPDATE desk_instance_connections SET last_used_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2 AND (last_used_at IS NULL OR last_used_at<clock_timestamp()-interval '5 minutes')`, p.TenantID, id)
 				return err
-			}
-			if err := activeConnection(tx); err != nil {
-				return err
-			}
-			if err := requireDeskAccessTx(ctx, tx, p); err != nil {
-				return err
-			}
-			_, err := tx.Exec(ctx, `UPDATE desk_instance_connections SET last_used_at=now() WHERE tenant_id=$1 AND id=$2`, p.TenantID, id)
-			return err
-		})
+			})
+			finishUsage(err == nil)
+		}
 	}
+
 	out := OwnerSummary{Instance: m.instances.Here, Items: []SummaryItem{}}
 	if err == nil {
 		// Like the home Desk, permissions and source data share an independent
@@ -305,7 +376,12 @@ func (m *Module) ownerSummary(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		// A fresh snapshot catches a revocation/expiry committed during the read;
 		// an old read snapshot must not keep an ended connection alive.
-		err = db.InTenantReadSnapshot(credentialCtx, m.pool, p.TenantID, activeConnection)
+		err = db.InTenantReadSnapshot(credentialCtx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+			if err := activeConnection(tx); err != nil {
+				return err
+			}
+			return requireDeskAccessTx(ctx, tx, p)
+		})
 	}
 	if errors.Is(err, errConnectionEnded) || errors.Is(err, authz.ErrForbidden) {
 		httpapi.WriteError(w, 401, "connection ended")

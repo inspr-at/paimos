@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/config"
@@ -103,6 +104,9 @@ type Module struct {
 	routineRuntime recurrences.ExecutionRuntimeReader
 	instances      config.Instances
 	publicOrigin   string
+	summaryMu      sync.Mutex
+	summaryBuckets map[string]*summaryBucket
+	summaryNow     func() time.Time
 }
 
 func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
@@ -116,6 +120,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/decision-desk/projection", m.projection)
 	mux.HandleFunc("GET /api/decision-desk/instances", m.listInstances)
 	mux.HandleFunc("GET /api/decision-desk/owner-summary", m.ownerSummary)
+	mux.HandleFunc("DELETE /api/decision-desk/owner-summary", m.disconnectSummary)
+	mux.HandleFunc("POST /api/decision-desk/connections/exchange", m.exchangeConnection)
+	mux.HandleFunc("OPTIONS /api/decision-desk/connections/exchange", m.exchangePreflight)
 	mux.HandleFunc("OPTIONS /api/decision-desk/owner-summary", m.summaryPreflight)
 	mux.HandleFunc("GET /api/decision-desk/connections", m.listConnections)
 	mux.HandleFunc("POST /api/decision-desk/connections", m.connectInstance)

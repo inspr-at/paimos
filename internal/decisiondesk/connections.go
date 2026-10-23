@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -68,24 +69,35 @@ func (m *Module) summaryOrigin(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (m *Module) summaryPreflight(w http.ResponseWriter, r *http.Request) {
+	m.connectionPreflight(w, r, false)
+}
+func (m *Module) exchangePreflight(w http.ResponseWriter, r *http.Request) {
+	m.connectionPreflight(w, r, true)
+}
+func (m *Module) connectionPreflight(w http.ResponseWriter, r *http.Request, exchange bool) {
 	if !m.summaryOrigin(w, r) {
 		return
 	}
 	w.Header().Add("Vary", "Access-Control-Request-Method")
 	w.Header().Add("Vary", "Access-Control-Request-Headers")
+	method := r.Header.Get("Access-Control-Request-Method")
 	headers := strings.Split(strings.ToLower(r.Header.Get("Access-Control-Request-Headers")), ",")
-	if r.Header.Get("Access-Control-Request-Method") != "GET" || len(headers) > 2 || !slices.ContainsFunc(headers, func(h string) bool { return strings.TrimSpace(h) == "authorization" }) {
-		httpapi.WriteError(w, 403, "only summary reads are allowed")
+	required, allowed, methods := "authorization", []string{"authorization", "accept"}, "GET, DELETE"
+	if exchange {
+		required, allowed, methods = "content-type", []string{"content-type"}, "POST"
+	}
+	if (exchange && method != "POST") || (!exchange && method != "GET" && method != "DELETE") || len(headers) > len(allowed) || !slices.ContainsFunc(headers, func(h string) bool { return strings.TrimSpace(h) == required }) {
+		httpapi.WriteError(w, 403, "method or headers not allowed")
 		return
 	}
 	for _, h := range headers {
-		if h = strings.TrimSpace(h); h != "authorization" && h != "accept" {
+		if !slices.Contains(allowed, strings.TrimSpace(h)) {
 			httpapi.WriteError(w, 403, "header not allowed")
 			return
 		}
 	}
-	w.Header().Set("Access-Control-Allow-Methods", "GET")
-	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Accept")
+	w.Header().Set("Access-Control-Allow-Methods", methods)
+	w.Header().Set("Access-Control-Allow-Headers", strings.Join(allowed, ", "))
 	w.Header().Set("Access-Control-Max-Age", "300")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -152,12 +164,13 @@ func (m *Module) connectInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Origin string `json:"origin"`
-		State  string `json:"state"`
+		Origin    string `json:"origin"`
+		State     string `json:"state"`
+		Challenge string `json:"code_challenge"`
 	}
 	decoder := httpapi.NewRequestDecoder(w, r, 2048)
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&in) != nil || decoder.Decode(new(any)) != io.EOF || !connectState.MatchString(in.State) {
+	if decoder.Decode(&in) != nil || decoder.Decode(new(any)) != io.EOF || !connectState.MatchString(in.State) || !connectState.MatchString(in.Challenge) {
 		httpapi.WriteError(w, 400, "invalid connect request")
 		return
 	}
@@ -172,20 +185,26 @@ func (m *Module) connectInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := "desk_" + p.TenantID + "_" + p.ID + "_" + base64.RawURLEncoding.EncodeToString(secret)
-	hash, stateHash := sha256.Sum256([]byte(token)), sha256.Sum256([]byte(in.State))
+	// The provisional token is never disclosed. Exchange installs a fresh bearer.
+	code, err := newConnectionSecret("code_", p)
+	if err != nil {
+		connectionError(w, r, err)
+		return
+	}
+	hash, stateHash, codeHash := sha256.Sum256([]byte(token)), sha256.Sum256([]byte(in.State)), sha256.Sum256([]byte(code))
 	var grant Connection
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
-	err := m.connectionWrite(ctx, p, func(tx pgx.Tx) error {
+	err = m.connectionWrite(ctx, p, func(tx pgx.Tx) error {
 		var count int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM desk_instance_connections WHERE tenant_id=$1 AND principal_id=$2 AND revoked_at IS NULL AND expires_at>now() LIMIT 100) c`, p.TenantID, p.ID).Scan(&count); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM desk_instance_connections WHERE tenant_id=$1 AND principal_id=$2 AND revoked_at IS NULL AND expires_at>now() AND (exchange_code_hash IS NULL OR exchange_used_at IS NOT NULL OR exchange_expires_at>now()) LIMIT 100) c`, p.TenantID, p.ID).Scan(&count); err != nil {
 			return err
 		}
 		if count >= maxConnections {
 			return errConnectConflict
 		}
-		err := tx.QueryRow(ctx, `INSERT INTO desk_instance_connections(tenant_id,principal_id,origin,instance_tag,token_hash,state_hash)
-		 VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (tenant_id,state_hash) DO NOTHING RETURNING id::text,created_at,expires_at`, p.TenantID, p.ID, sibling.Origin, sibling.Tag, hash[:], stateHash[:]).Scan(&grant.ID, &grant.CreatedAt, &grant.ExpiresAt)
+		err := tx.QueryRow(ctx, `INSERT INTO desk_instance_connections(tenant_id,principal_id,origin,instance_tag,token_hash,state_hash,exchange_code_hash,pkce_challenge,exchange_expires_at)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,clock_timestamp()+interval '60 seconds') ON CONFLICT (tenant_id,state_hash) DO NOTHING RETURNING id::text,created_at,expires_at`, p.TenantID, p.ID, sibling.Origin, sibling.Tag, hash[:], stateHash[:], codeHash[:], in.Challenge).Scan(&grant.ID, &grant.CreatedAt, &grant.ExpiresAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConnectConflict
 		}
@@ -195,7 +214,7 @@ func (m *Module) connectInstance(w http.ResponseWriter, r *http.Request) {
 		connectionError(w, r, err)
 		return
 	}
-	fragment := url.Values{"state": {in.State}, "token": {token}, "instance": {m.instances.Here}, "account": {clip(p.Name, 120)}, "expires_at": {grant.ExpiresAt.UTC().Format(time.RFC3339)}, "created_at": {grant.CreatedAt.UTC().Format(time.RFC3339)}}
+	fragment := url.Values{"state": {in.State}, "code": {code}, "instance": {m.instances.Here}}
 	httpapi.WriteJSON(w, 201, map[string]string{"redirect_url": sibling.Origin + "/instances/connected#" + fragment.Encode()})
 }
 
@@ -212,7 +231,7 @@ func (m *Module) listConnections(w http.ResponseWriter, r *http.Request) {
 		if err := requireDeskAccessTx(ctx, tx, p); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT id::text,origin,instance_tag,created_at,expires_at,last_used_at FROM desk_instance_connections WHERE tenant_id=$1 AND principal_id=$2 AND revoked_at IS NULL AND expires_at>now() ORDER BY created_at DESC,id DESC LIMIT 100`, p.TenantID, p.ID)
+		rows, err := tx.Query(ctx, `SELECT id::text,origin,instance_tag,created_at,expires_at,last_used_at FROM desk_instance_connections WHERE tenant_id=$1 AND principal_id=$2 AND revoked_at IS NULL AND expires_at>now() AND (exchange_code_hash IS NULL OR exchange_used_at IS NOT NULL) ORDER BY created_at DESC,id DESC LIMIT 100`, p.TenantID, p.ID)
 		if err != nil {
 			return err
 		}
@@ -257,16 +276,133 @@ func (m *Module) revokeConnection(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func newConnectionSecret(prefix string, p tenant.Principal) (string, error) {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return "", err
+	}
+	return prefix + p.TenantID + "_" + p.ID + "_" + base64.RawURLEncoding.EncodeToString(secret), nil
+}
+
+func connectionCredential(value, prefix string) (tenant.Principal, []byte, bool) {
+	raw, ok := strings.CutPrefix(value, prefix)
+	if !ok || len(raw) != 36+1+36+1+43 || !validID(raw[:36]) || raw[36] != '_' || !validID(raw[37:73]) || raw[73] != '_' || !connectState.MatchString(raw[74:]) {
+		return tenant.Principal{}, nil, false
+	}
+	hash := sha256.Sum256([]byte(strings.TrimPrefix(value, "Bearer ")))
+	return tenant.Principal{TenantID: raw[:36], ID: raw[37:73], Kind: tenant.Person, BrowserSession: false}, hash[:], true
+}
 func summaryCredential(r *http.Request) (tenant.Principal, []byte, bool) {
 	if len(r.Header.Values("Authorization")) != 1 {
 		return tenant.Principal{}, nil, false
 	}
-	raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer desk_")
-	parts := strings.Split(raw, "_")
-	// The final base64url secret can itself contain underscores.
-	if !ok || len(raw) != 36+1+36+1+43 || len(parts) < 3 || !validID(raw[:36]) || raw[36] != '_' || !validID(raw[37:73]) || raw[73] != '_' || !connectState.MatchString(raw[74:]) {
-		return tenant.Principal{}, nil, false
+	return connectionCredential(r.Header.Get("Authorization"), "Bearer desk_")
+}
+
+func (m *Module) exchangeConnection(w http.ResponseWriter, r *http.Request) {
+	if !m.summaryOrigin(w, r) {
+		return
 	}
-	hash := sha256.Sum256([]byte("desk_" + raw))
-	return tenant.Principal{TenantID: raw[:36], ID: raw[37:73], Kind: tenant.Person, BrowserSession: true}, hash[:], true
+	var in struct {
+		Code     string `json:"code"`
+		State    string `json:"state"`
+		Verifier string `json:"code_verifier"`
+	}
+	decoder := httpapi.NewRequestDecoder(w, r, 2048)
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&in) != nil || decoder.Decode(new(any)) != io.EOF || !connectState.MatchString(in.State) || !connectState.MatchString(in.Verifier) {
+		httpapi.WriteError(w, 400, "invalid exchange request")
+		return
+	}
+	p, hash, ok := connectionCredential(in.Code, "code_")
+	if !ok {
+		httpapi.WriteError(w, 401, "connection code refused")
+		return
+	}
+	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(r.Context(), p), 8*time.Second)
+	defer cancel()
+	stateHash := sha256.Sum256([]byte(in.State))
+	challengeHash := sha256.Sum256([]byte(in.Verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(challengeHash[:])
+	var id, expected string
+	// Unknown codes never take the tenant fence. No raw code or verifier is stored.
+	lookup := func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT c.id::text,c.pkce_challenge,p.name FROM desk_instance_connections c JOIN principals p ON p.tenant_id=c.tenant_id AND p.id=c.principal_id AND p.kind='person' AND p.status='active'
+   WHERE c.tenant_id=$1 AND c.principal_id=$2 AND c.exchange_code_hash=$3 AND c.state_hash=$4 AND c.origin=$5 AND c.exchange_used_at IS NULL AND c.exchange_expires_at>clock_timestamp() AND c.revoked_at IS NULL AND c.expires_at>clock_timestamp()`, p.TenantID, p.ID, hash, stateHash[:], r.Header.Get("Origin")).Scan(&id, &expected, &p.Name)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errConnectionEnded
+		}
+		if err != nil {
+			return err
+		}
+		if subtle.ConstantTimeCompare([]byte(expected), []byte(challenge)) != 1 {
+			return errConnectionEnded
+		}
+		return nil
+	}
+	err := db.InTenantReadSnapshot(db.NoProjects(ctx, "decision desk: validate exchange code"), m.pool, p.TenantID, lookup)
+	var token string
+	var grant Connection
+	if err == nil {
+		token, err = newConnectionSecret("desk_", p)
+		if err == nil {
+			err = m.connectionWrite(ctx, p, func(tx pgx.Tx) error {
+				if err := lookup(tx); err != nil {
+					return err
+				}
+				tokenHash := sha256.Sum256([]byte(token))
+				return tx.QueryRow(ctx, `UPDATE desk_instance_connections SET token_hash=$3,exchange_used_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2 AND exchange_used_at IS NULL RETURNING created_at,expires_at`, p.TenantID, id, tokenHash[:]).Scan(&grant.CreatedAt, &grant.ExpiresAt)
+			})
+		}
+	}
+	if errors.Is(err, errConnectionEnded) || errors.Is(err, pgx.ErrNoRows) || errors.Is(err, authz.ErrForbidden) {
+		httpapi.WriteError(w, 401, "connection code refused")
+		return
+	}
+	if err != nil {
+		connectionError(w, r, err)
+		return
+	}
+	httpapi.WriteJSON(w, 200, map[string]any{"token": token, "instance": m.instances.Here, "account": clip(p.Name, 120), "created_at": grant.CreatedAt, "expires_at": grant.ExpiresAt})
+}
+
+func (m *Module) disconnectSummary(w http.ResponseWriter, r *http.Request) {
+	if !m.summaryOrigin(w, r) {
+		return
+	}
+	p, hash, ok := summaryCredential(r)
+	if !ok {
+		httpapi.WriteError(w, 401, "summary connection required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(r.Context(), p), 8*time.Second)
+	defer cancel()
+	// Verify before taking the fence; final authorization and update are inside it.
+	var id string
+	lookup := func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT id::text FROM desk_instance_connections WHERE tenant_id=$1 AND principal_id=$2 AND token_hash=$3 AND origin=$4`, p.TenantID, p.ID, hash, r.Header.Get("Origin")).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errConnectionEnded
+		}
+		return err
+	}
+	err := db.InTenantReadSnapshot(db.NoProjects(ctx, "decision desk: validate self-revocation"), m.pool, p.TenantID, lookup)
+	if err == nil {
+		err = m.connectionWrite(ctx, p, func(tx pgx.Tx) error {
+			if err := lookup(tx); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `UPDATE desk_instance_connections SET revoked_at=coalesce(revoked_at,clock_timestamp()) WHERE tenant_id=$1 AND id=$2`, p.TenantID, id)
+			return err
+		})
+	}
+	if errors.Is(err, errConnectionEnded) || errors.Is(err, authz.ErrForbidden) {
+		httpapi.WriteError(w, 401, "connection ended")
+		return
+	}
+	if err != nil {
+		connectionError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

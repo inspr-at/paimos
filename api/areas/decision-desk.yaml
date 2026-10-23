@@ -78,13 +78,22 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
+        '429': {description: "Per-token read limit reached; Retry-After gives seconds until retry", headers: {Retry-After: {schema: {type: integer, minimum: 1}}}, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '500': {$ref: '#/components/responses/Error'}
     options:
       operationId: decisionDeskSummaryPreflight
       security: []
-      description: "Allows only GET with Authorization from one exact configured sibling origin. No Access-Control-Allow-Credentials."
+      description: "Allows only GET or DELETE with Authorization from one exact configured sibling origin. No Access-Control-Allow-Credentials. Responses are no-store and vary by Origin."
       responses:
         '204': {description: "Configured sibling may read with Authorization"}
+        '403': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: decisionDeskSummaryDisconnect
+      security: [{deskSummary: []}]
+      description: "The bearer revokes only its own grant, under the tenant access-change fence. Same exact configured-origin CORS allow-list as reads; cookies and agent keys never authorize this route."
+      responses:
+        '204': {description: "Grant ended"}
+        '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
   /decision-desk/connections:
     get:
@@ -98,24 +107,54 @@ paths:
     post:
       operationId: decisionDeskConnect
       security: [{session: []}]
-      description: "Explicit same-origin confirmation by an active browser person, never an agent key. Exact configured sibling origin and random single-use state required. Atomically consumes state and issues a hashed-at-rest, revocable, read-only grant for 90 days. Response returns a fixed /instances/connected address on that sibling with the credential ONLY in its fragment. The credential is never sent to the sibling server. At most 100 active connections per person."
+      description: "Explicit same-origin confirmation by an active browser person, never an agent key. Exact configured sibling origin, random single-use state and PKCE S256 challenge required. Returns a fixed /instances/connected address with a hashed-at-rest single-use code in its fragment, valid for 60 seconds and bound to state, challenge and origin. No bearer is put in a URL. At most 100 active connections per person."
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [origin, state]
+              required: [origin, state, code_challenge]
               additionalProperties: false
               properties:
                 origin: {type: string, maxLength: 300}
                 state: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+                code_challenge: {type: string, pattern: '^[A-Za-z0-9_-]{43}$', description: "Base64url SHA-256 of the browser's PKCE verifier (S256 only)."}
       responses:
         '201': {description: "Browser-only return address", content: {application/json: {schema: {type: object, required: [redirect_url], properties: {redirect_url: {type: string, maxLength: 2048}}}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '409': {description: "State already consumed or active connection limit reached", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /decision-desk/connections/exchange:
+    options:
+      operationId: decisionDeskExchangePreflight
+      security: []
+      description: "Allows only POST with Content-Type from an exact configured sibling origin, without credentials. No-store; Vary includes Origin."
+      responses:
+        '204': {description: "Configured sibling may exchange a code"}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: decisionDeskExchange
+      security: []
+      description: "Atomically consumes a 60-second code with its bound state and PKCE S256 verifier. The 90-day read-only bearer appears only in this no-store response body, never a URL. Exact configured-origin CORS without credentials; rechecks current person and Desk authority inside the write. Replay, expiry and wrong proof are refused."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, state, code_verifier]
+              additionalProperties: false
+              properties:
+                code: {type: string, maxLength: 128}
+                state: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+                code_verifier: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+      responses:
+        '200': {description: "Browser-only credential", content: {application/json: {schema: {type: object, required: [token, instance, account, created_at, expires_at], properties: {token: {type: string, maxLength: 128}, instance: {type: string}, account: {type: string, maxLength: 120}, created_at: {type: string, format: date-time}, expires_at: {type: string, format: date-time}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
   /decision-desk/connections/{id}:
     delete:
       operationId: decisionDeskDisconnect
