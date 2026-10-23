@@ -270,6 +270,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdSession(),
 		rt.cmdHook(),
 		rt.cmdTell(),
+		rt.cmdLanes(),
 		rt.cmdPeers(),
 		rt.cmdListen(),
 		rt.cmdMessage(),
