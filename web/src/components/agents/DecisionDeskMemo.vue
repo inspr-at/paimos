@@ -94,11 +94,9 @@ const ticketRef = computed<DeskTicket | undefined>(() => {
 const suggestedNote = computed(() => item.value && question.value ? suggestedUnavailableNote(item.value) : '')
 // An unavailable stamp's row reads its reason instead.
 const stampWords = (row: DeskItem, outcome: DeskOutcome) => {
-  const why = stampWhy(row, outcome)
   // The full server reason remains the accessible description. The phone row says
   // the same thing in two lines, without a tooltip over the neighbouring choice.
-  if (narrow.value && why === 'Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.') return 'Not available: the agent named no rule.'
-  return why || (outcome === 'requirement' ? `add to ${ticketRef.value?.key || 'the ticket'}` : STAMP_WORDS[outcome])
+  return stampWhy(row, outcome, narrow.value) || (outcome === 'requirement' ? `add to ${ticketRef.value?.key || 'the ticket'}` : STAMP_WORDS[outcome])
 }
 // Source only where no ticket names the origin. Phones show it on the answer line in the head (AEON-1535).
 const sourceShown = computed(() => { const row = item.value; return !!row?.source && !row.lesson && !row.approval && (!!row.rule || (!row.ticketId && !row.ticketKey)) })

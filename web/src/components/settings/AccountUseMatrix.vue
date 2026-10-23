@@ -125,7 +125,7 @@ function saved(result: CellResult, what: string, undoing = false, names: string[
   const changed = result.changes.filter((c, i) => c.allowed !== result.undo[i]?.allowed).length
   said.value = undoing ? `Undone: ${what}.` : `${what}: ${changed === 1 ? '1 cell changed' : `${changed} cells changed`}.`
   last.value = undoing ? null : { owner: scope.owner.value, revision: result.revision, undo: { cells: result.undo }, what, names }
-  const compactMessage = names.reduce((text, name) => text.replaceAll(name, Array.from(name).length > 18 ? `${Array.from(name).slice(0, 17).join('')}…` : name), said.value)
+  const compactMessage = [...names].sort((a, b) => b.length - a.length).reduce((text, name) => text.replaceAll(name, Array.from(name).length > 18 ? `${Array.from(name).slice(0, 17).join('')}…` : name), said.value)
   toast(said.value, { compactMessage, ...(undoing ? {} : { key: 'account-use', timeout: 10_000, action: { label: 'Undo', run: undo } }) })
   load(true)
 }
