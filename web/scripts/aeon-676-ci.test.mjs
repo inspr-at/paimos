@@ -33,7 +33,9 @@ test('AEON-676 regressions retain hosted launch policy and full nightly coverage
   assert.match(job('ci-plan'), /lane: \$\{\{ steps\.tiers\.outputs\.lane \}\}/)
   assert.match(shard, /needs\.ci-plan\.result == 'success'/)
   assert.doesNotMatch(workflow, /needs\.tier-plan\./)
-  assert.match(shard, /^    runs-on: ubuntu-24\.04$/m)
+  // AEON-1674 round 7 restores the hosted shard route; the visual comparator
+  // checks the observed ImageOS/ImageVersion against the reviewed renderer.
+  assert.match(shard, /^    runs-on: ubuntu-latest$/m)
   assert.match(shard, /^      AEON_VISUAL_RUNNER: ubuntu-24\.04$/m)
   assert.match(job('visual-reference-capture'), /^    runs-on: ubuntu-24\.04$/m)
   assert.match(shard, /cli\.mjs run web --shard \$\{\{ matrix.shard \}\}\/\$\{\{ strategy.job-total \}\}/)
