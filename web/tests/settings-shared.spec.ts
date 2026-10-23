@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { expectStableControls } from './helpers/stable'
+import AxeBuilder from '@axe-core/playwright'
 
 async function open(page: Page, width = 1440, german = false) {
   await page.setViewportSize({ width, height: 900 })
@@ -23,6 +24,7 @@ test('P02 a Settings dock becomes an isolated phone sheet with pinned series act
   const after = (await row.boundingBox())!
   for (const axis of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(after[axis] - before.row![axis]), `clicked row ${axis}`).toBeLessThanOrEqual(.5)
   await expect(page.locator('.dock-content')).toHaveJSProperty('inert', false)
+  expect((await new AxeBuilder({ page }).include('[role="dialog"]').withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()).violations).toEqual([])
   await expectStableControls({ controls: { close: page.getByRole('button', { name: 'Close details' }), next: page.getByRole('button', { name: 'Next computer' }), apply: page.getByRole('button', { name: 'Apply capacity' }), clickedRow: row },
     scrollAreas: { body: pane(page).locator('.pane-body') }, interactions: [{ name: 'long dock content', run: async () => {
       await page.getByRole('button', { name: 'Toggle content' }).evaluate(el => (el as HTMLButtonElement).click())

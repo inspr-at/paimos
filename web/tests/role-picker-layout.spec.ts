@@ -6,6 +6,7 @@ import { fixtures, mockWork, watchErrors, showProjectHead } from './work-fixture
 import { accessWorld, mockAccess, COORDINATOR } from './access-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { FloatingList } from './helpers/floating-lists'
+import AxeBuilder from '@axe-core/playwright'
 
 const LONG_SUBJECT = 'Jonas Weber-Oberhauser-Kieslinger · Projektbüro für grenzüberschreitende Entwicklungszusammenarbeit, Infrastrukturverantwortung und Qualitätssicherung'
 const LONG_DETAIL = 'Verantwortlich für projektübergreifende Entwicklungszusammenarbeit, Qualitätskontrolle und die langfristige Betreuung der gemeinsam betriebenen Infrastruktur. Dieser vollständige Entscheidungskontext muss auch auf dem Telefon lesbar bleiben.'
@@ -59,6 +60,7 @@ test('P02 native radio arrows and Enter apply the chosen role while keyboard Can
   await expect(member).toBeFocused()
   await member.press('ArrowUp')
   await expect(admin).toBeFocused(); await expect(admin).toHaveAttribute('aria-checked', 'true')
+  expect((await new AxeBuilder({ page }).include('.floating').withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()).violations).toEqual([])
   await admin.press('Enter')
   await expect(picker).toHaveCount(0)
   expect(world.calls.filter(call => call.method === 'PUT' && call.path.endsWith('/workspace-role')).map(call => call.body)).toEqual([{ role_id: 'role-admin' }])

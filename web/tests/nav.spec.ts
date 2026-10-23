@@ -48,6 +48,7 @@ test('P02 account menu keyboard focus returns through a route and browser Back',
   await account.focus(); await page.keyboard.press('Enter')
   const menu = page.getByRole('menu', { name: 'Account', exact: true })
   await expect(menu.getByRole('menuitem', { name: 'Personal settings', exact: true })).toBeFocused()
+  expect((await new AxeBuilder({ page }).include('.hm-panel').withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()).violations).toEqual([])
   await page.keyboard.press('End')
   await expect(menu.getByRole('menuitem').last()).toBeFocused()
   await page.keyboard.press('Home')
