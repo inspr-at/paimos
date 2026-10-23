@@ -474,6 +474,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return authz.AuthenticatedRoute, true
 		}
 	case "recurrences":
+		if len(parts) == 3 && validRouteUUID(parts[1]) && parts[2] == "agent-owner" && read || len(parts) == 5 && validRouteUUID(parts[1]) && parts[2] == "runs" && validRouteUUID(parts[3]) && parts[4] == "agent-result" && (read || r.Method == http.MethodPost) {
+			return "recurrences.manage", true
+		}
 		// This is an explicit agent allowlist. Every recurrence handler also
 		// checks live role grants and the recurrences.manage key ceiling.
 		if len(parts) >= 2 && parts[1] == "templates" {

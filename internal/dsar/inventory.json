@@ -1872,6 +1872,7 @@
     {
       "classification": "personal",
       "columns": {
+        "agent_owner_config": "personal",
         "assignment": "personal",
         "consent_policy_digest": "metadata",
         "consent_qualification_id": "metadata",
@@ -2239,6 +2240,8 @@
     {
       "classification": "personal",
       "columns": {
+        "agent_owner_config": "personal",
+        "agent_result": "personal",
         "agent_run_id": "metadata",
         "assignment": "personal",
         "assignment_digest": "personal",
