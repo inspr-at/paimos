@@ -607,7 +607,8 @@ test('Display keeps one box through every sort at 1024, 820 and 390, shows only 
 })
 
 // ---------- 1440 · 1024 · 390, light and dark ----------
-for (const [width, height] of [[1440, 900], [1024, 800], [390, 844]] as const) {
+// AEON-1677: retain phone/desktop axe in both themes; tablet controls are exercised above.
+for (const [width, height] of [[1440, 900], [390, 844]] as const) {
   for (const colorScheme of ['light', 'dark'] as const) {
     test(`${width} ${colorScheme}: essentials stay, nothing overflows, axe is clean`, async ({ page }, info) => {
       await page.setViewportSize({ width, height })

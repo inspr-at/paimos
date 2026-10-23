@@ -86,7 +86,7 @@ test('a v5 reading never moves its own tile or a control when the window or the 
   simpleGuard.done()
 })
 
-for (const width of [400, 1024, 1440]) {
+for (const width of [400, 1440]) {
   test(`Simple keeps every Learn and section still through every window at ${width}`, async ({ page }) => {
     // Risk (found while building AEON-1016): more numbers make the summary sentences longer, so another window wrapped one
     // line more and every Learn button below moved by a line.
@@ -148,7 +148,8 @@ test('missing, partial and unwatched facts are said as that, never as zero', asy
   await expect(page.getByRole('region', { name: 'Keeping it safe' }).locator('.cnt')).toHaveText('')
 })
 
-for (const width of [400, 1440]) for (const theme of ['light', 'dark'] as const) for (const level of ['expert', 'simple'] as const) {
+// P11: retain phone targets in both renderers; the behavior cases above own desktop readings.
+for (const [width, theme, level] of [[400, 'light', 'expert'], [400, 'light', 'simple']] as const) {
   test(`Delivery v5 readings at ${width} ${theme} ${level}`, async ({ page }, info) => {
     // AEON-998 keeps the app in English; German-profile screenshots have no translated UI.
     // Extend the existing artifact scenarios without adding another screenshot matrix.

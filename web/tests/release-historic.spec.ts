@@ -2,13 +2,11 @@
 // AEON-305: a backfilled release (102) reads exactly like a current one (105):
 // Features and Fixes, one block per ticket with its pill as the heading, the key
 // chip, the benefit and the folded commits. No tag message as a title.
-import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockReleases } from './releases-fixtures'
 import { historicHistory, NOTES } from './releases-historic-fixtures'
 
-const SHOTS = process.env.AEON_305_HISTORIC_SHOTS
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const detail = (page: Page) => sheet(page).locator('article.detail')
 
@@ -136,29 +134,4 @@ test('a German profile reads the backfilled pills and benefits in English', asyn
   await expect(fixes.getByRole('article', { name: 'Readable risk chip' }).locator('.benefit')).toHaveText('The high-risk chip on the deploy journey is easy to read in light mode.')
   await expect(fixes.locator('.pill-title')).toHaveAttribute('lang', 'en')
   await expect(detail(page).getByText('One ticket is hidden from release notes.')).toBeVisible()
-})
-
-test('screenshots of releases 102 and 105', async ({ page }) => {
-  test.skip(!SHOTS, 'set AEON_305_HISTORIC_SHOTS to a directory')
-  mkdirSync(SHOTS!, { recursive: true })
-  for (const width of [1600, 390]) {
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-    // 105 again with a presentation: the header sits above the same blocks.
-    const presented = historicHistory()
-    Object.assign(presented.releases[0]!, { presentation: {
-      theme_en: 'Sessions that clean up', theme_de: 'Sitzungen, die aufräumen', headline_en: 'Dead sessions end on their own, and phones get a proper session list.', headline_de: '',
-      intro_en: 'Sessions whose agent is gone close themselves, and the session menu offers only what works. Project counts and the Done check are honest again.', intro_de: '', revision: 1, updated_at: '2026-09-29T12:10:00Z' } })
-    for (const [name, version, history] of [['102', V102, historicHistory()], ['105', V105, historicHistory()], ['105-presented', V105, presented]] as const) {
-      for (const colorScheme of ['light', 'dark'] as const) {
-        await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
-        await open(page, version, history)
-        await page.screenshot({ path: `${SHOTS}/${name}-${width}-${colorScheme}.png` })
-        // The whole detail: a viewport tall enough that the sheet does not scroll.
-        const tall = await detail(page).evaluate(el => el.scrollHeight + el.getBoundingClientRect().top + 80)
-        await page.setViewportSize({ width, height: Math.ceil(tall) })
-        await page.screenshot({ path: `${SHOTS}/${name}-${width}-${colorScheme}-full.png` })
-        await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-      }
-    }
-  }
 })

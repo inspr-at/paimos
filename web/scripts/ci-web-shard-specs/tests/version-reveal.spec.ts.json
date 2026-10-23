@@ -6,14 +6,14 @@
   },
   "spec": {
     "file": "tests/version-reveal.spec.ts",
-    "listedTests": 6,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
-        "max": 2.954,
-        "median": 1.87,
-        "min": 1.568
+        "max": 4.286,
+        "median": 1.871,
+        "min": 1.54
       },
-      "seconds": 8.344,
+      "seconds": 12.327264,
       "selectedTests": 4
     },
     "weightSeconds": 7.657459,

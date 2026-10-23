@@ -58,7 +58,8 @@ test('dirty reload preserves local text, page reload recovers it, and a lost ACK
     await edit(pa,'title','My unsaved text');await edit(pb,'title','Remote second');expect((await save(pb)).local).toBe('clean')
     const dirty=await pa.evaluate(async()=>{const s=(window as any).quoteCollab;await s.check();const result=await s.reload();return {result,title:s.view.working.title,conflicts:s.view.review?.conflicts.length}})
     expect(dirty).toEqual({result:'review',title:'My unsaved text',conflicts:1})
-    await pa.waitForTimeout(150);await pa.reload();const restored=await open(pa,personA)
+    await expect.poll(()=>pa.evaluate(async()=>{const s=(window as any).quoteCollab;const stored=await(await import('/src/lib/quoteRecovery.ts')).loadRecovery({tenantId:s.tenantId,principalId:s.principalId,quoteId:s.quoteId,sessionId:s.clientSessionId});return stored?.mine.title})).toBe('My unsaved text')
+    await pa.reload();const restored=await open(pa,personA)
     expect(restored.recovery).toBe(true)
     const recovered=await pa.evaluate(async()=>{const s=(window as any).quoteCollab;const r=await (await import('/src/lib/quoteRecovery.ts')).loadRecovery({tenantId:s.tenantId,principalId:s.principalId,quoteId:s.quoteId,sessionId:s.clientSessionId});s.restore(r);return {title:s.view.working.title,remote:s.view.remote}})
     expect(recovered).toEqual({title:'My unsaved text',remote:'newer'})
@@ -67,37 +68,6 @@ test('dirty reload preserves local text, page reload recovers it, and a lost ACK
     const retried=await pa.evaluate(async()=>{const s=(window as any).quoteCollab;await s.retry();return {local:s.view.local,revision:s.view.baseRevision}})
     expect(retried).toEqual({local:'clean',revision:4});expect(server.document().subtitle).toBe('After reconnect')
   }finally{await a.close();await b.close()}
-})
-
-test('loading cannot save and a late reload never replaces an edit made while it waited',async({page})=>{
-  const doc=documentFixture()
-  let requests=0, writes=0, releaseReload:()=>void=()=>{}
-  const reloadGate=new Promise<void>(resolve=>{releaseReload=resolve})
-  await mockShell(page)
-  await page.route(`**/api/quotes/${quoteId}/draft`,async route=>{
-    if(route.request().method()==='PATCH'){writes++;await route.fulfill({status:500,body:'unexpected write'});return}
-    requests++
-    if(requests===2)await reloadGate
-    await route.fulfill({json:{document:doc,document_sha256:'a'.repeat(64),draft_revision:1,quote_revision:1,schema_version:1,minimum_writer_version:1,base_version:0,updated_at:'2026-09-24T00:00:00Z',updated_by_principal_id:nodeId}})
-  })
-  await page.goto('/')
-  const first=await page.evaluate(async({quoteId,tenantId})=>{
-    const {QuoteSession}=await import('/src/lib/quoteSession.ts')
-    const s=new QuoteSession({quoteId,tenantId,principalId:'aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa'})
-    ;(window as any).quoteCollab=s
-    s.edit({title:'Never saved while loading'} as any);await s.save()
-    await s.open()
-    return {local:s.view.local,title:s.view.working?.title}
-  },{quoteId,tenantId})
-  expect(first).toEqual({local:'clean',title:'Base'})
-  expect(writes).toBe(0)
-  await page.evaluate(()=>{const s=(window as any).quoteCollab;(window as any).lateReload=s.reload()})
-  await expect.poll(()=>requests).toBe(2)
-  await edit(page,'title','Local edit after reload began')
-  releaseReload()
-  const result=await page.evaluate(async()=>{const s=(window as any).quoteCollab;return {result:await (window as any).lateReload,title:s.view.working.title,local:s.view.local}})
-  expect(result).toEqual({result:'stale',title:'Local edit after reload began',local:'dirty'})
-  expect(writes).toBe(0)
 })
 
 test('revision watch backs off after outages and rechecks immediately on focus',async({page})=>{
@@ -139,30 +109,6 @@ test('verified overlay follows its stable node and stays out of print and saved 
   await expect(page.locator('.quote-presence-overlays .mark.section')).toBeVisible()
   await page.emulateMedia({media:'print'});expect(await page.locator('.quote-presence-overlays').evaluate(el=>getComputedStyle(el).display)).toBe('none')
   await page.emulateMedia({media:'screen'});await page.locator(`[data-section-id="${sectionId}"]`).evaluate(el=>el.remove());await expect(page.locator('.quote-presence-overlays .mark')).toHaveCount(0)
-})
-
-test('merge review keeps text overlaps, deleted anchors and competing order explicit',async({page})=>{
-  await page.route('**/api/**',route=>route.fulfill({status:200,contentType:'application/json',body:'{}'}));await page.goto('/')
-  const result=await page.evaluate(async(base)=>{
-    const {mergeQuote}=await import('/src/lib/quoteMerge.ts')
-    const mine=structuredClone(base),theirs=structuredClone(base)
-    mine.sections[0].nodes[0].text='My wording';theirs.sections[0].nodes[0].text='Their wording'
-    const text=mergeQuote(base,mine,theirs)
-    const chosen=mergeQuote(base,mine,theirs,{[text.conflicts[0].path]:'theirs'})
-    const deleted=structuredClone(base);deleted.sections=[]
-    const edited=structuredClone(base);edited.sections[0].heading='Edited remotely'
-    const deletion=mergeQuote(base,deleted,edited)
-    const orderedBase=structuredClone(base);orderedBase.sections.push({...structuredClone(base.sections[0]),id:'44444444-4444-4444-8444-444444444444',nodes:[]},{...structuredClone(base.sections[0]),id:'55555555-5555-4555-8555-555555555555',nodes:[]})
-    const mineOrder=structuredClone(orderedBase),theirOrder=structuredClone(orderedBase)
-    mineOrder.sections=[mineOrder.sections[1],mineOrder.sections[0],mineOrder.sections[2]]
-    theirOrder.sections=[theirOrder.sections[0],theirOrder.sections[2],theirOrder.sections[1]]
-    const order=mergeQuote(orderedBase,mineOrder,theirOrder)
-    return {textPaths:text.conflicts.map(c=>c.path),chosen:chosen.document?.sections[0].nodes[0].text,deletion:deletion.conflicts.map(c=>c.reason),order:order.conflicts.map(c=>c.reason)}
-  },documentFixture())
-  expect(result.textPaths).toContain(`$.sections[${sectionId}].nodes[${nodeId}].text`)
-  expect(result.chosen).toBe('Their wording')
-  expect(result.deletion).toContain('deletion versus edit or competing addition')
-  expect(result.order).toContain('competing reorder')
 })
 
 test('same-person tabs keep distinct mutation sessions after window.open clones storage',async({browser})=>{

@@ -4,7 +4,8 @@ import { expect, test } from '@playwright/test'
 import { expectStableControls } from './helpers/stable'
 import { LEAD_AGENT, LEAD_SESSION, mockLeadFlow } from './lead-flow-fixtures'
 
-for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1678: full person confirmation, pending and observed outcomes on desktop and phone.
+for (const width of [1440, 390]) for (const theme of ['light'] as const) {
   test(`person confirms the running coordinator without moving controls at ${width} ${theme}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width < 600 ? 844 : 1100 })
     const { data, state } = await mockLeadFlow(page, { lead: 'none', queue: ['n-4'], longText: true })

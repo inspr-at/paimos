@@ -3,7 +3,8 @@ import { expect, test } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { controlStability } from './control-stability'
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+// AEON-1677: retain phone and desktop drag targets without duplicate rendering profiles.
+for (const width of [390, 1440]) for (const theme of ['light']) {
   test(`unified Outline nests and unnests work ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.clock.setSystemTime(new Date('2026-10-04T10:00:00Z'))

@@ -5,7 +5,8 @@ import { expect, test } from '@playwright/test'
 import { expectStableControls } from './helpers/stable'
 import { mockLeadFlow } from './lead-flow-fixtures'
 
-for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as const) {
+// AEON-1678: retain the full native-control journey on desktop and phone.
+for (const width of [390, 1440]) for (const look of ['light'] as const) {
   test(`AEON-1040: remove confirmation stays still on card and Leads at ${width} ${look}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const { state } = await mockLeadFlow(page, { lead: 'paused', queue: [], decisions: false, launchEnabled: false, leadName: 'Projektverantwortlicher' })

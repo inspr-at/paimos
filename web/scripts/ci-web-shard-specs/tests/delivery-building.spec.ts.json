@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/delivery-building.spec.ts",
     "listedTests": 9,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.416,
+        "median": 2.845,
+        "min": 2.162
+      },
+      "seconds": 46.772986,
+      "selectedTests": 9
+    },
     "weightSeconds": 15.536585,
     "weightSource": "unmeasured-test-rate"
   }

@@ -369,7 +369,8 @@ test('without account management, Capacity reads: no picker, no default field, n
   expect(editable).toBe(0)
 })
 
-for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as const) for (const theme of ['light', 'dark'] as const) {
+// AEON-1678: retain all three physical layouts, including real phone touch, without theme copies.
+for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as const) for (const theme of ['light'] as const) {
   test.describe(`${width} ${theme}`, () => {
     test.use({ viewport: { width, height: width > 600 ? 1000 : 860 }, hasTouch: touch, isMobile: touch, colorScheme: theme })
     test(`capacity ${width} ${theme}: named controls, no sideways scroll, ${touch ? '44 px targets, ' : ''}one-line labels stay on one line`, async ({ page }, info) => {

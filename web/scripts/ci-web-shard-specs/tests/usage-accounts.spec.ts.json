@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/usage-accounts.spec.ts",
-    "listedTests": 9,
+    "listedTests": 7,
     "tierTiming": {
       "caseSeconds": {
-        "max": 3.369,
-        "median": 1.88,
-        "min": 1.606
+        "max": 2.634,
+        "median": 2.634,
+        "min": 2.634
       },
-      "seconds": 18.235,
-      "selectedTests": 9
+      "seconds": 3.361724,
+      "selectedTests": 1
     },
     "weightSeconds": 19.97561,
     "weightSource": "unmeasured-test-rate"

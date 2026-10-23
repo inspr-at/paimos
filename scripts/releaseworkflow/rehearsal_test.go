@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -161,7 +162,7 @@ func TestTagMatchesVersionFailsClosed(t *testing.T) {
 	_, guard := named(t, readWorkflow(t, "release.yml").Jobs["image-platform"], "Tag matches version.json")
 	for _, version := range []string{"261002004358.0.0", "261001205522.0.0"} {
 		dir := t.TempDir()
-		stub := "#!/bin/bash\nif [ \"$1\" = scripts/verify-release.mjs ]; then printf '%s' '{\"version\":\"" + version + "\"}'; else exec \"$REAL_NODE\" \"$@\"; fi\n"
+		stub := "#!/usr/bin/env bash\nif [ \"$1\" = scripts/verify-release.mjs ]; then printf '%s' '{\"version\":\"" + version + "\"}'; else exec \"$REAL_NODE\" \"$@\"; fi\n"
 		if err := os.WriteFile(filepath.Join(dir, "node"), []byte(stub), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -186,13 +187,19 @@ func TestRehearsalReleaseTagValidation(t *testing.T) {
 	}
 }
 
-// Always exercise the system bash (3.2 on macOS), even inside nix develop.
-// Also exercise the PATH bash when it differs, covering the Nix/CI shell.
+// macOS must exercise system Bash 3.2, even inside nix develop. Platforms
+// without /bin/bash use the installed Bash; exercise both when available.
 func digestTestShells(t *testing.T) []string {
 	t.Helper()
 	pathBash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat("/bin/bash"); err != nil {
+		if runtime.GOOS == "darwin" || !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		return []string{pathBash}
 	}
 	shells := []string{"/bin/bash"}
 	if pathBash != shells[0] {

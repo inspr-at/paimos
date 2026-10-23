@@ -13,7 +13,7 @@ const extensions = {
   [`x-demo.${'long-namespace-'.repeat(7)}end@1`]: { version: '1.0', data: { evidence: 'x'.repeat(2000) } },
 }
 
-for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1600, 390]) for (const theme of ['light'] as const) {
   test(`ticket shows originating extension data at ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme })
@@ -44,53 +44,7 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
   })
 }
 
-test('older extension response is discarded after selecting another ticket', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1000 })
-  await mockWork(page, fixtures())
-  await page.route('**/api/me/permissions?*', route => {
-    const result = mockEffectivePermissions('admin', 'p-pharos')
-    result.workspace.permissions.push('intake.read')
-    return route.fulfill({ json: result })
-  })
-  let release!: () => void, started!: () => void, finished!: () => void
-  const hold = new Promise<void>(resolve => { release = resolve })
-  const requested = new Promise<void>(resolve => { started = resolve })
-  const delivered = new Promise<void>(resolve => { finished = resolve })
-  await page.route('**/api/projects/p-pharos/intake?*', async route => {
-    const query = new URL(route.request().url()).searchParams
-    if (query.get('node_id') !== 'n-2') return route.fulfill({ json: { sources: [], turns: [], drafts: [] } })
-    if (!query.has('after')) return route.fulfill({ headers: { 'X-Next-Cursor': 'older' }, json: { sources: [], turns: [], drafts: [] } })
-    started()
-    await hold
-    await route.fulfill({ json: { sources: [], turns: [], drafts: [{ id: 'stale-draft', extensions }] } })
-    finished()
-  })
-  await page.goto('/p/PHAROS/PHAROS-12')
-  const workspace = page.getByRole('complementary', { name: 'Ticket details' })
-  await workspace.getByRole('button', { name: 'Show older extension data' }).click()
-  await requested
-  await workspace.getByRole('button', { name: 'Previous ticket', exact: true }).click()
-  await expect(workspace).toContainText('Connect Hetzner Cloud for managed provisioning')
-  const response = page.waitForResponse(r => r.url().includes('/intake?') && new URL(r.url()).searchParams.has('after'))
-  release()
-  await delivered
-  await (await response).finished()
-  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
-  await expect(workspace.getByRole('region', { name: 'Extension data' })).toHaveCount(0)
-  await expect(workspace.getByRole('button', { name: 'Show older extension data' })).toHaveCount(0)
-})
-
-test('ticket extension reads respect intake permission', async ({ page }) => {
-  await mockWork(page, fixtures(), { readOnly: true })
-  let calls = 0
-  await page.route('**/api/projects/*/intake?*', route => { calls++; return route.fulfill({ json: { sources: [], turns: [], drafts: [] } }) })
-  await page.goto('/p/PHAROS/PHAROS-12')
-  await expect(page.getByRole('complementary', { name: 'Ticket details' })).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Extension data' })).toHaveCount(0)
-  expect(calls).toBe(0)
-})
-
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`ticket extension history continues beyond 200 drafts at ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme })

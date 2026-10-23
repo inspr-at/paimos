@@ -128,7 +128,8 @@ const historyTo = (page: Page, url: string) => page.evaluate(to => { history.pus
 async function shot(page: Page, info: TestInfo, name: string) { await page.evaluate(() => document.querySelector('main')?.scrollTo(0, 0)); await page.screenshot({ path: info.outputPath(`${name}.png`) }) }
 
 // AEON-1240 evidence: the counts while a page is left to read ("1+", "–" with its tip), at three widths, light and dark.
-for (const width of [1440, 1024, 390]) for (const colorScheme of ['light', 'dark'] as const) {
+// AEON-1677: retain desktop/phone counts; logbook callbacks and tablet navigation stay.
+for (const width of [1440, 390]) for (const colorScheme of ['light'] as const) {
   test(`counts never read "0+" at ${width} ${colorScheme}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme })
     await setup(page)
@@ -390,7 +391,7 @@ test('the poll refreshes with a remaining cursor, rereads every loaded page and 
 
 test.describe('phone', () => {
   test.use({ viewport: { width: 390, height: 860 }, hasTouch: true, isMobile: true })
-  for (const theme of ['dark', 'light'] as const) test(`the list, then one logbook with a way back, in ${theme}`, async ({ page }, info) => {
+  for (const theme of ['light'] as const) test(`the list, then one logbook with a way back, in ${theme}`, async ({ page }, info) => {
     await page.emulateMedia({ colorScheme: theme })
     const { errors } = await setup(page)
     await page.goto('/agents/routines')

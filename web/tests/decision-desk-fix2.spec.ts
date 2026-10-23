@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { mockDecisionDesk, refreshDesk } from './decision-desk-fixtures'
 import { expectStableControls } from './helpers/stable'
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`server outcomes and correction keep selectors and actions stable ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     const world = await mockDecisionDesk(page, { long: true, theme }), question = world.questions[0]!

@@ -6,7 +6,16 @@
   },
   "spec": {
     "file": "tests/goals-create-link.spec.ts",
-    "listedTests": 7,
+    "listedTests": 10,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 10.776,
+        "median": 3.2545,
+        "min": 1.571
+      },
+      "seconds": 56.181955,
+      "selectedTests": 10
+    },
     "weightSeconds": 15.536585,
     "weightSource": "unmeasured-test-rate"
   }

@@ -224,6 +224,24 @@
     {
       "classification": "personal",
       "columns": {
+        "created_at": "metadata",
+        "owner_person_id": "personal",
+        "policy": "personal",
+        "principal_id": "personal",
+        "revision": "metadata",
+        "tenant_id": "metadata",
+        "updated_at": "metadata",
+        "vendor": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "owner_person_id"
+      },
+      "table": "assistant_profiles"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "action": "metadata",
         "actor_id": "personal",
         "completed_at": "metadata",
@@ -1827,8 +1845,9 @@
     {
       "classification": "personal",
       "columns": {
-        "messaging_only": "metadata",
+        "agent_class": "metadata",
         "assistant_last_pull_at": "metadata",
+        "messaging_only": "metadata",
         "messaging_owner_id": "personal"
       },
       "locator": {

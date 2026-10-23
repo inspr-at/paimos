@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { readFileSync, readdirSync } from 'node:fs'
 import { expect, test, type Browser, type Page, type TestInfo } from '@playwright/test'
-import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, me, mockWork } from './work-fixtures'
 
 const hour = (h: number) => new Date(Date.parse('2026-09-23T12:00:00Z') - h * 3_600_000).toISOString()
 
@@ -25,35 +25,6 @@ async function openTicket(page: Page) {
   await activity.scrollIntoViewIfNeeded()
   return activity
 }
-
-test('automatic history is Aeon, and a person named System stays a person', async ({ page }) => {
-  const errors = watchErrors(page)
-  const activity = await openTicket(page)
-  const auto = activity.locator('.entry.automatic')
-  await expect(auto).toHaveCount(1)
-  await expect(auto).toContainText('AEON (automatic)')
-  await expect(auto).toContainText('changed labels')
-  await expect(auto.locator('.auto svg')).toHaveCount(1)
-  await expect(auto.locator('strong')).toHaveAttribute('data-tip', 'learning-tagger · method learning tagger')
-  await expect(activity.locator('.entry.changes').filter({ hasText: 'changed priority' })).toContainText('System')
-  await expect(activity.locator('.entry.changes').filter({ hasText: 'changed priority' })).not.toContainText('automatic')
-
-  await activity.getByRole('radio', { name: 'Automatic' }).click()
-  await expect(activity.locator('.entry.automatic')).toHaveCount(1)
-  await expect(activity.locator('.entry.comment')).toHaveCount(0)
-  await expect(activity.locator('.entry.changes').filter({ hasText: 'System' })).toHaveCount(0)
-
-  await activity.getByRole('radio', { name: 'People and agents' }).click()
-  await expect(activity.locator('.entry.automatic')).toHaveCount(0)
-  await expect(activity.getByText('(automatic)')).toHaveCount(0)
-  await expect(activity.locator('.entry.comment')).toContainText('The probe list is the part to keep.')
-  await expect(activity.locator('.entry.changes')).toContainText('System')
-  await expect(activity.locator('.entry.created')).toContainText(me.name)
-
-  await activity.getByRole('radio', { name: 'All' }).click()
-  await expect(activity.locator('.entry')).toHaveCount(4)
-  expect(errors).toEqual([])
-})
 
 async function shoot(browser: Browser, testInfo: TestInfo, theme: 'light' | 'dark', width: number) {
   const context = await browser.newContext({

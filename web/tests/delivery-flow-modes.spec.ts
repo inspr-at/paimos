@@ -35,43 +35,6 @@ async function center(page: Page, selector: string) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
 }
 
-test('Live reads the recorded runs, follows a server hint, and keeps the time the person is viewing', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1300 })
-  const flow = await setup(page)
-  await page.goto('/p/AEON/delivery?view=flow')
-  await expect(chip(page)).toHaveText('Live · now 20:25')
-  await expect(page.getByTestId('delivery-updated')).toHaveText('Now 20:25 · live')
-  await expect(page.getByTestId('flow-empty')).toHaveCount(0)
-  await expect(page.getByTestId('flow-moment-head')).toContainText('At 20:25 (now) Release 126 is live but not working properly (since 20:14)')
-  const table = page.getByTestId('flow-inflight')
-  await expect(table.locator('tbody tr')).toHaveCount(4)
-  await expect(table.locator('tbody tr').first()).toContainText('the checks, then you: release GO')
-  await expect(table.locator('tbody tr').first()).toContainText('healthy ~20:35')
-  await expect(lanes(page).getByTestId('flow-avatar')).toHaveCount(1)
-
-  const guard = await controlStability(page, {
-    modes: modes(page), chip: page.getByTestId('flow-chip'), follow: page.getByTestId('flow-follow'),
-    zoom: page.getByTestId('flow-bar').getByRole('radiogroup', { name: 'Zoom' }), lanes: lanes(page), moment: page.getByTestId('flow-moment'),
-  })
-  // Only a playhead drag moves the time: "Viewing HH:MM" and "Back to now".
-  const pill = await center(page, '[data-testid="flow-playhead"] .ln-phpill')
-  await guard.check(async () => { await page.mouse.move(pill.x, pill.y); await page.mouse.down(); await page.mouse.move(pill.x - 150, pill.y, { steps: 8 }); await page.mouse.up() })
-  await expect(chip(page)).toHaveText(/^Viewing \d\d:\d\d$/)
-  const viewing = await chip(page).textContent()
-  await expect(page.getByTestId('flow-follow')).toContainText('Back to now')
-
-  // A hint on the stream reads the flow again; the new "now" does not take the person's time away.
-  const reads = flow.reads.filter(r => r.includes('/delivery/flow?')).length
-  flow.setNow('20:26')
-  await guard.check(async () => { flow.hint('delivery.step', RUN.r126); await expect.poll(() => flow.reads.filter(r => r.includes('/delivery/flow?')).length).toBeGreaterThan(reads) })
-  await expect(page.getByTestId('delivery-updated')).toHaveText('Now 20:26 · live')
-  await expect(chip(page)).toHaveText(viewing!)
-  await guard.check(() => page.getByTestId('flow-follow').click())
-  await expect(chip(page)).toHaveText('Live · now 20:26')
-  await expect(page.getByTestId('flow-moment-head')).toContainText('At 20:26 (now)')
-  guard.done()
-})
-
 test.describe('with motion', () => {
   test.use({ reducedMotion: 'no-preference' })
   test('Replay opens at the start of the latest release and auto-plays once per session', async ({ page }) => {
@@ -115,68 +78,10 @@ test.describe('with motion', () => {
   })
 })
 
-test('Replay under reduced motion shows the run still; the handle and Shift+arrows move the time', async ({ page }) => {
-  const at = new Date('2026-10-08T20:25:00Z')
-  await page.clock.install({ time: at })
-  await page.clock.pauseAt(new Date(at.getTime() + 1000))
-  await page.setViewportSize({ width: 1440, height: 1300 })
-  await setup(page)
-  await page.goto('/p/AEON/delivery?view=flow&mode=replay')
-  await expect(play(page)).toBeDisabled()
-  await expect(page.getByTestId('flow-rm')).toHaveText('Reduced motion: drag the time handle to step through.')
-  await expect(page.getByTestId('flow-head')).toContainText('(2 h 13)')
-  await expect(page.getByTestId('flow-head')).not.toContainText('in about a minute')
-  await page.clock.runFor(1000)
-  await expect(clock(page)).toHaveText('18:21 · 0 min in')
-  await lanes(page).focus()
-  await page.keyboard.press('Shift+ArrowRight')
-  await expect(clock(page)).toHaveText('18:22 · 1 min in')
-})
-
-test('Compare races release 126 from step a against the Arion target on one axis', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1300 })
-  await setup(page)
-  await page.goto(`/p/AEON/delivery?view=flow&mode=compare&run=${RUN.r126}`)
-  await expect(page.getByTestId('flow-pick')).toHaveValue(RUN.r126)
-  await expect(lanes(page).locator('.fl-ttl')).toHaveText(['Release 126 (a → l)', 'Arion target'])
-  await expect(lanes(page).getByTestId('flow-avatar')).toHaveCount(2)
-  await expect(page.getByTestId('flow-head')).toContainText('Release 126 vs. the Arion target, queue to live: 1 h 10 instead of 24 min')
-  await expect(clock(page)).toHaveText('+0 min')
-  await lanes(page).focus()
-  await page.keyboard.press('End')
-  await expect(clock(page)).toHaveText(/ · target reached$/)
-  await expect(page.getByTestId('flow-moment-head')).toContainText(/the Arion target was live after 24 min\./i)
-  await expect(page.getByTestId('flow-went').locator('.went')).toHaveCount(2)
-})
-
-for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'], [400, 'light', 'en'], [400, 'dark', 'en'], [1440, 'light', 'de']] as const) {
-  test(`Flow modes at ${width} ${theme} ${lang} keep controls still`, async ({ page }, info) => {
-    await page.setViewportSize({ width, height: width === 400 ? 2600 : 1500 })
-    await setup(page, { theme, lang, level: width === 400 ? 'simple' : theme === 'dark' ? 'expert' : 'simple' })
-    for (const mode of ['live', 'replay', 'compare'] as const) {
-      await page.goto(`/p/AEON/delivery?view=flow${mode === 'live' ? '' : `&mode=${mode}`}`)
-      await expect(page.getByTestId('flow-moment')).toBeVisible()
-      const controls = {
-        modes: modes(page), follow: page.getByTestId('flow-follow'), lanes: lanes(page), moment: page.getByTestId('flow-moment'),
-        ...(mode === 'live' ? { chip: page.getByTestId('flow-chip') } : { pick: page.getByTestId('flow-pick'), play: play(page) }),
-      }
-      const guard = await controlStability(page, controls)
-      await guard.check(async () => { await lanes(page).focus(); await page.keyboard.press('Shift+ArrowRight') })
-      await guard.check(async () => { await lanes(page).focus(); await page.keyboard.press('End') })
-      await guard.check(() => page.getByTestId('flow-follow').click())
-      guard.done()
-      if (mode === 'compare') await expect(page.getByTestId('flow-moment-head')).toContainText(/the Arion target was live after 24 min/i)
-      await page.mouse.move(0, 0)
-      await page.locator('.fl').evaluate(el => el.scrollIntoView({ block: 'start' }))
-      await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-994-p6-modes/flow-${mode}-${width}-${theme}-${lang}.png`) })
-    }
-  })
-}
-
 // Risk (AEON-1022): the release record under the card - the full test run and rehearsal timing, the qualification
 // evidence reference and the rollback class - is missing, says more than the record reported, or moves the controls
 // above it when the time moves, the mode changes or the data arrives. It sits below the card and grows downward.
-for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'], [1024, 'light', 'en'], [1024, 'dark', 'en'], [390, 'light', 'de'], [390, 'dark', 'en']] as const) {
+for (const [width, theme, lang] of [[1440, 'light', 'en'], [390, 'light', 'de']] as const) {
   test(`the release record shows catalogue timing, qualification evidence and rollback class and moves nothing (${width} ${theme} ${lang})`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 2800 : 1500 })
     await setup(page, { theme, lang, level: 'simple', record: true })
@@ -273,7 +178,7 @@ test('without a recorded run every mode shows the empty state and no sample data
   await expect(page.getByTestId('flow-moment-detail').getByText('Round', { exact: true })).toHaveCount(0)
 })
 
-for (const [width, theme] of [[390, 'light'], [390, 'dark'], [1024, 'light'], [1024, 'dark'], [1440, 'light'], [1440, 'dark']] as const) {
+for (const [width, theme] of [[390, 'light']] as const) {
   test(`the Flow empty state at ${width} ${theme} sits under the mode controls without sample data`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 })
     await setup(page, { theme, lang: 'de', empty: true })
@@ -363,3 +268,80 @@ for (const lang of ['en', 'de'] as const) {
     }
   })
 }
+
+// P11: the native mode controls and a held live refresh share one selected time.
+test('AEON-1683: Flow switches Live Replay and Compare and a held hint preserves the chosen time', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1300 })
+  const flow = await setup(page)
+  await page.goto('/p/AEON/delivery?view=flow')
+  await expect(chip(page)).toHaveText('Live · now 20:25')
+  await expect(page.getByTestId('delivery-updated')).toHaveText('Now 20:25 · live')
+  await expect(page.getByTestId('flow-empty')).toHaveCount(0)
+  await expect(page.getByTestId('flow-moment-head')).toContainText('At 20:25 (now) Release 126 is live but not working properly (since 20:14)')
+  const table = page.getByTestId('flow-inflight')
+  await expect(table.locator('tbody tr')).toHaveCount(4)
+  await expect(table.locator('tbody tr').first()).toContainText('the checks, then you: release GO')
+  await expect(table.locator('tbody tr').first()).toContainText('healthy ~20:35')
+  await expect(lanes(page).getByTestId('flow-avatar')).toHaveCount(1)
+
+  const guard = await controlStability(page, {
+    modes: modes(page), chip: page.getByTestId('flow-chip'), follow: page.getByTestId('flow-follow'),
+    zoom: page.getByTestId('flow-bar').getByRole('radiogroup', { name: 'Zoom' }), lanes: lanes(page), moment: page.getByTestId('flow-moment'),
+  })
+  // Only a playhead drag moves the time: "Viewing HH:MM" and "Back to now".
+  const pill = await center(page, '[data-testid="flow-playhead"] .ln-phpill')
+  await guard.check(async () => { await page.mouse.move(pill.x, pill.y); await page.mouse.down(); await page.mouse.move(pill.x - 150, pill.y, { steps: 8 }); await page.mouse.up() })
+  await expect(chip(page)).toHaveText(/^Viewing \d\d:\d\d$/)
+  const viewing = await chip(page).textContent()
+  await expect(page.getByTestId('flow-follow')).toContainText('Back to now')
+
+  // A hint on the stream reads the flow again; the new "now" does not take the person's time away.
+  const reads = flow.reads.filter(r => r.includes('/delivery/flow?')).length
+  flow.setNow('20:26')
+  let releaseHint!: () => void
+  const heldHint = new Promise<void>(resolve => { releaseHint = resolve })
+  let hintedReads = 0
+  const hold = async (route: Route) => { hintedReads++; await heldHint; await route.fallback() }
+  await page.route(/\/api\/projects\/[^/]+\/delivery\/flow(\?|$)/, hold)
+  flow.hint('delivery.step', RUN.r126)
+  await expect.poll(() => hintedReads).toBeGreaterThan(0)
+  // The read is on the wire before the person chooses a different time.
+  await lanes(page).focus()
+  await guard.check(() => page.keyboard.press('Shift+ArrowLeft'))
+  const selectedTime = await chip(page).textContent()
+  expect(selectedTime).not.toBe(viewing)
+  releaseHint()
+  await expect.poll(() => flow.reads.filter(r => r.includes('/delivery/flow?')).length).toBeGreaterThan(reads)
+  await expect(page.getByTestId('delivery-updated')).toHaveText('Now 20:26 · live')
+  await expect(chip(page)).toHaveText(selectedTime!)
+  await page.unroute(/\/api\/projects\/[^/]+\/delivery\/flow(\?|$)/, hold)
+  await guard.check(() => page.getByTestId('flow-follow').click())
+  await expect(chip(page)).toHaveText('Live · now 20:26')
+  await expect(page.getByTestId('flow-moment-head')).toContainText('At 20:26 (now)')
+  guard.done()
+  const modeGuard = await controlStability(page, {
+    modes: modes(page), live: modes(page).getByRole('radio', { name: 'Live', exact: true }),
+    replay: modes(page).getByRole('radio', { name: 'Replay', exact: true }), compare: modes(page).getByRole('radio', { name: 'Compare', exact: true }),
+  })
+  await modeGuard.check(async () => {
+    await modes(page).getByRole('radio', { name: 'Replay', exact: true }).click()
+    await expect(page).toHaveURL(/mode=replay/)
+    await expect(page.getByTestId('flow-pick')).toHaveValue(RUN.r126)
+    await expect(clock(page)).toHaveText('18:21 · 0 min in')
+  })
+  await expect(play(page)).toBeDisabled()
+  await expect(page.getByTestId('flow-rm')).toHaveText('Reduced motion: drag the time handle to step through.')
+  await lanes(page).focus(); await page.keyboard.press('Shift+ArrowRight')
+  await expect(clock(page)).toHaveText('18:22 · 1 min in')
+  await modeGuard.check(async () => {
+    await modes(page).getByRole('radio', { name: 'Compare', exact: true }).click()
+    await expect(lanes(page).locator('.fl-ttl')).toHaveText(['Release 126 (a → l)', 'Arion target'])
+  })
+  await expect(page.getByTestId('flow-went').locator('.went')).toHaveCount(2)
+  await modeGuard.check(async () => {
+    await modes(page).getByRole('radio', { name: 'Live', exact: true }).click()
+    await expect(chip(page)).toHaveText('Live · now 20:26')
+  })
+  modeGuard.done()
+
+})

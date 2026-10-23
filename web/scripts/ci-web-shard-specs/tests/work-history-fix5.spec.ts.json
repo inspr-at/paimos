@@ -6,14 +6,15 @@
   },
   "spec": {
     "file": "tests/work-history-fix5.spec.ts",
+    "listedTests": 2,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.747,
-        "median": 4.43,
-        "min": 4.238
+        "max": 3.982,
+        "median": 3.7960000000000003,
+        "min": 3.61
       },
-      "seconds": 27.02,
-      "selectedTests": 6
+      "seconds": 10.599815,
+      "selectedTests": 2
     },
     "weightSeconds": 30.961454,
     "weightSource": "hosted-tier-timing"

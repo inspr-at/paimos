@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/scope-codes.spec.ts",
-    "listedTests": 12,
+    "listedTests": 10,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.431,
-        "median": 3.211,
-        "min": 2.603
+        "max": 4.01,
+        "median": 2.4855,
+        "min": 2.145
       },
-      "seconds": 40.911,
-      "selectedTests": 12
+      "seconds": 34.196011,
+      "selectedTests": 10
     },
     "weightSeconds": 31.83871,
     "weightSource": "web-8"

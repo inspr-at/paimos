@@ -43,7 +43,8 @@ async function openWork(page: Page, theme: 'light' | 'dark', parent = false) {
   await expect(sheet.getByText(parent ? '3 open leaves will be cancelled.' : 'This leaf is busy.', { exact: false })).toBeVisible()
   return { sheet, requests, stop: () => { stopped = true }, revoke: () => { failContinue = true } }
 }
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1677: retain phone sheet/desktop controls and all revision/keyboard cases.
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`work actions stay still ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const world = await openWork(page, theme)

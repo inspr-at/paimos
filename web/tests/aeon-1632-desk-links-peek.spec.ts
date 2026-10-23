@@ -97,7 +97,7 @@ async function peekAndBack(page: Page, link: Locator, ticket: { key: string; tit
   near(await box(link), before.linkBox, 'link')
 }
 
-for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1440, 390]) for (const theme of ['light'] as const) {
   test(`AEON-1632: Desk ticket links open the peek and Esc returns to the same item ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: width < 600 ? 844 : 1000 })
     await mockDesk(page, theme)

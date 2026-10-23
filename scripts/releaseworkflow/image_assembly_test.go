@@ -435,7 +435,7 @@ func TestReleaseBinariesRefuseWarmOrUnverifiedGo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const goStub = `#!/bin/bash
+	const goStub = `#!/usr/bin/env bash
 printf '%s|%s|%s|%s\n' "$*" "${GOCACHE:-}" "${GOMODCACHE:-}" "${GOFLAGS:-}" >> "$GO_LOG"
 case "$1" in
   mod) [ "$2" != "${GO_FAIL:-}" ] || exit 1 ;;
@@ -458,7 +458,7 @@ esac
 			"repo/scripts/build-release-binaries.sh": string(script),
 			"repo/version.json":                      `{"version":"261005120000.0.0"}`,
 			"bin/go":                                 goStub,
-			"bin/file":                               "#!/bin/bash\necho \"$1: ELF executable, statically linked\"\n",
+			"bin/file":                               "#!/usr/bin/env bash\necho \"$1: ELF executable, statically linked\"\n",
 		} {
 			full := filepath.Join(dir, path)
 			if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
@@ -469,7 +469,7 @@ esac
 			}
 		}
 		log := filepath.Join(dir, "go.log")
-		cmd := exec.Command("/bin/bash", filepath.Join(dir, "repo/scripts/build-release-binaries.sh"), mode)
+		cmd := exec.Command("bash", filepath.Join(dir, "repo/scripts/build-release-binaries.sh"), mode)
 		// The surrounding CI job has its own Actions and Go settings; none may leak in.
 		for _, entry := range os.Environ() {
 			key, _, _ := strings.Cut(entry, "=")

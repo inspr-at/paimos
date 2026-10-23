@@ -101,4 +101,3 @@ export async function mockChatThread(page: Page, options: { theme?: 'light' | 'd
   await page.route('**/api/chat-sessions/*/thread', route => route.fulfill({ json: { contract: 'chat-v1', conversation_id: conversation, role: { contract: 'chat-v1' }, revision: '2', binding_epoch: '1', readiness: { state: 'offline', capabilities: [], reason: 'session_offline' } } }))
   return { worker, data, calls, messages, latest }
 }
-

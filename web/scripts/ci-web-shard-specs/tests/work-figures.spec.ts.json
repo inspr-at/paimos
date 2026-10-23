@@ -6,14 +6,14 @@
   },
   "spec": {
     "file": "tests/work-figures.spec.ts",
-    "listedTests": 28,
+    "listedTests": 19,
     "tierTiming": {
       "caseSeconds": {
-        "max": 19.248,
-        "median": 3.47,
-        "min": 2.22
+        "max": 18.592,
+        "median": 3.495,
+        "min": 1.73
       },
-      "seconds": 74.009,
+      "seconds": 81.677815,
       "selectedTests": 13
     },
     "weightSeconds": 63.645,

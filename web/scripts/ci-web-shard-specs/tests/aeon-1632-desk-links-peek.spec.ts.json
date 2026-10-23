@@ -6,7 +6,16 @@
   },
   "spec": {
     "file": "tests/aeon-1632-desk-links-peek.spec.ts",
-    "listedTests": 6,
+    "listedTests": 4,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 8.35,
+        "median": 3.8564999999999996,
+        "min": 2.303
+      },
+      "seconds": 23.745689,
+      "selectedTests": 4
+    },
     "weightSeconds": 11.097561,
     "weightSource": "unmeasured-test-rate"
   }

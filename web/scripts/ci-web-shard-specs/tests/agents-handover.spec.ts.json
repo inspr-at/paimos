@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/agents-handover.spec.ts",
-    "listedTests": 7,
+    "listedTests": 5,
     "tierTiming": {
       "caseSeconds": {
         "max": 2.987,

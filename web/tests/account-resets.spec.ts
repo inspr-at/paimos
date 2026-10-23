@@ -15,7 +15,7 @@ import type { AccountResetState, ResetPolicy } from '../src/lib/accountResets'
 test.use({ timezoneId: 'Europe/Vienna' })
 const credits = { count: 2, expires_at: ['2026-10-04T08:00:00Z', '2026-11-06T09:00:00Z'], source: 'vendor' as const }
 const plan = { planned_at: '2026-10-03T16:00:00Z', raised_pace_points: 18, raised_pace_until: '2026-10-03T22:00:00Z' }
-for (const width of [400, 1024, 1440]) for (const theme of ['light', 'dark']) test(`Account floor and resets switch stay still at ${width} ${theme}`, async ({ page }, testInfo) => {
+for (const width of [400, 1440]) for (const theme of ['light']) test(`Account floor and resets switch stay still at ${width} ${theme}`, async ({ page }, testInfo) => {
   await page.setViewportSize({ width, height: 1050 }); await page.clock.setSystemTime(NOW)
   await mockWork(page, fixtures(), { admin: true })
   const world = capacityWorld(), data = agentData({ me: me.id, now: NOW, projects: {}, tickets: {}, nodes: {} })

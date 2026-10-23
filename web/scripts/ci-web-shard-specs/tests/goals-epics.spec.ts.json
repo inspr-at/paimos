@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/goals-epics.spec.ts",
-    "listedTests": 10,
+    "listedTests": 7,
     "tierTiming": {
       "caseSeconds": {
-        "max": 5.731,
-        "median": 2.471,
-        "min": 1.555
+        "max": 5.345,
+        "median": 2.398,
+        "min": 1.515
       },
-      "seconds": 30.065,
-      "selectedTests": 10
+      "seconds": 25.933737,
+      "selectedTests": 7
     },
     "weightSeconds": 22.195122,
     "weightSource": "unmeasured-test-rate"

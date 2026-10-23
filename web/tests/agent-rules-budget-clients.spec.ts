@@ -133,7 +133,8 @@ test('pending budget saves preserve button positions and submit only once', asyn
   expect(mock.calls.filter(c => c.method === 'PUT' && c.path === '/api/rules/budget')).toHaveLength(1)
 })
 
-for (const width of [1600, 390]) for (const theme of ['light', 'dark']) {
+// AEON-1678: shared runtime proof owns client ceilings; keep both physical layouts once.
+for (const width of [1600, 390]) for (const theme of ['light']) {
   test(`large budget and per-client delivery ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme as 'light' | 'dark', reducedMotion: 'reduce' })

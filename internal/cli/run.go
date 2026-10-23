@@ -265,6 +265,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdCapacity(),
 		rt.cmdComputers(),
 		rt.cmdAgents(),
+		rt.cmdAssistant(),
 		rt.cmdUse(),
 		rt.cmdOnboard(),
 		rt.cmdSession(),

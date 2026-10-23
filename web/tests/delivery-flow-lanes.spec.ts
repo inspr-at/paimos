@@ -161,89 +161,6 @@ test('panning an incident to the right edge keeps its caption inside the lane fr
   await expect(lanes(page).locator('.sr-only')).toHaveText('Live, but not working properly · since 20:14')
 })
 
-test('the overview brush pans and resizes the window, and its playhead moves the time', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1100 })
-  await setup(page)
-  await page.goto('/p/AEON/delivery?view=flow')
-  await expect.poll(() => windowText(page)).toBe('19:55 – 20:40')
-  const brush = await center(page, '[data-testid="flow-overview"] .ln-brush')
-  await page.mouse.move(brush.x, brush.y); await page.mouse.down(); await page.mouse.move(brush.x - 150, brush.y, { steps: 6 }); await page.mouse.up()
-  const moved = await windowText(page)
-  expect(minuteOf(moved)).toBeLessThan(19 * 60 + 55)
-  expect(minuteOf(moved?.split('–')[1] ?? null) - minuteOf(moved)).toBe(45)
-  await expect(clock(page)).toHaveText('At 20:25 (now)')
-  const right = await center(page, '[data-testid="flow-overview"] [data-part="hr"]')
-  await page.mouse.move(right.x, right.y); await page.mouse.down(); await page.mouse.move(right.x + 100, right.y, { steps: 6 }); await page.mouse.up()
-  const wider = await windowText(page)
-  expect(minuteOf(wider?.split('–')[1] ?? null) - minuteOf(wider)).toBeGreaterThan(45)
-  // Keys on the overview move the window, not the time.
-  await overview(page).focus()
-  await page.keyboard.press('ArrowRight')
-  expect(await windowText(page)).not.toBe(wider)
-  await expect(clock(page)).toHaveText('At 20:25 (now)')
-  const ph = await center(page, '[data-testid="flow-overview"] [data-part="ovph"]')
-  await page.mouse.move(ph.x, ph.y); await page.mouse.down(); await page.mouse.move(ph.x - 200, ph.y, { steps: 6 }); await page.mouse.up()
-  expect(minuteOf(await clock(page).textContent())).toBeLessThan(20 * 60)
-})
-
-test('at Fit all a phone overview keeps each 44 px handle inside and a drag at either edge resizes', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 })
-  await setup(page)
-  await page.goto('/p/AEON/delivery?view=flow')
-  await page.getByTestId('flow-bar').getByRole('radio', { name: 'Fit all' }).click()
-  await expect.poll(() => windowText(page)).toBe('18:13 – 21:45')
-  await overview(page).scrollIntoViewIfNeeded()
-  const before = await windowText(page)
-  const geometry = await overview(page).evaluate(host => {
-    const svg = host.querySelector('svg')!
-    const frame = svg.getBoundingClientRect()
-    const box = (id: string) => host.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect()
-    const clip = (r: DOMRect) => ({
-      w: Math.min(r.right, frame.right) - Math.max(r.left, frame.left),
-      h: Math.min(r.bottom, frame.bottom) - Math.max(r.top, frame.top),
-    })
-    const area = (a: DOMRect, b: DOMRect) => {
-      const w = Math.min(a.right, b.right) - Math.max(a.left, b.left)
-      const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
-      return Math.max(0, w) * Math.max(0, h)
-    }
-    const hr = box('flow-overview-hr'), hl = box('flow-overview-hl'), ph = box('flow-overview-playhead')
-    const x = frame.right - 30, y = frame.top + frame.height / 2
-    return {
-      frameW: frame.width,
-      hl: clip(hl), hr: clip(hr),
-      playOverlap: area(hr, ph) + area(hl, ph),
-      rightPart: document.elementFromPoint(x, y)?.getAttribute('data-part') ?? '',
-      x, y,
-    }
-  })
-  expect(geometry.frameW).toBeGreaterThan(240)
-  expect(geometry.frameW).toBeLessThan(640)
-  expect(geometry.hl.w).toBeGreaterThanOrEqual(44)
-  expect(geometry.hl.h).toBeGreaterThanOrEqual(44)
-  expect(geometry.hr.w).toBeGreaterThanOrEqual(44)
-  expect(geometry.hr.h).toBeGreaterThanOrEqual(44)
-  expect(geometry.playOverlap).toBe(0)
-  // 30 px in from the right edge is outside the old 12 px sliver, so a miss does not resize.
-  expect(geometry.rightPart).toBe('hr')
-  await page.mouse.move(geometry.x, geometry.y)
-  await page.mouse.down()
-  await page.mouse.move(geometry.x - 36, geometry.y, { steps: 6 })
-  await page.mouse.up()
-  const shrunk = await windowText(page)
-  expect(shrunk?.split('–')[0]?.trim()).toBe(before?.split('–')[0]?.trim())
-  expect(minuteOf(shrunk?.split('–')[1] ?? null)).toBeLessThan(minuteOf(before?.split('–')[1] ?? null))
-  const left = await center(page, '[data-testid="flow-overview-hl"]')
-  const end = await windowText(page)
-  await page.mouse.move(left.x, left.y)
-  await page.mouse.down()
-  await page.mouse.move(left.x + 36, left.y, { steps: 6 })
-  await page.mouse.up()
-  const later = await windowText(page)
-  expect(later?.split('–')[1]?.trim()).toBe(end?.split('–')[1]?.trim())
-  expect(minuteOf(later)).toBeGreaterThan(minuteOf(end))
-})
-
 // AEON-1007: a 15 min window with the playhead on the range end used to stack both
 // 44 px handles on one x and leave the playhead over the grips, so the left edge
 // could not be resized. Each edge is zoomed fresh so one drag cannot pin the other.
@@ -325,29 +242,99 @@ test('a 15 min window at a phone overview edge keeps both handles draggable', as
   expect(minuteOf(leftNarrow?.split('–')[1] ?? null)).toBeLessThan(minuteOf(leftWide?.split('–')[1] ?? null))
 })
 
-for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'], [400, 'light', 'en'], [400, 'dark', 'en'], [1440, 'light', 'de'], [400, 'dark', 'de']] as const) {
-  test(`Flow lanes at ${width} ${theme} ${lang} keep controls still`, async ({ page }, info) => {
-    await page.setViewportSize({ width, height: width === 400 ? 900 : 1100 })
-    await setup(page, { theme, lang })
-    await page.goto('/p/AEON/delivery?view=flow')
-    const zoom = page.getByTestId('flow-bar').getByRole('radiogroup', { name: 'Zoom' })
-    await expect(lanes(page).locator('.ln-lane')).toHaveCount(6)
-    // Phone: Live opens at 20 min. A de-AT profile still uses the English app language (AEON-998).
-    await expect.poll(() => windowText(page)).toBe(width === 400 ? '20:12 – 20:32' : '19:55 – 20:40')
-    const guard = await controlStability(page, {
-      fit: zoom.getByRole('radio', { name: 'Fit all' }), z60: zoom.getByRole('radio', { name: '1 h' }),
-      follow: page.getByTestId('flow-follow'), readout: page.getByTestId('flow-readout'), overview: overview(page), lanes: lanes(page),
-    })
-    await guard.check(() => zoom.getByRole('radio', { name: '1 h' }).click())
-    await guard.check(() => zoom.getByRole('radio', { name: '30 min' }).click())
-    await guard.check(async () => { await lanes(page).focus(); await page.keyboard.press('Shift+ArrowLeft') })
-    await guard.check(() => page.getByTestId('flow-follow').click())
-    guard.done()
-    await page.mouse.move(0, 0)
-    await page.locator('.fl').evaluate(el => el.scrollIntoView({ block: 'start' }))
-    await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-994-p5-lanes/flow-lanes-${width}-${theme}-${lang}.png`) })
+// P11: actual hit testing at the phone edge, followed by brush pan and playhead drag.
+test('AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await setup(page)
+  await page.goto('/p/AEON/delivery?view=flow')
+  await page.getByTestId('flow-bar').getByRole('radio', { name: 'Fit all' }).click()
+  await expect.poll(() => windowText(page)).toBe('18:13 – 21:45')
+  await overview(page).scrollIntoViewIfNeeded()
+  const guard = await controlStability(page, {
+    zoom: page.getByTestId('flow-bar').getByRole('radiogroup', { name: 'Zoom' }),
+    follow: page.getByTestId('flow-follow'), chip: page.getByTestId('flow-chip'), overview: overview(page),
   })
-}
+  const drag = async (at: { x: number; y: number }, dx: number) => guard.check(async () => {
+    await page.mouse.move(at.x, at.y); await page.mouse.down()
+    await page.mouse.move(at.x + dx, at.y, { steps: 6 }); await page.mouse.up()
+  })
+  const before = await windowText(page)
+  const geometry = await overview(page).evaluate(host => {
+    const svg = host.querySelector('svg')!
+    const frame = svg.getBoundingClientRect()
+    const box = (id: string) => host.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect()
+    const clip = (r: DOMRect) => ({
+      w: Math.min(r.right, frame.right) - Math.max(r.left, frame.left),
+      h: Math.min(r.bottom, frame.bottom) - Math.max(r.top, frame.top),
+    })
+    const area = (a: DOMRect, b: DOMRect) => {
+      const w = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+      const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+      return Math.max(0, w) * Math.max(0, h)
+    }
+    const hr = box('flow-overview-hr'), hl = box('flow-overview-hl'), ph = box('flow-overview-playhead')
+    const x = frame.right - 30, y = frame.top + frame.height / 2
+    return {
+      frameW: frame.width,
+      hl: clip(hl), hr: clip(hr),
+      playOverlap: area(hr, ph) + area(hl, ph),
+      rightPart: document.elementFromPoint(x, y)?.getAttribute('data-part') ?? '',
+      x, y,
+    }
+  })
+  expect(geometry.frameW).toBeGreaterThan(240)
+  expect(geometry.frameW).toBeLessThan(640)
+  expect(geometry.hl.w).toBeGreaterThanOrEqual(44)
+  expect(geometry.hl.h).toBeGreaterThanOrEqual(44)
+  expect(geometry.hr.w).toBeGreaterThanOrEqual(44)
+  expect(geometry.hr.h).toBeGreaterThanOrEqual(44)
+  expect(geometry.playOverlap).toBe(0)
+  // 30 px in from the right edge is outside the old 12 px sliver, so a miss does not resize.
+  expect(geometry.rightPart).toBe('hr')
+  await drag(geometry, -36)
+  const shrunk = await windowText(page)
+  expect(shrunk?.split('–')[0]?.trim()).toBe(before?.split('–')[0]?.trim())
+  expect(minuteOf(shrunk?.split('–')[1] ?? null)).toBeLessThan(minuteOf(before?.split('–')[1] ?? null))
+  const left = await center(page, '[data-testid="flow-overview-hl"]')
+  const end = await windowText(page)
+  await drag(left, 36)
+  const later = await windowText(page)
+  expect(later?.split('–')[1]?.trim()).toBe(end?.split('–')[1]?.trim())
+  expect(minuteOf(later)).toBeGreaterThan(minuteOf(end))
+  // Moving the brush pans the window while keeping its span and the chosen time.
+  const span = minuteOf(later?.split('–')[1] ?? null) - minuteOf(later)
+  // Resize leaves fractional-minute endpoints. Pan by whole minutes so both
+  // minute-only labels advance equally, regardless of the platform's plot width.
+  const panMinutes = 20
+  const brush = await overview(page).evaluate((host, minutes) => {
+    const svg = host.querySelector('svg')!
+    const lane = host.querySelector<SVGLineElement>('.ln-ovlane')!
+    const rect = host.querySelector<SVGRectElement>('.ln-brush')!
+    const box = rect.getBoundingClientRect()
+    const range = Number(host.getAttribute('aria-valuemax')) - Number(host.getAttribute('aria-valuemin'))
+    const scale = svg.getBoundingClientRect().width / svg.viewBox.baseVal.width
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2, width: rect.width.baseVal.value,
+      dx: minutes * (lane.x2.baseVal.value - lane.x1.baseVal.value) / range * scale }
+  }, panMinutes)
+  expect(brush.width).toBeGreaterThan(0)
+  await drag(brush, brush.dx)
+  const panned = await windowText(page)
+  expect(panned).not.toBe(later)
+  expect(minuteOf(panned?.split('–')[1] ?? null) - minuteOf(panned)).toBe(span)
+  expect(minuteOf(panned) - minuteOf(later)).toBe(panMinutes)
+  expect(minuteOf(panned?.split('–')[1] ?? null) - minuteOf(later?.split('–')[1] ?? null)).toBe(panMinutes)
+  expect(await overview(page).locator('.ln-brush').evaluate(rect => (rect as SVGRectElement).width.baseVal.value)).toBe(brush.width)
+  await expect(clock(page)).toHaveText('At 20:25 (now)')
+  await overview(page).focus()
+  await guard.check(() => page.keyboard.press('ArrowRight'))
+  expect(await windowText(page)).not.toBe(panned)
+  await expect(clock(page)).toHaveText('At 20:25 (now)')
+  // The distinct playhead target moves the time rather than resizing the brush.
+  await drag(await center(page, '[data-testid="flow-overview"] [data-part="ovph"]'), -36)
+  expect(minuteOf(await clock(page).textContent())).toBeLessThan(20 * 60 + 25)
+  await expect(chip(page)).toHaveText(/^Viewing /)
+  guard.done()
+})
 
 // ---------- AEON-1656: lanes grow instead of stacking ----------
 type Box = { x: number; y: number; w: number; h: number }
@@ -489,4 +476,5 @@ test('a live update grows the Builder lane only once the pointer has left, never
   expect(after.lanes.review).toEqual(before.lanes.review)
   expect(after.lanes.ci!.y).toBeGreaterThan(before.lanes.ci!.y)
   expect(stacked(after.bars)).toEqual([])
+
 })
