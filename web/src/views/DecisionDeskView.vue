@@ -886,6 +886,8 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; autoRetry.sto
    Below it only Decided needs a second line. Open goes straight from the tabs to its list or empty state. */
 @container desk-tabs (max-width: 909.98px) {
   .dp-bar { grid-template-columns: max-content minmax(0, 1fr); }
+  /* CSS changes before ResizeObserver teleports the slot; never let it create an implicit third column. */
+  .refresh-slot { display: none; }
   .dp-bar .dec-filter { grid-area: 2 / 1 / auto / -1; }
   .dp-bar .dec-filter.reserved { display: none; }
 }
