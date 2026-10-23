@@ -869,5 +869,110 @@
     "afterCaseRunnerSeconds": null,
     "runnerTimeChangeSeconds": null,
     "conclusion": "Measured runtime proof: 84 cases in 2.526s plus 23 Node cases in 0.358s. The two new native candidates passed in 8.0s combined. No browser runner-time saving is claimed: the original 225 cases are retained and the package remains above its 30-case ceiling."
+  },
+  "fixRound2": {
+    "scope": "Repair the two CI accounting failures after the approved P10 cuts and promotions; the cut-A browser population and application behavior are unchanged.",
+    "baselineCommit": "f2c59aa0c24e3cbee2483557367fd5adc2642732",
+    "implementationCommit": "9f38a33dc7a3312f20f8c50fd6c7e33ed78ad99d",
+    "findings": [
+      {
+        "check": "AEON-1334 historical corpus replay has zero proof misses",
+        "cause": "The two quote-collaboration browser cases moved to runtime ownership left the current NIGHTLY drift-file cost snapshot stale.",
+        "nightlyCasesBefore": 1524,
+        "nightlyCasesAfter": 1522,
+        "historicalReplayRowsUnchanged": 1508,
+        "removedNightlyDriftCases": [
+          "tests/quote-collaboration.spec.ts: loading cannot save and a late reload never replaces an edit made while it waited",
+          "tests/quote-collaboration.spec.ts: merge review keeps text overlaps, deleted anchors and competing order explicit"
+        ]
+      },
+      {
+        "check": "ungated groups stay declared and checked but only run with --all",
+        "cause": "The new quote-native gate was charged to a historical pre-addition gate baseline.",
+        "historicalPriorShardLimitSeconds": 300,
+        "historicalPriorMaxShardSeconds": 299.838842,
+        "newQuoteSchedulingSeconds": 24.414634,
+        "newQuoteSchedulingLimitSeconds": 25,
+        "quoteFiles": 5,
+        "nativeQuoteCases": 7,
+        "essentialQuoteCases": 3,
+        "assertions": "Preserve the original historical <300s bound, charge only the exact promoted quote group separately, and check native identities, all full-gate tiers, exact ESSENTIAL journeys, listed counts, launch policy and one assignment per file."
+      }
+    ],
+    "regressionProof": {
+      "entryPoint": "remote-test.sh",
+      "host": "agm2-ci (Linux)",
+      "baselineTransportCommit": "854d92f5729f0bb108ca03a918e134d98aaf7bdd",
+      "baselineResult": "Both existing regression tests reproduce the reported assertion failures on the f2c59aa0 source: 1524 !== 1522; prior gate exceeds its five-minute estimate budget.",
+      "fixedTransportCommit": "20fafc92bed8ca70b9546c9481e3a7f6cbfca836",
+      "fixedTargetedResult": "2 passed, 0 failed, 0 skipped",
+      "transport": "Temporary launchers, temporary registrations and the historical replay-tree parent were confined to worker scratch refs, removed after verification; none is part of the delivery branch."
+    },
+    "validation": {
+      "static": {
+        "entryPoint": "ci-static-remote.sh",
+        "sourceCommit": "9f38a33dc7a3312f20f8c50fd6c7e33ed78ad99d",
+        "exitCode": 0,
+        "checksPassed": 44,
+        "optionalSkipped": 0,
+        "reportedSeconds": 299.73
+      },
+      "canonicalManifests": "passed",
+      "pruneChecker": "passed in default mode without P02; visualApproval=pending; cuts=false",
+      "latestMain": "11b092730 is already merged; fetch before handoff found no new main commits",
+      "affectedFiles": {
+        "entryPoint": "remote-test.sh (Node suites launched from an isolated Go scratch transport)",
+        "sourceCommit": "c4d662f9c98b0c422dfd8fa2a20032fc466b0e4b",
+        "implementationCommit": "9f38a33dc7a3312f20f8c50fd6c7e33ed78ad99d",
+        "host": "agm2-ci (Linux)",
+        "files": [
+          "scripts/test-tiers/corpus-replay.test.mjs",
+          "web/scripts/ci-web-shard.test.mjs"
+        ],
+        "tests": 36,
+        "passed": 36,
+        "failed": 0,
+        "skipped": 0,
+        "reportedNodeSeconds": 187.115282834,
+        "auditExitCode": 0,
+        "canonicalManifestsExitCode": 0,
+        "ledger": {
+          "file": "web/tests/test-prune-ledger.test.ts",
+          "tests": 1,
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0
+        },
+        "transportExitCode": 0
+      },
+      "additionalLinuxTierReplay": {
+        "entryPoint": "remote-test.sh",
+        "sourceCommit": "20fafc92bed8ca70b9546c9481e3a7f6cbfca836",
+        "targetedRegressionTests": {
+          "passed": 2,
+          "failed": 0,
+          "skipped": 0
+        },
+        "broadTierSuites": {
+          "tests": 541,
+          "passed": 536,
+          "failed": 5,
+          "skipped": 0
+        },
+        "runnerFailures": [
+          "AEON-1333 workflow bootstrap adoption fallback (registered twice): bash reports node: command not found and loses the fixture git wrapper.",
+          "AEON-1333 depth-1 merge checkout shadow evidence (registered twice): bash reports node: command not found.",
+          "workflow merge-group planner: its explicit /bin/bash fixture returns a null process status on the NixOS runner."
+        ],
+        "resolution": "The complete affected files pass on Linux (36/36), as do audit, canonical manifests and ledger. The full tier-suite shell fixtures pass in the mandatory 44-check remote static run; their separate NixOS shell-environment gaps remain recorded here."
+      }
+    },
+    "preserved": "Historical failure records, all 647 protected-risk lineage rows, protected registrations, visual approval state, tier/selection policy and scheduling weights are unchanged in this fix round.",
+    "outsideWriteSet": [
+      "scripts/test-tiers/drift-obligations.json: refresh the current NIGHTLY count after the two P10 collaboration cuts.",
+      "web/scripts/ci-web-shard.test.mjs: reconcile the newly added P10 gate with the historical scheduling baseline and verify its native registrations."
+    ],
+    "recordedAt": "2026-10-23T10:04:23.042062+00:00",
+    "complete": true
   }
 }
