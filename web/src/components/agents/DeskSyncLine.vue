@@ -10,21 +10,21 @@ import { deskSyncCopy, type DeskSyncLine } from '../../lib/deskSync'
 const props = defineProps<{ line: DeskSyncLine; pulse: number; busy: boolean }>()
 const emit = defineEmits<{ retry: [] }>()
 const words = deskSyncCopy()
-const dot = ref<HTMLElement>()
+const mark = ref<HTMLElement>()
 let reduced: MediaQueryList | undefined
 onMounted(() => { reduced = matchMedia('(prefers-reduced-motion: reduce)') })
-// Each live event pulses the dot once. Reduced motion keeps it still; the words carry the state.
+// Each live event pulses the icon slot once. The slot outlives the swap from the Live dot to "Change arrived"'s
+// refresh icon, which the same event causes, so the pulse is seen. Reduced motion keeps it still; the words carry it.
 watch(() => props.pulse, () => {
-  if (reduced?.matches || typeof dot.value?.animate !== 'function') return
-  dot.value.animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(1.6)', opacity: 0.35 }, { transform: 'scale(1)', opacity: 1 }], { duration: 600, easing: 'ease-out' })
+  if (reduced?.matches || typeof mark.value?.animate !== 'function') return
+  mark.value.animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(1.6)', opacity: 0.35 }, { transform: 'scale(1)', opacity: 1 }], { duration: 600, easing: 'ease-out' })
 })
 </script>
 
 <template>
   <p class="desk-sync" :class="{ warn: line.warn }" :data-state="line.state" data-testid="desk-sync">
     <span class="sync-text" tabindex="0" :data-tip="line.tip || undefined">
-      <span v-if="line.icon === 'dot'" ref="dot" class="sync-dot" role="img" :aria-label="words.live" data-testid="desk-sync-dot" />
-      <AppIcon v-else-if="line.icon" class="sync-icon" :class="{ spin: line.spin }" :name="line.icon" :size="12" />
+      <span v-if="line.icon" ref="mark" class="sync-mark"><span v-if="line.icon === 'dot'" class="sync-dot" role="img" :aria-label="words.live" data-testid="desk-sync-dot" /><AppIcon v-else class="sync-icon" :class="{ spin: line.spin }" :name="line.icon" :size="12" /></span>
       <span class="sync-words" aria-hidden="true"><template v-for="(part, index) in line.parts" :key="index"><span v-if="'n' in part" class="sync-n">{{ part.n }}</span><template v-else-if="part.short === undefined">{{ part.text }}</template><template v-else><span class="wide">{{ part.text }}</span><span v-if="part.short" class="short">{{ part.short }}</span></template></template></span>
       <span class="sr-only">{{ line.sentence }}</span>
     </span>
@@ -45,8 +45,10 @@ watch(() => props.pulse, () => {
 .sync-icon { flex: none; color: var(--ink-3); }
 .warn .sync-icon { color: inherit; }
 .warn { color: var(--warn-ink); }
-/* The 6 px dot in the 12 px icon box, so dot and icons share one slot. */
-.sync-dot { flex: none; display: grid; place-items: center; width: 12px; height: 12px; }
+/* One 12 px icon slot for the dot and the icons; the 6 px dot sits centred in it. */
+.sync-mark { flex: none; display: grid; place-items: center; width: 12px; height: 12px; }
+.sync-mark > * { grid-area: 1 / 1; }
+.sync-dot { display: grid; place-items: center; width: 12px; height: 12px; }
 .sync-dot::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); }
 @media (prefers-reduced-motion: no-preference) { .sync-icon.spin { animation: desk-sync-turn 1.2s linear infinite; } }
 @keyframes desk-sync-turn { to { transform: rotate(1turn); } }

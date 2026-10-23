@@ -120,6 +120,7 @@ describe('Decision Desk empty state', () => {
     expect(line(quiet)).toMatchObject({ state: 'quiet', health: 'quiet', icon: 'alert', warn: true, retry: false })
     expect(words(line(quiet))).toBe(`Couldn’t check · trying again in 10 s · showing ${shown}`)
     expect(words(line(quiet, 'de'))).toBe(`Prüfung fehlgeschlagen · neuer Versuch in 10 s · Stand ${shown}`)
+    expect(words(line(quiet), true), '≤ 520').toBe(`Couldn’t check · retry in 10 s · showing ${shown}`)
     // A pending automatic retry comes first when it is due before the poll.
     expect(words(line({ ...quiet, retryAt: at + 23_000 }))).toBe(`Couldn’t check · trying again in 3 s · showing ${shown}`)
     // AEON-1631's kept rows are the same quiet failure while retries run, and escalate once they are spent.
@@ -134,6 +135,7 @@ describe('Decision Desk empty state', () => {
     expect(line({ online: false })).toMatchObject({ state: 'offline', icon: 'cloud-off', warn: false, retry: false })
     expect(words(line({ online: false }))).toBe(`Offline · showing ${shown} · checks resume when you’re back`)
     expect(words(line({ online: false }, 'de'))).toBe(`Offline · Stand ${shown} · Prüfung startet wieder, sobald online`)
+    expect(words(line({ online: false }), true), '≤ 520').toBe(`Offline · showing ${shown} · resumes when online`)
     expect(line({ checkedAt: null })).toMatchObject({ state: 'never', icon: 'refresh', spin: false, tip: '' })
     expect(words(line({ checkedAt: null }))).toBe('Checking now…')
     expect(words(line({ checkedAt: null }, 'de'))).toBe('Wird geprüft…')

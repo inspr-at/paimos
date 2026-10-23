@@ -66,9 +66,10 @@ export const DESK_SYNC_COPY = {
     checked: (a: Ago) => a.kind === 'just' ? [t('checked just now')] : a.kind === 'at' ? [t(`checked at ${a.clock}`)] : [t('checked '), n(a.n), t(a.kind === 's' ? ' s ago' : ' min ago')],
     next: (s: number) => [t('next check in ', 'next in '), n(s), t(' s')],
     checking: 'Checking now…', change: 'Change arrived · updating…', retrying: 'Checking again…',
-    quiet: (s: number | null, shown: string) => [t('Couldn’t check'), ...(s === null ? [] : [SEP, t('trying again in '), n(s), t(' s')]), ...(shown ? [SEP, t(`showing ${shown}`)] : [])],
+    // ≤ 520 px the two long phrases shorten as "next in" does, so a phone keeps the line on one line (CI's sans is wide).
+    quiet: (s: number | null, shown: string) => [t('Couldn’t check'), ...(s === null ? [] : [SEP, t('trying again in ', 'retry in '), n(s), t(' s')]), ...(shown ? [SEP, t(`showing ${shown}`)] : [])],
     escalated: (shown: string) => [t(`Not updated since ${shown}`)],
-    offline: (shown: string) => [t('Offline'), ...(shown ? [SEP, t(`showing ${shown}`)] : []), SEP, t('checks resume when you’re back')],
+    offline: (shown: string) => [t('Offline'), ...(shown ? [SEP, t(`showing ${shown}`)] : []), SEP, t('checks resume when you’re back', 'resumes when online')],
     tryAgain: 'Try again',
     tip: (last: string, next: string) => `Last check ${last}${next ? ` · next ${next}` : ''}`,
     sentence: {
@@ -87,9 +88,9 @@ export const DESK_SYNC_COPY = {
     checked: (a: Ago) => a.kind === 'just' ? [t('gerade geprüft')] : a.kind === 'at' ? [t(`um ${a.clock} geprüft`)] : [t('vor '), n(a.n), t(a.kind === 's' ? ' s geprüft' : ' min geprüft')],
     next: (s: number) => [t('nächste Prüfung in ', 'nächste in '), n(s), t(' s')],
     checking: 'Wird geprüft…', change: 'Änderung eingetroffen · wird aktualisiert…', retrying: 'Erneuter Versuch…',
-    quiet: (s: number | null, shown: string) => [t('Prüfung fehlgeschlagen'), ...(s === null ? [] : [SEP, t('neuer Versuch in '), n(s), t(' s')]), ...(shown ? [SEP, t(`Stand ${shown}`)] : [])],
+    quiet: (s: number | null, shown: string) => [t('Prüfung fehlgeschlagen'), ...(s === null ? [] : [SEP, t('neuer Versuch in ', 'erneut in '), n(s), t(' s')]), ...(shown ? [SEP, t(`Stand ${shown}`)] : [])],
     escalated: (shown: string) => [t(`Seit ${shown} nicht aktualisiert`)],
-    offline: (shown: string) => [t('Offline'), ...(shown ? [SEP, t(`Stand ${shown}`)] : []), SEP, t('Prüfung startet wieder, sobald online')],
+    offline: (shown: string) => [t('Offline'), ...(shown ? [SEP, t(`Stand ${shown}`)] : []), SEP, t('Prüfung startet wieder, sobald online', 'weiter, sobald online')],
     tryAgain: 'Erneut versuchen',
     tip: (last: string, next: string) => `Letzte Prüfung ${last}${next ? ` · nächste ${next}` : ''}`,
     sentence: {
