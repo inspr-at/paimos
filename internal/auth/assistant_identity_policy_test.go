@@ -304,7 +304,8 @@ func testAssistantIdentityPolicy(t *testing.T) {
 		return err
 	})
 	limitedSession := session(limited)
-	call("POST", "/api/assistants", limitedSession, newBody, 403)
+	limitedBody := map[string]any{"display_name": "Limited helper", "vendor": "grok", "owner_person_id": limited.ID, "policy": assistants.DefaultPolicy()}
+	call("POST", "/api/assistants", limitedSession, limitedBody, 403)
 	call("PUT", path+"/policy", limitedSession, map[string]any{"expected_revision": 2, "policy": policy}, 403)
 	// Possessing both permissions never transfers another person's assistant.
 	seed(owner.TenantID, func(tx pgx.Tx) error {
@@ -321,7 +322,6 @@ func testAssistantIdentityPolicy(t *testing.T) {
  AND role_id=(SELECT id FROM roles WHERE key='assistant_limited')`)
 		return err
 	})
-	limitedBody := map[string]any{"display_name": "Limited helper", "vendor": "grok", "owner_person_id": limited.ID, "policy": assistants.DefaultPolicy()}
 	call("POST", "/api/assistants", limitedSession, limitedBody, 403)
 	renamed := decodeAssistant(call("PATCH", path, ownerSession, map[string]any{"expected_revision": 2, "display_name": "Amy hosted"}, 200))
 	if renamed.DisplayName != "Amy hosted" || renamed.Revision != 3 || renamed.PrincipalID != amy.PrincipalID {
