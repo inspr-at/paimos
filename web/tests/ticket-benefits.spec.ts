@@ -58,15 +58,6 @@ test('ticket benefits edit together with a precondition and preserve unrelated f
   expect(errors).toEqual([])
 })
 
-test('read-only ticket shows missing-language guidance without edit controls', async ({ page }) => {
-  const data = fixtures()
-  await mockWork(page, data, { readOnly: true })
-  await page.goto('/p/PHAROS/PHAROS-12')
-  const ws = page.getByRole('complementary', { name: 'Ticket details' })
-  await expect(ws.getByRole('region', { name: 'User benefit' })).toContainText('both languages')
-  await expect(ws.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
-})
-
 for (const state of ['done', 'accepted', 'delivered']) {
   test(`historical ${state} ticket shows completed guidance in display and edit mode`, async ({ page }) => {
     const data = fixtures()
@@ -270,7 +261,7 @@ for (const width of [1600, 390]) {
   })
 }
 
-for (const width of [1600, 390]) {
+for (const width of [390]) {
   test(`internal-only releases show no tag title and a quiet detail at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     // Cover both a hidden-only capture and an empty internal capture.

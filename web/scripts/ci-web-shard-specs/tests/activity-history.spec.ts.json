@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/activity-history.spec.ts",
-    "listedTests": 2,
+    "listedTests": 1,
     "tierTiming": {
       "caseSeconds": {
         "max": 10.393,

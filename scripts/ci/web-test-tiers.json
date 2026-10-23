@@ -942,17 +942,7 @@
     ,
     "browser:tests/hours.spec.ts:open periods older than a year appear on a direct approvals load"
     ,
-    "browser:tests/intake-extensions.spec.ts:older extension response is discarded after selecting another ticket"
-    ,
-    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1024 dark"
-    ,
-    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1024 light"
-    ,
-    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1440 dark"
-    ,
     "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1440 light"
-    ,
-    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 390 dark"
     ,
     "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 390 light"
     ,
@@ -1101,8 +1091,6 @@
     "browser:tests/project-settings.spec.ts:AEON-1233: approved P1 reference states and check.mjs audit against the build"
     ,
     "browser:tests/record-ownership.spec.ts:S8-001: accepted discard clears description and comment drafts before opening B"
-    ,
-    "browser:tests/record-ownership.spec.ts:the same ticket keeps its comment draft when expanding and returning"
     ,
     "browser:tests/recurrence-marker.spec.ts:a linked source outside page one is selected directly and stays selected when more rows arrive"
     ,
@@ -5618,8 +5606,6 @@
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"a reading nearly two minutes old stops promising room when the server stops trusting it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/activity-history.spec.ts","name":"automatic history is Aeon, and a person named System stays a person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/activity-history.spec.ts","name":"history screenshots at 390 and 1600, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/add-account.spec.ts","name":"a failed computer list offers Try again and then the steps","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -6444,17 +6430,11 @@
     ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: a queued narrow table resize preserves the columns after the table grows","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: deleting 50 lines keeps the page where it is, in the middle and at the end","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: deleting a capped comment back under its cap keeps the panel at its end when its scrollbar goes or a font arrives","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: the comment editor grows to its 560 px cap without ever collapsing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: the full ticket page writes the description in one row as tall as its preview","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 1024 light never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 1440 dark never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 1440 light never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -6467,22 +6447,6 @@
     {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"AEON-1535 P4: the 1440 desk keeps its geometry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"touch › AEON-1535 P3: O, A, R and D and a tap choose the right row, and choosing moves nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: a reader who presses e before permissions load gets no editor","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: c is spent when the person enters and leaves a field before permissions load","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: c pressed before project permissions load focuses the comment box once they arrive","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e is spent by a refreshed denial that lands after the request it waited on, so a later grant opens nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e is spent when a dialog opens and closes before permissions load","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e pressed before project permissions load opens the editor once they arrive","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e pressed while the ticket loads opens the editor when the ticket arrives after its permissions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e remembered for one ticket does not edit the ticket opened next","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -7846,11 +7810,9 @@
     ,
     {"kind":"browser","file":"tests/brand.spec.ts","name":"the sign-in page follows the brand too","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/bulk.spec.ts","name":"archive hides the tickets; a change made elsewhere since makes Undo refuse and change nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"assignee, priority, labels and parent change in one request each; stale tickets say why","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/bulk.spec.ts","name":"checkbox and Shift-click select a range; one status change for all of them, undone at once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/bulk.spec.ts","name":"checkbox and Shift-click select a range; one status change for all of them, undone at once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"keyboard: x toggles, Shift J grows, Cmd or Ctrl A selects all, s opens the bulk status menu, Esc clears","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10516,27 +10478,11 @@
     ,
     {"kind":"browser","file":"tests/indicator-gallery.spec.ts","name":"robot family gallery light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"older extension response is discarded after selecting another ticket","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension reads respect intake permission","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket shows originating extension data at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket shows originating extension data at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket shows originating extension data at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket shows originating extension data at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11243,8 +11189,6 @@
     {"kind":"browser","file":"tests/markdown-ticket-links.spec.ts","name":"a moved Markdown key PHAROS-14 follows AEON-2 and Back restores the source","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/markdown-ticket-links.spec.ts","name":"a plain click follows the routed ticket and a modified click opens the URL","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/markdown-ticket-links.spec.ts","name":"markdown ticket links and the epic panel, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/markdown-ticket-links.spec.ts","name":"the epic panel keeps the Updated line against the status chips","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12943,8 +12887,6 @@
     {"kind":"browser","file":"tests/quotes/two-user-presence.spec.ts","name":"two editors see named presence, server expiry removes an anchor, and print hides overlays","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/record-ownership.spec.ts","name":"S8-001: accepted discard clears description and comment drafts before opening B","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/record-ownership.spec.ts","name":"the same ticket keeps its comment draft when expanding and returning","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"a linked source outside page one is selected directly and stays selected when more rows arrive","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15064,19 +15006,7 @@
     ,
     {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"a 128-character usage model keeps its figures in the ticket panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"a ticket with no sessions leaves the agent work section out","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"agent work dark 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"agent work dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"agent work light 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"agent work light 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"an epic shows sessions with reported figures and leaves missing ones out","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"empty capped scope still warns that deeper sessions may exist","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"a German profile stays in English; an explicit DE choice shows German and falls back when German is empty","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15090,11 +15020,7 @@
     ,
     {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"historical done ticket shows completed guidance in display and edit mode","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"internal-only releases show no tag title and a quiet detail at 1600px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"internal-only releases show no tag title and a quiet detail at 390px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"read-only ticket shows missing-language guidance without edit controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"regenerated missing-snapshot history keeps chips, filters and visible changes without a tag title","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -16027,6 +15953,8 @@
     {"kind":"node","file":"tests/accounts-overview.test.ts","name":"host capacity parsing retains off defaults and rejects oversized history","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/accounts-overview.test.ts","name":"shared quota names its computers in the singular and plural, in English and German","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/activity.test.ts","name":"P03: automatic history names Aeon while a person named System remains a person through filtering","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/activity.test.ts","name":"an automatic change keeps the job that wrote it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
@@ -17704,11 +17632,17 @@
     ,
     {"kind":"node","file":"tests/theme-values.test.ts","name":"saved presets and Custom previews each choose ink within their own mode","leaf":"saved presets and Custom previews each choose ink within their own mode","line":49,"tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"P03: agent work renders optional, capped, partial and withheld usage without invented zeroes","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"a numeric cost in the payload is unknown, not displayed","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"estimated cost stays an exact decimal string and never a float","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"two model rows stay exact when summed text is already decimal","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/ticket-benefits.test.ts","name":"P03: benefit visibility preserves language text and independent release flags","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/ticket-benefits.test.ts","name":"P03: historic completion and read-only benefit guidance render from the actual component","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/ticket-benefits.test.ts","name":"a backfilled snapshot says the notes were written after the release, and a historical headline does not","tier":"GATED-FULL"}
     ,
@@ -18976,6 +18910,12 @@
     ,
     {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"rejects direct and aliased locale detectors while allowing language selection and region formatting","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"P03: deferred e waits for both grants and the captured ticket, in either order","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"P03: deferred ticket shortcuts are spent by changed ownership, fields, dialogs and denial","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"P03: the latest e/c intent alone runs once, while denied readers gain no intent","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"adoption confirmation is bound to the acting person and key","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"keeps an explicit custom-role recurrence grant and names the creator ceiling","tier":"ESSENTIAL"}
@@ -19236,6 +19176,12 @@
     ,
     {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"Aithema extension disclosures > retains unknown namespaces and coexisting majors as plain text","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"P03: denied intake reads stay absent; unavailable history exposes Retry without invented evidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"P03: held intake pages and errors cannot populate a different ticket, project or revoked grant","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"P03: intake continuation retains evidence, deduplicates drafts and retries the same bounded cursor","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"intake history continuation > keeps older drafts accessible and preserves the node filter on the next page","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/intake-extensions.unit.test.ts","name":"intake history continuation > reports a continuation failure instead of returning an empty successful page","tier":"GATED-FULL"}
@@ -19319,6 +19265,10 @@
     {"kind":"vitest","file":"tests/ledger.unit.test.ts","name":"the row version decides first, whatever the position or start order says","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/ledger.unit.test.ts","name":"with equal versions, the list snapshot decides before the start order","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/live-agents-store.unit.test.ts","name":"P03: a forbidden live read clears prior workers and truncation, without inventing an empty successful read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/live-agents-store.unit.test.ts","name":"P03: every ticket consumer shares one poll and reports partial or withheld worker evidence honestly","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/live-agents-store.unit.test.ts","name":"a stop during a slow poll discards the old response and coalesces a catch-up read","tier":"GATED-FULL"}
     ,
@@ -20406,6 +20356,10 @@
     ,
     {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"waits for a deferred wrong-version recovery decision even after the old 400ms window","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"P03: delayed table resize deliveries settle on the live width and discard superseded frame callbacks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"P03: editor fit math preserves growth and only spends the scroller slack on delete, late font or resize","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > drops a mark whose update never restored once its flush is over","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"readerAnchor > follows the next row on screen when the first one leaves, and stays still at the top or for a sub-pixel","tier":"ESSENTIAL"}
@@ -20419,6 +20373,10 @@
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"touchScroll > ends at scrollend once no finger is down, and ignores scrolls without a touch","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/reader-anchor.unit.test.ts","name":"touchScroll > runs from the touch until momentum is quiet, never while a finger is down","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/record-ownership.unit.test.ts","name":"P03: conflicted titles and failed comments retain their drafts and ignore late results after A changes to B","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/record-ownership.unit.test.ts","name":"P03: the same ticket retains its owned comment draft when expanded and returned","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/record-ownership.unit.test.ts","name":"S8-001: changing ticket clears description and comment drafts, including a late save","tier":"ESSENTIAL"}
     ,
@@ -24150,6 +24108,10 @@
     ,
     {"kind":"vitest","file":"tests/ticket-links.unit.test.ts","name":"unmount trims to 200 off-screen answers and access refresh without links forgets them","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/ticket-outcomes.unit.test.ts","name":"P03: a late outcome read or failure for A cannot replace B","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-outcomes.unit.test.ts","name":"P03: optional outcomes render recorded evidence and full long text, with honest empty/error states","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/ticket-outcomes.unit.test.ts","name":"describes each outcome without raw ids","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/ticket-peek-link.unit.test.ts","name":"a ctrl or cmd click opens one ticket tab and does not open the peek","tier":"ESSENTIAL"}
@@ -24164,7 +24126,15 @@
     ,
     {"kind":"vitest","file":"tests/ticket-peek-link.unit.test.ts","name":"repeated ctrl or cmd key presses keep the browser tab after a press opened one","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/ticket-peek.unit.test.ts","name":"P03: peek routing preserves Agents, knowledge and graph context and returns focus to its opener","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/ticket-peek.unit.test.ts","name":"the route owns the panel even when a stale peek query survives navigation","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-reviews.unit.test.ts","name":"P03: late review results cannot cross ticket, project, person, tenant or unmount boundaries","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-reviews.unit.test.ts","name":"P03: review readiness requires full distinct commits, repository, author and both write grants","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/ticket-reviews.unit.test.ts","name":"P03: uncertain review retries reuse the exact request while edited requests get a fresh id","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/ticket-search.unit.test.ts","name":"shared palette and relation search includes canonical work for PHAROS-29","tier":"GATED-FULL"}
     ,

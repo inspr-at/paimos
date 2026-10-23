@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/bulk.spec.ts",
-    "listedTests": 7,
+    "listedTests": 6,
     "tierTiming": {
       "caseSeconds": {
         "max": 27.599,
