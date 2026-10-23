@@ -1377,7 +1377,7 @@
             "tests/ticket-panel.spec.ts",
             "tests/attachments.spec.ts"
           ],
-          "finalRerunStatus": "refused: remote busy (host guard); final attempt pending"
+          "finalRerunStatus": "Final approved-entrypoint attempt refused: remote busy (host guard). Hosted PR CI must run relations.spec.ts, ticket-panel.spec.ts and attachments.spec.ts after the correction. No further local fallback or browser bypass used."
         }
       },
       "measuredRunnerTimeChange": {
