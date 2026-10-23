@@ -316,7 +316,9 @@ it('AEON-1682: rate form validates before writing, retains a refused draft and r
     listRates.mockResolvedValueOnce([confirmed])
     await state.save(unit)
     expect(createRate.mock.calls).toEqual(Array(2).fill(['cu-0', {
-      unit: 'hour', currency: 'EUR', bill_amount: 99.5, internal_amount: 64.25,
+      // The typed adapter takes exact decimal strings and writes JSON numbers
+      // itself; this boundary must never pass through floating point.
+      unit: 'hour', currency: 'EUR', bill_amount: '99.5000', internal_amount: '64.2500',
       effective_from: '2026-10-01', effective_until: null,
     }]))
     expect(store.costUnit('cu-0')!.rates).toEqual([confirmed])
