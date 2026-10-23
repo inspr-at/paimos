@@ -645,10 +645,6 @@ func normalizeAEON1674VisualReferences(t *testing.T, id string, job map[string]a
 		command = "download"
 		previous = "actions/setup-node@"
 		next = "Resolve lockfile and Playwright cache keys"
-		if !reflect.DeepEqual(job["permissions"], map[string]any{"contents": "read"}) {
-			t.Fatal("visual setup must use only read-only repository authority")
-		}
-		delete(job, "permissions")
 		pack := reuseStep(t, job, "Pack web runtime for shards")
 		if pack["run"] != `tar -cf "$RUNNER_TEMP/web-runtime.tar" web/node_modules web/dist tmp/visual-baselines` {
 			t.Fatal("shared web runtime must carry the verified original reference assets")
@@ -667,6 +663,10 @@ func normalizeAEON1674VisualReferences(t *testing.T, id string, job map[string]a
 	default:
 		return
 	}
+	if !reflect.DeepEqual(job["permissions"], map[string]any{"contents": "read"}) {
+		t.Fatal("visual transport must use only read-only repository authority")
+	}
+	delete(job, "permissions")
 	want := map[string]any{
 		"name": name,
 		"run":  "node scripts/test-prune/visual-baselines.mjs " + command + " tmp/visual-baselines\ncat tmp/visual-baselines/reference-gates.md >> \"$GITHUB_STEP_SUMMARY\"\n",
