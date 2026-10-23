@@ -959,9 +959,9 @@
           },
           "referenceStatus": "deferred",
           "deferredUntil": [
-            "AEON-1674"
+            "AEON-1692"
           ],
-          "deferredReason": "Tick requested changes to the 390px Delivery capture: scroll the Delivery heading below the app header and show the on-target headline. These two old captures are transport evidence only; a fresh capture and Tick approval are required before they can become references."
+          "deferredReason": "Tick requested changes to the 390px Delivery capture: heading top must be at least app-header bottom +12 px, with the full on-target headline in view. Re-capture and approval belong to AEON-1692 / reference set 3; these old PNGs remain transport evidence only."
         },
         {
           "id": "V-delivery-numbers-390-dark",
@@ -973,9 +973,9 @@
           },
           "referenceStatus": "deferred",
           "deferredUntil": [
-            "AEON-1674"
+            "AEON-1692"
           ],
-          "deferredReason": "Tick requested changes to the 390px Delivery capture: scroll the Delivery heading below the app header and show the on-target headline. These two old captures are transport evidence only; a fresh capture and Tick approval are required before they can become references."
+          "deferredReason": "Tick requested changes to the 390px Delivery capture: heading top must be at least app-header bottom +12 px, with the full on-target headline in view. Re-capture and approval belong to AEON-1692 / reference set 3; these old PNGs remain transport evidence only."
         },
         {
           "id": "V-delivery-numbers-1440-light",

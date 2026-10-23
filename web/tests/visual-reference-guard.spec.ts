@@ -14,6 +14,7 @@ import { fixtures, mockWork } from './work-fixtures'
 // Risk: a healthy Agents reference accidentally depicts an unmocked permission
 // service, or hiding that banner also hides a real load failure and its retry.
 test('P02 Agents permission requests load successfully and retain explicit error recovery', async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.clock.setFixedTime(new Date(NOW))
   await mockWork(page, fixtures(), { admin: true })
   // Exercise chrome without the shared agents handler, which also serves this
@@ -25,6 +26,15 @@ test('P02 Agents permission requests load successfully and retain explicit error
     return { status: response.status, body: await response.json() }
   })
   expect(chromeRead).toEqual({ status: 200, body: [] })
+  // Force the shell's delayed history read through the real release control.
+  // An unnamed reviewed running release must remain unnamed after that read.
+  const release = page.locator('.app-footer .version-pill')
+  await expect(release).toBeVisible()
+  await expect(release.locator('.footer-codename')).toHaveCount(0)
+  await release.click()
+  await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
+    .getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()
+  await expect(release.locator('.footer-codename')).toHaveCount(0)
   // An old chrome poll must not satisfy the populated fixture's readiness read
   // while navigation destroys its response body. Bind each fixture to its page.
   await page.close()
