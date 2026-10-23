@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Hours: the week grid, fast entry, people and agents, period review and approval.
 import { test, expect, type Page } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { addHistoricalPeriod, businessData, mira, mockBusiness, nova, WEEK39, type BusinessMockOptions } from './business-fixtures'
 import { colourContrast } from '../src/lib/themeEngine'
+import { expectStableControls } from './helpers/stable'
+import { domAudit } from './ui-audit-rules'
 
 test.use({ timezoneId: 'Europe/Vienna' })
 
@@ -76,7 +79,7 @@ test('open periods older than a year appear in the home waiting count and week b
   }
 })
 
-test('the week grid sums per ticket and day with exact amounts', async ({ page }) => {
+test('the week grid sums per ticket and day with exact amounts', async ({ page }, info) => {
   const errors = watchErrors(page)
   await setup(page)
   await openWeek(page)
@@ -94,6 +97,30 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
   await expect(entries.getByText('Thu 24')).toBeVisible()
   await expect(entries.locator('.entry').first()).toContainText('08:00–09:30')
   await expect(entries.locator('.entry').first()).toContainText('127.50')
+  // AEON-1687: the complete seven-day grid must fit its own container on a
+  // phone, rather than concealing a wider table in a horizontal scroller.
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    await page.evaluate(() => document.fonts.ready)
+    const scroll = page.getByRole('region', { name: 'Weekly hours, scroll for all days' })
+    await scroll.focus()
+    const controls = { navigation: page.getByRole('group', { name: 'Week', exact: true }),
+      person: page.getByRole('button', { name: 'Hours of You. Choose a person or agent' }),
+      row: rows.first(), grid: scroll }
+    const boxes = await Promise.all(Object.values(controls).map(control => control.boundingBox()))
+    await expectStableControls({ controls, scrollAreas: { grid: scroll }, interactions: [
+      { name: 'read the last day with the keyboard', run: async () => { await scroll.press('ArrowRight') } },
+      { name: 'return to the first day', run: async () => { await scroll.press('ArrowLeft') } },
+    ] })
+    expect(await Promise.all(Object.values(controls).map(control => control.boundingBox())), 'week controls and rows move by 0 px').toEqual(boxes)
+    const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
+    expect(layout, `${width} ${theme}: week descendants fit without clipping or overlap`).toEqual([])
+    const axe = await new AxeBuilder({ page }).include('.biz-page')
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+    expect(axe.violations, `${width} ${theme}: Hours WCAG A/AA`).toEqual([])
+    await page.screenshot({ path: info.outputPath(`AEON-1687-hours-${width}-${theme}.png`) })
+  }
   expect(errors).toEqual([])
 })
 

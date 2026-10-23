@@ -741,7 +741,7 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .week-label { min-width: 0; flex-direction: column; align-items: center; gap: 0; }
   .person-btn { height: 40px; }
   .log-wrap { padding: 12px; }
-  .week-grid { min-width: 420px; }
+  .week-grid { min-width: 0; }
   .week-grid .c-ticket { width: 84px; padding-left: 10px; }
   .week-grid thead .c-ticket { font-size: 0; }
   .t-cell .t-title { display: none; }
