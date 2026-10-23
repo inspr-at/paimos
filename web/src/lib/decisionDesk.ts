@@ -260,22 +260,23 @@ export function deskFailedWords(waiting: number | null | undefined, de = false) 
     ? n === 1 ? '1 Eintrag wartet, aber die Liste konnte nicht geladen werden.' : n ? `${n} Einträge warten, aber die Liste konnte nicht geladen werden.` : 'Der Desk konnte nicht geladen werden.'
     : n === 1 ? '1 item is waiting, but the list couldn’t be loaded.' : n ? `${n} items are waiting, but the list couldn’t be loaded.` : 'The desk couldn’t be loaded.'
   return de
-    ? { sentence, retrying: 'Wird automatisch erneut versucht', exhausted: 'Lädt weiterhin nicht. Die Einträge bleiben erhalten; später erneut versuchen.', retry: 'Erneut versuchen', stale: (time: string) => `Liste von ${time}` }
-    : { sentence, retrying: 'Retrying automatically', exhausted: 'Still not loading. Your items are safe; try again later.', retry: 'Try again', stale: (time: string) => `Showing the list from ${time}` }
+    ? { sentence, retrying: 'Wird automatisch erneut versucht', exhausted: 'Lädt weiterhin nicht. Die Einträge bleiben erhalten; später erneut versuchen.', retry: 'Erneut versuchen' }
+    : { sentence, retrying: 'Retrying automatically', exhausted: 'Still not loading. Your items are safe; try again later.', retry: 'Try again' }
 }
 
 // AEON-1631: a failed desk read is retried on its own, 3, 10 and 30 s apart; then the normal refresh takes over.
 export const DESK_RETRY_MS: readonly number[] = [3_000, 10_000, 30_000]
 export type DeskRetryPhase = 'idle' | 'retrying' | 'exhausted'
-/** One pending retry at most. `failing` is read after every retry; `stop` cancels the pending one (navigation, a person's own Try again). */
-export function deskAutoRetry(run: () => Promise<unknown>, failing: () => boolean, phase: (value: DeskRetryPhase) => void, delays: readonly number[] = DESK_RETRY_MS) {
+/** One pending retry at most. `failing` is read after every retry; `stop` cancels the pending one (navigation, a person's own Try again).
+ * A scheduled retry also names its due time, so the Desk's sync line counts down to the real timer (AEON-1700). */
+export function deskAutoRetry(run: () => Promise<unknown>, failing: () => boolean, phase: (value: DeskRetryPhase, dueAt?: number) => void, delays: readonly number[] = DESK_RETRY_MS) {
   let timer: ReturnType<typeof setTimeout> | undefined, step = 0, turn = 0
   function stop() { clearTimeout(timer); timer = undefined; turn++ }
   function next() {
     stop()
     const delay = delays[step]
     if (delay === undefined) { phase('exhausted'); return }
-    step++; phase('retrying')
+    step++; phase('retrying', Date.now() + delay)
     const mine = turn
     timer = setTimeout(async () => {
       timer = undefined

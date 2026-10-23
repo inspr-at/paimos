@@ -122,6 +122,7 @@ for (const width of [1440, 1024, 390] as const) {
     await expect(page.getByTestId('desk-tab-open')).toContainText('2')
     await expect(page.getByTestId('desk-clear')).toHaveCount(0)
     await expect(page.getByTestId('desk-empty')).toHaveText('Nothing waits here')
+    await expect(page.getByTestId('desk-sync').locator('.sync-text')).toHaveAttribute('data-tip', /pma: checked/)
     await expect(page.getByTestId('instance-pma').locator('.instance-item')).toHaveCount(2)
     await expect(page.getByTestId('instance-pma').getByRole('button')).toHaveCount(0)
     await shot(page, info, `desk-${width}-light`)

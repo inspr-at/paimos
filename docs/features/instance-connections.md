@@ -62,5 +62,5 @@ while the app is open; no server polls other instances in the background.
 The Goals line, confirmation and personal settings follow Tick spec v1. Tick
 v2 supplies consolidated count breakdowns, remote Desk/preview groups, the
 Decided-tab home links, notification copy and per-instance notification switches.
-The current local refresh tooltip includes each sibling; the separate AEON-1700
-sync-line slice must preserve that tooltip when combined by the coordinator.
+The shared sync line retains the local read status and includes each sibling’s
+read status and age in its tooltip, including cached or ended connections.

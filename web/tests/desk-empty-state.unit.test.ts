@@ -3,10 +3,13 @@
 // did not answer, so a person stops looking while something is waiting.
 // AEON-1631 risk: the badge counts two items while a failed desk read shows the
 // all-clear art, and nothing reads the desk again until the next refresh.
+// AEON-1700 risk: the sync line claims a check, a countdown or a live stream that
+// did not happen, or announces every tick to a screen reader.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { DESK_RETRY_MS, deskAutoRetry, deskEmptyState, deskFailedWords, deskUnansweredLine, type DeskProjection, type DeskRetryPhase } from '../src/lib/decisionDesk'
 import { loadDesk, nativeTierAdapter, tierSessionsFromRefresh } from '../src/lib/decisionDeskApi'
+import { deskClock, deskClockMoved, deskSyncAnnouncement, deskSyncLine, deskSyncMotion, type DeskSyncInput, type DeskSyncLine } from '../src/lib/deskSync'
 import type { HarnessSession } from '../src/lib/agents'
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
@@ -75,8 +78,85 @@ describe('Decision Desk empty state', () => {
     expect(deskFailedWords(1, true).sentence).toBe('1 Eintrag wartet, aber die Liste konnte nicht geladen werden.')
     expect(deskFailedWords(undefined, true).sentence).toBe('Der Desk konnte nicht geladen werden.')
     const en = deskFailedWords(2), de = deskFailedWords(2, true)
-    expect([en.retrying, en.exhausted, en.retry, en.stale('19:47')]).toEqual(['Retrying automatically', 'Still not loading. Your items are safe; try again later.', 'Try again', 'Showing the list from 19:47'])
-    expect([de.retrying, de.exhausted, de.retry, de.stale('19:47')]).toEqual(['Wird automatisch erneut versucht', 'Lädt weiterhin nicht. Die Einträge bleiben erhalten; später erneut versuchen.', 'Erneut versuchen', 'Liste von 19:47'])
+    expect([en.retrying, en.exhausted, en.retry]).toEqual(['Retrying automatically', 'Still not loading. Your items are safe; try again later.', 'Try again'])
+    expect([de.retrying, de.exhausted, de.retry]).toEqual(['Wird automatisch erneut versucht', 'Lädt weiterhin nicht. Die Einträge bleiben erhalten; später erneut versuchen.', 'Erneut versuchen'])
+
+    // AEON-1700 §3/§7: the sync line's words for every state on one frozen clock. Every instant derives from
+    // `at`; clock times come from the same formatter as the line, so the zone of the runner never matters.
+    const at = Date.UTC(2026, 9, 23, 13, 58, 0)
+    const idle: DeskSyncInput = { now: at + 12_000, checkedAt: at, busy: false, change: false, failures: 0, notice: null, stale: false, retry: 'idle',
+      online: true, visible: true, live: true, pollAt: at + 30_000, retryAt: null }
+    const words = (line: DeskSyncLine, short = false) => line.parts.map(part => 'n' in part ? `${part.n}${part.unit ?? ''}` : short ? part.short ?? part.text : part.text).join('').replace(/\u00a0/g, ' ')
+    const line = (over: Partial<DeskSyncInput> = {}, lang: 'en' | 'de' = 'en') => deskSyncLine({ ...idle, ...over }, lang)
+    const shown = deskClock(at)
+    expect(words(line())).toBe('Live · checked 12 s ago · next check in 18 s')
+    expect(words(line(), true), '≤ 520: no "Live ·", "next in"').toBe('checked 12 s ago · next in 18 s')
+    expect(words(line({}, 'de'))).toBe('Live · vor 12 s geprüft · nächste Prüfung in 18 s')
+    expect(line()).toMatchObject({ state: 'normal', icon: 'dot', live: true, warn: false, retry: false, tip: `Last check ${deskClock(at, true)} · next ${deskClock(at + 30_000, true)}` })
+    expect(line().sentence).toBe(`Live. Last check ${deskClock(at, true)}. Next check ${deskClock(at + 30_000, true)}.`)
+    expect(words(line({ now: at + 3_000 }))).toBe('Live · checked just now · next check in 27 s')
+    expect(words(line({ now: at + 3_000 }, 'de'))).toBe('Live · gerade geprüft · nächste Prüfung in 27 s')
+    expect(words(line({ now: at + 3 * 60_000, pollAt: at + 3 * 60_000 + 9_000 }))).toBe('Live · checked 3 min ago · next check in 9 s')
+    expect(words(line({ now: at + 59 * 60_000 + 59_000, pollAt: at + 60 * 60_000 }))).toBe('Live · checked 59 min ago · next check in 1 s')
+    expect(words(line({ now: at + 2 * 3600_000, pollAt: at + 2 * 3600_000 + 30_000 }))).toBe(`Live · checked at ${shown} · next check in 30 s`)
+    expect(words(line({ now: at + 2 * 3600_000, pollAt: at + 2 * 3600_000 + 30_000 }, 'de'))).toBe(`Live · um ${shown} geprüft · nächste Prüfung in 30 s`)
+    // Disconnected: "Live" and its dot drop. Hidden: no countdown is invented while polls pause.
+    expect(line({ live: false })).toMatchObject({ icon: null, live: false })
+    expect(words(line({ live: false }))).toBe('checked 12 s ago · next check in 18 s')
+    expect(words(line({ visible: false }))).toBe('Live · checked 12 s ago')
+    expect(words(line({ pollAt: null }))).toBe('Live · checked 12 s ago')
+    // The checked count reserves "59" on its own. The countdown keeps its unit in the same slot, so the box can reserve "59 s".
+    expect(line().parts.filter(part => 'n' in part)).toEqual([{ n: 12 }, { n: 18, unit: ' s' }])
+    expect(line({ busy: true })).toMatchObject({ state: 'checking', icon: 'refresh', spin: true })
+    expect(words(line({ busy: true }))).toBe('Checking now…')
+    expect(words(line({ busy: true }, 'de'))).toBe('Wird geprüft…')
+    expect(line({ busy: true, change: true })).toMatchObject({ state: 'change', icon: 'refresh', spin: true })
+    expect(words(line({ busy: true, change: true }))).toBe('Change arrived · updating…')
+    expect(words(line({ busy: true, change: true }, 'de'))).toBe('Änderung eingetroffen · wird aktualisiert…')
+    expect(line({ failures: 1 })).toMatchObject({ state: 'retrying', icon: 'refresh', spin: false, warn: false })
+    expect(words(line({ failures: 1 }))).toBe('Checking again…')
+    expect(words(line({ failures: 1 }, 'de'))).toBe('Erneuter Versuch…')
+    const quiet = { failures: 2, notice: 'quiet', now: at + 20_000 } as const
+    expect(line(quiet)).toMatchObject({ state: 'quiet', health: 'quiet', icon: 'alert', warn: true, retry: false })
+    expect(line(quiet).parts.filter(part => 'n' in part)).toEqual([{ n: 10, unit: ' s' }])
+    expect(words(line(quiet))).toBe(`Couldn’t check · trying again in 10 s · showing ${shown}`)
+    expect(words(line(quiet, 'de'))).toBe(`Prüfung fehlgeschlagen · neuer Versuch in 10 s · Stand ${shown}`)
+    expect(words(line(quiet), true), '≤ 520').toBe(`Couldn’t check · retry in 10 s · showing ${shown}`)
+    // A pending automatic retry comes first when it is due before the poll.
+    expect(words(line({ ...quiet, retryAt: at + 23_000 }))).toBe(`Couldn’t check · trying again in 3 s · showing ${shown}`)
+    // AEON-1631's kept rows are the same quiet failure while retries run, and escalate once they are spent.
+    expect(words(line({ stale: true, retry: 'retrying', retryAt: at + 15_000 }))).toBe(`Couldn’t check · trying again in 3 s · showing ${shown}`)
+    expect(line({ stale: true, retry: 'exhausted' }).state).toBe('escalated')
+    const escalated = { failures: 5, notice: 'escalated' } as const
+    expect(line(escalated)).toMatchObject({ state: 'escalated', icon: 'alert', warn: true, retry: true })
+    expect(words(line(escalated))).toBe(`Not updated since ${shown}`)
+    expect(words(line(escalated, 'de'))).toBe(`Seit ${shown} nicht aktualisiert`)
+    // Try again stays where it is through a later read: escalation wins over checking.
+    expect(line({ ...escalated, busy: true }).state).toBe('escalated')
+    expect(line({ online: false })).toMatchObject({ state: 'offline', icon: 'cloud-off', warn: false, retry: false })
+    expect(words(line({ online: false }))).toBe(`Offline · showing ${shown} · checks resume when you’re back`)
+    expect(words(line({ online: false }, 'de'))).toBe(`Offline · Stand ${shown} · Prüfung startet wieder, sobald online`)
+    expect(words(line({ online: false }), true), '≤ 520').toBe(`Offline · showing ${shown} · resumes when online`)
+    expect(line({ checkedAt: null })).toMatchObject({ state: 'never', icon: 'refresh', spin: false, tip: '' })
+    expect(words(line({ checkedAt: null }))).toBe('Checking now…')
+    expect(words(line({ checkedAt: null }, 'de'))).toBe('Wird geprüft…')
+    // Capture freezes one instant and sets reduced motion. The same instant twice is the same settled sentence.
+    const frozen = line({ now: at, checkedAt: at, pollAt: at + 30_000 })
+    expect(words(frozen)).toBe(words(line({ now: at, checkedAt: at, pollAt: at + 30_000 })))
+    expect(words(frozen)).toBe('Live · checked just now · next check in 30 s')
+    expect(frozen.spin, 'a settled line does not turn').toBe(false)
+    expect(words(frozen)).not.toBe('Checking now…')
+    expect(deskSyncMotion({ reducedMotion: true, spin: true })).toEqual({ spin: false, pulse: false })
+    expect(deskSyncMotion({ reducedMotion: false, spin: true })).toEqual({ spin: true, pulse: true })
+    expect(deskClockMoved(at, at), 'a frozen clock does not make the poll due').toBe(false)
+    expect(deskClockMoved(at, at + 30_000)).toBe(true)
+    // §5: failures, escalation and recovery speak once per transition; nothing else does.
+    expect(deskSyncAnnouncement('ok', 'ok', shown)).toBeNull()
+    expect(deskSyncAnnouncement('ok', 'quiet', shown)).toBe('Couldn’t check the Desk. Trying again.')
+    expect(deskSyncAnnouncement('quiet', 'escalated', shown)).toBe(`The Desk hasn’t updated since ${shown}. Try again is available.`)
+    expect(deskSyncAnnouncement('escalated', 'quiet', shown)).toBeNull()
+    expect(deskSyncAnnouncement('escalated', 'ok', shown)).toBe('The Desk is up to date again.')
+    expect(deskSyncAnnouncement('quiet', 'ok', shown, 'de')).toBe('Der Desk ist wieder aktuell.')
   })
 
   // Risk: retries stack (one per failure or poll) or never stop; a navigation leaves one running.
@@ -84,14 +164,18 @@ describe('Decision Desk empty state', () => {
     vi.useFakeTimers()
     expect(DESK_RETRY_MS).toEqual([3_000, 10_000, 30_000])
     let failing = true, reads = 0
-    const phases: DeskRetryPhase[] = []
-    const retry = deskAutoRetry(async () => { reads++ }, () => failing, phase => phases.push(phase))
+    const phases: DeskRetryPhase[] = [], dues: (number | undefined)[] = []
+    const retry = deskAutoRetry(async () => { reads++ }, () => failing, (phase, dueAt) => { phases.push(phase); dues.push(dueAt) })
+    const startedAt = Date.now()
     retry.start()
     // A second failure while one retry waits schedules nothing more.
     retry.start()
     expect(phases.at(-1)).toBe('retrying')
+    // AEON-1700: each scheduled retry names its own timer's due time; the sync line counts down to it.
+    expect(dues.at(-1)).toBe(startedAt + 3_000)
     await vi.advanceTimersByTimeAsync(2_999); expect(reads).toBe(0)
     await vi.advanceTimersByTimeAsync(1); expect(reads).toBe(1)
+    expect(dues.at(-1)).toBe(startedAt + 3_000 + 10_000)
     await vi.advanceTimersByTimeAsync(9_999); expect(reads).toBe(1)
     await vi.advanceTimersByTimeAsync(1); expect(reads).toBe(2)
     await vi.advanceTimersByTimeAsync(29_999); expect(reads).toBe(2)

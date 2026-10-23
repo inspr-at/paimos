@@ -77,7 +77,8 @@ export interface PolledData<T> { data: Ref<T>; status: ShallowRef<RefreshStatus>
 
 // The same lifecycle for every periodic read. Ticks never stack; coming back to
 // a tab or network refreshes immediately, including after a suspended timer.
-export function usePoller(run: () => Promise<unknown> | void, period: number, options: { enabled?: () => boolean; invalidate?: () => void } = {}) {
+// `due` hears when the interval fires next (null once stopped), read from the timer itself (AEON-1700).
+export function usePoller(run: () => Promise<unknown> | void, period: number, options: { enabled?: () => boolean; invalidate?: () => void; due?: (at: number | null) => void } = {}) {
   let timer: ReturnType<typeof setInterval> | undefined
   let running = false
   let started = false
@@ -122,11 +123,13 @@ export function usePoller(run: () => Promise<unknown> | void, period: number, op
     lastTick = Date.now()
     document.addEventListener('visibilitychange', visibility)
     window.addEventListener('online', online)
-    timer = setInterval(() => tick(), period)
+    timer = setInterval(() => { options.due?.(Date.now() + period); tick() }, period)
+    options.due?.(Date.now() + period)
     if (immediate) tick(true)
   }
   function stop() {
     clearInterval(timer); timer = undefined
+    options.due?.(null)
     pending = false
     generation++
     running = false; started = false
