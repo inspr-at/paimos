@@ -5,6 +5,7 @@ import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { maxEvidenceBytes, readJSON, requireText } from './review-selfcheck.mjs'
+import { publishFacts } from './delivery-evidence.mjs'
 
 const sha = /^[a-f0-9]{40}$/
 // Canonical family IDs from internal/reviewgate/result.go; harness names are
@@ -119,16 +120,20 @@ export function auditFacts(plan, results, { now = new Date() } = {}) {
   })
   return { facts: facts.sort((a, b) => a.pull_request - b.pull_request) }
 }
-export function auditMain(args, { now = new Date() } = {}) {
+export function auditMain(args, { now = new Date(), publish = publishFacts } = {}) {
   const [command, ...flags] = args, options = {}
   if (!['plan', 'facts'].includes(command)) throw new Error('usage_audit_plan_or_facts')
   for (let i = 0; i < flags.length; i += 2) {
     const key = flags[i]
-    if (!['--repository', '--inventory', '--plan', '--results', '--output', '--sample'].includes(key) || options[key] || !flags[i + 1]) throw new Error('invalid_audit_arguments')
+    if (key === '--submit' && !options[key]) { options[key] = true; i--; continue }
+    if (!['--repository', '--inventory', '--plan', '--results', '--output', '--sample', '--project', '--instance', '--aeon'].includes(key) || options[key] || !flags[i + 1]) throw new Error('invalid_audit_arguments')
     options[key] = flags[i + 1]
   }
   if (!options['--output'] || command === 'facts' && (!options['--plan'] || !options['--results'] || options['--repository'] || options['--inventory'] || options['--sample']) ||
       command === 'plan' && (!!options['--inventory'] === !!options['--repository'] || options['--results'] || options['--plan'])) throw new Error('invalid_audit_arguments')
+  const submitting = options['--submit'] === true
+  if (submitting && (command !== 'facts' || !options['--project'] || !options['--instance'] || !options['--aeon']) ||
+      !submitting && (options['--project'] || options['--instance'] || options['--aeon'])) throw new Error('invalid_audit_submit_arguments')
   let plan, output
   if (command === 'plan') {
     const inventory = options['--inventory'] ? readJSON(options['--inventory']) : collectMerged(options['--repository'], weekWindow(now))
@@ -144,6 +149,11 @@ export function auditMain(args, { now = new Date() } = {}) {
     output = auditFacts(plan, readJSON(options['--results']), { now })
   }
   writeFileSync(options['--output'], JSON.stringify(output, null, 2) + '\n', { flag: 'wx', mode: 0o600 })
+  if (submitting) {
+    const receipt = publish({ project: options['--project'], repository: plan.repository, facts: output.facts,
+      instance: options['--instance'], aeon: options['--aeon'] })
+    return { ...receipt, selected: plan.selected.length }
+  }
   return { status: command === 'plan' ? 'awaiting_independent_audits' : 'facts_prepared_not_submitted', selected: plan.selected.length }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

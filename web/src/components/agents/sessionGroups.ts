@@ -155,6 +155,17 @@ export function queueNote({ queueError, queuePartial }: { queueError: string; qu
 }
 
 // ---------- A folded lead says what it holds ----------
+const CHILD_COUNT_WORDS = {
+  en: { includes: (count: number, project: string) => `includes ${count} from ${project}`, omitted: (count: number) => `includes ${count} other ${count === 1 ? 'project' : 'projects'}` },
+  de: { includes: (count: number, project: string) => `davon ${count} aus ${project}`, omitted: (count: number) => `${count} weitere${count === 1 ? 's Projekt' : ' Projekte'} eingeschlossen` },
+}
+/** Render the server's project breakdown; never infer counts from a paged tree. */
+export function crossProjectChildren(counts: Readonly<import('../../lib/agentRows').ChildCounts> | undefined, history = false, language: 'en' | 'de' = 'en'): string {
+  if (!counts) return ''
+  const mode = history ? 'all' : 'current', words = CHILD_COUNT_WORDS[language]
+  return [...counts.cross_project.filter(project => project[mode] > 0).map(project => words.includes(project[mode], project.project_key)),
+    counts.omitted_projects ? words.omitted(counts.omitted_projects) : ''].filter(Boolean).join(' · ')
+}
 export interface FoldSummary { workers: number; problems: number; questions: number }
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 /** “5 workers · 1 problem · 1 question”: the line a folded lead adds to what it is doing. */

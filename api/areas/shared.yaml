@@ -415,6 +415,7 @@ components:
       additionalProperties: false
       required: [facts]
       properties:
+        repository: {type: string, maxLength: 200, description: 'Optional captured repository binding; a changed project source refuses the entire report with 409.'}
         facts:
           type: array
           minItems: 1
@@ -1040,6 +1041,24 @@ components:
         - {$ref: '#/components/schemas/HarnessSession'}
         - type: object
           properties:
+            child_counts:
+              description: 'Server counts of visible descendants through legacy and verified cross-project lineage, independent of list pagination. Current counts include live and paused sessions, recently ended sessions for ten minutes, and their ancestors; all counts include stopped history. Counts confer no control authority. Project breakdowns are bounded to 200 projects; omitted_projects reports any remaining projects.'
+              type: object
+              required: [current, all, cross_project, omitted_projects]
+              properties:
+                current: {type: integer, minimum: 0}
+                all: {type: integer, minimum: 0}
+                omitted_projects: {type: integer, minimum: 0}
+                cross_project:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [project_key, current, all]
+                    properties:
+                      project_key: {type: string}
+                      current: {type: integer, minimum: 0}
+                      all: {type: integer, minimum: 0}
             can_reparent: {type: boolean, description: Caller may move this live session or select it as a lead; read-time hint rechecked on writes. Omitted in event snapshots.}
             handed_over_to_id: {type: string, format: uuid, description: Successor coordinator; omitted without a handover.}
             adopted_from_id: {type: string, format: uuid, description: Previous lead from which this child was adopted; omitted after a manual move clears the lineage.}

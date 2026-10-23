@@ -137,7 +137,7 @@ retains the plan and full reports as ticket attachments, verifies attribution,
 then submits through the designated account. Confirm the API write before
 claiming the metrics were recorded. Keys bind repository/week/PR; resubmitting
 the same audit key corrects its earlier report instead of counting twice.
-The tooling does not contact that API.
+Preparation stays offline by default. With `facts --submit --project PROJECT_UUID --instance ppm --aeon /path/to/pm`, the validated audit producer submits through existing CLI authentication and requires a complete receipt. See [Delivery evidence feed](delivery-evidence-feed.md).
 
 ## AEON-1021 validation and follow-up
 
