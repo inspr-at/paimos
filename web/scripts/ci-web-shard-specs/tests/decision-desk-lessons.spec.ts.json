@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/decision-desk-lessons.spec.ts",
-    "listedTests": 26,
+    "listedTests": 14,
     "tierTiming": {
       "caseSeconds": {
         "max": 7.885,

@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/decision-desk-project.spec.ts",
-    "listedTests": 14,
+    "listedTests": 9,
     "tierTiming": {
       "caseSeconds": {
         "max": 6.193,

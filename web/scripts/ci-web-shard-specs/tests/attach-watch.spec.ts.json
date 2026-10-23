@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/attach-watch.spec.ts",
-    "listedTests": 31,
+    "listedTests": 23,
     "tierTiming": {
       "caseSeconds": {
         "max": 5.755,

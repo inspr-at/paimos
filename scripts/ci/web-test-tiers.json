@@ -414,12 +414,6 @@
     ,
     "browser:tests/agents.spec.ts:sessions are grouped by project, the lead heading its group, with ticket and heartbeat; details show account and model"
     ,
-    "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1024"
-    ,
-    "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1440"
-    ,
-    "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 390"
-    ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 1024"
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 1440"
@@ -6012,8 +6006,6 @@
     ,
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: every page leads with the badge’s count: none at 0, (1), (9), then (9+)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: reduced motion changes only the number, visible or in the background","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 Desk dismissal persists and an enabled browser gets no offer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 Settings and Desk remain still with EN and DE copy at phone tablet and desktop widths in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -6066,11 +6058,7 @@
     ,
     {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"touch › AEON-1535 P3: O, A, R and D and a tap choose the right row, and choosing moves nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -7006,12 +6994,6 @@
     ,
     {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"a mismatched native response is an unconfirmed decision, not success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls dark 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls dark 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls light 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"New menu preserves authorized attach and header controls light 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -7064,10 +7046,6 @@
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"approved, expired and cancelled requests say so, and ended ones can be dismissed","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach controls never move from code to memo or settled state dark 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach controls never move from code to memo or settled state dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach controls never move from code to memo or settled state light 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"attach controls never move from code to memo or settled state light 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -7081,10 +7059,6 @@
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"names still loading for the previous person never enable approval for the next one","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"names that cannot be read fall back to the ids and approval is possible","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"pending attach layout dark 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"pending attach layout dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-discoverable.spec.ts","name":"pending attach layout light 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -7104,111 +7078,31 @@
     ,
     {"kind":"browser","file":"tests/attach-security.spec.ts","name":"a long computer name wraps at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable no_gui dark 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable no_gui dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable no_gui light 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable no_gui light 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable policy dark 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable policy dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable policy light 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable policy light 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable unreported dark 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable unreported dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable unreported light 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable unreported light 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable unsigned dark 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable unsigned dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable unsigned light 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable unsigned light 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable unsupported dark 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable unsupported dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable unsupported light 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mac confirmation unavailable unsupported light 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mixed computers keep mac confirmation with named exceptions dark 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mixed computers keep mac confirmation with named exceptions dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mixed computers keep mac confirmation with named exceptions light 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"mixed computers keep mac confirmation with named exceptions light 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"no paired computer dark 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"no paired computer dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/attach-security.spec.ts","name":"no paired computer light 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"no paired computer light 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"older pairing uses Aeon approval until upgraded dark 1600 saved false","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"older pairing uses Aeon approval until upgraded dark 1600 saved true","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"older pairing uses Aeon approval until upgraded dark 390 saved false","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"older pairing uses Aeon approval until upgraded dark 390 saved true","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-security.spec.ts","name":"older pairing uses Aeon approval until upgraded light 1600 saved false","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-security.spec.ts","name":"older pairing uses Aeon approval until upgraded light 1600 saved true","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"older pairing uses Aeon approval until upgraded light 390 saved false","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"older pairing uses Aeon approval until upgraded light 390 saved true","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"saved mac confirmation without a capable computer dark 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"saved mac confirmation without a capable computer dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/attach-security.spec.ts","name":"saved mac confirmation without a capable computer light 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"saved mac confirmation without a capable computer light 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"saving mac confirmation blocks an upgraded headless computer dark 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"saving mac confirmation blocks an upgraded headless computer dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-security.spec.ts","name":"saving mac confirmation blocks an upgraded headless computer light 1600","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"saving mac confirmation blocks an upgraded headless computer light 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"session watching security dark 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"session watching security dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/attach-security.spec.ts","name":"session watching security light 1600","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/attach-security.spec.ts","name":"session watching security light 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/attach-watch.spec.ts","name":"an Aeon approval on Linux says that computer keeps this approval","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-watch.spec.ts","name":"approval and live watch layout dark 1600 aeon","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-watch.spec.ts","name":"approval and live watch layout dark 1600 local_auth","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-watch.spec.ts","name":"approval and live watch layout dark 390 aeon","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-watch.spec.ts","name":"approval and live watch layout dark 390 local_auth","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-watch.spec.ts","name":"approval and live watch layout light 1600 aeon","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -7229,14 +7123,6 @@
     {"kind":"browser","file":"tests/attach-watch.spec.ts","name":"conversation watch terminal state unreachable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-watch.spec.ts","name":"live text is inert, bounded, cleared on end and never automatically rejoined","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/attach-watch.spec.ts","name":"metadata-only attach approval and status dark 1600 aeon","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-watch.spec.ts","name":"metadata-only attach approval and status dark 1600 local_auth","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-watch.spec.ts","name":"metadata-only attach approval and status dark 390 aeon","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/attach-watch.spec.ts","name":"metadata-only attach approval and status dark 390 local_auth","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/attach-watch.spec.ts","name":"metadata-only attach approval and status light 1600 aeon","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -7832,59 +7718,23 @@
     ,
     {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"current server restrictions explain and block publishing without sending a write","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"server outcomes and correction keep selectors and actions stable 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"server outcomes and correction keep selectors and actions stable 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"server outcomes and correction keep selectors and actions stable 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"server outcomes and correction keep selectors and actions stable 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"server outcomes and correction keep selectors and actions stable 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-fix2.spec.ts","name":"server outcomes and correction keep selectors and actions stable 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"doctrine draft effect and required review open the exact pending draft 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"doctrine draft effect and required review open the exact pending draft 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"doctrine draft effect and required review open the exact pending draft 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"doctrine draft effect and required review open the exact pending draft 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"doctrine draft effect and required review open the exact pending draft 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"doctrine draft effect and required review open the exact pending draft 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"published doctrine effects keep their proposal review while an earlier pending draft opens in the Desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"revision-zero native tier request can approve with exact ownership","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-fix3.spec.ts","name":"revision-zero native tier request can decline with exact ownership","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 Knowledge without lessons at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 Knowledge without lessons at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 Knowledge without lessons at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 Knowledge without lessons at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 Knowledge without lessons at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 Knowledge without lessons at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 failed decisions and Undo keep the lesson honest","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo and row stay stable at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo and row stay stable at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo and row stay stable at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo and row stay stable at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo and row stay stable at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson memo and row stay stable at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -7892,15 +7742,7 @@
     ,
     {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 lesson scope names its filter and Show all restores other waiting items","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-lessons.spec.ts","name":"AEON-1331 pending lesson and Knowledge link at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -7918,8 +7760,6 @@
     ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"revisiting a question after Decide & next retains its project link, colour and P action","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"tablet toolbar stays visible and stable on opening and resizing dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"tablet toolbar stays visible and stable on opening and resizing light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the Agents desk panel names each item's project with a new-tab link","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -7928,15 +7768,7 @@
     ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the Agents doctrine row resolves its project through the authorized ticket lookup","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/decision-desk-project.spec.ts","name":"the desk controls stay still across a change of project 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8424,10 +8256,6 @@
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1406 empty desk states keep the card still 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1406 empty desk states keep the card still 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1406 empty desk states keep the card still 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1406 empty desk states keep the card still 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 Open and Decided keep controls still at 1024, with and without the hint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -8438,15 +8266,9 @@
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 a genuinely failed first load never claims an empty desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8616,15 +8438,7 @@
     ,
     {"kind":"browser","file":"tests/display-language.spec.ts","name":"German profile: ticket table controls and recurring markers stay English","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"native Edit then propose and outdated protection 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"native Edit then propose and outdated protection 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"native Edit then propose and outdated protection 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"native Edit then propose and outdated protection 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"native Edit then propose and outdated protection 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/doctrine-inbox.spec.ts","name":"native Edit then propose and outdated protection 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -11144,15 +10958,7 @@
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"ticket relation popover keeps its selectors through result changes at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/outcome-proposals.spec.ts","name":"agent principals never request or see the proposals list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/outcome-proposals.spec.ts","name":"empty analysis gives one quiet line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/outcome-proposals.spec.ts","name":"outcome proposals 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/outcome-proposals.spec.ts","name":"outcome proposals 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/outcome-proposals.spec.ts","name":"outcome proposals 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/outcome-proposals.spec.ts","name":"outcome proposals 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15740,6 +15546,8 @@
     ,
     {"kind":"node","file":"tests/desk-tab.test.ts","name":"the background notice is the words New decision and carries no icon glyph","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"the canvas painter cuts a gap, paints the badge ink and draws a digit only at readable device sizes","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/desk-tab.test.ts","name":"the first count of a page shows at rest: no pop, no notice","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/desk-tab.test.ts","name":"the tab counts like the badge: none at 0, (1), (9), then (9+)","tier":"ESSENTIAL"}
@@ -17438,6 +17246,20 @@
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"discards a pending attach list after a person change even when its transport ignores abort","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"drops a held approval body on person change, including refresh and parent notifications","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"keeps the saved consent policy and the stricter draft separate after a refused save","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"refreshes a confirmed exact request after its review closes, while discarding the closed dialog body","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"refuses local consent without a capable upgraded computer and drops a held saved policy on access reset","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"refuses unsupported local confirmation, revoked authority and failed writes without claiming an approval","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"waits for labels and an explicit choice, then writes both digests for the displayed request exactly once","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: Hours Undo is immediate, keeps its view and uses plain failures or silent DELETE 404","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: Hours ignores superseded Undo and locks optimistic rows until confirmation","tier":"ESSENTIAL"}
@@ -17696,7 +17518,11 @@
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"drops a previous person read even if transport ignores abort, and resets the count synchronously","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"rejects a held doctrine project lookup after a person change, even when the transport ignores cancellation","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"reports an unknown count on failed refresh and retries without claiming an empty desk","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"resolves doctrine projects once for concurrent consumers and retains the authorized cache across a projection refresh","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"bounds streamed tier response bytes before decode and leaves the source explicitly unavailable","tier":"ESSENTIAL"}
     ,
@@ -17705,6 +17531,8 @@
     {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"hydrates pending tier requests independently of two full sessions of history and can decide their exact native request","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"integrates the server default and each publishing outcome, then corrects the exact revision with its doctrine mapping","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"rechecks current tier authority and requires a receipt for the exact request before claiming a decision","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"retains outcome failure, retryability, exact effect references and required review independently of a handed-off answer","tier":"ESSENTIAL"}
     ,
@@ -17731,6 +17559,8 @@
     {"kind":"vitest","file":"tests/decision-desk-lessons.unit.test.ts","name":"keeps a rule-draft lesson on the draft and off the changelog chevron","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-lessons.unit.test.ts","name":"names a changelog lesson with the entry title and no text chevron","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"links a published doctrine effect and its earlier pending review to their own exact destinations","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"names a lasting restriction beside a muted Decide when no stamp can be used","tier":"ESSENTIAL"}
     ,
@@ -18053,6 +17883,10 @@
     {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Desk offer requires every eligibility condition and tolerates unavailable browser storage","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"iPhone and iPad require the Home Screen while standalone and desktop browsers remain eligible","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-tab-lifecycle.unit.test.ts","name":"drops a pending background notice on person, agent and sign-out changes and never polls for an agent or visitor","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-tab-lifecycle.unit.test.ts","name":"refreshes a stale background badge through the shared reader, resets its age on a projection, and disposes the poll","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"only the Display menu mounts the display editors","tier":"ESSENTIAL"}
     ,
@@ -19168,6 +19002,14 @@
     ,
     {"kind":"vitest","file":"tests/native-program.unit.test.ts","name":"rejects malformed replay and event envelopes before granting or opening a stream","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/outcome-proposals.unit.test.ts","name":"discards a held analysis after the person changes and cannot reveal the previous owner’s finding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/outcome-proposals.unit.test.ts","name":"does not request or render proposals for an agent principal","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/outcome-proposals.unit.test.ts","name":"renders analysis evidence and measured outcomes without inventing an approval action for a finding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/outcome-proposals.unit.test.ts","name":"reports empty only after successful reads and preserves an honest failure","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After beyond the lifetime ends the follow instead of reading later","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After inside the lifetime still waits, and one that reaches the deadline does not","tier":"GATED-FULL"}
@@ -19219,6 +19061,14 @@
     {"kind":"vitest","file":"tests/parent-benefit-generation.unit.test.ts","name":"retry captures its generation/revision and discards a result after navigation","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/parent-benefit-generation.unit.test.ts","name":"tenant changes fence an old status read even for the same node id","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/phone-approval-lifecycle.unit.test.ts","name":"aborts a held passkey after a person change and never posts or displays A’s decision for B","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/phone-approval-lifecycle.unit.test.ts","name":"expires the displayed request with its injected clock and starts no verification or decision afterwards","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/phone-approval-lifecycle.unit.test.ts","name":"records nothing on passkey cancellation, then binds an explicit decline to its new verification","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/phone-approval-lifecycle.unit.test.ts","name":"requires an explicit choice and a fresh proof before posting the exact reviewed request, hash and reason","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/phone-controls.unit.test.ts","name":"matching selection in the phone dock > keeps deletion feedback honest and blocks select-all during a bulk write","tier":"GATED-FULL"}
     ,

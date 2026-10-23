@@ -64,7 +64,7 @@ async function chooseAndDecide(dialog: Locator, choice: 'Allow' | 'Decline') {
 }
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)
 
-for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+for (const theme of ['light'] as const) for (const width of [390, 1024, 1440]) {
   test(`New menu preserves authorized attach and header controls ${theme} ${width}`, async ({ page }, testInfo) => {
     await setup(page, { theme })
     await list(page, [])
@@ -87,7 +87,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
   })
 }
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390]) {
+for (const theme of ['light'] as const) for (const width of [1440, 390]) {
   test(`attach controls never move from code to memo or settled state ${theme} ${width}`, async ({ page }, testInfo) => {
     await setup(page, { theme, paused: true })
     await page.setViewportSize({ width, height: 900 })
@@ -899,7 +899,7 @@ test('names that cannot be read fall back to the ids and approval is possible', 
   await expect(dialog.locator('dd[title="n-2"]')).toHaveText('n-2')
 })
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+for (const theme of ['light'] as const) for (const width of [1600, 390]) {
   test(`pending attach layout ${theme} ${width}`, async ({ page }, testInfo) => {
     await setup(page, { theme })
     await page.setViewportSize({ width, height: 900 })

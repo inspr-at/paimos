@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/desk-empty.spec.ts",
-    "listedTests": 15,
+    "listedTests": 10,
     "tierTiming": {
       "caseSeconds": {
         "max": 8.954,

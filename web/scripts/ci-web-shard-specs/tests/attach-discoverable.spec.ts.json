@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/attach-discoverable.spec.ts",
-    "listedTests": 47,
+    "listedTests": 40,
     "tierTiming": {
       "caseSeconds": {
         "max": 10.196,

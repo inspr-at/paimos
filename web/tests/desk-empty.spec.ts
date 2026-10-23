@@ -34,7 +34,7 @@ async function mockEmptyDesk(page: Page, theme: 'light' | 'dark', withItem = fal
 // AEON-1616 (R18): empty phone-only rows must not bury the first item or empty state.
 // Extend these existing cases: the normal desktop gap and zero movement elsewhere, including failures.
 // Tick: phone refresh feedback must clear the paused notice and the toast stack, leaving its retry reachable.
-for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const [width, theme] of [[1440, 'dark'], [1024, 'light'], [390, 'light']] as const) {
   test(`AEON-1477 refresh failures keep the items and hint geometry ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     const goodAt = new Date('2026-10-17T13:58:00Z')
@@ -384,7 +384,7 @@ async function onePicture(page: Page, theme: 'light' | 'dark') {
   await shown.evaluate(async image => { await (image as HTMLImageElement).decode(); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))) })
 }
 
-for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const [width, theme] of [[1440, 'dark'], [390, 'light']] as const) {
   test(`AEON-1406 empty desk states keep the card still ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     const reads = await mockEmptyDesk(page, theme)

@@ -1436,7 +1436,11 @@ test('AEON-1619 hosted shards 2, 13 and 14 keep launch-wall timings from run 395
   assert.equal(requests.weightSeconds,22.94)
   assert.equal(requests.weightSource,'hosted-CI-39565819178')
   const policy=loadWebPolicy()
-  const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
+  // This regression describes the recorded run, whose selected counts stay
+  // fixed when later prune packages remove current registrations. Live packing
+  // and selected-slice scaling have their own catalogue checks below.
+  const gate=Object.entries(measured).flatMap(([file,[,selectedTests]])=>
+    Array.from({length:selectedTests},(_,index)=>({kind:'browser',file,name:`hosted case ${index}`})))
   const weights=tierWeights(policy,gate)
   assert.ok(weights['tests/aeon-1212-lead-panel.spec.ts']>=468,'lead-panel must cover the hosted case sum')
   for(const file of ['tests/aeon-1212-lead-panel.spec.ts','tests/person-steps.spec.ts','tests/definitions-p3.spec.ts','tests/eta-column.spec.ts','tests/aeon-1470-list-titles.spec.ts','tests/aeon-1474-desk-push-ui.spec.ts','tests/desk-empty.spec.ts','tests/performance.spec.ts']) {
