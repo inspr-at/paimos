@@ -184,7 +184,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     } else {
     // Whole-project figures decide Parent after the rows paint. Wait for that
     // column on every load, then its fit/card samples; fonts and two frames
-    // alone can compare the 132px Parent slot with its still-absent state.
+    // alone can compare layouts with and without the Parent column.
     const parent = page.locator('.tickets thead th.c-parent')
     const ready = async () => {
       await expect(parent).toBeVisible()
