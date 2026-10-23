@@ -104,7 +104,7 @@ export function validateVisual(visual, { cuts = false, stateIds = visual.states?
     renderer.browser.headless === true && same(renderer.browser.args, ['--disable-gpu']) &&
     renderer.deviceScaleFactor === 1 && same(renderer.colourScheme, ['light', 'dark']) && renderer.reducedMotion === 'reduce' &&
     renderer.timezone === 'Europe/Vienna' && renderer.locale === 'en-GB' && renderer.fonts?.length === 1 &&
-    renderer.fonts[0].family === 'JetBrains Mono' && renderer.fonts[0].asset === 'web/src/assets/fonts/jetbrains.woff2' &&
+    renderer.fonts[0].family === 'JetBrains Mono' && renderer.fonts[0].asset === 'web/tests/visual/fonts/jetbrains-mono-v2.304.ttf' &&
     digest(renderer.fonts[0].sha256), 'Missing deterministic hosted visual renderer policy')
   need(visual.comparison?.threshold === 0 && visual.comparison.maxDiffPixels === 0 && text(visual.comparison.justification),
     'Visual comparison requires exact pixels with a documented tolerance policy')

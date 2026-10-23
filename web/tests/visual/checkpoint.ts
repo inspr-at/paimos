@@ -127,10 +127,11 @@ export async function compareVisualReference(page: Page, info: TestInfo, checkpo
 }
 
 // Only test setup changes typography: production assets and styles stay owned
-// by their product tickets. There is one app-hosted font in this checkout.
+// by their product tickets. The pinned full font covers picker arrow glyphs
+// absent from the production Latin subset, without permitting system fallback.
 export async function prepareVisualFonts(page: Page, baseURL: string) {
-  const url = new URL('/src/assets/fonts/jetbrains.woff2', baseURL).href
-  await page.addStyleTag({ content: `@font-face { font-family: 'JetBrains Mono'; src: url('${url}') format('woff2'); font-weight: 100 800; font-display: block; }
+  const url = new URL(`/${manifest.renderer.fonts[0].asset.replace(/^web\//, '')}`, baseURL).href
+  await page.addStyleTag({ content: `@font-face { font-family: 'JetBrains Mono'; src: url('${url}') format('truetype'); font-weight: 100 800; font-display: block; }
     :root { --font: 'JetBrains Mono'; --serif: 'JetBrains Mono'; --mono: 'JetBrains Mono'; }
     *, *::before, *::after, *::placeholder, *::file-selector-button { font-family: 'JetBrains Mono' !important; }` })
   await page.evaluate(async () => {

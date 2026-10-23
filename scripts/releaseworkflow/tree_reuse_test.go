@@ -427,6 +427,12 @@ func mergeGroupInventory(t *testing.T, w map[string]any) []string {
 	var names []string
 	for id, value := range treeMap(w["jobs"]) {
 		j := treeMap(value)
+		if id == "visual-reference-capture" {
+			if j["if"] != "github.event_name == 'workflow_dispatch' && inputs.visual_capture == true" || j["needs"] != nil || j["continue-on-error"] != nil {
+				t.Fatal("visual capture must remain an independent, blocking manual job, excluded from queue execution evidence")
+			}
+			continue
+		}
 		if id == "apt-bundle" {
 			checkOfflineAptWorkflow(t)
 			continue // Optional fetch acceleration, never execution evidence.
@@ -656,6 +662,11 @@ func normalizeAEON1674VisualReferences(t *testing.T, id string, job map[string]a
 		previous = "Install Chromium system dependencies"
 		next = "Download affected browser execution plan"
 		env := treeMap(job["env"])
+		if job["runs-on"] != "ubuntu-24.04" || env["AEON_VISUAL_RUNNER"] != "ubuntu-24.04" {
+			t.Fatal("visual comparison must retain its exact reviewed hosted Linux renderer")
+		}
+		job["runs-on"] = "ubuntu-latest"
+		delete(env, "AEON_VISUAL_RUNNER")
 		if env["AEON_VISUAL_BASELINE_FILE"] != "${{ github.workspace }}/tmp/visual-baselines/baseline.json" {
 			t.Fatal("every browser shard must compare against the verified transported baseline")
 		}
