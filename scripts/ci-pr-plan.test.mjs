@@ -417,7 +417,7 @@ function evaluate(expression, context) {
 }
 
 test('effective lane precedence and real workflow execution agree for all 90 flag/event/lane/mode combinations', () => {
-  const heavy = ['go-test', 'go-static', 'go-timing', 'web-catalogue', 'web-setup', 'web-unit', 'web-shard', 'e2e-run', 'release-check-run'];
+  const heavy = ['go-test', 'go-static', 'go-timing', 'web-catalogue', 'web-setup', 'web-unit', 'web-shard', 'visual-comparison', 'e2e-run', 'release-check-run'];
   const summary = join(mkdtempSync(join(tmpdir(), 'aeon-effective-lanes-')), 'summary');
   let combinations = 0;
   for (const flag of ['on', 'off']) for (const event of ['pull_request', 'merge_group', 'push'])
@@ -446,8 +446,8 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
         const condition = /^    if: (.+)$/m.exec(job)?.[1];
         assert.ok(condition, id);
         const enabled = Boolean(evaluate(condition, context));
-        const want = (id.startsWith('web-') ? lane !== 'docs-only' : lane === 'full') &&
-          !(layout === 'static' && ['go-test', 'go-timing', 'web-shard', 'e2e-run'].includes(id));
+        const want = (id.startsWith('web-') || id === 'visual-comparison' ? lane !== 'docs-only' : lane === 'full') &&
+          !(layout === 'static' && ['go-test', 'go-timing', 'web-shard', 'visual-comparison', 'e2e-run'].includes(id));
         assert.equal(enabled, want, `${label}/${id}`);
         if (flag === 'on' && mode === 'full') assert.equal(enabled, true, `${label}/${id}: full planner must execute heavy checks`);
         context[`needs.${id}.result`] = enabled ? 'success' : 'skipped';
