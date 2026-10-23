@@ -6812,6 +6812,8 @@
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"approval controls require the action permission even with an admin legacy role","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"assistants use the existing Agents dock with stable tabs, locked policy and audited revision saves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"closing a session panel goes back instead of adding history, like the ticket panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"cutover overview and session retain long German context at 1024 in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -6853,6 +6855,8 @@
     {"kind":"browser","file":"tests/agents.spec.ts","name":"the session panel shows the ticket, runs, telemetry and the thread, and sends messages","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"the ticket panel shows the bound agent’s attention state and links to its session","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"zero assistants show the permission-gated existing connect flow without sample rows","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/approval-feedback.spec.ts","name":"1440 no-preference: approved confirms only after the native server and keeps actions and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -16841,6 +16845,8 @@
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: a mutation between rows and digest retries the entire snapshot","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/assistants.unit.test.ts","name":"assistant facts retain the specified status order, exact budget words and independent Desk links","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"discards a pending attach list after a person change even when its transport ignores abort","tier":"ESSENTIAL"}
     ,

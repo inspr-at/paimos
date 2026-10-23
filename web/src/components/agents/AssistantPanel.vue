@@ -16,7 +16,7 @@ import type { PanelLayout } from '../../lib/leadPanel'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
-import ProviderMark from './ProviderMark.vue'
+import HarnessMark from './HarnessMark.vue'
 import AssistantBudget from './AssistantBudget.vue'
 const props = defineProps<{ item: Assistant; facts: AssistantFacts; now: number; docked: boolean; sheet: boolean; layout: PanelLayout }>()
 const emit = defineEmits<{ close: []; layout: [layout: PanelLayout] }>()
@@ -124,7 +124,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 <template>
   <aside ref="root" class="session-panel assistant-panel" :class="{ docked, sheet, full: layout === 'full', wide: layout === 'wide' }" :aria-label="words.details" tabindex="-1" @keydown="panelKey">
     <header class="assistant-panel-head">
-      <div class="assistant-panel-title"><ProviderMark :provider="item.vendor === 'grok' ? 'xai' : 'unknown'" /><h2>{{ item.display_name }}<small>{{ vendor }}</small></h2><button type="button" class="icon-btn flat assistant-close" :aria-label="words.close" @click="emit('close')"><AppIcon name="close" /></button></div>
+      <div class="assistant-panel-title"><HarnessMark :harness="item.vendor" :size="16" /><h2>{{ item.display_name }}<small>{{ vendor }}</small></h2><button type="button" class="icon-btn flat assistant-close" :aria-label="words.close" @click="emit('close')"><AppIcon name="close" /></button></div>
       <p class="panel-status" :class="{ down: status === 'down' }"><AppIcon :name="ASSISTANT_STATUS_ICON[status]" />{{ statusWord }}</p>
       <p class="panel-status-line">{{ statusLine }}</p>
       <div class="assistant-actions"><span v-if="!assistantCapabilities.pause" class="unavailable-action">{{ words.pauseUnavailable }}</span><button v-if="mayEdit" type="button" class="icon-btn flat" :aria-label="words.more" aria-haspopup="menu" :aria-expanded="!!menuAnchor" @click="menuAnchor = menuAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon name="more" /></button></div>

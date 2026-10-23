@@ -5,6 +5,7 @@ import { agentData, assistantEvidence, mockAgents, mockAssistants, type AgentMoc
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { controlStability } from './control-stability'
+import AxeBuilder from '@axe-core/playwright'
 
 const world: AgentWorld = {
   me: me.id,
@@ -753,6 +754,8 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
   await openAgents(page)
   const section = page.locator('.assistants')
+  const dialFold = page.getByRole('button', { name: 'Fold the dial', exact: true })
+  if (await dialFold.isVisible()) await dialFold.click()
   await expect(section.getByRole('heading')).toHaveText('Assistants · 2')
   await expect(section.locator('.assistant-row')).toHaveCount(2)
   expect(await section.locator('.assistant-row').evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height))).toEqual([56, 56])
@@ -764,15 +767,33 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   // pending approvals or owned routines. Their renderer is proven by the unit fixture.
   await expect(section.locator('.assistant-state').first()).toHaveText('Status unavailable')
   await expect(section.locator('.budget-unknown')).toHaveCount(2)
+  const amy = items.find(item => item.display_name === 'Amy')!
+  await section.hover()
+  const stableRows = await controlStability(page, { amy: section.locator(`[data-assistant="${amy.principal_id}"] .assistant-open`), scout: section.locator('.assistant-row').nth(1).locator('.assistant-open') }, { tolerance: 0 })
+  await stableRows.check(async () => {
+    amy.display_name = 'Zamy'
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(section.locator('.assistant-name strong').first()).toHaveText('Zamy')
+  })
+  stableRows.done()
+  await page.mouse.move(1, 1)
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(section.locator('.assistant-name strong').first()).toHaveText('Scout')
+  amy.display_name = 'Amy'
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(section.locator(`[data-assistant="${amy.principal_id}"] strong`)).toHaveText('Amy')
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(section.locator('.assistant-name strong').first()).toHaveText('Amy')
+  expect((await new AxeBuilder({ page }).include('.assistants').withRules(['color-contrast']).analyze()).violations).toEqual([])
   await shot('1440-light-typical')
   await page.emulateMedia({ colorScheme: 'dark' }); await shot('1440-dark-typical')
+  expect((await new AxeBuilder({ page }).include('.assistants').withRules(['color-contrast']).analyze()).violations).toEqual([])
   await page.emulateMedia({ colorScheme: 'light' })
   await page.setViewportSize({ width: 1024, height: 1000 })
   await expect(section.locator('.last-column').first()).toBeHidden()
   await expect(section.locator('.folded-facts').first()).toBeVisible()
   await shot('1024-light-folded')
   await page.setViewportSize({ width: 1440, height: 1000 })
-  const amy = items.find(item => item.display_name === 'Amy')!
   await section.getByRole('button', { name: 'Amy · Status unavailable', exact: true }).click()
   const details = page.getByRole('complementary', { name: 'Assistant details', exact: true })
   await expect(details).toBeVisible()
@@ -825,10 +846,12 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await expect(details).toContainText('Only people with Policy access can change this.')
   await expect(details.getByRole('textbox')).toHaveCount(0)
   await expect(details.getByRole('button', { name: 'More assistant actions' })).toHaveCount(0)
+  expect((await new AxeBuilder({ page }).include('.assistant-panel').withRules(['color-contrast']).analyze()).violations).toEqual([])
   await shot('1440-light-panel-policy-readonly')
   for (const width of [390, 320]) {
     await details.getByRole('button', { name: 'Close assistant details' }).click()
     await page.setViewportSize({ width, height: 844 })
+    await section.scrollIntoViewIfNeeded()
     expect(await section.locator('.assistant-row').first().evaluate(el => el.getBoundingClientRect().height)).toBe(64)
     if (width === 390) await shot('390-light-cards')
     await section.getByRole('button', { name: 'Amy · Status unavailable', exact: true }).click()
@@ -838,6 +861,14 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
     await expectStableControls({ controls: { tabs: details.getByRole('tablist'), close: details.getByRole('button', { name: 'Close assistant details' }), sheet: details }, scrollAreas: { body: details.locator('.assistant-panel-scroll') }, interactions: ['Overview', 'Policy'].map(name => ({ name, run: async () => { await details.getByRole('tab', { name, exact: true }).click(); if (width === 390) await shot(`390-light-sheet-${name.toLowerCase()}`) } })) })
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   }
+  await details.getByRole('button', { name: 'Close assistant details' }).click()
+  items.push(...Array.from({ length: 5 }, (_, n) => ({ ...amy, principal_id: `af000000-0000-4000-8000-00000000000${n}`, display_name: `Research ${n}` })))
+  await page.reload()
+  await expect(section.locator('.assistant-row')).toHaveCount(5)
+  await section.getByRole('button', { name: 'Show all (7)', exact: true }).click()
+  await expect(section.locator('.assistant-row')).toHaveCount(7)
+  await page.reload()
+  await expect(section.locator('.assistant-row')).toHaveCount(7)
   expect(errors).toEqual([])
 })
 
@@ -857,6 +888,8 @@ test('zero assistants show the permission-gated existing connect flow without sa
   for (const permitted of [true, false]) {
     connectAccess = permitted
     await page.reload()
+    const fold = page.getByRole('button', { name: 'Fold the dial', exact: true })
+    if (await fold.isVisible()) await fold.click()
     await expect(section).toContainText('No assistants yet.')
     await expect(section.locator('.assistant-row')).toHaveCount(0)
     const connect = section.getByRole('link', { name: 'Connect an assistant', exact: true })
