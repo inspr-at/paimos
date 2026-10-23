@@ -254,6 +254,20 @@ func TestAgentOwnedRoutineResearchBudgetAndAuthority(t *testing.T) {
 			})
 		}
 	}
+	// Bound the transport payload before a policy hook can reserve money.
+	oversized := scoped()
+	oversized.Template.Description = strings.Repeat("x", 65536)
+	largeRoutine := grant(f.create(oversized), AgentDestination{Kind: "new_ticket"})
+	largeRun := f.manual(largeRoutine.ID, "oversized")
+	invalidBudgetCalls := 0
+	f.m.WithAgentBudget(func(context.Context, pgx.Tx, AgentBudgetRequest) (AgentBudgetDecision, error) {
+		invalidBudgetCalls++
+		return AgentBudgetDecision{Allowed: true}, nil
+	})
+	dispatch()
+	if state, reason, count := readRun(largeRun.Run.ID); state != "held" || reason != "routine_message_too_large" || count != 0 || invalidBudgetCalls != 0 {
+		t.Fatalf("oversized input reserved budget or dispatched: %s %s %d calls=%d", state, reason, count, invalidBudgetCalls)
+	}
 	// A failed run retains honest history and creates no successful output.
 	failedRoutine := grant(f.create(scoped()), AgentDestination{Kind: "knowledge"})
 	failedRun := f.manual(failedRoutine.ID, "failed")

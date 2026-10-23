@@ -117,6 +117,16 @@ func (m *Module) dispatchAgentRun(ctx context.Context, tid, id string) error {
 		if err != nil {
 			return err
 		}
+		// Frozen assignment is data. Only the configured result route and current
+		// ordinary scopes authorize its bounded output; no outward tool authority.
+		var input Input
+		if len(assignment) > 131072 || json.Unmarshal(assignment, &input) != nil {
+			return workorders.Fail(409, "invalid_agent_assignment")
+		}
+		body := fmt.Sprintf("Routine run %s\nResult: POST /api/recurrences/%s/runs/%s/agent-result\nDestination: %s\n\n%s\n\n%s", id, recurrence, id, c.Destination.Kind, input.Template.Title, input.Template.Description)
+		if len(body) > 65536 {
+			return hold("routine_message_too_large", true)
+		}
 		if m.agentBudget == nil {
 			return hold("budget_policy_unavailable", false)
 		}
@@ -132,16 +142,6 @@ func (m *Module) dispatchAgentRun(ctx context.Context, tid, id string) error {
 		}
 		if !decision.Allowed {
 			return hold("owner_weekly_budget_exhausted", false)
-		}
-		// Frozen assignment is data. Only the configured result route and current
-		// ordinary scopes authorize its bounded output; no outward tool authority.
-		var input Input
-		if len(assignment) > 131072 || json.Unmarshal(assignment, &input) != nil {
-			return workorders.Fail(409, "invalid_agent_assignment")
-		}
-		body := fmt.Sprintf("Routine run %s\nResult: POST /api/recurrences/%s/runs/%s/agent-result\nDestination: %s\n\n%s\n\n%s", id, recurrence, id, c.Destination.Kind, input.Template.Title, input.Template.Description)
-		if len(body) > 65536 {
-			return hold("routine_message_too_large", true)
 		}
 		message, changes, err := inbox.QueueAgentRoutineTx(ctx, tx, person, c.OwnerPrincipalID, item.ProjectID, id, body)
 		if err != nil {
