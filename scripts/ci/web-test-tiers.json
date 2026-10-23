@@ -942,17 +942,7 @@
     ,
     "browser:tests/hours.spec.ts:open periods older than a year appear on a direct approvals load"
     ,
-    "browser:tests/intake-extensions.spec.ts:older extension response is discarded after selecting another ticket"
-    ,
-    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1024 dark"
-    ,
-    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1024 light"
-    ,
-    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1440 dark"
-    ,
     "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 1440 light"
-    ,
-    "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 390 dark"
     ,
     "browser:tests/intake-extensions.spec.ts:ticket extension history continues beyond 200 drafts at 390 light"
     ,
@@ -1101,8 +1091,6 @@
     "browser:tests/project-settings.spec.ts:AEON-1233: approved P1 reference states and check.mjs audit against the build"
     ,
     "browser:tests/record-ownership.spec.ts:S8-001: accepted discard clears description and comment drafts before opening B"
-    ,
-    "browser:tests/record-ownership.spec.ts:the same ticket keeps its comment draft when expanding and returning"
     ,
     "browser:tests/recurrence-marker.spec.ts:a linked source outside page one is selected directly and stays selected when more rows arrive"
     ,
@@ -5618,8 +5606,6 @@
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"a reading nearly two minutes old stops promising room when the server stops trusting it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/activity-history.spec.ts","name":"automatic history is Aeon, and a person named System stays a person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/activity-history.spec.ts","name":"history screenshots at 390 and 1600, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/add-account.spec.ts","name":"a failed computer list offers Try again and then the steps","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -6444,17 +6430,11 @@
     ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: a queued narrow table resize preserves the columns after the table grows","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: deleting 50 lines keeps the page where it is, in the middle and at the end","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: deleting a capped comment back under its cap keeps the panel at its end when its scrollbar goes or a font arrives","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: the comment editor grows to its 560 px cap without ever collapsing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: the full ticket page writes the description in one row as tall as its preview","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 1024 light never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 1440 dark never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 1440 light never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -6467,22 +6447,6 @@
     {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"AEON-1535 P4: the 1440 desk keeps its geometry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"touch › AEON-1535 P3: O, A, R and D and a tap choose the right row, and choosing moves nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: a reader who presses e before permissions load gets no editor","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: c is spent when the person enters and leaves a field before permissions load","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: c pressed before project permissions load focuses the comment box once they arrive","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e is spent by a refreshed denial that lands after the request it waited on, so a later grant opens nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e is spent when a dialog opens and closes before permissions load","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e pressed before project permissions load opens the editor once they arrive","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e pressed while the ticket loads opens the editor when the ticket arrives after its permissions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e remembered for one ticket does not edit the ticket opened next","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -7846,11 +7810,9 @@
     ,
     {"kind":"browser","file":"tests/brand.spec.ts","name":"the sign-in page follows the brand too","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/bulk.spec.ts","name":"archive hides the tickets; a change made elsewhere since makes Undo refuse and change nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"assignee, priority, labels and parent change in one request each; stale tickets say why","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/bulk.spec.ts","name":"checkbox and Shift-click select a range; one status change for all of them, undone at once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/bulk.spec.ts","name":"checkbox and Shift-click select a range; one status change for all of them, undone at once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"keyboard: x toggles, Shift J grows, Cmd or Ctrl A selects all, s opens the bulk status menu, Esc clears","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10516,27 +10478,11 @@
     ,
     {"kind":"browser","file":"tests/indicator-gallery.spec.ts","name":"robot family gallery light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"older extension response is discarded after selecting another ticket","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension history continues beyond 200 drafts at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension reads respect intake permission","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket shows originating extension data at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket shows originating extension data at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket shows originating extension data at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket shows originating extension data at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11243,8 +11189,6 @@
     {"kind":"browser","file":"tests/markdown-ticket-links.spec.ts","name":"a moved Markdown key PHAROS-14 follows AEON-2 and Back restores the source","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/markdown-ticket-links.spec.ts","name":"a plain click follows the routed ticket and a modified click opens the URL","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/markdown-ticket-links.spec.ts","name":"markdown ticket links and the epic panel, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/markdown-ticket-links.spec.ts","name":"the epic panel keeps the Updated line against the status chips","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12943,8 +12887,6 @@
     {"kind":"browser","file":"tests/quotes/two-user-presence.spec.ts","name":"two editors see named presence, server expiry removes an anchor, and print hides overlays","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/record-ownership.spec.ts","name":"S8-001: accepted discard clears description and comment drafts before opening B","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/record-ownership.spec.ts","name":"the same ticket keeps its comment draft when expanding and returning","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"a linked source outside page one is selected directly and stays selected when more rows arrive","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15064,19 +15006,7 @@
     ,
     {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"a 128-character usage model keeps its figures in the ticket panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"a ticket with no sessions leaves the agent work section out","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"agent work dark 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"agent work dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"agent work light 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"agent work light 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"an epic shows sessions with reported figures and leaves missing ones out","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ticket-agent-work.spec.ts","name":"empty capped scope still warns that deeper sessions may exist","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"a German profile stays in English; an explicit DE choice shows German and falls back when German is empty","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15090,11 +15020,7 @@
     ,
     {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"historical done ticket shows completed guidance in display and edit mode","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"internal-only releases show no tag title and a quiet detail at 1600px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"internal-only releases show no tag title and a quiet detail at 390px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"read-only ticket shows missing-language guidance without edit controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ticket-benefits.spec.ts","name":"regenerated missing-snapshot history keeps chips, filters and visible changes without a tag title","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

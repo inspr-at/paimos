@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/markdown-ticket-links.spec.ts",
-    "listedTests": 4,
+    "listedTests": 5,
     "tierTiming": {
       "caseSeconds": {
         "max": 5.719,

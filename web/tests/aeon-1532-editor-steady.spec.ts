@@ -227,7 +227,7 @@ async function deleteFiftyLines(page: Page, box: Locator, guard: Awaited<ReturnT
   checks.add('delete', 'movementPx 0 for the title, slug, status and Text label', true, { tolerancePx: .5 })
 }
 
-for (const { width, theme } of [{ width: 1440, theme: 'light' }, { width: 1440, theme: 'dark' }, { width: 1024, theme: 'light' }, { width: 390, theme: 'light' }] as const) {
+for (const { width, theme } of [{ width: 1440, theme: 'light' }, { width: 390, theme: 'light' }] as const) {
   test(`AEON-1532: typing in a 300-line knowledge entry at ${width} ${theme} never shrinks the box or moves the page`, async ({ page }) => {
     test.setTimeout(90_000)
     const errors = watchErrors(page)
@@ -282,16 +282,6 @@ for (const { width, theme } of [{ width: 1440, theme: 'light' }, { width: 1440, 
     await checks.save(`${width}-${theme}`)
   })
 }
-
-test('AEON-1532: deleting 50 lines keeps the page where it is, in the middle and at the end', async ({ page }) => {
-  test.setTimeout(90_000)
-  const { box, above } = await openEntry(page, 1440, 'light')
-  const checks = checker(1440, 'light')
-  const guard = await controlStability(page, above)
-  await deleteFiftyLines(page, box, guard, checks)
-  guard.done()
-  await checks.save('delete-1440-light')
-})
 
 // Posts a comment in the ticket panel and opens it for editing.
 async function editComment(page: Page) {

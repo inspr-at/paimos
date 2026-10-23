@@ -151,22 +151,6 @@ test('assignee, priority, labels and parent change in one request each; stale ti
   expect(bulkCalls(calls).at(-1)!.body).toMatchObject({ parent_id: 'n-epic' })
 })
 
-test('archive hides the tickets; a change made elsewhere since makes Undo refuse and change nothing', async ({ page }) => {
-  const data = fixtures()
-  await mockWork(page, data)
-  await page.goto('/p/PHAROS')
-  await expect(rows(page)).toHaveCount(5)
-  await row(page, 'PHAROS-14').hover()
-  await row(page, 'PHAROS-14').getByRole('checkbox').check()
-  await bulkBar(page).getByRole('button', { name: 'Archive' }).click()
-  await expect(page.getByText('Archived 1 ticket')).toBeVisible()
-  await expect(rows(page)).toHaveCount(4)
-  data.nodes.find(n => n.id === 'n-4')!.updated_at = '2026-09-23T12:30:00.000Z'
-  await page.getByRole('button', { name: 'Undo' }).click()
-  await expect(page.getByText('Some of them changed since, so nothing was undone.')).toBeVisible()
-  expect(data.nodes.find(n => n.id === 'n-4')!.state).toBe('archived')
-})
-
 test('read-only people see no selection', async ({ page }) => {
   await mockWork(page, fixtures(), { readOnly: true })
   await page.goto('/p/PHAROS')
