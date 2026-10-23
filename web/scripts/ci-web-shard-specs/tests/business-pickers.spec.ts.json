@@ -7,7 +7,7 @@
   },
   "spec": {
     "file": "tests/business-pickers.spec.ts",
-    "listedTests": 4,
+    "listedTests": 2,
     "weightSeconds": 80,
     "weightSource": "acceptance-and-visual-matrix-estimate"
   }

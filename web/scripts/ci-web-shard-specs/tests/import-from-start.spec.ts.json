@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/import-from-start.spec.ts",
-    "listedTests": 8,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
         "max": 7.888,

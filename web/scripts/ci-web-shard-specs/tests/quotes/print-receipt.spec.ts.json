@@ -1,12 +1,12 @@
 {
-  "group": "remaining-ui",
+  "group": "quote-native",
   "nightlyTiming": {
     "seconds": 2.597,
     "selectedTests": 3
   },
   "spec": {
     "file": "tests/quotes/print-receipt.spec.ts",
-    "listedTests": 3,
+    "listedTests": 2,
     "tierTiming": {
       "caseSeconds": {
         "max": 1.405,

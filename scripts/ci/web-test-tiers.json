@@ -7322,10 +7322,6 @@
     ,
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"the bulk bar and its menus have no axe violations in light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: 200 cost units keep rate request concurrency at six","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: continuation on the last allowed page reports partial for every business directory","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: partial customer quote contact and project lists show retry beside retained results","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/business-pickers.spec.ts","name":"AEON-1417: rejected rates remain in the hours picker and retry keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -7733,8 +7729,6 @@
     {"kind":"browser","file":"tests/connect-verification.spec.ts","name":"no selected harness gives a visible reason at Connect","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/connect-verification.spec.ts","name":"reader sees the permission reason at Connect","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/cost-units.spec.ts","name":"a clash is explained and nothing else changes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/cost-units.spec.ts","name":"an admin adds a cost unit and goes straight to its first rate","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9854,21 +9848,13 @@
     ,
     {"kind":"browser","file":"tests/idle-requests.spec.ts","name":"AEON-1117 shares mounted reads and event transport, fences stale answers and recovers missed events and access","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: expired handoff, and a German draft stays English, at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/import-from-start.spec.ts","name":"AEON-1441: from START, loading to created at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/indicator-controls.spec.ts","name":"100% fills the space inside each ring; 30% is 30% of it; unset keeps each drawing","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
@@ -11928,10 +11914,6 @@
     ,
     {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"dirty reload preserves local text, page reload recovers it, and a lost ACK replays after reconnect","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"loading cannot save and a late reload never replaces an edit made while it waited","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"merge review keeps text overlaps, deleted anchors and competing order explicit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"revision watch backs off after outages and rechecks immediately on focus","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"same-person tabs keep distinct mutation sessions after window.open clones storage","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11942,11 +11924,7 @@
     ,
     {"kind":"browser","file":"tests/quote-dock-layout.spec.ts","name":"at 1024 the list and the dock share the window: no gap, no overlap, nothing collapsed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/quote-dock-layout.spec.ts","name":"at 1280 the list and the dock share the window: no gap, no overlap, nothing collapsed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/quote-dock-layout.spec.ts","name":"at 1440 the list and the dock share the window: no gap, no overlap, nothing collapsed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/quote-dock-layout.spec.ts","name":"at 1920 the list and the dock share the window: no gap, no overlap, nothing collapsed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/quote-dock-layout.spec.ts","name":"axe: the split at 1024 and the folded menu, in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11956,13 +11934,7 @@
     ,
     {"kind":"browser","file":"tests/quote-dock-layout.spec.ts","name":"what folds out of the dock title bar is in its … menu, and works there","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"draft save converts measurements in old browser recovery without changing money","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"numbering restart, explicit start, continuation across prose and section binding","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"structured prose, all six levels, numbering, section and row changes survive JSON and history","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"typed P1 client sends CAS and stable document to the mocked draft API","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/quote-editor-core.spec.ts","name":"AEON-1682: native prose edit, measurement history and CAS save survive a reload with stable IDs","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/quote-editor-input.spec.ts","name":"oversized whole section sets the single readiness and overflow contract","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12054,9 +12026,9 @@
     ,
     {"kind":"browser","file":"tests/quote-public-page.spec.ts","name":"the customer sees the sender, the facts and the frozen document in its language, and accepts exactly what is shown","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/quote-public.spec.ts","name":"expired but readable document has no acceptance form","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quote-public.spec.ts","name":"expired but readable document has no acceptance form","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/quote-public.spec.ts","name":"scoped document renders read-only and acceptance submits displayed digest","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quote-public.spec.ts","name":"scoped document renders read-only and acceptance submits displayed digest","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/quote-save-state.spec.ts","name":"a copy without changes, or from another version’s draft, is never offered; a matching one is","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12156,15 +12128,13 @@
     ,
     {"kind":"browser","file":"tests/quotes-tab.spec.ts","name":"without a sender the dialog says what to set up first and creates nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/quotes/parity-flow.spec.ts","name":"customer → quote → inspector save → issue → public acceptance race → receipt","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quotes/parity-flow.spec.ts","name":"customer → quote → inspector save → issue → public acceptance race → receipt","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"print entry keeps inline marks and accepted receipt evidence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"AEON-1682: emitted multipage receipt preserves Unicode marks, fixed evidence and unclipped A4 text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"the emitted A4 PDF wraps long marked prose across pages without clipping","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"the final printed page QR decodes to the exact customer URL","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/quotes/print-receipt.spec.ts","name":"the final printed page QR decodes to the exact customer URL","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/quotes/two-user-presence.spec.ts","name":"two editors see named presence, server expiry removes an anchor, and print hides overlays","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/quotes/two-user-presence.spec.ts","name":"two editors see named presence, server expiry removes an anchor, and print hides overlays","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/record-ownership.spec.ts","name":"S8-001: accepted discard clears description and comment drafts before opening B","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -17554,6 +17524,10 @@
     ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1417: changing the rate-cache owner retires pending reads and stops queued requests","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1682: effective rates use the selected day, unit and currency and reject failed rates","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"AEON-1682: rate form validates before writing, retains a refused draft and refreshes confirmed rates","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > accepts exactly 2,000 rows but rejects a continuation rather than returning a partial list","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > includes the oldest supported open period with the explicit approval bound","tier":"GATED-FULL"}
@@ -19490,6 +19464,12 @@
     ,
     {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the subscriptions > each battery says what is left, when it refills and its own forecast; only the account that empties the pool warns","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/quote-editor.unit.test.ts","name":"AEON-1682: persisted editor vectors > keeps six numbered levels, marks, measurements, IDs, order and exact money through history","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/quote-editor.unit.test.ts","name":"AEON-1682: persisted editor vectors > numbers restart, explicit start and continuation across prose with section binding","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/quote-editor.unit.test.ts","name":"AEON-1682: persisted editor vectors > sends CAS and mutation identity, normalizes legacy measurements without changing money or the source","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/quote-editor.unit.test.ts","name":"QuoteEditor snapshots > hydrates nested reactive document data and preserves independent undo history","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/quote-editor.unit.test.ts","name":"QuoteEditor snapshots > persists section settings and restores them through undo and redo","tier":"ESSENTIAL"}
@@ -19548,6 +19528,8 @@
     ,
     {"kind":"vitest","file":"tests/quote-list.unit.test.ts","name":"the customer page speaks the document’s language > reads the language from the document, German when in doubt, a declared one first","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/quote-profile-normalize.unit.test.ts","name":"AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/quote-profile-normalize.unit.test.ts","name":"normalizeProfile > keeps the profile helpers from throwing on a null-list snapshot","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/quote-profile-normalize.unit.test.ts","name":"normalizeProfile > reads null lists and maps as empty without mutating the stored snapshot","tier":"GATED-FULL"}
@@ -19559,6 +19541,14 @@
     {"kind":"vitest","file":"tests/quote-switch-race.unit.test.ts","name":"AEON-1421: a receipt retry stays usable when the refresh shows generation failed again","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/quote-switch-race.unit.test.ts","name":"AEON-1421: switching quotes drops the other quote’s link read and refuses its revoke","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"AEON-1682: loading refuses writes and a held reload cannot replace an edit made after it began","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"AEON-1682: merge review preserves text overlaps, deleted anchors and competing order","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"AEON-1682: refused saves preserve work and distinguish corrected mutations from uncertain same-id retry","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"AEON-1682: revision watch backs off on the injected clock and focus rechecks without waiting","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/quote-workspace-recovery.unit.test.ts","name":"waits for a deferred discarded recovery decision even after the old 400ms window","tier":"GATED-FULL"}
     ,
@@ -24160,8 +24150,6 @@
       "tests/queue-filter.test.ts": {"seconds":0.240582,"selectedTests":2}
       ,
       "tests/quotaWarnings.test.ts": {"seconds":0.297013,"selectedTests":1}
-      ,
-      "tests/quote-editor-core.spec.ts": {"caseSeconds":{"typed P1 client sends CAS and stable document to the mocked draft API":0.926},"seconds":0.926,"selectedTests":1}
       ,
       "tests/quote-editor.unit.test.ts": {"seconds":0.575319,"selectedTests":3}
       ,

@@ -839,6 +839,33 @@
       "specs": [
       ]
     }
+    ,
+    {
+      "config": "playwright.ui.config.ts"
+      ,
+      "env": {}
+      ,
+      "flags": [
+        "--workers=1"
+        ,
+        "--trace=retain-on-failure"
+      ]
+      ,
+      "gate": true
+      ,
+      "hostedOnly": true
+      ,
+      "id": "quote-native"
+      ,
+      "project": null
+      ,
+      "sourceSteps": [
+        "AEON-1682: quote editor, public acceptance, presence and print browser boundaries"
+      ]
+      ,
+      "specs": [
+      ]
+    }
   ]
   ,
   "integrationNotes": [
