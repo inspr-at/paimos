@@ -2,25 +2,33 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "round6-capture-ready-no-active-reference-authority",
+  "status": "round10-clock-audited-66-pins-awaiting-hosted-proof",
   "cuts": false,
-  "note": "Round 6 implements an explicit workflow_dispatch visual_capture input on existing CI, artifact-only packaging of 42 checkpoints across ten states, exact hosted renderer identity with post-capture ImageVersion pinning, self-hosted glyph checks, zero pixel tolerance, historical-only macOS pins, early reporting of deferred Goals/workspace, and healthy native-context Session Chat with separate typed-refusal coverage. AttachmentStrip, TicketPlacement and the earlier AgentsTab product changes are restored to merged origin/main, along with only the new P02 assertions coupled to those fixes; all original tests and registrations remain. No cuts or new pins. All 42 capture-state quality checkpoints, both browser guards, 86 role-picker cases after the Access revert, 15 original attachment/placement cases and all eight deferred cases passed remotely. Node transport/ledger and CI command/apt inventories pass. Hosted static and actual Linux capture remain assigned to CI/LEAD as directed; Tick approval and publication as test-references-2 belong to the next round.",
+  "note": "Round 10 adds recorded/asserted per-state fixed clocks and candidate clock evidence, defers all four Capacity checkpoints to AEON-1692/reference set 3, positions Delivery 390 at header bottom +12px with a matching assertion, and stabilizes delayed release-name fixture data without product changes. There are 66 strict references and 14 explicit deferrals. The alleged lead-panel failures are passing in the raw hosted log and a fresh unchanged 56/56 remote run; fixtures and expectations remain unchanged. All 72 fixtures pass remote clock/quality checks, all six guards and both transport/ledger tests pass. Exact Linux comparisons and final hosted static proof remain coordinator-owned; no cuts, push, deploy or model review.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
     "functionalCandidates": 25,
     "visualCandidates": 80,
-    "additionalBrowserGuards": 3,
-    "currentPackageBrowserCases": 1198,
+    "additionalBrowserGuards": 6,
+    "currentPackageBrowserCases": 1201,
     "plannedCeiling": 105,
-    "currentGlobalBrowserCases": 5466,
+    "currentGlobalBrowserCases": 5470,
     "newRuntimeRegressionCases": 14,
     "referenceTransportCases": 1
   },
   "blockers": [
     {
-      "kind": "next-round-reference-approval",
-      "reason": "No current comparison authority. LEAD dispatches CI with visual_capture=true on this branch; Tick reviews the 42 hosted Linux captures, LEAD publishes test-references-2, and the next round pins exact assets plus the captured ImageVersion. This is the specified handoff, not permission to cut."
+      "kind": "hosted-verification",
+      "reason": "The remaining 66 zero-pixel Linux comparisons must run on the approved hosted renderer after coordinator push; the remote Mac clock/quality lane cannot claim this proof. Final hosted static proof is also pending."
+    },
+    {
+      "kind": "deferred-reference",
+      "states": [
+        "capacity",
+        "delivery-numbers-390"
+      ],
+      "reason": "Four Capacity checkpoints require frozen-clock re-capture, and two Delivery phone checkpoints require the +12px heading crop; AEON-1692/reference set 3 owns re-capture and approval."
     },
     {
       "kind": "deferred-product",
@@ -28,7 +36,7 @@
         "goals",
         "ticket-workspace"
       ],
-      "reason": "Goals reports deferred until AEON-1621 and AEON-1625; workspace reports its separate Tick product follow-up. No unbuilt product requirements run."
+      "reason": "Existing explicit product deferrals remain; no protected cuts are authorized."
     }
   ],
   "measurements": [
@@ -4037,5 +4045,58 @@
         "evidence": "web/test-results/remote/r9-negative-delivery/"
       }
     }
+  },
+  "round10": {
+    "implementationSHA": "1fde866a8",
+    "comparisonCheckpoints": 66,
+    "deferredCheckpoints": {
+      "capacity": 4,
+      "delivery-numbers-390": 2,
+      "goals": 4,
+      "ticket-workspace": 4
+    },
+    "archiveSHA256": "3c53666ddd810275cef073191449bebe20e73d6c0b162de4fe65f441a20e4511",
+    "archiveResult": "All 72 immutable PNG and payload digests verify; only 66 approved references are usable. No archive, renderer or other pin bytes changed.",
+    "clockAudit": "Per-state mode/now/audit in visual-manifest.json; three browser time samples in every successful report; missing/drifted candidate evidence rejects.",
+    "clockQuality": {
+      "sourceSHA": "4bd22cdc7",
+      "passed": 72,
+      "batches": [
+        30,
+        26,
+        16
+      ],
+      "evidence": "tmp/AEON-1674-r10/clock-quality-evidence.json",
+      "authority": "Temporary remote Mac quality-only manifest, absent from delivery ancestry; no pixel-comparison or reference authority."
+    },
+    "leadPanel": {
+      "sourceSHA": "c7d76b95e",
+      "remotePassed": 56,
+      "approvedDesignChecks": 322,
+      "filesChanged": [],
+      "cause": "False failure summary: raw hosted job logs passing cases and ALL PASS (322 checks), then 119 passed and two Capacity failures. No source regression is present.",
+      "hostedRun": "39915823868",
+      "hostedJob": "120289781495",
+      "evidence": "tmp/AEON-1674-r10/ci-web-shard-2.log and lead-panel.log"
+    },
+    "delivery": "Measured heading top >= app-header bottom +12px, asserted next to the complete on-target headline viewport assertion; both phone checkpoints remain deferred.",
+    "fixtureReadiness": "Reviewed named/unnamed current-release data is explicit in version and history, so the delayed history read cannot change the footer. Comparator synthetic documents use the app fallback font order.",
+    "validation": {
+      "transportLedgerPassed": 2,
+      "browserGuardsPassed": 6,
+      "linuxComparisons": "Pending coordinator-owned hosted CI after push; no tolerance or renderer bypass.",
+      "static": "Remote entry point: 43 checks passed, zero optional skips; only web-shard-spec-tests exceeded timeout_seconds=120 after 120.02s (process group termination requested). Its contained tests passed under web-shard-tests in 331.55s. This unchanged wrapper and measured shard/listing code match worker-common known environment list 3; final hosted exit-0 proof remains pending.",
+      "browserGuardSourceSHA": "b23d2dc86",
+      "finalGuardsAndDeferralsPassed": 20,
+      "finalGuardsAndDeferralsScope": "Six guards plus all 14 real report-only checkpoint registrations, in 18/18 and 2/2 remote batches.",
+      "staticEvidence": "tmp/AEON-1674-r10/ci-static-remote.log"
+    },
+    "newTestIdentities": [],
+    "sharedRegistrationsChanged": [],
+    "productSourceChanged": [],
+    "protectedCuts": false,
+    "pushed": false,
+    "deployed": false,
+    "modelReviewsRun": false
   }
 }
