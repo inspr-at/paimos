@@ -769,7 +769,9 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   if (await dialFold.isVisible()) await dialFold.click()
   await expect(section.getByRole('heading')).toHaveText('Assistants · 2')
   await expect(section).toHaveClass(/\bglass-card\b/)
-  const layout = section.locator('.assistants-head [data-layout-cycle]')
+  const layout = page.locator('[data-layout-cycle]')
+  await expect(section.locator('.assistants-head')).toHaveAttribute('aria-owns', 'agents-layout-cycle')
+  await expect(layout).toHaveAttribute('id', 'agents-layout-cycle')
   await expect(layout).toBeVisible()
   await expect(layout).toHaveAccessibleName(/^Layout: .+ Next: /)
   await expect(layout).toHaveAttribute('data-tip', /Next:/)
@@ -802,6 +804,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   }
   const lastActivity = section.locator('.assistant-row').first().locator('.last-column')
   await expect(lastActivity).toHaveText('Ran Inbox triage 1 · 30 min ago')
+  await expect(section.locator('.assistant-open').first()).toHaveAccessibleDescription(/Ran Inbox triage 1 · 30 min ago/)
   expect(await lastActivity.evaluate(cell => cell.scrollWidth <= cell.clientWidth)).toBe(true)
   await section.locator('.budget-unknown').first().hover()
   await expect(page.locator('.tooltip:popover-open')).toHaveText('Not available yet')
@@ -1014,8 +1017,9 @@ test('zero assistants show the permission-gated existing connect flow without sa
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
       if (width === 1440) {
-        await expect(section.locator('.assistants-head [data-layout-cycle]')).toHaveAccessibleName(/^Layout: .+ Next: /)
-        await expect(section.locator('.assistants-head [data-layout-cycle]')).toHaveAttribute('data-tip', /Next:/)
+        await expect(section.locator('.assistants-head')).toHaveAttribute('aria-owns', 'agents-layout-cycle')
+        await expect(page.locator('#agents-layout-cycle')).toHaveAccessibleName(/^Layout: .+ Next: /)
+        await expect(page.locator('#agents-layout-cycle')).toHaveAttribute('data-tip', /Next:/)
       }
       await page.screenshot({ path: testInfo.outputPath(`aeon-1705-${width}-${theme}-empty-${permitted ? 'connect' : 'readonly'}-fix1.png`), fullPage: true })
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)

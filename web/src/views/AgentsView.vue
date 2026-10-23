@@ -234,7 +234,7 @@ const LIST_MIN = 280, DETAILS_MIN = 380, FORM_AT = 560, DIVIDER = 16, FOCUS_WIDT
 const layoutPref = usePreference<{ handle?: number; [key: string]: unknown }>('agents:layout')
 const person = computed(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '')
 const work = ref<HTMLElement>(), divider = ref<HTMLElement>(), listPane = ref<HTMLElement>()
-const layoutDock = ref<HTMLElement>(), layoutHome = ref<HTMLElement>(), layoutPinned = ref(false)
+const layoutDock = ref<HTMLElement>()
 const workWidth = ref(0), paneHeight = ref(0)
 const canSplit = computed(() => workWidth.value >= FORM_AT + DIVIDER + OVERVIEW_DETAILS)
 const panelLayout = ref<PanelLayout>('side'), previousPanelLayout = ref<PanelLayout>('side')
@@ -270,11 +270,6 @@ async function setPanelLayout(next: PanelLayout, persist = true) {
 const panelOpen = computed(() => (!!sessionId.value && agents.loaded || !!selectedAssistant.value) && !ticketPeekOpen.value)
 const split = computed(() => panelOpen.value && canSplit.value && panelLayout.value === 'side')
 const panelOnly = computed(() => panelOpen.value && panelLayout.value === 'wide')
-function syncLayoutDock() {
-  const main = work.value?.closest('main')
-  layoutPinned.value = !!(canSplit.value && !panelOpen.value && main && layoutHome.value && layoutHome.value.getBoundingClientRect().top < main.getBoundingClientRect().top + 14)
-}
-watch([canSplit, panelOpen], () => { void nextTick(syncLayoutDock) })
 const maxHandle = computed(() => workWidth.value - DIVIDER - DETAILS_MIN)
 const clampHandle = (width: number) => Math.round(Math.max(LIST_MIN, Math.min(maxHandle.value, width)))
 const savedHandle = computed(() => {
@@ -657,12 +652,10 @@ onMounted(() => {
   const measureWidth = () => { workWidth.value = Math.floor(work.value?.getBoundingClientRect().width ?? 0) }
   const measureHeight = () => { paneHeight.value = Math.max(0, (main?.clientHeight ?? 0) - 8) }
   measureWidth(); measureHeight()
-  main?.addEventListener('scroll', syncLayoutDock, { passive: true })
   layoutResize = new ResizeObserver(entries => {
     // Width only depends on the surrounding page. Apply its breakpoint before
     // paint; deferring it lets the old split move controls during interaction.
     measureWidth()
-    syncLayoutDock()
     // The main viewport's height is independent of the split. Its resize can
     // settle immediately too, without briefly opening a zero-height pane.
     if (entries.some(entry => entry.target === main)) measureHeight()
@@ -689,7 +682,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   panelLayoutWrite++; panelMedia.removeEventListener('change', syncPanelClass)
   layoutResize?.disconnect(); drag = null; dragWidth.value = null
-  work.value?.closest('main')?.removeEventListener('scroll', syncLayoutDock)
   if (layoutFrame !== undefined) cancelAnimationFrame(layoutFrame)
   evidenceRefresh.stop(); document.removeEventListener('visibilitychange', evidenceVisible)
   stopTierWatch?.()
@@ -780,9 +772,10 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
       <div v-show="canSplit && !panelOpen" ref="layoutDock" class="layout-dock" />
       <div class="agents-split">
         <div v-show="!panelOnly" ref="listPane" class="agents-list-pane" @transitionend="finishLayout">
-        <AssistantsSection :items="assistants.items" :facts="assistants.facts" :state="assistants.state" :error="assistants.error" :truncated="assistants.truncated" :can-connect="assistants.mayConnect" :can-approve="can('approvals.decide')" :now="agents.now" :sort-epoch="assistantSortEpoch" :selected="assistantId" :owner="person" :project-names="Object.fromEntries(projects.projects.map(project => [project.id, project.routeKey]))" @open="openAssistant" @retry="assistants.load()">
-          <template #actions><div v-show="canSplit && !panelOpen" ref="layoutHome" class="layout-home">
-            <Teleport :to="layoutDock ?? 'body'" :disabled="!layoutPinned"><button type="button" class="icon-btn raised layout-button" data-layout-cycle :data-layout="preset" :aria-disabled="!layoutEnabled" :aria-label="`Layout: ${layouts[preset][0]}, ${layouts[preset][1]}. Next: ${layouts[nextPreset][0]}`" :aria-keyshortcuts="layoutKeys.join(' ') || undefined" :data-tip="layoutTip" @click="cycleLayout"><AppIcon :name="`layout-${preset}`" :size="17" /></button></Teleport>
+        <AssistantsSection :items="assistants.items" :facts="assistants.facts" :state="assistants.state" :error="assistants.error" :truncated="assistants.truncated" :can-connect="assistants.mayConnect" :can-approve="can('approvals.decide')" :now="agents.now" :sort-epoch="assistantSortEpoch" :selected="assistantId" :owner="person" :project-names="Object.fromEntries(projects.projects.map(project => [project.id, project.routeKey]))" :control-id="canSplit && !panelOpen ? 'agents-layout-cycle' : undefined" @open="openAssistant" @retry="assistants.load()">
+          <template #actions><div v-show="canSplit && !panelOpen" class="layout-home">
+            <!-- Header ownership stays explicit; CSS in the dock keeps the control still while scrolling. -->
+            <Teleport v-if="layoutDock" :to="layoutDock"><button id="agents-layout-cycle" type="button" class="icon-btn raised layout-button" data-layout-cycle :data-layout="preset" :aria-disabled="!layoutEnabled" :aria-label="`Layout: ${layouts[preset][0]}, ${layouts[preset][1]}. Next: ${layouts[nextPreset][0]}`" :aria-keyshortcuts="layoutKeys.join(' ') || undefined" :data-tip="layoutTip" @click="cycleLayout"><AppIcon :name="`layout-${preset}`" :size="17" /></button></Teleport>
           </div></template>
         </AssistantsSection>
         <SessionList
