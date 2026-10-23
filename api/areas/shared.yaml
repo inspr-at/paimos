@@ -1342,6 +1342,14 @@ components:
             instruction: {type: string, maxLength: 262144}
             repository_mutation_allowed: {type: boolean}
             request_digest: {type: string, pattern: '^[a-f0-9]{64}$', description: 'Immutable digest of the selected context and exact request options. Content reads only.'}
+            ticket:
+              type: object
+              description: 'Server-bound launch identity and revision. Successful settlement may close this leaf only while it is unchanged and current status permissions and Done checks pass. Historical runs may omit this binding.'
+              required: [id, state, updated_at]
+              properties:
+                id: {type: string, format: uuid}
+                state: {type: string}
+                updated_at: {type: string, format: date-time}
         preference_of: {type: object, required: [person, source], properties: {person: {type: [string, 'null'], format: uuid}, source: {type: string}}}
         column: {type: string}
         situation: {type: string, enum: [first, fix, stuck, small, review], description: "Models row or selected situation; small is the First build matrix override and review selects the author kind's review order."}
