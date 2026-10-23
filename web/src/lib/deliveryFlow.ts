@@ -210,7 +210,8 @@ export interface LabelInput { tag?: string; text: string; since?: string; durati
  * Both paths keep the label inside the bar's existing padding.
  */
 export function fitLabel({ tag, text, since = '', duration, room, pad, textWidth }: LabelInput): string {
-  const fits = (value: string) => (textWidth ? textWidth(value) : value.length * CHAR_W) + pad + 6 < room
+  const advance = (value: string) => textWidth ? textWidth(value) : value.length * CHAR_W
+  const fits = (value: string) => advance(value) + pad + 6 < room
   const clipped = (prefix: string, suffix: string, minimum: number): string => {
     let low = 0, high = Math.max(0, text.length - 1)
     while (low < high) {
@@ -229,7 +230,9 @@ export function fitLabel({ tag, text, since = '', duration, room, pad, textWidth
     const suffix = fits(tag + since) ? since : ''
     const base = `${tag} · ${text}`
     if (fits(base + suffix)) return base + suffix
-    return clipped(`${tag} · `, suffix, 1) || (fits(tag + suffix) ? tag + suffix : '')
+    // A bare key may use the entire bar; the renderer centres it and omits the
+    // optional kind icon. Padding must not hide a key that fits by itself.
+    return clipped(`${tag} · `, suffix, 1) || (fits(tag + suffix) ? tag + suffix : advance(tag) <= room ? tag : '')
   }
   const base = text + since
   const durationLabel = duration ? `${duration}${since}` : ''
