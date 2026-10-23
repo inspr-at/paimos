@@ -977,7 +977,17 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await saveGuard.check(() => budget.fill('15'))
   saveGuard.done()
   await details.locator('.assistant-panel-scroll').evaluate(element => { element.scrollTop = 0 })
+  await details.locator('.assistant-panel-scroll').evaluate(element => {
+    const input = element.querySelector('.policy-budget-fields input')!
+    // Keep the scope heading and the entire edited field in the same capture;
+    // centring the budget would scroll the heading past the pinned tabs.
+    element.scrollTop = Math.max(0, input.getBoundingClientRect().bottom - element.getBoundingClientRect().bottom + 16)
+  })
   await expect(scopeGroup.getByRole('heading', { name: 'What it may do', exact: true })).toBeVisible()
+  expect(await budget.evaluate(input => {
+    const field = input.getBoundingClientRect(), body = input.closest('.assistant-panel-scroll')!.getBoundingClientRect()
+    return field.top >= body.top && field.bottom <= body.bottom
+  })).toBe(true)
   await shot('1440-light-panel-policy-edit')
   await page.emulateMedia({ colorScheme: 'dark' }); await shot('1440-dark-panel-policy-edit')
   await page.emulateMedia({ colorScheme: 'light' })
