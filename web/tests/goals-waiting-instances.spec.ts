@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1709: browser connections replace cookie peeking. Risks: a disconnected
-// instance silently looks empty, counts differ between surfaces, bearer reads
+// grant silently looks empty, counts differ between surfaces, bearer reads
 // send cookies, callback fragments survive routing, or state changes move controls.
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
@@ -118,6 +118,7 @@ for (const width of [1440, 1024, 390] as const) {
     await expect(preview.getByTestId('instance-pma').locator('.instance-tag')).toHaveText(['pma', 'pma'])
     await expect(preview.getByRole('link', { name: 'Open pma Desk' })).toHaveAttribute('href', `${SIBLING}/decision-desk`)
     await shot(page, info, `preview-${width}-dark`)
+    await page.emulateMedia({ colorScheme: 'light' }); await shot(page, info, `preview-${width}-light`)
     await page.keyboard.press('Escape')
     await mockDecisionDesk(page, { emptyDesk: true })
     await mock.mount()
@@ -130,6 +131,8 @@ for (const width of [1440, 1024, 390] as const) {
     await expect(page.getByTestId('instance-pma').locator('.instance-item')).toHaveCount(2)
     await expect(page.getByTestId('instance-pma').getByRole('button')).toHaveCount(0)
     await shot(page, info, `desk-${width}-light`)
+    await page.emulateMedia({ colorScheme: 'dark' }); await shot(page, info, `desk-${width}-dark`)
+    await page.emulateMedia({ colorScheme: 'light' })
     if (width === 390) {
       await page.setViewportSize({ width: 320, height: 950 })
       expect(await page.locator('.desk-page').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
@@ -203,7 +206,7 @@ test('an unconnected sibling contributes nothing to the empty Desk, Goals and pr
   await mockDecisionDesk(page, { emptyDesk: true })
   await page.goto('/decision-desk')
   await expect(page.getByTestId('desk-clear')).toBeVisible()
-  await expect(page.getByTestId('desk-empty')).toHaveCount(0)
+  await expect(page.getByTestId('desk-empty')).toHaveText('Nothing waits for you')
 })
 
 test('phone status and project keys expose their full copy with text spacing', async ({ page }) => {
