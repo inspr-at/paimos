@@ -55,6 +55,10 @@ func TestNixVendorHashGate(t *testing.T) {
 	// Execute the actual workflow command with a closed Nix adapter. This proves
 	// rebuild-on-cache-hit argv and failure propagation without running a build
 	// inside Go tests; the real stale/fixed Nix builds are worker evidence.
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, fixture := range []struct {
 		name      string
 		build     string
@@ -69,6 +73,9 @@ func TestNixVendorHashGate(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			dir := t.TempDir()
 			log := filepath.Join(dir, "argv")
+			if err := os.Symlink(bash, filepath.Join(dir, "bash")); err != nil {
+				t.Fatal(err)
+			}
 			adapter := "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" >> \"$CALL_LOG\"\n" +
 				"if [[ \" $* \" == *' --rebuild '* ]]; then exit \"$NIX_REBUILD_EXIT\"; fi\nexit \"$NIX_BUILD_EXIT\"\n"
 			if err := os.WriteFile(filepath.Join(dir, "nix"), []byte(adapter), 0700); err != nil {
