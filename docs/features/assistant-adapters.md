@@ -24,7 +24,7 @@ The tenant registry is exposed within each project:
 - `GET /api/projects/{projectId}/assistant-adapters/{adapterId}` returns the
   redacted configuration and health for its delivery mode.
 - `POST /api/projects/{projectId}/assistant-adapters/{adapterId}/test-send`
-  defaults to `dry_run: true`. It validates the current encrypted configuration
+  defaults to `dry_run: true`. It validates the current delivery binding
   without queueing work or making an outbound HTTP request. A live test requires
   `dry_run: false`, `body` (up to 4096 characters), and `idempotency_key`.
   The response identifies the queued inbox message and its existing receipt.
@@ -118,10 +118,11 @@ Migration `1435_assistant_adapters.sql` backfills all existing
 versions, pending-delivery references and encrypted bytes. An additive trigger
 also projects Grok targets inserted by older writers during a rolling upgrade.
 Queued deliveries keep their original target version when an endpoint is
-replaced. Push uses the existing dispatcher. Pull uses the existing durable inbox; no
-second queue or background loop is needed. Expansion
+replaced. Push uses the existing dispatcher. Pull uses the existing durable
+inbox; no second queue or background loop is needed. Expansion
 `1436_assistant_pull_health.sql` adds only a nullable principal health timestamp
-and an unread lookup index. Existing owners have no migration step. The existing 32-byte messaging encryption key remains authoritative.
+and pull/unread lookup indexes. Existing owners have no migration step. The existing
+32-byte messaging encryption key remains authoritative.
 
 Approval requests, policy/budget enforcement, Routine ownership and the Agents
 page remain in their existing packages and the other AEON-754 slices. Only Grok
@@ -131,5 +132,6 @@ The existing `TestRoutineDispatcherUsesEncryptedTargetAndFencedCompletion`
 behaviour test now includes production-authenticated round-trip, exact injected
 retry boundaries, signature/redaction, dry-run, target version, authorization
 revocation, pull polling/receipts/health without outbound attempts, frozen-host
-retention, and pre-expansion Amy-shaped provisioning/rotation subtests. Its existing test tier is
-retained; no browser case or coordinator-owned tier record is added.
+retention, and pre-expansion Amy-shaped provisioning/rotation subtests. Its
+existing test tier is retained; no browser case or coordinator-owned tier record
+is added.

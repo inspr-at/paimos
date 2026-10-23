@@ -460,6 +460,26 @@ func testAssistantPullRoundTrip(t *testing.T) {
 		t.Fatalf("empty poll did not refresh mode-specific health: %+v", got)
 	}
 	assertNoPush()
+	// The UI and ordinary CLI can address the principal inbox directly, without
+	// selecting a project target. They must retain the same pull behaviour.
+	raw := mustJSON[Message](t, request(owner, "POST", "/api/inbox/messages", sendJSON(w.agent.ID, "direct pull inbox", "direct-pull", nil, nil), 201))
+	if countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM inbox_wakes WHERE message_id=$1`, raw.ID) != 0 || countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM inbox_receipts WHERE message_id=$1 AND deliver_by IS NULL`, raw.ID) != 1 {
+		t.Fatal("direct principal inbox bypassed pull mode")
+	}
+	// Explicit expiry remains authoritative even though automatic online
+	// deadlines are suppressed. Derive it from the database clock as well.
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_messages SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, raw.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_receipts SET deliver_by=clock_timestamp()-interval '1 second' WHERE message_id=$1`, raw.ID); err != nil {
+		t.Fatal(err)
+	}
+	if failed, err := NewSweeper(w.db.App).SweepTenant(t.Context(), w.admin.TenantID); err != nil || failed != 1 {
+		t.Fatalf("pull ignored explicit expiry: failed=%d err=%v", failed, err)
+	}
+	if got := mustJSON[Receipt](t, request(owner, "GET", "/api/inbox/messages/"+raw.ID+"/receipt", "", 200)); got.State != "failed" {
+		t.Fatalf("expired pull receipt reported success: %+v", got)
+	}
 }
 
 // Risk: installing pull support silently requires Amy's owner to re-register
