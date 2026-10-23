@@ -7,6 +7,7 @@ export interface StableOptions {
   interactions: StableInteraction[]
   scrollAreas?: Record<string, Locator>
   tolerance?: number
+  ready?: () => Promise<unknown>
 }
 
 // Scroll-container coordinates distinguish intentional scrolling from layout
@@ -14,32 +15,20 @@ export interface StableOptions {
 async function box(locator: Locator, name = 'control') {
   await expect(locator).toHaveCount(1)
   await expect(locator).toBeVisible()
-  const sample = { x: 0, y: 0, width: 0, height: 0 }
-  await expect.poll(async () => {
-    const settled = await locator.evaluate(async element => {
-      await document.fonts.ready
-      await Promise.all(element.getAnimations({ subtree: true })
-        .filter(animation => animation.effect?.getTiming().iterations !== Infinity)
-        .map(animation => animation.finished.catch(() => {})))
-      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-      // TicketTable can still be fitting columns or sampling its card after
-      // fonts and two frames. Read readiness and geometry in the same frame,
-      // on initial load and after interactions such as a full-page reload.
-      for (let current: Element | null = element; current; current = current.parentElement) {
-        if (current.getAttribute('data-columns-settled') === '0' || current.getAttribute('data-card-width-settled') === '0') return null
-      }
-      const rect = element.getBoundingClientRect()
-      let x = rect.x, y = rect.y
-      for (let current: Element | null = element; current; current = current.parentElement) {
-        if (current !== element) { x += current.scrollLeft; y += current.scrollTop }
-        if (getComputedStyle(current).position === 'fixed') break
-      }
-      return { x, y, width: rect.width, height: rect.height }
-    })
-    if (!settled) return false
-    Object.assign(sample, settled)
-    return true
-  }, { message: `wait for settled control layout (${name})` }).toBe(true)
+  const sample = await locator.evaluate(async element => {
+    await document.fonts.ready
+    await Promise.all(element.getAnimations({ subtree: true })
+      .filter(animation => animation.effect?.getTiming().iterations !== Infinity)
+      .map(animation => animation.finished.catch(() => {})))
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    const rect = element.getBoundingClientRect()
+    let x = rect.x, y = rect.y
+    for (let current: Element | null = element; current; current = current.parentElement) {
+      if (current !== element) { x += current.scrollLeft; y += current.scrollTop }
+      if (getComputedStyle(current).position === 'fixed') break
+    }
+    return { x, y, width: rect.width, height: rect.height }
+  })
   expect(sample.width, `sampled control width must be positive (${name})`).toBeGreaterThan(0)
   expect(sample.height, `sampled control height must be positive (${name})`).toBeGreaterThan(0)
   return sample
@@ -50,9 +39,10 @@ async function box(locator: Locator, name = 'control') {
  * selector groups, actions and the clicked row. Measure frame height only for a
  * phone sheet or an already scrolling body; top-anchored short frames may grow
  * downward. Locators may match the next series item; pass scrolling bodies to
- * catch horizontal overflow as well.
+ * catch horizontal overflow as well. Use ready for view-specific layout work
+ * that finishes after rows appear; it runs before every set of samples.
  */
-export async function expectStableControls({ controls, interactions, scrollAreas = {}, tolerance = 0.5 }: StableOptions) {
+export async function expectStableControls({ controls, interactions, scrollAreas = {}, tolerance = 0.5, ready }: StableOptions) {
   expect(Object.keys(controls).length, 'name at least one control').toBeGreaterThan(0)
   expect(interactions.length, 'provide at least one interaction').toBeGreaterThan(0)
   const overflow = async (step: string) => {
@@ -64,8 +54,11 @@ export async function expectStableControls({ controls, interactions, scrollAreas
   // Settle the named controls together. Serial double-frame waits multiplied
   // Hours' 12 layouts into 300 frame waits and exhausted its 30-second budget.
   // Every control still waits for fonts/animations and keeps the same checks.
-  const measure = async () => new Map(await Promise.all(Object.entries(controls).map(async ([name, locator]) =>
-    [name, await box(locator, name)] as const)))
+  const measure = async () => {
+    await ready?.()
+    return new Map(await Promise.all(Object.entries(controls).map(async ([name, locator]) =>
+      [name, await box(locator, name)] as const)))
+  }
   const baseline = await measure()
   await overflow('initial')
   for (const interaction of interactions) {

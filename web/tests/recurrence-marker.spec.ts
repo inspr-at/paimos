@@ -182,6 +182,16 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
         { name: 'routine restored without growing compact row', run: async () => { data.nodes.find(node => node.id === 'n-1')!.recurrence = structuredClone(provenance); await page.reload(); expect((await row(page).boundingBox())!.height).toBe(56) } },
       ] })
     } else {
+    // Whole-project figures decide Parent after the rows paint. Wait for that
+    // column on every load, then its fit/card samples; fonts and two frames
+    // alone can compare the 132px Parent slot with its still-absent state.
+    const parent = page.locator('.tickets thead th.c-parent')
+    const ready = async () => {
+      await expect(parent).toBeVisible()
+      await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
+      await expect(page.locator('.table-card')).toHaveAttribute('data-card-width-settled', '1')
+    }
+    await ready()
     await expect(row(page).getByRole('img', { name: label, exact: true })).toBeVisible()
     await expect(page.locator('#row-n-4 .recurrence-dot')).toHaveCount(0)
     for (const icon of await page.locator('.ticket-row .ticket-type-icon').all()) {
@@ -195,7 +205,8 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     mkdirSync(shots, { recursive: true })
     await page.screenshot({ path: join(shots, `list-${width}-${theme}.png`) })
     await expectStableControls({
-      controls: { 'type slot': icon, 'ticket title': title, 'clicked row': row(page) },
+      controls: { 'type slot': icon, 'ticket title': title, 'clicked row': row(page), 'parent header': parent },
+      ready,
       interactions: [
         { name: 'hover marker', run: () => icon.hover() },
         { name: 'keyboard focus marker', run: () => icon.focus() },

@@ -120,43 +120,29 @@ for (const width of [1440, 390]) {
 }
 
 test('stability guard allows scrolling but detects movement, resizing and overflow', async ({ page }) => {
-  // A reload may expose a row before TicketTable's column fit or card-width
-  // sample window finishes. Hold each independently: a frame/font wait alone
-  // must not record the provisional width as the control's baseline.
-  let pendingRead!: () => void
-  await page.exposeFunction('tableLayoutPending', () => pendingRead())
-  for (const attribute of ['data-columns-settled', 'data-card-width-settled']) {
-    await page.setContent(`<div id="card" ${attribute}="0"><button id="control" style="width:100px;height:40px">Choose</button></div>`)
-    let finishFit!: () => void
-    const fitFinished = new Promise<void>(resolve => { finishFit = resolve })
-    const read = new Promise<void>(resolve => { pendingRead = resolve })
-    await page.locator('#card').evaluate((element, attribute) => {
-      const getAttribute = element.getAttribute.bind(element)
-      element.getAttribute = name => {
-        const value = getAttribute(name)
-        if (name === attribute && value === '0') void (window as unknown as { tableLayoutPending: () => Promise<void> }).tableLayoutPending()
-        return value
-      }
-    }, attribute)
-    const checking = expectStableControls({ controls: { choose: page.locator('#control') }, interactions: [{
-      name: `hover after ${attribute}`,
-      run: async () => {
-        // Without the readiness wait, this releases the fit only after the
-        // helper has sampled 100px; its unchanged width assertion then fails.
-        pendingRead()
-        await fitFinished
-        await page.locator('#control').hover()
-      },
-    }] })
-    try {
-      await read
-      await page.locator('#card').evaluate((element, attribute) => {
-        (element.firstElementChild as HTMLElement).style.width = '200px'
-        element.setAttribute(attribute, '1')
-      }, attribute)
-    } finally { finishFit() }
-    await checking
-  }
+  // Background figures can change the column set after rows, fonts and frames
+  // are ready. A barrier proves layout readiness precedes the baseline read.
+  await page.setContent('<button id="control" style="width:100px;height:40px">Choose</button>')
+  let requestFit!: () => void, finishFit!: () => void
+  const requested = new Promise<void>(resolve => { requestFit = resolve })
+  const fitted = new Promise<void>(resolve => { finishFit = resolve })
+  let readyCalls = 0
+  const checking = expectStableControls({
+    controls: { choose: page.locator('#control') },
+    ready: async () => { readyCalls++; requestFit(); await fitted },
+    interactions: [{ name: 'hover after column fit', run: async () => {
+      // The old helper ignores ready: release only after its provisional
+      // baseline has been read, so its unchanged width assertion fails.
+      requestFit(); await fitted
+      await page.locator('#control').hover()
+    } }],
+  })
+  try {
+    await requested
+    await page.locator('#control').evaluate(el => { (el as HTMLElement).style.width = '200px' })
+  } finally { finishFit() }
+  await checking
+  expect(readyCalls, 'readiness runs before initial and post-interaction samples').toBe(2)
   await page.setContent('<div id="scroll" style="height:120px;width:200px;overflow:auto"><div style="height:600px"><button id="control" style="margin-top:60px">Choose</button></div></div>')
   const controls = { choose: page.locator('#control') }, scrollAreas = { body: page.locator('#scroll') }
   await expectStableControls({ controls, scrollAreas, interactions: [{ name: 'scroll', run: () => page.locator('#scroll').evaluate(el => { el.scrollTop = 30 }) }] })
