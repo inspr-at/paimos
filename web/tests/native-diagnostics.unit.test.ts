@@ -54,10 +54,13 @@ it('rejects private, malformed, omitted, deep and oversized expert bodies before
 it('requires exclusive descending replay and advancing cursors while enforcing count and byte limits', () => {
   expect(boundedPage(page([frame(3), frame(2)], '2'), request(), '4')?.map(event => event.seq)).toEqual(['2', '3'])
   for (const value of [page([frame(3), frame(3)]), page([frame(2), frame(3)]), page([frame(4)]),
-    page([], '1'), page([frame(3)], '4'), { ...page([frame(3)]), generation: 2 },
-    page(Array.from({ length: bounds.event_page_items + 1 }, (_, n) => frame(1000 - n)))]) {
+    page([], '1'), page([frame(3)], '4'), { ...page([frame(3)]), generation: 2 }]) {
     expect(boundedPage(value, request(), '4')).toBeNull()
   }
+  // No cursor can explain this rejection: all 501 frames are valid and
+  // descending, so only the count limit can reject the otherwise valid page.
+  const tooMany = page(Array.from({ length: bounds.event_page_items + 1 }, (_, n) => frame(1000 - n)))
+  expect(boundedPage(tooMany, request(), null)).toBeNull()
   const large = Array.from({ length: 25 }, (_, n) => altered(frame(30 - n), { payload: { message_id: `large-${n}`, text: 'x'.repeat(50_000) } }))
   expect(large.every(event => boundedEvent(event, request()) !== null)).toBe(true)
   expect(boundedPage(page(large), request(), null)).toBeNull()

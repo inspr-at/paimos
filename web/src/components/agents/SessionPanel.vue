@@ -24,7 +24,7 @@ function registerPanelShortcuts(owner: PanelShortcutOwner) {
 <script setup lang="ts">
 import { capacityWaitText } from '../../lib/capacityWait'
 import { brand } from '../../lib/brand'
-import { api, getNode } from '../../lib/api'
+import { getNode } from '../../lib/api'
 import { readSessionNativeContext } from '../../lib/agentRows'
 import { can, ensurePermissions } from '../../lib/authz'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'

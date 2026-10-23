@@ -48,7 +48,7 @@ The executable prerequisites added here are:
 
 All **26 cases** in these four targeted runtime suites passed locally, one file and one worker at a time after remote admission refused. The **17 added native registrations** are ESSENTIAL, classified through the canonical tier writer using the targeted native Vitest inventory. Existing registrations and tiers are preserved. The new module and fixture are covered by the existing `web/src/**` and `web/tests/**` S9 ownership rules, so no slice rule is added. The three P07 runtime destinations now bind exact verified native identities; retained browser destinations remain planned. The shared P04 stream-health destination is not marked complete on another package's behalf.
 
-Six temporary negative controls, run from a captured positive-state stash without a negative-control commit, failed for their intended assertions:
+Seven temporary negative controls, run against saved positive production code without a negative-control commit, failed for their intended assertions. The initial six used positive-state stash `6d3a28675a07211ed17b66736230c5556334a3c7`:
 
 | Disabled production guard | Rejecting runtime case | Observed result |
 |---|---|---|
@@ -58,9 +58,14 @@ Six temporary negative controls, run from a captured positive-state stash withou
 | Diagnostic private-field filter | native-diagnostics: expert privacy | Synthetic private field admitted; assertion failed |
 | Poll generation fence | resilient-polling: shared current read | Late old-screen response applied; assertion failed |
 | Shared stream source identity | stream-health: person reset | Old-person callback dispatched; assertion failed |
+| Replay page count | native-diagnostics: descending replay | Otherwise valid descending 501-frame page admitted; assertion failed |
 
 All mutants were restored, and the four complete targeted suites passed again. No timeout, compilation error or unrelated failure is counted as a successful negative control.
 
 The measured local resilient-polling invocation was **1.23 s for four cases before → 201 ms for eight cases after** (one observation each, including runner startup; not a performance assertion). Final individual process walls for the four suites were approximately 0.35–0.38 s each. **Browser runner-time change is unmeasured**, with no browser saving claimed. LEAD `remote-spec.sh` refused with `remote busy (host guard); wait or rely on PR CI`; `ci-static-remote.sh` refused with `remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job`. No heavy local substitute was run.
 
 Remaining work is the proven 27-case browser consolidation, all old-case mappings/current obligation updates and cuts after P02 supplies approved immutable references, plus affected browser execution and `ci-static --merge-main` through the authorized runner or PR CI. AEON-1662 is not declared closed: its mounted polling synchronization and browser proof are still required. The ledger check reports `cuts: false`; neither the absent visual authority nor refused runner capacity is reported as acceptance.
+
+The final main reconciliation included `ba983ea03`; the tier merge was clean. Canonical manifest validation, the ledger check and its Node regression, the SessionPanel SFC script compile and targeted ESLint check passed. Final browser and static attempts repeated the refusal messages above. Full static/typecheck and affected browser execution remain unproven.
+
+Outside the browser-spec/runtime-test paths: `web/src/components/agents/SessionPanel.vue` imports its original boundary functions from `web/src/lib/nativeSessionProgram.ts`; this minimal extraction makes the replacement execute the real production validation and transport rather than a test copy. Both retain the same request bounds, view-only authority, cancellation, error handling and detach behavior. No production version, contract, migration, hosted setting or application UI behavior changes.
