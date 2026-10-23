@@ -63,5 +63,5 @@ it('assistant facts retain the specified status order, exact budget words and in
   expect(assistantCopy('en').ran('Inbox triage 1', '30 min ago')).toBe('Ran Inbox triage 1 · 30 min ago')
   expect(assistantCopy('de').ran('Posteingang', 'vor 30 Minuten')).toBe('Posteingang ausgeführt · vor 30 Minuten')
   expect(assistantCopy('de').statuses.waiting).toBe('Wartet auf Freigabe')
-  expect(policyChange({ id: 1, at: new Date(now).toISOString(), type: 'assistant.policy_updated', actor_principal_id: 'owner', before: amy, after: { ...amy, policy: { ...amy.policy, weekly_budget: { amount: '15', unit: 'USD' } } } })).toBe('Budget: $10 → $15')
+  expect(policyChange({ id: 1, at: new Date(now).toISOString(), type: 'assistant.policy_updated', actor_principal_id: 'owner', before: amy, after: { ...amy, policy: { ...amy.policy, weekly_budget: { amount: '15', unit: 'USD' } } } })).toBe('Budget: $10 to $15')
 })

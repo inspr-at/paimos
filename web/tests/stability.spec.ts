@@ -74,8 +74,14 @@ for (const width of [390, 1440]) {
 
     test('the agents page holds still while its reads land', async ({ page }) => {
       await base(page)
+      // The shared Agents fixture owns its new assistant read too: a missing
+      // route must not make a healthy page (or Session Chat) look unavailable.
+      const assistantsRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/assistants')
       await page.goto('/agents')
       await expect(page.locator('.agents-page [data-row^="s:"]').first()).toBeVisible()
+      const response = await assistantsRead
+      expect(response.status()).toBe(200)
+      expect(await response.json()).toEqual({ assistants: [], next_cursor: null })
       // AEON-569 / #458 and AEON-1209 / #586 route decisions to the Desk.
       await expect(page.getByRole('link', { name: /Decision Desk/ }).first()).toBeVisible()
       await expectStill(page)
@@ -91,9 +97,13 @@ for (const width of [390, 1440]) {
         await page.route('**/api/me/permissions?project_id=p-pharos', async route => { started(); await held; await route.fallback() })
         await page.goto('/agents/5e000000-0000-4000-8000-000000000001')
         await requested
-        // A slow project grant cannot paint a partial panel and add its actions later.
-        await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
-        release()
+        try {
+          // The new card shares the Sessions admission boundary. Painting it
+          // before capacity and grants settle moves it under the pointer.
+          await expect(page.locator('.assistants')).toHaveCount(0)
+          // A slow project grant cannot paint a partial panel and add its actions later.
+          await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
+        } finally { release() }
         await expect(page.locator('.session-panel .facts')).toBeVisible()
         // AEON-1309 / #678 keeps the session's actions behind More session actions in the panel head.
         await expect(page.getByRole('complementary', { name: 'Session details' }).getByRole('group', { name: 'Panel actions' })
