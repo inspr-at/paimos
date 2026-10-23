@@ -41,7 +41,7 @@ export const router = createRouter({
       path: '/p/:projectKey', component: () => import('./views/ProjectView.vue'), meta: { title: 'Project' },
       children: [
         { path: 'tickets', component: RouteMarker, meta: { projectSection: 'tickets' } },
-        { path: 'journey', redirect: to => ({ path: `/p/${encodeURIComponent(String(to.params.projectKey))}/tickets`, hash: to.hash }) },
+        { path: 'journey', redirect: to => ({ path: `/p/${encodeURIComponent(String(to.params.projectKey))}/tickets`, query: {}, hash: to.hash }) },
         { path: 'settings/:settingsSection(general|delivery|definitions|agents|access|routines)?', component: RouteMarker, meta: { title: 'Project settings', projectSection: 'settings' } },
         { path: 'delivery', component: RouteMarker, meta: { title: 'Delivery', projectSection: 'delivery' } },
         // A docked entry (?entry=<type>/<slug>) on a screen too narrow to dock it opens the entry's own page.

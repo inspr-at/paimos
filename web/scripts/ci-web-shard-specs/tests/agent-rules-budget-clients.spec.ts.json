@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/agent-rules-budget-clients.spec.ts",
-    "listedTests": 10,
+    "listedTests": 8,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.922,

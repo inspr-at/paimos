@@ -8,6 +8,15 @@
   "spec": {
     "file": "tests/visual/reference-guard.spec.ts",
     "listedTests": 7,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 10.298,
+        "median": 6.393,
+        "min": 1.792
+      },
+      "seconds": 54.030987,
+      "selectedTests": 7
+    },
     "weightSeconds": 30,
     "weightSource": "AEON-1674-initial-estimate"
   }

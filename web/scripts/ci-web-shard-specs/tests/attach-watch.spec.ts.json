@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/attach-watch.spec.ts",
-    "listedTests": 31,
+    "listedTests": 23,
     "tierTiming": {
       "caseSeconds": {
-        "max": 5.755,
-        "median": 4.211,
-        "min": 1.653
+        "max": 5.524,
+        "median": 2.228,
+        "min": 1.373
       },
-      "seconds": 115.259,
-      "selectedTests": 31
+      "seconds": 87.380207,
+      "selectedTests": 23
     },
     "weightSeconds": 61.483333,
     "weightSource": "web-15"

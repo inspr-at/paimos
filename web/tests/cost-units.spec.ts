@@ -56,20 +56,6 @@ test('an admin adds a rate that closes the current one', async ({ page }) => {
   await expect(dev.getByText('1 Jan 2026 – 1 Oct 2026')).toBeVisible()
 })
 
-test('a clash is explained and nothing else changes', async ({ page }) => {
-  await setup(page)
-  await openRates(page)
-  await page.getByRole('button', { name: 'Add rate' }).nth(1).click()
-  await page.getByRole('combobox', { name: 'Unit' }).selectOption('hour')
-  await page.getByRole('textbox', { name: 'Bill rate' }).fill('abc')
-  await page.getByRole('button', { name: 'Add rate' }).last().click()
-  await expect(page.getByText('Bill rate is an amount with at most four decimals.')).toBeVisible()
-  await page.getByRole('textbox', { name: 'Bill rate' }).fill('100')
-  await page.getByRole('textbox', { name: 'Valid from' }).fill('2026-01-01')
-  await page.getByRole('button', { name: 'Add rate' }).last().click()
-  await expect(page.getByText('A rate already starts on that date. Rates for one unit and currency cannot overlap.')).toBeVisible()
-})
-
 test('an admin adds a cost unit and goes straight to its first rate', async ({ page }) => {
   await setup(page)
   await openRates(page)

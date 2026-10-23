@@ -124,7 +124,8 @@ function expectAvatars(avatars: Awaited<ReturnType<typeof probe>>['avatars']) {
   }
 }
 
-for (const theme of ['light', 'dark'] as const) {
+// AEON-1678: keep desktop/tablet columns and native phone rows without theme copies.
+for (const theme of ['light'] as const) {
   for (const width of [1440, 1024]) {
     test(`${theme} ${width}: the state lives in the avatar, Time sits beside the name`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: 1000 })
@@ -186,7 +187,7 @@ for (const theme of ['light', 'dark'] as const) {
   })
 }
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1440, 400]) {
+for (const theme of ['light'] as const) for (const width of [1440, 400]) {
   test(`${theme} ${width}: the approved columns, registry model names, a name-only line 1; listening and tier in the details`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
@@ -350,8 +351,8 @@ test('an unfinished session keeps its place and names why it ended, never Finish
   await expect(page.locator('.sessions .row[data-row] .l2t').filter({ hasText: /^Ended / })).toHaveCount(0)
 })
 
-// AEON-1240 evidence: a finished row that keeps its place, at three widths, light and dark.
-for (const width of [1440, 1024, 390]) for (const colorScheme of ['light', 'dark'] as const) {
+// AEON-1240: keep the finished-row rendering on desktop and phone.
+for (const width of [1440, 390]) for (const colorScheme of ['light'] as const) {
   test(`a finished row says when it finished and when it moves at ${width} ${colorScheme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 }); await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
     await setup(page, colorScheme)
@@ -606,7 +607,8 @@ const headingRows = (page: Page) => page.locator('.sessions .grp').evaluateAll(g
   rows: [...group.querySelectorAll('[role="row"]')].map(el => el.getAttribute('data-row') ?? (el.classList.contains('nolead') ? `no-lead:${el.getAttribute('data-project')}` : 'heading')),
 })))
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024, 390]) {
+// Both heading-update causes retain desktop note and phone chip behavior.
+for (const theme of ['light'] as const) for (const width of [1440, 390]) {
   for (const update of ['queue', 'handover'] as const) test(`${theme} ${width}: held ${update} headings never add a row or move its controls`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })

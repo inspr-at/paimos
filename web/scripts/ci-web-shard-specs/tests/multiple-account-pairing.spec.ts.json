@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/multiple-account-pairing.spec.ts",
-    "listedTests": 6,
+    "listedTests": 2,
     "tierTiming": {
       "caseSeconds": {
-        "max": 2.042,
-        "median": 1.944,
-        "min": 1.874
+        "max": 2.045,
+        "median": 1.9515,
+        "min": 1.858
       },
-      "seconds": 11.758,
-      "selectedTests": 6
+      "seconds": 5.307727,
+      "selectedTests": 2
     },
     "weightSeconds": 13.317072,
     "weightSource": "unmeasured-test-rate"

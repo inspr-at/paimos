@@ -6,7 +6,8 @@ import { mockBusiness, businessData } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
 const shots = 'test-results/aeon-655-wn'
-const sizes = [390, 1024, 1440]
+// AEON-1677: retain phone/desktop wiring for every vocabulary/creation vector.
+const sizes = [390, 1440]
 async function world(page: Page, theme: string) {
   const data = fixtures()
   data.preferences.theme = { choice: theme }
@@ -42,7 +43,7 @@ async function world(page: Page, theme: string) {
   } }))
   return { data, calls, fail: () => { fail = true } }
 }
-for (const width of sizes) for (const theme of ['light', 'dark']) {
+for (const width of sizes) for (const theme of ['light']) {
   test(`work vocabulary and surfaces ${width} ${theme}`, async ({ page }) => {
     await mkdir(shots, { recursive: true }); await page.setViewportSize({ width, height: 1000 })
     const w = await world(page, theme), errors = watchErrors(page)
@@ -146,7 +147,7 @@ for (const width of sizes) for (const theme of ['light', 'dark']) {
   })
 }
 
-for (const width of sizes) for (const theme of ['light', 'dark']) for (const custom of [false, true]) {
+for (const width of sizes) for (const theme of ['light']) for (const custom of [false, true]) {
   test(`quick creation preserves ${custom ? 'custom' : 'default'} workspace names ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     const data = fixtures(); data.preferences.theme = { choice: theme }
@@ -185,7 +186,7 @@ for (const width of sizes) for (const theme of ['light', 'dark']) for (const cus
 // Risks: the leaf listed first (upside down), icons invisible in the choice, and the
 // chain preview naming only three levels. The server answers like the real one: the
 // saved levels come back in the order sent, levels[0] being the top level.
-for (const width of sizes) for (const theme of ['light', 'dark']) {
+for (const width of sizes) for (const theme of ['light']) {
   test(`work vocabulary reads top-down with an icon picker ${width} ${theme}`, async ({ page }) => {
     const shots = 'test-results/aeon-1142-vocabicons'
     await mkdir(shots, { recursive: true }); await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })

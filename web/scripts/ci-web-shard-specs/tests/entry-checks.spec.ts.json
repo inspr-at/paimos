@@ -8,12 +8,12 @@
     "file": "tests/entry-checks.spec.ts",
     "tierTiming": {
       "caseSeconds": {
-        "max": 16.054,
-        "median": 13.617,
-        "min": 3.007
+        "max": 13.182,
+        "median": 9.363,
+        "min": 1.856
       },
-      "seconds": 32.913,
-      "selectedTests": 3
+      "seconds": 43.09235,
+      "selectedTests": 4
     },
     "weightSeconds": 30
   }

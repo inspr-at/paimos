@@ -5,7 +5,8 @@ import { mockBusiness, businessData } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+// AEON-1677: retain phone and desktop behavior without duplicate rendering profiles.
+for (const width of [390, 1440]) for (const theme of ['light']) {
   test(`incremental Outline and leaf progress ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     const data = fixtures()

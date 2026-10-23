@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/native-session-program.spec.ts",
     "listedTests": 1,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 14.931,
+        "median": 14.931,
+        "min": 14.931
+      },
+      "seconds": 18.790934,
+      "selectedTests": 1
+    },
     "weightSeconds": 6.666666666666667,
     "weightSource": "AEON-1309: original conservative 60s panel estimate apportioned by unchanged case count after file split; pending guarded measurement"
   }

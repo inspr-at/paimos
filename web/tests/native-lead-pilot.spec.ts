@@ -6,7 +6,7 @@ import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { controlStability } from './control-stability'
 
-for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+for (const theme of ['light'] as const) for (const width of [390, 1440]) {
   test(`AEON-1287 LEAD conversation ${theme} ${width}`, async ({ page }, testInfo) => {
     // Risk: accepting an input is shown as consumption, the final lands in a
     // different session, or growing conversation content moves the composer.

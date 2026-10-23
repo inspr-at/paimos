@@ -4,7 +4,7 @@
 // reduced motion. Time is an injected clock; nothing here sleeps.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createDeskTab, dotLayout, NEW_DECISION, NOTICE_MS, POP_FRAME_MS, POP_SCALES, tabCount, titlePrefix, type DeskReading } from '../src/lib/deskTab.ts'
+import { createDeskTab, DEFAULT_DOT_STYLE, dotLayout, drawTabIcon, NEW_DECISION, NOTICE_MS, POP_FRAME_MS, POP_SCALES, tabCount, titlePrefix, type DeskReading } from '../src/lib/deskTab.ts'
 
 function fakeClock() {
   let now = 0, seq = 0
@@ -177,4 +177,26 @@ test('dispose leaves the plain title and icon', () => {
   assert.equal(state.prefix, '')
   assert.equal(state.notice, '')
   assert.deepEqual(state.paints.at(-1), [null, 1])
+})
+
+test('the canvas painter cuts a gap, paints the badge ink and draws a digit only at readable device sizes', () => {
+  for (const size of [16, 32]) {
+    const operations: unknown[][] = []
+    const saved: { fillStyle: string; strokeStyle: string; globalCompositeOperation: string; globalAlpha: number }[] = []
+    const ctx = {
+      fillStyle: '', strokeStyle: '', globalCompositeOperation: 'source-over', globalAlpha: 1,
+      clearRect() {}, drawImage() {}, beginPath() {}, roundRect(...args: number[]) { operations.push(['capsule', ...args]) },
+      save() { saved.push({ fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, globalCompositeOperation: this.globalCompositeOperation, globalAlpha: this.globalAlpha }) },
+      restore() { Object.assign(this, saved.pop()!) },
+      fill() { operations.push(['fill', this.fillStyle, this.globalCompositeOperation]) },
+      stroke() { operations.push(['stroke', this.strokeStyle]) },
+      measureText: () => ({ width: 8, actualBoundingBoxAscent: 8, actualBoundingBoxDescent: 2 }),
+      fillText(label: string) { operations.push(['digit', label, this.fillStyle]) },
+    }
+    drawTabIcon(ctx as unknown as CanvasRenderingContext2D, size, null, 3, 1, DEFAULT_DOT_STYLE)
+    assert.ok(operations.some(op => op[0] === 'fill' && op[2] === 'destination-out'), 'a gap separates the badge from the icon')
+    assert.ok(operations.some(op => op[0] === 'fill' && op[1] === DEFAULT_DOT_STYLE.fill && op[2] === 'source-over'), 'the badge fill is drawn after the gap cut')
+    assert.ok(operations.some(op => op[0] === 'stroke' && op[1] === DEFAULT_DOT_STYLE.ink), 'the hairline is drawn')
+    assert.deepEqual(operations.filter(op => op[0] === 'digit'), size === 16 ? [] : [['digit', '3', DEFAULT_DOT_STYLE.ink]])
+  }
 })

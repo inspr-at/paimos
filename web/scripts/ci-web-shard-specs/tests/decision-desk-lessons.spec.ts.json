@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/decision-desk-lessons.spec.ts",
-    "listedTests": 26,
+    "listedTests": 14,
     "tierTiming": {
       "caseSeconds": {
-        "max": 7.885,
-        "median": 5.242,
-        "min": 2.269
+        "max": 37.141,
+        "median": 4.756,
+        "min": 1.986
       },
-      "seconds": 123.974,
-      "selectedTests": 26
+      "seconds": 116.535007,
+      "selectedTests": 14
     },
     "weightSeconds": 29.944,
     "weightSource": "AEON-1331 remote-spec 4625de40f: upper bound from 38 registrations (22 lesson + 16 legacy), wall_ms 29944"

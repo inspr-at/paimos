@@ -50,7 +50,9 @@ async function refreshSessions(page: Page) {
   await page.evaluate(async () => { await (await import('/src/stores/agents.ts' /* @vite-ignore */)).useAgents().refreshSessions() })
 }
 
-for (const width of [1440, 390]) for (const look of ['light', 'dark'] as const) {
+// Write-once opening is also covered by aeon-1439-panel-opening.test.ts;
+// keep one mounted observer/tab integration rather than four render copies.
+for (const width of [1440]) for (const look of ['light'] as const) {
   test(`AEON-1439: ${width} ${look} refreshes keep the chosen tab and write the opening line once`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 })
     await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })

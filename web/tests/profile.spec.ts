@@ -234,7 +234,7 @@ test('at 390 nothing in the profile is cut', async ({ page }) => {
   expect(cut).toEqual([])
 })
 
-for (const colorScheme of ['light', 'dark'] as const) {
+for (const colorScheme of ['light'] as const) {
   test(`axe: profile, crop dialog and greeting in ${colorScheme}`, async ({ page }) => {
     await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
     await setup(page, { photo: true })

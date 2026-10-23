@@ -16,7 +16,9 @@ function actions(page: Page) {
   return { decide: page.getByTestId('desk-decide'), skip: page.getByTestId('desk-skip'), close: page.getByTestId('desk-close'), pager: page.getByTestId('desk-pager') }
 }
 
-for (const width of [1440, 1024, 390]) for (const motion of ['no-preference', 'reduce'] as const) for (const decision of ['approved', 'denied'] as const) {
+// Preserve both motion modes, both outcomes and both dialog layouts without
+// repeating their Cartesian product (AEON-1679).
+for (const { width, motion } of [{ width: 1440, motion: 'no-preference' }, { width: 390, motion: 'reduce' }] as const) for (const decision of ['approved', 'denied'] as const) {
   test(`${width} ${motion}: ${decision} confirms only after the native server and keeps actions and focus`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ reducedMotion: motion })
@@ -61,7 +63,7 @@ for (const width of [1440, 1024, 390]) for (const motion of ['no-preference', 'r
   })
 }
 
-for (const width of [1440, 1024, 390]) {
+for (const width of [1440, 390]) {
   test(`${width}: a rejected native decision retains its reason and never advances or reports success`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     const world = await mockDecisionDesk(page); world.denyWrite = true

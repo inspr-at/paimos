@@ -178,7 +178,8 @@ test('attention counts relevant descendants through family folds and stopped his
   await expect(row(page, 11)).toHaveAttribute('data-state', 'done')
 })
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1678: reduce only the unprotected ETA copies; the protected report-source matrix is unchanged.
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`${width} ${theme}: first ETA report keeps family controls and following rows still`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })

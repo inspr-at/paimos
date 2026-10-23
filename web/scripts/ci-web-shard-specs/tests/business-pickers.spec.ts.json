@@ -7,7 +7,16 @@
   },
   "spec": {
     "file": "tests/business-pickers.spec.ts",
-    "listedTests": 4,
+    "listedTests": 2,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 40.305,
+        "median": 31.706,
+        "min": 23.107
+      },
+      "seconds": 87.929588,
+      "selectedTests": 2
+    },
     "weightSeconds": 80,
     "weightSource": "acceptance-and-visual-matrix-estimate"
   }

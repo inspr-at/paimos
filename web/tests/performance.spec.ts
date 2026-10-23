@@ -27,7 +27,8 @@ async function throttle(page: Page) {
 }
 
 async function paint(page: Page) {
-  await page.waitForTimeout(350)
+  await page.evaluate(() => document.fonts.ready)
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
   return page.evaluate(() => ({
     fcp: Math.round(performance.getEntriesByName('first-contentful-paint')[0]?.startTime ?? 0),
     lcp: Math.round((window as typeof window & { __perfLCP?: number }).__perfLCP ?? 0),

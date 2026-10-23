@@ -136,7 +136,8 @@ for (const width of [1600, 390]) for (const reportedMetadata of [false, true]) {
   })
 }
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
+// AEON-1678: optional-data and layout vectors stay; remove theme copies of the same row checks.
+for (const theme of ['light'] as const) for (const width of [1600, 390]) {
   test(`${theme} ${width}px fits without horizontal scroll and captures review image`, async ({ page }) => {
     const { worker } = await setup(page, theme, true)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })

@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/ticket-key-nowrap.spec.ts",
     "listedTests": 4,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.792,
+        "median": 3.243,
+        "min": 2.738
+      },
+      "seconds": 17.078518,
+      "selectedTests": 4
+    },
     "weightSeconds": 8.878049,
     "weightSource": "unmeasured-test-rate"
   }

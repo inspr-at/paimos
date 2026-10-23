@@ -92,7 +92,8 @@ test('AEON-1195: focus cycles retain the same lead DOM rows, order and controls 
   })).toBe(true)
 })
 
-for (const width of [1440, 390]) for (const look of ['light', 'dark'] as const) {
+// AEON-1678: keep desktop and phone start journeys; unique live/fold/refresh risks remain.
+for (const width of [1440, 390]) for (const look of ['light'] as const) {
   test(`no lead: the band offers Start lead and the sheet requests one at ${width} ${look}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const { state } = await mockLeadFlow(page, { lead: 'none' })
@@ -330,7 +331,7 @@ test('ticket header steps down at every dock width so Close stays inside with a 
   }
 })
 
-for (const look of ['light', 'dark'] as const) test(`Agents page: one line per lead; + offers Start lead only while a project has none (${look})`, async ({ page }, info) => {
+for (const look of ['light'] as const) test(`Agents page: one line per lead; + offers Start lead only while a project has none (${look})`, async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await mockLeadFlow(page, { lead: 'working', aeon: 'none', queue: ['n-4', 'n-a1'] })
   await page.goto('/agents')
@@ -385,7 +386,7 @@ test('Agents page: the expert setting reveals Start agent manually', async ({ pa
   await expect(page.getByRole('menuitem', { name: /Start agent manually/ })).toBeVisible()
 })
 
-for (const look of ['light', 'dark'] as const) test(`phone: band, full-height panel and pinned sheet bar at 390 (${look})`, async ({ page }, info) => {
+for (const look of ['light'] as const) test(`phone: band, full-height panel and pinned sheet bar at 390 (${look})`, async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockLeadFlow(page, { lead: 'working', question: true, longText: true })
   await page.goto('/p/PHAROS'); await showProjectHead(page)

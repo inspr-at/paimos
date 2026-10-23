@@ -190,7 +190,7 @@ function expectRowPlacement(at: Awaited<ReturnType<typeof syncPlacement>>, wide:
 // AEON-1477: a transient failure must never replace good rows or move controls.
 // AEON-1616 (R18): empty phone-only rows must not bury the first item or empty state.
 // AEON-1700: the sync line says each refresh state in place: one line, no second element, no movement.
-for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const [width, theme] of [[1440, 'dark'], [1024, 'light'], [390, 'light']] as const) {
   test(`AEON-1477 refresh failures keep the items and hint geometry ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     const goodAt = new Date('2026-10-17T13:58:00Z')
@@ -260,11 +260,11 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     expectRowPlacement(await syncPlacement(page), wide, `${width} ${theme} items`)
     expect(await contrast(words), 'the line text is at least 4.5:1').toBeGreaterThanOrEqual(4.5)
     await page.screenshot({ path: testInfo.outputPath(`AEON-1700-items-${width}-${theme}.png`) })
-    if (width === 1440 && theme === 'light') {
+    if (width === 1440) {
       // The exact clock on hover: the tip names the last check and the poll's own next tick.
       await sync.locator('.sync-text').hover()
       await expect(page.locator('.tooltip')).toHaveText(`Last check ${await clockOf(page, goodAt.getTime(), true)} · next ${await clockOf(page, goodAt.getTime() + 30_000, true)}`)
-      await page.screenshot({ path: testInfo.outputPath('AEON-1700-tooltip-1440-light.png') })
+      await page.screenshot({ path: testInfo.outputPath(`AEON-1700-tooltip-1440-${theme}.png`) })
       await page.mouse.move(0, 0)
       await expect(page.locator('.tooltip')).toHaveCount(0)
     }
@@ -547,7 +547,7 @@ async function onePicture(page: Page, theme: 'light' | 'dark') {
   await shown.evaluate(async image => { await (image as HTMLImageElement).decode(); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))) })
 }
 
-for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const [width, theme] of [[1440, 'dark'], [390, 'light']] as const) {
   test(`AEON-1406 empty desk states keep the card still ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     const reads = await mockEmptyDesk(page, theme)
@@ -850,7 +850,7 @@ async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: numb
   await sameGlyph('live-settled')
   // Evidence only: the pinned visual fixture keeps the stream shut. A further clock step starts the next read,
   // so this shot is the settled connected line (Live and the dot; "just now" until that read).
-  if (theme === 'light' && (width === 1440 || width === 390)) await page.screenshot({ path: testInfo.outputPath(`AEON-1700-live-${width}-light.png`) })
+  await page.screenshot({ path: testInfo.outputPath(`AEON-1700-live-${width}-${theme}.png`) })
   const liveReads = reads
   await page.evaluate(() => (window as unknown as { fixtureQuietStreams: { emit(type: string, data: string, id: number): void } }).fixtureQuietStreams.emit('question.asked', '{}', 9001))
   await expect(sync).toHaveAttribute('data-state', 'change')

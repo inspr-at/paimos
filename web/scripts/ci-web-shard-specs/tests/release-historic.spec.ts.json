@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/release-historic.spec.ts",
-    "listedTests": 7,
+    "listedTests": 6,
     "tierTiming": {
       "caseSeconds": {
-        "max": 2.377,
-        "median": 2.133,
-        "min": 0.052
+        "max": 2.264,
+        "median": 1.8175,
+        "min": 1.739
       },
-      "seconds": 12.805,
-      "selectedTests": 7
+      "seconds": 9.840682,
+      "selectedTests": 4
     },
     "weightSeconds": 15.536585,
     "weightSource": "unmeasured-test-rate"

@@ -6,15 +6,15 @@
   },
   "spec": {
     "file": "tests/account-use-matrix.spec.ts",
-    "listedTests": 13,
+    "listedTests": 18,
     "tierTiming": {
       "caseSeconds": {
-        "max": 5.812,
-        "median": 1.799,
-        "min": 0.034
+        "max": 12.732,
+        "median": 1.75,
+        "min": 1.345
       },
-      "seconds": 45.26,
-      "selectedTests": 21
+      "seconds": 61.995325,
+      "selectedTests": 15
     },
     "weightSeconds": 40,
     "weightSource": "AEON-1054 estimate: thirteen mocked matrix flows, one skipped evidence run"

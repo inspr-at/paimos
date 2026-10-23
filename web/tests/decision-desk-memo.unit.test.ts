@@ -36,12 +36,12 @@ function stubBrowser() {
     addEventListener() {}, removeEventListener() {},
   })
 }
-async function htmlFor(item: DeskItem, extra: { ticket?: (row: DeskItem) => DeskTicket | undefined; runPending?: (row: DeskItem) => boolean } = {}) {
+async function htmlFor(item: DeskItem, extra: { ticket?: (row: DeskItem) => DeskTicket | undefined; runPending?: (row: DeskItem) => boolean; pendingRuleIds?: string[] } = {}) {
   stubBrowser()
   const app = Vue.createSSRApp({ render: () => Vue.h(DecisionDeskMemo, {
     items: [item], round: [item.id], start: item.id, arrivalsCount: 0, allowed: () => true, decide: vi.fn(async () => item), ...extra,
   }) })
-  app.component('RouterLink', { props: ['to'], setup: (_, { slots }) => () => slots.default?.() })
+  app.component('RouterLink', { props: ['to'], setup: (props, { slots }) => () => Vue.h('a', { href: props.to }, slots.default?.()) })
   // AEON-1632: ticket links read their project's address from the projects store.
   app.use(createPinia())
   return renderToString(app)
@@ -116,4 +116,20 @@ it('names a run approval by the ticket its run works on and the run, with a fall
   expect(text(unresolved, 'desk-re-run')).toBe('Run 7a1b2c3d')
   expect(text(unresolved, 'desk-re-run-ticket')).toBe('Ticket not resolved')
   for (const html of [named, reading, unresolved]) expect(re(html)).not.toContain('Across tickets')
+})
+
+// P09 transfers fix3's published/pending identity permutations to the real memo
+// renderer. The separate doctrine-inbox journey still owns person settlement.
+it('links a published doctrine effect and its earlier pending review to their own exact destinations', async () => {
+  const item: DeskItem = { ...question(), decided: true, outcome: 'doctrine', answer: 'Use the rule.', outcomeEffects: [{
+    id: 'effect', revision: 2, kind: 'outcome', state: 'delivered', deliver_after: '', doctrine_state: 'in_review',
+    effect_data: { doctrine_id: 'published-1', review_required: [{ kind: 'doctrine', ref: 'pending-1', why: 'Earlier edited draft needs person review.' }] },
+  }] }
+  const published = await htmlFor(item, { pendingRuleIds: ['pending-1'] })
+  expect(published).toMatch(/href="\/settings\/agent-rules"[^>]*>Review the doctrine draft/)
+  expect(published).toMatch(/href="\/decision-desk\?item=r:pending-1"[^>]*>Open the draft to review/)
+  const effect = item.outcomeEffects![0]!
+  effect.doctrine_state = 'pending'; effect.effect_data!.doctrine_id = 'pending /1'
+  const pending = await htmlFor(item)
+  expect(pending).toMatch(/href="\/decision-desk\?item=r:pending%20%2F1"[^>]*>Review the doctrine draft/)
 })

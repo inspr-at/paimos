@@ -62,7 +62,8 @@ test('a computer approver loses the statusline toggle when account.manage is rev
   await expect(toggle).toHaveCount(0)
 })
 
-for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1678: preserve consent and throttling interactions on desktop and phone once.
+for (const width of [1600, 390]) for (const theme of ['light'] as const) {
   test(`vendor throttling and explicit statusline consent ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 960 })
     const { first, changes, account } = await setup(page, theme)

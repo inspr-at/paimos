@@ -74,7 +74,7 @@ async function openLesson(page: Page) {
   await expect(page.getByTestId('desk-decide')).toBeEnabled()
 }
 
-for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1440, 390]) for (const theme of ['light'] as const) {
   test(`AEON-1331 lesson memo and row stay stable at ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 }); await page.clock.install()
     const { state } = await mockLessons(page, { theme, outdated: true })

@@ -12,7 +12,8 @@ async function theme(page: Page, look: 'light' | 'dark') {
   await page.evaluate(value => { document.documentElement.dataset.theme = value }, look)
 }
 
-for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as const) {
+// AEON-1678: preserve actual destination/focus checks on phone and desktop once.
+for (const width of [390, 1440]) for (const look of ['light'] as const) {
   test(`approval evidence reaches the Decision Desk at ${width} ${look}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await mockWork(page, fixtures(), { admin: true })

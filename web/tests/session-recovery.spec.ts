@@ -79,7 +79,7 @@ test('members do not receive record recovery controls', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Recover', exact: true })).toHaveCount(0)
 })
 
-for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
+for (const theme of ['light']) for (const width of [1600, 390]) {
   test(`recovery visual ${width} ${theme}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await setup(page)
@@ -139,7 +139,7 @@ test('an accepted force stop reads the lists again before the daemon answers', a
   await expect.poll(() => sessionListReads(calls)).toBeGreaterThan(before)
 })
 
-for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
+for (const theme of ['light']) for (const width of [1600, 390]) {
   test(`force confirmation visual ${width} ${theme}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await managed(page)

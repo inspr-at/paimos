@@ -229,11 +229,11 @@ func TestBuilderVersionAssertionFailsClosed(t *testing.T) {
 			if err := os.WriteFile(plugin, data, 0700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(dir, "uname"), []byte("#!/bin/bash\nprintf 'x86_64\\n'\n"), 0700); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "uname"), []byte("#!/usr/bin/env bash\nprintf 'x86_64\\n'\n"), 0700); err != nil {
 				t.Fatal(err)
 			}
 			// This stub proves the workflow assertion without invoking Docker.
-			stub := fmt.Sprintf("#!/bin/bash\ncase \"$*\" in\n 'buildx version') printf '%%s\\n' \"$FIXTURE_BUILDX\"; exit %d;;\n 'buildx inspect --bootstrap') printf '%%s\\n' \"$FIXTURE_INSPECT\"; exit %d;;\n *) exit 99;;\nesac\n", tc.versionExit, tc.inspectExit)
+			stub := fmt.Sprintf("#!/usr/bin/env bash\ncase \"$*\" in\n 'buildx version') printf '%%s\\n' \"$FIXTURE_BUILDX\"; exit %d;;\n 'buildx inspect --bootstrap') printf '%%s\\n' \"$FIXTURE_INSPECT\"; exit %d;;\n *) exit 99;;\nesac\n", tc.versionExit, tc.inspectExit)
 			if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(stub), 0700); err != nil {
 				t.Fatal(err)
 			}
@@ -364,12 +364,12 @@ func TestBuilderChecksumAndPluginPathFailClosed(t *testing.T) {
 			case "invalid extra dirs":
 				write(filepath.Join(configDir, "config.json"), `{"cliPluginsExtraDirs":"bad"}`, 0600)
 			case "checksum command fails":
-				write(filepath.Join(dir, "sha256sum"), "#!/bin/bash\nexit 1\n", 0700)
+				write(filepath.Join(dir, "sha256sum"), "#!/usr/bin/env bash\nexit 1\n", 0700)
 			}
-			write(filepath.Join(dir, "uname"), "#!/bin/bash\nprintf '%s\\n' \"$FIXTURE_ARCH\"\n", 0700)
+			write(filepath.Join(dir, "uname"), "#!/usr/bin/env bash\nprintf '%s\\n' \"$FIXTURE_ARCH\"\n", 0700)
 			// A command log proves invalid bytes/paths never reach any Docker command.
 			log := filepath.Join(dir, "docker-calls")
-			write(filepath.Join(dir, "docker"), `#!/bin/bash
+			write(filepath.Join(dir, "docker"), `#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FIXTURE_CALLS"
 case "$*" in
   'buildx version') printf 'github.com/docker/buildx v0.37.1 fixture\n';;
