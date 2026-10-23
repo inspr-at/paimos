@@ -111,7 +111,7 @@ function panelKey(event: KeyboardEvent) {
     else if (menuAnchor.value) menuAnchor.value = null
     else emit('close')
   }
-  if (event.key === 'Enter' && !event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) { event.preventDefault(); event.stopPropagation(); void save() }
+  if (editing.value && shortcutTyping(event.target) && event.key === 'Enter' && !event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) { event.preventDefault(); event.stopPropagation(); void save() }
   // Native/OS shortcuts and unmodified typing are never captured.
 }
 useVisualViewport(root)

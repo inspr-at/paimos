@@ -1,15 +1,18 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSession } from '../../stores/session'
 import { useAssistants } from '../../stores/assistants'
 import { assistantRequest, type Assistant, type AssistantPolicy } from '../../lib/assistants'
 import { assistantCopy } from '../../lib/assistantsCopy'
+import { shortcutTyping } from '../../lib/shortcuts'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 const session = useSession(), store = useAssistants(), router = useRouter(), words = assistantCopy()
 const name = ref(''), busy = ref(false), error = ref('')
+let alive = true
+onBeforeUnmount(() => { alive = false })
 const owner = computed(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '')
 const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 watch(owner, () => { name.value = ''; busy.value = false; error.value = '' })
@@ -20,13 +23,13 @@ async function connect() {
   const policy: AssistantPolicy = { allowed_projects: [], allowed_scopes: ['inbox.read', 'inbox.receipt', 'inbox.send'], weekly_budget: { amount: '0', unit: 'USD' }, outward_action_rule: 'approval_required', never_ask_person_for_secrets_or_manual_steps: true }
   try {
     const item = await assistantRequest<Assistant>('/assistants', 'POST', { display_name: displayName, vendor: 'grok', owner_person_id: identity.principal.id, policy })
-    if (who !== owner.value) return
+    if (!alive || who !== owner.value) return
     store.invalidate(); store.adopt(item)
     await router.push({ path: '/agents', query: { assistant: item.principal_id } })
-  } catch (failure) { if (who === owner.value) error.value = failure instanceof Error ? failure.message : words.loadFailed }
-  finally { if (who === owner.value) busy.value = false }
+  } catch (failure) { if (alive && who === owner.value) error.value = failure instanceof Error ? failure.message : words.loadFailed }
+  finally { if (alive && who === owner.value) busy.value = false }
 }
-function key(event: KeyboardEvent) { if (event.key === 'Enter' && !event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) { event.preventDefault(); void connect() } }
+function key(event: KeyboardEvent) { if (shortcutTyping(event.target) && event.key === 'Enter' && !event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) { event.preventDefault(); void connect() } }
 </script>
 <template>
   <article class="connect-assistant" @keydown="key">
