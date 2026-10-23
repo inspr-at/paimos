@@ -154,6 +154,11 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
   test(`Delivery numbers at ${width} ${theme} ${lang} keep controls still`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await setup(page, { theme, lang, prefs: { level: 'expert', window: 7 } })
+    // The paused-launch lead is the state containing the inline Settings link.
+    await page.route('**/api/projects/p-aeon/lead', route => route.fulfill({ json: {
+      project_id: 'p-aeon', revision: 0, generation: 0, session_id: null, state: 'none', reason: '', process_active: false, automatic_launch_enabled: false,
+      actions: { start: { available: false, blocked_reason: 'automatic_launch_disabled' } },
+    } }))
     await page.goto('/p/AEON/delivery')
     const windows = head(page).getByRole('radiogroup', { name: 'Chart window' })
     const levels = head(page).getByRole('radiogroup', { name: 'Level of detail' })

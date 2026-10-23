@@ -382,7 +382,7 @@ test('the title bar: compact zoom, the header chevron beside PDF, save state and
             await expect(control).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
             await expect(control).toHaveCSS('box-shadow', 'none')
           }
-          await expect(details).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+          await expect(details).not.toHaveCSS('background-image', 'none')
         }
       } },
       { name: 'switch to Format', run: async () => {
@@ -390,7 +390,7 @@ test('the title bar: compact zoom, the header chevron beside PDF, save state and
         await expect(format).toHaveAttribute('aria-pressed', 'true')
         if (width === 390) {
           await expect(details).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-          await expect(format).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+          await expect(format).not.toHaveCSS('background-image', 'none')
         }
       } },
       { name: 'press the ghost menu action without moving it', run: async () => {
