@@ -195,11 +195,12 @@ test('AEON-1336 a token and exact-base nightly cannot narrow web source PRs whil
 })
 
 test('AEON-1336 retained phone and desktop G7 read-state cases stay essential on every PR', () => {
-  // AEON-1678 removes six unprotected profile copies. Both retained native
-  // read-state cases must still run on every PR, rather than becoming NIGHTLY.
+  // AEON-1678 fix3 restores the complete required G7 viewport/theme matrix.
+  // Every native read-state case must run on each PR, including both phones.
   const catalogue = load('web').tests
   const title = 'AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart'
-  const expected = [title, `${title} (390 light)`]
+  const expected = [title, `${title} (1440 dark)`, `${title} (1024 light)`, `${title} (1024 dark)`,
+    `${title} (400 light)`, `${title} (400 dark)`, `${title} (390 light)`, `${title} (390 dark)`]
   const cases = catalogue.filter(row => row.file === 'tests/aeon-1209-agents-head.spec.ts' && row.name.startsWith(title))
   assert.deepEqual(cases.map(row => row.name).sort(), expected.sort())
   assert.ok(cases.every(row => row.tier === 'ESSENTIAL'), 'every split case stays on every PR')
