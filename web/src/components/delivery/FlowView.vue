@@ -333,7 +333,7 @@ const emptyText = computed(() => {
 .play:disabled { opacity: .5; }
 .fl-rm { flex: 0 1 auto; max-width: 340px; font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A label slot as wide as its longest wording: switching words never moves a neighbour. */
-.stack { display: inline-grid; }
+.stack { display: inline-grid; font-kerning: none; }
 .stack > span { grid-area: 1 / 1; white-space: nowrap; }
 .stack > span[aria-hidden] { visibility: hidden; }
 .fl-livechip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); font-size: 12.5px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
