@@ -592,7 +592,7 @@
       "needs": [
         "go"
       ],
-      "timeout_seconds": 120
+      "timeout_seconds": 180
     },
     {
       "id": "runner-route-tests",

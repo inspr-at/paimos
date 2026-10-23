@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/key-dialog.spec.ts",
-    "listedTests": 9,
+    "listedTests": 7,
     "tierTiming": {
       "caseSeconds": {
         "max": 7.897,

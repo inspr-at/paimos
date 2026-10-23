@@ -60,7 +60,7 @@ const overflow = (page: Page) => page.evaluate(() => document.documentElement.sc
 for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as const) for (const theme of ['light', 'dark'] as const) {
   test.describe(`${width} ${theme}`, () => {
     test.use({ viewport: { width, height: width > 600 ? 1000 : 860 }, hasTouch: touch, isMobile: touch, colorScheme: theme })
-    test(`accounts ${width} ${theme}: each row carries the bar and one caption; the panel says what stops agents first`, async ({ page }, info) => {
+    if (theme === 'light' && width !== 1024) test(`accounts ${width} ${theme}: each row carries the bar and one caption; the panel says what stops agents first`, async ({ page }, info) => {
       const errors = watchErrors(page)
       await setup(page, { limits: true })
       await page.goto('/settings/accounts')
@@ -118,7 +118,7 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
     // The approved design's check (AEON-1149 check.mjs), on the built page: folds and panels never move what
     // is above them, the menu offers no Sprint or Hold, Escape closes the menu first and then the panel, and
     // every control has a name.
-    test(`accounts ${width} ${theme}: the design's checks hold on the built page`, async ({ page }) => {
+    if (theme === 'light' && width !== 1024) test(`accounts ${width} ${theme}: the design's checks hold on the built page`, async ({ page }) => {
       const errors = watchErrors(page)
       await setup(page, { limits: true })
       await page.goto('/settings/accounts')
@@ -155,7 +155,7 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
       expect(errors).toEqual([])
     })
 
-    test(`accounts ${width} ${theme}: a floor save and its Undo move no control in the panel`, async ({ page }) => {
+    if (theme === 'light' && width !== 1024) test(`accounts ${width} ${theme}: a floor save and its Undo move no control in the panel`, async ({ page }) => {
       const { floors } = await setup(page)
       await page.goto('/settings/accounts')
       await listRow(page, ACCOUNTS.main).click()

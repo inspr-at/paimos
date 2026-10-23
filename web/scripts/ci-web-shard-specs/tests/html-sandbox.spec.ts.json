@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/html-sandbox.spec.ts",
-    "listedTests": 10,
+    "listedTests": 2,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.642,

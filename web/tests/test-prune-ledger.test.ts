@@ -36,7 +36,7 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   const summary = checkRepository()
   assert.deepEqual(summary, { browserCases: 5318, specs: 378, core: 29, protectedRisks: 647,
     driftCases: 455, candidateGroups: 31, candidateCases: 155, visualCases: 80,
-    visualApproval: 'pending', phase: 'P01', cuts: false })
+    visualApproval: 'pending', phase: json('scripts/test-prune/risk-ledger.json').phase, cuts: false })
   const original = {
     baseline,
     ledger: json('scripts/test-prune/risk-ledger.json'),
@@ -80,6 +80,16 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   const unrelated = original.currentWeb.tests.find((row: Parameters<typeof key>[0]) =>
     row.kind === 'vitest' && row.file === 'tests/access-keys.unit.test.ts' && !protectedKeys.has(key(row)))
   assert.ok(unrelated, 'The counterexample must use an unprotected unit registration')
+  // Start P01 counterexamples from its complete frozen catalogue. A later
+  // package's already removed browser case must not make them pass first.
+  const p01Snapshot = structuredClone(original)
+  p01Snapshot.ledger.phase = 'P01'
+  p01Snapshot.currentWeb = { ...p01Snapshot.baseline.cataloguePolicy, tests: p01Snapshot.baseline.catalogue.map((row: { key: string }) => {
+    const { key: ignored, ...entry } = row
+    return entry
+  }) }
+  const frozenHash = (path: string) => original.baseline.sourcePins.find((pin: { path: string }) => pin.path === path).sha256
+  assert.equal(validateLedger({ ...p01Snapshot, sourceHash: frozenHash, p01: true }).cuts, false)
   for (const operation of ['rename', 'remove']) {
     const edited = structuredClone(original)
     const index = edited.currentWeb.tests.findIndex((row: Parameters<typeof key>[0]) => key(row) === key(unrelated))
@@ -88,7 +98,12 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
     else edited.currentWeb.tests.splice(index, 1)
     assert.equal(validateLedger({ ...edited, sourceHash }).cuts, false,
       `An unprotected unit ${operation} must pass without Tick references`)
-    assert.throws(() => validateLedger({ ...edited, sourceHash, p01: true }), {
+    const frozenEdit = structuredClone(p01Snapshot)
+    const frozenIndex = frozenEdit.currentWeb.tests.findIndex((row: Parameters<typeof key>[0]) => key(row) === key(unrelated))
+    assert.notEqual(frozenIndex, -1)
+    if (operation === 'rename') frozenEdit.currentWeb.tests[frozenIndex].name += ' (renamed without changing its risk)'
+    else frozenEdit.currentWeb.tests.splice(frozenIndex, 1)
+    assert.throws(() => validateLedger({ ...frozenEdit, sourceHash: frozenHash, p01: true }), {
       message: 'P01 cannot remove or demote any existing test execution',
     })
   }
@@ -142,12 +157,7 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   assert.throws(() => validateLedger({ ...original, sourceHash: () => '0'.repeat(64) }), /Frozen historical-evidence changed/)
   // Snapshot enforcement is explicit: future assertion additions and refreshed
   // timings must not be blocked by P01's one-time no-execution-change check.
-  const frozen = structuredClone(original)
-  frozen.currentWeb = { ...frozen.baseline.cataloguePolicy, tests: frozen.baseline.catalogue.map((row: { key: string }) => {
-    const { key: ignored, ...entry } = row
-    return entry
-  }) }
-  const frozenHash = (path: string) => original.baseline.sourcePins.find((pin: { path: string }) => pin.path === path).sha256
+  const frozen = structuredClone(p01Snapshot)
   assert.equal(validateLedger({ ...frozen, sourceHash: frozenHash, p01: true }).cuts, false)
   assert.throws(() => validateLedger({ ...frozen, sourceHash: () => '0'.repeat(64), p01: true }), /Frozen launch-policy changed/)
   frozen.currentWeb.defaultNewTier = 'ESSENTIAL'

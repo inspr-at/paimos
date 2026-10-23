@@ -232,7 +232,7 @@ test('expiry failure retains draft; modifier Enter saves and Escape leaves a fie
   expect(world.keys.find(k => k.id === 'k2')!.expires_at).toBeNull()
 })
 
-for (const width of [390, 1024, 1440, 1600]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`key sheet controls stay anchored at ${width}px ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme })

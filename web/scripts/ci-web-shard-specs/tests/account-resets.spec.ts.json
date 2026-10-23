@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/account-resets.spec.ts",
-    "listedTests": 6,
+    "listedTests": 2,
     "tierTiming": {
       "caseSeconds": {
         "max": 5.703,

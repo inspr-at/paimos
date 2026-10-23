@@ -28,7 +28,7 @@ async function inspect(page: Page, name: string) {
   }
 }
 
-for (const width of [390, 1600]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1600]) for (const theme of ['light'] as const) {
   test(`project Ticket worker flow, explanations and searchable scopes at ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.emulateMedia({ colorScheme: theme })

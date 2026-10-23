@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/settings-accounts.spec.ts",
-    "listedTests": 24,
+    "listedTests": 27,
     "tierTiming": {
       "caseSeconds": {
         "max": 4.581,

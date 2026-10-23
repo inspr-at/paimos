@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/scope-codes.spec.ts",
-    "listedTests": 12,
+    "listedTests": 10,
     "tierTiming": {
       "caseSeconds": {
         "max": 4.431,

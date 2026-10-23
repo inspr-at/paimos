@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/classic-invite.spec.ts",
-    "listedTests": 6,
+    "listedTests": 5,
     "tierTiming": {
       "caseSeconds": {
         "max": 2.38,

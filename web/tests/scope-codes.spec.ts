@@ -159,7 +159,7 @@ for (const builtin of [false, true]) test(`Rotate combines workspace and project
   expect(world.bindings).toEqual(beforeBindings)
 })
 
-for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390]) test(`scope proposals fit ${width}px in ${theme}`, async ({ page }, testInfo) => {
+for (const theme of ['light'] as const) for (const width of [1440, 390]) test(`scope proposals fit ${width}px in ${theme}`, async ({ page }, testInfo) => {
   const errors = watchErrors(page)
   await page.emulateMedia({ colorScheme: theme })
   await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })

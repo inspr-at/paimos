@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/guest.spec.ts",
-    "listedTests": 2,
+    "listedTests": 1,
     "tierTiming": {
       "caseSeconds": {
         "max": 2.285,

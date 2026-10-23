@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/account-use-matrix.spec.ts",
-    "listedTests": 13,
+    "listedTests": 18,
     "tierTiming": {
       "caseSeconds": {
         "max": 5.812,

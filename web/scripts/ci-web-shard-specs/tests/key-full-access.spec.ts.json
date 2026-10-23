@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/key-full-access.spec.ts",
-    "listedTests": 20,
+    "listedTests": 16,
     "tierTiming": {
       "caseSeconds": {
         "max": 11.897,
