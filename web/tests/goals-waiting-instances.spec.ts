@@ -124,6 +124,14 @@ for (const width of [1440, 1024, 390] as const) {
     await expect(page.getByTestId('instance-pma').locator('.instance-item')).toHaveCount(2)
     await expect(page.getByTestId('instance-pma').getByRole('button')).toHaveCount(0)
     await shot(page, info, `desk-${width}-light`)
+    if (width === 390) {
+      await page.setViewportSize({ width: 320, height: 950 })
+      expect(await page.locator('.desk-page').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+      const item = await page.getByTestId('instance-pma').locator('.instance-item').first().boundingBox()
+      expect(item!.height).toBeGreaterThanOrEqual(44)
+      await shot(page, info, 'desk-320-light')
+      await page.setViewportSize({ width: 390, height: 950 })
+    }
     await page.getByRole('radio', { name: /^Decided/ }).click()
     await expect(page.getByRole('link', { name: 'Decisions made on pma are listed there' })).toHaveAttribute('href', `${SIBLING}/decision-desk?view=decided`)
     await shot(page, info, `decided-${width}-light`)

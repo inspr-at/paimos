@@ -64,7 +64,7 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
       <span class="instance-actions">
         <span class="action-slot">
           <span v-for="label in [text('Reconnect', 'Neu verbinden'), text('Try again', 'Erneut versuchen')]" :key="label" class="action-size" aria-hidden="true">{{ label }}</span>
-          <span v-if="variant === 'desk' && (read.summary?.open ?? 0) > 5" class="action-size" aria-hidden="true">{{ text('Show all 0000000000', 'Alle 0000000000 anzeigen') }}</span>
+          <span v-if="variant === 'desk'" class="action-size" aria-hidden="true">{{ text('Show all 0000000000', 'Alle 0000000000 anzeigen') }}</span>
           <button v-if="action" type="button" class="instance-action" @click="act">{{ action }}</button>
         </span>
         <button v-if="variant === 'goals' && read.state === 'not connected'" type="button" class="instance-dismiss" :aria-label="text('Not now', 'Nicht jetzt')" @click="store.dismiss(read.tag)"><AppIcon name="close" :size="14" /></button>
