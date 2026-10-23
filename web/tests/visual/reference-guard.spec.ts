@@ -104,11 +104,10 @@ test('visual comparison rejects a changed control and never creates a missing re
   const renderer = structuredClone(visual.renderer)
   for (const state of visual.states) {
     delete state.approval
+    for (const field of ['referenceStatus', 'deferredUntil', 'deferredReason']) delete state[field]
     for (const checkpoint of state.checkpoints) {
       checkpoint.reference = { attachmentMember: null, sha256: null }
-      if (checkpoint.referenceStatus === 'needs-re-capture') {
-        delete checkpoint.referenceStatus; delete checkpoint.deferredUntil; delete checkpoint.deferredReason
-      }
+      for (const field of ['referenceStatus', 'deferredUntil', 'deferredReason']) delete checkpoint[field]
     }
   }
   const png = await page.screenshot()
@@ -182,22 +181,19 @@ test('visual comparison rejects a changed control and never creates a missing re
     await setupQuality(qualityPage)
     await qualityPage.clock.setFixedTime(new Date(NOW + 60_000))
   }, { visual })).rejects.toThrow(/fixture clock changed/)
-  for (const id of ['goals', 'ticket-workspace', 'delivery-numbers', 'capacity']) {
-    const deferred = visualCases(id)[0]!
-    // The setup must never run; an unbuilt product is neither inspected nor
-    // failed, and its explicit until/reason report is attached to the test.
-    await checkVisual(browser, info, deferred, async () => { throw new Error('Deferred setup must not run') }, { visual })
-    expect(JSON.parse(readFileSync(info.outputPath(`${deferred.id}.md`), 'utf8')))
-      .toMatchObject({ requirementsRun: false, reference: { mode: 'deferred', reason: expect.stringContaining('deferred until AEON-') } })
-    expect(info.annotations.some(row => row.type === 'deferred' && row.description?.includes(deferred.id))).toBe(true)
-    expect(existsSync(info.outputPath(`${deferred.id}.png`))).toBe(false)
-  }
   // Stale pins are explicit awaiting-reference reports, never comparisons or
-  // quiet passes. Re-capture and person review belong to reference set 3.
-  const current = JSON.parse(readFileSync(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
-  current.comparison.mode = 'blocking'
+  // quiet passes. Build this counterexample explicitly: the activated product
+  // manifest has no stale checkpoints and must not make this guard vacuous.
+  const current = structuredClone(visual)
+  for (const id of ['goals', 'ticket-workspace', 'delivery-numbers', 'capacity']) {
+    Object.assign(current.states.find(state => state.id === id).checkpoints[0], {
+      referenceStatus: 'needs-re-capture', deferredUntil: ['AEON-1692'], deferredReason: 'Synthetic stale reference; awaiting reviewed re-capture',
+    })
+  }
+  let staleCases = 0
   for (const state of current.states) {
     for (const checkpoint of state.checkpoints.filter(row => row.referenceStatus === 'needs-re-capture')) {
+      staleCases++
       const stale = visualCases(state.id).find(row => row.id === checkpoint.id)!
       await checkVisual(browser, info, stale, async () => { throw new Error('Stale reference setup must not run') }, { visual: current })
       expect(JSON.parse(readFileSync(info.outputPath(`${stale.id}.md`), 'utf8')))
@@ -206,6 +202,7 @@ test('visual comparison rejects a changed control and never creates a missing re
       expect(existsSync(info.outputPath(`${stale.id}.png`))).toBe(false)
     }
   }
+  expect(staleCases).toBe(4)
   await expect(checkVisual(browser, info, visualCases('hours')[0]!, async qualityPage => {
     await setupQuality(qualityPage)
     await qualityPage.evaluate(() => console.error('Synthetic quality failure must still block an awaiting state'))
@@ -218,17 +215,25 @@ test('visual comparison rejects a changed control and never creates a missing re
   expect(JSON.parse(readFileSync(info.outputPath(`${pending.id}.md`), 'utf8')))
     .toMatchObject({ requirementsRun: true, quality: { status: 'failed', error: expect.stringContaining('unexpected console/page failure') },
       comparison: { status: 'unavailable' } })
+  // A checkpoint deferral reports failed quality even while the global policy
+  // blocks approved references. It never needs a product reference or approval.
+  const deferredVisual = structuredClone(visual)
   for (const id of ['goals', 'ticket-workspace', 'delivery-numbers', 'capacity']) {
     const deferred = visualCases(id)[0]!
+    Object.assign(deferredVisual.states.find(state => state.id === id).checkpoints[0], {
+      referenceStatus: 'deferred', deferredUntil: ['AEON-1692'], deferredReason: 'Synthetic deferred quality inspection',
+    })
     let setupRan = false
     await checkVisual(browser, info, deferred, async () => {
       setupRan = true
       throw new Error('Synthetic deferred quality setup failure is reported')
-    })
+    }, { visual: deferredVisual })
     expect(setupRan).toBe(true)
     expect(JSON.parse(readFileSync(info.outputPath(`${deferred.id}.md`), 'utf8')))
-      .toMatchObject({ requirementsRun: true, reference: { mode: 'report-only' },
+      .toMatchObject({ requirementsRun: true, baselineCompared: false, reference: { mode: 'deferred', reason: expect.stringContaining('deferred until AEON-1692') },
         quality: { status: 'failed', error: expect.stringContaining('Synthetic deferred quality setup failure is reported') } })
+    expect(info.annotations.some(row => row.type === 'deferred' && row.description?.includes(deferred.id))).toBe(true)
+    expect(existsSync(info.outputPath(`${deferred.id}.png`))).toBe(false)
   }
   await setupQuality(page)
   await prepareVisualFonts(page, String(info.project.use.baseURL))
@@ -269,7 +274,10 @@ test('P02 Delivery phone capture includes its heading and on-target headline in 
   // either a Linux renderer match or approval of these synthetic test gates.
   const visual = JSON.parse(readFileSync(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
   const delivery = visual.states.find((state: { id: string }) => state.id === 'delivery-numbers')
+  const phoneIds = delivery.checkpoints.filter(checkpoint => checkpoint.profile === 'phone').map(checkpoint => checkpoint.id)
+  visual.approval.checkpoints = visual.approval.checkpoints.filter(id => !phoneIds.includes(id))
   for (const checkpoint of delivery.checkpoints) if (checkpoint.profile === 'phone') {
+    checkpoint.reference = { attachmentMember: null, sha256: null }
     delete checkpoint.referenceStatus; delete checkpoint.deferredUntil; delete checkpoint.deferredReason
   }
   visual.comparison.mode = 'blocking'

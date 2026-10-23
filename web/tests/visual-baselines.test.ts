@@ -558,7 +558,10 @@ test('visual references require approval, immutable attachment bytes and every e
     const probeOutput = mkdtempSync(join(probeOutputRoot, 'raster-probe-unit-'))
     try {
       const calls: string[] = []
-      const report = await runProbe(probeID, join(probeOutput, 'run'), probeVisual, {
+      // A fresh CI checkout has no test-results parent yet. Keep this parent
+      // absent so the probe's first write exercises the same startup path.
+      const probeRun = join(probeOutput, 'fresh-parent/run')
+      const report = await runProbe(probeID, probeRun, probeVisual, {
         platform: 'linux', arch: 'x64',
         env: { ...probeEnv, AEON_VISUAL_CONTAINER_DIGEST: renderer.container.digest },
         run: (command, args, options) => {
@@ -584,8 +587,14 @@ test('visual references require approval, immutable attachment bytes and every e
       assert.deepEqual(calls, PROBE_SETTINGS.map(setting => setting.id))
       assert.equal(report.complete, true)
       assert.ok(report.settings.every(setting => setting.allByteIdentical))
-      assert.equal(JSON.parse(readFileSync(join(probeOutput, 'run/probe-report.json'), 'utf8')).kind, 'raster-determinism-probe')
-      assert.throws(() => collectCandidates(join(probeOutput, 'run/baseline')), /Raster probe is diagnostic only/)
+      assert.equal(JSON.parse(readFileSync(join(probeRun, 'probe-report.json'), 'utf8')).kind, 'raster-determinism-probe')
+      assert.throws(() => collectCandidates(join(probeRun, 'baseline')), /Raster probe is diagnostic only/)
+      await assert.rejects(runProbe(probeID, probeRun, probeVisual, {
+        platform: 'linux', arch: 'x64',
+        env: { ...probeEnv, AEON_VISUAL_CONTAINER_DIGEST: renderer.container.digest },
+        run: () => assert.fail('An existing probe output must never be reused'),
+      }), { code: 'EEXIST' })
+      assert.deepEqual(calls, PROBE_SETTINGS.map(setting => setting.id))
     } finally { rmSync(probeOutput, { recursive: true, force: true }) }
     const smallRecords = candidate.members.map(member => ({ quality: { id: member.id }, png: white }))
     const baseCapture = { candidate, records: smallRecords, archiveSHA256: candidate.archive.sha256 }

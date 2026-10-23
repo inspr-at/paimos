@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectCandidates } from './visual-candidates.mjs'
 import { boundedFile, decodePNG, sha256 } from './visual-pin.mjs'
@@ -81,6 +81,9 @@ export async function runProbe(input, output, visual, { env = process.env, run =
   const checkpoints = probeCheckpoints(input, visual)
   output = resolve(root, output)
   need(output.startsWith(resolve(root, 'web/test-results') + '/'), 'Probe artifacts must stay under web/test-results')
+  // The manual probe runs before Playwright on a fresh container checkout.
+  // Create only the parent; an existing probe output must still be refused.
+  mkdirSync(dirname(output), { recursive: true })
   mkdirSync(output, { recursive: false })
   const specs = [...new Set(visual.states.filter(state => state.checkpoints.some(checkpoint => checkpoints.includes(checkpoint.id))).map(state => state.owner))]
   const settings = []
