@@ -17,19 +17,17 @@ BEGIN
     SELECT k.id FROM node_kinds k
     WHERE k.tenant_id = current_setting('aeon.tenant_id')::uuid
       AND k.slug IN ('work', 'epic', 'ticket', 'task')
+ ), work_parents AS MATERIALIZED (
+    SELECT DISTINCT c.parent_id FROM nodes c
+    WHERE c.tenant_id = current_setting('aeon.tenant_id')::uuid
+      AND c.deleted_at IS NULL
+      -- Keep both memberships hashed. Stale statistics must not turn this
+      -- one canonical child pass into a tenant scan per candidate.
+      AND (c.parent_id IN (SELECT w.id FROM wanted w)) IS TRUE
+      AND (c.kind_id IN (SELECT k.id FROM work_kinds k)) IS TRUE
  )
  SELECT n.id,
-        NOT EXISTS (
-            SELECT 1 FROM nodes c
-            WHERE c.tenant_id = current_setting('aeon.tenant_id')::uuid
-              AND c.parent_id = n.id
-              AND c.deleted_at IS NULL
-              -- Stale statistics must still select a bounded sibling range,
-              -- rather than scanning the tenant for each candidate.
-              AND (c.parent_id, c.id) >= (n.id, '00000000-0000-0000-0000-000000000000'::uuid)
-              AND (c.parent_id, c.id) <= (n.id, 'ffffffff-ffff-ffff-ffff-ffffffffffff'::uuid)
-              AND (c.kind_id IN (SELECT k.id FROM work_kinds k)) IS TRUE
-        )
+        (n.id IN (SELECT p.parent_id FROM work_parents p)) IS NOT TRUE
  FROM wanted w CROSS JOIN LATERAL (
     SELECT candidate.id, candidate.kind_id FROM nodes candidate
     WHERE candidate.tenant_id = current_setting('aeon.tenant_id')::uuid
