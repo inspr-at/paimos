@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'n
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateVisual } from './check.mjs'
-import { assertRenderer, captureEnabled } from './visual-renderer.mjs'
+import { assertRenderer, assertFontEvidence, captureEnabled } from './visual-renderer.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const need = (condition, message) => { if (!condition) throw new Error(message) }
@@ -37,8 +37,8 @@ export function packCandidates(records, visual) {
     assertRenderer(quality.renderer, visual.renderer, { capture: true })
     renderer ??= quality.renderer
     assertRenderer(quality.renderer, renderer)
-    need(quality.requirementsRun === true && quality.captureMode === true && quality.baselineCompared === false &&
-      JSON.stringify(quality.fonts) === JSON.stringify([{ family: 'JetBrains Mono', custom: true }]), `Missing self-hosted font/quality evidence: ${checkpoint.id}`)
+    need(quality.requirementsRun === true && quality.captureMode === true && quality.baselineCompared === false, `Missing font/quality evidence: ${checkpoint.id}`)
+    assertFontEvidence(quality.fonts, states.find(state => state.owner === checkpoint.owner).id)
     need(quality.owner === checkpoint.owner && quality.fixture === checkpoint.fixture && quality.theme === checkpoint.theme &&
       quality.viewport?.width === viewport.width && quality.viewport?.height === viewport.height, `Wrong review fixture/profile: ${checkpoint.id}`)
     for (const name of ['layout', 'axe', 'console', 'responses']) {

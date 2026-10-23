@@ -8,7 +8,7 @@ import test from 'node:test'
 import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGates, referenceReport, materializeBaseline } from '../../scripts/test-prune/visual-baselines.mjs'
 import { packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
 
-import { assertRenderer, captureEnabled, rendererIdentity } from '../../scripts/test-prune/visual-renderer.mjs'
+import { assertRenderer, assertFontEvidence, verifyFontAssets, installRendererFonts, captureEnabled, rendererIdentity } from '../../scripts/test-prune/visual-renderer.mjs'
 import { parseWorkflow } from '../../scripts/ci-static.mjs'
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
@@ -152,6 +152,7 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.doesNotMatch(compareJob, /AEON_VISUAL_CAPTURE/)
   for (const job of [captureJob, compareJob]) {
     assert.match(job, /AEON_VISUAL_RUNNER: ubuntu-24\.04/)
+    assert.match(job, /node scripts\/test-prune\/visual-renderer\.mjs install-fonts/)
   }
   const changedImage = structuredClone(actual)
   changedImage.runner.imageOS = 'different-image'
@@ -189,13 +190,33 @@ test('visual references require approval, immutable attachment bytes and every e
     sized.writeUInt32BE(viewport.width, 16); sized.writeUInt32BE(viewport.height, 20)
     return { png: sized, quality: { id: checkpoint.id, owner: state.owner,
       fixture: state.fixturesByProfile?.[checkpoint.profile] ?? state.fixture, theme: checkpoint.theme, viewport,
-      captureSHA: 'a'.repeat(40), renderer, requirementsRun: true, captureMode: true, baselineCompared: false, fonts: [{ family: 'JetBrains Mono', custom: true }], pngSHA256: hash(sized), layout: [], axe: [], console: [], responses: [] } }
+      captureSHA: 'a'.repeat(40), renderer, requirementsRun: true, captureMode: true, baselineCompared: false,
+      fonts: {
+        body: { computedFamily: 'system-ui', renderedFamilies: ['Inter Variable'] },
+        painted: [{ family: 'Inter Variable', custom: false }],
+        profile: [],
+        ...(['public-quote', 'quote-editor'].includes(state.id) ? {
+          profile: [400, 600, 700].flatMap(weight => ['normal', 'italic'].map(style => ({ family: 'QuoteProfilebody', role: 'body', weight: String(weight), style, status: 'loaded', checked: true })))
+            .concat([{ family: 'QuoteProfiledisplay', role: 'display', weight: '400', style: 'normal', status: 'loaded', checked: true }]),
+          document: { body: { computedFamily: 'QuoteProfilebody', renderedFamilies: ['Source Sans 3'] }, display: { computedFamily: 'QuoteProfiledisplay', renderedFamilies: ['Source Serif 4 Display'] } },
+        } : {}),
+      }, pngSHA256: hash(sized), layout: [], axe: [], console: [], responses: [] } }
   }))
+  verifyFontAssets(manifest)
+  const badFontAsset = structuredClone(manifest); badFontAsset.renderer.fonts[0].sha256 = '0'.repeat(64)
+  assert.throws(() => verifyFontAssets(badFontAsset), /font asset SHA-256/)
+  const monoEvidence = { body: { computedFamily: 'system-ui', renderedFamilies: ['JetBrains Mono'] }, painted: [{ family: 'JetBrains Mono', custom: true }], profile: [] }
+  assert.throws(() => assertFontEvidence(monoEvidence, 'projects'), /body text must resolve to Inter/)
+  const monoRecords = records.map((record, index) => index ? record : { ...record, quality: { ...record.quality, fonts: monoEvidence } })
+  assert.throws(() => packCandidates(monoRecords, manifest), /body text must resolve to Inter/)
+  const quoteEvidence = structuredClone(records.find(record => record.quality.id.startsWith('V-public-quote'))!.quality.fonts)
+  quoteEvidence.profile[0]!.status = 'unloaded'
+  assert.throws(() => assertFontEvidence(quoteEvidence, 'public-quote'), /profile faces must all be loaded/)
   const packed = packCandidates(records, manifest)
   assert.equal(packed.review.status, 'pending-Tick-review')
-  assert.equal(packed.review.members.length, 42)
+  assert.equal(packed.review.members.length, 72)
   assert.deepEqual(packed.review.deferred.map((state: { id: string }) => state.id), ['goals', 'ticket-workspace'])
-  assert.throws(() => packCandidates(records.slice(1), manifest), /all 42/)
+  assert.throws(() => packCandidates(records.slice(1), manifest), /all 72/)
   assert.throws(() => packCandidates([...records.slice(0, -1), records[0]], manifest), /Duplicate/)
   const changedSource = records.map((record: { png: Buffer; quality: Record<string, unknown> }) => ({ png: record.png, quality: { ...record.quality } }))
   changedSource[1].quality.captureSHA = 'b'.repeat(40)
@@ -219,15 +240,15 @@ test('visual references require approval, immutable attachment bytes and every e
   const wrongRenderer = records.map((record: { quality: Record<string, unknown> }, index: number) => index ? record : { ...record, quality: { ...record.quality, renderer: { ...renderer, locale: 'de-DE' } } })
   assert.throws(() => packCandidates(wrongRenderer, manifest), /renderer differs from reference: locale/)
   const fallback = records.map((record: { quality: Record<string, unknown> }, index: number) => index ? record : { ...record, quality: { ...record.quality, fonts: [{ family: 'Arial', custom: false }] } })
-  assert.throws(() => packCandidates(fallback, manifest), /Missing self-hosted font/)
+  assert.throws(() => packCandidates(fallback, manifest), /Visual font guard/)
   const directory = mkdtempSync(join(tmpdir(), 'aeon-1674-candidate-'))
   try {
     const output = join(directory, 'artifact')
     const candidate = writeCandidateArchive(records, manifest, output)
     assert.equal(candidate.status, 'pending-Tick-review')
-    assert.equal(candidate.members.length, 42)
+    assert.equal(candidate.members.length, 72)
     assert.equal(candidate.archive.sha256, hash(readFileSync(join(output, candidate.archive.name))))
-    assert.equal(candidate.payload.length, 85)
+    assert.equal(candidate.payload.length, 145)
     assert.match(readFileSync(join(output, 'members.sha256'), 'utf8'), /quality\/V-projects-390-light.json/)
     // The generated archive can be consumed only after explicit synthetic
     // approval and pins. This proves next-round transport compatibility too.
@@ -249,7 +270,7 @@ test('visual references require approval, immutable attachment bytes and every e
       }
     }
     const archive = readFileSync(join(output, candidate.archive.name))
-    assert.equal(verifyReferenceArchive(archive, detached, pinned).references.size, 42)
+    assert.equal(verifyReferenceArchive(archive, detached, pinned).references.size, 72)
     const tampered = Buffer.from(archive); tampered[600] ^= 1
     assert.throws(() => verifyReferenceArchive(tampered, detached, pinned, noExtraction), /archive SHA-256 mismatch/)
   } finally { rmSync(directory, { recursive: true, force: true }) }

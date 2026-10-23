@@ -283,12 +283,13 @@ function isoToday() { return iso(0) }
 function isoPlus(days: number) { return iso(days) }
 
 // A public page for one link: the frozen document, its state and the acceptance.
-export async function mockPublicQuote(page: Page, state: { acceptable: boolean; accepted?: boolean; receiptReady?: boolean; linkEnded?: boolean; missing?: boolean; now?: number }) {
+export async function mockPublicQuote(page: Page, state: { acceptable: boolean; accepted?: boolean; receiptReady?: boolean; linkEnded?: boolean; missing?: boolean; now?: number; profile?: QuoteDoc['profile'] }) {
   const posted: unknown[] = []
   const clock = state.now ?? Date.now()
   const day = (days: number) => new Date(clock + days * 86_400_000).toISOString().slice(0, 10)
   const instant = (days: number) => new Date(clock + days * 86_400_000).toISOString()
   const d = doc('Relaunch des Kundenportals', 'Bäckerei Hofer', [['Konzeption', '16', 11000], ['Umsetzung', '40', 9500]], day(-3), day(27))
+  if (state.profile) d.profile = state.profile
   let accepted = !!state.accepted
   await page.route('**/api/public/quotes/**', route => {
     const path = new URL(route.request().url()).pathname

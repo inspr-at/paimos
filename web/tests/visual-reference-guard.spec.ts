@@ -6,8 +6,8 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { test, expect, type Page, type Response } from '@playwright/test'
-import { agents, NOW, sessionChat, sessionChatUnavailable } from './visual/fixtures'
-import { checkVisual, compareVisualReference, visualCases, prepareVisualFonts, renderedFonts } from './visual/checkpoint'
+import { agents, capacity, publicQuote, NOW, sessionChat, sessionChatUnavailable } from './visual/fixtures'
+import { checkVisual, compareVisualReference, visualCases, prepareVisualFonts, renderedFonts, fontEvidence } from './visual/checkpoint'
 import { visualChrome } from './visual/chrome-fixture'
 import { fixtures, mockWork } from './work-fixtures'
 
@@ -53,7 +53,10 @@ test('P02 Agents permission requests load successfully and retain explicit error
 
 test('visual comparison rejects a changed control and never creates a missing reference', async ({ page, browser }, info) => {
   expect(info.config.updateSnapshots).toBe('none')
-  await page.setContent('<style>body { margin: 0; background: white; } button { width: 160px; height: 44px; background: white; color: black; border: 1px solid black; }</style><button>Review change</button>')
+  await page.route('**/__visual-comparator-proof', route => route.fulfill({ contentType: 'text/html', body: '<style>body { margin: 0; background: white; font-family: var(--font, system-ui); } button { font: inherit; width: 160px; height: 44px; background: white; color: black; border: 1px solid black; }</style><button>Review change</button>' }))
+  await page.goto('/__visual-comparator-proof')
+  await prepareVisualFonts(page, String(info.project.use.baseURL))
+  await fontEvidence(page, 'projects')
   const reference = info.snapshotPath('synthetic-reference.png')
   mkdirSync(dirname(reference), { recursive: true })
   writeFileSync(reference, await page.screenshot({ path: info.outputPath('synthetic-reference.png') }))
@@ -95,7 +98,7 @@ test('visual comparison rejects a changed control and never creates a missing re
   await expect(compareVisualReference(page, info, checkpoint, { visual, baselineFile: info.outputPath('absent-bundle.json'), renderer: { ...renderer, locale: 'de-DE' } }))
     .rejects.toThrow('renderer differs from reference: locale')
   // Awaiting states retain strict quality checks without PNG captures.
-  const qualityDocument = '<html lang="en"><head><title>Synthetic quality control</title><style>button { min-width: 80px; height: 44px; }</style></head><body><main><button>Continue</button></main></body></html>'
+  const qualityDocument = '<html lang="en"><head><title>Synthetic quality control</title><style>body { font-family: var(--font, system-ui); } button, input { font: inherit; } button { min-width: 80px; height: 44px; }</style></head><body><main><button>Continue</button></main></body></html>'
   const setupQuality = async (qualityPage: Page) => {
     await qualityPage.route('**/__visual-quality-proof', route => route.fulfill({ contentType: 'text/html', body: qualityDocument }))
     // Fonts stay on the app origin, as in real checkpoints. about:blank would
@@ -107,7 +110,7 @@ test('visual comparison rejects a changed control and never creates a missing re
   await checkVisual(browser, info, pending, setupQuality)
   const report = JSON.parse(readFileSync(info.outputPath(`${pending.id}.md`), 'utf8'))
   expect(report).toMatchObject({ baselineCompared: false, pngSHA256: null, requirementsRun: true,
-    reference: { mode: 'awaiting-reference' }, layout: [], axe: [], console: [], responses: [], fonts: [{ family: 'JetBrains Mono', custom: true }] })
+    reference: { mode: 'awaiting-reference' }, layout: [], axe: [], console: [], responses: [], fonts: { body: { renderedFamilies: ['Inter Variable'] }, painted: expect.arrayContaining([{ family: 'Inter Variable', custom: process.platform !== 'linux' }]) } })
   expect(existsSync(info.outputPath(`${pending.id}.png`))).toBe(false)
   for (const id of ['goals', 'ticket-workspace']) {
     const deferred = visualCases(id)[0]!
@@ -125,14 +128,14 @@ test('visual comparison rejects a changed control and never creates a missing re
   })).rejects.toThrow(/unexpected console\/page failure/)
   await setupQuality(page)
   await prepareVisualFonts(page, String(info.project.use.baseURL))
-  expect(await renderedFonts(page)).toEqual([{ family: 'JetBrains Mono', custom: true }])
+  expect(await renderedFonts(page)).toEqual([{ family: 'Inter Variable', custom: process.platform !== 'linux' }])
   await page.evaluate(() => {
     const hidden = document.createElement('span')
     hidden.textContent = 'Not painted'
     hidden.style.cssText = 'opacity: 0; font-family: Arial !important'
     document.body.append(hidden)
   })
-  expect(await renderedFonts(page)).toEqual([{ family: 'JetBrains Mono', custom: true }])
+  expect(await renderedFonts(page)).toEqual([{ family: 'Inter Variable', custom: process.platform !== 'linux' }])
   // The production Latin subset lacks these picker placeholder glyphs. Keep
   // the real text intact and require custom-font provenance for both the
   // native placeholder and ordinary painted text on every host.
@@ -144,10 +147,14 @@ test('visual comparison rejects a changed control and never creates a missing re
     label.append(input)
     document.querySelector('main')!.append(label)
   })
-  expect(await renderedFonts(page)).toEqual([{ family: 'JetBrains Mono', custom: true }])
-  await page.addStyleTag({ content: 'button { font-family: Arial !important; }' })
-  await expect(page.getByRole('button')).toHaveCSS('font-family', 'Arial')
-  await expect(renderedFonts(page)).rejects.toThrow(/System-font fallback/)
+  expect(await renderedFonts(page)).toEqual([{ family: 'Inter Variable', custom: process.platform !== 'linux' }])
+  await page.addStyleTag({ content: 'body, body * { font-family: "JetBrains Mono" !important; }' })
+  await expect(fontEvidence(page, 'projects')).rejects.toThrow(/body text must resolve to Inter/)
+  await expect(compareVisualReference(page, info, checkpoint, { visual, baselineFile, renderer })).rejects.toThrow(/body text must resolve to Inter/)
+  await expect(checkVisual(browser, info, pending, async qualityPage => {
+    await setupQuality(qualityPage)
+    await qualityPage.addStyleTag({ content: 'body, body * { font-family: "JetBrains Mono" !important; }' })
+  })).rejects.toThrow(/body text must resolve to Inter/)
 
 })
 
@@ -195,12 +202,64 @@ test('P02 Session Chat fixture binds its chat reads and native refusal to the di
     const healthyNativeRead = healthyPage.waitForResponse(response => new URL(response.url()).pathname.endsWith('/native-context'))
     await sessionChat(healthyPage, 'desktop', 'light')
     const healthyNative = await healthyNativeRead
-    expect(healthyNative.status()).toBe(200)
-    expect(await healthyNative.json()).toMatchObject({ profile: 'native', current_binding: { project_id: 'p-pharos', harness_session_id: session } })
-    await expect(healthyPage.getByRole('tabpanel', { name: /^Chat/ })).toContainText('Owned session input from this panel is not available yet. Use the qualified session client.')
+    expect(healthyNative.status()).toBe(503)
+    expect(await healthyNative.json()).toEqual({ reason: 'feature_disabled', request_id: null, retryable: false })
+    const thread = healthyPage.getByRole('list', { name: 'Messages', exact: true })
+    await expect(thread.locator('.msg.desk')).toHaveCount(2)
+    await expect(thread.getByRole('separator', { name: 'Today', exact: true })).toHaveCount(1)
+    await expect(thread.locator('.msg.mine').last()).toContainText('Start it now. Keep the CI fixes in their own PR.')
     await expect(healthyPage.getByText('The session’s live capabilities could not be read. Reopen the panel to try again.', { exact: true })).toHaveCount(0)
-    expect(healthyReads.filter(response => response.status() >= 400).map(response => new URL(response.url()).pathname)).toEqual([])
+    expect(healthyReads.filter(response => response.status() >= 400).map(response => ({ path: new URL(response.url()).pathname, status: response.status() }))).toEqual([{ path: new URL(healthyNative.url()).pathname, status: 503 }])
     expect(healthyErrors).toEqual([])
   } finally { await healthyContext.close() }
 
+})
+
+// Risk: a missing profile route silently falls back to the shell's sans or mono,
+// leaving both the reference and future comparisons equally wrong.
+test('P02 quote font guard rejects an unloaded profile face', async ({ page }, info) => {
+  await page.clock.setFixedTime(new Date(NOW))
+  await prepareVisualFonts(page, String(info.project.use.baseURL))
+  await publicQuote(page, 'desktop', 'light')
+  const evidence = await fontEvidence(page, 'public-quote')
+  expect(evidence.profile).toHaveLength(7)
+  expect(evidence.document?.body.renderedFamilies).toEqual(['Source Sans 3'])
+  expect(evidence.document?.display.renderedFamilies).toEqual(['Source Serif 4 Display'])
+  // Replace an unused italic face with its declared but unloaded equivalent.
+  // The regular body/display still paint correctly, so only the face guard
+  // can reject this control. It uses no network request or elapsed-time check.
+  await page.evaluate(() => {
+    const face = [...document.fonts].find(face => face.style === 'italic' && face.weight === '700')!
+    document.fonts.delete(face)
+    document.fonts.add(new FontFace(face.family, 'url("/not-a-profile-font.woff2")', { weight: face.weight, style: face.style }))
+  })
+  await expect(fontEvidence(page, 'public-quote')).rejects.toThrow(/quote profile faces must all be loaded/)
+})
+
+// Risk: asynchronous font/layout changes dismiss only one theme's popover or
+// change its scroll, so the two references depict different interactions.
+test('P02 capacity reference keeps the same open popover and scroll across themes', async ({ browser }, info) => {
+  for (const width of [390, 1440]) {
+    const states: unknown[] = []
+    for (const theme of ['light', 'dark'] as const) {
+      const context = await browser.newContext({ baseURL: info.project.use.baseURL, viewport: { width, height: width === 390 ? 844 : 900 },
+        colorScheme: theme, reducedMotion: 'reduce', deviceScaleFactor: 1, hasTouch: width === 390 })
+      try {
+        const page = await context.newPage()
+        await prepareVisualFonts(page, String(info.project.use.baseURL))
+        await capacity(page, width === 390 ? 'phone' : 'desktop', theme)
+        await fontEvidence(page, 'capacity')
+        // Include a paint after all font reads: a delayed scroll dismissal
+        // cannot pass just because the panel was present immediately on click.
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+        await expect(page.getByRole('dialog', { name: 'Daily limit for Claude Code', exact: true })).toBeVisible()
+        states.push(await page.locator('button[data-pace="claude"]').evaluate(element => ({
+          expanded: element.getAttribute('aria-expanded'),
+          top: element.getBoundingClientRect().top,
+          scroll: [...document.querySelectorAll('*')].filter(element => element.scrollTop > 0).map(element => ({ tag: element.tagName, class: element.className, top: element.scrollTop })),
+        })))
+      } finally { await context.close() }
+    }
+    expect(states[1], `capacity themes must depict the same ${width}px state`).toEqual(states[0])
+  }
 })

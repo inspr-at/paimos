@@ -2,12 +2,12 @@
   "group": "remaining-ui",
   "nightlyTiming": {
     "seconds": 20,
-    "selectedTests": 3,
+    "selectedTests": 5,
     "source": "AEON-1674 initial scheduling estimate; comparisons remain unproven until references are approved."
   },
   "spec": {
     "file": "tests/visual-reference-guard.spec.ts",
-    "listedTests": 3,
+    "listedTests": 5,
     "weightSeconds": 20,
     "weightSource": "AEON-1674-initial-estimate"
   }

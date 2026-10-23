@@ -103,15 +103,17 @@ export function validateVisual(visual, { cuts = false, stateIds = visual.states?
     renderer.browser?.name === 'chromium-headless-shell' && text(renderer.browser.revision) && text(renderer.browser.version) &&
     renderer.browser.headless === true && same(renderer.browser.args, ['--disable-gpu']) &&
     renderer.deviceScaleFactor === 1 && same(renderer.colourScheme, ['light', 'dark']) && renderer.reducedMotion === 'reduce' &&
-    renderer.timezone === 'Europe/Vienna' && renderer.locale === 'en-GB' && renderer.fonts?.length === 1 &&
-    renderer.fonts[0].family === 'JetBrains Mono' && renderer.fonts[0].asset === 'web/tests/visual/fonts/jetbrains-mono-v2.304.ttf' &&
-    digest(renderer.fonts[0].sha256), 'Missing deterministic hosted visual renderer policy')
+    renderer.timezone === 'Europe/Vienna' && renderer.locale === 'en-GB' && renderer.fonts?.length === 10 &&
+    renderer.fonts[0].family === 'Inter Variable' && renderer.fonts[0].asset === 'web/tests/visual/fonts/inter-v4.1.ttf' &&
+    renderer.fonts.every(font => digest(font.sha256) && text(font.asset) && text(font.license)) &&
+    same(renderer.fontconfig?.aliases, { '-apple-system': 'Inter Variable', 'system-ui': 'Inter Variable', 'sans-serif': 'Inter Variable', monospace: 'JetBrains Mono' }), 'Missing deterministic hosted visual renderer policy')
   need(visual.comparison?.threshold === 0 && visual.comparison.maxDiffPixels === 0 && text(visual.comparison.justification),
     'Visual comparison requires exact pixels with a documented tolerance policy')
   need(visual.capture?.workflow === '.github/workflows/ci.yml' && visual.capture.event === 'workflow_dispatch' &&
     visual.capture.input === 'visual_capture' && visual.capture.job === 'visual-reference-capture' && visual.capture.retentionDays === 7 &&
     same(visual.capture.states, ['projects', 'access', 'knowledge', 'public-quote', 'agent-rules', 'start-agent',
-      'quote-editor', 'session-chat', 'hours', 'capacity']), 'Manual visual capture must retain the exact ten-state review scope')
+      'quote-editor', 'session-chat', 'hours', 'capacity', 'tickets', 'agents', 'decision-desk',
+      'account-use-matrix', 'delivery-numbers', 'models']), 'Manual visual capture must retain the exact sixteen-state review scope')
   const authority = visual.baselineAuthority
   need(authority?.onMissing === 'fail' && authority.onExpired === 'fail' && authority.onDigestMismatch === 'fail' &&
     authority.automaticRewrite === false && authority.currentRunMayBeReference === false, 'Visual baseline failures must fail closed')

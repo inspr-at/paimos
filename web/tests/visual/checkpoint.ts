@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, type Browser, type Page, type TestInfo } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { readBaselineBundle, referenceGate } from '../../../scripts/test-prune/visual-baselines.mjs'
-import { assertRenderer, captureEnabled, rendererIdentity } from '../../../scripts/test-prune/visual-renderer.mjs'
+import { assertRenderer, assertFontEvidence, captureEnabled, rendererIdentity, verifyFontAssets } from '../../../scripts/test-prune/visual-renderer.mjs'
 import { domAudit } from '../ui-audit-rules'
 
 const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8'))
@@ -48,6 +48,7 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
       colorScheme: checkpoint.theme, reducedMotion: manifest.renderer.reducedMotion,
       hasTouch: checkpoint.profile === 'phone', locale: manifest.renderer.locale, timezoneId: manifest.renderer.timezone })
     const page = await context.newPage()
+    await prepareVisualFonts(page, String(info.project.use.baseURL))
     const errors: string[] = []
     const responses: { path: string; status: number }[] = []
     page.on('response', response => { if (response.status() >= 400) responses.push({ path: new URL(response.url()).pathname, status: response.status() }) })
@@ -58,7 +59,6 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
     await page.clock.setFixedTime(new Date('2026-09-23T12:00:00Z'))
     try {
       await setup(page, checkpoint.profile, checkpoint.theme)
-      await prepareVisualFonts(page, String(info.project.use.baseURL))
       await page.evaluate(async theme => {
         document.documentElement.dataset.theme = theme
         await document.fonts.ready
@@ -73,19 +73,27 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
         theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }))
       expect(emulation, 'renderer differs from reference: browser context settings').toEqual({ scale: renderer.deviceScaleFactor,
         locale: renderer.locale, timezone: renderer.timezone, reduced: true, theme: checkpoint.theme })
-      const fonts = await renderedFonts(page)
+      const fonts = await fontEvidence(page, gate.state)
+      console.log(`${checkpoint.id}: font guard ok; computed body: ${fonts.body.computedFamily}; resolved: ${fonts.body.renderedFamilies.join(', ')}; profile faces loaded: ${fonts.profile.length}`)
       const png = capture || gate.mode === 'compare' ? await page.screenshot({ path: info.outputPath(`${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }) : null
       const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
       const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
       const violations = axe.violations.map(row => ({ id: row.id, impact: row.impact, nodes: row.nodes.map(node => node.target) }))
+      const expectedResponses = manifest.states.find((state: { id: string }) => state.id === gate.state)?.expectedResponses ?? []
+      const expected = (path: string, status: number) => expectedResponses.some((row: { path: string; status: number }) => row.path === path && row.status === status)
+      const expectedReads = responses.filter(row => expected(row.path, row.status))
+      const unexpectedResponses = responses.filter(row => !expected(row.path, row.status))
+      const unexpectedErrors = errors.filter(error => !expectedReads.some(row =>
+        error.startsWith(`Failed to load resource: the server responded with a status of ${row.status} `) && error.endsWith(row.path)))
       const report = { id: checkpoint.id, owner: checkpoint.owner, fixture: checkpoint.fixture,
         captureSHA, pngSHA256: png ? createHash('sha256').update(png).digest('hex') : null, baselineCompared: false,
         reference: gate, viewport, theme: checkpoint.theme, renderer, fonts, requirementsRun: true,
-        captureMode: capture, layout, axe: violations, console: errors, responses }
+        captureMode: capture, layout, axe: violations, console: unexpectedErrors, responses: unexpectedResponses, expectedReads }
       const saveReport = () => writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify(report, null, 2))
       saveReport()
-      expect(errors, 'unexpected console/page failure').toEqual([])
-      expect(responses, 'unexpected failed HTTP reads').toEqual([])
+      expect(expectedReads, 'declared fixture refusal must be observed exactly once').toEqual(expectedResponses.map(({ path, status }: { path: string; status: number }) => ({ path, status })))
+      expect(unexpectedErrors, 'unexpected console/page failure').toEqual([])
+      expect(unexpectedResponses, 'unexpected failed HTTP reads').toEqual([])
       expect(layout, 'unexpected clipping, overlap or overflow').toEqual([])
       expect(violations, 'WCAG A/AA violations').toEqual([])
       report.baselineCompared = !capture && gate.mode === 'compare' ? await compareVisualReference(page, info, checkpoint, { renderer }) : false
@@ -120,25 +128,37 @@ export async function compareVisualReference(page: Page, info: TestInfo, checkpo
     return false
   }
   assertRenderer(renderer, visual.renderer)
+  await fontEvidence(page, gate.state)
   materializeReference(info, checkpoint, { visual, baselineFile })
   await expect(page).toHaveScreenshot(`${checkpoint.id}.png`, { fullPage: false, animations: 'disabled', caret: 'hide',
     threshold: visual.comparison.threshold, maxDiffPixels: visual.comparison.maxDiffPixels, timeout })
   return true
 }
 
-// Only test setup changes typography: production assets and styles stay owned
-// by their product tickets. The pinned full font covers picker arrow glyphs
-// absent from the production Latin subset, without permitting system fallback.
+// Linux uses the private fontconfig installed before browser launch. The remote
+// Mac quality lane uses the same Inter bytes through a test-only face; the
+// product's CSS and fonts are never changed. Install before navigation so
+// opening a popover cannot precede a typography/layout change.
 export async function prepareVisualFonts(page: Page, baseURL: string) {
-  const url = new URL(`/${manifest.renderer.fonts[0].asset.replace(/^web\//, '')}`, baseURL).href
-  await page.addStyleTag({ content: `@font-face { font-family: 'JetBrains Mono'; src: url('${url}') format('truetype'); font-weight: 100 800; font-display: block; }
-    :root { --font: 'JetBrains Mono'; --serif: 'JetBrains Mono'; --mono: 'JetBrains Mono'; }
-    *, *::before, *::after, *::placeholder, *::file-selector-button { font-family: 'JetBrains Mono' !important; }` })
-  await page.evaluate(async () => {
-    const loaded = await document.fonts.load('14px "JetBrains Mono"')
-    if (!loaded.length || loaded.some(face => face.status !== 'loaded')) throw new Error('Self-hosted visual font did not load')
-    await document.fonts.ready
-  })
+  verifyFontAssets(manifest)
+  const mono = manifest.renderer.fonts.find((font: { asset: string }) => font.asset.endsWith('.ttf') && font.asset.includes('jetbrains'))
+  const url = (asset: string) => new URL(`/${asset.replace(/^web\//, '')}`, baseURL).href
+  const content = `@font-face { font-family: 'JetBrains Mono'; src: url('${url(mono.asset)}') format('truetype'); font-weight: 100 800; font-display: block; }
+    ${process.platform === 'linux' ? '' : `@font-face { font-family: 'Inter Variable'; src: url('${url(manifest.renderer.fonts[0].asset)}') format('truetype'); font-weight: 100 900; font-display: block; }
+    :root { --font: 'Inter Variable', -apple-system, system-ui, sans-serif !important; --serif: 'Inter Variable', -apple-system, system-ui, sans-serif !important; }`}`
+  await page.addInitScript(content => {
+    const add = () => {
+      if (!document.head) return false
+      const style = document.createElement('style'); style.dataset.visualFonts = ''; style.textContent = content
+      document.head.append(style)
+      return true
+    }
+    if (!add()) {
+      const observer = new MutationObserver(() => { if (add()) observer.disconnect() })
+      observer.observe(document, { childList: true, subtree: true })
+    }
+  }, content)
+  if (page.url() !== 'about:blank') await page.addStyleTag({ content })
 }
 
 export async function renderedFonts(page: Page) {
@@ -176,10 +196,10 @@ export async function renderedFonts(page: Page) {
       const { nodeId } = await client.send('DOM.requestNode', { objectId: object.value!.objectId! })
       const { fonts } = await client.send('CSS.getPlatformFontsForNode', { nodeId })
       for (const font of fonts) if (font.glyphCount > 0) {
-        if (!font.isCustomFont || font.familyName !== 'JetBrains Mono') {
+        if (!['Inter Variable', 'JetBrains Mono', 'Source Sans 3', 'Source Serif 4 Display'].includes(font.familyName)) {
           const { node } = await client.send('DOM.describeNode', { nodeId, depth: 0 })
           const { outerHTML } = await client.send('DOM.getOuterHTML', { nodeId })
-          throw new Error(`System-font fallback in visual checkpoint: ${font.familyName} at ${node.nodeName}: ${outerHTML.slice(0, 200)}`)
+          throw new Error(`Visual font guard: unexpected painted font ${font.familyName} at ${node.nodeName}: ${outerHTML.slice(0, 200)}`)
         }
         rendered.set(font.familyName, { family: font.familyName, custom: font.isCustomFont })
       }
@@ -190,6 +210,43 @@ export async function renderedFonts(page: Page) {
     await client.send('Runtime.releaseObjectGroup', { objectGroup: 'visual-fonts' }).catch(() => {})
     await client.detach()
   }
+}
+
+// A transparent probe inherits the actual computed stack and resolves glyphs
+// through Chromium. font-family alone still says system-ui when fontconfig has
+// accidentally mapped it to mono. Probes are removed before any screenshot.
+export async function fontEvidence(page: Page, state: string) {
+  await page.evaluate(() => document.fonts.ready)
+  const quote = ['public-quote', 'quote-editor'].includes(state)
+  if (quote) await page.waitForFunction(() => [...document.fonts].filter(face => face.family.replaceAll('"', '').startsWith('QuoteProfile')).length === 7)
+  const client = await page.context().newCDPSession(page)
+  const sample = async (selector: string) => {
+    const computedFamily = await page.locator(selector).first().evaluate(element => {
+      const probe = document.createElement('span')
+      probe.id = 'visual-font-probe'; probe.textContent = 'Proportional body Wiim'
+      probe.style.cssText = `position:fixed;opacity:0;pointer-events:none;font-family:${getComputedStyle(element).fontFamily}`
+      document.body.append(probe)
+      return getComputedStyle(element).fontFamily.replaceAll('"', '')
+    })
+    try {
+      const { root } = await client.send('DOM.getDocument')
+      const { nodeId } = await client.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#visual-font-probe' })
+      const { fonts } = await client.send('CSS.getPlatformFontsForNode', { nodeId })
+      return { computedFamily, renderedFamilies: [...new Set(fonts.filter(font => font.glyphCount > 0).map(font => font.familyName))].sort() }
+    } finally { await page.locator('#visual-font-probe').evaluate(element => element.remove()) }
+  }
+  try {
+    await client.send('DOM.enable'); await client.send('CSS.enable')
+    const body = await sample('body')
+    const profile = await page.evaluate(() => [...document.fonts].filter(face => face.family.replaceAll('"', '').startsWith('QuoteProfile')).map(face => ({
+      family: face.family.replaceAll('"', ''), role: face.family.endsWith('body') ? 'body' : 'display', weight: face.weight, style: face.style,
+      status: face.status, checked: document.fonts.check(`${face.style} ${face.weight} 14px "${face.family.replaceAll('"', '')}"`),
+    })))
+    const quoteDocument = quote ? { body: await sample('.quote-document'), display: await sample('.quote-document .quote-title') } : undefined
+    const evidence = { body, profile, document: quoteDocument, painted: await renderedFonts(page) }
+    assertFontEvidence(evidence, state)
+    return evidence
+  } finally { await client.detach() }
 }
 
 export function materializeReference(info: TestInfo, checkpoint: { id: string; reference: { attachmentMember: string } },

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { readFileSync } from 'node:fs'
 import { expect, type Page } from '@playwright/test'
 import { fixtures, liveAgent, me, mockWork } from '../work-fixtures'
 import { agentData, mockAgents } from '../agents-fixtures'
@@ -6,7 +7,7 @@ import { accessWorld, mockAccess, COORDINATOR } from '../access-fixtures'
 import { knowledgeWorld, mockKnowledge } from '../knowledge-fixtures'
 import { mockDecisionDesk } from '../decision-desk-fixtures'
 import { businessData, mockBusiness } from '../business-fixtures'
-import { mockQuoteEditor, QUOTE_ID, NODES, quoteDocument } from '../quote-inspector-fixtures'
+import { mockQuoteEditor, QUOTE_ID, NODES, quoteDocument, type QuoteDoc } from '../quote-inspector-fixtures'
 import { mockPublicQuote } from '../quote-list-fixtures'
 import { mockSettings, settingsData } from '../settings-fixtures'
 import { mockRulesScale, scaleImportFile } from '../rules-scale-fixtures'
@@ -17,7 +18,8 @@ import { mockFlow } from '../delivery-flow-fixtures'
 import { capacityWorld, NOW as CAPACITY_NOW } from '../capacity-fixtures'
 import { mockDailyPlan } from '../agents-daily-fixtures'
 import { mockStartAgent } from '../start-agent-fixtures'
-import { makeNative } from '../native-session-program-fixtures'
+import { mockChatThread } from '../chat-thread-fixtures'
+import type { QuoteProfileSnapshot } from '../../src/lib/quotes/types'
 import type { VisualSetup, Theme } from './checkpoint'
 import { visualChrome } from './chrome-fixture'
 
@@ -96,7 +98,7 @@ export const agents: VisualSetup = async (page, _profile, theme) => {
   await expect(page.locator(`[data-row="s:${data.sessions[6]!.id}"]`)).toBeVisible()
 }
 
-async function setupSessionChat(page: Page, theme: Theme, unavailable: boolean) {
+async function setupSessionChatUnavailable(page: Page, theme: Theme) {
   await work(page, theme)
   const data = agentsData(), worker = data.sessions[0]!
   worker.display_label = 'Release coordination'
@@ -107,20 +109,13 @@ async function setupSessionChat(page: Page, theme: Theme, unavailable: boolean) 
     created_at: new Date(NOW - 60_000).toISOString() })
   await mockAgents(page, data, { now: () => NOW })
   await healthyLead(page)
-  // A valid native-context selects the product's owned-session Chat pane. That
-  // pane currently explains its native-client input limit; fabricating a 200
-  // refusal would hide an invalid contract to keep the legacy composer visible.
-  // The separate unavailable fixture retains the legacy post/composer and 503.
-  const native = makeNative()
-  Object.assign(native.current_binding!, { project_id: worker.project_id, harness_session_id: worker.id })
-  native.harness = worker.harness
-  native.terminal_viewer_url = null
+  // This separate refusal fixture retains the legacy post/composer and typed 503.
   const conversation = '7c000000-0000-4000-8000-000000001674'
   await page.route('**/api/**', route => {
     const request = route.request(), path = new URL(request.url()).pathname
     if (request.method() !== 'GET') return route.fallback()
-    if (path === `/api/projects/${worker.project_id}/harness-sessions/${worker.id}/native-context`) return unavailable ? route.fulfill({ status: 503,
-      json: { reason: 'feature_disabled', request_id: null, retryable: false } }) : route.fulfill({ json: native })
+    if (path === `/api/projects/${worker.project_id}/harness-sessions/${worker.id}/native-context`) return route.fulfill({ status: 503,
+      json: { reason: 'feature_disabled', request_id: null, retryable: false } })
     if (path === `/api/chat-sessions/${worker.id}/thread`) return route.fulfill({ json: {
       contract: 'chat-v1', conversation_id: conversation, role: { contract: 'chat-v1' }, revision: '1', binding_epoch: '1',
       readiness: { state: 'offline', capabilities: [], reason: 'session_offline' },
@@ -136,13 +131,26 @@ async function setupSessionChat(page: Page, theme: Theme, unavailable: boolean) 
   await page.goto(`/agents/${worker.id}?tab=messages`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await panel.getByRole('tab', { name: /^Chat/ }).click()
-  if (unavailable) {
-    await expect(panel.getByRole('textbox', { name: 'Message to Release coordination', exact: true })).toBeVisible()
-    await expect(panel.getByText('Übergabebericht', { exact: true })).toBeVisible()
-  } else await expect(panel.getByText('Owned session input from this panel is not available yet. Use the qualified session client.', { exact: true })).toBeVisible()
+  await expect(panel.getByRole('textbox', { name: 'Message to Release coordination', exact: true })).toBeVisible()
+  await expect(panel.getByText('Übergabebericht', { exact: true })).toBeVisible()
 }
-export const sessionChat: VisualSetup = async (page, _profile, theme) => setupSessionChat(page, theme, false)
-export const sessionChatUnavailable: VisualSetup = async (page, _profile, theme) => setupSessionChat(page, theme, true)
+export const sessionChat: VisualSetup = async (page, _profile, theme) => {
+  const { worker } = await mockChatThread(page, { theme, now: NOW, clock: false, today: true })
+  await visualChrome(page, fixtures(), NOW, { agents: false })
+  await healthyLead(page)
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const panel = page.getByRole('complementary', { name: 'Session details' })
+  await expect(panel.getByRole('textbox', { name: 'Message to AEON-LEAD', exact: true })).toBeVisible()
+  const thread = panel.getByRole('list', { name: 'Messages', exact: true })
+  await expect(thread.locator('.msg.desk')).toHaveCount(2)
+  await expect(thread.getByRole('article', { name: /^Decision Desk: Merge AEON-1182/ })).toContainText('Answered: Yes, merge now')
+  await expect(thread.getByRole('article', { name: /^Decision Desk: Ship the 135 notes/ })).toContainText('Waiting for you')
+  await expect(thread.getByRole('separator', { name: 'Today', exact: true })).toHaveCount(1)
+  await expect(thread.locator('.msg.mine').last()).toContainText('Start it now. Keep the CI fixes in their own PR.')
+  await page.evaluate(() => document.fonts.ready)
+  await panel.locator('.thread-scroll').evaluate(element => { element.scrollTop = 0 })
+}
+export const sessionChatUnavailable: VisualSetup = async (page, _profile, theme) => setupSessionChatUnavailable(page, theme)
 
 export const decisionDesk: VisualSetup = async (page, profile, theme) => {
   await work(page, theme)
@@ -237,9 +245,24 @@ export const hours: VisualSetup = async (page, _profile, theme) => {
   await expect(page.getByRole('form', { name: 'Edit entry' })).toBeVisible()
 }
 
+
+// Use the actual bundled INSPR profile and serve only its allowlisted assets.
+async function visualQuoteProfile(page: Page): Promise<QuoteProfileSnapshot> {
+  const root = new URL('../../../internal/business/quotes/profiles/inspr/', import.meta.url)
+  const { definition } = JSON.parse(readFileSync(new URL('profile.json', root), 'utf8'))
+  const allowed = new Set([...definition.fonts.map((face: { asset_id: string }) => face.asset_id), definition.footer.asset_id])
+  await page.route('**/api/quote-profiles/assets/**', route => {
+    const asset = decodeURIComponent(new URL(route.request().url()).pathname.split('/assets/')[1]!)
+    if (!allowed.has(asset)) throw new Error(`Unexpected INSPR quote asset: ${asset}`)
+    return route.fulfill({ body: readFileSync(new URL(asset, root)), contentType: asset.endsWith('.woff2') ? 'font/woff2' : 'image/svg+xml' })
+  })
+  return { id: '7e5a0000-0000-4000-8000-000000001674', revision: 1, definition }
+}
+
 export const quoteEditor: VisualSetup = async (page, _profile, theme) => {
   await work(page, theme)
-  const document = quoteDocument()
+  const document: QuoteDoc = quoteDocument()
+  document.profile = await visualQuoteProfile(page)
   document.sections[0]!.nodes[0]!.text = `${LONG}. **Vollständige Prüfung** vor jeder Freigabe.`
   await mockQuoteEditor(page, document)
   await page.goto(`/business/quotes/${QUOTE_ID}`)
@@ -253,7 +276,7 @@ export const quoteEditor: VisualSetup = async (page, _profile, theme) => {
 
 export const publicQuote: VisualSetup = async (page, _profile, theme) => {
   await work(page, theme)
-  await mockPublicQuote(page, { acceptable: true, now: NOW })
+  await mockPublicQuote(page, { acceptable: true, now: NOW, profile: await visualQuoteProfile(page) })
   await page.goto('/offers/sel-demo/tok-example')
   await expect(page.locator('#pq-title')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Prüfen und annehmen', exact: true })).toBeVisible()
@@ -280,7 +303,14 @@ export const capacity: VisualSetup = async (page, _profile, theme) => {
   await mockAgents(page, data, { capacity, now: () => CAPACITY_NOW })
   await mockDailyPlan(page, { example: 'pace' })
   await page.goto('/settings/capacity')
-  await page.locator('button[data-pace="claude"]').click()
+  await page.evaluate(() => document.fonts.ready)
+  const picker = page.locator('button[data-pace="claude"]')
+  // Finish layout and scroll before opening: FloatingPanel closes when its
+  // trigger moves, so late font metrics must never choose a theme's state.
+  await picker.evaluate(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }))
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+  await picker.click()
+  await expect(picker).toHaveAttribute('aria-expanded', 'true')
   await expect(page.getByRole('dialog', { name: /^Daily limit for/ })).toBeVisible()
 }
 

@@ -180,7 +180,7 @@
         "decision": "changes-requested",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "reason": "Awaiting AEON-1688 and the next reviewed reference round; no recapture or pin in round 5.",
+        "reason": "AEON-1688 is on main. Included in the round-8 sixteen-state Linux capture; awaiting Tick review.",
         "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
       }
     },
@@ -321,7 +321,7 @@
         "decision": "changes-requested",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "reason": "Awaiting AEON-1688 and the next reviewed reference round; no recapture or pin in round 5.",
+        "reason": "AEON-1688 is on main. Included in the round-8 sixteen-state Linux capture; awaiting Tick review.",
         "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
       }
     },
@@ -329,7 +329,7 @@
       "id": "session-chat",
       "label": "Session Chat",
       "owner": "tests/visual/session-chat.spec.ts",
-      "fixture": "Successful, session-bound native-context read; open owned-session Chat pane with the explicit qualified-client input limitation. Legacy long post/code/link, receipt and composer remain covered by the separate native-refusal test.",
+      "fixture": "AEON-1438/1687 shared conversation: answered and waiting Desk cards; Today separator; latest sent message and receipt",
       "profiles": [
         "phone",
         "desktop"
@@ -381,7 +381,14 @@
         "decision": "awaiting-linux-reference",
         "reason": "AEON-1687 is on main. Included in the manual Linux capture set; awaiting Tick review of the hosted capture.",
         "evidence": "LEAD-M AEON-1674 round-6 brief"
-      }
+      },
+      "expectedResponses": [
+        {
+          "path": "/api/projects/p-pharos/harness-sessions/5e000000-0000-4000-8000-000000000001/native-context",
+          "status": 503,
+          "reason": "feature_disabled"
+        }
+      ]
     },
     {
       "id": "decision-desk",
@@ -458,7 +465,7 @@
         "decision": "changes-requested",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "reason": "Awaiting AEON-1688 and the next reviewed reference round; no recapture or pin in round 5.",
+        "reason": "AEON-1688 is on main. Included in the round-8 sixteen-state Linux capture; awaiting Tick review.",
         "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
       }
     },
@@ -537,7 +544,7 @@
         "decision": "changes-requested",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "reason": "Awaiting AEON-1688 and the next reviewed reference round; no recapture or pin in round 5.",
+        "reason": "AEON-1688 is on main. Included in the round-8 sixteen-state Linux capture; awaiting Tick review.",
         "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
       }
     },
@@ -597,7 +604,7 @@
         "decision": "changes-requested",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "reason": "Awaiting AEON-1688 and the next reviewed reference round; no recapture or pin in round 5.",
+        "reason": "AEON-1688 is on main. Included in the round-8 sixteen-state Linux capture; awaiting Tick review.",
         "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
       }
     },
@@ -773,7 +780,7 @@
         "decision": "changes-requested",
         "reviewedOn": "2026-10-23",
         "recordedBy": "LEAD-M",
-        "reason": "Awaiting AEON-1688 and the next reviewed reference round; no recapture or pin in round 5.",
+        "reason": "AEON-1688 is on main. Included in the round-8 sixteen-state Linux capture; awaiting Tick review.",
         "evidence": "AEON-1674 round-3/round-4/round-5 briefs; AEON-1670 detached approved-set manifest"
       }
     },
@@ -1090,7 +1097,7 @@
       "id": "capacity",
       "label": "Capacity & load",
       "owner": "tests/visual/capacity.spec.ts",
-      "fixture": "Quota/pace rows with stale or partial evidence and an open editor",
+      "fixture": "Daily limit for Claude Code popover open; fonts and layout settled before opening; identical scroll in both themes",
       "profiles": [
         "phone",
         "desktop"
@@ -1709,15 +1716,79 @@
     "locale": "en-GB",
     "fonts": [
       {
+        "family": "Inter Variable",
+        "asset": "web/tests/visual/fonts/inter-v4.1.ttf",
+        "sha256": "4989b125924991b90d05b2d16e0e388c48f7d5bb8b30539bbf9c755278d0ccaf",
+        "source": "https://raw.githubusercontent.com/rsms/inter/e3a3d4c57d5ecc01453a575621882a384c1995a3/docs/font-files/InterVariable.ttf",
+        "license": "web/tests/visual/fonts/Inter-OFL.txt"
+      },
+      {
         "family": "JetBrains Mono",
         "asset": "web/tests/visual/fonts/jetbrains-mono-v2.304.ttf",
         "sha256": "662a196d58f1183bf2d77428b6d5283fe3f45161ab021bea4036bc98e5cac016",
         "source": "https://github.com/JetBrains/JetBrainsMono/blob/cd5227bd1f61dff3bbd6c814ceaf7ffd95e947d9/fonts/variable/JetBrainsMono%5Bwght%5D.ttf",
         "license": "web/tests/visual/fonts/OFL.txt"
+      },
+      {
+        "family": "JetBrains Mono",
+        "asset": "web/src/assets/fonts/jetbrains.woff2",
+        "sha256": "18be452724bfdc236c074ca94a249a7f41a86752c7d04ab258ce9ed5651f6a7e",
+        "license": "web/tests/visual/fonts/OFL.txt"
+      },
+      {
+        "family": "Source Sans 3",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSans3-Regular.ttf.woff2",
+        "sha256": "53492fb3a0def77354f166a55d09b63a10855e91c206c7620a81cf56e97f8ec3",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSans3-OFL-1.1.txt"
+      },
+      {
+        "family": "Source Sans 3",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSans3-It.ttf.woff2",
+        "sha256": "4d80b3b801f4c457f1b4adbd3911d8501338e6d282141663770c38d3a2e97859",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSans3-OFL-1.1.txt"
+      },
+      {
+        "family": "Source Sans 3",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSans3-Semibold.ttf.woff2",
+        "sha256": "47b9b661b9f395fe7f0d0e119637fba5c8dad97bde3df60066fd24229c0792f4",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSans3-OFL-1.1.txt"
+      },
+      {
+        "family": "Source Sans 3",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSans3-SemiboldIt.ttf.woff2",
+        "sha256": "552d2d08e719d09413fbfff81f6fa16f153ad87edf6a49d69df9c303fea71ae6",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSans3-OFL-1.1.txt"
+      },
+      {
+        "family": "Source Sans 3",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSans3-Bold.ttf.woff2",
+        "sha256": "8d35c6d40e750a4ee23bbbba2bd604ad098d172907369b43281507e16b8e2e7a",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSans3-OFL-1.1.txt"
+      },
+      {
+        "family": "Source Sans 3",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSans3-BoldIt.ttf.woff2",
+        "sha256": "8c4b66aea0e7887dfd1e296b03ae53b76ce25256fae1437777514933acaef0f3",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSans3-OFL-1.1.txt"
+      },
+      {
+        "family": "Source Serif 4 Display",
+        "asset": "internal/business/quotes/profiles/inspr/fonts/SourceSerif4Display-Regular.ttf.woff2",
+        "sha256": "c75301c83bef55b3787f3060c2f62cb5d902a6706419149b7ff9d0c7927055ac",
+        "license": "internal/business/quotes/profiles/inspr/licenses/SourceSerif4-OFL-1.1.txt"
       }
     ],
-    "fontPolicy": "Test-only font-family override to the pinned full self-hosted JetBrains Mono v2.304 fixture for every text element and pseudo element, including picker arrows. CDP must confirm every rendered glyph uses this custom font. System fallbacks fail.",
-    "imageVersionPolicy": "Capture records ImageVersion. Tick-approved Linux pins must set this exact value before comparison; a later hosted image requires a new review."
+    "fontPolicy": "Renderer only: digest-verified vendored Inter 4.1; fontconfig maps -apple-system, system-ui and sans-serif to Inter. Production font stacks stay intact. Body computed family and resolved Inter, painted font families, and all quote-profile faces are guarded before captures and comparisons. Full JetBrains Mono is reserved for mono text; profile documents use their Source Sans 3 / Source Serif 4 Display faces.",
+    "imageVersionPolicy": "Capture records ImageVersion. Tick-approved Linux pins must set this exact value before comparison; a later hosted image requires a new review.",
+    "fontconfig": {
+      "aliases": {
+        "-apple-system": "Inter Variable",
+        "system-ui": "Inter Variable",
+        "sans-serif": "Inter Variable",
+        "monospace": "JetBrains Mono"
+      },
+      "installer": "node scripts/test-prune/visual-renderer.mjs install-fonts"
+    }
   },
   "comparison": {
     "threshold": 0,
@@ -1737,7 +1808,13 @@
       "quote-editor",
       "session-chat",
       "hours",
-      "capacity"
+      "capacity",
+      "tickets",
+      "agents",
+      "decision-desk",
+      "account-use-matrix",
+      "delivery-numbers",
+      "models"
     ],
     "retentionDays": 7,
     "approval": "pending-Tick-review",
