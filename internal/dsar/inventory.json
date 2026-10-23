@@ -1114,7 +1114,24 @@
     {
       "classification": "personal",
       "columns": {
+        "message_id": "metadata",
+        "reported_at": "personal",
+        "sender_principal_id": "personal",
+        "session_id": "metadata",
+        "target_node_id": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "sender_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "inbox_lane_statuses"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "cancelled_at": "metadata",
+        "lane_status": "personal",
         "pickup_lease_until": "metadata"
       },
       "locator": {

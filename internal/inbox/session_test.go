@@ -28,6 +28,7 @@ func messageTestSession(t *testing.T, w *world, project string, p tenant.Princip
 }
 
 func TestSessionMessagesIsolationAndLegacyWire(t *testing.T) {
+	t.Run("structured lane status through a reporting day", testLaneStatusInboxDay)
 	w, m, project, srv := messagingWorld(t)
 	first := messageTestSession(t, w, project, w.agent, "First worker")
 	second := messageTestSession(t, w, project, w.agent, "Second worker")

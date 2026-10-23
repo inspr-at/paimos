@@ -26,13 +26,15 @@ const (
 
 // Message is one durable inbox row. AckedAt is null until the recipient acks.
 type Message struct {
-	ContentMode                string     `json:"content_mode,omitempty"`
-	MessageGrantID             *string    `json:"message_grant_id,omitempty"`
-	RecipientMessageGeneration *string    `json:"recipient_message_generation,omitempty"`
-	MessageDeadline            *time.Time `json:"message_deadline,omitempty"`
-	RecipientSessionID         *string    `json:"recipient_session_id,omitempty"`
-	SenderSessionID            *string    `json:"sender_session_id,omitempty"`
-	SenderLabel                string     `json:"sender_label,omitempty"`
+	Kind                       string      `json:"kind,omitempty"`
+	LaneStatus                 *LaneStatus `json:"lane_status,omitempty"`
+	ContentMode                string      `json:"content_mode,omitempty"`
+	MessageGrantID             *string     `json:"message_grant_id,omitempty"`
+	RecipientMessageGeneration *string     `json:"recipient_message_generation,omitempty"`
+	MessageDeadline            *time.Time  `json:"message_deadline,omitempty"`
+	RecipientSessionID         *string     `json:"recipient_session_id,omitempty"`
+	SenderSessionID            *string     `json:"sender_session_id,omitempty"`
+	SenderLabel                string      `json:"sender_label,omitempty"`
 	frozenSenderLabel          string
 	ID                         string     `json:"id"`
 	SenderPrincipalID          string     `json:"sender_principal_id"`
@@ -77,12 +79,12 @@ func metaFrom(m Message) messageMeta {
 	}
 }
 
-const messageCols = `content_mode,message_grant_id::text,recipient_message_generation::text,message_deadline,recipient_session_id::text,sender_session_id::text,coalesce(sender_label,''),id::text, sender_principal_id::text, recipient_principal_id::text,
+const messageCols = `lane_status,content_mode,message_grant_id::text,recipient_message_generation::text,message_deadline,recipient_session_id::text,sender_session_id::text,coalesce(sender_label,''),id::text, sender_principal_id::text, recipient_principal_id::text,
 	reply_to_id::text, body, idempotency_key, expires_at, sent_event_id, created_at, acked_at`
 
 func scanMessage(row pgx.Row) (Message, error) {
 	var m Message
-	err := row.Scan(&m.ContentMode, &m.MessageGrantID, &m.RecipientMessageGeneration, &m.MessageDeadline, &m.RecipientSessionID, &m.SenderSessionID, &m.frozenSenderLabel, &m.ID, &m.SenderPrincipalID, &m.RecipientPrincipalID, &m.ReplyToID,
+	err := row.Scan(&m.LaneStatus, &m.ContentMode, &m.MessageGrantID, &m.RecipientMessageGeneration, &m.MessageDeadline, &m.RecipientSessionID, &m.SenderSessionID, &m.frozenSenderLabel, &m.ID, &m.SenderPrincipalID, &m.RecipientPrincipalID, &m.ReplyToID,
 		&m.Body, &m.IdempotencyKey, &m.ExpiresAt, &m.SentEventID, &m.CreatedAt, &m.AckedAt)
 	if m.RecipientSessionID != nil || m.SenderSessionID != nil {
 		m.SenderLabel = m.frozenSenderLabel
@@ -90,10 +92,14 @@ func scanMessage(row pgx.Row) (Message, error) {
 	if m.ContentMode == "durable" {
 		m.ContentMode = ""
 	}
+	if m.LaneStatus != nil {
+		m.Kind = "status"
+	}
 	return m, err
 }
 
 type sendInput struct {
+	LaneStatus         *LaneStatus
 	Generation         string
 	RecipientSessionID *string
 	SenderSessionID    *string
@@ -114,17 +120,30 @@ func (m *module) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Generation           string     `json:"recipient_message_generation"`
-		RecipientSessionID   *string    `json:"recipient_session_id"`
-		SenderSessionID      *string    `json:"sender_session_id"`
-		RecipientPrincipalID string     `json:"recipient_principal_id"`
-		Body                 string     `json:"body"`
-		IdempotencyKey       string     `json:"idempotency_key"`
-		ReplyToID            *string    `json:"reply_to_id"`
-		ExpiresAt            *time.Time `json:"expires_at"`
+		Kind                 string      `json:"kind"`
+		LaneStatus           *LaneStatus `json:"lane_status"`
+		Generation           string      `json:"recipient_message_generation"`
+		RecipientSessionID   *string     `json:"recipient_session_id"`
+		SenderSessionID      *string     `json:"sender_session_id"`
+		RecipientPrincipalID string      `json:"recipient_principal_id"`
+		Body                 string      `json:"body"`
+		IdempotencyKey       string      `json:"idempotency_key"`
+		ReplyToID            *string     `json:"reply_to_id"`
+		ExpiresAt            *time.Time  `json:"expires_at"`
 	}
 	if !decodeJSON(w, r, 512<<10, &body) {
 		return
+	}
+	if err := normalizeLaneStatus(body.Kind, body.LaneStatus, body.SenderSessionID); err != nil {
+		failure(w, err)
+		return
+	}
+	if body.LaneStatus != nil {
+		if body.ReplyToID != nil || body.ExpiresAt != nil || body.Generation != "" {
+			failure(w, badRequest("status cannot be a reply, attached note or expiring message"))
+			return
+		}
+		body.Body = body.LaneStatus.Line()
 	}
 	in, err := normalizeSend(p, body.RecipientPrincipalID, body.Body, body.IdempotencyKey, body.ReplyToID, body.ExpiresAt)
 	if err != nil {
@@ -132,6 +151,7 @@ func (m *module) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.RecipientSessionID, in.SenderSessionID = body.RecipientSessionID, body.SenderSessionID
+	in.LaneStatus = body.LaneStatus
 	if err := normalizeSession(in.RecipientSessionID); err != nil {
 		failure(w, err)
 		return
@@ -183,7 +203,7 @@ func normalizeSend(p tenant.Principal, recipient, body, key string, reply *strin
 func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Message, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if handled, msg, _, err := m.tryAttached(ctx, p, "", attachedInput{Expires: in.Expires, Recipient: in.Recipient, Body: in.Body, Key: in.Key, Generation: in.Generation, Session: in.RecipientSessionID, SenderSession: in.SenderSessionID, Reply: in.ReplyTo}); handled || err != nil {
+	if handled, msg, _, err := m.tryAttached(ctx, p, "", attachedInput{Status: in.LaneStatus != nil, Expires: in.Expires, Recipient: in.Recipient, Body: in.Body, Key: in.Key, Generation: in.Generation, Session: in.RecipientSessionID, SenderSession: in.SenderSessionID, Reply: in.ReplyTo}); handled || err != nil {
 		return msg, err
 	}
 	var out Message
@@ -193,6 +213,9 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 		}
 		if err := authz.RequireTx(ctx, tx, p, "inbox.send", authz.Scope{}); err != nil {
 			return errForbidden
+		}
+		if err := authorizeLaneStatusTx(ctx, tx, p, in.SenderSessionID, in.LaneStatus, ""); err != nil {
+			return err
 		}
 		if m.attached.Enabled() {
 			if request, err := attachedmsg.AttachmentForSend(ctx, tx, in.Recipient, in.RecipientSessionID); err != nil {
@@ -249,7 +272,16 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 				return errNotFound
 			}
 		}
+		var reportedAt time.Time
+		if in.LaneStatus != nil {
+			reportedAt, err = m.laneNow(ctx, tx)
+			if err != nil {
+				return err
+			}
+		}
 		out, err = AcceptMessageTx(ctx, tx, p, Acceptance{
+			laneReportedAt:       reportedAt,
+			LaneStatus:           in.LaneStatus,
 			RecipientPrincipalID: in.Recipient, RecipientSessionID: in.RecipientSessionID,
 			SenderSessionID: in.SenderSessionID, SenderLabel: senderLabel,
 			Body: in.Body, IdempotencyKey: in.Key, ReplyToID: in.ReplyTo, ExpiresAt: in.Expires,
@@ -263,6 +295,8 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 // message. ProjectID scopes its sent event when an internal service knows the
 // project; ordinary principal messages keep their existing node-less event.
 type Acceptance struct {
+	laneReportedAt       time.Time
+	LaneStatus           *LaneStatus
 	RecipientPrincipalID string
 	RecipientSessionID   *string
 	SenderSessionID      *string
@@ -278,7 +312,8 @@ type Acceptance struct {
 // internal services: sent event, message, wakes and queued receipt/deadline.
 // The caller must authorize under its access-change fence, serialize/check
 // idempotency, and lock every existing FK parent and session BEFORE its first
-// event append. This function acquires no existing-row locks. Any error must
+// event append. An optional lane projection is reserved before the append;
+// no existing-row locks are acquired after it. Any error must
 // roll back the caller's transaction. Terminal failure notices intentionally
 // use their separate receipt-free path so failures cannot recurse.
 func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acceptance) (Message, error) {
@@ -292,6 +327,9 @@ func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acce
 	if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
 		return Message{}, err
 	}
+	if err := recordLaneStatusTx(ctx, tx, p, in.SenderSessionID, in.LaneStatus, id, in.laneReportedAt); err != nil {
+		return Message{}, err
+	}
 	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: in.ProjectID, Type: "inbox.sent", After: messageMeta{
 		ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: in.RecipientPrincipalID,
 		ReplyToID: in.ReplyToID, IdempotencyKey: in.IdempotencyKey, ExpiresAt: in.ExpiresAt,
@@ -301,10 +339,10 @@ func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acce
 	}
 	out, err := scanMessage(tx.QueryRow(ctx, `INSERT INTO inbox_messages (
 		tenant_id, id, sender_principal_id, recipient_principal_id, reply_to_id,
-		sent_event_id, body, idempotency_key, expires_at,recipient_session_id,sender_session_id,sender_label)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9,$10::uuid,$11::uuid,$12)
+		sent_event_id, body, idempotency_key, expires_at,recipient_session_id,sender_session_id,sender_label,lane_status)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9,$10::uuid,$11::uuid,$12,$13::jsonb)
 		RETURNING `+messageCols,
-		p.TenantID, id, p.ID, in.RecipientPrincipalID, in.ReplyToID, ev.ID, in.Body, in.IdempotencyKey, in.ExpiresAt, in.RecipientSessionID, in.SenderSessionID, in.SenderLabel))
+		p.TenantID, id, p.ID, in.RecipientPrincipalID, in.ReplyToID, ev.ID, in.Body, in.IdempotencyKey, in.ExpiresAt, in.RecipientSessionID, in.SenderSessionID, in.SenderLabel, lanePayload(in.LaneStatus)))
 	if err != nil {
 		return Message{}, mapWrite(err)
 	}
@@ -318,6 +356,9 @@ func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acce
 }
 
 func sameSend(m Message, in sendInput) bool {
+	if messageDigest(m.LaneStatus) != messageDigest(in.LaneStatus) {
+		return false
+	}
 	if m.RecipientPrincipalID != in.Recipient || m.Body != in.Body || !sameSession(m.RecipientSessionID, in.RecipientSessionID) || !sameSession(m.SenderSessionID, in.SenderSessionID) {
 		return false
 	}

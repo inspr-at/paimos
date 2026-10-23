@@ -75,6 +75,7 @@
   "routes": {
     "DELETE /api/inbox/targets/{targetId}": "inbox.send|inbox.manage",
     "GET /api/inbox/feedback-recipient": "inbox.send",
+    "GET /api/inbox/lanes": "inbox.read",
     "GET /api/inbox/message-status": "inbox.receipt",
     "GET /api/inbox/messages": "inbox.read",
     "GET /api/inbox/messages/{messageId}/receipt": "inbox.receipt",
@@ -103,5 +104,8 @@
     "resources": {
       "inbox": "messages"
     }
+  },
+  "project_filtered": {
+    "GET /api/inbox/lanes": true
   }
 }
