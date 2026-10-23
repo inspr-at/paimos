@@ -28,6 +28,10 @@ export interface AssistantEvent {
   before?: AssistantSnapshot; after?: AssistantSnapshot
 }
 export type AssistantStatus = 'waiting' | 'down' | 'working' | 'idle' | 'paused' | 'setup' | 'unavailable'
+export interface AssistantRoutine {
+  id: string; name: string; schedule: string; next: string | null; projectId: string
+  result?: { label: string; href: string }; paused: boolean; revision: number; lastState?: string
+}
 
 // Presentation facts have explicit unknowns. Unmerged services are never
 // probed at invented routes and their absence is never converted to zero/ok.
@@ -35,7 +39,8 @@ export interface AssistantFacts {
   adapter: null | { state: 'ok' | 'down' | 'setup'; lastReceipt: string | null; failingSince?: string; error?: string }
   spend: null | { amount: string; daily: { day: string; amount: string }[]; resumes?: string }
   approvals: null | { id: string; title: string; target: string; at: string; href: string; decision?: string; by?: string }[]
-  routines: null | { id: string; name: string; schedule: string; next: string | null; result?: { label: string; href: string }; paused: boolean; revision: number }[]
+  routines: null | AssistantRoutine[]
+  routinesTruncated?: boolean; routinesError?: string; activityIncomplete?: boolean
   activity: null | { at: string; text: string; kind: 'messages' | 'runs' | 'approvals'; href?: string; refused?: boolean }[]
   lastActivity: null | { at: string; text: string }
   paused: null | { by: string; at: string }
@@ -43,7 +48,7 @@ export interface AssistantFacts {
 export const unavailableAssistantFacts = (): AssistantFacts => ({ adapter: null, spend: null, approvals: null, routines: null, activity: null, lastActivity: null, paused: null })
 // These services have no merged assistant read contract yet. Add a capability
 // only alongside its real, permission-checked read/mutation adapter.
-export const assistantCapabilities = Object.freeze({ adapter: false, approvals: false, routines: false, pause: false, approvers: false, resetWeekday: false })
+export const assistantCapabilities = Object.freeze({ adapter: false, approvals: false, routines: true, pause: false, approvers: false, resetWeekday: false })
 
 export function assistantStatus(item: Assistant, facts: AssistantFacts, now: number): AssistantStatus {
   if (facts.paused || item.status === 'deactivated' || budgetPercent(item.policy, facts) === 100) return 'paused'

@@ -485,6 +485,7 @@
         "web/public/**",
         "web/src/lib/displayLanguage.ts",
         "web/src/lib/assistants.ts",
+        "web/src/lib/assistantRoutines.ts",
         "web/src/lib/assistantsCopy.ts",
         "web/src/stores/assistants.ts",
         "web/tests/assistants.unit.test.ts",

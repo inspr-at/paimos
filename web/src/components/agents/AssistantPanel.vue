@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAssistants } from '../../stores/assistants'
 import { useProjects } from '../../stores/projects'
 import { useSession } from '../../stores/session'
-import { assistantCapabilities, assistantDeskLink, assistantMoney, assistantStatus, ASSISTANT_STATUS_ICON, cloneAssistantPolicy, policyChange, policyGroups, type Assistant, type AssistantFacts, type AssistantPolicy } from '../../lib/assistants'
+import { assistantCapabilities, assistantDeskLink, assistantMoney, assistantStatus, ASSISTANT_STATUS_ICON, cloneAssistantPolicy, policyChange, policyGroups, type Assistant, type AssistantFacts, type AssistantPolicy, type AssistantRoutine } from '../../lib/assistants'
 import { assistantCopy } from '../../lib/assistantsCopy'
 import { can } from '../../lib/authz'
 import { APIError } from '../../lib/api'
@@ -60,6 +60,18 @@ const scopeOptions = computed(() => [
 const otherScopes = computed(() => displayPolicy.value.allowed_scopes.filter(scope => !scopeOptions.value.some(option => option.scopes.includes(scope))))
 function time(at: string) { return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) }
 function projectName(id: string) { const project = projects.byId(id); return project?.routeKey ?? id }
+const nextRoutine = computed(() => props.facts.routines?.filter(row => row.next && !row.paused).sort((a, b) => Date.parse(a.next!) - Date.parse(b.next!))[0])
+async function toggleRoutine(routine: AssistantRoutine) {
+  const id = props.item.principal_id, person = who.value, paused = routine.paused
+  feedback.value = ''; failed.value = false
+  try {
+    const saved = await store.toggleRoutine(id, routine)
+    if (saved && id === props.item.principal_id && person === who.value) feedback.value = paused ? words.routineResumed(routine.name) : words.routinePaused(routine.name)
+  } catch (error) {
+    if (id !== props.item.principal_id || person !== who.value) return
+    failed.value = true; feedback.value = error instanceof APIError && error.status === 409 ? words.routineConflict : error instanceof Error ? error.message : words.routinesUnavailable
+  }
+}
 function toggleProject(id: string, checked: boolean) {
   if (!draft.value) return
   draft.value.allowed_projects = checked ? [...new Set([...draft.value.allowed_projects, id])] : draft.value.allowed_projects.filter(value => value !== id)
@@ -136,15 +148,15 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <div v-show="tab === 'overview'" id="assistant-pane-overview" role="tabpanel" aria-labelledby="assistant-tab-overview">
         <section class="assistant-block"><h3>{{ words.thisWeek }}</h3><AssistantBudget :policy="item.policy" :facts="facts" daily /></section>
         <section class="assistant-block"><h3>{{ words.adapter }}</h3><dl><div><dt>{{ words.vendor }}</dt><dd>{{ vendor }}</dd></div><div><dt>{{ words.status }}</dt><dd>{{ facts.adapter ? facts.adapter.state === 'ok' ? words.adapterOk(vendor) : facts.adapter.state === 'down' ? words.statuses.down : words.statuses.setup : words.adapterUnavailable }}</dd></div><div><dt>{{ words.lastReceipt }}</dt><dd>{{ facts.adapter?.lastReceipt ? relativeTime(facts.adapter.lastReceipt, { now }) : words.notReported }}</dd></div><div v-if="facts.adapter?.error"><dt>{{ words.lastError }}</dt><dd>{{ facts.adapter.error }}</dd></div></dl></section>
-        <section class="assistant-block"><h3>{{ words.next }}</h3><p>{{ facts.routines === null ? words.routinesUnavailable : facts.routines.length ? facts.routines[0]?.name : words.noRoutines }}</p><RouterLink v-if="openApprovals?.length" :to="assistantDeskLink(item.principal_id)">{{ words.toApprove(openApprovals.length) }} · {{ words.openDesk }}</RouterLink><p v-else>{{ openApprovals === null ? words.approvalsUnavailable : words.noApprovals }}</p></section>
+        <section class="assistant-block"><h3>{{ words.next }}</h3><p>{{ facts.routines === null ? words.routinesUnavailable : nextRoutine ? `${nextRoutine.name} · ${time(nextRoutine.next!)}` : words.noRoutines }}</p><p v-if="facts.routinesTruncated">{{ words.truncated }}</p><RouterLink v-if="openApprovals?.length" :to="assistantDeskLink(item.principal_id)">{{ words.toApprove(openApprovals.length) }} · {{ words.openDesk }}</RouterLink><p v-else>{{ openApprovals === null ? words.approvalsUnavailable : words.noApprovals }}</p></section>
       </div>
       <div v-show="tab === 'approvals'" id="assistant-pane-approvals" role="tabpanel" aria-labelledby="assistant-tab-approvals" class="assistant-block">
         <p v-if="facts.approvals === null">{{ words.approvalsUnavailable }}</p>
         <template v-else><p v-if="!openApprovals?.length">{{ words.noApprovals }}</p><article v-for="approval in openApprovals" :key="approval.id" class="assistant-log-entry"><strong>{{ approval.title }}</strong><p>{{ approval.target }} · {{ relativeTime(approval.at, { now }) }}</p><RouterLink :to="approval.href">{{ words.openDesk }}</RouterLink></article><h3>{{ words.recentDecisions }}</h3><article v-for="approval in facts.approvals.filter(row => row.decision)" :key="approval.id" class="assistant-log-entry"><strong>{{ approval.title }}</strong><p>{{ approval.decision }} · {{ approval.by }} · {{ relativeTime(approval.at, { now }) }}</p></article></template>
       </div>
       <div v-show="tab === 'routines'" id="assistant-pane-routines" role="tabpanel" aria-labelledby="assistant-tab-routines" class="assistant-block">
-        <p v-if="facts.routines === null">{{ words.routinesUnavailable }}</p><p v-else-if="!facts.routines.length">{{ words.noRoutines }}</p>
-        <article v-for="routine in facts.routines ?? []" :key="routine.id" class="assistant-log-entry"><strong>{{ routine.name }}</strong><p>{{ routine.schedule }} · {{ routine.next ?? words.notReported }}</p><RouterLink v-if="routine.result" :to="routine.result.href">{{ routine.result.label }}</RouterLink><p>{{ routine.paused ? words.statuses.paused : words.statuses.idle }}</p><RouterLink :to="`/agents/routines?routine=${encodeURIComponent(routine.id)}`">{{ words.openRoutine }}</RouterLink></article>
+        <p v-if="facts.routines === null">{{ words.routinesUnavailable }}</p><p v-else-if="!facts.routines.length">{{ words.noRoutines }}</p><p v-if="facts.routinesTruncated">{{ words.truncated }}</p><p v-if="facts.routinesError" class="assistant-error" role="alert">{{ facts.routinesError }}</p>
+        <article v-for="routine in facts.routines ?? []" :key="routine.id" class="assistant-log-entry assistant-routine" :data-routine="routine.id"><div class="routine-top"><strong v-clip-tip>{{ routine.name }}</strong><button v-if="store.mayManageRoutine(routine)" type="button" class="btn sm" :disabled="store.busy[`routine:${routine.id}`]" :aria-label="`${routine.paused ? words.resume : words.pause} ${routine.name}`" @click="toggleRoutine(routine)"><AppIcon :name="routine.paused ? 'play' : 'pause'" :size="14" /><span class="save-label"><span>{{ routine.paused ? words.resume : words.pause }}</span><span aria-hidden="true">{{ words.resume }}</span><span aria-hidden="true">{{ words.pause }}</span></span></button></div><p v-clip-tip>{{ routine.schedule }}</p><p :title="routine.next ? new Date(routine.next).toLocaleString('en-GB') : ''">{{ words.next }} · {{ routine.next ? time(routine.next) : words.notReported }}</p><RouterLink v-if="routine.result" v-clip-tip :to="routine.result.href">{{ routine.result.label }}</RouterLink><p v-else>{{ routine.lastState ?? words.routineHistoryUnavailable }}</p><p>{{ routine.paused ? words.statuses.paused : words.statuses.idle }}</p><RouterLink :to="`/agents/routines?routine=${encodeURIComponent(routine.id)}`">{{ words.openRoutine }}</RouterLink></article>
       </div>
       <div v-show="tab === 'policy'" id="assistant-pane-policy" role="tabpanel" aria-labelledby="assistant-tab-policy">
         <p v-if="!mayEdit" class="policy-read-only">{{ words.readOnly }} <span>{{ words.ownerOnly }}</span></p>
@@ -158,8 +170,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </div>
       <div v-show="tab === 'activity'" id="assistant-pane-activity" role="tabpanel" aria-labelledby="assistant-tab-activity" class="assistant-activity">
         <div class="activity-filters"><label for="assistant-activity-filter">{{ words.tabs.activity }}</label><select id="assistant-activity-filter" v-model="activityFilter" class="field" @change="refusalsOnly = false"><option v-for="(label, key) in words.filters" :key="key" :value="key">{{ label }}</option></select></div>
-        <p v-if="facts.activity === null">{{ words.activityUnavailable }}</p><p v-if="store.historyState === 'forbidden' || store.historyState === 'error'">{{ words.historyUnavailable }} {{ store.historyError }}</p><p v-if="store.historyTruncated">{{ words.truncated }}</p>
-        <article v-for="event in activities" :key="event.key" class="assistant-log-entry"><time :datetime="event.at">{{ new Date(event.at).toLocaleString('en-GB') }}</time><p>{{ event.text }}</p><RouterLink v-if="event.href" :to="event.href">{{ event.href }}</RouterLink></article><p v-if="!activities.length && store.historyState === 'ready' && (activityFilter === 'policy' || facts.activity !== null)">{{ words.noActivity }}</p><p class="history-range">{{ words.historyRange }}</p>
+        <p v-if="facts.activity === null || facts.activityIncomplete">{{ assistantCapabilities.routines ? words.routineHistoryWindow : words.activityUnavailable }}</p><p v-if="store.historyState === 'forbidden' || store.historyState === 'error'">{{ words.historyUnavailable }} {{ store.historyError }}</p><p v-if="store.historyTruncated || facts.routinesTruncated">{{ words.truncated }}</p>
+        <article v-for="event in activities" :key="event.key" class="assistant-log-entry"><time :datetime="event.at">{{ new Date(event.at).toLocaleString('en-GB') }}</time><p>{{ event.text }}</p><RouterLink v-if="event.href" :to="event.href">{{ event.href }}</RouterLink></article><p v-if="!activities.length && store.historyState === 'ready' && (activityFilter === 'policy' || activityFilter === 'runs' && facts.activity !== null)">{{ words.noActivity }}</p><p class="history-range">{{ words.historyRange }}</p>
       </div>
     </div>
     <footer class="assistant-save-bar">
@@ -215,6 +227,10 @@ dt { color: var(--ink-2); } dd { margin: 0; overflow-wrap: anywhere; }
 .activity-filters select { min-height: 44px; min-width: 0; flex: 1; }
 .assistant-log-entry { padding: 14px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .assistant-log-entry p { margin: 6px 0; }.assistant-log-entry time { color: var(--ink-2); font-size: 11px; }
+.routine-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
+.routine-top strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.routine-top .btn { flex: none; min-height: 44px; }
+.assistant-routine > p, .assistant-routine > a { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .assistant-save-bar { flex: none; padding: 8px 16px max(8px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
 .save-feedback { min-height: 18px; margin: 0; color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
 .save-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding-top: 8px; }

@@ -751,12 +751,12 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   const errors = watchErrors(page)
   await setup(page)
   const { items } = assistantEvidence(Date.now(), me.id)
-  const { writes, events } = await mockAssistants(page, items, me.id)
+  const { writes, events, routineWrites, routines } = await mockAssistants(page, items, me.id)
   let policyAccess = true
   await page.route('**/api/me/permissions*', route => {
     const permissions = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
     permissions.workspace.permissions.push('events.read')
-    if (policyAccess) permissions.workspace.permissions.push('agents.create')
+    if (policyAccess) permissions.workspace.permissions.push('agents.create', 'recurrences.manage')
     return route.fulfill({ json: permissions })
   })
   const shot = async (name: string) => page.screenshot({ path: testInfo.outputPath(`aeon-1705-${name}.png`), fullPage: true })
@@ -819,6 +819,18 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
       const pane = details.getByRole('tabpanel', { name: 'Approvals', exact: true })
       await expect(pane).toContainText('Assistant approvals are not available yet.')
       await expect(pane.getByRole('button')).toHaveCount(0)
+    }
+    if (name === 'Routines') {
+      const pane = details.getByRole('tabpanel', { name: 'Routines', exact: true })
+      await expect(pane.locator('[data-routine]')).toHaveCount(3)
+      await expect(pane).toContainText('Every Monday, Tuesday, Wednesday, Thursday, Friday at 08:00')
+      await expect(pane.getByRole('link', { name: 'AEON-1 · Aeon foundation' }).first()).toHaveAttribute('href', '/p/AEON/AEON-1')
+      const row = pane.locator('[data-routine]').first(), action = row.getByRole('button')
+      const routineGuard = await controlStability(page, { row, action, tabs, close: controls.close })
+      await routineGuard.check(async () => { await action.click(); await expect(action).toHaveAccessibleName('Resume Inbox triage 1') })
+      await routineGuard.check(async () => { await action.click(); await expect(action).toHaveAccessibleName('Pause Inbox triage 1') })
+      routineGuard.done()
+      expect(routineWrites).toEqual([{ id: routines[0]!.id, action: 'pause', expected_revision: 1 }, { id: routines[0]!.id, action: 'resume', expected_revision: 2 }])
     }
     if (name === 'Policy') {
       const policy = details.getByRole('tabpanel', { name: 'Policy', exact: true })

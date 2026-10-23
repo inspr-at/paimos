@@ -42,6 +42,7 @@ function glance(item: Assistant) {
 function routineLine(item: Assistant) {
   const routines = factsOf(item).routines
   if (routines === null) return words.unavailable
+  if (factsOf(item).routinesTruncated) return `${words.routineCount(routines.length)} · ${words.truncated}`
   if (!routines.length) return words.noRoutines
   const next = routines.filter(row => row.next && !row.paused).sort((a, b) => Date.parse(a.next!) - Date.parse(b.next!))[0]?.next
   return next ? words.routinesNext(routines.length, new Date(next).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })) : words.routineCount(routines.length)

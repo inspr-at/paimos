@@ -380,7 +380,7 @@ export function assistantEvidence(now: number, owner: string) {
   const scout: Assistant = { ...amy, principal_id: agent(9), display_name: 'Scout', policy: { ...amy.policy, allowed_projects: ['p-aeon'] } }
   const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString()
   const facts: Record<string, AssistantFacts> = {
-    [amy.principal_id]: { ...unavailableAssistantFacts(), adapter: { state: 'ok', lastReceipt: ago(1) }, spend: { amount: '3.20', daily: Array.from({ length: 7 }, (_, n) => ({ day: String(n + 1), amount: n === 4 ? '3.20' : '0' })) }, approvals: [1, 2].map(n => ({ id: `action-${n}`, title: n === 1 ? 'Send the research summary' : 'Publish the knowledge entry', target: n === 1 ? 'PHAROS' : 'AEON', at: ago(n * 3), href: assistantDeskLink(amy.principal_id) })), routines: [1, 2, 3].map(n => ({ id: `routine-${n}`, name: `Inbox triage ${n}`, schedule: 'Weekdays at 08:00', next: new Date(now + n * 60_000).toISOString(), paused: false, revision: 1 })), lastActivity: { at: ago(12), text: 'Replied' } },
+    [amy.principal_id]: { ...unavailableAssistantFacts(), adapter: { state: 'ok', lastReceipt: ago(1) }, spend: { amount: '3.20', daily: Array.from({ length: 7 }, (_, n) => ({ day: String(n + 1), amount: n === 4 ? '3.20' : '0' })) }, approvals: [1, 2].map(n => ({ id: `action-${n}`, title: n === 1 ? 'Send the research summary' : 'Publish the knowledge entry', target: n === 1 ? 'PHAROS' : 'AEON', at: ago(n * 3), href: assistantDeskLink(amy.principal_id) })), routines: [1, 2, 3].map(n => ({ id: `routine-${n}`, projectId: 'p-aeon', name: `Inbox triage ${n}`, schedule: 'Weekdays at 08:00', next: new Date(now + n * 60_000).toISOString(), paused: false, revision: 1 })), lastActivity: { at: ago(12), text: 'Replied' } },
     [scout.principal_id]: { ...unavailableAssistantFacts(), adapter: { state: 'ok', lastReceipt: ago(2) }, spend: { amount: '8.40', daily: Array.from({ length: 7 }, (_, n) => ({ day: String(n + 1), amount: n === 4 ? '8.40' : '0' })) }, approvals: [], routines: [], lastActivity: { at: ago(30), text: 'Replied' } },
   }
   return { items: [scout, amy], facts }
@@ -389,6 +389,29 @@ export function assistantEvidence(now: number, owner: string) {
 export async function mockAssistants(page: Page, items: Assistant[], owner: string) {
   const writes: { id: string; body: { expected_revision: number; policy: Assistant['policy'] } }[] = []
   const events: AssistantEvent[] = []
+  const now = Date.now()
+  const routines = [1, 2, 3].map(n => ({ id: `ab000000-0000-4000-8000-00000000000${n}`, project_id: 'p-aeon', parent_id: 'p-aeon', template: { name: `Inbox triage ${n}`, title: `Triage ${n}`, description: '', acceptance_criteria: [], estimate_hours: 0, priority: 'medium', tags: [], type: 'work' }, trigger: { kind: 'time', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', time_of_day: '08:00', timezone: 'Europe/Vienna' }, queue_each: false, overlap_policy: 'skip', catch_up_policy: 'one', paused: false, revision: 1, occurrence_count: 1, next_at: new Date(now + n * 3600_000).toISOString(), created_at: new Date(now - 86400_000).toISOString(), updated_at: new Date(now - 3600_000).toISOString(), last_run: { id: `ad000000-0000-4000-8000-00000000000${n}`, state: 'done', reason: '', created_at: new Date(now - n * 3600_000).toISOString() } }))
+  const routineWrites: { id: string; action: string; expected_revision: number }[] = []
+  await page.route('**/api/recurrences**', async route => {
+    const url = new URL(route.request().url()), method = route.request().method()
+    if (url.pathname === '/api/recurrences' && method === 'GET') return route.fulfill({ json: { items: items.some(item => item.principal_id === agent(5)) ? routines : [], next_cursor: null } })
+    const match = /^\/api\/recurrences\/([^/]+)(?:\/(.*))?$/.exec(url.pathname), routine = routines.find(row => row.id === match?.[1])
+    if (!routine) return route.fallback()
+    const action = match?.[2]
+    if (action === 'agent-owner') return route.fulfill({ json: { owner_principal_id: agent(5), destination: { kind: 'new_ticket' }, granted_by_principal_id: owner, definition_digest: 'a'.repeat(64) } })
+    if (action === 'pause' || action === 'resume') {
+      const body = route.request().postDataJSON()
+      routineWrites.push({ id: routine.id, action, expected_revision: body.expected_revision })
+      if (body.expected_revision !== routine.revision) return route.fulfill({ status: 409, json: { error: 'Routine revision changed' } })
+      routine.paused = action === 'pause'; routine.revision++
+      return route.fulfill({ json: routine })
+    }
+    const run = { id: routine.last_run.id, recurrence_id: routine.id, definition_revision: 1, owner_principal_id: agent(5), state: 'done', reason: '', work_node_id: 'n-a1', work_order_id: null, agent_run_id: null, created_at: routine.last_run.created_at, updated_at: new Date(now - 30 * 60_000).toISOString(), usage: {} }
+    if (action === 'runs') return route.fulfill({ json: { items: [run], next_cursor: null } })
+    if (action === `runs/${routine.last_run.id}`) return route.fulfill({ json: { run, attempts: { items: [], next_cursor: null }, actions: { items: [], next_cursor: null }, effects: { items: [], next_cursor: null } } })
+    if (action === `runs/${routine.last_run.id}/agent-result`) return route.fulfill({ json: { run_id: routine.last_run.id, status: 'succeeded', node_id: 'n-a1', request_digest: 'a'.repeat(64) } })
+    return route.fallback()
+  })
   await page.route('**/api/assistants**', async route => {
     const url = new URL(route.request().url()), method = route.request().method()
     if (url.pathname === '/api/assistants' && method === 'GET') return route.fulfill({ json: { assistants: items } })
@@ -415,5 +438,5 @@ export async function mockAssistants(page: Page, items: Assistant[], owner: stri
     return route.fulfill({ status: 404, json: { error: 'Assistant route not available' } })
   })
   await page.route('**/api/events?*', route => new URL(route.request().url()).searchParams.get('type')?.startsWith('assistant.') ? route.fulfill({ json: { items: events, next_after: null } }) : route.fallback())
-  return { writes, events }
+  return { writes, events, routineWrites, routines }
 }

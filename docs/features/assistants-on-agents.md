@@ -31,10 +31,17 @@ and removes it with Show all. Invalid identifiers fail closed and show an invali
 filter message; source failures remain visible.
 This does not add any decision controls to the assistant panel.
 
-At this revision, assistant adapter/receipt reads (AEON-1702), action requests
-(AEON-1703) and owned routines (AEON-1704) have not merged. Their capabilities are
-closed: the five tabs show explicit unavailable states instead of fabricated
-health, activity, spend, approvals or routine counts. Pause/resume, approvers and
-reset weekday likewise remain unavailable because the current policy contract
-does not expose them. No sample values appear in product code. EN/DE strings are
-kept in the assistant catalog and follow the app's shared display language.
+Owned routines (AEON-1704) use the existing recurrence list and its new agent-owner
+read. Discovery is limited to two 100-definition pages and six concurrent reads;
+larger lists disclose truncation. People with current project routine-management
+permission can pause/resume using the captured revision. Failed writes keep the
+last confirmed state. Result links and Activity read the latest run of up to 20
+owned routines, rechecking the run's frozen owner before attributing it to an
+assistant. The bounded history window stays explicit. Production dispatch remains
+closed under D's policy/budget guard; this UI does not enable it.
+
+Assistant adapter/receipt reads (AEON-1702) and action requests (AEON-1703) have not
+merged. Their capabilities stay closed instead of fabricating health, spend or
+approvals. Assistant-wide pause/resume, approvers and reset weekday likewise stay
+unavailable while their APIs are absent. No sample values appear in product code.
+EN/DE strings are kept in the assistant catalog and follow the shared app language.
