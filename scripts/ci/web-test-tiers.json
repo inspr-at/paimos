@@ -6262,6 +6262,10 @@
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1440 light: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1600 dark: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 1600 light: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 320 dark: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 thread 320 light: Desk cards, quiet meta, latest receipt, calm composer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
