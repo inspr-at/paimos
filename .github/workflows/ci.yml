@@ -89,14 +89,14 @@ jobs:
           run-id: 39949629594
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: web/test-results/reviewed-runner
-      - name: Prove repeat stability and identity with all reviewed runner pixels
+      - name: Prove non-deferred repeat stability and report runner differences
         run: node scripts/test-prune/visual-identity.mjs web/test-results/container-run-1 web/test-results/container-run-2 web/test-results/reviewed-runner web/test-results/container-identity
       - name: Rehearse blocking pin and planted-pixel rejection
         run: node scripts/test-prune/visual-pin.mjs prepare web/test-results/container-run-1 web/test-results/container-pin-plan web/test-results/container-identity/identity-proof.json
       - name: Record identity proof and approval handoff
         if: always()
         run: |
-          echo 'Container capture evidence only. No references were changed or published. Any difference stops pinning.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Container capture evidence only. No references were changed or published. All 64 non-deferred repeats must match; deferred pixels grant no authority. The declared account-use runner difference requires Tick re-look.' >> "$GITHUB_STEP_SUMMARY"
           if [ -f web/test-results/container-identity/identity-proof.md ]; then cat web/test-results/container-identity/identity-proof.md >> "$GITHUB_STEP_SUMMARY"; fi
       - name: Upload both captures, identity evidence and guarded pin commands
         if: always()
