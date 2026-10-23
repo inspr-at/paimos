@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'n
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateVisual } from './check.mjs'
-import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled } from './visual-renderer.mjs'
+import { assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, captureVisual } from './visual-renderer.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const need = (condition, message) => { if (!condition) throw new Error(message) }
@@ -118,7 +118,7 @@ export function writeCandidateArchive(records, visual, directory) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [directory, output] = process.argv.slice(2)
-  const visual = JSON.parse(readFileSync(new URL('./visual-manifest.json', import.meta.url), 'utf8'))
+  const visual = captureVisual(JSON.parse(readFileSync(new URL('./visual-manifest.json', import.meta.url), 'utf8')))
   if (directory === 'specs') {
     validateVisual(visual)
     for (const id of visual.capture.states) {

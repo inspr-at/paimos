@@ -435,6 +435,12 @@ func mergeGroupInventory(t *testing.T, w map[string]any) []string {
 			}
 			continue
 		}
+		if id == "visual-probe-summary" {
+			if j["if"] != "always() && github.event_name == 'workflow_dispatch' && inputs.visual_probe != ''" || j["needs"] != "visual-reference-capture" || j["continue-on-error"] != nil {
+				t.Fatal("probe summary must run after all manual matrix members, including failed members; it is never queue execution evidence")
+			}
+			continue
+		}
 		if id == "apt-bundle" {
 			checkOfflineAptWorkflow(t)
 			continue // Optional fetch acceleration, never execution evidence.

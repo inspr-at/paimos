@@ -33,7 +33,28 @@ case "${1:-}" in
       exit 1
     fi
     gh workflow run ci.yml --repo inspr-at/paimos --ref "$probe_ref" -f "visual_probe=$checkpoint_ids"
-    echo 'Diagnostic probe only: five settings, six independent repeats each. Download visual-raster-probe-SHA-ATTEMPT; no pin plan is produced.'
+    echo 'Diagnostic probe only: six parallel runner machines, baseline vs disabled Skia runtime opts plus determinism flags, six repeats each. Read visual-raster-probe-matrix-SHA-ATTEMPT/matrix-report.json and .md; per-runner PNGs, CPU flags and logs remain separate artifacts. No pin plan is produced.'
+    ;;
+  dispatch-candidate)
+    capture_ref=${2:?usage: lead-commands.sh dispatch-candidate COORDINATOR_PUBLISHED_REF PREPARED_SETTING}
+    setting=${3:?prepared renderer setting required}
+    SETTING="$setting" node --input-type=module -e 'import { readFileSync } from "node:fs"; import { preparedRenderer } from "./scripts/test-prune/visual-renderer.mjs"; const renderer = preparedRenderer(JSON.parse(readFileSync("scripts/test-prune/visual-manifest.json")), process.env.SETTING); if (!renderer.rasterSetting) throw new Error("Choose an explicit prepared renderer"); if (renderer.machine) throw new Error("agm2 scheduling is prepared only; OPS and coordinator must review the runner boundary before enabling that workflow input");'
+    expected_sha=$(git rev-parse HEAD)
+    published_sha=$(gh api "repos/inspr-at/paimos/commits/$capture_ref" --jq .sha)
+    if [ "$expected_sha" != "$published_sha" ]; then
+      echo 'Published ref does not match this checkout; stop before dispatch.' >&2
+      exit 1
+    fi
+    gh workflow run ci.yml --repo inspr-at/paimos --ref "$capture_ref" -f visual_capture=true -f "visual_renderer=$setting"
+    echo 'Two runner jobs each capture all 72 candidates twice. Download visual-linux-candidate-SHA-ATTEMPT-runner-1 and -runner-2 into separate fresh directories. Prove all 60 selected PNGs across machines and review diffs vs set 3; no current reference is changed.'
+    ;;
+  candidate-proof)
+    setting=${2:?usage: lead-commands.sh candidate-proof PREPARED_SETTING FIRST_CAPTURE SECOND_CAPTURE VERIFIED_SET3_DIR NEW_REVIEW_DIR}
+    first_capture=${3:?first runner container-run-1 required}
+    second_capture=${4:?second runner container-run-1 required}
+    set3=${5:?verified set-3 assets directory required}
+    output=${6:?fresh review directory required}
+    node scripts/test-prune/visual-identity.mjs candidate "$setting" "$first_capture" "$second_capture" "$set3" "$output"
     ;;
   dispatch)
     capture_ref=${2:?usage: lead-commands.sh dispatch COORDINATOR_PUBLISHED_REF}
@@ -69,7 +90,7 @@ case "${1:-}" in
     echo 'After recording attachment IDs: bash web/test-results/container-pin-plan/lead-commands.sh activate ARCHIVE_ATTACHMENT_UUID MANIFEST_ATTACHMENT_UUID'
     ;;
   *)
-    echo 'Usage: lead-commands.sh prepare CAPTURE_ARTIFACT_DIR REVIEWED_RUNNER_DIR NEW_PLAN_ROOT | dispatch COORDINATOR_PUBLISHED_REF | download CI_RUN_ID | probe COORDINATOR_PUBLISHED_REF CHECKPOINT_IDS' >&2
+    echo 'Usage: lead-commands.sh prepare CAPTURE_ARTIFACT_DIR REVIEWED_RUNNER_DIR NEW_PLAN_ROOT | dispatch COORDINATOR_PUBLISHED_REF | download CI_RUN_ID | probe COORDINATOR_PUBLISHED_REF CHECKPOINT_IDS | dispatch-candidate COORDINATOR_PUBLISHED_REF PREPARED_SETTING | candidate-proof PREPARED_SETTING FIRST_CAPTURE SECOND_CAPTURE VERIFIED_SET3_DIR NEW_REVIEW_DIR' >&2
     exit 1
     ;;
 esac

@@ -9,7 +9,7 @@ const oid = /^[a-f0-9]{40}$/;
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const positive = value => Number.isSafeInteger(value) && value > 0;
 const ensure = (value, message) => { if (!value) throw new Error(message); };
-const optionalJobs = ['cache-prime', 'tree-reuse', 'apt-bundle', 'visual-reference-capture'];
+const optionalJobs = ['cache-prime', 'tree-reuse', 'apt-bundle', 'visual-reference-capture', 'visual-probe-summary'];
 const mainPushBackoff = [15000, 30000, 45000, 60000];
 const mainPushBudget = 180000;
 const lookupTimeout = 10000;
@@ -87,7 +87,7 @@ export async function verifyRun(repository, runID, api, sha) {
 export function verifyJobs(jobs, attempt) {
   ensure(positive(jobs.total_count) && jobs.total_count <= 100 && jobs.jobs?.length === jobs.total_count, 'incomplete job list');
   ensure(jobs.jobs.every(job => job.run_attempt === attempt && job.status === 'completed' && (job.conclusion === 'success' || (optionalJobs.includes(job.name) && job.conclusion === 'skipped') || (job.name === 'apt-bundle' && job.conclusion === 'failure'))), 'incomplete suite');
-  ensure(jobs.jobs.every(job => job.name !== 'visual-reference-capture' || job.conclusion === 'skipped'), 'manual capture must be skipped');
+  ensure(jobs.jobs.every(job => !['visual-reference-capture', 'visual-probe-summary'].includes(job.name) || job.conclusion === 'skipped'), 'manual capture must be skipped');
   // The apt artifact is optional: failed fetches retain network installs, and
   // every test execution below must still have passed. Unknown or duplicate
   // jobs cannot silently change the suite this proof recognizes.

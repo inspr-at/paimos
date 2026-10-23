@@ -16,9 +16,14 @@ on:
         type: boolean
         default: false
       visual_probe:
-        description: 'Raster probe only: 1–8 comma-separated checkpoint IDs, six repeats per setting'
+        description: 'Cross-machine probe: 1–8 checkpoint IDs, six parallel runners, baseline vs disabled Skia runtime opts'
         type: string
         default: ''
+      visual_renderer:
+        description: 'Manual candidate captures only; leaves the active renderer and pins unchanged'
+        type: choice
+        options: [baseline, skia-runtime-disabled]
+        default: baseline
 
 # New main pushes supersede older main runs (AEON-585); PR cancellation stays per PR.
 concurrency:
@@ -39,6 +44,12 @@ env:
 jobs:
   visual-reference-capture:
     if: github.event_name == 'workflow_dispatch' && (inputs.visual_capture == true || inputs.visual_probe != '')
+    name: ${{ inputs.visual_probe != '' && format('visual-raster-probe ({0})', matrix.runner) || (inputs.visual_renderer != '' && inputs.visual_renderer != 'baseline') && format('visual-candidate-capture ({0})', matrix.runner) || 'visual-reference-capture' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        runner: ${{ fromJSON(inputs.visual_probe != '' && '[1,2,3,4,5,6]' || (inputs.visual_renderer != '' && inputs.visual_renderer != 'baseline') && '[1,2]' || '[1]') }}
     runs-on: ubuntu-latest
     # MCR v1.64.1-noble amd64 manifest, resolved 2026-10-23; source in visual-manifest.json.
     # Change this digest only in a PR that also regenerates visual baselines
@@ -58,6 +69,9 @@ jobs:
       PW_WORKERS: '1'
       AEON_REQUIRE_BACKEND: 'off'
       AEON_VISUAL_CAPTURE: '1'
+      AEON_VISUAL_RENDERER_SETTING: ${{ inputs.visual_renderer }}
+      AEON_VISUAL_RUNNER: ubuntu-latest
+      AEON_VISUAL_PROBE_SLOT: ${{ matrix.runner }}
       AEON_VISUAL_CONTAINER_DIGEST: sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -72,6 +86,8 @@ jobs:
           node-version: "24.22.1"
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Record runner CPU evidence before capture or probe
+        run: node scripts/test-prune/visual-renderer.mjs cpu-evidence web/test-results/cpu-evidence.json
       - name: Verify the container pin and baseline update policy
         run: node scripts/test-prune/visual-container-check.mjs
       - name: Install locked web dependencies
@@ -93,7 +109,7 @@ jobs:
           VISUAL_PROBE_CHECKPOINTS: ${{ inputs.visual_probe }}
         run: node scripts/test-prune/visual-probe.mjs web/test-results/raster-probe
       - name: Download Tick-reviewed runner capture for the identity proof
-        if: inputs.visual_probe == ''
+        if: inputs.visual_probe == '' && inputs.visual_renderer == 'baseline'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: visual-linux-candidate-ecb819ba898f3fcb944f395388fb2c24a8b7ce83-1
@@ -101,26 +117,36 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: web/test-results/reviewed-runner
       - name: Prove non-deferred repeat stability and report runner differences
-        if: inputs.visual_probe == ''
+        if: inputs.visual_probe == '' && inputs.visual_renderer == 'baseline'
         run: node scripts/test-prune/visual-identity.mjs web/test-results/container-run-1 web/test-results/container-run-2 web/test-results/reviewed-runner web/test-results/container-identity
       - name: Rehearse blocking pin and planted-pixel rejection
-        if: inputs.visual_probe == ''
+        if: inputs.visual_probe == '' && inputs.visual_renderer == 'baseline'
         run: node scripts/test-prune/visual-pin.mjs prepare web/test-results/container-run-1 web/test-results/container-pin-plan web/test-results/container-identity/identity-proof.json
       - name: Record identity proof and approval handoff
         if: always() && inputs.visual_probe == ''
         run: |
           echo 'Container capture evidence only. No references were changed or published. All 60 non-deferred repeats and reviewed runner pixels must match; the 20 deferred checkpoints grant no authority. Tick must approve these exact archive bytes.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Prepared renderer captures need cross-machine identity and diffs vs set 3; they do not inherit set-3 approval.' >> "$GITHUB_STEP_SUMMARY"
           if [ -f web/test-results/container-identity/identity-proof.md ]; then cat web/test-results/container-identity/identity-proof.md >> "$GITHUB_STEP_SUMMARY"; fi
       - name: Upload both captures, identity evidence and guarded pin commands
         if: always() && inputs.visual_probe == ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: visual-linux-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          name: visual-linux-candidate-${{ github.sha }}-${{ github.run_attempt }}${{ (inputs.visual_renderer != '' && inputs.visual_renderer != 'baseline') && format('-runner-{0}', matrix.runner) || '' }}
           path: |
             web/test-results/container-run-1/
             web/test-results/container-run-2/
             web/test-results/container-identity/
             web/test-results/container-pin-plan/
+            web/test-results/cpu-evidence.json
+          retention-days: 7
+          if-no-files-found: error
+      - name: Preserve probe CPU evidence even if capture setup failed
+        if: always() && inputs.visual_probe != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-raster-cpu-${{ github.sha }}-${{ github.run_attempt }}-runner-${{ matrix.runner }}
+          path: web/test-results/cpu-evidence.json
           retention-days: 7
           if-no-files-found: error
       - name: Record raster probe measurements
@@ -131,8 +157,52 @@ jobs:
         if: always() && inputs.visual_probe != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: visual-raster-probe-${{ github.sha }}-${{ github.run_attempt }}
+          name: visual-raster-probe-${{ github.sha }}-${{ github.run_attempt }}-runner-${{ matrix.runner }}
           path: web/test-results/raster-probe/
+          retention-days: 7
+          if-no-files-found: error
+
+  visual-probe-summary:
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.visual_probe != ''
+    needs: visual-reference-capture
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    env:
+      VISUAL_PROBE_CHECKPOINTS: ${{ inputs.visual_probe }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24.22.1"
+      - name: Download every runner probe report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: visual-raster-probe-${{ github.sha }}-${{ github.run_attempt }}-runner-*
+          path: web/test-results/probe-matrix-input
+      - name: Arrange exact matrix slots and prove cross-machine byte identity
+        run: |
+          set -euo pipefail
+          mkdir web/test-results/probe-matrix
+          for slot in 1 2 3 4 5 6; do
+            source="web/test-results/probe-matrix-input/visual-raster-probe-${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}-runner-${slot}"
+            if [ -d "$source" ]; then mv "$source" "web/test-results/probe-matrix/runner-${slot}"; fi
+          done
+          node scripts/test-prune/visual-probe.mjs matrix web/test-results/probe-matrix web/test-results/probe-matrix-summary
+      - name: Record cross-machine probe results
+        if: always()
+        run: |
+          if [ -f web/test-results/probe-matrix-summary/matrix-report.md ]; then cat web/test-results/probe-matrix-summary/matrix-report.md >> "$GITHUB_STEP_SUMMARY"; fi
+      - name: Preserve cross-machine probe summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-raster-probe-matrix-${{ github.sha }}-${{ github.run_attempt }}
+          path: web/test-results/probe-matrix-summary/
           retention-days: 7
           if-no-files-found: error
 
@@ -1189,6 +1259,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24.22.1"
+      - name: Record runner CPU evidence before comparison
+        run: node scripts/test-prune/visual-renderer.mjs cpu-evidence web/test-results/cpu-evidence.json
       - name: Verify the container pin and baseline update policy
         env:
           AEON_VISUAL_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || '' }}

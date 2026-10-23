@@ -20,12 +20,13 @@ export function checkContainerPin(workflow, visual, previous, nightly) {
       job.includes(`AEON_VISUAL_CONTAINER_DIGEST: ${container.digest}`), 'Nightly visual container pin differs from manifest')
   }
   const before = previous?.renderer?.container?.digest
-  if (before && before !== container.digest) {
-    need(visual.renderer.container.digest !== previous.renderer.container.digest &&
-      visual.baselineAuthority.source.sha256 !== previous.baselineAuthority.source.sha256 &&
+  const rasterChanged = previous?.renderer && ['rasterSetting', 'machine', 'browser', 'deviceScaleFactor'].some(key =>
+    JSON.stringify(previous.renderer[key]) !== JSON.stringify(visual.renderer[key]))
+  if (before && (before !== container.digest || rasterChanged)) {
+    need(visual.baselineAuthority.source.sha256 !== previous.baselineAuthority.source.sha256 &&
       visual.baselineAuthority.source.captureSHA !== previous.baselineAuthority.source.captureSHA &&
       visual.approval.status === 'approved' && visual.baselineAuthority.status === 'approved' && visual.comparison.mode === 'blocking',
-    'Container digest changed without regenerated, approved baselines and capture evidence in the manifest; automated digest bumps are forbidden')
+    `${before !== container.digest ? 'Container digest' : 'Raster setting or fixed machine'} changed without regenerated, approved baselines and capture evidence in the manifest; automated renderer bumps are forbidden`)
   }
   return true
 }

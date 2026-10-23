@@ -8,11 +8,11 @@ import { test as base, expect, type Browser, type Page, type TestInfo } from '@p
 import AxeBuilder from '@axe-core/playwright'
 import { readBaselineBundle, referenceGate } from '../../../scripts/test-prune/visual-baselines.mjs'
 import { visualReportOnly, visualCheckResult } from '../../../scripts/test-prune/check.mjs'
-import { assertVisualContainer, assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, rendererIdentity, verifyFontAssets, installRendererFonts, sampleRenderedFont } from '../../../scripts/test-prune/visual-renderer.mjs'
+import { assertVisualContainer, assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, captureEnabled, captureVisual, rendererIdentity, verifyFontAssets, installRendererFonts, sampleRenderedFont } from '../../../scripts/test-prune/visual-renderer.mjs'
 import { domAudit } from '../ui-audit-rules'
 import { visualProbe } from '../../../scripts/test-prune/visual-probe.mjs'
 
-const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8'))
+const manifest = captureVisual(JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8')))
 // Only tests/visual imports this fixture. Fontconfig belongs to this browser's
 // child environment, never the worker, dev server or another spec's browser.
 export const test = base.extend({
@@ -22,7 +22,8 @@ export const test = base.extend({
     assertVisualContainer(manifest)
     const probe = visualProbe(manifest)
     const fontconfig = installRendererFonts(manifest, join(workerInfo.project.outputDir, `visual-fontconfig-${workerInfo.workerIndex}`))
-    await use({ ...launchOptions, ...(probe ? { args: [...(launchOptions.args ?? []), ...probe.args] } : {}), env: { ...process.env, ...launchOptions.env,
+    const args = [...manifest.renderer.browser.args, ...(probe?.args ?? [])]
+    await use({ ...launchOptions, args, env: { ...process.env, ...launchOptions.env,
       FONTCONFIG_FILE: fontconfig, XDG_CACHE_HOME: join(dirname(fontconfig), 'cache') } })
   }, { scope: 'worker' }],
 })
@@ -84,8 +85,8 @@ async function runVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoin
       return
     }
     if (capture && !visual.capture.states.includes(gate.state)) throw new Error(`State is outside the manual capture set: ${gate.state}`)
-    const browserOptions = probe ? { ...info.project.use, launchOptions: { ...info.project.use.launchOptions,
-      args: [...(info.project.use.launchOptions?.args ?? []), ...probe.args] } } : info.project.use
+    const browserOptions = { ...info.project.use, launchOptions: { ...info.project.use.launchOptions,
+      args: [...visual.renderer.browser.args, ...(probe?.args ?? [])] } }
     const expectedRenderer = probe ? { ...visual.renderer, browser: { ...visual.renderer.browser,
       args: [...visual.renderer.browser.args, ...probe.args] } } : visual.renderer
     const renderer = rendererIdentity(visual, browser.version(), { browserOptions,

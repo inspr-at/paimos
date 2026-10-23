@@ -91,12 +91,17 @@
     "visual-reference-capture": {
       "kind": "not-static",
       "reason": "AEON-1674 manual hosted browser capture and artifact-only review packaging; never a local static check or reference publication.",
-      "runs_sha256": "6759857b8ac07455d295ff47af255e801376141e689e149c10f858fc7f8c0088"
+      "runs_sha256": "b4f8fe5ef47770593e1c6c9f758dad45ec4950e3f9ecea7ba249b9d1160da7a5"
     },
     "visual-comparison": {
       "kind": "not-static",
       "reason": "AEON-1692 required digest-pinned container visual execution; guarded by renderer, manifest and baseline-update tests.",
-      "runs_sha256": "8cd6246b40ddd10dd666e36d4fcf3da5fa7ffb6c22908b408c12fefd8eef9e2e"
+      "runs_sha256": "14a5dc90b3ce3b6c37915e38553c6f4f32878bc6bf0193ae64dbe4b810125429"
+    },
+    "visual-probe-summary": {
+      "kind": "not-static",
+      "reason": "AEON-1692 manual cross-machine raster aggregation; diagnostic artifacts only, excluded from queue evidence.",
+      "runs_sha256": "594922e43cc76c71c72a00f037ad0d4502aea91a83accf8bfc7a2302ab0f1dc6"
     }
   },
   "exclusions": [

@@ -462,6 +462,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24.22.1"
+      - name: Record runner CPU evidence before comparison
+        run: node scripts/test-prune/visual-renderer.mjs cpu-evidence web/test-results/cpu-evidence.json
       - name: Verify the container pin and baseline update policy
         env:
           AEON_VISUAL_BASE_SHA: ${{ github.sha }}

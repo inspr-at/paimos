@@ -78,9 +78,9 @@ test('found: an exact-SHA successful merge-group full suite reuses with source n
   }
   // AEON-1674: manual artifact capture is present but skipped on merge-group
   // runs. It must never replace execution evidence or run during reuse.
-  for (const conclusion of ['skipped', 'success', 'failure', 'cancelled']) {
+  for (const name of ['visual-reference-capture', 'visual-probe-summary']) for (const conclusion of ['skipped', 'success', 'failure', 'cancelled']) {
     const captured = fixture();
-    captured.jobs.jobs.push({ name: 'visual-reference-capture', status: 'completed', conclusion, run_attempt: 1 });
+    captured.jobs.jobs.push({ name, status: 'completed', conclusion, run_attempt: 1 });
     captured.jobs.total_count++;
     if (conclusion === 'skipped') {
       assert.deepEqual(await verifyRun(repository, 123, captured.api, sha), { run: 123, attempt: 1, sha });

@@ -3677,5 +3677,77 @@
       "relookReason": "No runner differences are eligible for the 60-checkpoint selection. Rounded-outline nondeterminism is deferred to the AEON-1692 round-5 diagnostic probe."
     }
   },
-  "referenceSet": 3
+  "referenceSet": 3,
+  "rendererPreparation": {
+    "status": "prepared-only",
+    "authority": "Diagnostic candidates only. Active renderer, set 3 pins, blocking comparison, and Tick approval remain unchanged. New pixels require two cross-machine full captures, identity, changed-checkpoint review, test-references-4 publication, then explicit activation.",
+    "settings": {
+      "skia-runtime-disabled": {
+        "browserArgs": [
+          "--disable-gpu",
+          "--disable-skia-runtime-opts",
+          "--force-color-profile=srgb",
+          "--disable-lcd-text",
+          "--font-render-hinting=none",
+          "--force-device-scale-factor=1"
+        ]
+      },
+      "agm2-baseline": {
+        "browserArgs": [
+          "--disable-gpu"
+        ],
+        "runnerLabels": [
+          "self-hosted",
+          "linux",
+          "x64",
+          "agm2"
+        ],
+        "machine": {
+          "runnerLabel": "agm2",
+          "cpuModel": null,
+          "cpuFlagsSHA256": null
+        }
+      },
+      "agm2-skia-runtime-disabled": {
+        "browserArgs": [
+          "--disable-gpu",
+          "--disable-skia-runtime-opts",
+          "--force-color-profile=srgb",
+          "--disable-lcd-text",
+          "--font-render-hinting=none",
+          "--force-device-scale-factor=1"
+        ],
+        "runnerLabels": [
+          "self-hosted",
+          "linux",
+          "x64",
+          "agm2"
+        ],
+        "machine": {
+          "runnerLabel": "agm2",
+          "cpuModel": null,
+          "cpuFlagsSHA256": null
+        }
+      }
+    },
+    "probe": {
+      "slots": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "checkpoints": [
+        "V-projects-390-light",
+        "V-account-use-matrix-1440-dark",
+        "V-account-use-matrix-1440-light",
+        "V-agent-rules-390-dark",
+        "V-decision-desk-1024-dark",
+        "V-decision-desk-1440-dark"
+      ]
+    },
+    "fixedMachineOwner": "OPS must confirm runner labels and pin exact CPU model and flags SHA-256 from container evidence before LEAD dispatches the agm2 candidate. Container digest remains mandatory."
+  }
 }

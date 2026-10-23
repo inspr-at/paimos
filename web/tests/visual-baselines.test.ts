@@ -9,12 +9,12 @@ import test from 'node:test'
 import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGate, referenceGates, referenceReport, materializeBaseline, checkpointReport } from '../../scripts/test-prune/visual-baselines.mjs'
 import { collectCandidates, packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
 import { pinCheckpoints, pinManifest, assertPinIdentity, pngTools, replayCandidates, publicationCommands } from '../../scripts/test-prune/visual-pin.mjs'
-import { compareCaptureRecords, proveCaptureIdentity } from '../../scripts/test-prune/visual-identity.mjs'
-import { PROBE_REPEATS, PROBE_SETTINGS, probeCheckpoints, visualProbe, summarizeProbe, runProbe } from '../../scripts/test-prune/visual-probe.mjs'
+import { compareCaptureRecords, proveCaptureIdentity, provePreparedIdentity, rendererPixelDiff, verifyCapture } from '../../scripts/test-prune/visual-identity.mjs'
+import { PROBE_REPEATS, PROBE_SLOTS, PROBE_SETTINGS, probeCheckpoints, visualProbe, summarizeProbe, summarizeProbeMatrix, writeProbeMatrix, runProbe } from '../../scripts/test-prune/visual-probe.mjs'
 import { checkContainerPin } from '../../scripts/test-prune/visual-container-check.mjs'
 import { pixelChanges } from '../../scripts/test-prune/visual-review.mjs'
 
-import { assertVisualContainer, assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, verifyFontAssets, captureEnabled, rendererIdentity, installRendererFonts } from '../../scripts/test-prune/visual-renderer.mjs'
+import { assertVisualContainer, assertMachine, assertRenderer, assertFontEvidence, assertClockEvidence, visualClock, verifyFontAssets, captureEnabled, captureVisual, cpuEvidence, preparedRenderer, rendererIdentity, installRendererFonts } from '../../scripts/test-prune/visual-renderer.mjs'
 import { validateVisual, visualCheckResult } from '../../scripts/test-prune/check.mjs'
 import { parseWorkflow } from '../../scripts/ci-static.mjs'
 
@@ -246,11 +246,43 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.throws(() => assertRenderer(changed, renderer), /renderer differs from reference|visual = CI only/)
   }
   const environment = { AEON_VISUAL_CONTAINER_DIGEST: renderer.container.digest, ImageOS: 'ubuntu26', ImageVersion: 'new-hosted-image' }
+  const cpu = cpuEvidence({ platform: 'linux', read: (path, limit) => {
+    assert.ok(limit <= 64 * 1024)
+    return path === '/proc/cpuinfo' ? 'model name : Synthetic CPU\nflags : sse2 avx2 avx512f\n\nmodel name : ignored\n' : '00000000-0000-0000-0000-000000000001\n'
+  } })
+  assert.equal(cpu.model, 'Synthetic CPU')
+  assert.deepEqual(cpu.flags, ['avx2', 'avx512f', 'sse2'])
+  assert.throws(() => cpuEvidence({ platform: 'linux', read: () => '' }), /missing or invalid Linux CPU/)
   const identityOptions = { env: environment, platform: 'linux', arch: 'x64',
+    cpu,
     fontconfigFile: new URL('../../scripts/test-prune/visual-fonts.conf', import.meta.url) }
   const actual = rendererIdentity(manifest, manifest.renderer.browser.version, identityOptions)
   assertRenderer(actual, renderer)
   assert.equal(actual.runner.imageVersion, 'new-hosted-image')
+  assert.deepEqual(actual.runner.cpu, cpu)
+  assert.deepEqual(captureVisual(manifest, {}), manifest)
+  const prepared = preparedRenderer(manifest, 'skia-runtime-disabled')
+  assert.ok(prepared.browser.args.includes('--disable-skia-runtime-opts'))
+  assert.deepEqual(manifest.renderer.browser.args, ['--disable-gpu'])
+  assert.throws(() => captureVisual(manifest, { AEON_VISUAL_RENDERER_SETTING: 'skia-runtime-disabled' }), /requires manual capture/)
+  const candidateEnv = { AEON_VISUAL_CAPTURE: '1', GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_WORKFLOW: 'CI',
+    GITHUB_JOB: 'visual-reference-capture', AEON_VISUAL_RENDERER_SETTING: 'skia-runtime-disabled' }
+  const candidateVisual = captureVisual(manifest, candidateEnv)
+  assert.deepEqual(candidateVisual.renderer, prepared)
+  validateVisual(candidateVisual)
+  assert.deepEqual(candidateVisual.baselineAuthority, manifest.baselineAuthority)
+  assert.throws(() => preparedRenderer(manifest, 'agm2-baseline'), /OPS-pinned CPU identity/)
+  const machineVisual = structuredClone(manifest)
+  machineVisual.renderer.machine = { runnerLabel: 'agm2', cpuModel: cpu.model, cpuFlagsSHA256: cpu.flagsSHA256 }
+  assertMachine(machineVisual, { env: { AEON_VISUAL_RUNNER: 'agm2' }, cpu })
+  const fixedIdentity = rendererIdentity(machineVisual, manifest.renderer.browser.version, { ...identityOptions,
+    env: { ...environment, AEON_VISUAL_RUNNER: 'agm2' } })
+  assertRenderer(fixedIdentity, machineVisual.renderer)
+  assert.throws(() => assertRenderer({ ...fixedIdentity, machine: { ...fixedIdentity.machine, cpuModel: 'Other CPU' } }, machineVisual.renderer), /renderer differs from reference: machine/)
+  for (const options of [{ env: { AEON_VISUAL_RUNNER: 'ubuntu-latest' }, cpu },
+    { env: { AEON_VISUAL_RUNNER: 'agm2' }, cpu: { ...cpu, model: 'Other CPU' } },
+    { env: { AEON_VISUAL_RUNNER: 'agm2' }, cpu: { ...cpu, flagsSHA256: 'f'.repeat(64) } }])
+    assert.throws(() => assertMachine(machineVisual, options), /fixed machine CPU\/flags or runner label/)
   assertVisualContainer(manifest, identityOptions)
   for (const options of [{ ...identityOptions, env: {} }, { ...identityOptions, env: { AEON_VISUAL_CONTAINER_DIGEST: 'sha256:' + '0'.repeat(64) } },
     { ...identityOptions, platform: 'darwin' }, { ...identityOptions, arch: 'arm64' }])
@@ -267,11 +299,16 @@ test('visual references require approval, immutable attachment bytes and every e
     browserOptions: { browserName: 'chromium', headless: true, launchOptions: { args: [] } } })
   assert.throws(() => assertRenderer(changedBrowser, renderer), /renderer differs from reference: browser/)
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
-  const captureJob = workflow.slice(workflow.indexOf('\n  visual-reference-capture:'), workflow.indexOf('\n  # Read-only proof.'))
+  const captureJob = workflow.slice(workflow.indexOf('\n  visual-reference-capture:'), workflow.indexOf('\n  visual-probe-summary:'))
   const compareJob = workflow.slice(workflow.indexOf('\n  visual-comparison:'), workflow.indexOf('\n  # Preserve the ruleset'))
   const ordinaryJob = workflow.slice(workflow.indexOf('\n  web-shard:'), workflow.indexOf('\n  visual-comparison:'))
   assert.match(captureJob, /if: github.event_name == 'workflow_dispatch' && \(inputs.visual_capture == true \|\| inputs.visual_probe != ''\)/)
-  assert.doesNotMatch(captureJob, /\n    (needs|strategy|continue-on-error):/)
+  assert.doesNotMatch(captureJob, /\n    (needs|continue-on-error):/)
+  assert.match(captureJob, /fail-fast: false/)
+  assert.match(captureJob, /max-parallel: 6/)
+  assert.match(captureJob, /\[1,2,3,4,5,6\]/)
+  assert.match(captureJob, /runs-on: ubuntu-latest/)
+  assert.doesNotMatch(captureJob, /runs-on:.*self-hosted/)
   assert.match(ordinaryJob, /runs-on: ubuntu-latest/)
   assert.doesNotMatch(ordinaryJob, /AEON_VISUAL_|visual-baselines/)
   assert.doesNotMatch(compareJob, /AEON_VISUAL_CAPTURE/)
@@ -280,6 +317,7 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.doesNotMatch(job, /playwright install|bounded-apt|install-fonts|FONTCONFIG/)
   }
   assert.equal(checkContainerPin(workflow, manifest, manifest), true)
+  assert.throws(() => checkContainerPin(workflow, candidateVisual, manifest), /Raster setting or fixed machine changed without regenerated, approved baselines/)
   const bumped = structuredClone(manifest); bumped.renderer.container.digest = 'sha256:' + '1'.repeat(64)
   const bumpedWorkflow = workflow.replaceAll(renderer.container.digest, bumped.renderer.container.digest)
   assert.throws(() => checkContainerPin(bumpedWorkflow, bumped, manifest), /without regenerated, approved baselines/)
@@ -426,6 +464,16 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.equal(candidate.archive.sha256, hash(readFileSync(join(output, candidate.archive.name))))
     assert.equal(candidate.payload.length, 145)
     assert.match(readFileSync(join(output, 'members.sha256'), 'utf8'), /quality\/V-projects-390-light.json/)
+    const verifiedDirectory = join(directory, 'verify-active-candidate')
+    mkdirSync(join(verifiedDirectory, 'capture-run'), { recursive: true })
+    const preparedRecords = records.map(record => ({ ...record, quality: { ...record.quality, quality: { status: 'passed' }, renderer: { ...prepared, runner: { ...renderer.runner, cpu } } } }))
+    for (const record of preparedRecords) {
+      writeFileSync(join(verifiedDirectory, 'capture-run', `${record.quality.id}.md`), JSON.stringify(record.quality))
+      writeFileSync(join(verifiedDirectory, 'capture-run', `${record.quality.id}.png`), record.png)
+    }
+    writeCandidateArchive(preparedRecords, candidateVisual, join(verifiedDirectory, 'linux-candidate'))
+    assert.equal(verifyCapture(verifiedDirectory, candidateVisual).records.length, 72,
+      'Candidate archive verification must work while the real manifest remains on active set 3')
     // The generated archive can be consumed only after explicit synthetic
     // approval and pins. This proves next-round transport compatibility too.
     const pinned = structuredClone(manifest)
@@ -502,6 +550,15 @@ test('visual references require approval, immutable attachment bytes and every e
     assert.equal(change.pixels, 1)
     assert.equal(change.percent, 100 / 256)
     assert.deepEqual(change.regions, [{ x: 0, y: 0, width: 1, height: 1, pixels: 1 }])
+    const edgeDiff = rendererPixelDiff(white, blackCorner)
+    assert.equal(edgeDiff.pixels, 1)
+    assert.equal(edgeDiff.nonEdgePixels, 0)
+    assert.match(edgeDiff.assessment, /attribution unproven/)
+    const marked = PNG.sync.read(edgeDiff.png)
+    assert.deepEqual([...marked.data.subarray(0, 4)], [220, 0, 150, 255])
+    const flat = new PNG({ width: 16, height: 16 }); flat.data.fill(254)
+    assert.equal(rendererPixelDiff(white, PNG.sync.write(flat)).nonEdgePixels, 256)
+    assert.match(rendererPixelDiff(white, PNG.sync.write(flat)).assessment, /non-edge pixels/)
     // Risk: a probe can report false determinism with missing/duplicate
     // repeats or leak diagnostic baseline bytes into reference authority.
     const probeID = 'V-agent-rules-390-dark'
@@ -516,19 +573,20 @@ test('visual references require approval, immutable attachment bytes and every e
       assert.throws(() => probeCheckpoints(input, manifest), /Probe needs/)
     assert.deepEqual(probeCheckpoints(probeID + ',V-account-use-matrix-1440-light', manifest), [probeID, 'V-account-use-matrix-1440-light'])
     assert.equal(PROBE_REPEATS, 6)
-    assert.deepEqual(PROBE_SETTINGS.map(setting => setting.args), [[], ['--num-raster-threads=1'], ['--run-all-compositor-stages-before-draw'],
-      ['--disable-partial-raster'], ['--num-raster-threads=1', '--run-all-compositor-stages-before-draw', '--disable-partial-raster']])
+    assert.deepEqual(PROBE_SLOTS, [1, 2, 3, 4, 5, 6])
+    assert.deepEqual(PROBE_SETTINGS.map(setting => setting.args), [[], ['--disable-skia-runtime-opts', '--force-color-profile=srgb',
+      '--disable-lcd-text', '--font-render-hinting=none', '--force-device-scale-factor=1']])
     const probeVisual = structuredClone(manifest)
     probeVisual.profiles.phone = { width: 16, height: 16 }
     for (const setting of PROBE_SETTINGS) {
-      const probeRenderer = { ...renderer, browser: { ...renderer.browser, args: [...renderer.browser.args, ...setting.args] } }
+      const probeRenderer = { ...renderer, runner: { ...renderer.runner, cpu }, browser: { ...renderer.browser, args: [...renderer.browser.args, ...setting.args] } }
       const probeRecords = Array.from({ length: PROBE_REPEATS }, (_, repeatIndex) => ({ png: white, quality: {
         id: probeID, captureSHA: candidate.captureSHA, captureMode: false, baselineCompared: false, requirementsRun: true,
         quality: { status: 'passed' }, viewport: { width: 16, height: 16 }, pngSHA256: hash(white), renderer: probeRenderer,
         diagnosticProbe: { setting: setting.id, args: probeRenderer.browser.args, repeatIndex },
       } }))
       assert.deepEqual(visualProbe(manifest, { ...probeEnv, AEON_VISUAL_PROBE_SETTING: setting.id }).args, setting.args)
-      const summarize = (rows, options = {}) => summarizeProbe(rows, [probeID], setting, probeVisual, options)
+      const summarize = (rows, options = {}) => summarizeProbe(rows, [probeID], setting, probeVisual, { cpu, ...options })
       assert.equal(summarize(probeRecords).allByteIdentical, true)
       assert.equal(summarize(probeRecords.slice(1)).complete, false)
       const duplicate = [...probeRecords.slice(0, -1), probeRecords[0]]
@@ -549,7 +607,7 @@ test('visual references require approval, immutable attachment bytes and every e
     const probeSteps = captureJob.split('\n      - ')
     const normalCaptureSteps = probeSteps.filter(step => /^name: (Capture the same|Download Tick|Prove non-deferred|Rehearse blocking)/.test(step))
     assert.equal(normalCaptureSteps.length, 4)
-    assert.ok(normalCaptureSteps.every(step => step.includes("\n        if: inputs.visual_probe == ''\n")))
+    assert.ok(normalCaptureSteps.every(step => step.includes("\n        if: inputs.visual_probe == ''")))
     const probeStep = probeSteps.find(step => step.includes('visual-probe.mjs web/test-results/raster-probe'))
     assert.ok(probeStep.includes("\n        if: inputs.visual_probe != ''\n"))
     assert.ok(probeStep.includes('VISUAL_PROBE_CHECKPOINTS: ${{ inputs.visual_probe }}'))
@@ -562,8 +620,9 @@ test('visual references require approval, immutable attachment bytes and every e
       // absent so the probe's first write exercises the same startup path.
       const probeRun = join(probeOutput, 'fresh-parent/run')
       const report = await runProbe(probeID, probeRun, probeVisual, {
-        platform: 'linux', arch: 'x64',
-        env: { ...probeEnv, AEON_VISUAL_CONTAINER_DIGEST: renderer.container.digest },
+        platform: 'linux', arch: 'x64', cpu,
+        env: { ...probeEnv, AEON_VISUAL_CONTAINER_DIGEST: renderer.container.digest,
+          AEON_VISUAL_PROBE_SLOT: '1', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', RUNNER_NAME: 'runner-1' },
         run: (command, args, options) => {
           assert.equal(command, 'npm')
           assert.ok(args.includes('--repeat-each=6') && args.includes('--workers=1') && args.includes('--retries=0'))
@@ -574,7 +633,7 @@ test('visual references require approval, immutable attachment bytes and every e
           for (let repeatIndex = 0; repeatIndex < PROBE_REPEATS; repeatIndex++) {
             const target = join(output, String(repeatIndex))
             mkdirSync(target, { recursive: true })
-            const probeRenderer = { ...renderer, browser: { ...renderer.browser, args: [...renderer.browser.args, ...setting.args] } }
+            const probeRenderer = { ...renderer, runner: { ...renderer.runner, cpu }, browser: { ...renderer.browser, args: [...renderer.browser.args, ...setting.args] } }
             writeFileSync(join(target, `${probeID}.png`), white)
             writeFileSync(join(target, `${probeID}.md`), JSON.stringify({ id: probeID, captureSHA: candidate.captureSHA,
               captureMode: false, baselineCompared: false, requirementsRun: true, reference: { mode: 'deferred' },
@@ -587,10 +646,54 @@ test('visual references require approval, immutable attachment bytes and every e
       assert.deepEqual(calls, PROBE_SETTINGS.map(setting => setting.id))
       assert.equal(report.complete, true)
       assert.ok(report.settings.every(setting => setting.allByteIdentical))
+      const matrix = PROBE_SLOTS.map(slot => ({ ...structuredClone(report), slot, runner: `runner-${slot}`,
+        cpu: { ...cpu, model: slot % 2 ? 'CPU A' : 'CPU B', bootId: `00000000-0000-0000-0000-${String(slot).padStart(12, '0')}` } }))
+      const summarize = reports => summarizeProbeMatrix(reports, [probeID], probeVisual, { captureSHA: candidate.captureSHA, run: '123', attempt: '1' })
+      assert.equal(summarize(matrix).complete, true)
+      assert.ok(summarize(matrix).settings.every(setting => setting.allByteIdentical))
+      for (const mutate of [
+        rows => rows.pop(), rows => rows.push(rows[0]), rows => { rows[5] = rows[0] },
+        rows => { rows[0].complete = false }, rows => { rows[0].cpu.model = 'unidentified' },
+        rows => { rows[0].cpu.flagsSHA256 = 'f'.repeat(64) }, rows => { rows[0].attempt = '2' },
+        rows => { rows[0].cpu.bootId = rows[1].cpu.bootId }, rows => { rows[0].settings[0].captureSHA = 'b'.repeat(40) },
+        rows => { rows[0].settings[0].checkpoints[0].digests.pop() },
+        rows => { rows[0].settings[0].args.push('--arbitrary-flag') },
+      ]) {
+        const broken = structuredClone(matrix); mutate(broken)
+        assert.equal(summarize(broken).complete, false)
+        assert.ok(summarize(broken).settings.every(setting => setting.allByteIdentical === null))
+      }
+      const changedMachine = structuredClone(matrix)
+      changedMachine[5].settings[0].checkpoints[0].digests = Array(PROBE_REPEATS).fill(hash(blackCorner))
+      const result = summarize(changedMachine)
+      assert.equal(result.complete, true)
+      assert.equal(result.settings[0].allByteIdentical, false)
+      assert.equal(result.settings[1].allByteIdentical, true)
+      assert.match(result.hypothesis, /Supports CPU-dependent rasterization/)
+      // This was the old false-positive: every runner is stable in isolation,
+      // but one runner paints different rounded-corner bytes.
+      assert.ok(changedMachine.every(row => row.settings.every(setting => setting.allByteIdentical)))
+      const matrixDirectory = join(probeOutput, 'matrix-input')
+      mkdirSync(matrixDirectory)
+      for (const row of changedMachine) {
+        const slot = join(matrixDirectory, `runner-${row.slot}`)
+        mkdirSync(slot)
+        writeFileSync(join(slot, 'probe-report.json'), JSON.stringify(row))
+      }
+      const expected = { captureSHA: candidate.captureSHA, run: '123', attempt: '1' }
+      assert.equal(writeProbeMatrix(matrixDirectory, join(probeOutput, 'matrix-summary'), probeID, probeVisual, expected).complete, true)
+      const summary = readFileSync(join(probeOutput, 'matrix-summary/matrix-report.md'), 'utf8')
+      assert.match(summary, /CPU A/); assert.match(summary, /CPU B/)
+      assert.match(summary, /\| baseline \| no \|/)
+      assert.match(summary, /\| skia-runtime-disabled \| yes \|/)
+      const emptyMatrix = join(probeOutput, 'empty-matrix'); mkdirSync(emptyMatrix)
+      const incomplete = writeProbeMatrix(emptyMatrix, join(probeOutput, 'empty-summary'), probeID, probeVisual, expected)
+      assert.equal(incomplete.complete, false)
+      assert.ok(incomplete.settings.every(setting => setting.allByteIdentical === null))
       assert.equal(JSON.parse(readFileSync(join(probeRun, 'probe-report.json'), 'utf8')).kind, 'raster-determinism-probe')
       assert.throws(() => collectCandidates(join(probeRun, 'baseline')), /Raster probe is diagnostic only/)
       await assert.rejects(runProbe(probeID, probeRun, probeVisual, {
-        platform: 'linux', arch: 'x64',
+        platform: 'linux', arch: 'x64', cpu,
         env: { ...probeEnv, AEON_VISUAL_CONTAINER_DIGEST: renderer.container.digest },
         run: () => assert.fail('An existing probe output must never be reused'),
       }), { code: 'EEXIST' })
@@ -598,6 +701,19 @@ test('visual references require approval, immutable attachment bytes and every e
     } finally { rmSync(probeOutput, { recursive: true, force: true }) }
     const smallRecords = candidate.members.map(member => ({ quality: { id: member.id }, png: white }))
     const baseCapture = { candidate, records: smallRecords, archiveSHA256: candidate.archive.sha256 }
+    const preparedCapture = (bootId, model = 'Synthetic CPU') => ({ ...baseCapture,
+      candidate: { ...candidate, renderer: prepared }, records: smallRecords.map(record => ({ ...record,
+        quality: { ...record.quality, renderer: { ...prepared, runner: { ...renderer.runner, cpu: { ...cpu, bootId, model } } } } })) })
+    const firstMachine = preparedCapture(cpu.bootId)
+    const secondMachine = preparedCapture('00000000-0000-0000-0000-000000000002', 'Other CPU')
+    const candidateProof = provePreparedIdentity(firstMachine, secondMachine, manifest, 'skia-runtime-disabled')
+    assert.equal(candidateProof.status, 'stable-awaiting-Tick-review')
+    assert.equal(candidateProof.checkpoints.length, 60)
+    assert.throws(() => provePreparedIdentity(firstMachine, firstMachine, manifest, 'skia-runtime-disabled'), /two different machines/)
+    const changedCandidate = { ...secondMachine, records: secondMachine.records.map((record, i) => i ? record : { ...record, png: blackCorner }) }
+    assert.equal(provePreparedIdentity(firstMachine, changedCandidate, manifest, 'skia-runtime-disabled').status, 'STOP-before-pinning')
+    assert.throws(() => provePreparedIdentity(firstMachine, { ...secondMachine, candidate: { ...secondMachine.candidate, captureSHA: 'b'.repeat(40) } },
+      manifest, 'skia-runtime-disabled'), /SAME commit/)
     const reviewedCapture = { ...baseCapture, archiveSHA256: manifest.capture.identityProof.reviewedRunnerArchiveSHA256 }
     const repeatProof = proveCaptureIdentity(baseCapture, baseCapture, reviewedCapture, manifest)
     assert.equal(repeatProof.status, 'identical')

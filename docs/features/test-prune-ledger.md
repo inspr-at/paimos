@@ -260,7 +260,7 @@ The generated publication script verifies the real receipt before creating the i
 bash scripts/test-prune/lead-commands.sh prepare web/test-results/refset3-run3/container-39975623900-QTeuKK web/test-results/refset3/main-39949629594 web/test-results/refset3-run3/rebuilt-60
 ```
 
-The manual capture job also accepts `visual_probe`, a comma-separated list of **1–8 checkpoint IDs** from the 72-candidate capture set. A nonempty probe input runs only the probe path. In the same digest-pinned job it recreates each selected fixture **six times per setting**, with one worker and no retries: baseline (`--disable-gpu`), baseline plus `--num-raster-threads=1`, plus `--run-all-compositor-stages-before-draw`, plus `--disable-partial-raster`, and baseline plus all three candidate flags. Default capture and comparison flags stay unchanged. JSON and Markdown report byte identity per setting/checkpoint, all six sample digests and incomplete or failed attempts; original PNGs, quality reports and logs remain in the artifact. Incomplete execution fails the job; measured nondeterminism is a reported result. Probe captures carry diagnostic metadata and cannot be packaged as references, including the baseline setting. There are no masks or pixel tolerances.
+Round 5 introduced a single-runner `visual_probe` with five candidate settings and six repeats. That historical experiment is superseded by the round-8 cross-machine matrix below. The same 1–8-checkpoint input remains; diagnostic captures still cannot be packaged as references, including the baseline setting.
 
 LEAD invokes the probe after publishing the reviewed branch:
 
@@ -298,6 +298,64 @@ Diagnostic-only CI run **39996824066** was dispatched on the already published b
 The same original comparison job also failed two verification fixtures after activation. The comparator guard now builds explicit synthetic awaiting, stale, and deferred states, requires four actual stale cases, and verifies that deferred quality failures remain visible under the blocking global policy. The Delivery crop guard explicitly removes its synthetic phone pins and inherited checkpoint approval before requiring quality-only execution. Its heading/header gap, complete headline, theme geometry, and quality assertions stay intact. Missing-reference, changed-pixel, clock, font, transport, and two-way switch controls remain required; no named test, tier, or shard registration changes.
 
 Final implementation `72861f2f0` includes main `3a18f5f07` through merge `98cb033cc`; the final fetch/merge is already up to date. Remote static exits **0 in 188.17 seconds: 44 checks passed, zero optional skips**. The first merged-head attempt passed 43 checks and timed out in the unchanged tier suite after 198 passes and zero assertion failures; the retry changes no deadline or assertion. Authority/transport/probe/switch regressions pass **2/2**, ledger regressions **2/2**, and the merged coverage regression **1/1**. Outside the write set: `web/scripts/ci-web-shard.test.mjs` resolves the main conflict by preserving both the 19 dedicated visual specs and main's new missing/duplicate assignment controls at all four shard counts. The approved browser entry point refuses the updated guard with **exit 5 / VISUAL = CI ONLY**; final guard/comparison/probe execution remains for hosted CI after the coordinator's push. The worker exits **90% / BLOCKED**, because neither a complete green pinned comparison nor evidence authorizing a UI-change withdrawal exists. `fix7-evidence-index.json` indexes the full handoff. No origin push, deployment, reference publication/activation, release/tag, PPM attachment, model CLI, or review gate is performed; the remaining unrelated jobs in the worker's diagnostic CI run are cancelled after the focused evidence is archived.
+
+### Prepared cross-machine raster experiment — AEON-1692 round 8
+
+The active **set 3 / 60 blocking / 20 report-only** policy, active renderer record, browser arguments (`--disable-gpu`), container digest, PNG pins, thresholds and approval receipt are unchanged. `rendererPreparation` is an additional, inactive record. One explicit setting selects the complete candidate renderer; no arbitrary flags are accepted. Default captures and ordinary comparisons do not read a candidate setting. The renderer-update policy also rejects changing raster settings, browser parameters or a fixed-machine identity without a new approved baseline source and capture SHA.
+
+Every capture, comparison (including nightly), and probe rendering job records bounded `/proc/cpuinfo` model/flags plus the kernel boot UUID before browser work. Every checkpoint renderer records the same CPU evidence under diagnostic `runner` metadata. These new diagnostic fields do not rewrite immutable v2 archives. JSON retains all CPU flags (including AVX2 and AVX512 variants); the summary identifies each machine and CPU model. Missing Linux CPU evidence fails loudly. The boot UUID establishes separate runner machines without relying on a possibly reused display name.
+
+A nonempty `visual_probe` now creates **six parallel hosted jobs**, `fail-fast: false`, each using the same pinned container and selected fixtures, with one Playwright worker, zero retries and six repeats under each setting:
+
+| Setting | Extra arguments beyond the unchanged baseline |
+| --- | --- |
+| `baseline` | none |
+| `skia-runtime-disabled` | `--disable-skia-runtime-opts`, `--force-color-profile=srgb`, `--disable-lcd-text`, `--font-render-hinting=none`, `--force-device-scale-factor=1` |
+
+The context also retains device scale factor 1, headless Chromium and no GPU. After all jobs finish, `visual-probe-summary` downloads their exact SHA/attempt artifacts and checks all six slot identities, distinct kernel boots, CPU evidence, source SHA, setting arguments, quality passes and every entire-file PNG digest. A missing, duplicate, failed, stale or incomplete job produces **INCOMPLETE**, never “stable.” A complete run reports yes/no **per setting across ALL six jobs and all repeats**, plus per-checkpoint digests and CPU models. Measured nondeterminism is a result; incomplete evidence fails the summary job. Manual jobs remain excluded from merge-group reuse evidence, and ordinary comparisons remain required.
+
+LEAD first publishes this reviewed branch, then dispatches exactly the six flipping checkpoints (the worker does not push or dispatch):
+
+```sh
+bash scripts/test-prune/lead-commands.sh probe work/aeon-1692-refset3 V-projects-390-light,V-account-use-matrix-1440-dark,V-account-use-matrix-1440-light,V-agent-rules-390-dark,V-decision-desk-1024-dark,V-decision-desk-1440-dark
+# Equivalent dispatch; the helper above additionally verifies the published ref equals local HEAD:
+gh workflow run ci.yml --repo inspr-at/paimos --ref work/aeon-1692-refset3 -f visual_probe=V-projects-390-light,V-account-use-matrix-1440-dark,V-account-use-matrix-1440-light,V-agent-rules-390-dark,V-decision-desk-1024-dark,V-decision-desk-1440-dark -f visual_renderer=baseline
+```
+
+Read artifact **`visual-raster-probe-matrix-SHA-ATTEMPT`**, `matrix-report.json` and `matrix-report.md`. The six `visual-raster-probe-SHA-ATTEMPT-runner-N` artifacts retain original PNGs, quality records and logs; `visual-raster-cpu-SHA-ATTEMPT-runner-N` retains early CPU evidence even if setup fails. Baseline divergence across at least two CPU models, paired with complete byte identity under the disabled-Skia/determinism bundle, supports the CPU-dependent raster hypothesis. It does not isolate which bundled flag caused stability. If the six jobs all sample one CPU model, rerun to seek diversity; the report labels that result inconclusive. Stable selected checkpoints alone never prove that all 60 are stable.
+
+If a setting is stable across the sampled machines, the prepared full-capture path is:
+
+```sh
+# Optional inspection: writes only a fresh renderer record under test-results.
+node scripts/test-prune/visual-renderer.mjs prepare skia-runtime-disabled web/test-results/fix8-prepared-renderer.json
+bash scripts/test-prune/lead-commands.sh dispatch-candidate work/aeon-1692-refset3 skia-runtime-disabled
+# Record the new run's FULL_RUN, exact SHA and ATTEMPT. Two parallel runner jobs
+# each capture all 72 candidates twice; only the existing 60 can be promoted.
+# Use fresh destinations, and substitute the real SHA and ATTEMPT below.
+gh run download FULL_RUN --repo inspr-at/paimos --name visual-linux-candidate-SHA-ATTEMPT-runner-1 --dir web/test-results/fix8-full/runner-1
+gh run download FULL_RUN --repo inspr-at/paimos --name visual-linux-candidate-SHA-ATTEMPT-runner-2 --dir web/test-results/fix8-full/runner-2
+node scripts/test-prune/visual-baselines.mjs download web/test-results/fix8-full/set3
+bash scripts/test-prune/lead-commands.sh candidate-proof skia-runtime-disabled web/test-results/fix8-full/runner-1/container-run-1 web/test-results/fix8-full/runner-2/container-run-1 web/test-results/fix8-full/set3 web/test-results/fix8-full/review
+```
+
+The proof verifies original candidate archives and quality records, the same source SHA and candidate renderer, and **60/60 byte identity on different machines**. It verifies the immutable set-3 archive before generating, for **every changed checkpoint**, set-3, candidate and exact-RGBA diff PNGs plus counts/regions in `candidate-identity.json` and `candidate-review.md`. Non-edge changes and edge-localized changes appear separately. The 3×3 gradient heuristic is explicitly labelled: edge localization is compatible with anti-aliasing, not proof that a difference is harmless. Tick must assess the images and identify anything beyond anti-aliasing. No new pixel is automatically approved. An unstable full capture stops before pinning.
+
+LEAD then obtains Tick's actual receipt identifying the **exact candidate archive digest**, the full 60-ID selection and every changed checkpoint reviewed. Only after that receipt and the coordinator's normal release controls may LEAD publish the two **original, unmodified** assets (no repacking):
+
+```sh
+# ARCHIVE and DETACHED are the original files in runner-1/container-run-1/linux-candidate.
+# CAPTURE_SHA is from its verified detached manifest, not a later code commit.
+gh release create test-references-4 --repo inspr-at/paimos --target CAPTURE_SHA --prerelease --title 'Visual reference set 4' --notes 'Tick-approved renderer reference set 4; exact archive and changed-checkpoint receipt recorded on AEON-1670.' ARCHIVE DETACHED
+/Users/markus/.aeon/lead/aeon/pm --instance ppm --agent-name aeon-lead-claude --json attach AEON-1670 ARCHIVE
+/Users/markus/.aeon/lead/aeon/pm --instance ppm --agent-name aeon-lead-claude --json attach AEON-1670 DETACHED
+```
+
+Activation is a **separate coordinator-owned reviewed change**: retain set 3 in history; replace the single active renderer record with the verified candidate renderer; install the new archive/manifest attachment UUIDs, source/capture/bundle digests, `test-references-4` mirror, actual Tick receipt and those exact 60 PNG pins; set `referenceSet` to 4 and retain blocking comparison and all 20 deferrals. Run the renderer-update check, transport proof, planted-pixel rejection and the full required visual comparison in CI before merge. The existing **set-3 pin/publication helper is deliberately not a set-4 activator** and must not be reused. This round performs none of these publication or activation steps.
+
+If neither setting proves the **full 60** stable across machines, LEAD can choose the prepared fixed-machine variant, `agm2-baseline` or `agm2-skia-runtime-disabled`. OPS owns runner provisioning, the label assignment and confirming that the exact pinned container runs there. The prepared scheduling labels are **`[self-hosted, linux, x64, agm2]`**. Both agm2 records deliberately contain null CPU pins and refuse use until OPS supplies the actual container CPU model and flags SHA-256 in that preparation record. They are never learned from a comparison run. Scheduling stays **inactive**: the workflow retains literal `runs-on: ubuntu-latest`, exposes only baseline and hosted Skia candidate choices, and the dispatch helper refuses machine-bound candidates. Existing runner-boundary guards are not relaxed. After OPS pins the CPU values and the coordinator obtains the required review for routing these manual jobs through the repository’s runner boundary, the later routing change can expose the chosen agm2 input and use the same capture/proof path. That reviewed change must select the prepared labels and `AEON_VISUAL_RUNNER: agm2`; it cannot bypass the existing runner guard. Different boot IDs are not required for this fallback, which intentionally confines rendering to one machine type; both CPU model and flags must equal the pin. If stable and Tick-approved, the later activation change moves **capture, required comparison and nightly comparison** to those labels and sets `AEON_VISUAL_RUNNER: agm2` in each. Both the fixture's infrastructure check and renderer identity refuse every other label, CPU model or flags hash, while the container digest remains mandatory. Native agm2 Chromium remains incomparable.
+
+Round-8 regressions extend existing registered transport/switch and reuse tests without adding, removing, renaming or skipping any test identities. They cover same-run repeat stability hiding cross-machine divergence, missing/duplicate/stale jobs, reused boot identities, byte-only differences, incomplete summaries, CPU parsing, fixed-machine refusal, candidate archive transport after activation, candidate-only manual authority and the full-60 identity/diff guards. No review gate or other model CLI is run by the worker.
 
 ## P07 runtime preparation — AEON-1679
 

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { assertRenderer, visualClock } from './visual-renderer.mjs'
+import { assertRenderer, visualClock, preparedRenderer } from './visual-renderer.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const rank = { NIGHTLY: 0, 'GATED-FULL': 1, ESSENTIAL: 2 }
@@ -139,7 +139,7 @@ export function validateVisual(visual, { cuts = false, stateIds = visual.states?
   need((legacyRenderer || containerRenderer) &&
     renderer.runner.platform === 'linux' && renderer.runner.arch === 'x64' && text(renderer.playwright) &&
     renderer.browser?.name === 'chromium-headless-shell' && text(renderer.browser.revision) && text(renderer.browser.version) &&
-    renderer.browser.headless === true && same(renderer.browser.args, ['--disable-gpu']) &&
+    renderer.browser.headless === true && same(renderer.browser.args, renderer.rasterSetting ? preparedRenderer(visual, renderer.rasterSetting).browser.args : ['--disable-gpu']) &&
     renderer.deviceScaleFactor === 1 && same(renderer.colourScheme, ['light', 'dark']) && renderer.reducedMotion === 'reduce' &&
     renderer.timezone === 'Europe/Vienna' && renderer.locale === 'en-GB' && renderer.fonts?.length === 10 &&
     renderer.fonts[0].family === 'Inter Variable' && renderer.fonts[0].asset === 'web/tests/visual/fonts/inter-v4.1.ttf' &&
