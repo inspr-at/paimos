@@ -647,6 +647,7 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
 .log-open { width: 100%; height: 44px; }
 .agent-note { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .grid-scroll { overflow-x: auto; }
+.grid-scroll:focus-visible { outline: 1px solid var(--line); box-shadow: none; }
 .week-grid { width: 100%; min-width: 720px; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 13px; }
 .week-grid th, .week-grid td { height: 40px; padding: 0 10px; border-bottom: 1px solid var(--line); text-align: right; font-weight: 400; }
 .week-grid thead th { height: 44px; font: 500 10px/1.2 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); border-bottom: 1px solid var(--line-2); font-variant-ligatures: none; }

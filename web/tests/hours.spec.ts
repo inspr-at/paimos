@@ -129,6 +129,31 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     expect(dayFont.renderedFamilies, `${width} ${theme}: day values render in the bundled font`).toEqual(['JetBrains Mono'])
     const scroll = page.getByRole('region', { name: 'Weekly hours', exact: true })
     await scroll.focus()
+    // AEON-1699 fix1: the focused region's outline also paints the header's
+    // top edge. Checking only the table borders would miss the teal rule.
+    const headerEdge = await scroll.evaluate(element => {
+      const probe = document.createElement('span')
+      probe.style.borderTop = '1px solid var(--line)'
+      element.append(probe)
+      const neutral = getComputedStyle(probe).borderTopColor
+      probe.remove()
+      const style = getComputedStyle(element)
+      return { neutral, outline: { width: parseFloat(style.outlineWidth), color: style.outlineColor },
+        shadow: style.boxShadow,
+        borders: [element, ...element.querySelectorAll('thead, thead tr, thead th')].map(edge => {
+          const style = getComputedStyle(edge)
+          return { width: parseFloat(style.borderTopWidth), color: style.borderTopColor }
+        }) }
+    })
+    for (const border of headerEdge.borders.filter(border => border.width > 0)) {
+      expect(border.color, `${width} ${theme}: header top border uses the neutral line token`).toBe(headerEdge.neutral)
+      expect(border.width, `${width} ${theme}: header top border is a hairline`).toBe(1)
+    }
+    if (headerEdge.outline.width > 0) {
+      expect(headerEdge.outline.color, `${width} ${theme}: focused header top edge uses the neutral line token`).toBe(headerEdge.neutral)
+      expect(headerEdge.outline.width, `${width} ${theme}: focus outline is a hairline`).toBe(1)
+    }
+    expect(headerEdge.shadow, `${width} ${theme}: no accent shadow around the header`).toBe('none')
     const dimensions = await scroll.evaluate(element => ({
       overflow: element.scrollWidth - element.clientWidth, width: element.clientWidth,
       descendants: Array.from(element.querySelectorAll('*')).flatMap(child => {
@@ -297,7 +322,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     })
     if (width > 520) expect(unchangedWideLayout.fixedTotals, `${width} ${theme}: Total keeps its position, size and font`).toEqual(unchangedWideLayout.previousTotals)
     if (width >= 1024) expect(unchangedWideLayout.fixed, `${width} ${theme}: 0 px change from the pre-fix layout`).toEqual(unchangedWideLayout.previous)
-    measurements.push({ width, theme, dayFont, dayCells, phoneGrid, textRows, totalCells, unchangedWideLayout })
+    measurements.push({ width, theme, headerEdge, dayFont, dayCells, phoneGrid, textRows, totalCells, unchangedWideLayout })
     const crowdedTickets = await grid(page).locator('tbody th').evaluateAll(cells => cells.flatMap(cell => {
       const chip = cell.querySelector('.ticket-chip')!, edge = chip.getBoundingClientRect().right
       const neighbour = window.matchMedia('(max-width: 520px)').matches ? cell.parentElement!.querySelector('.c-total')! : cell.nextElementSibling!
@@ -312,7 +337,9 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     const axe = await new AxeBuilder({ page }).include('.biz-page')
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
     expect(axe.violations, `${width} ${theme}: Hours WCAG A/AA`).toEqual([])
-    await page.screenshot({ path: info.outputPath(`AEON-1699-hours-${width}-${theme}.png`) })
+    if ((width === 390 || width === 1440) && theme === 'light') {
+      await page.screenshot({ path: info.outputPath(`AEON-1699-hours-${width}-${theme}-fix1.png`) })
+    }
   }
   await writeFile(info.outputPath('AEON-1699-hours-checks.json'), JSON.stringify(measurements, null, 2))
   expect(errors).toEqual([])
