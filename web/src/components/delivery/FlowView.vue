@@ -336,7 +336,7 @@ const emptyText = computed(() => {
 .stack { display: inline-grid; }
 .stack > span { grid-area: 1 / 1; white-space: nowrap; }
 .stack > span[aria-hidden] { visibility: hidden; }
-.fl-livechip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); font-size: 12.5px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fl-livechip { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); font-size: 12.5px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; font-kerning: none; }
 .fl-livechip.hist { background: var(--surface-sunken); color: var(--ink-2); }
 .fl-clock { min-width: 0; font: 500 12px var(--mono); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fl-clock.wide { flex: 0 1 200px; }

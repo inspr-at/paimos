@@ -204,9 +204,11 @@ test('another person or workspace starts without the earlier answers', async ({ 
   await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: '33333333-3333-4333-8333-333333333333', name: 'Ola Nordmann', kind: 'person', roles: ['member'] }, tenant: { id: 't2', name: 'Other Studio' } } }))
   // Any navigation refreshes the session: step to the next release and back, one settled step at a time.
   const rows = sheet(page).getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
-  await rows.nth(2).click()
+  // Click the row's time, away from its nested version-copy action. A row
+  // centre can land on that action after the shared test font changes.
+  await rows.nth(2).locator('.clock').click()
   await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
-  await rows.nth(1).click()
+  await rows.nth(1).locator('.clock').click()
   await expect(page).toHaveURL(`/releases/${history.releases[1].version}`)
   await expect(chips(page).getByText('PHAROS-11', { exact: true })).toHaveJSProperty('tagName', 'SPAN')
   await expect(sheet(page).getByRole('link', { name: new RegExp(TITLE) })).toHaveCount(0)

@@ -518,13 +518,18 @@ test.describe('phones', () => {
   test('a late font keeps the ticket key whole on a phone', async ({ page }) => {
     let release!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
-    await page.route('**/jetbrains*.woff2*', async route => { await held; await route.continue() })
+    let requested = false
+    await page.route('**/jetbrains*.woff2*', async route => { requested = true; await held; await route.continue() })
     await page.setViewportSize({ width: 390, height: 844 })
     await page.emulateMedia({ colorScheme: 'light' })
     await signIn(page, 'admin', { business: true })
     await page.goto('/p/PHAROS/PHAROS-11?view=full')
     const key = page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')
     await expect(key).toHaveText('PHAROS-11')
+    // A font availability check can pass before this weight has been used.
+    // Start the requested face and prove that the network barrier holds it.
+    await page.evaluate(() => { void document.fonts.load('12px "JetBrains Mono"') })
+    await expect.poll(() => requested).toBe(true)
     expect(await page.evaluate(() => document.fonts.check('12px "JetBrains Mono"'))).toBe(false)
     await page.setViewportSize({ width: 415, height: 844 })
     release()

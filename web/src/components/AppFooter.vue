@@ -205,7 +205,7 @@ button.sum:active { background: var(--row-selected); }
 /* The face uses natural widths; hover and focus never resize the target. */
 .version-pill { display: inline-flex; align-items: center; height: 100%; min-width: 0; max-width: 100%; flex: 0 1 auto; margin-right: -8px; padding: 0; border: 0; background: transparent; color: var(--ink-2); }
 .version-pill:focus-visible { box-shadow: none; }
-.pill-face { display: inline-flex; align-items: center; min-width: 0; height: 28px; padding: 0 8px; border-radius: 8px; white-space: nowrap; transition: background-color .15s ease, color .15s ease; }
+.pill-face { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; height: 28px; padding: 0 8px; border-radius: 8px; white-space: nowrap; transition: background-color .15s ease, color .15s ease; }
 .pill-face > svg { color: var(--ink-3); margin-right: 7px; }
 .footer-codename { min-width: 0; max-width: 168px; overflow: hidden; text-overflow: ellipsis; font: 500 12.5px/16px var(--font); color: var(--ink); }
 .release-divider { flex: none; width: 1px; height: 12px; margin: 0 9px; background: var(--line-2); }
