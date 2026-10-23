@@ -57,6 +57,8 @@ export async function setupBrowserFonts() {
       console.log(`Browser font guard ok; computed body: ${body.computedFamily}; resolved: ${body.renderedFamilies.join(', ')}`)
     } finally { await browser.close() }
     process.env.FONTCONFIG_FILE = fontconfig
+    // Forward this teardown from each global setup so the private file remains
+    // available until every worker browser has exited.
     return cleanup
   } catch (error) { cleanup(); throw error }
 }
