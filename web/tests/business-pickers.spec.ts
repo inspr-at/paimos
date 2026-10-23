@@ -316,15 +316,3 @@ test('AEON-1417: partial customer quote contact and project lists show retry bes
   await writeFile(testInfo.outputPath('checks.json'), JSON.stringify(checks, null, 2))
   await writeFile(testInfo.outputPath('checks.md'), JSON.stringify(checks, null, 2))
 })
-
-// Temporary same-host worker timing; removed before handoff.
-import { writeFileSync as writeCutATiming } from 'node:fs'
-import { hostname as cutAHost } from 'node:os'
-let cutAStarted = 0
-test.beforeEach(() => { cutAStarted = performance.now() })
-test.afterEach(async ({}, testInfo) => {
-  writeCutATiming(testInfo.outputPath('p10-cutA-timing.md'), JSON.stringify({
-    host: cutAHost(), title: testInfo.title, seconds: (performance.now() - cutAStarted) / 1000,
-    status: testInfo.status, retry: testInfo.retry,
-  }))
-})

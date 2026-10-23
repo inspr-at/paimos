@@ -51,15 +51,3 @@ test('AEON-1682: native prose edit, measurement history and CAS save survive a r
   await item.click()
   await expect(marker).toHaveValue('3.5')
 })
-
-// Temporary same-host worker timing; removed before handoff.
-import { writeFileSync as writeCutATiming } from 'node:fs'
-import { hostname as cutAHost } from 'node:os'
-let cutAStarted = 0
-test.beforeEach(() => { cutAStarted = performance.now() })
-test.afterEach(async ({}, testInfo) => {
-  writeCutATiming(testInfo.outputPath('p10-cutA-timing.md'), JSON.stringify({
-    host: cutAHost(), title: testInfo.title, seconds: (performance.now() - cutAStarted) / 1000,
-    status: testInfo.status, retry: testInfo.retry,
-  }))
-})
