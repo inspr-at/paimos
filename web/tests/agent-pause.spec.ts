@@ -264,6 +264,14 @@ test('AEON-783: chosen agents keeps Done in, By, Cancel and Submit still', async
     const go = pop.locator('button[type=submit]'), quit = pop.getByRole('button', { name: /^Cancel/ })
     const pauseAll = pop.getByRole('button', { name: /^Pause all…/ }), resumeAll = pop.getByRole('button', { name: /^Resume all…/ })
     const guard = await controlStability(page, { where, seg, by, go, quit, pauseAll, resumeAll })
+    // AEON-1712: the rendered time must also stay still with CI's system face,
+    // across every viewport/theme, including the hidden invalid-time label.
+    for (const minutes of [5, 30, 60, 15]) await guard.check(async () => {
+      const preset = seg.getByRole('radio', { name: `${minutes} min`, exact: true })
+      await preset.click(); await expect(preset).toHaveAttribute('aria-checked', 'true')
+    })
+    await guard.check(async () => { await by.fill('25:00'); await expect(by).toHaveAttribute('aria-invalid', 'true') })
+    await guard.check(async () => { await seg.getByRole('radio', { name: '15 min', exact: true }).click(); await expect(by).not.toHaveAttribute('aria-invalid', 'true') })
     await guard.check(async () => { await where.selectOption({ label: 'Markus’s studio · 2 agents' }); await expect(pop.locator('.wdf-prev')).toContainText('2 agents on Markus’s studio') })
     await guard.check(async () => { await where.selectOption('pick'); await expect(pop.getByRole('group', { name: 'Agents to wind down' })).toBeVisible() })
     await guard.check(async () => { await pop.getByRole('group', { name: 'Agents to wind down' }).getByRole('checkbox').nth(2).uncheck(); await expect(pop.locator('.wdf-prev')).toContainText('2 agents you chose') })

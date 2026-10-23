@@ -9410,7 +9410,29 @@
     ,
     {"kind":"browser","file":"tests/hours.spec.ts","name":"open periods older than a year appear on a direct approvals load","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts (1024px, dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts (1024px, light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts (1440px, dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts (1440px, light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts (320px, dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts (320px, light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts (390px, dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts (390px, light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts (520px, dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts (520px, light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts (560px, dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/hours.spec.ts","name":"the week grid sums per ticket and day with exact amounts (560px, light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/hours.spec.ts","name":"weeks move with the arrow keys; l focuses the entry line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

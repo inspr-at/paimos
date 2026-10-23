@@ -81,47 +81,48 @@ test('open periods older than a year appear in the home waiting count and week b
   }
 })
 
-test('the week grid sums per ticket and day with exact amounts', async ({ page }, info) => {
-  const errors = watchErrors(page)
-  const { data } = await setup(page)
-  // Adjacent five-character days expose run-together values, and a fully
-  // logged week exercises the widest realistic weekly total (168:00).
-  const fullDay = data.entries.find(entry => entry.id === 'e-2')!
-  for (const [i, id] of ['e-1', 'e-2', 'e-3', 'e-4'].entries()) {
-    const entry = data.entries.find(entry => entry.id === id)!
-    entry.started_at = new Date(Date.parse(WEEK39.starts_at) + i * 86400_000).toISOString()
-    entry.duration_seconds = (i === 0 ? 10.5 : 24) * 3600
-    entry.ended_at = new Date(Date.parse(entry.started_at) + entry.duration_seconds * 1000).toISOString()
-    entry.amount = i === 0 ? '997.5000' : i === 3 ? '2040.0000' : '2280.0000'
-  }
-  for (const i of [4, 5, 6]) {
-    const started = Date.parse(WEEK39.starts_at) + i * 86400_000
-    data.entries.push({ ...fullDay, id: `e-full-${i}`, started_at: new Date(started).toISOString(),
-      ended_at: new Date(started + 86400_000).toISOString() })
-  }
-  data.entries.push({ ...data.entries.find(entry => entry.id === 'e-3')!, id: 'e-monday-rest',
-    started_at: data.entries.find(entry => entry.id === 'e-1')!.ended_at,
-    ended_at: fullDay.started_at, duration_seconds: 13.5 * 3600, amount: '1282.5000' })
-  await openWeek(page)
-  await expect(page.getByText('Week 39 · 21–27 Sep 2026 · 168h logged')).toBeVisible()
-  const rows = grid(page).locator('tbody tr')
-  await expect(rows).toHaveCount(3)
-  await expect(rows.first()).toContainText('PHAROS-11')
-  await expect(rows.first().locator('td')).toHaveText(['10:30', '24:00', '·', '·', '24:00', '24:00', '24:00', '106:30'])
-  await expect(grid(page).locator('tfoot td')).toHaveText(['24:00', '24:00', '24:00', '24:00', '24:00', '24:00', '24:00', '168:00'])
-  await expect(grid(page).locator('thead th.today')).toContainText('Thu')
-  // 144h × 95 + 24h × 85, exactly.
-  await expect(page.locator('.week-foot')).toContainText('15,720.00 EUR')
-  await expect(page.locator('.period-chip')).toHaveText('21–27 Sep 2026')
-  const entries = page.getByRole('region', { name: 'Entries' })
-  await expect(entries.getByText('Thu 24')).toBeVisible()
-  const thursdayEntry = entries.locator('.entry').filter({ hasText: 'Connector sketch' })
-  await expect(thursdayEntry).toContainText('00:00–00:00')
-  await expect(thursdayEntry).toContainText('2,040.00')
-  // AEON-1687: the complete seven-day grid must fit its own container on a
-  // phone, rather than concealing a wider table in a horizontal scroller.
-  const measurements = []
-  for (const width of [390, 320, 520, 560, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+// Each viewport/theme keeps the full assertions and audits in its own 30-second budget.
+for (const width of [390, 320, 520, 560, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`the week grid sums per ticket and day with exact amounts (${width}px, ${theme})`, async ({ page }, info) => {
+    const errors = watchErrors(page)
+    const { data } = await setup(page)
+    // Adjacent five-character days expose run-together values, and a fully
+    // logged week exercises the widest realistic weekly total (168:00).
+    const fullDay = data.entries.find(entry => entry.id === 'e-2')!
+    for (const [i, id] of ['e-1', 'e-2', 'e-3', 'e-4'].entries()) {
+      const entry = data.entries.find(entry => entry.id === id)!
+      entry.started_at = new Date(Date.parse(WEEK39.starts_at) + i * 86400_000).toISOString()
+      entry.duration_seconds = (i === 0 ? 10.5 : 24) * 3600
+      entry.ended_at = new Date(Date.parse(entry.started_at) + entry.duration_seconds * 1000).toISOString()
+      entry.amount = i === 0 ? '997.5000' : i === 3 ? '2040.0000' : '2280.0000'
+    }
+    for (const i of [4, 5, 6]) {
+      const started = Date.parse(WEEK39.starts_at) + i * 86400_000
+      data.entries.push({ ...fullDay, id: `e-full-${i}`, started_at: new Date(started).toISOString(),
+        ended_at: new Date(started + 86400_000).toISOString() })
+    }
+    data.entries.push({ ...data.entries.find(entry => entry.id === 'e-3')!, id: 'e-monday-rest',
+      started_at: data.entries.find(entry => entry.id === 'e-1')!.ended_at,
+      ended_at: fullDay.started_at, duration_seconds: 13.5 * 3600, amount: '1282.5000' })
+    await openWeek(page)
+    await expect(page.getByText('Week 39 · 21–27 Sep 2026 · 168h logged')).toBeVisible()
+    const rows = grid(page).locator('tbody tr')
+    await expect(rows).toHaveCount(3)
+    await expect(rows.first()).toContainText('PHAROS-11')
+    await expect(rows.first().locator('td')).toHaveText(['10:30', '24:00', '·', '·', '24:00', '24:00', '24:00', '106:30'])
+    await expect(grid(page).locator('tfoot td')).toHaveText(['24:00', '24:00', '24:00', '24:00', '24:00', '24:00', '24:00', '168:00'])
+    await expect(grid(page).locator('thead th.today')).toContainText('Thu')
+    // 144h × 95 + 24h × 85, exactly.
+    await expect(page.locator('.week-foot')).toContainText('15,720.00 EUR')
+    await expect(page.locator('.period-chip')).toHaveText('21–27 Sep 2026')
+    const entries = page.getByRole('region', { name: 'Entries' })
+    await expect(entries.getByText('Thu 24')).toBeVisible()
+    const thursdayEntry = entries.locator('.entry').filter({ hasText: 'Connector sketch' })
+    await expect(thursdayEntry).toContainText('00:00–00:00')
+    await expect(thursdayEntry).toContainText('2,040.00')
+    // AEON-1687: the complete seven-day grid must fit its own container on a
+    // phone, rather than concealing a wider table in a horizontal scroller.
+    const measurements = []
     await page.setViewportSize({ width, height: 900 })
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     await page.evaluate(() => document.fonts.ready)
@@ -338,10 +339,10 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
     expect(axe.violations, `${width} ${theme}: Hours WCAG A/AA`).toEqual([])
     await page.screenshot({ path: info.outputPath(`AEON-1699-hours-${width}-${theme}-fix3.png`) })
-  }
-  await writeFile(info.outputPath('AEON-1699-hours-checks.json'), JSON.stringify(measurements, null, 2))
-  expect(errors).toEqual([])
-})
+    await writeFile(info.outputPath('AEON-1699-hours-checks.json'), JSON.stringify(measurements, null, 2))
+    expect(errors).toEqual([])
+  })
+}
 
 test('logging time: ticket, duration like 1h30, Enter', async ({ page }) => {
   const { data, calls } = await setup(page)
