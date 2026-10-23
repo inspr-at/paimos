@@ -87,7 +87,8 @@ func TestAttachedResponsesUseSeparateSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	defs := map[string]any{}
-	for _, name := range []string{"InboxSend", "InboxMessage", "InboxReceipt", "InboxSendResponse", "InboxReceiptResponse", "AttachedInboxMessage", "AttachedInboxReceipt", "AttachedMessageStatus"} {
+	// InboxMessage embeds InboxSend, including its structured lane status.
+	for _, name := range []string{"InboxSend", "InboxLaneStatus", "InboxMessage", "InboxReceipt", "InboxSendResponse", "InboxReceiptResponse", "AttachedInboxMessage", "AttachedInboxReceipt", "AttachedMessageStatus"} {
 		shape, ok := doc.Components.Schemas[name]
 		if !ok {
 			t.Fatalf("missing separate response schema %s", name)
@@ -162,6 +163,29 @@ func TestAttachedResponsesUseSeparateSchemas(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
+	t.Run("lane status", func(t *testing.T) {
+		status := msg
+		status.Kind, status.SenderSessionID = "status", &id
+		status.LaneStatus = &inbox.LaneStatus{TargetNodeID: id, Done: "contract dependency included", Next: "validate responses"}
+		status.Body = status.LaneStatus.Line()
+		if err := send.Validate(wire(status)); err != nil {
+			t.Fatalf("lane status send response: %v", err)
+		}
+		// Resolve the real dependency: a permissive stand-in would accept these.
+		for name, mutate := range map[string]func(map[string]any){
+			"missing next":  func(fields map[string]any) { delete(fields, "next") },
+			"unknown field": func(fields map[string]any) { fields["unexpected"] = true },
+			"invalid done":  func(fields map[string]any) { fields["done"] = 42 },
+		} {
+			t.Run(name, func(t *testing.T) {
+				value := wire(status)
+				mutate(value["lane_status"].(map[string]any))
+				if err := send.Validate(value); err == nil {
+					t.Fatal("send response permits malformed lane status")
+				}
+			})
+		}
+	})
 	for _, mode := range []string{"attached_volatile", "attached_notification"} {
 		t.Run(mode, func(t *testing.T) {
 			msg.ContentMode, msg.Body, msg.RecipientSessionID, msg.MessageDeadline = mode, attachedmsg.Placeholder, &id, &at
