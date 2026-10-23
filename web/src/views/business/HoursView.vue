@@ -763,10 +763,10 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
 /* Reclaim key padding before the 1 px type step: even adjacent full-day
    values need 6 px of clear space in the bundled mono font on Linux. */
 @media (max-width: 520px) {
-  .week-grid .c-ticket { width: 54px; padding-left: 0; }
+  .week-grid .c-ticket { width: 58px; padding-left: 0; }
   .week-grid .ticket-chip { padding: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--ink); font-size: 10.5px; }
   .week-grid .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
   .week-grid .c-day { font-size: 10px; }
-  .week-grid .c-total { width: 46px; padding-right: 5px !important; font-size: 10.5px; }
+  .week-grid .c-total { width: 44px; padding-left: 1px; padding-right: 1px !important; font-size: 10.5px; }
 }
 </style>

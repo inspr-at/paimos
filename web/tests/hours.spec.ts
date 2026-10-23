@@ -183,7 +183,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     // fit perfectly while the adjacent time values still read as one number.
     const textRows = await grid(page).locator('tr').evaluateAll(rows => rows.map(row => {
       const header = row.parentElement?.tagName === 'THEAD'
-      const cells = Array.from(row.querySelectorAll(header ? '.c-day, .c-total' : '.c-day'))
+      const cells = Array.from(row.querySelectorAll('.c-day, .c-total'))
       const text = cells.map(cell => {
         const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT)
         const rects: DOMRect[] = []
@@ -202,9 +202,9 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     }))
     expect(textRows).toHaveLength(5) // Header, all three tickets and per-day totals.
     for (const row of textRows) {
-      expect(row.text).toHaveLength(row.header ? 8 : 7)
+      expect(row.text).toHaveLength(8)
       expect(row.text.every(text => text.visible), `${width} ${theme}: ${row.label} has positive text boxes`).toBe(true)
-      expect(row.gaps).toHaveLength(row.header ? 7 : 6)
+      expect(row.gaps).toHaveLength(7)
       for (const [i, gap] of row.gaps.entries()) {
         expect(gap, `${width} ${theme}: ${row.label}, ${row.text[i].value} → ${row.text[i + 1].value}`).toBeGreaterThanOrEqual(6)
       }
