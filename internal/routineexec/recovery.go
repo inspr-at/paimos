@@ -101,7 +101,7 @@ func (e *Executor) recoverTenant(ctx context.Context, tid string) (Pass, error) 
 			return err
 		}
 		rows, err := tx.Query(ctx, `SELECT r.id::text FROM routine_runs r LEFT JOIN routine_effect_outbox o ON o.run_id=r.id AND o.effect_key='recovery'
-   WHERE (r.state NOT IN ('done','completed','succeeded','failed','skipped','cancelled')
+   WHERE r.agent_owner_config IS NULL AND (r.state NOT IN ('done','completed','succeeded','failed','skipped','cancelled')
     OR EXISTS(SELECT 1 FROM routine_launch_intents l WHERE l.routine_run_id=r.id AND l.claimed_at IS NOT NULL AND l.exit_observed_at IS NULL)
     OR EXISTS(SELECT 1 FROM routine_budget_grants g WHERE g.run_id=r.id AND g.state<>'settled')
     OR EXISTS(SELECT 1 FROM routine_effect_outbox unknown_effect WHERE unknown_effect.run_id=r.id AND unknown_effect.state='unknown'))
