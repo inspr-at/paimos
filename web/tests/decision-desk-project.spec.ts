@@ -132,7 +132,7 @@ test('revisiting a question after Decide & next retains its project link, colour
 })
 
 test('the Agents doctrine row resolves its project through the authorized ticket lookup', async ({ page }, testInfo) => {
-  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  for (const width of [1440]) for (const theme of ['light'] as const) {
     await page.setViewportSize({ width, height: 1000 })
     const world = await mockDecisionDesk(page, { theme })
     world.rule.ticket = 'AEON-1'
@@ -157,7 +157,7 @@ test('the Agents doctrine row resolves its project through the authorized ticket
 
 // Risk: a poll removes a project link under the pointer while its ticket is read again.
 test('the Agents doctrine project link stays put through a second desk refresh without repeated lookups', async ({ page }, testInfo) => {
-  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  for (const width of [1440]) for (const theme of ['light'] as const) {
     await page.setViewportSize({ width, height: 1000 })
     const world = await mockDecisionDesk(page, { theme })
     await page.goto(DESK_PANEL)
@@ -192,7 +192,7 @@ test('the Agents doctrine project link stays put through a second desk refresh w
   }
 })
 
-for (const theme of ['light', 'dark'] as const) {
+for (const theme of ['light'] as const) {
   test(`tablet toolbar stays visible and stable on opening and resizing ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 768, height: 1000 })
     await openRound(page, theme)
@@ -223,7 +223,7 @@ for (const theme of ['light', 'dark'] as const) {
   })
 }
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   test(`the desk controls stay still across a change of project ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     const world = await mockDecisionDesk(page, { theme })

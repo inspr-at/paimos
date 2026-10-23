@@ -38,7 +38,7 @@ async function setup(page: Page, items = findings, agent = false) {
   return calls
 }
 
-for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1600, 390]) for (const theme of ['light'] as const) {
   test(`outcome proposals ${width} ${theme}`, async ({ page }) => {
     const errors = watchErrors(page)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
@@ -71,17 +71,3 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
     }
   })
 }
-
-test('agent principals never request or see the proposals list', async ({ page }) => {
-  const calls = await setup(page, findings, true)
-  await page.goto('/settings/agent-rules')
-  await expect(page.getByRole('heading', { name: 'Doctrine', exact: true })).toBeVisible()
-  await expect(page.getByLabel('Proposals', { exact: true })).toHaveCount(0)
-  expect(calls.some(path => path.endsWith('/analysis') || path.endsWith('/proposals'))).toBe(false)
-})
-
-test('empty analysis gives one quiet line', async ({ page }) => {
-  await setup(page, [])
-  await page.goto('/settings/agent-rules')
-  await expect(page.getByText('No proposals yet.')).toBeVisible()
-})

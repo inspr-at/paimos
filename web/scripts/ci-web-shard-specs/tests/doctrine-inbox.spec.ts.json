@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/doctrine-inbox.spec.ts",
-    "listedTests": 7,
+    "listedTests": 3,
     "tierTiming": {
       "caseSeconds": {
         "max": 7.815,

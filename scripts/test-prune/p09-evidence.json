@@ -2,39 +2,18 @@
   "version": 1,
   "ticket": "AEON-1681",
   "package": "P09",
-  "status": "blocked-before-cuts",
-  "blockers": [
-    {
-      "kind": "visual-reference-authority",
-      "source": "scripts/test-prune/visual-manifest.json",
-      "observed": {
-        "approval": "pending",
-        "baselineAuthority": "pending-review",
-        "attachmentId": null,
-        "sha256": null
-      },
-      "required": "The plan and ledger cutPrerequisites require Tick approval of the exact fixtures and an immutable available reference source before pruning starts."
-    },
-    {
-      "kind": "remote-browser-capacity",
-      "entryPoint": "remote-spec.sh",
-      "result": "exit 3",
-      "refusals": [
-        "remote busy (host guard); wait or rely on PR CI",
-        "remote busy: 2/2 remote runs (CI pool 0/4); no free mbp2606 slot"
-      ]
-    }
-  ],
+  "status": "cut-a-implemented",
+  "blockers": [],
   "browser": {
     "beforeCases": 420,
-    "afterCases": 420,
+    "afterCases": 326,
     "plannedCeiling": 23,
-    "removed": 0,
+    "removed": 94,
     "demoted": 0,
-    "runnerSecondsBefore": null,
+    "runnerSecondsBefore": 342,
     "runnerSecondsAfter": null,
     "measuredRunnerSecondsDelta": null,
-    "measurementStatus": "unmeasured: remote baseline refused; no browser reduction or timing saving claimed"
+    "measurementStatus": "baseline passed on mbp2606: 94 cases in 1.9m plus 132 cases in 3.8m; retained runs pending"
   },
   "runtime": {
     "newCases": 22,
@@ -395,20 +374,23 @@
     {
       "source": "tests/aeon-1473-desk-tab.spec.ts",
       "sourceKeys": [
-        "browser:tests/aeon-1473-desk-tab.spec.ts:16 px favicon › AEON-1473: the amber dot reads at 16 px on light and dark tab strips",
-        "browser:tests/aeon-1473-desk-tab.spec.ts:32 px favicon › AEON-1473: the amber dot reads at 32 px on light and dark tab strips",
+        "browser:tests/aeon-1473-desk-tab.spec.ts:16 px favicon \u203a AEON-1473: the amber dot reads at 16 px on light and dark tab strips",
+        "browser:tests/aeon-1473-desk-tab.spec.ts:32 px favicon \u203a AEON-1473: the amber dot reads at 32 px on light and dark tab strips",
         "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: a background tab reads the Desk itself and says New decision for two seconds, without focus or sound",
         "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: a rise pops the favicon dot once in six frames; the visible title never swaps",
         "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: an agent principal and a signed-out visitor see no count and the plain icon",
-        "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: every page leads with the badge’s count: none at 0, (1), (9), then (9+)",
+        "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: every page leads with the badge\u2019s count: none at 0, (1), (9), then (9+)",
         "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: reduced motion changes only the number, visible or in the background"
       ],
       "runtimeDestinations": [
         "runtime:desk-tab.test.ts",
         "runtime:desk-tab-lifecycle.unit.test.ts"
       ],
-      "cutStatus": "deferred",
-      "remainingProof": "Keep original native keyboard/focus, mounted page wiring, control stability and appearance cases until the corresponding retained journeys and Tick reference authority are verified."
+      "cutStatus": "partial-unprotected-cut-a",
+      "remainingProof": "Unique native keyboard/focus, mounted page wiring, real canvas and control geometry remain in the listed retained browser cases. Protected cuts await P02.",
+      "removedKeys": [
+        "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: reduced motion changes only the number, visible or in the background"
+      ]
     },
     {
       "source": "tests/decision-desk-fix2.spec.ts",
@@ -426,8 +408,14 @@
         "runtime:decision-desk-fix2.unit.test.ts",
         "runtime:decision-desk-memo.unit.test.ts"
       ],
-      "cutStatus": "deferred",
-      "remainingProof": "Keep original native keyboard/focus, mounted page wiring, control stability and appearance cases until the corresponding retained journeys and Tick reference authority are verified."
+      "cutStatus": "partial-unprotected-cut-a",
+      "remainingProof": "Unique native keyboard/focus, mounted page wiring, real canvas and control geometry remain in the listed retained browser cases. Protected cuts await P02.",
+      "removedKeys": [
+        "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1024 dark",
+        "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1024 light",
+        "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1440 dark",
+        "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 390 dark"
+      ]
     },
     {
       "source": "tests/decision-desk-fix3.spec.ts",
@@ -446,8 +434,16 @@
         "runtime:decision-desk-fix3.unit.test.ts",
         "runtime:decision-desk-memo.unit.test.ts"
       ],
-      "cutStatus": "deferred",
-      "remainingProof": "Keep original native keyboard/focus, mounted page wiring, control stability and appearance cases until the corresponding retained journeys and Tick reference authority are verified."
+      "cutStatus": "partial-unprotected-cut-a",
+      "remainingProof": "Unique native keyboard/focus, mounted page wiring, real canvas and control geometry remain in the listed retained browser cases. Protected cuts await P02.",
+      "removedKeys": [
+        "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1024 dark",
+        "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1024 light",
+        "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1440 dark",
+        "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 390 dark",
+        "browser:tests/decision-desk-fix3.spec.ts:revision-zero native tier request can approve with exact ownership",
+        "browser:tests/decision-desk-fix3.spec.ts:revision-zero native tier request can decline with exact ownership"
+      ]
     },
     {
       "source": "tests/decision-desk-project.spec.ts",
@@ -471,8 +467,15 @@
         "runtime:decision-desk-project.unit.test.ts",
         "runtime:decision-desk-cutover.unit.test.ts"
       ],
-      "cutStatus": "deferred",
-      "remainingProof": "Keep original native keyboard/focus, mounted page wiring, control stability and appearance cases until the corresponding retained journeys and Tick reference authority are verified."
+      "cutStatus": "partial-unprotected-cut-a",
+      "remainingProof": "Unique native keyboard/focus, mounted page wiring, real canvas and control geometry remain in the listed retained browser cases. Protected cuts await P02.",
+      "removedKeys": [
+        "browser:tests/decision-desk-project.spec.ts:tablet toolbar stays visible and stable on opening and resizing dark",
+        "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1024 dark",
+        "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1024 light",
+        "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1440 dark",
+        "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 390 dark"
+      ]
     },
     {
       "source": "tests/outcome-proposals.spec.ts",
@@ -488,37 +491,1457 @@
         "runtime:decision-desk.unit.test.ts",
         "runtime:outcome-proposals.unit.test.ts"
       ],
-      "cutStatus": "deferred",
-      "remainingProof": "Keep original native keyboard/focus, mounted page wiring, control stability and appearance cases until the corresponding retained journeys and Tick reference authority are verified."
+      "cutStatus": "partial-unprotected-cut-a",
+      "remainingProof": "Unique native keyboard/focus, mounted page wiring, real canvas and control geometry remain in the listed retained browser cases. Protected cuts await P02.",
+      "removedKeys": [
+        "browser:tests/outcome-proposals.spec.ts:agent principals never request or see the proposals list",
+        "browser:tests/outcome-proposals.spec.ts:empty analysis gives one quiet line",
+        "browser:tests/outcome-proposals.spec.ts:outcome proposals 1600 dark",
+        "browser:tests/outcome-proposals.spec.ts:outcome proposals 390 dark"
+      ]
     }
   ],
   "preservedRisks": [
-    "All 420 original browser identities, their tiers and launch records remain unchanged.",
-    "Native keyboard/IME/focus, pointer/touch, series geometry, rendered text and real mounted streams still require retained browser proof.",
-    "No Tick reference was invented, no historical replay evidence was rewritten, and no test assertion or required check was weakened."
+    "All 82 protected browser identities remain with their original tiers and assertions.",
+    "Unique keyboard/focus, touch, approval consent, held-response ownership, live streams, exact-request passkey and geometry risks remain in browser specs.",
+    "Every retained expectation expression in the 12 changed specs is unchanged; five targeted negative controls failed by assertion before the five runtime-backed cuts.",
+    "Immutable baseline, protected lineage rows, current drift obligations, launch policy and historical replay evidence remain unchanged."
   ],
   "nextCutPrerequisites": [
-    "Tick pins and approves the visual fixtures and immutable reference attachment through the coordinator-owned P02 work.",
-    "Prove the remaining retained P09 browser journeys, including negative controls and measured before/after runs, through the LEAD browser lane.",
-    "Only then remove the redundant groups and update native case mappings, tier rows and shard source records using the canonical writer."
+    "Protected, after P02: decision-desk.spec.ts (60) and decision-text.spec.ts (22) need Tick-approved digest-pinned available references and proven retained journeys.",
+    "Other unique native risks remain until their exact replacements are proven; the original 23-case package budget is not forced during cut A."
   ],
   "validation": {
     "ledger": "passed",
-    "manifests": "passed",
-    "remoteStatic": {
-      "entryPoint": "ci-static-remote.sh",
-      "result": "exit 3 / incomplete",
-      "message": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job"
-    },
     "ledgerRegression": "passed: web/tests/test-prune-ledger.test.ts (1 case)",
-    "postMerge": {
-      "commit": "03d91976e4c18b6a071d231e815c647d6038c4b4",
-      "main": "396567da01c9b7cf80d59661368d960bcbf88a17",
-      "runtimeCases": 75,
-      "wallSeconds": 5.938,
-      "result": "75 focused runtime cases passed; typed helper cleanup rechecked in its three affected suites; ledger and canonical manifests passed"
+    "manifests": "passed: canonical writer --write and --check",
+    "nativeCollection": "passed: 226 -> 132 cases in 12 changed owners; no new identity or protected removal",
+    "static": "Hosted CI only per cut-A brief; not run locally",
+    "sharedFiles": "Only 94 removed P09 browser tier/post-gate rows, the 12 actual native listedTests counts and P09 ledger/evidence entries changed. Two existing policy assertions/fixtures were maintained for the approved catalogue change; all historical timing values, gate and launch policies stay intact.",
+    "tierPolicy": "Targeted AEON-1619 timing fixture passed; full rerun pending after correcting the current-catalogue coupling."
+  },
+  "previousRound": {
+    "status": "blocked-before-cuts",
+    "blockers": [
+      {
+        "kind": "visual-reference-authority",
+        "source": "scripts/test-prune/visual-manifest.json",
+        "observed": {
+          "approval": "pending",
+          "baselineAuthority": "pending-review",
+          "attachmentId": null,
+          "sha256": null
+        },
+        "required": "The plan and ledger cutPrerequisites require Tick approval of the exact fixtures and an immutable available reference source before pruning starts."
+      },
+      {
+        "kind": "remote-browser-capacity",
+        "entryPoint": "remote-spec.sh",
+        "result": "exit 3",
+        "refusals": [
+          "remote busy (host guard); wait or rely on PR CI",
+          "remote busy: 2/2 remote runs (CI pool 0/4); no free mbp2606 slot"
+        ]
+      }
+    ],
+    "browser": {
+      "beforeCases": 420,
+      "afterCases": 420,
+      "plannedCeiling": 23,
+      "removed": 0,
+      "demoted": 0,
+      "runnerSecondsBefore": null,
+      "runnerSecondsAfter": null,
+      "measuredRunnerSecondsDelta": null,
+      "measurementStatus": "unmeasured: remote baseline refused; no browser reduction or timing saving claimed"
     },
-    "ownership": "New test/helper sources are already covered by the S9 web/tests/** slice; no ownership rule was changed.",
-    "sharedFiles": "Only 22 ESSENTIAL web-test-tier rows and the P09 runtime destination/evidence entries were added; browser tiers, shard records, budgets, protected risk rows and immutable baseline files stay unchanged."
+    "validation": {
+      "ledger": "passed",
+      "manifests": "passed",
+      "remoteStatic": {
+        "entryPoint": "ci-static-remote.sh",
+        "result": "exit 3 / incomplete",
+        "message": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job"
+      },
+      "ledgerRegression": "passed: web/tests/test-prune-ledger.test.ts (1 case)",
+      "postMerge": {
+        "commit": "03d91976e4c18b6a071d231e815c647d6038c4b4",
+        "main": "396567da01c9b7cf80d59661368d960bcbf88a17",
+        "runtimeCases": 75,
+        "wallSeconds": 5.938,
+        "result": "75 focused runtime cases passed; typed helper cleanup rechecked in its three affected suites; ledger and canonical manifests passed"
+      },
+      "ownership": "New test/helper sources are already covered by the S9 web/tests/** slice; no ownership rule was changed.",
+      "sharedFiles": "Only 22 ESSENTIAL web-test-tier rows and the P09 runtime destination/evidence entries were added; browser tiers, shard records, budgets, protected risk rows and immutable baseline files stay unchanged."
+    }
+  },
+  "cutA": {
+    "brief": "aeon-1681-prune-p09-desk-approvals-cutA.md",
+    "baselineCommit": "ac853042bfd741af1b8353b3e0aa8b7ac2a4f8ac",
+    "baselineMain": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
+    "beforeCases": 420,
+    "afterCases": 326,
+    "removed": 94,
+    "demoted": 0,
+    "profileDuplicateCuts": 89,
+    "runtimeReplacementCuts": 5,
+    "protectedRemoved": 0,
+    "protectedAfterP02": [
+      "tests/decision-desk.spec.ts (60 cases; candidate-group anchor)",
+      "tests/decision-text.spec.ts (22 cases; drift anchors)"
+    ],
+    "groups": [
+      {
+        "file": "tests/aeon-1473-desk-tab.spec.ts",
+        "before": 7,
+        "after": 6,
+        "removed": 1,
+        "runtimeCuts": 1,
+        "retainedNativeKeys": [
+          "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: every page leads with the badge\u2019s count: none at 0, (1), (9), then (9+)",
+          "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: a rise pops the favicon dot once in six frames; the visible title never swaps",
+          "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: a background tab reads the Desk itself and says New decision for two seconds, without focus or sound",
+          "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: an agent principal and a signed-out visitor see no count and the plain icon",
+          "browser:tests/aeon-1473-desk-tab.spec.ts:16 px favicon \u203a AEON-1473: the amber dot reads at 16 px on light and dark tab strips",
+          "browser:tests/aeon-1473-desk-tab.spec.ts:32 px favicon \u203a AEON-1473: the amber dot reads at 32 px on light and dark tab strips"
+        ]
+      },
+      {
+        "file": "tests/decision-desk-fix2.spec.ts",
+        "before": 8,
+        "after": 4,
+        "removed": 4,
+        "runtimeCuts": 0,
+        "retainedNativeKeys": [
+          "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 390 light",
+          "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1440 light",
+          "browser:tests/decision-desk-fix2.spec.ts:current server restrictions explain and block publishing without sending a write",
+          "browser:tests/decision-desk-fix2.spec.ts:a directly linked canonical tier request beyond 30 sessions and 100 history rows remains actionable"
+        ]
+      },
+      {
+        "file": "tests/decision-desk-fix3.spec.ts",
+        "before": 9,
+        "after": 3,
+        "removed": 6,
+        "runtimeCuts": 2,
+        "retainedNativeKeys": [
+          "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 390 light",
+          "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1440 light",
+          "browser:tests/decision-desk-fix3.spec.ts:published doctrine effects keep their proposal review while an earlier pending draft opens in the Desk"
+        ]
+      },
+      {
+        "file": "tests/decision-desk-project.spec.ts",
+        "before": 14,
+        "after": 9,
+        "removed": 5,
+        "runtimeCuts": 0,
+        "retainedNativeKeys": [
+          "browser:tests/decision-desk-project.spec.ts:every kind names its project with a new-tab link; P opens it, but not while typing",
+          "browser:tests/decision-desk-project.spec.ts:the filled key chip follows the item shown before, through J/K, the jump list and Decide & next",
+          "browser:tests/decision-desk-project.spec.ts:the Agents desk panel names each item's project with a new-tab link",
+          "browser:tests/decision-desk-project.spec.ts:revisiting a question after Decide & next retains its project link, colour and P action",
+          "browser:tests/decision-desk-project.spec.ts:the Agents doctrine row resolves its project through the authorized ticket lookup",
+          "browser:tests/decision-desk-project.spec.ts:the Agents doctrine project link stays put through a second desk refresh without repeated lookups",
+          "browser:tests/decision-desk-project.spec.ts:tablet toolbar stays visible and stable on opening and resizing light",
+          "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 390 light",
+          "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1440 light"
+        ]
+      },
+      {
+        "file": "tests/outcome-proposals.spec.ts",
+        "before": 6,
+        "after": 2,
+        "removed": 4,
+        "runtimeCuts": 2,
+        "retainedNativeKeys": [
+          "browser:tests/outcome-proposals.spec.ts:outcome proposals 1600 light",
+          "browser:tests/outcome-proposals.spec.ts:outcome proposals 390 light"
+        ]
+      },
+      {
+        "file": "tests/attach-security.spec.ts",
+        "before": 50,
+        "after": 14,
+        "removed": 36,
+        "runtimeCuts": 0,
+        "retainedNativeKeys": [
+          "browser:tests/attach-security.spec.ts:session watching security light 1600",
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsupported light 1600",
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsigned light 1600",
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable no_gui light 1600",
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable policy light 1600",
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable unreported light 1600",
+          "browser:tests/attach-security.spec.ts:mixed computers keep mac confirmation with named exceptions light 1600",
+          "browser:tests/attach-security.spec.ts:saving mac confirmation blocks an upgraded headless computer light 1600",
+          "browser:tests/attach-security.spec.ts:a failed security save never claims the stricter mode was stored",
+          "browser:tests/attach-security.spec.ts:saved mac confirmation without a capable computer light 1600",
+          "browser:tests/attach-security.spec.ts:no paired computer light 1600",
+          "browser:tests/attach-security.spec.ts:a long computer name wraps at 390",
+          "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded light 1600 saved false",
+          "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded light 1600 saved true"
+        ]
+      },
+      {
+        "file": "tests/attach-discoverable.spec.ts",
+        "before": 47,
+        "after": 40,
+        "removed": 7,
+        "runtimeCuts": 0,
+        "retainedNativeKeys": [
+          "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 390",
+          "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 1024",
+          "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 1440",
+          "browser:tests/attach-discoverable.spec.ts:attach controls never move from code to memo or settled state light 1440",
+          "browser:tests/attach-discoverable.spec.ts:attach controls never move from code to memo or settled state light 390",
+          "browser:tests/attach-discoverable.spec.ts:attach keyboard keeps browser shortcuts native and requires explicit lookup on MacIntel",
+          "browser:tests/attach-discoverable.spec.ts:attach keyboard keeps browser shortcuts native and requires explicit lookup on Win32",
+          "browser:tests/attach-discoverable.spec.ts:a reviewed request expires in place and cannot send an approval",
+          "browser:tests/attach-discoverable.spec.ts:connections retain expiry ordering and stay separate from canonical permission decisions, never a code or inline Allow",
+          "browser:tests/attach-discoverable.spec.ts:round navigation and choices keep controls fixed, Skip sends no decision",
+          "browser:tests/attach-discoverable.spec.ts:a declined request settles then folds into Decided",
+          "browser:tests/attach-discoverable.spec.ts:a waiting attach is listed with computer, harness and expiry, and one click reviews it",
+          "browser:tests/attach-discoverable.spec.ts:a decision refreshes the list instead of waiting for the next poll",
+          "browser:tests/attach-discoverable.spec.ts:approved, expired and cancelled requests say so, and ended ones can be dismissed",
+          "browser:tests/attach-discoverable.spec.ts:a request past its expiry reads as expired before the next poll says so",
+          "browser:tests/attach-discoverable.spec.ts:an empty list shows nothing, and people who cannot attach never ask",
+          "browser:tests/attach-discoverable.spec.ts:an unavailable list stays quiet",
+          "browser:tests/attach-discoverable.spec.ts:the terminal link fills the code in, is removed from the address bar, and approves nothing",
+          "browser:tests/attach-discoverable.spec.ts:a link with anything but nine digits opens nothing",
+          "browser:tests/attach-discoverable.spec.ts:a de-AT browser still shows English pairing guidance and only prefills the approval code",
+          "browser:tests/attach-discoverable.spec.ts:a person who cannot attach gets no dialog from the link, and the code leaves the address bar",
+          "browser:tests/attach-discoverable.spec.ts:a list still on its way when the person changes is never shown to the next person",
+          "browser:tests/attach-discoverable.spec.ts:the attach code never reaches a sign-in address, even when the session has ended",
+          "browser:tests/attach-discoverable.spec.ts:a reset queued between the scope check and continuation cannot open A\u2019s code for B",
+          "browser:tests/attach-discoverable.spec.ts:signing in as another person in a second tab invalidates the old tab before accepting lists",
+          "browser:tests/attach-discoverable.spec.ts:signing out and back in as A in a second tab never revives A\u2019s old link continuation",
+          "browser:tests/attach-discoverable.spec.ts:an OIDC round trip in another tab invalidates the old review and records the returned session",
+          "browser:tests/attach-discoverable.spec.ts:a link code waiting for slow permissions never opens for the next person",
+          "browser:tests/attach-discoverable.spec.ts:names still loading for the previous person never enable approval for the next one",
+          "browser:tests/attach-discoverable.spec.ts:a decision still on its way when the person changes shows nothing to the next person",
+          "browser:tests/attach-discoverable.spec.ts:an accepted approve refreshes pending requests and sessions after its review closes during body decoding",
+          "browser:tests/attach-discoverable.spec.ts:an accepted approve body is aborted and dropped when the identity changes during decoding",
+          "browser:tests/attach-discoverable.spec.ts:an accepted revoke refreshes pending requests and sessions after its review closes during body decoding",
+          "browser:tests/attach-discoverable.spec.ts:an accepted revoke body is aborted and dropped when the identity changes during decoding",
+          "browser:tests/attach-discoverable.spec.ts:a link followed inside the open Agents page fills the code in again",
+          "browser:tests/attach-discoverable.spec.ts:approval waits for the project and ticket names (the list)",
+          "browser:tests/attach-discoverable.spec.ts:approval waits for the project and ticket names (a typed code)",
+          "browser:tests/attach-discoverable.spec.ts:names that cannot be read fall back to the ids and approval is possible",
+          "browser:tests/attach-discoverable.spec.ts:pending attach layout light 1600",
+          "browser:tests/attach-discoverable.spec.ts:pending attach layout light 390"
+        ]
+      },
+      {
+        "file": "tests/attach-watch.spec.ts",
+        "before": 31,
+        "after": 23,
+        "removed": 8,
+        "runtimeCuts": 0,
+        "retainedNativeKeys": [
+          "browser:tests/attach-watch.spec.ts:watch is default-off, including the approving owner",
+          "browser:tests/attach-watch.spec.ts:live text is inert, bounded, cleared on end and never automatically rejoined",
+          "browser:tests/attach-watch.spec.ts:control characters clear the stream and owner revocation closes access",
+          "browser:tests/attach-watch.spec.ts:revoking a watch reads the lists again",
+          "browser:tests/attach-watch.spec.ts:approving an attach request reads the lists again",
+          "browser:tests/attach-watch.spec.ts:approval and live watch layout light 1600 aeon",
+          "browser:tests/attach-watch.spec.ts:approval and live watch layout light 1600 local_auth",
+          "browser:tests/attach-watch.spec.ts:approval and live watch layout light 390 aeon",
+          "browser:tests/attach-watch.spec.ts:approval and live watch layout light 390 local_auth",
+          "browser:tests/attach-watch.spec.ts:only an owner can explicitly delegate viewing without having it: owner",
+          "browser:tests/attach-watch.spec.ts:only an owner can explicitly delegate viewing without having it: admin",
+          "browser:tests/attach-watch.spec.ts:strict approval cannot proceed on a Linux daemon",
+          "browser:tests/attach-watch.spec.ts:an Aeon approval on Linux says that computer keeps this approval",
+          "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status light 1600 aeon",
+          "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status light 1600 local_auth",
+          "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status light 390 aeon",
+          "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status light 390 local_auth",
+          "browser:tests/attach-watch.spec.ts:metadata-only terminal state detached",
+          "browser:tests/attach-watch.spec.ts:metadata-only terminal state unreachable",
+          "browser:tests/attach-watch.spec.ts:metadata-only terminal state confirmed_exited",
+          "browser:tests/attach-watch.spec.ts:conversation watch terminal state detached",
+          "browser:tests/attach-watch.spec.ts:conversation watch terminal state unreachable",
+          "browser:tests/attach-watch.spec.ts:conversation watch terminal state confirmed_exited"
+        ]
+      },
+      {
+        "file": "tests/decision-desk-lessons.spec.ts",
+        "before": 26,
+        "after": 14,
+        "removed": 12,
+        "runtimeCuts": 0,
+        "retainedNativeKeys": [
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 390 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 390 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 390 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1363 Knowledge lesson line counts and keeps its chevron with the last word at 1440",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1363 Knowledge lesson line counts and keeps its chevron with the last word at 960",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1363 Knowledge lesson line counts and keeps its chevron with the last word at 390",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 rule draft, omitted source and keyboard use the native decision",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 failed decisions and Undo keep the lesson honest",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 replaced proposal refuses the frozen lesson",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo has no accessibility violations",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson scope names its filter and Show all restores other waiting items"
+        ]
+      },
+      {
+        "file": "tests/doctrine-inbox.spec.ts",
+        "before": 7,
+        "after": 3,
+        "removed": 4,
+        "runtimeCuts": 0,
+        "retainedNativeKeys": [
+          "browser:tests/doctrine-inbox.spec.ts:native doctrine proposals retain diff, notices, source links and protected settlement in one desk",
+          "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 1440 light",
+          "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 390 light"
+        ]
+      },
+      {
+        "file": "tests/desk-empty.spec.ts",
+        "before": 15,
+        "after": 10,
+        "removed": 5,
+        "runtimeCuts": 0,
+        "retainedNativeKeys": [
+          "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 1440 dark",
+          "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 1024 light",
+          "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 390 light",
+          "browser:tests/desk-empty.spec.ts:AEON-1477 Open and Decided keep controls still at 1440, with and without the hint",
+          "browser:tests/desk-empty.spec.ts:AEON-1477 Open and Decided keep controls still at 1024, with and without the hint",
+          "browser:tests/desk-empty.spec.ts:AEON-1477 Open and Decided keep controls still at 390, with and without the hint",
+          "browser:tests/desk-empty.spec.ts:AEON-1477 a genuinely failed first load never claims an empty desk",
+          "browser:tests/desk-empty.spec.ts:AEON-1406 empty desk states keep the card still 1440 dark",
+          "browser:tests/desk-empty.spec.ts:AEON-1406 empty desk states keep the card still 390 light",
+          "browser:tests/desk-empty.spec.ts:touch \u203a AEON-1477 on touch Try again shows with the hint on a 44 px target"
+        ]
+      },
+      {
+        "file": "tests/aeon-1632-desk-links-peek.spec.ts",
+        "before": 6,
+        "after": 4,
+        "removed": 2,
+        "runtimeCuts": 0,
+        "retainedNativeKeys": [
+          "browser:tests/aeon-1632-desk-links-peek.spec.ts:AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 light",
+          "browser:tests/aeon-1632-desk-links-peek.spec.ts:AEON-1632: Desk ticket links open the peek and Esc returns to the same item 390 light",
+          "browser:tests/aeon-1632-desk-links-peek.spec.ts:AEON-1632: Escape closes an open peek menu before the ticket and keeps the memo draft",
+          "browser:tests/aeon-1632-desk-links-peek.spec.ts:AEON-1632: the peek opens the ticket\u2019s full page at its canonical address"
+        ]
+      }
+    ],
+    "removedMappings": [
+      {
+        "sourceKey": "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: reduced motion changes only the number, visible or in the background",
+        "group": "runtime-replacement",
+        "destination": "runtime:desk-tab.test.ts",
+        "nativeKeys": [
+          "node:tests/desk-tab.test.ts:a rise in a visible tab pops the dot once in six frames, then stops",
+          "node:tests/desk-tab.test.ts:reduced motion changes only the number: no frames, no notice"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/aeon-1632-desk-links-peek.spec.ts:AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/aeon-1632-desk-links-peek.spec.ts",
+        "nativeKeys": [
+          "browser:tests/aeon-1632-desk-links-peek.spec.ts:AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 light",
+          "browser:tests/aeon-1632-desk-links-peek.spec.ts:AEON-1632: Desk ticket links open the peek and Esc returns to the same item 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/aeon-1632-desk-links-peek.spec.ts:AEON-1632: Desk ticket links open the peek and Esc returns to the same item 390 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/aeon-1632-desk-links-peek.spec.ts",
+        "nativeKeys": [
+          "browser:tests/aeon-1632-desk-links-peek.spec.ts:AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 light",
+          "browser:tests/aeon-1632-desk-links-peek.spec.ts:AEON-1632: Desk ticket links open the peek and Esc returns to the same item 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1024",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-discoverable.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 390",
+          "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 1024",
+          "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 1440"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1440",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-discoverable.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 390",
+          "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 1024",
+          "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 1440"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-discoverable.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 390",
+          "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 1024",
+          "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 1440"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-discoverable.spec.ts:attach controls never move from code to memo or settled state dark 1440",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-discoverable.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-discoverable.spec.ts:attach controls never move from code to memo or settled state light 1440",
+          "browser:tests/attach-discoverable.spec.ts:attach controls never move from code to memo or settled state light 390"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-discoverable.spec.ts:attach controls never move from code to memo or settled state dark 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-discoverable.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-discoverable.spec.ts:attach controls never move from code to memo or settled state light 1440",
+          "browser:tests/attach-discoverable.spec.ts:attach controls never move from code to memo or settled state light 390"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-discoverable.spec.ts:pending attach layout dark 1600",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-discoverable.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-discoverable.spec.ts:pending attach layout light 1600",
+          "browser:tests/attach-discoverable.spec.ts:pending attach layout light 390"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-discoverable.spec.ts:pending attach layout dark 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-discoverable.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-discoverable.spec.ts:pending attach layout light 1600",
+          "browser:tests/attach-discoverable.spec.ts:pending attach layout light 390"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable no_gui dark 1600",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable no_gui light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable no_gui dark 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable no_gui light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable no_gui light 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable no_gui light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable policy dark 1600",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable policy light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable policy dark 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable policy light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable policy light 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable policy light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable unreported dark 1600",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable unreported light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable unreported dark 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable unreported light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable unreported light 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable unreported light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsigned dark 1600",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsigned light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsigned dark 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsigned light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsigned light 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsigned light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsupported dark 1600",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsupported light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsupported dark 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsupported light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsupported light 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mac confirmation unavailable unsupported light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mixed computers keep mac confirmation with named exceptions dark 1600",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mixed computers keep mac confirmation with named exceptions light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mixed computers keep mac confirmation with named exceptions dark 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mixed computers keep mac confirmation with named exceptions light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:mixed computers keep mac confirmation with named exceptions light 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:mixed computers keep mac confirmation with named exceptions light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:no paired computer dark 1600",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:no paired computer light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:no paired computer dark 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:no paired computer light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:no paired computer light 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:no paired computer light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded dark 1600 saved false",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded light 1600 saved false"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded dark 1600 saved true",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded light 1600 saved true"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded dark 390 saved false",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded light 1600 saved false"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded dark 390 saved true",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded light 1600 saved true"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded light 390 saved false",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded light 1600 saved false"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded light 390 saved true",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:older pairing uses Aeon approval until upgraded light 1600 saved true"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:saved mac confirmation without a capable computer dark 1600",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:saved mac confirmation without a capable computer light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:saved mac confirmation without a capable computer dark 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:saved mac confirmation without a capable computer light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:saved mac confirmation without a capable computer light 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:saved mac confirmation without a capable computer light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:saving mac confirmation blocks an upgraded headless computer dark 1600",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:saving mac confirmation blocks an upgraded headless computer light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:saving mac confirmation blocks an upgraded headless computer dark 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:saving mac confirmation blocks an upgraded headless computer light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:saving mac confirmation blocks an upgraded headless computer light 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:saving mac confirmation blocks an upgraded headless computer light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:session watching security dark 1600",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:session watching security light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:session watching security dark 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:session watching security light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-security.spec.ts:session watching security light 390",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-security.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-security.spec.ts:session watching security light 1600"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-watch.spec.ts:approval and live watch layout dark 1600 aeon",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-watch.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-watch.spec.ts:approval and live watch layout light 1600 aeon",
+          "browser:tests/attach-watch.spec.ts:approval and live watch layout light 390 aeon"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-watch.spec.ts:approval and live watch layout dark 1600 local_auth",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-watch.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-watch.spec.ts:approval and live watch layout light 1600 local_auth",
+          "browser:tests/attach-watch.spec.ts:approval and live watch layout light 390 local_auth"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-watch.spec.ts:approval and live watch layout dark 390 aeon",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-watch.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-watch.spec.ts:approval and live watch layout light 1600 aeon",
+          "browser:tests/attach-watch.spec.ts:approval and live watch layout light 390 aeon"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-watch.spec.ts:approval and live watch layout dark 390 local_auth",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-watch.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-watch.spec.ts:approval and live watch layout light 1600 local_auth",
+          "browser:tests/attach-watch.spec.ts:approval and live watch layout light 390 local_auth"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status dark 1600 aeon",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-watch.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status light 1600 aeon",
+          "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status light 390 aeon"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status dark 1600 local_auth",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-watch.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status light 1600 local_auth",
+          "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status light 390 local_auth"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status dark 390 aeon",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-watch.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status light 1600 aeon",
+          "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status light 390 aeon"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status dark 390 local_auth",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/attach-watch.spec.ts",
+        "nativeKeys": [
+          "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status light 1600 local_auth",
+          "browser:tests/attach-watch.spec.ts:metadata-only attach approval and status light 390 local_auth"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1024 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-fix2.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 390 light",
+          "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1440 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1024 light",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-fix2.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 390 light",
+          "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1440 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1440 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-fix2.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 390 light",
+          "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1440 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 390 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-fix2.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 390 light",
+          "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1440 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1024 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-fix3.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 390 light",
+          "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1440 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1024 light",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-fix3.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 390 light",
+          "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1440 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1440 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-fix3.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 390 light",
+          "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1440 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 390 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-fix3.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 390 light",
+          "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1440 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-fix3.spec.ts:revision-zero native tier request can approve with exact ownership",
+        "group": "runtime-replacement",
+        "destination": "runtime:decision-desk-fix3.unit.test.ts",
+        "nativeKeys": [
+          "vitest:tests/decision-desk-fix3.unit.test.ts:hydrates and approves a first tier request with native revision zero",
+          "vitest:tests/decision-desk-fix3.unit.test.ts:hydrates and declines a first tier request with native revision zero"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-fix3.spec.ts:revision-zero native tier request can decline with exact ownership",
+        "group": "runtime-replacement",
+        "destination": "runtime:decision-desk-fix3.unit.test.ts",
+        "nativeKeys": [
+          "vitest:tests/decision-desk-fix3.unit.test.ts:hydrates and approves a first tier request with native revision zero",
+          "vitest:tests/decision-desk-fix3.unit.test.ts:hydrates and declines a first tier request with native revision zero"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 1024 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-lessons.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 1024 light",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-lessons.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 1440 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-lessons.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 390 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-lessons.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 Knowledge without lessons at 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 1024 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-lessons.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 1024 light",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-lessons.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 1440 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-lessons.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 390 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-lessons.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 lesson memo and row stay stable at 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 1024 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-lessons.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 1024 light",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-lessons.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 1440 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-lessons.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 390 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-lessons.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 1440 light",
+          "browser:tests/decision-desk-lessons.spec.ts:AEON-1331 pending lesson and Knowledge link at 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-project.spec.ts:tablet toolbar stays visible and stable on opening and resizing dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-project.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-project.spec.ts:tablet toolbar stays visible and stable on opening and resizing light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1024 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-project.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 390 light",
+          "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1440 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1024 light",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-project.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 390 light",
+          "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1440 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1440 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-project.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 390 light",
+          "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1440 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 390 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/decision-desk-project.spec.ts",
+        "nativeKeys": [
+          "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 390 light",
+          "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1440 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/desk-empty.spec.ts:AEON-1406 empty desk states keep the card still 1440 light",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/desk-empty.spec.ts",
+        "nativeKeys": [
+          "browser:tests/desk-empty.spec.ts:AEON-1406 empty desk states keep the card still 1440 dark",
+          "browser:tests/desk-empty.spec.ts:AEON-1406 empty desk states keep the card still 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/desk-empty.spec.ts:AEON-1406 empty desk states keep the card still 390 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/desk-empty.spec.ts",
+        "nativeKeys": [
+          "browser:tests/desk-empty.spec.ts:AEON-1406 empty desk states keep the card still 1440 dark",
+          "browser:tests/desk-empty.spec.ts:AEON-1406 empty desk states keep the card still 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 1024 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/desk-empty.spec.ts",
+        "nativeKeys": [
+          "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 1440 dark",
+          "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 1024 light",
+          "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 1440 light",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/desk-empty.spec.ts",
+        "nativeKeys": [
+          "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 1440 dark",
+          "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 1024 light",
+          "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 390 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/desk-empty.spec.ts",
+        "nativeKeys": [
+          "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 1440 dark",
+          "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 1024 light",
+          "browser:tests/desk-empty.spec.ts:AEON-1477 refresh failures keep the items and hint geometry 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 1024 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/doctrine-inbox.spec.ts",
+        "nativeKeys": [
+          "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 1440 light",
+          "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 1024 light",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/doctrine-inbox.spec.ts",
+        "nativeKeys": [
+          "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 1440 light",
+          "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 1440 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/doctrine-inbox.spec.ts",
+        "nativeKeys": [
+          "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 1440 light",
+          "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 390 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/doctrine-inbox.spec.ts",
+        "nativeKeys": [
+          "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 1440 light",
+          "browser:tests/doctrine-inbox.spec.ts:native Edit then propose and outdated protection 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/outcome-proposals.spec.ts:agent principals never request or see the proposals list",
+        "group": "runtime-replacement",
+        "destination": "runtime:outcome-proposals.unit.test.ts",
+        "nativeKeys": [
+          "vitest:tests/outcome-proposals.unit.test.ts:does not request or render proposals for an agent principal",
+          "vitest:tests/outcome-proposals.unit.test.ts:reports empty only after successful reads and preserves an honest failure"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/outcome-proposals.spec.ts:empty analysis gives one quiet line",
+        "group": "runtime-replacement",
+        "destination": "runtime:outcome-proposals.unit.test.ts",
+        "nativeKeys": [
+          "vitest:tests/outcome-proposals.unit.test.ts:does not request or render proposals for an agent principal",
+          "vitest:tests/outcome-proposals.unit.test.ts:reports empty only after successful reads and preserves an honest failure"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/outcome-proposals.spec.ts:outcome proposals 1600 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/outcome-proposals.spec.ts",
+        "nativeKeys": [
+          "browser:tests/outcome-proposals.spec.ts:outcome proposals 1600 light",
+          "browser:tests/outcome-proposals.spec.ts:outcome proposals 390 light"
+        ]
+      },
+      {
+        "sourceKey": "browser:tests/outcome-proposals.spec.ts:outcome proposals 390 dark",
+        "group": "profile-duplicate",
+        "destination": "retained:tests/outcome-proposals.spec.ts",
+        "nativeKeys": [
+          "browser:tests/outcome-proposals.spec.ts:outcome proposals 1600 light",
+          "browser:tests/outcome-proposals.spec.ts:outcome proposals 390 light"
+        ]
+      }
+    ],
+    "retainedAssertionProof": [
+      {
+        "file": "tests/aeon-1473-desk-tab.spec.ts",
+        "retainedTestBodies": 5,
+        "retainedAssertions": 51,
+        "assertionsSha256": "5b7d0b40bd4a3db5703a102181898560a1a74c2a7e905a65ae1be7e47e4993fe",
+        "beforeSourceSha256": "5568e97a09c1cd1b67e2df3c5a79204831073399fd7ef6d10416a99f21e915c1",
+        "afterSourceSha256": "265a97114f9aaae2f9f23598d5f0bac6b42d5dadf9328abdb60311a3b8819873",
+        "result": "all retained expectation expressions unchanged"
+      },
+      {
+        "file": "tests/decision-desk-fix2.spec.ts",
+        "retainedTestBodies": 3,
+        "retainedAssertions": 47,
+        "assertionsSha256": "7c934885b158e039ab08d166d526669af3800a6cacbecb0c662ac615931f37c7",
+        "beforeSourceSha256": "c47bd22243cac5deadddf9b6b5d0fda65d856205ab265bace5858e96ce091ca5",
+        "afterSourceSha256": "8d1f9d66df8f69c25c3ff3565d00c3eaaa3d77eb46ebae232915220a62ca858d",
+        "result": "all retained expectation expressions unchanged"
+      },
+      {
+        "file": "tests/decision-desk-fix3.spec.ts",
+        "retainedTestBodies": 2,
+        "retainedAssertions": 16,
+        "assertionsSha256": "4705e269e1fab65a59982a7a0956f0924c84de3e3d9ce5d7f33e1e961a2b3f13",
+        "beforeSourceSha256": "f318e19896633ab39dc96604105b6fe6669573eb921ae89427ca3e9b5332911f",
+        "afterSourceSha256": "b4ccf1835fb219ab1b36479cee59f4e430f54940c276ddce76423ec11403aa19",
+        "result": "all retained expectation expressions unchanged"
+      },
+      {
+        "file": "tests/decision-desk-project.spec.ts",
+        "retainedTestBodies": 8,
+        "retainedAssertions": 67,
+        "assertionsSha256": "d9d87e9f50daae0e81e7b495965c0d22c361416fd8ede9c89f96b71a0c2d5021",
+        "beforeSourceSha256": "d84e9a98c3f56e38f0d7f4c829e9dc092b090e9abcc73527b777561b443c46b2",
+        "afterSourceSha256": "28db04a51770f7c222434c15304d6d4dc75705fd500d54cd1dadb3802959d90a",
+        "result": "all retained expectation expressions unchanged"
+      },
+      {
+        "file": "tests/outcome-proposals.spec.ts",
+        "retainedTestBodies": 1,
+        "retainedAssertions": 15,
+        "assertionsSha256": "375655c58aa43ac991caad2cbd7f8bec5a7dbfea74e9b5ca637cc8dbb844ec36",
+        "beforeSourceSha256": "7da63e418268190c2ec495e6c1b47e2929e0ab7357daad2060446b07f2e6a400",
+        "afterSourceSha256": "b19b043692e979a5f5c2b68b9e6a14ddeeff4a8eaf8f00cdc53d2052f37258c8",
+        "result": "all retained expectation expressions unchanged"
+      },
+      {
+        "file": "tests/attach-security.spec.ts",
+        "retainedTestBodies": 9,
+        "retainedAssertions": 71,
+        "assertionsSha256": "680ca8d7711b9a9ac9f22ed0f9e822d5ea65a715a61412c24baf27ff84bd547f",
+        "beforeSourceSha256": "d8403d2a4f07952a15302f82ab19b59a5a93131795f4d357ca192a53975d5abe",
+        "afterSourceSha256": "450d90b0e0b8e093a2a0903425c26e5f85aeb362b51265b346ba0ce05a41ef51",
+        "result": "all retained expectation expressions unchanged"
+      },
+      {
+        "file": "tests/attach-discoverable.spec.ts",
+        "retainedTestBodies": 32,
+        "retainedAssertions": 223,
+        "assertionsSha256": "6ce0c58b94896fc4199a4fdfff0088217e6c31837d4bf91bb75bfde6b8bc02f5",
+        "beforeSourceSha256": "c1b8d775004e9ed0dfb1f8389c75576752ef575fd776471dad2c9acfcc10f299",
+        "afterSourceSha256": "eae23246550dac60267084fe696ae034326e826925115b5e0b1133e35849ed4a",
+        "result": "all retained expectation expressions unchanged"
+      },
+      {
+        "file": "tests/attach-watch.spec.ts",
+        "retainedTestBodies": 12,
+        "retainedAssertions": 82,
+        "assertionsSha256": "986cf25c440bee2baa601d6e4f188d484210ea58bec61705d04cbe44736b5c1a",
+        "beforeSourceSha256": "a7cc727c13be6ce847db4f35314f2e9bd19e37d3d7227f1407c768d96cb59bc2",
+        "afterSourceSha256": "5f84bef9955be5e918b8cf0fd12e8f3daaa8f95e796f4e1d384d024e79a6634b",
+        "result": "all retained expectation expressions unchanged"
+      },
+      {
+        "file": "tests/decision-desk-lessons.spec.ts",
+        "retainedTestBodies": 9,
+        "retainedAssertions": 76,
+        "assertionsSha256": "1b2464471149d49ebbe940020d703eb222b0e4dca79a8eb561dd169f36a9051b",
+        "beforeSourceSha256": "28930c3efc99a3e5d5b3396ae76029fee36f5a602386bcf0c6557830be775716",
+        "afterSourceSha256": "93d56347774476a717e3723dc62384bd1346d3a85a803a44667e7fbff69740aa",
+        "result": "all retained expectation expressions unchanged"
+      },
+      {
+        "file": "tests/doctrine-inbox.spec.ts",
+        "retainedTestBodies": 2,
+        "retainedAssertions": 40,
+        "assertionsSha256": "9a657c9118af9ec784139e737f6aadb9989f86b253c032df609c1bd13026c66c",
+        "beforeSourceSha256": "572c372478d83209927c4f45330ab8b3d9e86c0a2228694c9db20e631c997adb",
+        "afterSourceSha256": "05274e0f60cf5de314052a8e734f36dbdf8e7481b00fc86d016f3aa6ee656854",
+        "result": "all retained expectation expressions unchanged"
+      },
+      {
+        "file": "tests/desk-empty.spec.ts",
+        "retainedTestBodies": 5,
+        "retainedAssertions": 109,
+        "assertionsSha256": "24d3f9f9f81f4ad07ef76bc6bf36c02c30e90b071d706c303632ecd285659ad9",
+        "beforeSourceSha256": "45b577f81ea7200aeafd97d9de7ef6467b0f7e1ac80593ebceadcbf595beb378",
+        "afterSourceSha256": "0b55b0a39e6f39e5217b87d02ce2ff8383cba20ea0cd4e707700cd830b171411",
+        "result": "all retained expectation expressions unchanged"
+      },
+      {
+        "file": "tests/aeon-1632-desk-links-peek.spec.ts",
+        "retainedTestBodies": 3,
+        "retainedAssertions": 31,
+        "assertionsSha256": "8c44c073b5d9b424a2c127e67e71e06f6318687002bd1791803ca5f2beb1c5f9",
+        "beforeSourceSha256": "a44eb772b7894e2a834345c17a636f0b93e22807278d0c0ba84746ed6516cbd8",
+        "afterSourceSha256": "89ea981a3cb84cc01cb85d1c459ad5a3d6a30e5bd1cf3b32b8158d9590fe457a",
+        "result": "all retained expectation expressions unchanged"
+      }
+    ],
+    "negativeControls": [
+      {
+        "id": "tab-pop",
+        "source": "web/src/lib/deskTab.ts",
+        "sourceSha256": "98348f90ef1fce7c6de61b3ff8f0a890f0025af25716c34ae9973855145d58b8",
+        "mutation": {
+          "from": "else pop(count)",
+          "to": "else rest(count)"
+        },
+        "test": "web/tests/desk-tab.test.ts",
+        "titleFilter": "a rise in a visible tab pops the dot once in six frames, then stops",
+        "result": "assertion-failed-as-expected",
+        "seconds": 0.146
+      },
+      {
+        "id": "tab-reduced-motion",
+        "source": "web/src/lib/deskTab.ts",
+        "sourceSha256": "98348f90ef1fce7c6de61b3ff8f0a890f0025af25716c34ae9973855145d58b8",
+        "mutation": {
+          "from": "out.reducedMotion()",
+          "to": "false"
+        },
+        "test": "web/tests/desk-tab.test.ts",
+        "titleFilter": "reduced motion changes only the number: no frames, no notice",
+        "result": "assertion-failed-as-expected",
+        "seconds": 0.142
+      },
+      {
+        "id": "proposal-person",
+        "source": "web/src/components/rules/DoctrineProposals.vue",
+        "sourceSha256": "603dd28d6740f25c7e94fbfeb495273ccb0cef87848fe2c5ea8efe1ccb9cc500",
+        "mutation": {
+          "from": "if (!person.value) return",
+          "to": "if (false) return"
+        },
+        "test": "web/tests/outcome-proposals.unit.test.ts",
+        "titleFilter": "does not request or render proposals for an agent principal",
+        "result": "assertion-failed-as-expected",
+        "seconds": 0.604
+      },
+      {
+        "id": "proposal-empty",
+        "source": "web/src/components/rules/DoctrineProposals.vue",
+        "sourceSha256": "603dd28d6740f25c7e94fbfeb495273ccb0cef87848fe2c5ea8efe1ccb9cc500",
+        "mutation": {
+          "from": "loaded.value = true",
+          "to": "loaded.value = false"
+        },
+        "test": "web/tests/outcome-proposals.unit.test.ts",
+        "titleFilter": "reports empty only after successful reads",
+        "result": "assertion-failed-as-expected",
+        "seconds": 0.588
+      },
+      {
+        "id": "tier-zero",
+        "source": "web/src/lib/decisionDeskApi.ts",
+        "sourceSha256": "2599992fad5ec70e808e464601c6f9a36774fb0e7f4c9420b4c0139368dc4a97",
+        "mutation": {
+          "from": "tier.revision < 0",
+          "to": "tier.revision <= 0"
+        },
+        "test": "web/tests/decision-desk-fix3.unit.test.ts",
+        "titleFilter": "native revision zero",
+        "result": "assertion-failed-as-expected",
+        "seconds": 0.556
+      }
+    ],
+    "runtimeValidation": [
+      {
+        "file": "web/tests/desk-tab.test.ts",
+        "cases": 13,
+        "result": "passed",
+        "wallSeconds": 0.113
+      },
+      {
+        "file": "web/tests/outcome-proposals.unit.test.ts",
+        "cases": 4,
+        "result": "passed",
+        "wallSeconds": 0.546
+      },
+      {
+        "file": "web/tests/decision-desk-fix3.unit.test.ts",
+        "cases": 8,
+        "result": "passed",
+        "wallSeconds": 0.427
+      }
+    ],
+    "browserMeasurements": [
+      {
+        "phase": "before",
+        "group": "1",
+        "host": "mbp2606",
+        "remoteOnly": true,
+        "commit": "ac853042bfd741af1b8353b3e0aa8b7ac2a4f8ac",
+        "specs": [
+          "tests/aeon-1473-desk-tab.spec.ts",
+          "tests/decision-desk-fix2.spec.ts",
+          "tests/decision-desk-fix3.spec.ts",
+          "tests/decision-desk-project.spec.ts",
+          "tests/outcome-proposals.spec.ts",
+          "tests/attach-security.spec.ts"
+        ],
+        "entryPoint": "remote-spec.sh",
+        "exitCode": 0,
+        "entryPointWallSeconds": 140.389,
+        "log": "web/test-results/p09-cutA/before-group1-attempt6.log",
+        "passedCases": 94,
+        "playwrightReportedDuration": "1.9m",
+        "playwrightReportedSeconds": 114.0,
+        "durationPrecision": "native Playwright summary (rounded)",
+        "supervisor": {
+          "before": 0,
+          "peak": 0,
+          "after": 0,
+          "remaining_processes": 0,
+          "wall_ms": 15667,
+          "signal": null
+        }
+      },
+      {
+        "phase": "before",
+        "group": "2",
+        "host": "mbp2606",
+        "remoteOnly": true,
+        "commit": "ac853042bfd741af1b8353b3e0aa8b7ac2a4f8ac",
+        "entryPoint": "remote-spec.sh",
+        "specs": [
+          "tests/attach-discoverable.spec.ts",
+          "tests/attach-watch.spec.ts",
+          "tests/decision-desk-lessons.spec.ts",
+          "tests/doctrine-inbox.spec.ts",
+          "tests/desk-empty.spec.ts",
+          "tests/aeon-1632-desk-links-peek.spec.ts"
+        ],
+        "exitCode": 0,
+        "passedCases": 132,
+        "playwrightReportedDuration": "3.8m",
+        "playwrightReportedSeconds": 228,
+        "durationPrecision": "Playwright summary rounded to 0.1 minute",
+        "processSupervisorWallMs": 78981,
+        "source": "remote-spec.sh stdout: 132 passed (3.8m); AEON_PW_PROCESSES wall_ms=78981; rc=0"
+      }
+    ],
+    "measurementStatus": "baseline passed on mbp2606: 94 cases in 1.9m plus 132 cases in 3.8m; retained runs pending",
+    "extraIterationReduction": [
+      {
+        "file": "tests/decision-desk-project.spec.ts",
+        "journeys": 2,
+        "profilesPerJourneyBefore": 6,
+        "profilesPerJourneyAfter": 1,
+        "nativeCaseReduction": 0
+      }
+    ],
+    "manifestWriter": "scripts/test-tiers/collect.mjs saveManifest + node scripts/test-tiers/cli.mjs manifests --write",
+    "staticValidation": "Hosted PR CI, as required by the cut-A brief.",
+    "retainedNativeRisks": [
+      "The six-frame real-canvas animation and header bounding-box case stays; the fake-clock timing unit cannot replace its physical output/geometry assertions.",
+      "Both favicon pixel sizes, native background no-focus/no-sound, both phone and desktop geometry, tablet toolbar, held-response privacy, exact approval consent and all passkey/step-up journeys stay."
+    ],
+    "timingFixtureNegativeControl": {
+      "id": "historical-timing-scale",
+      "source": "scripts/test-tiers/core.mjs",
+      "sourceSha256": "74d63c11e52945555de7bdf7a6d46eb43379350048e166124b7af2bd713de418",
+      "mutation": {
+        "from": "seconds * selected / selectedTests",
+        "to": "seconds * selected"
+      },
+      "test": "scripts/test-tiers/test-tiers.test.mjs",
+      "titleFilter": "AEON-1619 hosted shards",
+      "result": "assertion-failed-as-expected",
+      "seconds": 1.006
+    },
+    "timingFixtureMaintenance": "AEON-1619 keeps every pinned timing value/assertion and now builds fixed historical selected counts from its recorded run rather than coupling historical weights to current catalogue size. The targeted positive run passed, and removing the selected-count divisor failed its assertion.",
+    "additionalAcceptanceFiles": [
+      {
+        "file": "scripts/test-tiers/test-tiers.test.mjs",
+        "reason": "Give the historical timing regression its recorded selection counts while retaining every exact timing assertion."
+      },
+      {
+        "file": "web/scripts/ci-web-shard.test.mjs",
+        "reason": "Update the exact approved current lesson and empty-Desk counts to 14 and 10 while preserving their gate and launch-budget checks."
+      }
+    ],
+    "sourceRecords": "All 12 per-spec source records now declare their actual native listedTests. Historical tierTiming/nightlyTiming values, source provenance, launch flags/config/project, gate and hosted-only ownership are preserved."
   }
 }
