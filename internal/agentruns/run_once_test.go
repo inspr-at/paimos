@@ -139,6 +139,149 @@ func TestRunOnceBindsContextOptionsAndCurrentAuthority(t *testing.T) {
 	if f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.admission_refused' AND after->>'reason'='permission_revoked'`) != 1 {
 		t.Fatal("revoked one-off claim lost its refusal audit")
 	}
+	t.Run("settlement", exerciseRunOnceSettlement)
+}
+
+// Risks: false Done, duplicate settlement, overwriting a person's decision or
+// retaining revoked write authority. Extend the already-classified Run once
+// behaviour guard through the real launch, claim, telemetry and cancel routes.
+func exerciseRunOnceSettlement(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, errorCode, state, reason string
+	}{
+		{"success", "completed", "", "done", ""},
+		{"selected-leaf", "completed", "", "done", ""},
+		{"failed", "failed", "turn_failed", "open", "turn_failed"},
+		{"cancelled", "cancelled", "decision_refused", "open", "decision_refused"},
+		{"queued-cancel", "cancelled", "", "open", "cancelled_by_person"},
+		{"person-status", "completed", "", "blocked", "ticket_changed"},
+		{"person-away-and-back", "completed", "", "open", "ticket_changed"},
+		{"person-edit", "completed", "", "open", "ticket_changed"},
+		{"permission-revoked", "completed", "", "open", "permission_revoked"},
+		{"done-check", "completed", "", "open", "entry_checks_failed"},
+		{"unconfirmed-exit", "completed", "", "open", "process_exit_unconfirmed"},
+		{"historical", "completed", "", "open", "launch_revision_unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setup(t)
+			nodes.New(f.d.App, nil).Mount(f.mux)
+			f.pairedRunComputer(t)
+			var contextID string
+			var revision time.Time
+			if tc.name == "selected-leaf" {
+				contextID = f.ticket(t, "open", "medium", nil)
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), `SELECT updated_at FROM nodes WHERE id=$1`, contextID).Scan(&revision)
+				})
+			} else {
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,'SETTLE-1','Run once settlement','{"project_key":"SETTLE"}' FROM node_kinds WHERE slug='project' RETURNING id::text,updated_at`, f.person.TenantID).Scan(&contextID, &revision)
+				})
+			}
+			if tc.name == "done-check" {
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_set(fields,'{checks,done}','[{"id":"manual:signoff","label":"Person signs off"}]') WHERE kind_id=(SELECT id FROM node_kinds WHERE slug='definition')`)
+					return err
+				})
+			}
+			input := map[string]any{"request_id": uuid(), "expected_updated_at": revision, "agent_principal_id": f.agent.ID, "model_profile_id": f.profile, "repository_mutation_allowed": true}
+			if tc.name != "selected-leaf" {
+				input["task"] = "Inspect supplied context"
+			}
+			launchPath := "/api/nodes/" + contextID + "/run-once"
+			var run agentruns.Run
+			f.call(t, f.person, "POST", launchPath, input, 201, &run)
+			var ticket string
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT parent_id::text FROM nodes WHERE id=$1`, run.OrderID).Scan(&ticket)
+			})
+			path := "/api/runs/" + run.ID
+			var report map[string]any
+			if tc.name == "queued-cancel" {
+				f.reserve(t, run)
+				f.call(t, f.person, "POST", path+"/cancel", nil, 200, &run)
+				f.call(t, f.person, "POST", path+"/cancel", nil, 200, nil)
+				if f.count(t, f.person, `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, run.ID) != 0 {
+					t.Fatal("queued cancellation retained a reservation")
+				}
+			} else {
+				ids := f.reserve(t, run)
+				raw, _ := json.Marshal(claimBody(ids))
+				r := httptest.NewRequest("POST", path+"/claim", strings.NewReader(string(raw)))
+				r = r.WithContext(tenant.WithPrincipal(r.Context(), f.agent))
+				r.Header.Set("Authorization", "Bearer "+f.token)
+				r.Header.Set(agentverification.RunOncePolicyHeader, agentverification.RunOncePolicy)
+				w := httptest.NewRecorder()
+				f.mux.ServeHTTP(w, r)
+				if w.Code != 200 {
+					t.Fatalf("claim: %d %s", w.Code, w.Body.String())
+				}
+				switch tc.name {
+				case "person-status", "person-away-and-back":
+					f.call(t, f.person, "PATCH", "/api/nodes/"+ticket, map[string]any{"state": "blocked"}, 200, nil)
+					if tc.name == "person-away-and-back" {
+						f.call(t, f.person, "PATCH", "/api/nodes/"+ticket, map[string]any{"state": "open"}, 200, nil)
+					}
+				case "person-edit":
+					f.call(t, f.person, "PATCH", "/api/nodes/"+ticket, map[string]any{"title": "Person updated this task"}, 200, nil)
+				case "permission-revoked":
+					f.tx(t, f.person, func(tx pgx.Tx) error {
+						var role string
+						if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'settlement_observer','Settlement observer') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
+							return err
+						}
+						if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'nodes.read'),($1,$2,'work_orders.write'),($1,$2,'run.create')`, f.person.TenantID, role); err != nil {
+							return err
+						}
+						_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, f.person.ID, role)
+						return err
+					})
+				case "historical":
+					f.tx(t, f.person, func(tx pgx.Tx) error {
+						_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=trace#-'{run_once,ticket}' WHERE id=$1`, run.ID)
+						return err
+					})
+				}
+				report = map[string]any{"sequence": 1, "kind": "finished", "status": tc.status, "error_code": tc.errorCode, "process_state": "exited"}
+				if tc.name == "unconfirmed-exit" {
+					report["process_state"] = "unconfirmed"
+				}
+				f.call(t, f.agent, "POST", path+"/telemetry", report, 200, &run)
+				f.call(t, f.agent, "POST", path+"/telemetry", report, 200, nil)
+			}
+			if run.Status != tc.status || run.EndedAt == nil {
+				t.Fatalf("run did not settle: %+v", run)
+			}
+			if f.count(t, f.person, `SELECT count(*) FROM nodes WHERE id=$1 AND state=$2 AND deleted_at IS NULL`, ticket, tc.state) != 1 {
+				t.Fatalf("ticket did not retain expected state %s", tc.state)
+			}
+			if f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='run_once.settled' AND after->>'run_id'=$2 AND after->>'status'=$3 AND after->>'reason'=$4 AND (after->>'ticket_closed')::bool=$5 AND after->>'result_url'=$6`, ticket, run.ID, tc.status, tc.reason, tc.state == "done", "/agents?run="+run.ID) != 1 {
+				t.Fatal("missing, divergent or duplicated settlement receipt")
+			}
+			if f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='comment.created' AND after->>'run_id'=$2 AND position($3 in after->>'body_markdown')>0 AND position($4 in after->>'body_markdown')>0`, ticket, run.ID, "/agents?run="+run.ID, tc.reason) != 1 {
+				t.Fatal("missing, divergent or duplicated result comment")
+			}
+			closed := int64(0)
+			if tc.state == "done" {
+				closed = 1
+			}
+			if got := f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='node.updated' AND after->>'state'='done' AND metadata->>'run_id'=$2`, ticket, run.ID); got != closed {
+				t.Fatalf("status transition audit count %d, want %d", got, closed)
+			}
+			if tc.name == "success" {
+				var again agentruns.Run
+				f.call(t, f.person, "POST", launchPath, input, 201, &again)
+				if again.ID != run.ID {
+					t.Fatal("settlement invalidated the launch retry")
+				}
+				f.call(t, f.person, "PATCH", "/api/nodes/"+ticket, map[string]any{"state": "open"}, 200, nil)
+				f.call(t, f.agent, "POST", path+"/telemetry", report, 200, nil)
+				if f.count(t, f.person, `SELECT count(*) FROM nodes WHERE id=$1 AND state='open'`, ticket) != 1 || f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='run_once.settled'`, ticket) != 1 {
+					t.Fatal("replay overrode a later person decision")
+				}
+			}
+		})
+	}
 }
 
 // Risk: a malformed persisted binding poisons every list page (or hides its
