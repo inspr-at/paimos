@@ -752,6 +752,7 @@ async function failedDeskFillsItself(page: Page, testInfo: TestInfo, width: numb
   await page.clock.runFor(400)
   await page.evaluate(() => (window as unknown as { deskLiveStop(): void }).deskLiveStop())
   await expect(sync.getByTestId('desk-sync-dot'), 'without the stream "Live" and its dot drop').toHaveCount(0)
-  expect(await heard(), 'no state change spoke in the live run').toEqual(['Couldn’t check the Desk. Trying again.', 'The Desk is up to date again.'])
+  // The second recorder took over at the idle run: since then (idle minute, checking, live run) nothing spoke.
+  expect(await quietRun(), 'no announcement in the idle, checking and live runs').toEqual([])
 }
 
