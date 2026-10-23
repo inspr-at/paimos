@@ -8734,6 +8734,8 @@
     ,
     {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it: the previous worst five stay closed until the new window answers","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 light de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -8755,6 +8757,8 @@
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"panning an incident to the right edge keeps its caption inside the lane frame","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"the overview brush pans and resizes the window, and its playhead moves the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"AEON-1683: Flow switches Live Replay and Compare and a held hint preserves the chosen time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-modes.spec.ts","name":"Compare races release 126 from step a against the Arion target on one axis","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -8921,6 +8925,8 @@
     {"kind":"browser","file":"tests/delivery-tab-switch.spec.ts","name":"Flow: fast section switches keep one hint stream per mounted view and its lanes render","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-tab-switch.spec.ts","name":"Numbers: fast section switches keep Delivery responsive and its cards render","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"AEON-1683: Delivery retains failed rows and drafts, retries, and binds policy Undo to its project","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"a failed refresh keeps the delivery rows and notes the failure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
