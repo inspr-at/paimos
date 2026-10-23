@@ -227,6 +227,12 @@ test('phone status and project keys expose their full copy with text spacing', a
   await copy.focus(); await expect(copy).toBeFocused()
 })
 
+test('sibling sync ages keep the number and seconds unit together', async ({ page }) => {
+  await mockBand(page, { sibling: 'ok' })
+  await page.goto('/decision-desk')
+  await expect(page.getByTestId('desk-sync').locator('.sync-text')).toHaveAttribute('data-tip', /pma: checked \d+\u00a0s ago/)
+})
+
 // A browser proof is necessary for the handshake: unit tests cannot show that
 // the actual router strips a credential fragment before rendering or retaining
 // a sign-in return path. No third-party cookies are used in this flow.
@@ -294,10 +300,11 @@ for (const width of [1440, 1024, 390] as const) {
   test(`long German account names and hosts remain readable at ${width}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 950 })
     const account = 'Datenschutzbeauftragte für grenzüberschreitende Unternehmenszusammenarbeit', email = `${'datenschutz'.repeat(5)}@example.test`
-    const origin = `https://${'unternehmenszusammenarbeit'.repeat(2)}.example`
+    const origin = `https://${Array(4).fill('unternehmenszusammenarbeit'.repeat(2)).join('.')}.example`
     await mockBand(page, { connected: false, sibling: 'ok' })
     await page.route('**/api/me', route => route.fulfill({ json: { principal: { ...me, name: account, email, kind: 'person', roles: ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } }))
     await page.route('**/api/decision-desk/instances', route => route.fulfill({ json: { here: 'ppm', siblings: [{ tag: 'pma', origin }] } }))
+    await page.route(`${origin}/api/decision-desk/owner-summary*`, route => route.fulfill({ status: 503, headers: { 'access-control-allow-origin': new URL(page.url()).origin, 'access-control-allow-methods': 'GET', 'access-control-allow-headers': 'Authorization, Accept' }, json: { error: 'unavailable' } }))
     await page.goto(`/instances/connect?origin=${encodeURIComponent(origin)}&state=${'a'.repeat(43)}`)
     const card = page.locator('.connect-card'), name = page.locator('.connect-account b'), address = page.locator('.connect-account small')
     await expect(name).toHaveText(account)
@@ -328,7 +335,8 @@ for (const width of [1440, 1024, 390] as const) {
         await host.focus(); await expect(host).toBeFocused()
         expect(await section.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
       }
-      await expect(receiving.locator('.connection-account')).toHaveAttribute('data-tip', `connected as ${account}`)
+      await expect(receiving.locator('.connection-account')).toHaveCSS('white-space', 'nowrap')
+      if (width === 390) await expect(receiving.locator('.connection-account')).toHaveAttribute('data-tip', `connected as ${account}`)
       await receiving.screenshot({ path: info.outputPath(`connections-long-${width}-${theme}.png`) })
     }
     const notice = receiving.getByRole('checkbox', { name: 'Notify me about pma' })

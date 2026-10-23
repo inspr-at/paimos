@@ -8652,6 +8652,8 @@
     ,
     {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"shared sibling counts, exact home links and stable Goals controls at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"sibling sync ages keep the number and seconds unit together","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"unreachable results remain dated, ended results disappear, and connection states keep the same row","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/graph-canvas.spec.ts","name":"a glimpse renderer takes its host size when its engine loads after the first resize pass","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

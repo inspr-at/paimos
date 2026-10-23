@@ -230,6 +230,7 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 	// for the exact lock reason rather than relying on elapsed time.
 	t.Run("summary snapshot releases the write fence", func(t *testing.T) {
 		var holder pgx.Tx
+		hash := sha256.Sum256([]byte(token))
 		defer func() {
 			if holder != nil {
 				_ = holder.Rollback(t.Context())
@@ -237,7 +238,7 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 		}()
 		ctx := db.WithTenantGuard(t.Context(), func(ctx context.Context, tx pgx.Tx, tid string) error {
 			var used bool
-			err := f.d.Admin.QueryRow(ctx, `SELECT last_used_at IS NOT NULL FROM desk_instance_connections WHERE tenant_id=$1 AND token_hash=$2`, tid, func() []byte { h := sha256.Sum256([]byte(token)); return h[:] }()).Scan(&used)
+			err := f.d.Admin.QueryRow(ctx, `SELECT last_used_at IS NOT NULL FROM desk_instance_connections WHERE tenant_id=$1 AND token_hash=$2`, tid, hash[:]).Scan(&used)
 			if err != nil || !used || holder != nil {
 				return err
 			}
@@ -257,6 +258,35 @@ func TestPersonConnectionsScopeExpiryAndRevocation(t *testing.T) {
 			t.Fatalf("summary did not read independently of its write fence: %d %s (read barrier reached: %t)", w.Code, w.Body.String(), holder != nil)
 		}
 	})
+	token, id = issue(member, strings.Repeat("f", 43))
+	t.Run("revocation during the snapshot discards the summary", func(t *testing.T) {
+		revoked := false
+		ctx := db.WithTenantGuard(t.Context(), func(ctx context.Context, tx pgx.Tx, tid string) error {
+			var used bool
+			if err := f.d.Admin.QueryRow(ctx, `SELECT last_used_at IS NOT NULL FROM desk_instance_connections WHERE tenant_id=$1 AND id=$2`, tid, id).Scan(&used); err != nil {
+				return err
+			}
+			if used && !revoked {
+				// The read snapshot is established at transaction entry. Revoke
+				// through the real write path after that barrier, with no sleeps.
+				w := request(member, "DELETE", "/api/decision-desk/connections/"+id, nil, "", "")
+				if w.Code != http.StatusNoContent {
+					t.Fatalf("revoke during summary: %d %s", w.Code, w.Body.String())
+				}
+				revoked = true
+			}
+			return nil
+		})
+		r := httptest.NewRequest("GET", "/api/decision-desk/owner-summary", nil).WithContext(ctx)
+		r.Header.Set("Origin", sibling.Origin)
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		if !revoked || w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), "connection ended") {
+			t.Fatalf("revocation did not discard the in-flight summary: %d %s (revocation barrier reached: %t)", w.Code, w.Body.String(), revoked)
+		}
+	})
+	token, _ = issue(member, strings.Repeat("g", 43))
 	// Commit an access change exactly between initial visibility setup and the
 	// handler's fence. This proves a pre-fence repeatable-read snapshot cannot
 	// keep old authority alive, without sleeps or a wall-clock interleaving.
