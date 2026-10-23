@@ -1235,7 +1235,8 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				}
 				checkout, other := filepath.Join(dir, "container checkout"), filepath.Join(dir, "unrelated")
 				env := append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+filepath.Join(dir, "gitconfig"),
-					"GIT_TEST_ASSUME_DIFFERENT_OWNER=1", "GITHUB_WORKSPACE="+filepath.Join(dir, "host checkout"))
+					"GIT_TEST_ASSUME_DIFFERENT_OWNER=1", "GITHUB_WORKSPACE="+filepath.Join(dir, "host checkout"),
+					"GITHUB_ENV="+filepath.Join(dir, "github-env"), "RUNNER_TEMP="+filepath.Join(dir, "container temp"))
 				run := func(cwd, input, program string, args ...string) (string, error) {
 					cmd := exec.CommandContext(ctx, program, args...)
 					cmd.Dir, cmd.Env, cmd.Stdin = cwd, env, strings.NewReader(input)
@@ -1273,6 +1274,42 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				}
 				if out, err := run(other, "", "git", "rev-parse", "--show-toplevel"); err == nil || !strings.Contains(out, "detected dubious ownership") {
 					t.Fatalf("an unrelated repository must remain untrusted: %v\n%s", err, out)
+				}
+				if owner.job == "visual-comparison" {
+					// Download actions and shell steps must share a container path.
+					// Replay the actual restore command against a real tar fixture.
+					if treeMap(job["env"])["AEON_VISUAL_BASELINE_FILE"] != nil {
+						t.Fatal("baseline path must be resolved inside the container, not in host expressions")
+					}
+					download := reuseStep(t, job, "Download shared web runtime")
+					path := fmt.Sprint(treeMap(download["with"])["path"])
+					if filepath.IsAbs(path) || strings.Contains(path, "$") || strings.HasPrefix(filepath.Clean(path), "..") {
+						t.Fatalf("runtime download must stay inside the checkout: %s", path)
+					}
+					baselineDir := filepath.Join("tmp", "visual-baselines")
+					fixture := filepath.Join(dir, "runtime", baselineDir)
+					for _, path := range []string{fixture, filepath.Join(checkout, path)} {
+						if err := os.MkdirAll(path, 0o700); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := os.WriteFile(filepath.Join(fixture, "baseline.json"), []byte(payload), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if out, err := run(checkout, "", "tar", "-cf", filepath.Join(path, "web-runtime.tar"), "-C", filepath.Join(dir, "runtime"), baselineDir); err != nil {
+						t.Fatalf("pack runtime fixture: %v\n%s", err, out)
+					}
+					restore := reuseStep(t, job, "Restore web runtime")
+					if out, err := run(checkout, "", "bash", "-euo", "pipefail", "-c", fmt.Sprint(restore["run"])); err != nil {
+						t.Fatalf("restore runtime inside container: %v\n%s", err, out)
+					}
+					baselinePath := filepath.Join(checkout, baselineDir, "baseline.json")
+					if body, err := os.ReadFile(filepath.Join(dir, "github-env")); err != nil || string(body) != "AEON_VISUAL_BASELINE_FILE="+baselinePath+"\n" {
+						t.Fatalf("browser baseline path must use the container mount: %v\n%s", err, body)
+					}
+					if body, err := os.ReadFile(baselinePath); err != nil || string(body) != payload {
+						t.Fatalf("browser baseline must be the restored runtime member: %v\n%s", err, body)
+					}
 				}
 			})
 		}

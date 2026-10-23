@@ -96,7 +96,7 @@
     "visual-comparison": {
       "kind": "not-static",
       "reason": "AEON-1692 required digest-pinned container visual execution; guarded by renderer, manifest and baseline-update tests.",
-      "runs_sha256": "adc20a5464c40a727fadcf2c44beda8103804e4a11932d450e0069b56f2e42dd"
+      "runs_sha256": "8cd6246b40ddd10dd666e36d4fcf3da5fa7ffb6c22908b408c12fefd8eef9e2e"
     }
   },
   "exclusions": [

@@ -60,7 +60,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      # Checkout's host path differs from the mount path seen by container shells.
+      # Checkout's temporary Git config is not shared with container shell steps.
       - name: Trust the visual container checkout
         run: git config --global --add safe.directory "$(pwd -P)"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -1151,7 +1151,6 @@ jobs:
       PW_WORKERS: '1'
       AEON_REQUIRE_BACKEND: 'off'
       AEON_VISUAL_CONTAINER_DIGEST: sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
-      AEON_VISUAL_BASELINE_FILE: ${{ github.workspace }}/tmp/visual-baselines/baseline.json
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -1159,7 +1158,9 @@ jobs:
           fetch-depth: 0
       # Trust only this checkout, using its actual container path.
       - name: Trust the visual container checkout
-        run: git config --global --add safe.directory "$(pwd -P)"
+        run: |
+          git config --global --add safe.directory "$(pwd -P)"
+          echo "AEON_VISUAL_BASELINE_FILE=$(pwd -P)/tmp/visual-baselines/baseline.json" >> "$GITHUB_ENV"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24.22.1"
@@ -1171,9 +1172,9 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: web-runtime
-          path: ${{ runner.temp }}/web-runtime
+          path: tmp/visual-runtime
       - name: Restore web runtime
-        run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
+        run: tar -xf tmp/visual-runtime/web-runtime.tar
       - name: Verify visual reference transport before comparison
         run: |
           node scripts/test-prune/visual-baselines.mjs verify tmp/visual-baselines
