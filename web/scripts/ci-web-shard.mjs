@@ -132,20 +132,25 @@ function lowerMakespan(shards, passes) {
   for (let pass = 0; pass < passes; pass++) {
     for (const shard of shards) shard.specs.sort((left, right) => compare(left.file, right.file))
     const current = descending(shards.map(shard => shard.weightSeconds))
+    // A pass never mutates its shards until the best exchange is chosen.
+    // Build and weigh each subset once, rather than for every partner shard.
+    const subsets = shards.map(shard => specSubsets(shard.specs, shard.specs.length > 12 ? 2 : 3)
+      .map(specs => ({ specs, weightSeconds: specSum(specs) })))
     let best = null
     for (let i = 0; i < shards.length; i++) {
-      const giveSets = specSubsets(shards[i].specs, shards[i].specs.length > 12 ? 2 : 3)
       for (let j = i + 1; j < shards.length; j++) {
-        const takeSets = specSubsets(shards[j].specs, shards[j].specs.length > 12 ? 2 : 3)
-        for (const give of giveSets) {
-          const giveWeight = specSum(give)
-          for (const take of takeSets) {
-            const delta = giveWeight - specSum(take)
+        const pairMaximum = Math.max(shards[i].weightSeconds, shards[j].weightSeconds)
+        for (const give of subsets[i]) {
+          for (const take of subsets[j]) {
+            const delta = give.weightSeconds - take.weightSeconds
             const nextI = shards[i].weightSeconds - delta
             const nextJ = shards[j].weightSeconds + delta
-            if (nextI > current[0] + 1e-9 || nextJ > current[0] + 1e-9) continue
+            // The pair's total is unchanged: its sorted loads can improve
+            // only if its maximum falls. Most exchanges cannot do that;
+            // reject them before allocating and sorting the full shard key.
+            if (Math.max(nextI, nextJ) >= pairMaximum) continue
             const key = descending(shards.map((shard, index) => index === i ? nextI : index === j ? nextJ : shard.weightSeconds))
-            if (lower(key, current) && (!best || lower(key, best.key))) best = { i, j, give, take, key }
+            if (lower(key, current) && (!best || lower(key, best.key))) best = { i, j, give: give.specs, take: take.specs, key }
           }
         }
       }

@@ -88,8 +88,9 @@ test('source manifest accounts for every spec, including nested files, before re
   const manifest = loadManifest(), discovered = discoverSpecs(webRoot, manifest.specDirectories)
   assert.deepEqual(checkSpecInventory(manifest, discovered), { specs: discovered.length, excluded: 0 })
   assert.deepEqual(manifest.exclusions, [])
+  const assigned = balanceShards(manifest, 12).flatMap(shard => shard.specs)
   for (const file of ['tests/clip-tip.spec.ts', 'tests/aeon-632b-clip.spec.ts', 'tests/aeon-632b-clip-settings.spec.ts', 'tests/key-trim.spec.ts', 'tests/model-prefs.spec.ts', 'tests/record-ownership.spec.ts']) {
-    assert.equal(balanceShards(manifest, 12).flatMap(shard => shard.specs).filter(spec => spec.file === file).length, 1, `${file} must gate exactly once`)
+    assert.equal(assigned.filter(spec => spec.file === file).length, 1, `${file} must gate exactly once`)
   }
 })
 
@@ -309,10 +310,19 @@ test('real manifest covers every non-excluded UI spec once for 1, 12, 24 and 256
   assert.ok(expected.includes('tests/quotes/print-receipt.spec.ts'))
   assert.ok(!expected.includes('e2e/smoke.spec.ts'))
   for (const count of [1, 12, 24, 256]) {
-    assert.deepEqual(checkCoverage(manifest, balanceShards(manifest, count, { all: true }), expected, { all: true }), {
+    const shards = balanceShards(manifest, count, { all: true })
+    assert.deepEqual(checkCoverage(manifest, shards, expected, { all: true }), {
       specs: expected.length - manifest.exclusions.length, shards: count,
       ...(manifest.exclusions.length ? { excluded: manifest.exclusions.length } : {}),
     })
+    // The real catalogue must still fail closed when one assignment is lost
+    // or duplicated, at every supported coverage-test shard count.
+    const missing = structuredClone(shards)
+    missing.find(shard => shard.specs.length).specs.pop()
+    assert.throws(() => checkCoverage(manifest, missing, expected, { all: true }), /Spec missing from shards:/)
+    const duplicate = structuredClone(shards)
+    duplicate.at(-1).specs.push(duplicate[0].specs[0])
+    assert.throws(() => checkCoverage(manifest, duplicate, expected, { all: true }), /Spec appears in two shards:/)
   }
   const access = manifest.groups.find(g => g.id === 'access-dialogs')
   assert.equal(access.hostedOnly, true)
@@ -327,8 +337,9 @@ test('real manifest covers every non-excluded UI spec once for 1, 12, 24 and 256
   assert.deepEqual(recurrence.specs.map(s => s.file), ['tests/recurrence-marker.spec.ts', 'tests/recurrences.spec.ts'])
   assert.equal(balanceShards(manifest, 12).flatMap(s => s.specs).filter(s => s.file === 'tests/recurrences.spec.ts').length, 1)
   assert.equal(files(manifest).filter(file => file === 'tests/access.spec.ts').length, 1)
+  const declared = new Set(files(manifest))
   for (const e of manifest.ciInventory.filter(e => e.kind === 'browser-test' && e.config === 'playwright.ui.config.ts' && !e.revision)) {
-    for (const file of e.specs) assert.ok(files(manifest).includes(file), `${e.id}: ${file}`)
+    for (const file of e.specs) assert.ok(declared.has(file), `${e.id}: ${file}`)
   }
 })
 

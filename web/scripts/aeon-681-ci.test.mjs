@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'nod
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { run, browserList, plan, main } from '../../scripts/test-tiers/cli.mjs'
-import { command, root, web, evidence, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
+import { collectWeb, command, root, web, evidence, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
 import { resolve, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerHooks } from 'node:module'
@@ -23,10 +23,7 @@ const inventory=()=>{
   if(!collected) {
     const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))
     const tests=manifest.tests.filter(row=>row.kind!=='browser')
-    for(const config of ['playwright.ui.config.ts','playwright.perf.config.ts']) {
-      const rows=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','-c',config,'--list','--reporter=json'],{cwd:web})),config)
-      tests.push(...rows.filter(row=>config!=='playwright.ui.config.ts'||row.file!=='tests/performance.spec.ts'))
-    }
+    tests.push(...collectWeb({browserOnly:true,cache:false}).tests)
     collected={tests}
   }
   return collected
@@ -95,16 +92,17 @@ function fullBrowserGate(browser, paths) {
 }
 
 test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async t=>{
-  // Exercise every unchanged planner/CLI path against the same native snapshot.
-  // Recollecting the entire catalogue for each mode made this one regression
-  // exceed the static gate's guard before it could finish its assertions.
+  // Exercise every unchanged planner/CLI path against the production browser
+  // collection scope, shared with the other regressions in this process.
+  // Strict web-tiers checks unit registrations independently; collecting those
+  // here again made this browser-gate regression exceed the static budget.
   const collector=pathToFileURL(resolve(root,'scripts/test-tiers/collect.mjs')).href
   const entry=pathToFileURL(resolve(root,'scripts/test-tiers/cli.mjs')).href+'?aeon691-native-planning'
   const wrapper=`export * from ${JSON.stringify(collector)};
 import { collectWeb as nativeCollectWeb } from ${JSON.stringify(collector)};
 let inventory;
 export let collections = 0;
-export const collectWeb = () => { if (!inventory) { collections++; inventory = nativeCollectWeb(); } return inventory; };`
+export const collectWeb = () => { if (!inventory) { collections++; inventory = nativeCollectWeb({browserOnly:true,cache:false}); } return inventory; };`
   const snapshot='data:text/javascript,'+encodeURIComponent(wrapper)
   const hook=registerHooks({resolve(specifier,context,next){
     if(context.parentURL===entry&&specifier==='./collect.mjs') return {url:snapshot,shortCircuit:true}
@@ -262,18 +260,29 @@ test('native browser selectors cover reconciled essentials and every collected f
   const declared=new Map(manifest.tests.filter(row=>row.kind==='browser').map(row=>[key(row),row]))
   for(const row of reconciled) assert.equal(row.tier,declared.get(key(row))?.tier??'NIGHTLY',key(row))
   const groups=loadWebPolicy().groups
-  // Full and catalogue modes often produce identical inputs. Collect each
-  // distinct native selector once, while retaining every per-mode assertion.
-  // Several groups select exactly the same cases in full and all modes.
-  // Reuse only identical native requests within this unchanged snapshot;
-  // each mode still asserts every identity and its independent total.
+  const byFile=new Map()
+  for(const row of all) {
+    if(!byFile.has(row.file)) byFile.set(row.file,[])
+    byFile.get(row.file).push(row)
+  }
+  // Groups with exactly the same launch policy can share a native list.
+  // Every group and mode still checks its own complete registration identities;
+  // only identical combined requests are reused across modes.
   const nativeSelections=new Map()
   for(const mode of ['essential','full','all']) {
     let total=0
+    const batches=new Map()
     for(const group of groups) {
       const included=row=>mode==='all'||tiers.get(key(row))==='ESSENTIAL'||(mode==='full'&&tiers.get(key(row))==='GATED-FULL')
-      const rows=all.filter(row=>group.specs.some(spec=>spec.file===row.file)&&included(row))
+      const rows=group.specs.flatMap(spec=>byFile.get(spec.file)??[]).filter(included)
       if(!rows.length) continue
+      const policy=JSON.stringify([group.config,group.flags,group.project,group.env,group.hostedOnly])
+      if(!batches.has(policy)) batches.set(policy,{group,rows:[],groups:[]})
+      const batch=batches.get(policy)
+      batch.rows.push(...rows)
+      batch.groups.push({group,rows})
+    }
+    for(const {group,rows,groups:members} of batches.values()) {
       const list=resolve(evidence,`regression-${mode}-${group.id}.txt`)
       const selectors=browserList(rows,all).join('\n')+'\n'
       writeFileSync(list,selectors)
@@ -286,6 +295,15 @@ test('native browser selectors cover reconciled essentials and every collected f
         nativeSelections.set(identity,listed)
       }
       assert.deepEqual(listed.map(row=>`${row.id}:${row.project}`).sort(),rows.map(row=>`${row.id}:${row.project}`).sort(),group.id)
+      const listedByFile=new Map()
+      for(const row of listed) {
+        if(!listedByFile.has(row.file)) listedByFile.set(row.file,[])
+        listedByFile.get(row.file).push(row)
+      }
+      for(const member of members) {
+        const selected=member.group.specs.flatMap(spec=>listedByFile.get(spec.file)??[])
+        assert.deepEqual(selected.map(row=>`${row.id}:${row.project}`).sort(),member.rows.map(row=>`${row.id}:${row.project}`).sort(),`${mode}: ${member.group.id}`)
+      }
       total+=listed.length
     }
     assert.equal(total,mode==='all'?all.length:reconciled.filter(row=>row.tier==='ESSENTIAL'||(mode==='full'&&row.tier==='GATED-FULL')).length)
