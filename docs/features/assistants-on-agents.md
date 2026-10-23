@@ -47,7 +47,8 @@ unavailable while their APIs are absent. No sample values appear in product code
 EN/DE strings are kept in the assistant catalog and follow the shared app language.
 
 The section uses the Sessions card style, with its heading and the page layout
-control inside the card header. Missing row metrics use muted dashes with a
+control inside the card header. That same control stays reachable in the existing
+sticky dock when its card scrolls away. Missing row metrics use muted dashes with a
 "Not available yet" tooltip; only the Status cell names the unavailable status.
 Overview explains the pending spend, adapter and approval connections once.
 Assistant-wide Pause is disabled in the actions menu, with a desktop tooltip and

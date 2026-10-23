@@ -27,7 +27,7 @@ async function setup(page: Page, options: AgentMockOptions & { empty?: boolean; 
   await mockWork(page, work, { readOnly: options.readOnly, admin: !options.member })
   const data = agentData({ ...world, empty: options.empty })
   const calls = await mockAgents(page, data, options)
-  return { data, calls }
+  return { data, calls, work }
 }
 async function openAgents(page: Page, path = '/agents') {
   await page.goto(path)
@@ -749,7 +749,8 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [1600,
 test('assistants use the existing Agents dock with stable tabs, locked policy and audited revision saves', async ({ page }, testInfo) => {
   test.setTimeout(120_000)
   const errors = watchErrors(page)
-  await setup(page)
+  const { work } = await setup(page)
+  work.preferences['ui.agents.sections'] = { dial: false }
   const { items } = assistantEvidence(Date.now(), me.id)
   const { writes, events, routineWrites, routines, runOwners, routineReads } = await mockAssistants(page, items, me.id)
   let policyAccess = true
@@ -806,7 +807,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await expect(page.locator('.tooltip:popover-open')).toHaveText('Not available yet')
   const amy = items.find(item => item.display_name === 'Amy')!
   await section.hover()
-  const stableRows = await controlStability(page, { amy: section.locator(`[data-assistant="${amy.principal_id}"] .assistant-open`), scout: section.locator('.assistant-row').nth(1).locator('.assistant-open') }, { tolerance: 0 })
+  const stableRows = await controlStability(page, { layout, amy: section.locator(`[data-assistant="${amy.principal_id}"] .assistant-open`), scout: section.locator('.assistant-row').nth(1).locator('.assistant-open') }, { tolerance: 0 })
   await stableRows.check(async () => {
     amy.display_name = 'Zamy'; amy.revision++
     await page.evaluate(() => window.dispatchEvent(new Event('focus')))
@@ -985,7 +986,8 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
 
 test('zero assistants show the permission-gated existing connect flow without sample rows', async ({ page }, testInfo) => {
   test.setTimeout(90_000)
-  await setup(page)
+  const { work } = await setup(page)
+  work.preferences['ui.agents.sections'] = { dial: false }
   const items: ReturnType<typeof assistantEvidence>['items'] = []
   await mockAssistants(page, items, me.id)
   let connectAccess = true
