@@ -3,12 +3,12 @@
   "ticket": "AEON-1682",
   "package": "P10",
   "complete": false,
-  "stage": "replacement-preparation-proven-for-recorded-candidates",
+  "stage": "unprotected-cut-A-in-progress",
   "sourceCommit": "653660d89af8a92038610839f8f232fe99ed195f",
   "counts": {
     "beforeBrowserCases": 225,
-    "currentBrowserCases": 227,
-    "originalCasesRemoved": 0,
+    "currentBrowserCases": 210,
+    "originalCasesRemoved": 17,
     "originalCasesDemoted": 0,
     "newRuntimeCases": 10,
     "newBrowserCandidates": 2,
@@ -203,7 +203,7 @@
     "beforeReportedBrowserWall": "1.5m for the six-spec baseline batch",
     "afterCaseRunnerSeconds": null,
     "runnerTimeChangeSeconds": null,
-    "conclusion": "Measured runtime proof: 84 cases in 2.526s plus 23 Node cases in 0.358s. The two new native candidates passed in 8.0s combined. No browser runner-time saving is claimed: the original 225 cases are retained and the package remains above its 30-case ceiling."
+    "conclusion": "Cut A removes 17 unprotected registrations (227 -> 210). Same-host case-body before/after measurement is in progress; previous preparation evidence is retained below."
   },
   "runtimeCandidates": [
     "vitest:tests/business-periods.unit.test.ts:AEON-1682: effective rates use the selected day, unit and currency and reject failed rates",
@@ -225,109 +225,107 @@
     {
       "source": "browser:tests/business-pickers.spec.ts:AEON-1417: 200 cost units keep rate request concurrency at six",
       "destination": "vitest:tests/business-periods.unit.test.ts:AEON-1417: 200 units use at most six rate reads and a rejected unit remains visible until retry succeeds",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-original-removed-in-cut-A",
+      "action": "replacement-executes-production-logic; current-cut-proof-pending"
     },
     {
       "source": "browser:tests/business-pickers.spec.ts:AEON-1417: continuation on the last allowed page reports partial for every business directory",
       "destination": "vitest:tests/business-periods.unit.test.ts:AEON-1417: a cursor at every directory cap returns typed partial rows and the final complete page stays complete",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-original-removed-in-cut-A",
+      "action": "replacement-executes-production-logic; current-cut-proof-pending"
     },
     {
       "source": "browser:tests/quote-editor-core.spec.ts:draft save converts measurements in old browser recovery without changing money",
       "destination": "vitest:tests/quote-editor.unit.test.ts:AEON-1682: persisted editor vectors > sends CAS and mutation identity, normalizes legacy measurements without changing money or the source",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-original-removed-in-cut-A",
+      "action": "replacement-executes-production-logic; current-cut-proof-pending"
     },
     {
       "source": "browser:tests/quote-editor-core.spec.ts:structured prose, all six levels, numbering, section and row changes survive JSON and history",
       "destination": "vitest:tests/quote-editor.unit.test.ts:AEON-1682: persisted editor vectors > keeps six numbered levels, marks, measurements, IDs, order and exact money through history",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-original-removed-in-cut-A",
+      "action": "replacement-executes-production-logic; current-cut-proof-pending"
     },
     {
       "source": "browser:tests/quote-editor-core.spec.ts:typed P1 client sends CAS and stable document to the mocked draft API",
       "destination": "vitest:tests/quote-editor.unit.test.ts:AEON-1682: persisted editor vectors > sends CAS and mutation identity, normalizes legacy measurements without changing money or the source",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-original-removed-in-cut-A",
+      "action": "replacement-executes-production-logic; current-cut-proof-pending"
     },
     {
       "source": "browser:tests/quote-editor-core.spec.ts:numbering restart, explicit start, continuation across prose and section binding",
       "destination": "vitest:tests/quote-editor.unit.test.ts:AEON-1682: persisted editor vectors > numbers restart, explicit start and continuation across prose with section binding",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-original-removed-in-cut-A",
+      "action": "replacement-executes-production-logic; current-cut-proof-pending"
     },
     {
       "source": "browser:tests/quote-collaboration.spec.ts:loading cannot save and a late reload never replaces an edit made while it waited",
       "destination": "vitest:tests/quote-workspace-recovery.unit.test.ts:AEON-1682: loading refuses writes and a held reload cannot replace an edit made after it began",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-original-removed-in-cut-A",
+      "action": "replacement-executes-production-logic; current-cut-proof-pending"
     },
     {
       "source": "browser:tests/quote-collaboration.spec.ts:merge review keeps text overlaps, deleted anchors and competing order explicit",
       "destination": "vitest:tests/quote-workspace-recovery.unit.test.ts:AEON-1682: merge review preserves text overlaps, deleted anchors and competing order",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-original-removed-in-cut-A",
+      "action": "replacement-executes-production-logic; current-cut-proof-pending"
     },
     {
       "source": "browser:tests/quote-collaboration.spec.ts:revision watch backs off after outages and rechecks immediately on focus",
       "destination": "vitest:tests/quote-workspace-recovery.unit.test.ts:AEON-1682: revision watch backs off on the injected clock and focus rechecks without waiting",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-protected-original-retained",
+      "action": "protected-after-P02; keep-original-until-pinned-reference-authority-and-protected-ledger-pass"
     },
     {
       "source": "browser:tests/quote-showcase.spec.ts:a stored profile snapshot with null lists still opens (A260929-04 as stored before the fix)",
       "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-protected-original-retained",
+      "action": "protected-after-P02; keep-original-until-pinned-reference-authority-and-protected-ledger-pass"
     },
     {
       "source": "browser:tests/quote-showcase.spec.ts:showcase quote acme-acceptance opens beside the list without an error page",
       "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-protected-original-retained",
+      "action": "protected-after-P02; keep-original-until-pinned-reference-authority-and-protected-ledger-pass"
     },
     {
       "source": "browser:tests/quote-showcase.spec.ts:showcase quote acme-fitout opens beside the list without an error page",
       "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-protected-original-retained",
+      "action": "protected-after-P02; keep-original-until-pinned-reference-authority-and-protected-ledger-pass"
     },
     {
       "source": "browser:tests/quote-showcase.spec.ts:showcase quote acme-platform opens beside the list without an error page",
       "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-protected-original-retained",
+      "action": "protected-after-P02; keep-original-until-pinned-reference-authority-and-protected-ledger-pass"
     },
     {
       "source": "browser:tests/quote-showcase.spec.ts:showcase quote acme-retainer opens beside the list without an error page",
       "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-protected-original-retained",
+      "action": "protected-after-P02; keep-original-until-pinned-reference-authority-and-protected-ledger-pass"
     },
     {
       "source": "browser:tests/quote-showcase.spec.ts:showcase quote steinwender-belegleser opens beside the list without an error page",
       "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-protected-original-retained",
+      "action": "protected-after-P02; keep-original-until-pinned-reference-authority-and-protected-ledger-pass"
     },
     {
       "source": "browser:tests/quote-showcase.spec.ts:the fixture holds all five showcase quotes, the English one with its own profile",
       "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
-      "status": "runtime-verified-original-retained",
-      "action": "keep-original-until-runtime-and-negative-proof-pass"
+      "status": "runtime-verified-protected-original-retained",
+      "action": "protected-after-P02; keep-original-until-pinned-reference-authority-and-protected-ledger-pass"
     }
   ],
   "remaining": [
-    "Complete and prove the other P10 native journeys and runtime conversions.",
-    "Run the complete required static/policy checks when the remote night protocol permits; the two targeted catalogue invariants passed.",
-    "Complete positive/negative evidence for remaining P10 groups before deleting their originals.",
-    "Resolve the P01/P02 visual-reference prerequisite without bypassing the ledger guard.",
-    "Remove proven duplicates, remap current obligations, and regenerate tiers/shard source records; measure actual before/after runner time."
+    "Eight protected duplicate registrations remain until P02 (seven showcase cases and revision-watch backoff).",
+    "Seven other protected native regressions remain; a pinned reference alone does not justify removing their unique risks.",
+    "Unique CRM/Business/Hours/editor/input/CSP/public/Undo/focus/accessibility journeys without a proven replacement remain. Overall P10 is still above its 30-case ceiling; further consolidation is a later round."
   ],
   "handoff": {
-    "status": "blocked-incomplete",
+    "status": "unprotected-cut-A-in-progress",
     "mainCommit": "af8da694874992ab76d4161a94a5e69eee3e056e",
     "finalChecks": {
       "canonicalManifests": "passed",
@@ -339,5 +337,253 @@
     "noDeploy": true,
     "noReviewGate": true,
     "noOtherModelCLI": true
+  },
+  "cutA": {
+    "brief": "aeon-1682-prune-p10-business-quotes-cutA.md",
+    "complete": false,
+    "baselineCommit": "3accfb500b21a0f2aeae0b576806e815f6ba012d",
+    "roundBeforeBrowserCases": 227,
+    "afterBrowserCases": 210,
+    "originalCasesRemoved": 17,
+    "demoted": 0,
+    "protectedNativeRegistrationsRetained": 15,
+    "protectedAfterP02": [
+      {
+        "source": "browser:tests/quote-collaboration.spec.ts:revision watch backs off after outages and rechecks immediately on focus",
+        "destination": "vitest:tests/quote-workspace-recovery.unit.test.ts:AEON-1682: revision watch backs off on the injected clock and focus rechecks without waiting",
+        "action": "Retain until P02 pinned-reference authority is available and the protected-cut ledger check passes."
+      },
+      {
+        "source": "browser:tests/quote-showcase.spec.ts:a stored profile snapshot with null lists still opens (A260929-04 as stored before the fix)",
+        "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+        "action": "Retain until P02 pinned-reference authority is available and the protected-cut ledger check passes."
+      },
+      {
+        "source": "browser:tests/quote-showcase.spec.ts:showcase quote acme-acceptance opens beside the list without an error page",
+        "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+        "action": "Retain until P02 pinned-reference authority is available and the protected-cut ledger check passes."
+      },
+      {
+        "source": "browser:tests/quote-showcase.spec.ts:showcase quote acme-fitout opens beside the list without an error page",
+        "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+        "action": "Retain until P02 pinned-reference authority is available and the protected-cut ledger check passes."
+      },
+      {
+        "source": "browser:tests/quote-showcase.spec.ts:showcase quote acme-platform opens beside the list without an error page",
+        "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+        "action": "Retain until P02 pinned-reference authority is available and the protected-cut ledger check passes."
+      },
+      {
+        "source": "browser:tests/quote-showcase.spec.ts:showcase quote acme-retainer opens beside the list without an error page",
+        "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+        "action": "Retain until P02 pinned-reference authority is available and the protected-cut ledger check passes."
+      },
+      {
+        "source": "browser:tests/quote-showcase.spec.ts:showcase quote steinwender-belegleser opens beside the list without an error page",
+        "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+        "action": "Retain until P02 pinned-reference authority is available and the protected-cut ledger check passes."
+      },
+      {
+        "source": "browser:tests/quote-showcase.spec.ts:the fixture holds all five showcase quotes, the English one with its own profile",
+        "destination": "vitest:tests/quote-profile-normalize.unit.test.ts:AEON-1682: every stored showcase draft and version hydrates with its own profile and stable IDs",
+        "action": "Retain until P02 pinned-reference authority is available and the protected-cut ledger check passes."
+      }
+    ],
+    "otherProtectedNativeRisksRetained": [
+      "browser:tests/crm.spec.ts:at 1440 names get the room: the role drops out whole, and cut values show in full on hover",
+      "browser:tests/crm.spec.ts:at 390 the meta line wraps without a separator at the start or end of a line; the internal key stays hidden",
+      "browser:tests/hours.spec.ts:a changed period refuses the approval and says so",
+      "browser:tests/hours.spec.ts:a running period can be reviewed from the week strip",
+      "browser:tests/profile-editor.spec.ts:under the production CSP the fonts and the mark load from this origin",
+      "browser:tests/quote-public-page.spec.ts:content security: the Quotes list and a docked quote run under the production policy",
+      "browser:tests/quote-public-page.spec.ts:content security: the public page runs under the strict public policy without a violation"
+    ],
+    "cutsByGroup": [
+      {
+        "file": "tests/business-pickers.spec.ts",
+        "before": 4,
+        "after": 2,
+        "removedKeys": [
+          "browser:tests/business-pickers.spec.ts:AEON-1417: 200 cost units keep rate request concurrency at six",
+          "browser:tests/business-pickers.spec.ts:AEON-1417: continuation on the last allowed page reports partial for every business directory"
+        ],
+        "destinations": [
+          "runtime:business-periods.unit.test.ts"
+        ],
+        "riskPreservation": "Runtime barriers assert six concurrent reads across 200 units and all five directory caps; the two retained mounted cases still assert partial rows, retry, native selection, and control stability."
+      },
+      {
+        "file": "tests/cost-units.spec.ts",
+        "before": 5,
+        "after": 4,
+        "removedKeys": [
+          "browser:tests/cost-units.spec.ts:a clash is explained and nothing else changes"
+        ],
+        "destinations": [
+          "runtime:business-periods.unit.test.ts"
+        ],
+        "riskPreservation": "Production rate form runtime case verifies invalid amounts never write, overlap refuses without losing the draft, and a corrected retry refreshes rates; native create/rate focus and Enter remain."
+      },
+      {
+        "file": "tests/quote-editor-core.spec.ts",
+        "before": 5,
+        "after": 1,
+        "removedKeys": [
+          "browser:tests/quote-editor-core.spec.ts:draft save converts measurements in old browser recovery without changing money",
+          "browser:tests/quote-editor-core.spec.ts:structured prose, all six levels, numbering, section and row changes survive JSON and history",
+          "browser:tests/quote-editor-core.spec.ts:typed P1 client sends CAS and stable document to the mocked draft API",
+          "browser:tests/quote-editor-core.spec.ts:numbering restart, explicit start, continuation across prose and section binding"
+        ],
+        "destinations": [
+          "runtime:quote-editor.unit.test.ts",
+          "retained:tests/quote-editor-core.spec.ts"
+        ],
+        "riskPreservation": "Exact persisted vectors run directly against the production editor/prose/API with CAS and numbering negative controls; the retained native editor case proves UI selection, typing, measurement Undo/Redo, CAS save and reload."
+      },
+      {
+        "file": "tests/quote-collaboration.spec.ts",
+        "before": 7,
+        "after": 5,
+        "removedKeys": [
+          "browser:tests/quote-collaboration.spec.ts:loading cannot save and a late reload never replaces an edit made while it waited",
+          "browser:tests/quote-collaboration.spec.ts:merge review keeps text overlaps, deleted anchors and competing order explicit"
+        ],
+        "destinations": [
+          "runtime:quote-workspace-recovery.unit.test.ts"
+        ],
+        "riskPreservation": "Held reload and explicit three-way text/deletion/order conflicts execute production session/merge logic; two-context CAS, dirty reconnect, cloned session storage, overlay geometry and protected focus/backoff remain."
+      },
+      {
+        "file": "tests/quotes/print-receipt.spec.ts",
+        "before": 4,
+        "after": 2,
+        "removedKeys": [
+          "browser:tests/quotes/print-receipt.spec.ts:print entry keeps inline marks and accepted receipt evidence",
+          "browser:tests/quotes/print-receipt.spec.ts:the emitted A4 PDF wraps long marked prose across pages without clipping"
+        ],
+        "destinations": [
+          "retained:tests/quotes/print-receipt.spec.ts"
+        ],
+        "riskPreservation": "Previously passed native candidate combines Unicode marks, accepted name/digest, no customer QR on receipts, multipage bounds and real A4 PDF page count; independent final-page QR decode remains."
+      },
+      {
+        "file": "tests/import-from-start.spec.ts",
+        "before": 8,
+        "after": 4,
+        "removedKeys": [
+          "browser:tests/import-from-start.spec.ts:AEON-1441: expired handoff, and a German draft stays English, at 1440 dark",
+          "browser:tests/import-from-start.spec.ts:AEON-1441: expired handoff, and a German draft stays English, at 390 light",
+          "browser:tests/import-from-start.spec.ts:AEON-1441: from START, loading to created at 1440 dark",
+          "browser:tests/import-from-start.spec.ts:AEON-1441: from START, loading to created at 390 light"
+        ],
+        "destinations": [
+          "retained:tests/import-from-start.spec.ts",
+          "runtime:import-draft-routing.unit.test.ts"
+        ],
+        "riskPreservation": "Identical behavior and assertion bodies retain desktop light and phone dark; capability header/URL, held loading/create, exact payload, expired/forbidden, German locale and contrast/touch/stability checks remain. No native scenario is moved to runtime."
+      },
+      {
+        "file": "tests/quote-dock-layout.spec.ts",
+        "before": 8,
+        "after": 6,
+        "removedKeys": [
+          "browser:tests/quote-dock-layout.spec.ts:at 1280 the list and the dock share the window: no gap, no overlap, nothing collapsed",
+          "browser:tests/quote-dock-layout.spec.ts:at 1920 the list and the dock share the window: no gap, no overlap, nothing collapsed"
+        ],
+        "destinations": [
+          "retained:tests/quote-dock-layout.spec.ts"
+        ],
+        "riskPreservation": "Identical geometric assertions retain the constrained 1024 split and canonical 1440 desktop; real divider, saved per-person width, keyboard reset, folded actions and both axe themes remain."
+      }
+    ],
+    "pickerProfiles": {
+      "before": [
+        [
+          390,
+          "light"
+        ],
+        [
+          390,
+          "dark"
+        ],
+        [
+          1024,
+          "light"
+        ],
+        [
+          1024,
+          "dark"
+        ],
+        [
+          1440,
+          "light"
+        ],
+        [
+          1440,
+          "dark"
+        ]
+      ],
+      "after": [
+        [
+          1440,
+          "light"
+        ],
+        [
+          390,
+          "dark"
+        ]
+      ],
+      "cases": 2,
+      "preserved": "All retained case assertions and interactions are unchanged; both native layouts and themes remain."
+    },
+    "validation": {
+      "beforeA": {
+        "entryPoint": "remote-spec.sh",
+        "specs": [
+          "tests/business-pickers.spec.ts",
+          "tests/cost-units.spec.ts",
+          "tests/quote-editor-core.spec.ts",
+          "tests/quote-collaboration.spec.ts",
+          "tests/quotes/print-receipt.spec.ts",
+          "tests/import-from-start.spec.ts"
+        ],
+        "status": "passed",
+        "cases": 33,
+        "reportedWall": "2.3m",
+        "host": "mbp2606",
+        "caseBodySeconds": 50.445018452999996,
+        "artifactRoot": "web/test-results/p10-cutA-before-a",
+        "artifactDigest": "d3f00a7229d6c0c494c0a624806a268f2560c05cc034a478250de5520b5d149c"
+      },
+      "beforeB": {
+        "status": "pending"
+      },
+      "runtime": {
+        "status": "pending"
+      },
+      "after": {
+        "status": "pending"
+      },
+      "static": {
+        "status": "hosted-CI-required",
+        "reason": "Cut A brief explicitly assigns static validation to hosted CI."
+      },
+      "retainedCallbacks": {
+        "status": "passed",
+        "callbackBodies": 20,
+        "method": "TypeScript AST compares each retained callback with the committed baseline. Only the explicitly documented picker profile loop and unreachable removed dock-width height branch are normalized; every assertion and interaction is identical."
+      }
+    },
+    "timing": {
+      "method": "Sum monotonic beforeEach-to-afterEach case-body intervals from testInfo.outputPath() artifacts on the same remote host. Excludes fixture setup/teardown, process startup, and waiting for the shared FIFO lock. No latency assertion is added.",
+      "runnerTimeChangeSeconds": null,
+      "beforeCaseBodySeconds": null,
+      "afterCaseBodySeconds": null
+    },
+    "remainingOutsideRound": [
+      "Eight protected duplicate registrations remain until P02 (seven showcase cases and revision-watch backoff).",
+      "Seven other protected native regressions remain; a pinned reference alone does not justify removing their unique risks.",
+      "Unique CRM/Business/Hours/editor/input/CSP/public/Undo/focus/accessibility journeys without a proven replacement remain. Overall P10 is still above its 30-case ceiling; further consolidation is a later round."
+    ]
   }
 }

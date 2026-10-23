@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/quote-editor-core.spec.ts",
-    "listedTests": 5,
+    "listedTests": 1,
     "tierTiming": {
       "caseSeconds": {
         "max": 1.359,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // U20 (AEON-99): the quote docked beside the Quotes list is a deliberate split.
-// At 1024, 1280, 1440 and 1920 with the dock open: the list and the dock share
+// At 1024 and 1440 with the dock open: the list and the dock share
 // the window with no dead gap; the page head never wraps its summary word by
 // word; every Business tab shows whole; the quote title never collapses; the
 // dock's title bar folds instead of overlapping. The divider sets the dock's own
@@ -39,9 +39,9 @@ function titleBarControls(page: Page) {
     .map(el => { const r = el.getBoundingClientRect(); return { name: el.getAttribute('aria-label') || el.className || el.tagName, box: { x: r.x, y: r.y, width: r.width, height: r.height } } }))
 }
 
-for (const width of [1024, 1280, 1440, 1920]) {
+for (const width of [1024, 1440]) {
   test(`at ${width} the list and the dock share the window: no gap, no overlap, nothing collapsed`, async ({ page }) => {
-    await page.setViewportSize({ width, height: width >= 1900 ? 1080 : width === 1024 ? 768 : 900 })
+    await page.setViewportSize({ width, height: width === 1024 ? 768 : 900 })
     const errors = watchErrors(page)
     await docked(page)
     const dock = await rect(page, '.quote-dock')

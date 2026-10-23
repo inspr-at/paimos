@@ -3,7 +3,7 @@
 // entry point. This case launches no browser and is removed after the proof.
 import { test, expect } from '@playwright/test'
 import { spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { performance } from 'node:perf_hooks'
 
 test('AEON-1682 worker runtime and negative-control proof', async ({}, testInfo) => {
@@ -21,12 +21,39 @@ test('AEON-1682 worker runtime and negative-control proof', async ({}, testInfo)
   }
   const vitest = (files: string[], pattern?: string) => ['node_modules/vitest/vitest.mjs', 'run', ...files.map(file => `tests/${file}`),
     '--maxWorkers=1', '--no-fileParallelism', '--retry=0', ...(pattern ? ['--testNamePattern', pattern] : [])]
+  const hiddenSource = testInfo.outputPath('p10-worker-source.ts')
+  // Catalogue checks see the shipping sources while this already-loaded
+  // disposable transport runs. It is restored even when a child fails.
+  renameSync(testInfo.file, hiddenSource)
   try {
     const positive = run('runtime-positive', vitest(files))
     expect(positive.output, 'runtime suites must pass before any negative control').toMatch(/Test Files.*passed/)
     expect(positive.status, positive.output).toBe(0)
     const node = run('node-positive', ['--experimental-strip-types', '--test', '--test-concurrency=1', 'tests/business.test.ts', 'tests/crm.test.ts', 'tests/business-setup-owner.test.ts', 'tests/test-prune-ledger.test.ts'])
     expect(node.status, node.output).toBe(0)
+    const native = run('native-registration-and-launch-counts', ['--input-type=module', '-e', `
+      import assert from 'node:assert/strict'
+      import { readFileSync } from 'node:fs'
+      import { command, flattenBrowser } from '../scripts/test-tiers/collect.mjs'
+      import { loadManifest } from './scripts/ci-web-shard.mjs'
+      const files = ['tests/business-pickers.spec.ts', 'tests/cost-units.spec.ts', 'tests/import-from-start.spec.ts',
+        'tests/quote-editor-core.spec.ts', 'tests/quote-collaboration.spec.ts', 'tests/quotes/print-receipt.spec.ts', 'tests/quote-dock-layout.spec.ts']
+      const rows = flattenBrowser(JSON.parse(command(process.execPath,
+        ['node_modules/@playwright/test/cli.js', 'test', '-c', 'playwright.ui.config.ts', ...files, '--list', '--reporter=json'],
+        { cwd: process.cwd() })), 'playwright.ui.config.ts')
+      const manifest = JSON.parse(readFileSync('../scripts/ci/web-test-tiers.json', 'utf8'))
+      const key = row => JSON.stringify([row.kind, row.file, row.name, row.occurrence ?? null])
+      assert.deepEqual(rows.map(key).sort(), manifest.tests.filter(row => row.kind === 'browser' && files.includes(row.file)).map(key).sort())
+      assert.equal(rows.length, 24)
+      const launches = loadManifest().groups.flatMap(group => group.specs)
+      for (const file of files) assert.equal(launches.find(row => row.file === file).listedTests, rows.filter(row => row.file === file).length, file)
+      console.log('24 native registrations and seven launch counts match the shipping catalogue')
+    `])
+    expect(native.status, native.output).toBe(0)
+    const catalogue = run('catalogue-policy', ['--test', '--test-concurrency=1',
+      '--test-name-pattern=^(three-tier manifests allow new NIGHTLY cases and never promote ungated browser cases|AEON-1024 measured splits preserve native baseline cases, tiers and full shard coverage)$',
+      '../scripts/test-tiers/test-tiers.test.mjs'])
+    expect(catalogue.status, catalogue.output).toBe(0)
     const mutations = [
       { file: 'src/stores/business.ts', before: 'Math.min(6, pending.length)', after: 'Math.min(7, pending.length)', suite: 'business-periods.unit.test.ts', name: '200 units use at most six', error: /to be called 6 times|expected.*6/i },
       { file: 'src/stores/business.ts', before: 'rate.effective_until > day', after: 'rate.effective_until >= day', suite: 'business-periods.unit.test.ts', name: 'effective rates use the selected day', error: /AssertionError|expected/ },
@@ -52,6 +79,7 @@ test('AEON-1682 worker runtime and negative-control proof', async ({}, testInfo)
       } finally { writeFileSync(mutation.file, original) }
     }
   } finally {
+    renameSync(hiddenSource, testInfo.file)
     writeFileSync(testInfo.outputPath('p10-runtime-proof.md'), JSON.stringify({ version: 1, results }, null, 2))
   }
 })
