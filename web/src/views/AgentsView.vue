@@ -864,6 +864,10 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
    Cap the pane at the row and let the divider yield so that frame cannot widen main. */
 .agents-list-pane { flex: 0 0 100%; min-width: 0; max-width: 100%; container: sessions / inline-size; transition: flex-basis 240ms ease; }
 .split .agents-list-pane { flex-basis: var(--list-w); position: sticky; top: 0; }
+/* Both cards share the viewport: Sessions scrolls in the room below Assistants. */
+.split .agents-list-pane { display: flex; flex-direction: column; height: var(--pane-h); }
+.split .agents-list-pane > :deep(.assistants) { flex: none; }
+.split .agents-list-pane > :deep(.sessions.pane) { flex: 1 1 auto; min-height: 0; height: auto; }
 .split, .panel-only { padding-bottom: 8px; }
 /* The pane toolbar is already below the app header. Page-anchor clearance
    would scroll its focused controls away from the pane's top. */
