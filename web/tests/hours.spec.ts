@@ -8,6 +8,7 @@ import { addHistoricalPeriod, businessData, mira, mockBusiness, nova, WEEK39, ty
 import { colourContrast } from '../src/lib/themeEngine'
 import { expectStableControls } from './helpers/stable'
 import { domAudit } from './ui-audit-rules'
+import { sampleRenderedFont } from '../../scripts/test-prune/visual-renderer.mjs'
 
 test.use({ timezoneId: 'Europe/Vienna' })
 
@@ -83,33 +84,49 @@ test('open periods older than a year appear in the home waiting count and week b
 test('the week grid sums per ticket and day with exact amounts', async ({ page }, info) => {
   const errors = watchErrors(page)
   const { data } = await setup(page)
-  // A five-character day value exposes clipping that shorter durations miss.
-  const longDay = data.entries.find(entry => entry.id === 'e-1')!
-  longDay.duration_seconds = 10.5 * 3600
-  longDay.ended_at = new Date(Date.parse(longDay.started_at) + longDay.duration_seconds * 1000).toISOString()
-  longDay.amount = '997.5000'
+  // Adjacent five-character days expose run-together values, and a fully
+  // logged week exercises the widest realistic weekly total (168:00).
+  const fullDay = data.entries.find(entry => entry.id === 'e-2')!
+  for (const [i, id] of ['e-1', 'e-2', 'e-3', 'e-4'].entries()) {
+    const entry = data.entries.find(entry => entry.id === id)!
+    entry.started_at = new Date(Date.parse(WEEK39.starts_at) + i * 86400_000).toISOString()
+    entry.duration_seconds = (i === 0 ? 10.5 : 24) * 3600
+    entry.ended_at = new Date(Date.parse(entry.started_at) + entry.duration_seconds * 1000).toISOString()
+    entry.amount = i === 0 ? '997.5000' : i === 3 ? '2040.0000' : '2280.0000'
+  }
+  for (const i of [4, 5, 6]) {
+    const started = Date.parse(WEEK39.starts_at) + i * 86400_000
+    data.entries.push({ ...fullDay, id: `e-full-${i}`, started_at: new Date(started).toISOString(),
+      ended_at: new Date(started + 86400_000).toISOString() })
+  }
+  data.entries.push({ ...data.entries.find(entry => entry.id === 'e-3')!, id: 'e-monday-rest',
+    started_at: data.entries.find(entry => entry.id === 'e-1')!.ended_at,
+    ended_at: fullDay.started_at, duration_seconds: 13.5 * 3600, amount: '1282.5000' })
   await openWeek(page)
-  await expect(page.getByText('Week 39 · 21–27 Sep 2026 · 17h logged')).toBeVisible()
+  await expect(page.getByText('Week 39 · 21–27 Sep 2026 · 168h logged')).toBeVisible()
   const rows = grid(page).locator('tbody tr')
   await expect(rows).toHaveCount(3)
   await expect(rows.first()).toContainText('PHAROS-11')
-  await expect(rows.first().locator('td')).toHaveText(['10:30', '3:30', '·', '·', '·', '·', '·', '14:00'])
-  await expect(grid(page).locator('tfoot td')).toHaveText(['10:30', '3:30', '1:30', '1:30', '·', '·', '·', '17:00'])
+  await expect(rows.first().locator('td')).toHaveText(['10:30', '24:00', '·', '·', '24:00', '24:00', '24:00', '106:30'])
+  await expect(grid(page).locator('tfoot td')).toHaveText(['24:00', '24:00', '24:00', '24:00', '24:00', '24:00', '24:00', '168:00'])
   await expect(grid(page).locator('thead th.today')).toContainText('Thu')
-  // 14h × 95 + 1.5h × 95 + 1.5h × 85, exactly.
-  await expect(page.locator('.week-foot')).toContainText('1,600.00 EUR')
+  // 144h × 95 + 24h × 85, exactly.
+  await expect(page.locator('.week-foot')).toContainText('15,720.00 EUR')
   await expect(page.locator('.period-chip')).toHaveText('21–27 Sep 2026')
   const entries = page.getByRole('region', { name: 'Entries' })
   await expect(entries.getByText('Thu 24')).toBeVisible()
-  await expect(entries.locator('.entry').first()).toContainText('08:00–09:30')
-  await expect(entries.locator('.entry').first()).toContainText('127.50')
+  const thursdayEntry = entries.locator('.entry').filter({ hasText: 'Connector sketch' })
+  await expect(thursdayEntry).toContainText('00:00–00:00')
+  await expect(thursdayEntry).toContainText('2,040.00')
   // AEON-1687: the complete seven-day grid must fit its own container on a
   // phone, rather than concealing a wider table in a horizontal scroller.
   const measurements = []
-  for (const width of [390, 560, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  for (const width of [390, 520, 560, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 900 })
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     await page.evaluate(() => document.fonts.ready)
+    const dayFont = await sampleRenderedFont(page, '.week-grid tbody .c-day')
+    expect(dayFont.renderedFamilies, `${width} ${theme}: day values render in the bundled font`).toEqual(['JetBrains Mono'])
     const scroll = page.getByRole('region', { name: 'Weekly hours', exact: true })
     await scroll.focus()
     const dimensions = await scroll.evaluate(element => ({
@@ -136,12 +153,15 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
       const style = getComputedStyle(cell), range = document.createRange()
       range.selectNodeContents(cell)
       return { text: cell.textContent, scrollWidth: cell.scrollWidth, clientWidth: cell.clientWidth,
+        value: cell.tagName === 'TD',
         textWidth: range.getBoundingClientRect().width,
         contentWidth: cell.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) }
     }))
     expect(dayCells.some(cell => cell.text === '10:30'), 'the grid includes a five-character day value').toBe(true)
     expect(dayCells.filter(cell => cell.scrollWidth > cell.clientWidth), `${width} ${theme}: every day value fits its cell`).toEqual([])
     expect(dayCells.filter(cell => cell.textWidth > cell.contentWidth + 0.5), `${width} ${theme}: day text stays inside the content box`).toEqual([])
+    expect(dayCells.filter(cell => cell.value && cell.contentWidth - cell.textWidth < 1),
+      `${width} ${theme}: every day value has at least 1 px slack`).toEqual([])
     // At 521–600px the Total cell can fit while its text spills into Sunday.
     // Check the text edges against the padded content box in every grid row.
     const totalCells = await grid(page).locator('.c-total').evaluateAll(cells => cells.map(cell => {
@@ -153,10 +173,12 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
           right: box.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight) } }
     }))
     expect(totalCells).toHaveLength(5) // Header, all three tickets and the grand total.
-    expect(totalCells.some(cell => cell.value === '14:00'), 'Total includes a five-character clock').toBe(true)
+    expect(totalCells.some(cell => cell.value === '168:00'), 'Total includes the widest weekly clock').toBe(true)
     expect(totalCells.every(cell => cell.text.width > 0 && cell.text.height > 0), `${width} ${theme}: Total text boxes have positive size`).toBe(true)
     expect(totalCells.filter(cell => cell.text.left < cell.content.left - 0.5 || cell.text.right > cell.content.right + 0.5),
       `${width} ${theme}: every Total text box stays inside its content box`).toEqual([])
+    expect(totalCells.filter(cell => cell.content.right - cell.content.left - cell.text.width < 1),
+      `${width} ${theme}: every Total has at least 1 px slack`).toEqual([])
     // Measure actual text, including both lines of the header. Cell boxes can
     // fit perfectly while the adjacent time values still read as one number.
     const textRows = await grid(page).locator('tr').evaluateAll(rows => rows.map(row => {
@@ -205,9 +227,9 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
         return { fixed, fixedTotals, previous: measure(), previousTotals: measureTotals() }
       } finally { compact.media.mediaText = condition }
     })
-    expect(unchangedWideLayout.fixedTotals, `${width} ${theme}: Total keeps its position, size and font`).toEqual(unchangedWideLayout.previousTotals)
+    if (width > 520) expect(unchangedWideLayout.fixedTotals, `${width} ${theme}: Total keeps its position, size and font`).toEqual(unchangedWideLayout.previousTotals)
     if (width >= 1024) expect(unchangedWideLayout.fixed, `${width} ${theme}: 0 px change from the pre-fix layout`).toEqual(unchangedWideLayout.previous)
-    measurements.push({ width, theme, textRows, totalCells, unchangedWideLayout })
+    measurements.push({ width, theme, dayFont, dayCells, textRows, totalCells, unchangedWideLayout })
     const crowdedTickets = await grid(page).locator('tbody th').evaluateAll(cells => cells.flatMap(cell => {
       const chip = cell.querySelector('.ticket-chip')!, edge = chip.getBoundingClientRect().right
       const range = document.createRange(); range.selectNodeContents(cell.nextElementSibling!)
