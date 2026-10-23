@@ -144,7 +144,7 @@ export function policyChange(event: AssistantEvent): string {
   if (event.type === 'assistant.disabled') return words.disconnected
   if (!before || !after) return words.policyChanged
   const changes: string[] = []
-  if (JSON.stringify(before.weekly_budget) !== JSON.stringify(after.weekly_budget)) changes.push(`${words.budget}: ${assistantMoney(before.weekly_budget.amount, before.weekly_budget.unit)} → ${assistantMoney(after.weekly_budget.amount, after.weekly_budget.unit)}`)
+  if (JSON.stringify(before.weekly_budget) !== JSON.stringify(after.weekly_budget)) changes.push(`${words.budget}: ${words.budgetChange(assistantMoney(before.weekly_budget.amount, before.weekly_budget.unit), assistantMoney(after.weekly_budget.amount, after.weekly_budget.unit))}`)
   if (JSON.stringify(before.allowed_projects) !== JSON.stringify(after.allowed_projects)) changes.push(words.projectsChanged)
   if (JSON.stringify(before.allowed_scopes) !== JSON.stringify(after.allowed_scopes)) changes.push(words.scopesChanged)
   return changes.join(' · ') || words.policyChanged

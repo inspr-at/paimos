@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, assistantEvidence, mockAgents, mockAssistants, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
@@ -748,6 +749,11 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [1600,
 // policy actions drifting to another record/person while the right panel updates.
 test('assistants use the existing Agents dock with stable tabs, locked policy and audited revision saves', async ({ page }, testInfo) => {
   test.setTimeout(120_000)
+  // The approved remote entry point exposes Playwright. Run the affected unit
+  // and glyph guard in that same remote checkout, before allocating a browser.
+  const units = execFileSync(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', 'tests/assistants.unit.test.ts', '--maxWorkers=1'], { encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 * 1024 })
+  const glyphs = execFileSync(process.execPath, ['--test', 'tests/text-glyphs.test.ts'], { encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 * 1024 })
+  await testInfo.attach('assistant-units-and-glyphs', { body: units + glyphs, contentType: 'text/plain' })
   const errors = watchErrors(page)
   const { work } = await setup(page)
   work.preferences['ui.agents.sections'] = { dial: false }
@@ -916,7 +922,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   expect(writes).toHaveLength(1)
   expect(writes[0]).toMatchObject({ id: amy.principal_id, body: { expected_revision: policyRevision, policy: { weekly_budget: { amount: '15', unit: 'USD' }, outward_action_rule: 'approval_required', never_ask_person_for_secrets_or_manual_steps: true } } })
   expect(events).toHaveLength(1)
-  await expect(details.locator('.policy-audit')).toContainText(/Changed by .*: Budget: \$10 → \$15/)
+  await expect(details.locator('.policy-audit')).toContainText(/Changed by .*: Budget: \$10 to \$15/)
   // A conflicting write must retain the draft and never report a successful save.
   await details.getByRole('button', { name: 'More assistant actions' }).click()
   await page.getByRole('menuitem', { name: 'Edit policy', exact: true }).click()

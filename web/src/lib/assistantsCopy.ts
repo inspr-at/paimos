@@ -73,6 +73,7 @@ export function assistantCopy(language: DisplayLanguage = displayLanguage()) {
     messagePeople: de ? 'Personen Nachrichten senden' : 'Message people', readInbox: de ? 'Posteingang lesen und bestätigen' : 'Read inbox and acknowledge messages',
     readInboxOnly: de ? 'Posteingang lesen' : 'Read inbox', acknowledgeInbox: de ? 'Nachrichten bestätigen' : 'Acknowledge messages',
     budget: 'Budget', perWeek: de ? 'Pro Woche' : 'Per week', currency: de ? 'Einheit' : 'Currency or unit',
+    budgetChange: (before: string, after: string) => de ? `${before} auf ${after}` : `${before} to ${after}`,
     outward: de ? 'Aktionen nach außen' : 'Outward actions', approvers: de ? 'Freigebende' : 'Approvers',
     locked: de ? 'Gesperrte Regel' : 'Locked rule', refusals: de ? 'Ablehnungen in der Aktivität ansehen' : 'View refusals in Activity',
     editPolicy: de ? 'Richtlinie bearbeiten' : 'Edit policy',

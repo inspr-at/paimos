@@ -94,6 +94,20 @@ async function openAgents(page: Page, size: Size, look: Look, options: { account
 }
 const main = (page: Page) => page.locator('main')
 const toolbar = (page: Page) => page.locator('.sessions .th-stick')
+// Tick's AEON-1705 placement adds one card before Sessions. Preserve the
+// original chrome budgets and dimensions after accounting for that card's
+// measured footprint, and require the fixture's honest, empty state.
+async function assistantSpace(page: Page) {
+  const section = page.locator('.assistants')
+  await expect(section.getByRole('heading')).toHaveText('Assistants · 0')
+  await expect(section.locator('.assistant-empty')).toContainText('No assistants yet.')
+  await expect(section.locator('.assistant-row')).toHaveCount(0)
+  await expect(section).toHaveCSS('margin-bottom', '16px')
+  const card = await box(section), sessions = await box(page.locator('.sessions'))
+  expect(card.height, 'the added card has a positive-size sample').toBeGreaterThan(0)
+  expect(Math.abs(sessions.y - card.y - card.height - 16), 'Sessions follows the approved card with exactly its 16 px gap').toBeLessThanOrEqual(.5)
+  return card.height + 16
+}
 const scrollTo = (page: Page, top: number) => main(page).evaluate((el, y) => { el.scrollTop = y }, top)
 // The toolbar's offset in the page's scroller: scrolling past it sticks the toolbar.
 const toolbarOffset = (page: Page) => page.evaluate(() => {
@@ -179,6 +193,7 @@ for (const { size, looks, rows, topMax, scrolled } of C1) for (const look of loo
       const footers = await page.locator('footer.app-footer').count()
       c.is('no footer element on compact', footers, '0', footers === 0)
       const bar = toolbar(page), line = page.locator('.sessions .tree-head')
+      const assistantHeight = await assistantSpace(page)
       const [barBox, lineBox] = await Promise.all([box(bar), box(line)])
       c.is('toolbar height', barBox.height, '44', Math.abs(barBox.height - 44) <= .5)
       c.is('toolbar line height', lineBox.height, '44', Math.abs(lineBox.height - 44) <= .5)
@@ -186,7 +201,7 @@ for (const { size, looks, rows, topMax, scrolled } of C1) for (const look of loo
       c.is('toolbar parts inside its one line', wrapped, '[]', wrapped.length === 0)
       const columnHead = await page.locator('.sessions .thead').isVisible()
       c.is('no column head', columnHead, 'false', !columnHead)
-      c.is('toolbar top before scrolling', barBox.y, `≤ ${topMax}`, barBox.y <= topMax)
+      c.is('toolbar top before scrolling, accounting for the approved Assistants card', barBox.y - assistantHeight, `≤ ${topMax}`, barBox.y - assistantHeight <= topMax)
       const status = page.locator('.sessions .compact-status')
       if (size.width >= 380) {
         await expect(status).toBeVisible()
@@ -641,8 +656,10 @@ for (const look of ['light', 'dark'] as const) test(`AEON-1459 C9 1440 ${look}: 
     })
     c.is('1440 reserves the native scrollbar gutter', scroll, 'stable gutter, visible native scrollbar', scroll.policy === 'stable' && scroll.width !== 'none' && scroll.pseudoWidth !== '0px' && scroll.pseudoDisplay !== 'none')
     const now = await desktopGeometry(page)
+    const assistantHeight = await assistantSpace(page)
     for (const [name, overlay] of Object.entries(MAIN_1440)) {
       const expected = { ...overlay }
+      if (name === 'toolbar' || name === 'toolbar line' || name === 'column head' || name.startsWith('column ')) expected.y += assistantHeight
       if (name !== 'header') {
         if (/^column [2-6]$/.test(name)) expected.x -= scroll.gutter
         else expected.width -= scroll.gutter

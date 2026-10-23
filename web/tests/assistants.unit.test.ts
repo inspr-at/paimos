@@ -60,6 +60,7 @@ it('assistant facts retain the specified status order, exact budget words and in
   expect(assistantCopy('en').perWeek).toBe('Per week')
   expect(assistantCopy('de').budget).toBe('Budget')
   expect(assistantCopy('de').perWeek).toBe('Pro Woche')
+  expect(assistantCopy('de').budgetChange('$10', '$15')).toBe('$10 auf $15')
   expect(assistantCopy('en').ran('Inbox triage 1', '30 min ago')).toBe('Ran Inbox triage 1 · 30 min ago')
   expect(assistantCopy('de').ran('Posteingang', 'vor 30 Minuten')).toBe('Posteingang ausgeführt · vor 30 Minuten')
   expect(assistantCopy('de').statuses.waiting).toBe('Wartet auf Freigabe')
