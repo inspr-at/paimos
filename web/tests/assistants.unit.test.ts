@@ -19,13 +19,14 @@ vi.mock('../src/stores/decisionDesk', () => ({ useDecisionDesk: () => desk }))
 vi.mock('../src/lib/sharedRequests', () => ({ subscribeBrowserEvents: (events: string[], changed: (event?: string) => void) => { routineHints = { events, changed }; return () => {} } }))
 vi.mock('../src/lib/authz', () => ({ can: () => true, permissionsKnown: () => true, ensurePermissions: async () => {}, onAccessRevalidate: () => () => {} }))
 const viewer = reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'owner', kind: 'person' } } })
-const desk = reactive<{ projection: DeskProjection | null; failures: number; error: string }>({ projection: null, failures: 0, error: '' })
+const desk = reactive<{ projection: DeskProjection | null; failures: number; error: string; refresh: () => Promise<boolean> }>({ projection: null, failures: 0, error: '', refresh: vi.fn(async () => true) })
 let pinia: ReturnType<typeof createPinia>
 let routineHints: { events: string[]; changed: (event?: string) => void }
 beforeEach(() => {
   pinia = createPinia(); setActivePinia(pinia)
   viewer.identity.principal.id = 'owner'; viewer.identity.principal.kind = 'person'
   desk.projection = null; desk.failures = 0; desk.error = ''
+  vi.mocked(desk.refresh).mockClear()
   vi.mocked(listAssistants).mockReset(); vi.mocked(readAssistantRoutines).mockReset()
   vi.mocked(listAssistants).mockResolvedValue({ items: assistantEvidence(Date.now(), 'owner').items, truncated: false })
   vi.mocked(readAssistantRoutines).mockResolvedValue({ rows: [], truncated: false })
@@ -52,6 +53,11 @@ it('assistant identity polls reuse discovered routines instead of repeating the 
   await vi.advanceTimersByTimeAsync(400)
   expect(readAssistantRoutines).toHaveBeenCalledTimes(3)
   await store.loadRoutines() // Opening the panel explicitly refreshes its data.
+  expect(readAssistantRoutines).toHaveBeenCalledTimes(4)
+  routineHints.changed('approval.proposed')
+  routineHints.changed('approval.denied')
+  await vi.advanceTimersByTimeAsync(400)
+  expect(desk.refresh).toHaveBeenCalledTimes(1)
   expect(readAssistantRoutines).toHaveBeenCalledTimes(4)
   stop()
 })

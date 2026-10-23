@@ -166,21 +166,33 @@ export const useAssistants = defineStore('assistants', () => {
     return request
   }
   function watchPage() {
-    let timer: ReturnType<typeof setTimeout> | undefined, stopped = false, identityChanged = false
+    let timer: ReturnType<typeof setTimeout> | undefined, stopped = false, identityChanged = false, routinesChanged = false, approvalsChanged = false, pendingGeneration = generation
     // Hints only. Batch named events, then read the authorized APIs; routine
     // discovery never runs from the page's 20-second identity poll.
     const stop = subscribeBrowserEvents([
       'assistant.created', 'assistant.updated', 'assistant.policy_updated', 'assistant.disabled',
       'recurrence.created', 'recurrence.updated', 'recurrence.deleted', 'recurrence.paused', 'recurrence.resumed',
-      'recurrence.occurred', 'recurrence.skipped', 'recurrence.agent_result',
+      'recurrence.occurred', 'recurrence.skipped', 'recurrence.failed', 'recurrence.agent_result',
+      'approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked',
     ], event => {
+      if (pendingGeneration !== generation) {
+        clearTimeout(timer); timer = undefined; identityChanged = routinesChanged = approvalsChanged = false; pendingGeneration = generation
+      }
       if (event?.startsWith('assistant.')) identityChanged = true
+      if (event?.startsWith('approval.')) approvalsChanged = true
+      else routinesChanged = true
       const epoch = generation
       timer ??= setTimeout(async () => {
         timer = undefined
-        const refreshIdentity = identityChanged; identityChanged = false
+        const refreshIdentity = identityChanged, refreshRoutines = routinesChanged, refreshApprovals = approvalsChanged
+        identityChanged = routinesChanged = approvalsChanged = false
+        if (stopped || epoch !== generation) return
+        // Native approval events do not wake the shared lead projection. Read
+        // the same Desk store once per burst, without another routine sweep.
+        if (refreshApprovals) await desk.refresh()
         if (stopped || epoch !== generation) return
         if (refreshIdentity) await load()
+        if (!refreshRoutines || stopped || epoch !== generation) return
         // A hint received during discovery must be read after that snapshot.
         if (routineFlight) await routineFlight
         if (!stopped && epoch === generation) await loadRoutines()
