@@ -380,6 +380,8 @@ func (f *deliveryFixture) expectEffects(t *testing.T, q Question, inboxState str
 	}
 }
 func TestDeliveryGraceEditRestartAndCorrections(t *testing.T) {
+	t.Run("durable unanswered reminders", reminderLifecycle)
+	t.Run("reminder quiet boundaries", reminderQuietBoundaries)
 	f := deliveryFixtureFor(t)
 	in := input()
 	in.SessionID = f.session

@@ -382,7 +382,8 @@
         "internal/routineactions/pr.go",
         "internal/routineactions/evidence/evidence.go",
         "internal/routineactions/pipeline.go",
-        "internal/routineactions/pr_test.go"
+        "internal/routineactions/pr_test.go",
+        "internal/db/migrations/1423_question_reminders.sql"
       ]
     },
     {

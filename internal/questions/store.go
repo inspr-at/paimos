@@ -240,6 +240,9 @@ func (m *Module) AskTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 		if err != nil {
 			return err
 		}
+		if err := m.scheduleReminderTx(ctx, tx, p.TenantID, project, id, in); err != nil {
+			return err
+		}
 		if err := event(ctx, tx, p, id, "question.asked", 1); err != nil {
 			return err
 		}
@@ -263,10 +266,11 @@ func (m *Module) read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id str
 }
 func (m *Module) readWithCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, check authz.ProjectCheck) (Question, error) {
 	q := Question{Askers: []Asker{}, Pending: []Pending{}}
-	err := tx.QueryRow(ctx, `SELECT q.node_id::text,q.project_id::text,q.revision,q.state,CASE WHEN q.input ? 'goal_id' AND NOT EXISTS(SELECT 1 FROM nodes visible_goal WHERE visible_goal.id::text=q.input->>'goal_id' AND visible_goal.deleted_at IS NULL) THEN q.input-'goal_id' ELSE q.input END,q.suggested_outcome,q.suggestion_reason,q.created_at,q.updated_at
+	err := tx.QueryRow(ctx, `SELECT q.node_id::text,q.project_id::text,q.revision,q.state,CASE WHEN q.input ? 'goal_id' AND NOT EXISTS(SELECT 1 FROM nodes visible_goal WHERE visible_goal.id::text=q.input->>'goal_id' AND visible_goal.deleted_at IS NULL) THEN q.input-'goal_id' ELSE q.input END,q.suggested_outcome,q.suggestion_reason,q.created_at,q.updated_at,
+ (SELECT jsonb_strip_nulls(jsonb_build_object('after_seconds',r.after_seconds,'count',r.reminder_count,'last_at',r.last_at,'next_at',CASE WHEN q.state='open' THEN r.next_at END)) FROM desk_question_reminders r WHERE r.tenant_id=q.tenant_id AND r.question_id=q.node_id)
  FROM desk_questions q JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id
  JOIN nodes project ON project.tenant_id=q.tenant_id AND project.id=q.project_id
- WHERE q.tenant_id=$1 AND q.node_id=$2 AND n.deleted_at IS NULL AND project.deleted_at IS NULL FOR SHARE OF q`, p.TenantID, id).Scan(&q.ID, &q.ProjectID, &q.Revision, &q.State, &q.Input, &q.SuggestedOutcome, &q.SuggestionReason, &q.CreatedAt, &q.UpdatedAt)
+ WHERE q.tenant_id=$1 AND q.node_id=$2 AND n.deleted_at IS NULL AND project.deleted_at IS NULL FOR SHARE OF q`, p.TenantID, id).Scan(&q.ID, &q.ProjectID, &q.Revision, &q.State, &q.Input, &q.SuggestedOutcome, &q.SuggestionReason, &q.CreatedAt, &q.UpdatedAt, &q.Reminder)
 	if err != nil {
 		return q, err
 	}
@@ -615,6 +619,9 @@ func (m *Module) decideTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id
 			return err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE desk_questions SET revision=$3,state='answered',updated_at=clock_timestamp() WHERE tenant_id=$1 AND node_id=$2`, p.TenantID, id, rev); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE desk_question_reminders SET next_at=NULL WHERE tenant_id=$1 AND question_id=$2`, p.TenantID, id); err != nil {
 			return err
 		}
 		if err := settleHeld(ctx, tx, p, q, rev); err != nil {

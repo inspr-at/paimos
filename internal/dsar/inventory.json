@@ -892,6 +892,37 @@
       "table": "desk_notification_claims"
     },
     {
+      "table": "desk_question_reminders",
+      "classification": "personal",
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "question_id": "metadata",
+        "after_seconds": "metadata",
+        "next_at": "personal",
+        "last_at": "personal",
+        "reminder_count": "personal"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      }
+    },
+    {
+      "table": "desk_reminder_settings",
+      "classification": "metadata",
+      "columns": {
+        "tenant_id": "metadata",
+        "default_after_seconds": "metadata",
+        "time_zone": "metadata",
+        "quiet_start": "metadata",
+        "quiet_end": "metadata",
+        "revision": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      }
+    },
+    {
       "classification": "metadata",
       "columns": {
         "actor_principal_id": "personal",

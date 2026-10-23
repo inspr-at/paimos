@@ -168,7 +168,7 @@ func (m *Module) listenDeliveryConnection(ctx context.Context, wakes chan<- stru
 // decisions for deterministic boundary tests, never a request-supplied time.
 func (m *Module) DispatchTenant(ctx context.Context, tid string) (time.Duration, error) {
 	ctx = db.AllProjects(ctx, "decision desk durable outbox")
-	var ids []string
+	var ids, reminderIDs []string
 	var due *time.Time
 	var now time.Time
 	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -189,20 +189,36 @@ func (m *Module) DispatchTenant(ctx context.Context, tid string) (time.Duration,
    r.state='failed' AND r.failure_reason='session_ended'
    OR r.state='queued' AND im.fetched_at IS NULL AND im.acked_at IS NULL AND NOT e.effect_data ? 'pickup_stall_alerted_at'))
  AND coalesce(e.effect_data->>'retryable','true')<>'false'
+ ), reminders AS MATERIALIZED (
+ SELECT r.question_id,r.next_at FROM desk_question_reminders r
+ JOIN desk_questions q ON q.tenant_id=r.tenant_id AND q.node_id=r.question_id AND q.state='open'
+ JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id AND n.deleted_at IS NULL
+ JOIN nodes project ON project.tenant_id=q.tenant_id AND project.id=q.project_id AND project.deleted_at IS NULL
+ WHERE r.tenant_id=$1 AND r.next_at IS NOT NULL
  ) SELECT ARRAY(SELECT id::text FROM candidates WHERE due<=$2
  ORDER BY ordering,question_id,(kind='outcome') DESC,kind,id LIMIT $3),
- (SELECT min(due) FROM candidates WHERE due>$2)`, tid, now, dispatchBatch).Scan(&ids, &due)
+ (SELECT min(at) FROM (SELECT due AS at FROM candidates WHERE due>$2 UNION ALL SELECT next_at FROM reminders WHERE next_at>$2) deadlines),
+ ARRAY(SELECT question_id::text FROM reminders WHERE next_at<=$2 ORDER BY next_at,question_id LIMIT $3)`, tid, now, dispatchBatch).Scan(&ids, &due, &reminderIDs)
 	})
 	cancel()
 	if err != nil {
 		return time.Second, err
 	}
-	for _, id := range ids {
-		if err = m.dispatchOne(ctx, tid, id); err != nil {
-			return time.Second, err
+	var reminderFailures []error
+	for _, id := range reminderIDs {
+		if err := m.remindOne(ctx, tid, id); err != nil {
+			reminderFailures = append(reminderFailures, err)
 		}
 	}
-	if len(ids) != 0 {
+	for _, id := range ids {
+		if err = m.dispatchOne(ctx, tid, id); err != nil {
+			return time.Second, errors.Join(append(reminderFailures, err)...)
+		}
+	}
+	if err := errors.Join(reminderFailures...); err != nil {
+		return time.Second, err
+	}
+	if len(ids) != 0 || len(reminderIDs) != 0 {
 		// Effects may have persisted retries. Refresh with the same combined read
 		// after draining this batch, rather than use a pre-effect deadline.
 		return 0, nil

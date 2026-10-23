@@ -51,24 +51,25 @@ type OutcomeAvailability struct {
 	Why            string `json:"why"`
 }
 type Input struct {
-	GoalID           string          `json:"goal_id,omitempty"`
-	Doctrine         *DoctrineTarget `json:"doctrine,omitempty"`
-	RequestID        string          `json:"request_id"`
-	Question         string          `json:"question"`
-	Context          string          `json:"context,omitempty"`
-	Findings         string          `json:"findings,omitempty"`
-	Options          []Option        `json:"options"`
-	Recommend        string          `json:"recommend,omitempty"`
-	Why              string          `json:"why,omitempty"`
-	Meanwhile        string          `json:"meanwhile"`
-	MeanwhileText    string          `json:"meanwhile_text,omitempty"`
-	BlockedNodeIDs   []string        `json:"blocked_node_ids,omitempty"`
-	SuggestedOutcome string          `json:"suggested_outcome,omitempty"`
-	TicketID         string          `json:"ticket_id,omitempty"`
-	SessionID        string          `json:"session_id,omitempty"`
-	SourceRequestID  string          `json:"source_request_id,omitempty"`
-	SourceHandoverID string          `json:"source_handover_id,omitempty"`
-	AnywayReason     string          `json:"anyway_reason,omitempty"`
+	RemindAfterSeconds *int            `json:"remind_after_seconds,omitempty"`
+	GoalID             string          `json:"goal_id,omitempty"`
+	Doctrine           *DoctrineTarget `json:"doctrine,omitempty"`
+	RequestID          string          `json:"request_id"`
+	Question           string          `json:"question"`
+	Context            string          `json:"context,omitempty"`
+	Findings           string          `json:"findings,omitempty"`
+	Options            []Option        `json:"options"`
+	Recommend          string          `json:"recommend,omitempty"`
+	Why                string          `json:"why,omitempty"`
+	Meanwhile          string          `json:"meanwhile"`
+	MeanwhileText      string          `json:"meanwhile_text,omitempty"`
+	BlockedNodeIDs     []string        `json:"blocked_node_ids,omitempty"`
+	SuggestedOutcome   string          `json:"suggested_outcome,omitempty"`
+	TicketID           string          `json:"ticket_id,omitempty"`
+	SessionID          string          `json:"session_id,omitempty"`
+	SourceRequestID    string          `json:"source_request_id,omitempty"`
+	SourceHandoverID   string          `json:"source_handover_id,omitempty"`
+	AnywayReason       string          `json:"anyway_reason,omitempty"`
 }
 type DecisionInput struct {
 	Doctrine         *DoctrineTarget `json:"doctrine,omitempty"`
@@ -126,6 +127,7 @@ type Pending struct {
 	ErrorCode         string     `json:"error_code,omitempty"`
 }
 type Question struct {
+	Reminder         *Reminder             `json:"reminder,omitempty"`
 	Outcomes         []OutcomeAvailability `json:"outcomes"`
 	ID               string                `json:"id"`
 	ProjectID        string                `json:"project_id"`
@@ -155,6 +157,9 @@ func outcome(s string) bool {
 
 // Validate is shared by HTTP, CLI and MCP. IDs are normalized before hashing.
 func (in *Input) Validate() error {
+	if in.RemindAfterSeconds != nil && (*in.RemindAfterSeconds < 0 || *in.RemindAfterSeconds > maxReminderSeconds) {
+		return fmt.Errorf("remind_after_seconds must be between 0 and 2592000")
+	}
 	if err := in.Doctrine.validate(); err != nil {
 		return err
 	}
