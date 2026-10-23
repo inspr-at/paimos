@@ -786,7 +786,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
         queueWarning: document.body.textContent?.includes('Queued work can’t be read right now') ?? false,
       }
     })
-    await page.screenshot({ path: testInfo.outputPath(`aeon-1705-${name}-fix6.png`), fullPage: true })
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1705-${name}-fix7.png`), fullPage: true })
     checks.push({ name, ...measurements })
   }
   await page.setViewportSize({ width: 1440, height: 1000 })
@@ -814,7 +814,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   }))
   expect(cardStyles[0]).toEqual(cardStyles[1])
   await expect(section.locator('.assistant-row')).toHaveCount(2)
-  expect(await section.locator('.assistant-row').evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height))).toEqual([56, 56])
+  for (const height of await section.locator('.assistant-row').evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height))) expect(height).toBeGreaterThanOrEqual(56)
   // U11: the complete policy must fit in up to two lines at 1440, including
   // while Status has free room. Removing the wrapping fix fails these checks.
   for (const line of await section.locator('.assistant-glance').all()) {
@@ -873,6 +873,41 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(section.locator('.assistant-name strong').first()).toHaveText('Amy')
   expect((await new AxeBuilder({ page }).include('.assistants').withRules(['color-contrast']).analyze()).violations).toEqual([])
+  // A16/U10: a real long policy must be clipped only after two lines, and
+  // its row must size from the text even with WCAG 1.4.12 spacing overrides.
+  amy.policy.allowed_projects = ['p-aeon', 'p-pharos', 'KNOWLEDGE', 'RESEARCH', 'OPERATIONS', 'AUTOMATION', 'INSPR', 'SUPPORT']
+  amy.revision++
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  const longRow = section.locator(`[data-assistant="${amy.principal_id}"]`), longPolicy = longRow.locator('.assistant-glance')
+  const fullPolicy = 'AEON, PHAROS, KNOWLEDGE, RESEARCH, OPERATIONS, AUTOMATION, INSPR, SUPPORT · asks before acting · $10 a week'
+  await expect(longPolicy).toHaveText(fullPolicy)
+  const checkLongPolicy = async () => {
+    const measurements = await longPolicy.evaluate(element => {
+      const box = element.getBoundingClientRect(), row = element.closest('.assistant-row')!, rowBox = row.getBoundingClientRect()
+      const nameBox = row.querySelector('.assistant-name')!.getBoundingClientRect(), nextBox = row.nextElementSibling!.getBoundingClientRect()
+      return { lineHeight: parseFloat(getComputedStyle(element).lineHeight), height: box.height, hiddenHeight: element.scrollHeight - element.clientHeight, horizontalOverflow: element.scrollWidth - element.clientWidth, rowHeight: rowBox.height, inside: nameBox.top >= rowBox.top && box.bottom <= rowBox.bottom, noOverlap: rowBox.bottom <= nextBox.top && box.bottom <= nextBox.top }
+    })
+    expect(measurements.height).toBeGreaterThan(measurements.lineHeight)
+    expect(measurements.height).toBeLessThanOrEqual(2 * measurements.lineHeight + .5)
+    expect(measurements.hiddenHeight).toBeGreaterThan(1)
+    expect(measurements.horizontalOverflow).toBeLessThanOrEqual(0)
+    expect(measurements.rowHeight).toBeGreaterThan(56)
+    expect(measurements.inside).toBe(true)
+    expect(measurements.noOverlap).toBe(true)
+    await expect(longPolicy).toHaveAttribute('data-tip', fullPolicy)
+    return measurements
+  }
+  const regularPolicy = await checkLongPolicy()
+  const spacing = await page.addStyleTag({ content: '.assistants, .assistants * { line-height: 1.5 !important; letter-spacing: .12em !important; word-spacing: .16em !important; }' })
+  const spacedPolicy = await checkLongPolicy()
+  expect(spacedPolicy.rowHeight).toBeGreaterThan(regularPolicy.rowHeight)
+  await longPolicy.hover()
+  await expect(page.locator('.tooltip:popover-open')).toHaveText(fullPolicy)
+  await page.keyboard.press('Escape')
+  await spacing.evaluate(element => element.remove())
+  await checkLongPolicy()
+  checks.push({ name: '1440-long-policy-text-spacing', regularPolicy, spacedPolicy, fullPolicy })
+  await page.mouse.move(1, 1)
   await shot('1440-light-typical')
   await page.emulateMedia({ colorScheme: 'dark' }); await shot('1440-dark-typical')
   expect((await new AxeBuilder({ page }).include('.assistants').withRules(['color-contrast']).analyze()).violations).toEqual([])
@@ -1073,7 +1108,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   identityGuard.done()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   expect(errors).toEqual([])
-  await testInfo.attach('aeon-1705-fix6-checks.json', { body: JSON.stringify(checks, null, 2), contentType: 'application/json' })
+  await testInfo.attach('aeon-1705-fix7-checks.json', { body: JSON.stringify(checks, null, 2), contentType: 'application/json' })
 })
 
 test('assistant Desk approvals keep independent links, waiting order and partial coverage', async ({ page }, testInfo) => {

@@ -112,11 +112,11 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
 .metrics-pending { --assistant-columns: minmax(180px, 1.6fr) minmax(132px, 1fr) minmax(220px, 1.8fr) minmax(94px, .65fr) minmax(72px, .5fr) minmax(100px, .8fr) minmax(78px, .6fr); }
 .metrics-pending .assistant-columns, .metrics-pending .assistant-row, .metrics-pending .assistant-open { grid-template-columns: var(--assistant-columns); }
 .assistant-columns { height: 28px; font-size: 11px; color: var(--ink-2); }
-.assistant-row { position: relative; height: 56px; border-bottom: 1px solid var(--line); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.assistant-row { position: relative; min-height: 56px; border-bottom: 1px solid var(--line); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .assistant-row:first-child { border-top: 1px solid var(--line); }
 .assistant-row:last-child { border-bottom: 0; }
 .assistant-row:hover, .assistant-row.selected { background: var(--row-hover); }
-.assistant-open { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 0; background: transparent; cursor: pointer; color: inherit; font: inherit; text-align: left; }
+.assistant-open { grid-column: 1 / -1; grid-row: 1; align-self: stretch; width: calc(100% + 32px); margin-inline: -16px; padding-block: 6px; border: 0; border-radius: 0; background: transparent; cursor: pointer; color: inherit; font: inherit; text-align: left; }
 .assistant-open:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 .assistant-row > :not(.assistant-open) { pointer-events: none; min-width: 0; }
 .assistant-identity { display: grid; gap: 2px; min-width: 0; }
@@ -124,12 +124,12 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
 .assistant-name strong { font-size: 14px; font-weight: 600; line-height: 18px; }
 .assistant-name strong, .folded-facts, .phone-facts, .last-column, .routines-column, .adapter-column { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .assistant-name :deep(svg) { width: 16px; height: 16px; }
-.assistant-glance { min-width: 0; font-size: 12px; line-height: 15px; white-space: normal; }
+.assistant-glance { min-width: 0; font-size: 12px; line-height: 15px; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .assistant-state { display: flex; align-items: center; gap: 6px; color: var(--ink); }
 .assistant-state svg { flex: none; }
 [data-status="down"] .assistant-state, [data-status="down"] .adapter-column { color: var(--danger); }
 [data-status="waiting"] .assistant-state { font-weight: 600; }
-.assistant-approvals { grid-column: 5; white-space: nowrap; }
+.assistant-approvals { grid-column: 5; grid-row: 1; white-space: nowrap; }
 .assistant-approvals > span { position: relative; pointer-events: auto; cursor: pointer; }
 .assistant-approvals a { display: flex; align-items: center; min-height: 44px; position: relative; z-index: 1; pointer-events: auto; color: var(--teal-ink); }
 .assistant-show-all { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; width: 100%; border: 0; background: transparent; color: var(--ink-2); font-size: 12px; cursor: pointer; }
@@ -166,7 +166,7 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
   .assistant-row:has(.assistant-approvals a) .phone-facts { max-width: calc(50% - 8px); }
   .assistant-approvals:has(a) { display: block; position: absolute; left: calc(50% + 8px); right: 12px; bottom: 0; }
   .assistant-approvals a { min-height: 44px; min-width: 16ch; justify-content: flex-start; font-variant-numeric: tabular-nums; }
-  .assistant-open { display: block; padding: 0; border-radius: var(--radius); }
+  .assistant-open { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; display: block; padding: 0; border-radius: var(--radius); }
   .assistant-empty { flex-direction: column; align-items: flex-start; gap: 10px; padding: 12px; }
   .assistant-empty .btn { min-height: 44px; }
 }
