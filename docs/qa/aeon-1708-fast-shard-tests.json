@@ -71,16 +71,17 @@
       "browsers_launched": false
     },
     "linux_remote_after": {
-      "suite_and_check": 45.162,
-      "real_manifest_coverage": 2.011973953,
-      "native_full_planning": 3.386052733,
-      "native_browser_selectors": 12.212890187,
+      "suite_and_check": 44.647,
+      "real_manifest_coverage": 1.756434533,
+      "native_full_planning": 4.074971036,
+      "native_browser_selectors": 11.236770053,
       "registered_test_results": 48,
       "passed_results": 48,
       "skipped_results": 0,
-      "unchanged_120_second_static_wrapper": 7.431,
+      "unchanged_120_second_static_wrapper": 7.16,
       "wrapper_passed_results": 35,
-      "wrapper_skipped_results": 0
+      "wrapper_skipped_results": 0,
+      "validated_after_main_merge": true
     },
     "linux_remote_intermediate_after": {
       "suite_and_check": 82.292,
@@ -101,31 +102,45 @@
       "tested_implementation_commit": "8a76fd206"
     },
     "remote_static_after": {
-      "tested_implementation_commit": "90a2b89fa",
       "result": "full-static attempt refused; no complete final static-green claim",
       "exit_code": 3,
       "exact_refusal_line": "remote busy: 2/2 remote runs (CI pool 0/4)",
       "same_wrapper_proved_independently": {
         "entry": "approved Linux remote-test entry point",
         "unchanged_deadline_seconds": 120,
-        "passed_seconds": 7.431,
+        "passed_seconds": 7.16,
         "passed_results": 35
       },
-      "other_static_evidence": "All 43 other checks passed on the initial optimization except the unchanged releaseworkflow-tests 120-second timeout; source selection/tier/ownership tests were not skipped or loosened."
+      "other_static_evidence": "Intermediate static validation passed 43 checks with zero optional skips; its sole failure was the unchanged releaseworkflow-tests 120-second timeout. The final full-static attempt was refused.",
+      "requested_implementation_commit": "90a2b89fa"
+    },
+    "linux_remote_after_pre_merge": {
+      "suite_and_check": 45.162,
+      "real_manifest_coverage": 2.011973953,
+      "native_full_planning": 3.386052733,
+      "native_browser_selectors": 12.212890187,
+      "registered_test_results": 48,
+      "passed_results": 48,
+      "skipped_results": 0,
+      "unchanged_120_second_static_wrapper": 7.431,
+      "wrapper_passed_results": 35,
+      "wrapper_skipped_results": 0
     }
   },
   "validation_entry_points": {
     "static": "~/.aeon/lead/aeon/ci-static-locked.sh",
     "linux_before": "~/.aeon/lead/aeon/remote-test.sh \"$WORKTREE\" ./scripts/releaseworkflow -run ^TestAEON1708RemoteShardEvidence$ -count=1 -v",
     "baseline_scratch_commit": "f2ecaf601",
-    "after_scratch_commit": "18a70b43a",
+    "after_scratch_commit": "b63e98f06",
     "scratch_harness_in_work_branch": false,
     "native_discovery_cache": "AEON_TEST_TIER_CACHE=0; optimized browser snapshot also explicitly uses cache:false",
     "intermediate_after_scratch_commit": "73209449e",
     "linux_after": "~/.aeon/lead/aeon/remote-test.sh \"$WORKTREE\" ./scripts/releaseworkflow -run ^TestAEON1708RemoteShardEvidence$ -count=1 -v",
     "baseline_node_command": "node --cpu-prof --cpu-prof-dir=\"$SCRATCH\" --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs scripts/aeon-681-ci.test.mjs; npm run ci:web:shard:check",
     "after_node_command": "npm run ci:web:shard:test",
-    "wrapper_node_command": "node --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs; guarded by the unchanged 120-second static deadline"
+    "wrapper_node_command": "node --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs; guarded by the unchanged 120-second static deadline",
+    "pre_merge_after_scratch_commit": "18a70b43a",
+    "tested_merged_work_commit": "68a0f127d"
   },
   "negative_controls": {
     "before": [
@@ -169,10 +184,11 @@
     "result": "pass; identical complete structured shard values against the original 21815206b implementation, including deterministic assignment, groups and weights"
   },
   "latest_main_merge": {
-    "origin_main": "21815206bef5777ba47f192de32afb96865c9ad3",
-    "result": "git fetch origin main followed by git merge origin/main: Already up to date."
+    "origin_main": "6ee19143dca94ef71280a6273ae7449884596ec7",
+    "merge_commit": "0c60d9ecb",
+    "result": "Merged six upstream files without conflicts. The subsequent full Linux acceptance, wrapper, original-planner parity and mutation controls all passed. The final diff against this main revision contains only the three intended source/test files and this evidence file."
   },
-  "environment_entry_3": "The shard-manifest/planning timeout waiver can be retired: the complete uncached suite now passes in 45.162s and the unchanged 120s wrapper in 7.431s on the approved Linux test worker. This does not retire the generic loaded-runner rule for unrelated checks; releaseworkflow-tests exceeded the same 120s budget before and after the initial change.",
+  "environment_entry_3": "The shard-manifest/planning timeout waiver can be retired: after merging main, the complete uncached suite passes in 44.647s and the unchanged 120s wrapper in 7.160s on the approved Linux test worker. This does not retire the generic loaded-runner rule for unrelated checks; releaseworkflow-tests exceeded the same 120s budget before and after the initial change.",
   "safety": {
     "origin_push": false,
     "deployment": false,
