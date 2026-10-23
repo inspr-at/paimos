@@ -80,7 +80,7 @@ onBeforeUnmount(() => { generation++; abort.abort() })
       <h1>{{ sibling ? text(`Show your waiting decisions on ${sibling.tag}?`, `Wartende Entscheidungen auf ${sibling.tag} anzeigen?`) : text('Connect another instance', 'Andere Instanz verbinden') }}</h1>
       <template v-if="sibling && !result">
         <p>{{ sibling.tag }} (<span v-clip-tip class="connect-host">{{ host(sibling.origin) }}</span>) {{ text("will read what waits for you here: titles, projects and how long each has waited. It can't change anything. The access lives only in that browser, and you can disconnect it any time in Personal settings.", 'liest, was hier wartet: Titel, Projekte und wie lange es schon wartet. Ändern kann es nichts. Der Zugriff gilt nur in diesem Browser und lässt sich jederzeit in den persönlichen Einstellungen trennen.') }}</p>
-        <div class="connect-account"><Avatar :id="session.identity?.principal.id" :name="account" :size="36" /><span><b v-clip-tip>{{ account }}</b><small v-clip-tip>{{ email }}</small></span></div>
+        <div class="connect-account"><Avatar :id="session.identity?.principal.id" :name="account" :size="36" /><span class="connect-account-copy"><b v-clip-tip>{{ account }}</b><small v-clip-tip>{{ email }}</small></span></div>
         <button type="button" class="linkish" :disabled="busy" @click="switchAccount">{{ text('Not you? Switch account', 'Nicht das richtige Konto? Konto wechseln') }}</button>
         <p>{{ text('Ends after 90 days, or when you disconnect.', 'Endet nach 90 Tagen oder beim Trennen.') }}</p>
         <div class="connect-actions"><button type="button" class="btn primary" :disabled="busy" @click="connect">{{ text('Connect', 'Verbinden') }}</button><button type="button" class="btn" :disabled="busy" @click="cancel">{{ text('Cancel', 'Abbrechen') }}</button></div>
@@ -99,7 +99,7 @@ onBeforeUnmount(() => { generation++; abort.abort() })
 h1 { margin: 0 0 20px; font-size: 22px; line-height: 1.3; hyphens: auto; }
 p { font-size: 14px; line-height: 1.6; }
 .connect-account { display: flex; gap: 12px; align-items: center; margin: 18px 0 10px; }
-.connect-account span { display: grid; flex: 1; min-width: 0; }
+.connect-account-copy { display: grid; flex: 1; min-width: 0; }
 .connect-account b { hyphens: auto; }
 .connect-account b, .connect-account small, .connect-host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connect-host { display: inline-block; max-width: 100%; vertical-align: bottom; }
