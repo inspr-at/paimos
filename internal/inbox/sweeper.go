@@ -148,6 +148,7 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
  LEFT JOIN inbox_compat_messages c ON c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id
  LEFT JOIN inbox_message_deliveries d ON d.tenant_id=c.tenant_id AND d.message_id=c.id
  WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND r.state='queued' AND r.deliver_by IS NOT NULL AND m.acked_at IS NULL
+   AND NOT ((`+pullInboxMessageSQL+`) AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()))
    AND NOT (coalesce(d.attempts,0)<$1 AND coalesce(c.key_digest='desk/'||c.id::text,false)
      AND (rs.id IS NULL OR (rs.stopped_at IS NULL AND rs.archived_at IS NULL)))
    AND NOT ((`+personSessionChatSQL+`) AND coalesce(d.attempts,0)<$1

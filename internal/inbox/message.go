@@ -399,7 +399,11 @@ func enqueueWakesWith(ctx context.Context, tx pgx.Tx, tenantID string, msg Messa
 	// and compatible with target writers' NO KEY UPDATE locks.
 	rows, err := tx.Query(ctx, `SELECT id::text FROM inbox_delivery_targets
 		WHERE principal_id = $1::uuid AND kind = 'webhook' AND enabled
-		ORDER BY id`, msg.RecipientPrincipalID)
+		AND NOT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND messaging_only IS TRUE)
+		AND NOT EXISTS(SELECT 1 FROM inbox_message_deliveries d JOIN inbox_message_targets t
+		 ON t.tenant_id=d.tenant_id AND t.id=COALESCE(d.effective_target_id,d.target_id)
+		 WHERE d.message_id=$2::uuid AND t.target_kind='pull')
+		ORDER BY id`, msg.RecipientPrincipalID, msg.ID)
 	if err != nil {
 		return err
 	}

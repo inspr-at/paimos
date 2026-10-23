@@ -88,7 +88,15 @@ func loadDeliverySettings(ctx context.Context, tx pgx.Tx) (DeliverySettings, err
 // receiptDeadlineSQL computes deliver_by for message $2. Only agents have a
 // delivery path to guarantee; a person reads messages in the app, so a message
 // to a person has no deadline. A sender's expires_at shortens the deadline.
-const receiptDeadlineSQL = `(SELECT CASE WHEN rp.kind<>'agent' THEN NULL ELSE LEAST(m.expires_at, m.created_at + make_interval(secs => CASE WHEN m.recipient_session_id IS NOT NULL THEN coalesce(s.session_deadline_seconds,300) ELSE coalesce(s.unbound_deadline_seconds,1800) END)) END
+// Pull assistants wait durably across suspended routine runs; only an explicit
+// sender expiry applies. Binding-specific mode stays fixed across replacements.
+const pullInboxMessageSQL = `(m.recipient_session_id IS NULL AND (
+ EXISTS(SELECT 1 FROM principals ap WHERE ap.tenant_id=m.tenant_id AND ap.id=m.recipient_principal_id AND ap.messaging_only IS TRUE)
+ OR EXISTS(SELECT 1 FROM inbox_compat_messages ac JOIN inbox_message_deliveries ad ON ad.tenant_id=ac.tenant_id AND ad.message_id=ac.id
+ JOIN inbox_message_targets at ON at.tenant_id=ad.tenant_id AND at.id=COALESCE(ad.effective_target_id,ad.target_id)
+ WHERE ac.tenant_id=m.tenant_id AND ac.inbox_message_id=m.id AND at.target_kind='pull')))`
+
+const receiptDeadlineSQL = `(SELECT CASE WHEN rp.kind<>'agent' THEN NULL WHEN ` + pullInboxMessageSQL + ` THEN m.expires_at ELSE LEAST(m.expires_at, m.created_at + make_interval(secs => CASE WHEN m.recipient_session_id IS NOT NULL THEN coalesce(s.session_deadline_seconds,300) ELSE coalesce(s.unbound_deadline_seconds,1800) END)) END
  FROM inbox_messages m JOIN principals rp ON rp.tenant_id=m.tenant_id AND rp.id=m.recipient_principal_id
  LEFT JOIN inbox_delivery_settings s ON s.tenant_id=m.tenant_id WHERE m.id=$2::uuid)`
 
@@ -301,7 +309,8 @@ func failMessage(ctx context.Context, tx pgx.Tx, messageID, reason string, respe
 	// failures keep their existing terminal semantics.
 	if reason == ReasonNoListener || reason == ReasonDeadline {
 		var waits bool
-		if err := tx.QueryRow(ctx, `SELECT ((`+personSessionChatSQL+`) AND ($2='no_listener' OR m.expires_at IS NULL OR m.expires_at>clock_timestamp())) OR EXISTS(SELECT 1 FROM inbox_compat_messages c
+		if err := tx.QueryRow(ctx, `SELECT ((`+personSessionChatSQL+`) AND ($2='no_listener' OR m.expires_at IS NULL OR m.expires_at>clock_timestamp()))
+ OR ((`+pullInboxMessageSQL+`) AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp())) OR EXISTS(SELECT 1 FROM inbox_compat_messages c
  WHERE c.inbox_message_id=m.id AND c.key_digest='desk/'||c.id::text) FROM inbox_messages m WHERE m.id=$1::uuid`, messageID, reason).Scan(&waits); err != nil || waits {
 			return false, err
 		}

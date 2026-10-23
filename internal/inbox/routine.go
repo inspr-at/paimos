@@ -304,7 +304,9 @@ func notifyRoutineTarget(ctx context.Context, tx pgx.Tx, tenantID string, target
 		return nil
 	}
 	_, err := tx.Exec(ctx, `SELECT pg_notify('aeon_routine_deliveries', json_build_object('tenant_id',$1::text)::text)
-	 FROM assistant_adapters WHERE tenant_id=$1::uuid AND target_id=$2::uuid`, tenantID, *target)
+	 FROM assistant_adapters a JOIN inbox_message_targets t ON t.tenant_id=a.tenant_id AND t.id=a.target_id
+	 JOIN principals p ON p.tenant_id=t.tenant_id AND p.id=t.principal_id
+	 WHERE a.tenant_id=$1::uuid AND a.target_id=$2::uuid AND t.target_kind='https_webhook' AND NOT coalesce(p.messaging_only,false)`, tenantID, *target)
 	return err
 }
 
@@ -345,6 +347,7 @@ func (d *RoutineDispatcher) nextRoutine(ctx context.Context, tenantID string) (r
 		 JOIN principals p ON p.tenant_id=c.tenant_id AND p.id=c.recipient_principal_id
 		 CROSS JOIN clock
 		 WHERE d.tenant_id=$1::uuid AND d.state='pending' AND t.adapter=ANY($3::text[])
+		 AND t.target_kind='https_webhook' AND NOT coalesce(p.messaging_only,false)
 		 AND d.attempts<8 AND i.acked_at IS NULL
 		 ORDER BY CASE WHEN d.lease_until>clock.now THEN d.lease_until ELSE '-infinity'::timestamptz END,c.sent_event_id LIMIT 1`, tenantID, now, d.m.adapters.targets).Scan(&candidate.project, &candidate.key, &candidate.address, &candidate.adapter, &candidate.actor.ID, &kind, &candidate.actor.Name, &retrySeconds, &nextRetrySeconds)
 		candidate.actor.Kind = tenant.PrincipalKind(kind)

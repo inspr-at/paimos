@@ -245,6 +245,12 @@ func validateCompatTarget(ctx context.Context, in *targetInput) error {
 	if in.Role == "simple_fallback" && in.MaximumLevel != "simple" {
 		return badRequest("fallback must be simple")
 	}
+	if in.Adapter == "grok_bot_routine" && in.Kind == "pull" {
+		if match[1] != "grok_bot" || in.Ref != "" || in.Secret != "" || in.MaximumLevel != "simple" || in.Role != "primary" {
+			return badRequest("invalid pull target")
+		}
+		return nil
+	}
 	if !utf8.ValidString(in.Ref) || len(in.Ref) == 0 || len(in.Ref) > 4096 || strings.ContainsRune(in.Ref, 0) {
 		return badRequest("invalid target reference")
 	}

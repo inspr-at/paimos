@@ -24,6 +24,7 @@ import (
 type HostedAssistantAdapter interface {
 	Vendor() string
 	TargetAdapter() string
+	DefaultDeliveryMode() string
 	Encode(AssistantDelivery) ([]byte, error)
 }
 
@@ -38,8 +39,9 @@ type AssistantDelivery struct {
 
 type grokAssistantAdapter struct{}
 
-func (grokAssistantAdapter) Vendor() string        { return "grok" }
-func (grokAssistantAdapter) TargetAdapter() string { return "grok_bot_routine" }
+func (grokAssistantAdapter) Vendor() string              { return "grok" }
+func (grokAssistantAdapter) TargetAdapter() string       { return "grok_bot_routine" }
+func (grokAssistantAdapter) DefaultDeliveryMode() string { return "pull" }
 func (grokAssistantAdapter) Encode(in AssistantDelivery) ([]byte, error) {
 	return json.Marshal(routineWake{Event: "agent_message.available", Version: 1, Instance: "aeon", DeliveryID: in.DeliveryID,
 		Project: in.Project, MessageID: in.Message.ID, Cursor: in.Cursor, To: in.Message.To,
@@ -61,7 +63,7 @@ func newAssistantAdapterRegistry() assistantAdapterRegistry {
 func registerAssistantAdapters(adapters ...HostedAssistantAdapter) assistantAdapterRegistry {
 	r := assistantAdapterRegistry{byVendor: map[string]HostedAssistantAdapter{}, byTarget: map[string]HostedAssistantAdapter{}}
 	for _, adapter := range adapters {
-		if adapter == nil || adapter.Vendor() == "" || adapter.TargetAdapter() == "" || r.byVendor[adapter.Vendor()] != nil || r.byTarget[adapter.TargetAdapter()] != nil {
+		if adapter == nil || adapter.Vendor() == "" || adapter.TargetAdapter() == "" || (adapter.DefaultDeliveryMode() != "push" && adapter.DefaultDeliveryMode() != "pull") || r.byVendor[adapter.Vendor()] != nil || r.byTarget[adapter.TargetAdapter()] != nil {
 			panic("invalid hosted assistant adapter registration")
 		}
 		r.byVendor[adapter.Vendor()], r.byTarget[adapter.TargetAdapter()] = adapter, adapter
@@ -85,14 +87,44 @@ type AssistantAdapterConfig struct {
 	LastSuccessAt   *time.Time `json:"last_success_at"`
 	LastFailureAt   *time.Time `json:"last_failure_at"`
 	LastFailureCode *string    `json:"last_failure_code"`
+	DeliveryMode    string     `json:"delivery_mode"`
+	Implicit        bool       `json:"implicit"`
+	LastPullAt      *time.Time `json:"last_pull_at"`
+	OldestUnreadAt  *time.Time `json:"oldest_unread_at"`
+	OldestUnreadAge *int64     `json:"oldest_unread_age_seconds"`
 }
 
-const assistantAdapterCols = `t.id::text,t.project_id::text,t.principal_id::text,t.address,a.vendor,t.version,t.enabled,t.created_at,a.last_success_at,a.last_failure_at,a.last_failure_code`
-const assistantAdapterJoin = ` FROM assistant_adapters a JOIN inbox_message_targets t ON t.tenant_id=a.tenant_id AND t.id=a.target_id `
+const assistantAdapterCols = `t.id::text,t.project_id::text,t.principal_id::text,t.address,t.vendor,t.version,t.enabled,t.created_at,t.last_success_at,t.last_failure_at,t.last_failure_code,t.delivery_mode,t.implicit,
+ CASE WHEN t.delivery_mode='pull' THEN p.assistant_last_pull_at END,u.created_at`
 
-func scanAssistantAdapter(row pgx.Row) (AssistantAdapterConfig, error) {
+// Existing messaging-only assistants have no project target. Project managers
+// can inspect their own assistants without registering them or changing their
+// principal/key lifecycle. The project remains the permission/view context.
+const assistantAdapterJoin = ` FROM (
+ SELECT t.id,t.tenant_id,t.project_id,t.principal_id,t.address,a.vendor,t.version,t.enabled,t.created_at,
+ CASE WHEN t.target_kind<>'pull' AND NOT coalesce(p.messaging_only,false) THEN a.last_success_at END AS last_success_at,
+ CASE WHEN t.target_kind<>'pull' AND NOT coalesce(p.messaging_only,false) THEN a.last_failure_at END AS last_failure_at,
+ CASE WHEN t.target_kind<>'pull' AND NOT coalesce(p.messaging_only,false) THEN a.last_failure_code END AS last_failure_code,
+ CASE WHEN t.target_kind='pull' OR p.messaging_only IS TRUE THEN 'pull' ELSE 'push' END AS delivery_mode,false AS implicit
+ FROM assistant_adapters a JOIN inbox_message_targets t ON t.tenant_id=a.tenant_id AND t.id=a.target_id
+ JOIN principals p ON p.tenant_id=t.tenant_id AND p.id=t.principal_id WHERE t.project_id=$1::uuid
+ UNION ALL
+ SELECT p.id,p.tenant_id,$1::uuid,p.id,p.id::text,'generic',1,p.status='active' AND p.linked_to IS NULL,p.created_at,
+ NULL::timestamptz,NULL::timestamptz,NULL::text,'pull',true
+ FROM principals p WHERE p.kind='agent' AND p.messaging_only IS TRUE AND p.messaging_owner_id=$2::uuid
+ ) t JOIN principals p ON p.tenant_id=t.tenant_id AND p.id=t.principal_id
+ LEFT JOIN LATERAL (SELECT m.created_at FROM inbox_messages m
+ WHERE t.delivery_mode='pull' AND m.tenant_id=t.tenant_id AND m.recipient_principal_id=t.principal_id
+ AND m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.recipient_session_id IS NULL AND m.acked_at IS NULL
+ AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) ORDER BY m.created_at LIMIT 1) u ON true `
+
+func scanAssistantAdapter(row pgx.Row, now time.Time) (AssistantAdapterConfig, error) {
 	var v AssistantAdapterConfig
-	err := row.Scan(&v.ID, &v.ProjectID, &v.PrincipalID, &v.Address, &v.Vendor, &v.Version, &v.Enabled, &v.CreatedAt, &v.LastSuccessAt, &v.LastFailureAt, &v.LastFailureCode)
+	err := row.Scan(&v.ID, &v.ProjectID, &v.PrincipalID, &v.Address, &v.Vendor, &v.Version, &v.Enabled, &v.CreatedAt, &v.LastSuccessAt, &v.LastFailureAt, &v.LastFailureCode, &v.DeliveryMode, &v.Implicit, &v.LastPullAt, &v.OldestUnreadAt)
+	if v.OldestUnreadAt != nil {
+		age := max(int64(0), int64(now.Sub(*v.OldestUnreadAt)/time.Second))
+		v.OldestUnreadAge = &age
+	}
 	return v, err
 }
 
@@ -127,6 +159,7 @@ func (m *messaging) createAssistantAdapter(w http.ResponseWriter, r *http.Reques
 	}
 	var in struct {
 		Vendor      string `json:"vendor"`
+		Mode        string `json:"delivery_mode"`
 		PrincipalID string `json:"principal_id"`
 		Address     string `json:"address"`
 		Endpoint    string `json:"endpoint"`
@@ -141,7 +174,22 @@ func (m *messaging) createAssistantAdapter(w http.ResponseWriter, r *http.Reques
 		messagingFailure(w, badRequest("invalid vendor or agent principal"))
 		return
 	}
-	target := targetInput{boundPrincipalID: principalID, PrincipalID: principalID, Address: in.Address, Adapter: adapter.TargetAdapter(), Kind: "https_webhook", Ref: in.Endpoint, Secret: in.Secret, Role: "primary", MaximumLevel: "simple"}
+	if in.Mode == "" {
+		in.Mode = adapter.DefaultDeliveryMode()
+		// Keep legacy endpoint clients on their already configured push mode.
+		if in.Endpoint != "" || in.Secret != "" {
+			in.Mode = "push"
+		}
+	}
+	if in.Mode != "push" && in.Mode != "pull" || in.Mode == "pull" && (in.Endpoint != "" || in.Secret != "") {
+		messagingFailure(w, badRequest("invalid delivery mode or pull endpoint"))
+		return
+	}
+	kind := "https_webhook"
+	if in.Mode == "pull" {
+		kind = "pull"
+	}
+	target := targetInput{boundPrincipalID: principalID, PrincipalID: principalID, Address: in.Address, Adapter: adapter.TargetAdapter(), Kind: kind, Ref: in.Endpoint, Secret: in.Secret, Role: "primary", MaximumLevel: "simple"}
 	if err := validateCompatTarget(r.Context(), &target); err != nil {
 		messagingFailure(w, err)
 		return
@@ -153,18 +201,25 @@ func (m *messaging) createAssistantAdapter(w http.ResponseWriter, r *http.Reques
 		if err := requireAdapterTx(ctx, tx, p, project, true); err != nil {
 			return err
 		}
-		var active bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND kind='agent' AND status='active' AND linked_to IS NULL)`, principalID).Scan(&active); err != nil {
+		var active, messagingOnly bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND kind='agent' AND status='active' AND linked_to IS NULL),EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND messaging_only IS TRUE)`, principalID).Scan(&active, &messagingOnly); err != nil {
 			return err
 		}
 		if !active {
 			return errNotFound
 		}
+		if messagingOnly && in.Mode != "pull" {
+			return badRequest("messaging-only assistants use pull delivery")
+		}
 		t, err := m.storeTargetTx(ctx, tx, p, project, target)
 		if err != nil {
 			return err
 		}
-		out, err = scanAssistantAdapter(tx.QueryRow(ctx, `SELECT `+assistantAdapterCols+assistantAdapterJoin+` WHERE t.project_id=$1::uuid AND t.id=$2::uuid`, project, t.ID))
+		now, err := m.databaseNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		out, err = scanAssistantAdapter(tx.QueryRow(ctx, `SELECT `+assistantAdapterCols+assistantAdapterJoin+` WHERE t.id=$3::uuid`, project, p.ID, t.ID), now)
 		return err
 	})
 	if err != nil {
@@ -204,13 +259,17 @@ func (m *messaging) listAssistantAdapters(w http.ResponseWriter, r *http.Request
 		if err := requireAdapterTx(ctx, tx, p, project, false); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT `+assistantAdapterCols+assistantAdapterJoin+` WHERE t.project_id=$1::uuid AND (NULLIF($2,'')::uuid IS NULL OR t.id>NULLIF($2,'')::uuid) ORDER BY t.id LIMIT $3`, project, after, limit+1)
+		now, err := m.databaseNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT `+assistantAdapterCols+assistantAdapterJoin+` WHERE (NULLIF($3,'')::uuid IS NULL OR t.id>NULLIF($3,'')::uuid) ORDER BY t.id LIMIT $4`, project, p.ID, after, limit+1)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			item, err := scanAssistantAdapter(rows)
+			item, err := scanAssistantAdapter(rows, now)
 			if err != nil {
 				return err
 			}
@@ -255,12 +314,15 @@ func (m *messaging) readAssistantAdapter(ctx context.Context, p tenant.Principal
 		if err := requireAdapterTx(ctx, tx, p, project, test); err != nil {
 			return err
 		}
-		var err error
-		out, err = scanAssistantAdapter(tx.QueryRow(ctx, `SELECT `+assistantAdapterCols+assistantAdapterJoin+` WHERE t.project_id=$1::uuid AND t.id=$2::uuid`, project, id))
+		now, err := m.databaseNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		out, err = scanAssistantAdapter(tx.QueryRow(ctx, `SELECT `+assistantAdapterCols+assistantAdapterJoin+` WHERE t.id=$3::uuid`, project, p.ID, id), now)
 		if err == nil && test && !out.Enabled {
 			return errConflict
 		}
-		if err == nil && test {
+		if err == nil && test && !out.Implicit {
 			var sealed []byte
 			var adapter, role string
 			if err := tx.QueryRow(ctx, `SELECT sealed_target,adapter,role FROM inbox_message_targets WHERE id=$1::uuid`, id).Scan(&sealed, &adapter, &role); err != nil {
@@ -280,7 +342,14 @@ func (m *messaging) readAssistantAdapter(ctx context.Context, p tenant.Principal
 			if json.Unmarshal(plain, &private) != nil {
 				return errConflict
 			}
-			input := targetInput{Address: out.Address, Adapter: adapter, Kind: "https_webhook", Ref: private.Ref, Secret: private.Secret, MaximumLevel: "simple", Role: "primary"}
+			kind := "https_webhook"
+			if out.DeliveryMode == "pull" {
+				// A legacy messaging-only principal can still have a webhook
+				// binding. Its durable inbox is authoritative; never test it by
+				// contacting the sleeping host.
+				kind, private.Ref, private.Secret = "pull", "", ""
+			}
+			input := targetInput{Address: out.Address, Adapter: adapter, Kind: kind, Ref: private.Ref, Secret: private.Secret, MaximumLevel: "simple", Role: "primary"}
 			if validateCompatTarget(ctx, &input) != nil {
 				return &httpError{409, "target_invalid", "adapter target is unavailable"}
 			}
@@ -358,7 +427,9 @@ func requireAdapterTestTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, pr
 	}
 	var current bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM assistant_adapters a JOIN inbox_message_targets t ON t.tenant_id=a.tenant_id AND t.id=a.target_id
-	 WHERE t.project_id=$1::uuid AND t.id=$2::uuid AND t.address=$3 AND t.role='primary' AND t.enabled)`, project, id, address).Scan(&current); err != nil {
+	 WHERE t.project_id=$1::uuid AND t.id=$2::uuid AND t.address=$3 AND t.role='primary' AND t.enabled)
+	 OR EXISTS(SELECT 1 FROM principals WHERE id=$2::uuid AND id::text=$3 AND kind='agent' AND messaging_only IS TRUE
+	 AND messaging_owner_id=$4::uuid AND status='active' AND linked_to IS NULL)`, project, id, address, p.ID).Scan(&current); err != nil {
 		return err
 	}
 	if !current {

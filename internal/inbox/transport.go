@@ -113,6 +113,15 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		if owner != p.ID {
 			return errForbidden
 		}
+		if in.Adapter == "grok_bot_routine" {
+			var pullOnly bool
+			if err := tx.QueryRow(ctx, `SELECT coalesce(messaging_only,false) FROM principals WHERE id=$1::uuid`, p.ID).Scan(&pullOnly); err != nil {
+				return err
+			}
+			if pullOnly {
+				return nil
+			}
+		}
 		// One address is processed in event order. A cursor is advanced only by a
 		// completed, acknowledged handoff; a failed adapter cannot skip work.
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,66))`, p.TenantID+project+in.To); err != nil {
@@ -189,6 +198,10 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		var sealed []byte
 		if err := tx.QueryRow(ctx, `SELECT adapter,target_kind,maximum_level,sealed_target FROM inbox_message_targets WHERE id=$1::uuid AND principal_id=$2::uuid`, *targetID, p.ID).Scan(&adapter, &kind, &maximum, &sealed); err != nil {
 			return err
+		}
+		if kind == "pull" {
+			work = nil
+			return nil
 		}
 		if requested == "simple" && priorFallback == "" && fallbackID != nil && (adapter == "agentd_codex" || adapter == "agentd_claude" || adapter == "agentd_pi" || adapter == "agentd_cursor" || adapter == "agentd_gemini" || adapter == "agentd_opencode" || adapter == "claude_channel") {
 			if _, err := tx.Exec(ctx, `UPDATE inbox_message_deliveries SET effective_target_id=$2::uuid,fallback_reason='not_steerable' WHERE id=$1::uuid`, id, *fallbackID); err != nil {

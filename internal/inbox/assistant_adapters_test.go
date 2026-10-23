@@ -72,7 +72,7 @@ func testAssistantAdapterRoundTrip(t *testing.T) {
 	post(managerKey, path, string(create), 403)
 	data := post(owner, path, string(create), 201)
 	adapter := mustJSON[AssistantAdapterConfig](t, data)
-	if adapter.PrincipalID != w.agent.ID || adapter.Vendor != "grok" || adapter.Version != 1 || !adapter.Enabled || adapter.LastSuccessAt != nil || adapter.LastFailureAt != nil || bytes.Contains(data, []byte(secret)) || bytes.Contains(data, []byte(endpoint)) {
+	if adapter.PrincipalID != w.agent.ID || adapter.Vendor != "grok" || adapter.DeliveryMode != "push" || adapter.Version != 1 || !adapter.Enabled || adapter.LastSuccessAt != nil || adapter.LastFailureAt != nil || bytes.Contains(data, []byte(secret)) || bytes.Contains(data, []byte(endpoint)) {
 		t.Fatal("invalid or unredacted adapter registration")
 	}
 	testPath := path + "/" + adapter.ID + "/test-send"
@@ -338,5 +338,234 @@ func testAssistantAdapterMigration(t *testing.T) {
 		return tx.QueryRow(ctx, `SELECT vendor FROM assistant_adapters WHERE target_id=$1`, next.ID).Scan(&vendor)
 	}); err != nil || vendor != "grok" {
 		t.Fatalf("old writer bridge: %s %v", vendor, err)
+	}
+}
+
+// Risk: a frozen routine host gets failed/retried instead of retaining its
+// inbox, or polling is mistaken for acknowledgement. Every age/retry decision
+// below uses one database-derived clock, advanced without sleeping.
+func testAssistantPullRoundTrip(t *testing.T) {
+	w, m, project, _ := messagingWorld(t)
+	server := &httpapi.Server{Pool: w.db.App, Modules: []httpapi.Module{m.base, m}}
+	if _, err := auth.Attach(server, auth.Config{Env: "dev", SessionKey: bytes.Repeat([]byte{3}, 32)}); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewTLSServer(server.Handler())
+	t.Cleanup(srv.Close)
+	owner := receiptSession(t, w, w.admin)
+	key := receiptAgentKey(t, w, w.agent, "inbox.read", "inbox.send", "inbox.receipt")
+	sendOnly := receiptAgentKey(t, w, w.agent, "inbox.send")
+	request := func(credential, method, path, body string, want int) []byte {
+		t.Helper()
+		status, data := receiptRequest(t, srv, credential, method, path, body)
+		if status != want {
+			t.Fatalf("%s %s: %d want %d: %s", method, path, status, want, data)
+		}
+		return data
+	}
+	path := "/api/projects/" + project + "/assistant-adapters"
+	body := fmt.Sprintf(`{"vendor":"grok","principal_id":%q,"address":"grok_bot:pull"}`, w.agent.ID)
+	adapter := mustJSON[AssistantAdapterConfig](t, request(owner, "POST", path, body, 201))
+	if adapter.DeliveryMode != "pull" || adapter.Implicit || adapter.LastPullAt != nil || adapter.OldestUnreadAt != nil {
+		t.Fatalf("new Grok default is not an empty pull inbox: %+v", adapter)
+	}
+	// Explicit pull never accepts dormant endpoint credentials.
+	request(owner, "POST", path, strings.TrimSuffix(body, "}")+`,"delivery_mode":"pull","endpoint":"https://8.8.8.8/unused"}`, 400)
+	// An older generic webhook registration must not create a second push path.
+	endpoint := "https://8.8.8.8/old-generic-wake"
+	if _, err := m.base.createTarget(t.Context(), w.admin, w.agent.ID, "webhook", &endpoint); err != nil {
+		t.Fatal(err)
+	}
+	testPath := path + "/" + adapter.ID + "/test-send"
+	request(owner, "POST", testPath, `{}`, 200)
+	live := `{"dry_run":false,"body":"retained while host sleeps","idempotency_key":"pull-roundtrip"}`
+	queued := mustJSON[assistantAdapterTestResult](t, request(owner, "POST", testPath, live, 202))
+	if again := mustJSON[assistantAdapterTestResult](t, request(owner, "POST", testPath, live, 202)); again.MessageID != queued.MessageID {
+		t.Fatal("pull test-send duplicated its inbox row")
+	}
+	var now time.Time
+	if err := w.db.Admin.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Truncate(time.Microsecond)
+	m.databaseClock = func(context.Context, pgx.Tx) (time.Time, error) { return now, nil }
+	m.base.laneClock = m.databaseClock
+	oldest := now.Add(-2 * time.Hour)
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_messages SET created_at=$2 WHERE id=$1`, queued.MessageID, oldest); err != nil {
+		t.Fatal(err)
+	}
+	if countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM inbox_receipts WHERE message_id=$1 AND deliver_by IS NULL`, queued.MessageID) != 1 {
+		t.Fatal("pull inbox inherited the online delivery deadline")
+	}
+	// Simulate a pre-upgrade queued receipt whose automatic deadline elapsed.
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_receipts SET deliver_by=$2 WHERE message_id=$1`, queued.MessageID, now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if failed, err := NewSweeper(w.db.App).SweepTenant(t.Context(), w.admin.TenantID); err != nil || failed != 0 {
+		t.Fatalf("suspended pull host failed by sweeper: failed=%d err=%v", failed, err)
+	}
+	assertNoPush := func() {
+		t.Helper()
+		d := &RoutineDispatcher{m: m, client: &http.Client{Transport: routineRoundTrip(func(*http.Request) (*http.Response, error) {
+			t.Fatal("pull adapter made an outbound request")
+			return nil, nil
+		})}}
+		for range 3 {
+			if worked, err := d.DispatchOne(t.Context(), w.admin.TenantID); err != nil || worked {
+				t.Fatalf("pull adapter entered push retry loop: worked=%v err=%v", worked, err)
+			}
+		}
+		if work, err := m.claim(t.Context(), w.agent, project, claimInput{To: "grok_bot:pull", Adapter: "grok_bot_routine"}); err != nil || work != nil {
+			t.Fatalf("pull adapter accepted a push claim: work=%+v err=%v", work, err)
+		}
+		if countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM inbox_message_deliveries WHERE message_id=$1 AND attempts=0 AND lease_token IS NULL AND lease_until IS NULL`, queued.MessageID) != 1 || countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM inbox_wakes WHERE message_id=$1`, queued.MessageID) != 0 {
+			t.Fatal("pull accumulated outbound attempts or wake jobs")
+		}
+	}
+	assertNoPush()
+	health := func() AssistantAdapterConfig {
+		t.Helper()
+		return mustJSON[AssistantAdapterConfig](t, request(owner, "GET", path+"/"+adapter.ID, "", 200))
+	}
+	before := health()
+	if before.LastPullAt != nil || before.OldestUnreadAt == nil || !before.OldestUnreadAt.Equal(oldest) || before.OldestUnreadAge == nil || *before.OldestUnreadAge != 7200 || before.LastFailureAt != nil {
+		t.Fatalf("pull health did not describe unread age: %+v", before)
+	}
+	request(sendOnly, "GET", "/api/inbox/messages?wait_ms=0", "", 403)
+	if health().LastPullAt != nil {
+		t.Fatal("denied poll refreshed liveness")
+	}
+	for range 2 {
+		page := mustJSON[Page](t, request(key, "GET", "/api/inbox/messages?wait_ms=0", "", 200))
+		if len(page.Items) != 1 || page.Items[0].ID != queued.MessageID {
+			t.Fatalf("unacknowledged pull is not replayable: %+v", page)
+		}
+	}
+	if got := mustJSON[Receipt](t, request(owner, "GET", queued.ReceiptPath, "", 200)); got.State != "queued" {
+		t.Fatalf("fetch claimed receiver acknowledgement: %+v", got)
+	}
+	now = now.Add(3 * time.Hour)
+	stale := health()
+	if stale.LastPullAt == nil || !stale.LastPullAt.Equal(now.Add(-3*time.Hour)) || stale.OldestUnreadAge == nil || *stale.OldestUnreadAge != 18000 || stale.LastFailureAt != nil {
+		t.Fatalf("stale polling reported a push failure: %+v", stale)
+	}
+	assertNoPush()
+	request(key, "POST", "/api/inbox/messages/"+queued.MessageID+"/ack", `{}`, 200)
+	request(key, "POST", "/api/inbox/messages/"+queued.MessageID+"/ack", `{}`, 200)
+	if got := mustJSON[Receipt](t, request(owner, "GET", queued.ReceiptPath, "", 200)); got.State != "handed_off" || got.TargetID == nil || *got.TargetID != adapter.ID {
+		t.Fatalf("pull acknowledgement lost receipt binding: %+v", got)
+	}
+	request(key, "GET", "/api/inbox/messages?wait_ms=0", "", 200)
+	if got := health(); got.LastPullAt == nil || !got.LastPullAt.Equal(now) || got.OldestUnreadAt != nil || got.OldestUnreadAge != nil || got.LastSuccessAt != nil || got.LastFailureAt != nil {
+		t.Fatalf("empty poll did not refresh mode-specific health: %+v", got)
+	}
+	assertNoPush()
+}
+
+// Risk: installing pull support silently requires Amy's owner to re-register
+// the assistant or replace its principal/key. Provision with the old lifecycle
+// before the expansion, then authenticate with that exact key afterwards.
+func testAssistantPullMigration(t *testing.T) {
+	ctx := dbtest.Seed(t.Context())
+	d, err := dbtest.NewUnmigrated(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	var m *messaging
+	var srv *httptest.Server
+	var w *world
+	var owner, project string
+	var amy struct {
+		ID          string `json:"id"`
+		PrincipalID string `json:"principal_id"`
+		Token       string `json:"token"`
+	}
+	err = db.MigrateWithHook(ctx, d.App, func(name string) error {
+		if name != "1436_assistant_pull_health.sql" {
+			return nil
+		}
+		tid := insertTenant(t, d, "amy-pull-upgrade")
+		person := insertPrincipal(t, d, tid, tenant.Person, "owner", []string{"admin"})
+		w = &world{db: d, admin: person}
+		if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'AMY-1','Amy inbox' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, tid).Scan(&project)
+		}); err != nil {
+			return err
+		}
+		mod, err := NewMessaging(d.App, bytes.Repeat([]byte{7}, 32))
+		if err != nil {
+			return err
+		}
+		m = mod.(*messaging)
+		server := &httpapi.Server{Pool: d.App, Modules: []httpapi.Module{m.base, m}}
+		a, err := auth.Attach(server, auth.Config{Env: "dev", SessionKey: bytes.Repeat([]byte{3}, 32)})
+		if err != nil {
+			return err
+		}
+		a.AssistantNoticeTx = MessagingAssistantNoticeTx
+		srv = httptest.NewTLSServer(server.Handler())
+		t.Cleanup(srv.Close)
+		owner = receiptSession(t, w, person)
+		status, data := receiptRequest(t, srv, owner, "POST", "/api/agents/assistants", fmt.Sprintf(`{"name":"Amy existing routine","expires_at":%q}`, time.Now().Add(7*24*time.Hour).UTC().Format(time.RFC3339Nano)))
+		if status != 201 || json.Unmarshal(data, &amy) != nil || amy.PrincipalID == "" || amy.Token == "" {
+			t.Fatalf("pre-upgrade Amy provisioning failed: status=%d", status)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/projects/" + project + "/assistant-adapters"
+	status, data := receiptRequest(t, srv, owner, "GET", path+"/"+amy.PrincipalID, "")
+	adapter := mustJSON[AssistantAdapterConfig](t, data)
+	if status != 200 || !adapter.Implicit || adapter.DeliveryMode != "pull" || adapter.PrincipalID != amy.PrincipalID || adapter.ID != amy.PrincipalID || adapter.LastPullAt != nil || countSQL(t, d.App, w.admin.TenantID, `SELECT count(*) FROM inbox_message_targets WHERE principal_id=$1`, amy.PrincipalID) != 0 {
+		t.Fatalf("existing assistant required owner migration: %d %+v", status, adapter)
+	}
+	// Its scoped key has not been rotated, granted new scopes or given roles.
+	if countSQL(t, d.App, w.admin.TenantID, `SELECT count(*) FROM agent_keys WHERE id=$1 AND principal_id=$2 AND revoked_at IS NULL AND scopes=ARRAY['inbox.read','inbox.send','inbox.receipt']::text[]`, amy.ID, amy.PrincipalID) != 1 {
+		t.Fatal("upgrade changed existing Amy key metadata")
+	}
+	status, data = receiptRequest(t, srv, owner, "POST", path+"/"+amy.PrincipalID+"/test-send", `{"dry_run":false,"body":"Amy pulls during a run","idempotency_key":"amy-existing-pull"}`)
+	queued := mustJSON[assistantAdapterTestResult](t, data)
+	if status != 202 {
+		t.Fatalf("implicit pull test-send failed: %d %s", status, data)
+	}
+	status, data = receiptRequest(t, srv, amy.Token, "GET", "/api/inbox/messages?wait_ms=0", "")
+	page := mustJSON[Page](t, data)
+	if status != 200 || len(page.Items) != 1 || page.Items[0].ID != queued.MessageID {
+		t.Fatalf("original Amy key cannot pull after expansion: %d %s", status, data)
+	}
+	status, _ = receiptRequest(t, srv, amy.Token, "POST", "/api/inbox/messages/"+queued.MessageID+"/ack", `{}`)
+	if status != 200 {
+		t.Fatalf("original Amy key cannot acknowledge: %d", status)
+	}
+	status, data = receiptRequest(t, srv, owner, "GET", queued.ReceiptPath, "")
+	if got := mustJSON[Receipt](t, data); status != 200 || got.State != "handed_off" {
+		t.Fatalf("implicit assistant receipt failed: %d %+v", status, got)
+	}
+	status, data = receiptRequest(t, srv, owner, "GET", path+"/"+amy.PrincipalID, "")
+	if got := mustJSON[AssistantAdapterConfig](t, data); status != 200 || got.LastPullAt == nil || got.OldestUnreadAt != nil {
+		t.Fatalf("implicit pull health missing: %d %+v", status, got)
+	}
+	// The same lifecycle endpoint used by `aeon agents assistant rotate` stays
+	// valid and retains the existing principal while revoking the old key.
+	status, data = receiptRequest(t, srv, owner, "POST", "/api/agents/assistants/"+amy.PrincipalID+"/rotate", fmt.Sprintf(`{"expires_at":%q}`, time.Now().Add(7*24*time.Hour).UTC().Format(time.RFC3339Nano)))
+	var rotated struct {
+		PrincipalID string `json:"principal_id"`
+		Token       string `json:"token"`
+	}
+	if status != 201 || json.Unmarshal(data, &rotated) != nil || rotated.PrincipalID != amy.PrincipalID || rotated.Token == "" {
+		t.Fatalf("existing assistant rotate changed identity: status=%d", status)
+	}
+	if status, _ := receiptRequest(t, srv, amy.Token, "GET", "/api/inbox/messages?wait_ms=0", ""); status != 401 {
+		t.Fatalf("old Amy key remains active after rotate: %d", status)
+	}
+	if status, _ := receiptRequest(t, srv, rotated.Token, "GET", "/api/inbox/messages?wait_ms=0", ""); status != 200 {
+		t.Fatalf("rotated Amy key cannot poll: %d", status)
 	}
 }

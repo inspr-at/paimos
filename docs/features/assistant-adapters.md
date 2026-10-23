@@ -1,8 +1,10 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 
-# Hosted assistant adapters
+# Assistant adapters
 
-Hosted assistants use the existing principal inbox. Grok is the first vendor;
+Assistants use the existing principal inbox. Every adapter reports a
+`delivery_mode`: `push` for a continuously reachable vendor endpoint, or `pull`
+for an assistant that fetches its inbox during a run. Grok is the first vendor;
 `HostedAssistantAdapter` supplies the vendor payload while the inbox owns
 encrypted configuration, public HTTPS delivery, signatures, fenced claims,
 retry backoff, idempotency and delivery receipts. No vendor process is started.
@@ -12,11 +14,15 @@ The tenant registry is exposed within each project:
 - `GET /api/projects/{projectId}/assistant-adapters` lists up to 100 entries
   using `limit` and an `after` target-ID cursor; `next_after` is null at the end.
 - `POST` to that collection binds an existing active agent principal to a
-  `grok` endpoint. Supply `principal_id`, a `grok_bot:…` address, `endpoint` and
-  the receiver's existing `webhook_secret`. An Aeon API key is rejected as a
-  webhook credential. A replacement creates a new immutable target version.
+  `grok` binding. Supply `principal_id` and a `grok_bot:…` address.
+  With no endpoint credentials, Grok defaults to `delivery_mode: "pull"`.
+  For push, set `delivery_mode: "push"`, `endpoint` and the receiver's existing
+  `webhook_secret`. Legacy requests that supply endpoint credentials without a
+  mode keep their push behaviour. Pull rejects endpoint credentials. An Aeon
+  API key is rejected as a webhook credential. A replacement creates a new
+  immutable target version.
 - `GET /api/projects/{projectId}/assistant-adapters/{adapterId}` returns the
-  redacted configuration and last delivery success/failure timestamps.
+  redacted configuration and health for its delivery mode.
 - `POST /api/projects/{projectId}/assistant-adapters/{adapterId}/test-send`
   defaults to `dry_run: true`. It validates the current encrypted configuration
   without queueing work or making an outbound HTTP request. A live test requires
@@ -32,18 +38,51 @@ Existing message-target routes retain their existing permissions and behaviour.
 
 URLs and webhook credentials stay in the existing AES-GCM encrypted target,
 bound to its tenant, project and immutable ID. The registry, events and health
-responses contain neither. Health retains the last success and last failure
+responses contain neither. Push health retains the last success and last failure
 independently; compare their timestamps to determine which happened most
 recently. A dry-run does not establish delivery health. Health and delivery
 results commit together, so a failed completion cannot record a success.
 
 List results include disabled historical versions. `enabled` identifies the
-binding used for new messages; each version's health describes attempts made
-against that version's endpoint. A replacement starts with no delivery history.
+binding used for new messages; each push version's health describes attempts
+made against that version's endpoint. A replacement starts with no delivery history.
+
+## Pull delivery and existing assistants
+
+A routine host may be suspended between runs. Pull mode makes no outbound
+request, acquires no outbound lease and consumes no retry attempts. The durable
+inbox retains messages while the host sleeps. A routine uses its own existing
+scoped key with `GET /api/inbox/messages?wait_ms=0`, then acknowledges individual
+messages through `POST /api/inbox/messages/{messageId}/ack`. Fetching is
+replayable until acknowledgement; only acknowledgement moves the sender's
+receipt from `queued` to `handed_off`. The existing project message-listen API
+also records polling for configured pull adapters.
+
+Pull health uses the database/server clock: `last_pull_at` records a successful
+poll, including an empty one. `oldest_unread_at` and
+`oldest_unread_age_seconds` describe unacknowledged, unexpired messages in the
+principal inbox. A stale timestamp (for example, no pull for three hours) is a
+polling alarm; it is never presented as a failed push. Pull health does not set
+push success/failure fields. These fields do not imply that work was completed.
+
+Existing owner-bound `messaging_only` principals, including assistants created
+with `aeon agents assistant create`, are implicit pull adapters. Their owner
+can inspect them through the project registry without registering a target.
+The adapter ID and address are the existing principal UUID, the vendor is
+`generic`, and `implicit` is true. `project_id` is the authorized inspection
+context; this projection grants no project access. Other owners' implicit
+entries are not returned. IDs, keys, scopes and `aeon agents assistant rotate`
+remain unchanged. Messaging-only principals stay pull even if a legacy webhook
+target exists; old generic wake registrations cannot cause outbound retries.
+
+Pull messages have no automatic online-delivery deadline. An explicit sender
+`expires_at` still applies. Existing queued receipts with an old automatic
+deadline remain available until acknowledgement or explicit expiry. Host
+suspension therefore does not turn a durable inbox into a `no_listener` failure.
 
 ## Webhook protocol and receipts
 
-The Grok JSON payload and its existing Bearer authentication header are
+For push mode, the Grok JSON payload and its existing Bearer authentication header are
 preserved. Messages retain their untrusted-data security notice. The shared
 dispatcher additionally sends:
 
@@ -70,7 +109,7 @@ key through the existing API/MCP. Ordinary project-bound agent keys can use
 the project messages API, including `reply_to`; messaging-only identities use
 the existing principal inbox API and its narrowly provisioned scopes. Webhook
 credentials and Aeon API keys are never inserted into outbound message data.
-This adapter slice creates no keys, grants, assistant class or policy.
+Adapter registration creates no keys, grants, assistant class or policy.
 
 ## Upgrade and scope
 
@@ -79,8 +118,10 @@ Migration `1435_assistant_adapters.sql` backfills all existing
 versions, pending-delivery references and encrypted bytes. An additive trigger
 also projects Grok targets inserted by older writers during a rolling upgrade.
 Queued deliveries keep their original target version when an endpoint is
-replaced. The existing dispatcher is used; no second queue or background loop
-is needed. The existing 32-byte messaging encryption key remains authoritative.
+replaced. Push uses the existing dispatcher. Pull uses the existing durable inbox; no
+second queue or background loop is needed. Expansion
+`1436_assistant_pull_health.sql` adds only a nullable principal health timestamp
+and an unread lookup index. Existing owners have no migration step. The existing 32-byte messaging encryption key remains authoritative.
 
 Approval requests, policy/budget enforcement, Routine ownership and the Agents
 page remain in their existing packages and the other AEON-754 slices. Only Grok
@@ -89,5 +130,6 @@ is registered. OpenAI and Meta adapters are deferred; this feature adds no UI.
 The existing `TestRoutineDispatcherUsesEncryptedTargetAndFencedCompletion`
 behaviour test now includes production-authenticated round-trip, exact injected
 retry boundaries, signature/redaction, dry-run, target version, authorization
-revocation and restricted-owner migration subtests. Its existing test tier is
+revocation, pull polling/receipts/health without outbound attempts, frozen-host
+retention, and pre-expansion Amy-shaped provisioning/rotation subtests. Its existing test tier is
 retained; no browser case or coordinator-owned tier record is added.

@@ -519,8 +519,16 @@ func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		}
 		if target == nil {
 			state, reason = "blocked", "target_missing"
+			var implicitPull bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals p JOIN inbox_compat_messages c ON c.recipient_principal_id=p.id
+			 WHERE c.id=$1::uuid AND p.messaging_only IS TRUE)`, id).Scan(&implicitPull); err != nil {
+				return err
+			}
+			if implicitPull {
+				state, reason = "pending", ""
+			}
 		}
-		if in.adapterTestID != "" && (target == nil || *target != in.adapterTestID) {
+		if in.adapterTestID != "" && in.adapterTestID != in.To && (target == nil || *target != in.adapterTestID) {
 			return errConflict
 		}
 	}
@@ -653,6 +661,11 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 	}
 	page := compatPage{Items: []CompatMessage{}, NextAfter: after, Preamble: untrustedMessagePreamble}
 	err = db.InTenant(r.Context(), m.base.pool, p.TenantID, func(tx pgx.Tx) error {
+		if !inspect && sessionID == nil {
+			if err := m.base.recordAssistantPull(r.Context(), tx, p, authz.Scope{ProjectID: project}); err != nil {
+				return err
+			}
+		}
 		if err := messagingProject(r.Context(), tx, project); err != nil {
 			return err
 		}
