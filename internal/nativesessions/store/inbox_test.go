@@ -130,6 +130,14 @@ func TestNativeInboxUnclaimedLeaseRecovery(t *testing.T) {
 			if !released {
 				t.Fatal("unclaimed native lease still hides its inbox message")
 			}
+			var state string
+			wantState := "rejected"
+			if scenario == "expired" || scenario == "claim expired" {
+				wantState = "expired"
+			}
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT receipt->>'state' FROM native_session_receipts WHERE operation_id=$1`, item.OperationID).Scan(&state); err != nil || state != wantState {
+				t.Fatal("retired input did not report its terminal outcome", state, err)
+			}
 			f.s.commandMu.Lock()
 			_, retained := f.s.commands[item.OperationID]
 			f.s.commandMu.Unlock()
@@ -177,8 +185,15 @@ func TestNativeInboxLongTurnKeepsMessageAvailable(t *testing.T) {
 	})
 	for range 2 {
 		page, err := f.s.Commands(ctx, d, nativecontract.PageQuery{})
-		if err != nil || len(page.Items) != 0 {
-			t.Fatal("inbox input was admitted before the provider's safe boundary", page, err)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range page.Items {
+			// The already acknowledged person command may still be listed;
+			// agentd's journal suppresses its replay. The inbox may not be leased.
+			if item.RequestID != input.RequestID {
+				t.Fatal("inbox input was admitted before the provider's safe boundary", page)
+			}
 		}
 		clock.Store(f.now.Add(6 * time.Minute).UnixNano())
 	}
