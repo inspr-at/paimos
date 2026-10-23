@@ -44,7 +44,7 @@ test('AEON-1697 manual Expert Live proof from harness records', async ({ browser
   const current = 'if (row < 0) { row = ends.length; ends.push(0) }'
   expect(source).toContain(current)
   writeFileSync(join(control, 'deliveryFlow.ts'), source.replace(current, 'if (row < 0) { row = Math.min(ends.length, 3); if (row === ends.length) ends.push(0) }'))
-  writeFileSync(join(control, 'vitest.config.mjs'), `export default { resolve: { alias: [{ find: /(?:^|\\/)deliveryFlow(?:\\.ts)?$/, replacement: ${JSON.stringify(join(control, 'deliveryFlow.ts'))} }] } }`)
+  writeFileSync(join(control, 'vitest.config.mjs'), `export default { resolve: { alias: [{ find: /^.*\\/deliveryFlow(?:\\.ts)?$/, replacement: ${JSON.stringify(join(control, 'deliveryFlow.ts'))} }] } }`)
   const negative = command(info, 'negative-control', process.execPath, ['node_modules/vitest/vitest.mjs', 'run', 'tests/delivery-flow-lanes.unit.test.ts', '--maxWorkers=1', '--config', join(control, 'vitest.config.mjs'), '-t', 'ten concurrent builders take ten rows'])
   expect(negative.status).not.toBe(0)
   expect(negative.log).toMatch(/expected 4 to be 10/)
@@ -86,7 +86,7 @@ test('AEON-1697 manual Expert Live proof from harness records', async ({ browser
         await page.route(/\/api\/projects\/[^/]+\/delivery\/flow\/stream/, route => route.fulfill({ contentType: 'text/event-stream', body: 'retry: 600000\n\n' }))
         await page.goto(`http://127.0.0.1:${port}/p/AEON/delivery?view=flow`)
         const host = page.getByTestId('flow-lanes')
-        await expect(page.getByRole('button', { name: 'Expert', exact: true })).toHaveAttribute('aria-pressed', 'true')
+        await expect(page.getByRole('radio', { name: 'Expert', exact: true })).toHaveAttribute('aria-checked', 'true')
         await expect(page.getByTestId('flow-modes').getByRole('radio', { name: 'Live', exact: true })).toHaveAttribute('aria-checked', 'true')
         await expect(page.getByTestId('flow-clock')).toHaveText('At 12:06 (now)')
         await expect(host.locator('.ln-lane')).toHaveCount(6)
