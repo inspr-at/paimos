@@ -337,6 +337,10 @@ for (const width of [1440, 1024, 390] as const) {
       await page.emulateMedia({ colorScheme: theme })
       for (const section of [receiving, issuing]) {
         const host = section.locator('.connection-host')
+        const extent = await host.evaluate(el => ({ width: el.clientWidth, height: el.clientHeight, scrollWidth: el.scrollWidth }))
+        expect(extent.width, 'host has a measured text box').toBeGreaterThan(0)
+        expect(extent.height, 'host has a measured text box').toBeGreaterThan(0)
+        expect(extent.scrollWidth, 'long host is ellipsized inside its card').toBeGreaterThan(extent.width + 1)
         await expect(host).toHaveCSS('white-space', 'nowrap')
         await expect(host).toHaveAttribute('data-tip', new URL(origin).host)
         await expect(host).toHaveAttribute('tabindex', '0')

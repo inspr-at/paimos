@@ -42,7 +42,7 @@ onBeforeUnmount(() => { generation++; abort.abort() })
 </script>
 
 <template>
-  <SettingsCard :title="text('Other instances', 'Andere Instanzen')" icon="link" anchor="other-instances">
+  <SettingsCard class="instance-connections" :title="text('Other instances', 'Andere Instanzen')" icon="link" anchor="other-instances">
     <template #lead>{{ text('Read your waiting decisions here. Each decision opens on its home instance.', 'Wartende Entscheidungen werden hier angezeigt. Jede Entscheidung öffnet sich auf ihrer eigenen Instanz.') }}</template>
     <div v-for="row in store.reads" :key="row.tag" class="connection-row">
       <span><span class="connection-identity"><b>{{ row.tag }}</b> · <span v-clip-tip class="connection-host">{{ host(row.origin) }}</span></span><small v-if="row.account"><span v-clip-tip class="connection-account">{{ text('connected as', 'verbunden als') }} {{ row.account }}</span>{{ text('since', 'seit') }} {{ date(row.connectedAt) }}<template v-if="row.summary"> · {{ text('last read', 'zuletzt gelesen') }} {{ date(row.summary.asOf) }}</template></small><small>{{ connectionState(row.state) }}</small><label v-if="['ok', 'reading', 'unreachable'].includes(row.state)" class="instance-notify"><input type="checkbox" :checked="row.notify" @change="store.setNotify(row.tag, ($event.target as HTMLInputElement).checked)"><span>{{ text(`Notify me about ${row.tag}`, `Über ${row.tag} benachrichtigen`) }}</span></label></span>
@@ -53,7 +53,7 @@ onBeforeUnmount(() => { generation++; abort.abort() })
     <p v-if="!store.reads.length">{{ text('Not connected to another instance.', 'Keine Verbindung zu einer anderen Instanz.') }}</p>
     <button v-if="store.discovery === 'unknown'" type="button" class="btn sm" @click="store.refresh(true)">{{ text('Try again', 'Erneut versuchen') }}</button>
   </SettingsCard>
-  <SettingsCard :title="text('Connected instances (read your waiting items)', 'Verbundene Instanzen (Wartendes lesen)')" icon="shield" anchor="connected-instances">
+  <SettingsCard class="instance-connections" :title="text('Connected instances (read your waiting items)', 'Verbundene Instanzen (Wartendes lesen)')" icon="shield" anchor="connected-instances">
     <template #lead>{{ text('Disconnect here to end access from that browser.', 'Durch Trennen endet der Zugriff aus dem verbundenen Browser.') }}</template>
     <div v-for="row in issued" :key="row.id" class="connection-row">
       <span><span class="connection-identity"><b>{{ row.instance }}</b> · <span v-clip-tip class="connection-host">{{ host(row.origin) }}</span></span><small>{{ text('this browser · connected', 'dieser Browser · verbunden') }} {{ date(row.created_at) }}<template v-if="row.last_used_at"> · {{ text('last used', 'zuletzt verwendet') }} {{ date(row.last_used_at) }}</template></small></span>
@@ -65,7 +65,8 @@ onBeforeUnmount(() => { generation++; abort.abort() })
 </template>
 
 <style scoped>
-.connection-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.instance-connections { min-width: 0; }
+.connection-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; padding: 10px 0; border-top: 1px solid var(--line); font-size: 13px; }
 .connection-row > span { flex: 1; min-width: 0; }
 .connection-identity { display: flex; align-items: baseline; gap: .3em; min-width: 0; }
 .connection-identity b { flex: none; }
