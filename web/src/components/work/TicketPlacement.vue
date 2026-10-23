@@ -77,7 +77,7 @@ function choose(field: 'area' | 'complexity', event: Event) { void save(field, (
         <button v-if="canEdit && complexity && placementSuggested(item.fields, 'complexity')" type="button" class="confirm" :disabled="busy" @click="save('complexity', complexity)">Confirm</button>
       </dd>
     </div>
-    <div class="prop placement-feedback"><dt class="sr-only">Classification</dt><dd :id="feedbackId" :tabindex="feedback ? 0 : undefined" role="status" aria-label="Classification feedback" aria-live="polite">{{ feedback }}</dd></div>
+    <div class="prop placement-feedback"><dt class="sr-only">Classification</dt><dd><span :id="feedbackId" :tabindex="feedback ? 0 : undefined" role="status" aria-label="Classification feedback" aria-live="polite">{{ feedback }}</span></dd></div>
   </template>
 </template>
 
@@ -92,8 +92,9 @@ select:focus-visible, button:focus-visible { outline: none; box-shadow: var(--fo
 .placement-prop dd::after { content: ''; width: 65px; flex: 0 0 65px; }
 .placement-prop dd:has(.confirm)::after { display: none; }
 .placement-feedback { flex-basis: 100%; height: 30px; color: var(--ink-3); font-size: 11px; }
-.placement-feedback dd { height: 30px; overflow: auto; overflow-wrap: anywhere; }
-.placement-feedback dd:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.placement-feedback dd { height: 30px; }
+.placement-feedback [role="status"] { display: block; height: 100%; overflow: auto; overflow-wrap: anywhere; }
+.placement-feedback [role="status"]:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 @media (max-width: 720px) { select, .placement-value, .confirm { height: 34px; } }
 </style>
