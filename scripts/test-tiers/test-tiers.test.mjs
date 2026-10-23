@@ -2505,7 +2505,7 @@ test('AEON-1325 nightly shards retain every browser case and require every plann
   t.after(()=>rmSync(resolve(output,'..'),{recursive:true,force:true}))
   writeFileSync(output,'previous=value\n')
   const logs=[]
-  assert.equal(await tierRunnerMain(['nightly-web-plan'],{inventory:{tests:selected},env:{GITHUB_OUTPUT:output},log:value=>logs.push(value)}),0)
+  assert.equal(await tierRunnerMain(['nightly-web-plan'],{inventory:{tests:[...selected,...visuals]},env:{GITHUB_OUTPUT:output},log:value=>logs.push(value)}),0)
   assert.deepEqual(JSON.parse(logs[0]),sizing)
   assert.equal(readFileSync(output,'utf8'),`previous=value\nshards=${JSON.stringify(indices)}\n`)
   const weights=nightlyWeights(policy,selected)

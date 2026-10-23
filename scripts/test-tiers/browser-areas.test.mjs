@@ -67,7 +67,8 @@ test('AEON-1336 the largest real browser plan reaches a fresh runner through a s
       base: ${JSON.stringify(base)}, affectedLane: 'on', plannerMode: 'essential', plannerLayout: 'full',
       inventory: { tests: load('web').tests } },
       { browserCoverage: () => { throw new Error('execution must not fetch another map') } });
-    process.stdout.write(JSON.stringify({ full: result.full, scope: result.scope, tests: result.tests.length, reason: result.reason }));
+    const visual = plan('web', { full: true, visual: true, event: 'pull_request', paths: [], inventory: { tests: load('web').tests } });
+    process.stdout.write(JSON.stringify({ full: result.full, scope: result.scope, tests: result.tests.length, visualTests: visual.tests.length, reason: result.reason }));
   `
   const run = overrides => {
     const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
@@ -79,7 +80,10 @@ test('AEON-1336 the largest real browser plan reaches a fresh runner through a s
   }
   const result = run({})
   assert.equal(result.full, false, `the fresh runner must accept the pinned real plan: ${result.reason}`)
-  assert.equal(result.scope, 'affected'); assert.equal(result.tests, selected.length)
+  assert.equal(result.scope, 'affected')
+  assert.equal(result.tests, selected.filter(row=>row.executionJob!=='visual-comparison').length)
+  assert.equal(result.visualTests, selected.filter(row=>row.executionJob==='visual-comparison').length)
+  assert.equal(result.tests+result.visualTests,selected.length)
   for (const override of [{ AEON_BROWSER_PLAN_FILE: '' }, { AEON_BROWSER_PLAN_FILE: `${file}.missing` },
     { AEON_BROWSER_PLAN_SHA256: '' }, { AEON_BROWSER_PLAN_SHA256: 'd'.repeat(64) }]) {
     const rejected = run(override)
