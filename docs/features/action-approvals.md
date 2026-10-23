@@ -29,6 +29,11 @@ agents can read only their own requests. A queued receipt means accepted for
 delivery. Only a real inbox acknowledgement or supported transport confirmation
 moves it to `handed_off`; delivery failures remain visible.
 
+The server connects the existing inbox writer to HTTP decisions, verified phone
+decisions and expiry. Missing delivery wiring fails closed. If outcome acceptance
+fails, the decision and its outcome roll back together; the request stays pending
+and no successful decision is reported.
+
 `human_input` explicitly declares `none`, `secrets`, `tokens` or `manual_steps`.
 The latter three are refused, recorded and reported to the agent without
 creating a decidable approval. Common English and German requests in free text
