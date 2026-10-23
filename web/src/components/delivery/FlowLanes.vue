@@ -77,8 +77,6 @@ function textWidth(value: string, weight = 650, outline = CAPTION_INK): number {
   inkCache.set(key, ink)
   return ink
 }
-// Bars use 600-weight text without the incident caption's painted outline.
-const labelWidth = (value: string) => textWidth(value, 600, 0)
 
 // ---------- Growth below the pointer (AEON-1656) ----------
 // `drawn` is the geometry last drawn; `pointerY` the clientY of a hovering mouse or pen. While
@@ -272,6 +270,8 @@ function stepPiece(item: LaneItem, x: number, y: number, w: number, h: number, s
   const icon = s.kind === 'wait' ? 'clock' : s.kind === 'rework' ? 'refresh' : null
   const pad = icon ? 16 : 6
   const tag = set.multi ? run.tag : undefined
+  // Match the bar's actual font, without the incident caption's outline.
+  const labelWidth = (value: string) => textWidth(value, fut ? 500 : 600, 0)
   const label = h >= 12 ? fitLabel({ tag, text: words(s), since, duration: icon ? minutesText(s.end - s.start) : undefined, room, pad, textWidth: labelWidth }) : ''
   const keyOnly = !!tag && label === tag
   return {

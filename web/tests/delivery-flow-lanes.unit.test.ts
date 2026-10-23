@@ -166,6 +166,9 @@ it('a label falls back from tag and text, to the text, to the duration, to an el
   expect(ink(measured) + input.pad + 6).toBeLessThan(107.32)
   expect(fitLabel({ ...input, room: ink(input.tag), textWidth: ink })).toBe('1676')
   expect(fitLabel({ ...input, room: ink(input.tag) - 0.5, textWidth: ink })).toBe('')
+  const german = fitLabel({ ...input, text: 'Wartet auf die ausführliche technische Überprüfung', since: ' · seit 19:36', room: 160, textWidth: ink })
+  expect(german).toMatch(/^1676 .* · seit 19:36$/)
+  expect(ink(german) + input.pad + 6).toBeLessThan(160)
 })
 
 it('panning an incident onto the right edge keeps its caption inside a 320 px frame', () => {
