@@ -4006,6 +4006,24 @@
     "rendererImageVersion": "20261012.334.1",
     "captureFix": "The phone Delivery heading scrolls into view with block start, then main scrolls by the measured heading offset minus app-header height. The complete on-target headline must be inside the viewport. Desktop capture setup is unchanged.",
     "guard": "browser:tests/visual-reference-guard.spec.ts:P02 Delivery phone capture includes its heading and on-target headline in both themes",
-    "validation": "In progress; final evidence recorded before handoff."
+    "validation": {
+      "transportAndLedger": "2/2 Node tests passed; exact 70 usable references from 72 digest-verified PNGs; missing approved pin, deferred pin, deferred digest and duplicate controls reject as intended.",
+      "realArchive": "GitHub test-references-2 assets downloaded; archive/detached/internal/bundle/payload/PNG digests verified locally before materialization. Original macOS history is byte-for-byte unchanged as JSON data.",
+      "remoteBrowser": {
+        "sourceSHA": "ea054bc01",
+        "passed": 14,
+        "scope": "Six fixture/font/comparator guards and eight Goals/workspace deferral reports. Delivery heading/headline and geometry pass at 390 in both themes; partial-state desktop reference materialization passes.",
+        "evidence": "web/test-results/remote/r9-guards/",
+        "authority": "Mac quality evidence only; no new product reference authority.",
+        "deliveryDeferrals": {
+          "sourceSHA": "ea054bc01",
+          "passed": 2,
+          "evidence": "web/test-results/remote/r9-delivery-deferrals/",
+          "scope": "Both ordinary Delivery 390 cases report deferred before setup and product requirements; together with the first batch all ten real deferral registrations pass."
+        }
+      },
+      "static": "First locked entrypoint attempt refused remote capacity; bounded retry in progress.",
+      "hostedCI": "Coordinator-owned next step after push; worker does not claim an already-green #891 or 70 completed real Linux comparisons."
+    }
   }
 }

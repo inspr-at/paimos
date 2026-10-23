@@ -179,15 +179,19 @@ test('visual comparison rejects a changed control and never creates a missing re
 // Risk: the phone's page-flow panel remains below project chrome, so a capture
 // omits the on-target headline even though the off-screen summary is visible.
 test('P02 Delivery phone capture includes its heading and on-target headline in both themes', async ({ browser }, info) => {
+  // Inspect the pending crop through the same quality runner without claiming
+  // either a Linux renderer match or approval of these synthetic test gates.
+  const visual = JSON.parse(readFileSync(new URL('../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
+  const delivery = visual.states.find((state: { id: string }) => state.id === 'delivery-numbers')
+  for (const checkpoint of delivery.checkpoints) if (checkpoint.profile === 'phone') {
+    delete checkpoint.referenceStatus; delete checkpoint.deferredUntil; delete checkpoint.deferredReason
+  }
+  delivery.approval.reason = 'Synthetic quality-only inspection of the pending phone crop; no product reference authority'
   const positions: unknown[] = []
   for (const theme of ['light', 'dark'] as const) {
-    const context = await browser.newContext({ baseURL: info.project.use.baseURL, viewport: { width: 390, height: 844 },
-      colorScheme: theme, reducedMotion: 'reduce', deviceScaleFactor: 1, hasTouch: true })
-    try {
-      const page = await context.newPage()
-      await page.clock.setFixedTime(new Date(NOW))
-      await prepareVisualFonts(page, String(info.project.use.baseURL))
-      await deliveryNumbers(page, 'phone', theme)
+    const checkpoint = visualCases('delivery-numbers').find(checkpoint => checkpoint.profile === 'phone' && checkpoint.theme === theme)!
+    await checkVisual(browser, info, checkpoint, async page => {
+      await deliveryNumbers(page, checkpoint.profile, theme)
       await fontEvidence(page, 'delivery-numbers')
       const heading = page.getByRole('heading', { name: 'Delivery', exact: true })
       const headline = page.getByTestId('delivery-summary').locator('.big')
@@ -199,7 +203,9 @@ test('P02 Delivery phone capture includes its heading and on-target headline in 
       expect(Math.abs(top - headerHeight), 'Delivery starts immediately below the app header').toBeLessThanOrEqual(0.5)
       positions.push({ heading: await heading.boundingBox(), headline: await headline.boundingBox() })
       await page.screenshot({ path: info.outputPath(`delivery-numbers-390-${theme}.png`), animations: 'disabled', caret: 'hide' })
-    } finally { await context.close() }
+    }, { visual })
+    expect(JSON.parse(readFileSync(info.outputPath(`${checkpoint.id}.md`), 'utf8')))
+      .toMatchObject({ requirementsRun: true, baselineCompared: false, layout: [], axe: [], console: [], responses: [] })
   }
   expect(positions[1], 'both themes depict the same phone crop').toEqual(positions[0])
 })
