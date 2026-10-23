@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { verifySupervisor } from '../playwright-global-setup.mjs'
+import { setupBrowserFonts, verifySupervisor } from '../playwright-global-setup.mjs'
 import { uiStackTarget, waitForStack } from './stack-ready.mjs'
 
 // CI waits for backend health before specs. Approved mock-only jobs set
@@ -13,4 +13,5 @@ export async function runUiStackSetup({ env = process.env, cwd = process.cwd(), 
 
 export default async function uiStackSetup() {
   await runUiStackSetup()
+  return setupBrowserFonts()
 }
