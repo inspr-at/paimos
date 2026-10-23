@@ -42,7 +42,7 @@ func (a *pauseTestAPI) HeartbeatHarnessPause(ctx context.Context, s HarnessSessi
 }
 
 func TestPauseHeartbeatUsesExistingInboxAndNeverStopsProcess(t *testing.T) {
-	s, a, e, p := managedFixture(t)
+	s, a, e, p := managedServiceFixture(t)
 	e.mu.Lock()
 	e.inboxCapable = true
 	e.mu.Unlock()
@@ -65,7 +65,7 @@ func TestPauseHeartbeatUsesExistingInboxAndNeverStopsProcess(t *testing.T) {
 }
 
 func TestScheduledPauseWaitsAndEscalationIsDeliveredOnce(t *testing.T) {
-	s, a, e, p := managedFixture(t)
+	s, a, e, p := managedServiceFixture(t)
 	e.mu.Lock()
 	e.inboxCapable = true
 	e.mu.Unlock()
@@ -150,7 +150,7 @@ func TestStopNowUsesOwnedExecutorAndRejectsWrongGeneration(t *testing.T) {
 }
 
 func TestPauseWakeHintAnchorsBeforeHeartbeatRoundTrip(t *testing.T) {
-	s, a, e, _ := managedFixture(t)
+	s, a, e, _ := managedServiceFixture(t)
 	api := &pauseTestAPI{fakeAPI: a, pause: &HarnessPause{WakeInMS: 250}}
 	s.api = api
 	start := time.Now()
