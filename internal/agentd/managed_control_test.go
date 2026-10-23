@@ -88,6 +88,17 @@ func managedServiceFixture(t *testing.T) (*Supervisor, *fakeAPI, *owned, *manage
 	if err := s.journal.Put(entry.record); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		// No monitor runs in this fixture. Observe the fake process exit before
+		// testSupervisor closes its journal, state store and instance lock.
+		_ = proc.Stop(context.Background())
+		if err := proc.Wait(); err != nil {
+			t.Error(err)
+		}
+		entry.mu.Lock()
+		entry.record.ExitObserved = true
+		entry.mu.Unlock()
+	})
 	return s, a, entry, proc
 }
 
