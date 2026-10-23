@@ -312,7 +312,7 @@ test('real manifest covers every non-excluded UI spec once for 1, 12, 24 and 256
   for (const count of [1, 12, 24, 256]) {
     const shards = balanceShards(manifest, count, { all: true })
     assert.deepEqual(checkCoverage(manifest, shards, expected, { all: true }), {
-      specs: expected.length - manifest.exclusions.length, shards: count,
+      specs: expected.length - manifest.exclusions.length - 19, shards: count, dedicated: 19,
       ...(manifest.exclusions.length ? { excluded: manifest.exclusions.length } : {}),
     })
     // The real catalogue must still fail closed when one assignment is lost
@@ -348,10 +348,10 @@ test('list/check launch no process and checks are wired into the existing CI uni
   const output = []
   assert.equal(await main(['--check', '--all', '--shards', '12'], { run: forbiddenRun, out: s => output.push(s), env: {} }), 0)
   const all = JSON.parse(output.pop())
-  assert.equal(all.specs + (all.excluded ?? 0), discoverSpecs().length)
+  assert.equal(all.specs + (all.dedicated ?? 0) + (all.excluded ?? 0), discoverSpecs().length)
   assert.equal(await main(['--check', '--shards', '12'], { run: forbiddenRun, out: s => output.push(s), env: {} }), 0)
   const gate = JSON.parse(output.pop())
-  assert.equal(gate.specs + gate.ungated + (gate.excluded ?? 0), discoverSpecs().length)
+  assert.equal(gate.specs + gate.ungated + (gate.dedicated ?? 0) + (gate.excluded ?? 0), discoverSpecs().length)
   assert.equal(await main(['--list', '1/12'], { run: forbiddenRun, out: s => output.push(s), env: {} }), 0)
   assert.equal(JSON.parse(output.pop()).length, 1)
   const scripts = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).scripts
@@ -374,7 +374,7 @@ test('runner is hosted-only, runs groups sequentially, retains failure and stops
     return { code: calls.length === 1 ? 1 : 0 }
   }
   assert.equal(await main(['1/1'], { manifest, env, run, out: () => {} }), 1)
-  assert.equal(calls.length, manifest.groups.filter(g => g.gate !== false).length)
+  assert.equal(calls.length, manifest.groups.filter(g => g.gate !== false && !g.executionJob).length)
   assert.equal(calls.find(call => call.options.env.AEON_DESK_SHOTS).options.env.AEON_DESK_SHOTS, '/tmp/runner/aeon-desk-shots')
   let interruptedCalls = 0
   assert.equal(await main(['1/1'], { env, out: () => {}, run: async () => { interruptedCalls++; return { code: 143 } } }), 143)
@@ -593,7 +593,14 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   assert.equal(real.groups.find(g => g.id === 'remaining-ui').gate, false)
   const gated = balanceShards(real, 12).flatMap(s => s.specs)
   assert.ok(gated.some(spec => spec.file === 'tests/knowledge.spec.ts'), 'Decision Knowledge regressions must gate CI')
-  assert.equal(gated.length, files(real).length - real.groups.find(g => g.id === 'remaining-ui').specs.length)
+  const visuals = real.groups.find(g => g.id === 'visual-comparison')
+  assert.equal(visuals.executionJob, 'visual-comparison')
+  assert.equal(visuals.gate, true)
+  assert.equal(visuals.specs.length, 19)
+  assert.ok(visuals.specs.every(spec => spec.file.startsWith('tests/visual/')))
+  assert.ok(gated.every(spec => !spec.file.startsWith('tests/visual/')))
+  assert.ok(balanceShards(real, 12, { all: true }).flatMap(shard => shard.specs).every(spec => !spec.file.startsWith('tests/visual/')))
+  assert.equal(gated.length, files(real).length - real.groups.find(g => g.id === 'remaining-ui').specs.length - visuals.specs.length)
   // Preserve main's five-minute estimate for every gated group except
   // AEON-697's attention spec. That spec is one file, so the balancer cannot
   // spread it; the expanded gate may grow by its whole weight and no more.
@@ -808,7 +815,7 @@ test('runtime reconciliation leaves new specs ungated, drops removed specs and r
   // The real manifest keeps main's gates and any additional branch specs.
   const out = []
   assert.equal(await main(['--check', '--shards', '12'], { out: s => out.push(s), env: {} }), 0)
-  const declared = loadManifest().groups.filter(group => group.gate !== false).flatMap(group => group.specs)
+  const declared = loadManifest().groups.filter(group => group.gate !== false && !group.executionJob).flatMap(group => group.specs)
   assert.equal(JSON.parse(out.pop()).specs, declared.length)
 })
 

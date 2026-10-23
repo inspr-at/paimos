@@ -69,7 +69,7 @@ export function runnerSelection(tests,options,candidate,planner) {
 // Programmatic comparisons can share one native snapshot of an unchanged
 // checkout through `collect`. Otherwise content-keyed discovery reuses the
 // catalogue across processes and invalidates it when registration inputs change.
-export function plan(kind,{env=process.env,event=env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=env.CI_AFFECTED_LANE,plannerMode=env.AEON_TEST_TIER_MODE,plannerLayout=env.AEON_TEST_TIER_LAYOUT,base=eventBase(env),index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false,cache,inventory:supplied}={}, { collect=target, browserCoverage=nightlyBrowserMap, exec=command }={}) {
+export function plan(kind,{env=process.env,event=env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=env.CI_AFFECTED_LANE,plannerMode=env.AEON_TEST_TIER_MODE,plannerLayout=env.AEON_TEST_TIER_LAYOUT,base=eventBase(env),index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false,visual=false,cache,inventory:supplied}={}, { collect=target, browserCoverage=nightlyBrowserMap, exec=command }={}) {
   if(supplied!==undefined&&!Array.isArray(supplied?.tests)) throw new Error('Supplied inventory needs a tests array')
   const begin=performance.now()
   const inventory=supplied??collect(kind,{browserOnly:kind==='web'&&!unit,...(cache===undefined?{}:{cache})})
@@ -81,13 +81,14 @@ export function plan(kind,{env=process.env,event=env.GITHUB_EVENT_NAME??'pull_re
   const browserOnly=kind==='web'&&inventory.scope==='browser'
   const catalogueRows=browserOnly?[...inventory.tests,...manifest.tests.filter(row=>row.kind!=='browser')]:inventory.tests
   const all=validate(manifest,catalogueRows)
+  const ownsBrowser = row => row.kind === 'browser' && (row.executionJob === 'visual-comparison') === visual
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
   const pinnedBrowser=kind==='web'&&!unit&&env.CI_IMPACT==='on'&&event==='pull_request'&&hasBrowserSource(paths)
   if(pinnedBrowser&&!full&&!catalogue) {
     const selection=runnerSelection(all,{event,paths,impact:env.CI_IMPACT,affectedLane,base,sha:env.GITHUB_SHA,
       browserPlan:readBrowserPlan(root,env.AEON_BROWSER_PLAN_FILE,env.AEON_BROWSER_PLAN_SHA256)??'',forceFull:full,forceAll:catalogue},
       {mode:'full',layout:'full',reason:'affected browser plan unavailable'}, {mode:plannerMode,layout:plannerLayout})
-    const filtered=selection.tests.filter(row=>row.kind==='browser')
+    const filtered=selection.tests.filter(ownsBrowser)
     const tests=shard(filtered,index,count,tierWeights(browserPolicy,filtered))
     return {...selection,all,tests,collectionScope:browserOnly?'browser':'all',
       timing:{collectSeconds:supplied===undefined?(collected-begin)/1000:0,planSeconds:(performance.now()-collected)/1000}}
@@ -104,7 +105,7 @@ export function plan(kind,{env=process.env,event=env.GITHUB_EVENT_NAME??'pull_re
   const selection=runnerSelection(all,{event,paths,imports:inventory.imports,affectedLane,impact:env.CI_IMPACT,
     forceFull:full,forceAll:catalogue,webImports:graph,tree,registryChanges,readFile,...coverage},candidate,
     {mode:plannerMode,layout:plannerLayout})
-  const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
+  const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':ownsBrowser(row)):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}
   if(kind==='web'&&!unit) Object.assign(weights,(selection.scope==='catalogue'?nightlyWeights:tierWeights)(browserPolicy,filtered))
   if(kind==='go') {
@@ -534,7 +535,7 @@ export async function main(args, dependencies={}) {
   const options={unit:false,full:false,all:false,job:`${kind}-tiers`}
   for(let i=0;i<flags.length;i++) {
     const flag=flags[i]
-    if(flag==='--full'||flag==='--all'||flag==='--unit') options[flag.slice(2)]=true
+    if(flag==='--full'||flag==='--all'||flag==='--unit'||flag==='--visual') options[flag.slice(2)]=true
     else if(flag==='--no-cache') options.cache=false
     else if(flag==='--paths') options.paths=JSON.parse(flags[++i])
     else if(flag==='--event') options.event=flags[++i]

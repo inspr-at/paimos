@@ -55,12 +55,12 @@
     "web-shard": {
       "kind": "not-static",
       "reason": "Browser tier execution and infrastructure preparation.",
-      "runs_sha256": "99e834fe5793287a33b111fc52e75914601ac4e5ff6defeb4cdee63fa57bd866"
+      "runs_sha256": "ee9acf06f676c1ec1bd9d32b3e6b42363e3f2ead06a45b43f01f1ebac76d1a1a"
     },
     "web": {
       "kind": "not-static",
       "reason": "Hosted aggregate status gate.",
-      "runs_sha256": "64f1f6aca3ffe08e9772a4e9e1470bbeed30ca19b1b116ba969ccbc962e0d0fb"
+      "runs_sha256": "ef1d1840e2bb36853885ba6abc0de5c96560697daeb20e9c8d11f10c573f8866"
     },
     "release-check": {
       "kind": "not-static",
@@ -91,7 +91,17 @@
     "visual-reference-capture": {
       "kind": "not-static",
       "reason": "AEON-1674 manual hosted browser capture and artifact-only review packaging; never a local static check or reference publication.",
-      "runs_sha256": "e4ca19f89832873b284dafa638c32468003f080fb8e527f196bf57bc4709e553"
+      "runs_sha256": "b4f8fe5ef47770593e1c6c9f758dad45ec4950e3f9ecea7ba249b9d1160da7a5"
+    },
+    "visual-comparison": {
+      "kind": "not-static",
+      "reason": "AEON-1692 required digest-pinned container visual execution; guarded by renderer, manifest and baseline-update tests.",
+      "runs_sha256": "14a5dc90b3ce3b6c37915e38553c6f4f32878bc6bf0193ae64dbe4b810125429"
+    },
+    "visual-probe-summary": {
+      "kind": "not-static",
+      "reason": "AEON-1692 manual cross-machine raster aggregation; diagnostic artifacts only, excluded from queue evidence.",
+      "runs_sha256": "594922e43cc76c71c72a00f037ad0d4502aea91a83accf8bfc7a2302ab0f1dc6"
     }
   },
   "exclusions": [

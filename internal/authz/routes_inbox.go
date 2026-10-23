@@ -5,6 +5,10 @@ package authz
 // Route and scope declarations for inbox.
 func init() {
 	registerRoutes("inbox", map[string]string{
+		"GET /api/projects/{projectId}/assistant-adapters":                        "inbox.manage",
+		"POST /api/projects/{projectId}/assistant-adapters":                       "inbox.manage",
+		"GET /api/projects/{projectId}/assistant-adapters/{adapterId}":            "inbox.manage",
+		"POST /api/projects/{projectId}/assistant-adapters/{adapterId}/test-send": "inbox.manage",
 		"GET /api/inbox/lanes":                                           "inbox.read",
 		"GET /api/peers":                                                 "harness.read",
 		"POST /api/peers/{sessionId}/messages":                           "inbox.send",

@@ -1,5 +1,5 @@
 {
-  "group": "remaining-ui",
+  "group": "visual-comparison",
   "nightlyTiming": {
     "seconds": 60,
     "selectedTests": 6,

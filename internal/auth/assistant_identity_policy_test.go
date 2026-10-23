@@ -451,7 +451,10 @@ func assistantUpgradeFixture(t *testing.T) (*Module, tenant.Principal, time.Time
 	}
 	if err := db.InTenant(ctx, d.App, owner.TenantID, func(tx pgx.Tx) error {
 		var unchanged bool
-		if err := tx.QueryRow(ctx, `SELECT (to_jsonb(p)-'agent_class')=$3::jsonb AND p.agent_class IS NULL
+		// Both assistant expansions add nullable metadata; every pre-upgrade
+		// principal and credential field must still match the original snapshot.
+		if err := tx.QueryRow(ctx, `SELECT (to_jsonb(p)-'agent_class'-'assistant_last_pull_at')=$3::jsonb
+ AND p.agent_class IS NULL AND p.assistant_last_pull_at IS NULL
  AND to_jsonb(k)=$4::jsonb FROM principals p JOIN agent_keys k
  ON k.tenant_id=p.tenant_id AND k.principal_id=p.id WHERE p.id=$1 AND k.id=$2`, amy.PrincipalID, amy.ID, principalBefore, keyBefore).Scan(&unchanged); err != nil {
 			return err

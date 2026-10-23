@@ -252,6 +252,21 @@
       "table": "approval_requests"
     },
     {
+      "classification": "metadata",
+      "columns": {
+        "last_failure_at": "metadata",
+        "last_failure_code": "metadata",
+        "last_success_at": "metadata",
+        "target_id": "metadata",
+        "tenant_id": "metadata",
+        "vendor": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "assistant_adapters"
+    },
+    {
       "classification": "personal",
       "columns": {
         "created_at": "metadata",
@@ -1897,6 +1912,7 @@
       "classification": "personal",
       "columns": {
         "agent_class": "metadata",
+        "assistant_last_pull_at": "metadata",
         "messaging_only": "metadata",
         "messaging_owner_id": "personal"
       },

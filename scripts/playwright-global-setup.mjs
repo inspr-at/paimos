@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { processStart, validStart } from './playwright-processes.mjs'
@@ -42,7 +41,10 @@ export async function setupBrowserFonts() {
   }
   try {
     fontconfig = installRendererFonts(visual, directory)
-    const { chromium } = createRequire(new URL('../web/package.json', import.meta.url))('@playwright/test')
+    // Use the browser API's ESM entry, as the owned-browser fixture does.
+    // Nightly redirects @playwright/test to its ESM coverage fixture; requiring
+    // that fixture through Playwright's transform fails before any test starts.
+    const { chromium } = await import('../web/node_modules/playwright/index.mjs')
     const browser = await chromium.launch({ headless: true, args: ['--disable-gpu'], timeout: 30_000,
       env: { ...process.env, FONTCONFIG_FILE: fontconfig } })
     try {

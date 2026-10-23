@@ -8018,6 +8018,8 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestProjectOnlyCallersCanFailMessages","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestPullAssistantPickupRetention","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestPullDropsAMessageFailedAfterItWasSelected","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestReceiptThroughAuthGate","tier":"GATED-FULL"}

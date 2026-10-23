@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/db"
 )
 
@@ -148,6 +149,7 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
  LEFT JOIN inbox_compat_messages c ON c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id
  LEFT JOIN inbox_message_deliveries d ON d.tenant_id=c.tenant_id AND d.message_id=c.id
  WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND r.state='queued' AND r.deliver_by IS NOT NULL AND m.acked_at IS NULL
+   AND NOT (`+pullInboxMessageSQL+`)
    AND NOT (coalesce(d.attempts,0)<$1 AND coalesce(c.key_digest='desk/'||c.id::text,false)
      AND (rs.id IS NULL OR (rs.stopped_at IS NULL AND rs.archived_at IS NULL)))
    AND NOT ((`+personSessionChatSQL+`) AND coalesce(d.attempts,0)<$1
@@ -198,9 +200,69 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
 			failed++
 		}
 	}
+	// Pull retention/lifecycle is independent of online deadlines, including
+	// pre-upgrade queued receipts with an elapsed or missing deliver_by.
+	n, err := s.sweepPull(ctx, tenantID)
+	failed += n
+	if err != nil && first == nil {
+		first = err
+	}
 	// A notice failure must not hold back terminal guarantees for other messages.
 	if err := s.sweepChatPickup(ctx, tenantID); err != nil && first == nil {
 		first = err
+	}
+	return failed, first
+}
+
+func (s *Sweeper) sweepPull(ctx context.Context, tenantID string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	now := s.clock().UTC()
+	var ids []string
+	err := db.InTenant(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
+		ids = nil
+		rows, err := tx.Query(ctx, `SELECT m.id::text FROM inbox_messages m
+ JOIN inbox_receipts r ON r.tenant_id=m.tenant_id AND r.message_id=m.id
+ CROSS JOIN (SELECT $1::timestamptz AS now) pn
+ WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.acked_at IS NULL AND r.state='queued'
+ AND (`+pullInboxMessageSQL+`) AND (`+pullFailureReasonSQL+`)<>''
+ ORDER BY m.created_at,m.id LIMIT $2`, now, sweepBatch)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return 0, err
+	}
+	failed := 0
+	var first error
+	for _, id := range ids {
+		var done bool
+		err := db.InTenant(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
+			// Lifecycle changes take this fence too. Acquire it before message,
+			// delivery and receipt locks, and recheck after candidate selection.
+			if err := attachedmsg.Lock(ctx, tx); err != nil {
+				return err
+			}
+			var err error
+			done, err = failMessageAt(ctx, tx, id, ReasonPickupExpired, true, &now)
+			return err
+		})
+		if err != nil && first == nil {
+			first = err
+		}
+		if err == nil && done {
+			failed++
+		}
 	}
 	return failed, first
 }

@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/attachedmsg"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -150,9 +152,16 @@ func (m *module) pending(ctx context.Context, p tenant.Principal, after int64, l
 // is stamped as handed over to its recipient. exact leaves out unbound
 // principal-wide rows, so a session hook never pages through a broadcast backlog.
 func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64, limit int, sessionID *string, exact bool, via string) ([]Message, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	var items []Message
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		items = nil
+		if sessionID == nil {
+			if err := m.recordAssistantPull(ctx, tx, p, authz.RouteScope(ctx)); err != nil {
+				return err
+			}
+		}
 		if _, err := listeningSession(ctx, tx, sessionID, p.ID, ""); err != nil {
 			return err
 		}
@@ -214,6 +223,36 @@ func (m *module) pendingVia(ctx context.Context, p tenant.Principal, after int64
 		items = []Message{}
 	}
 	return items, err
+}
+
+// A successful empty poll is liveness too. Use the server/database clock;
+// a routine host may be suspended between runs. This precedes session/message
+// locks and the event counter, and rolls back if the page cannot be handed over.
+func (m *module) recordAssistantPull(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope authz.Scope) error {
+	if p.Kind != tenant.Agent {
+		return nil
+	}
+	var pull bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals p WHERE p.id=$1::uuid AND
+	 (p.messaging_only IS TRUE OR EXISTS(SELECT 1 FROM inbox_message_targets t
+	 WHERE t.principal_id=p.id AND t.target_kind='pull' AND t.enabled)))`, p.ID).Scan(&pull); err != nil {
+		return err
+	}
+	if !pull {
+		return nil
+	}
+	if err := attachedmsg.Lock(ctx, tx); err != nil {
+		return err
+	}
+	if err := authz.RequireTx(ctx, tx, p, "inbox.read", scope); err != nil {
+		return errForbidden
+	}
+	now, err := m.laneNow(ctx, tx)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE principals SET assistant_last_pull_at=$2 WHERE id=$1::uuid AND kind='agent'`, p.ID, now)
+	return err
 }
 
 func closeListen(conn db.NotificationListener) {

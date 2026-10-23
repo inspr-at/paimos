@@ -307,12 +307,12 @@ test('AEON-1333 kill switch aggregates reject planned skips, stale layouts, prio
     for (const gate of gates) {
       const script = gate.split('        run: |\n')[1].split('\n').filter(line => line.startsWith('          ')).map(line => line.slice(10)).join('\n')
       const env = { PATH: process.env.PATH, CI_IMPACT: 'off', CI_LANE: 'full', TIER_LAYOUT: 'full', TIER_PLAN: 'success', CI_PLAN: 'success', REUSE: 'none',
-        GO_TEST: 'success', GO_STATIC: 'success', GO_TIMING: 'success', WEB_CATALOGUE: 'success', WEB_SETUP: 'success', WEB_UNIT: 'success', WEB_SHARD: 'success', CHECK_RESULT: 'success', CACHE_PRIME: 'skipped', GITHUB_STEP_SUMMARY: resolve(output, 'summary.md') }
+        GO_TEST: 'success', GO_STATIC: 'success', GO_TIMING: 'success', WEB_CATALOGUE: 'success', WEB_SETUP: 'success', WEB_UNIT: 'success', WEB_SHARD: 'success', VISUAL_COMPARISON: 'success', CHECK_RESULT: 'success', CACHE_PRIME: 'skipped', GITHUB_STEP_SUMMARY: resolve(output, 'summary.md') }
       // The PR-reuse-only Go gate has stricter positive reuse obligations.
       if (gate.includes('PR_CONFIRM_REUSE') && id === 'go') continue
       assert.equal(spawnSync('bash', ['-c', script], { env, encoding: 'utf8' }).status, 0, id)
       for (const override of [{ CI_LANE: 'docs-only' }, { TIER_LAYOUT: 'static' }, { REUSE: 'merge_group' }, { REUSE: 'pull_request' }, { CI_PLAN: 'failure' }, { TIER_PLAN: 'skipped' }]) assert.notEqual(spawnSync('bash', ['-c', script], { env: { ...env, ...override }, encoding: 'utf8' }).status, 0, `${id}/${JSON.stringify(override)}`)
-      const inputs = id === 'go' ? ['GO_TEST', 'GO_STATIC', 'GO_TIMING'] : id === 'web' ? ['WEB_CATALOGUE', 'WEB_SETUP', 'WEB_UNIT', 'WEB_SHARD'] : ['CHECK_RESULT']
+      const inputs = id === 'go' ? ['GO_TEST', 'GO_STATIC', 'GO_TIMING'] : id === 'web' ? ['WEB_CATALOGUE', 'WEB_SETUP', 'WEB_UNIT', 'WEB_SHARD', 'VISUAL_COMPARISON'] : ['CHECK_RESULT']
       for (const input of inputs) for (const result of ['failure', 'cancelled', 'skipped', '']) assert.notEqual(spawnSync('bash', ['-c', script], { env: { ...env, [input]: result }, encoding: 'utf8' }).status, 0, `${id}/${input}/${result}`)
     }
     assert.ok(gates.length, `${id} has a checked aggregate`)

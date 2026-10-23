@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { expect, type Page, type Response } from '@playwright/test'
 import { agents, capacity, deliveryNumbers, publicQuote, quoteEditor, NOW, sessionChat, sessionChatUnavailable } from './fixtures'
-import { test, checkVisual, compareVisualReference, visualCases, prepareVisualFonts, renderedFonts, fontEvidence } from './checkpoint'
+import { test, checkVisual, compareVisualReference, visualCases, prepareVisualFonts, renderedFonts, fontEvidence, settleVisualCapture } from './checkpoint'
 import { visualChrome } from './chrome-fixture'
 import { fixtures, mockWork } from '../work-fixtures'
 import { NODES } from '../quote-inspector-fixtures'
@@ -68,6 +68,22 @@ test('visual comparison rejects a changed control and never creates a missing re
   await page.goto('/__visual-comparator-proof')
   await prepareVisualFonts(page, String(info.project.use.baseURL))
   await fontEvidence(page, 'projects')
+  const settled = await settleVisualCapture(page)
+  expect(settled.evidence.consecutive).toBe(3)
+  expect(settled.evidence.samples.slice(-3)).toEqual(Array(3).fill(settled.evidence.samples.at(-1)))
+  // A source that keeps repainting must fail at the bound, even with no
+  // pending CSS animation. Each screenshot is a distinct actual browser PNG.
+  let attempts = 0
+  const repainting = {
+    evaluate: page.evaluate.bind(page),
+    screenshot: async (options: Parameters<Page['screenshot']>[0]) => {
+      await page.getByRole('button').evaluate((element, red) => { element.style.background = `rgb(${red}, 0, 0)` }, ++attempts * 20)
+      return page.screenshot(options)
+    },
+  } as Page
+  await expect(settleVisualCapture(repainting)).rejects.toThrow(/did not settle.*eight captures/)
+  expect(attempts).toBe(8)
+  await page.getByRole('button').evaluate(element => { element.style.background = 'white' })
   const reference = info.snapshotPath('synthetic-reference.png')
   mkdirSync(dirname(reference), { recursive: true })
   writeFileSync(reference, await page.screenshot({ path: info.outputPath('synthetic-reference.png') }))
@@ -88,11 +104,10 @@ test('visual comparison rejects a changed control and never creates a missing re
   const renderer = structuredClone(visual.renderer)
   for (const state of visual.states) {
     delete state.approval
+    for (const field of ['referenceStatus', 'deferredUntil', 'deferredReason']) delete state[field]
     for (const checkpoint of state.checkpoints) {
       checkpoint.reference = { attachmentMember: null, sha256: null }
-      if (checkpoint.referenceStatus === 'needs-re-capture') {
-        delete checkpoint.referenceStatus; delete checkpoint.deferredUntil; delete checkpoint.deferredReason
-      }
+      for (const field of ['referenceStatus', 'deferredUntil', 'deferredReason']) delete checkpoint[field]
     }
   }
   const png = await page.screenshot()
@@ -109,21 +124,25 @@ test('visual comparison rejects a changed control and never creates a missing re
   const baselineFile = info.outputPath('synthetic-pinned-bundle.json')
   writeFileSync(baselineFile, bundle)
   const checkpoint = project.checkpoints[0]
-  expect(await compareVisualReference(page, info, checkpoint, { visual, baselineFile, renderer })).toBe(true)
+  // Capture and comparison must use the same image, even when a later paint
+  // changes. A new standalone comparison must still reject that changed page.
   await page.getByRole('button').evaluate(element => { element.style.background = 'rgb(0, 0, 220)' })
-  await expect(compareVisualReference(page, info, checkpoint, { visual, baselineFile, renderer, timeout: 1500 }))
+  expect(await compareVisualReference(page, info, checkpoint, { visual, baselineFile, renderer, png })).toBe(true)
+  expect(JSON.parse(readFileSync(info.outputPath(`${checkpoint.id}-comparison.md`), 'utf8')))
+    .toMatchObject({ status: 'matched', pngSHA256: hash(png) })
+  await expect(compareVisualReference(page, info, checkpoint, { visual, baselineFile, renderer }))
     .rejects.toThrow(/Screenshot comparison failed|pixels.*different/)
   // The exact same differing pixels remain visible as evidence in report-only
   // mode, then reject again when only the mode field changes back to blocking.
   const reporting = structuredClone(visual)
   reporting.history = [] // Synthetic bytes, never the real set-2 history.
   reporting.comparison.mode = 'report-only'
-  expect(await compareVisualReference(page, info, checkpoint, { visual: reporting, baselineFile, renderer: { ...renderer, locale: 'de-DE' }, timeout: 1500 })).toBe(false)
+  expect(await compareVisualReference(page, info, checkpoint, { visual: reporting, baselineFile, renderer: { ...renderer, locale: 'de-DE' } })).toBe(false)
   expect(JSON.parse(readFileSync(info.outputPath(`${checkpoint.id}-comparison.md`), 'utf8')))
     .toMatchObject({ status: 'different', rendererMismatch: expect.stringContaining('renderer differs from reference: locale'),
       error: expect.stringMatching(/Screenshot comparison failed|pixels.*different/) })
   reporting.comparison.mode = 'blocking'
-  await expect(compareVisualReference(page, info, checkpoint, { visual: reporting, baselineFile, renderer, timeout: 1500 }))
+  await expect(compareVisualReference(page, info, checkpoint, { visual: reporting, baselineFile, renderer }))
     .rejects.toThrow(/Screenshot comparison failed|pixels.*different/)
   await expect(compareVisualReference(page, info, checkpoint, { visual, baselineFile: info.outputPath('absent-bundle.json'), renderer: { ...renderer, locale: 'de-DE' } }))
     .rejects.toThrow('renderer differs from reference: locale')
@@ -166,22 +185,19 @@ test('visual comparison rejects a changed control and never creates a missing re
     await setupQuality(qualityPage)
     await qualityPage.clock.setFixedTime(new Date(NOW + 60_000))
   }, { visual })).rejects.toThrow(/fixture clock changed/)
-  for (const id of ['goals', 'ticket-workspace', 'delivery-numbers', 'capacity']) {
-    const deferred = visualCases(id)[0]!
-    // The setup must never run; an unbuilt product is neither inspected nor
-    // failed, and its explicit until/reason report is attached to the test.
-    await checkVisual(browser, info, deferred, async () => { throw new Error('Deferred setup must not run') }, { visual })
-    expect(JSON.parse(readFileSync(info.outputPath(`${deferred.id}.md`), 'utf8')))
-      .toMatchObject({ requirementsRun: false, reference: { mode: 'deferred', reason: expect.stringContaining('deferred until AEON-') } })
-    expect(info.annotations.some(row => row.type === 'deferred' && row.description?.includes(deferred.id))).toBe(true)
-    expect(existsSync(info.outputPath(`${deferred.id}.png`))).toBe(false)
-  }
   // Stale pins are explicit awaiting-reference reports, never comparisons or
-  // quiet passes. Re-capture and person review belong to reference set 3.
-  const current = JSON.parse(readFileSync(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
-  current.comparison.mode = 'blocking'
+  // quiet passes. Build this counterexample explicitly: the activated product
+  // manifest has no stale checkpoints and must not make this guard vacuous.
+  const current = structuredClone(visual)
+  for (const id of ['goals', 'ticket-workspace', 'delivery-numbers', 'capacity']) {
+    Object.assign(current.states.find(state => state.id === id).checkpoints[0], {
+      referenceStatus: 'needs-re-capture', deferredUntil: ['AEON-1692'], deferredReason: 'Synthetic stale reference; awaiting reviewed re-capture',
+    })
+  }
+  let staleCases = 0
   for (const state of current.states) {
     for (const checkpoint of state.checkpoints.filter(row => row.referenceStatus === 'needs-re-capture')) {
+      staleCases++
       const stale = visualCases(state.id).find(row => row.id === checkpoint.id)!
       await checkVisual(browser, info, stale, async () => { throw new Error('Stale reference setup must not run') }, { visual: current })
       expect(JSON.parse(readFileSync(info.outputPath(`${stale.id}.md`), 'utf8')))
@@ -190,6 +206,7 @@ test('visual comparison rejects a changed control and never creates a missing re
       expect(existsSync(info.outputPath(`${stale.id}.png`))).toBe(false)
     }
   }
+  expect(staleCases).toBe(4)
   await expect(checkVisual(browser, info, visualCases('hours')[0]!, async qualityPage => {
     await setupQuality(qualityPage)
     await qualityPage.evaluate(() => console.error('Synthetic quality failure must still block an awaiting state'))
@@ -202,17 +219,25 @@ test('visual comparison rejects a changed control and never creates a missing re
   expect(JSON.parse(readFileSync(info.outputPath(`${pending.id}.md`), 'utf8')))
     .toMatchObject({ requirementsRun: true, quality: { status: 'failed', error: expect.stringContaining('unexpected console/page failure') },
       comparison: { status: 'unavailable' } })
+  // A checkpoint deferral reports failed quality even while the global policy
+  // blocks approved references. It never needs a product reference or approval.
+  const deferredVisual = structuredClone(visual)
   for (const id of ['goals', 'ticket-workspace', 'delivery-numbers', 'capacity']) {
     const deferred = visualCases(id)[0]!
+    Object.assign(deferredVisual.states.find(state => state.id === id).checkpoints[0], {
+      referenceStatus: 'deferred', deferredUntil: ['AEON-1692'], deferredReason: 'Synthetic deferred quality inspection',
+    })
     let setupRan = false
     await checkVisual(browser, info, deferred, async () => {
       setupRan = true
       throw new Error('Synthetic deferred quality setup failure is reported')
-    })
+    }, { visual: deferredVisual })
     expect(setupRan).toBe(true)
     expect(JSON.parse(readFileSync(info.outputPath(`${deferred.id}.md`), 'utf8')))
-      .toMatchObject({ requirementsRun: true, reference: { mode: 'report-only' },
+      .toMatchObject({ requirementsRun: true, baselineCompared: false, reference: { mode: 'deferred', reason: expect.stringContaining('deferred until AEON-1692') },
         quality: { status: 'failed', error: expect.stringContaining('Synthetic deferred quality setup failure is reported') } })
+    expect(info.annotations.some(row => row.type === 'deferred' && row.description?.includes(deferred.id))).toBe(true)
+    expect(existsSync(info.outputPath(`${deferred.id}.png`))).toBe(false)
   }
   await setupQuality(page)
   await prepareVisualFonts(page, String(info.project.use.baseURL))
@@ -253,7 +278,10 @@ test('P02 Delivery phone capture includes its heading and on-target headline in 
   // either a Linux renderer match or approval of these synthetic test gates.
   const visual = JSON.parse(readFileSync(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
   const delivery = visual.states.find((state: { id: string }) => state.id === 'delivery-numbers')
+  const phoneIds = delivery.checkpoints.filter(checkpoint => checkpoint.profile === 'phone').map(checkpoint => checkpoint.id)
+  visual.approval.checkpoints = visual.approval.checkpoints.filter(id => !phoneIds.includes(id))
   for (const checkpoint of delivery.checkpoints) if (checkpoint.profile === 'phone') {
+    checkpoint.reference = { attachmentMember: null, sha256: null }
     delete checkpoint.referenceStatus; delete checkpoint.deferredUntil; delete checkpoint.deferredReason
   }
   visual.comparison.mode = 'blocking'

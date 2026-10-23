@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { assertRenderer, visualClock } from './visual-renderer.mjs'
+import { assertRenderer, visualClock, preparedRenderer } from './visual-renderer.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const rank = { NIGHTLY: 0, 'GATED-FULL': 1, ESSENTIAL: 2 }
@@ -130,15 +130,21 @@ export function validateVisual(visual, { cuts = false, stateIds = visual.states?
   need(requirements.maskAssessedContent === false && requirements.fullPageTour === false &&
     requirements.controlStabilityTolerancePx === 0.5 && requirements.captures === 'testInfo.outputPath()', 'Visual capture/stability ownership changed')
   const renderer = visual.renderer
-  need(renderer?.runner?.label === 'ubuntu-24.04' && renderer.runner.imageOS === 'ubuntu24' &&
+  const legacyRenderer = renderer?.version === 1 && renderer.runner?.label === 'ubuntu-24.04' && renderer.runner.imageOS === 'ubuntu24'
+  const containerRenderer = renderer?.version === 2 &&
+    renderer.container?.image === `mcr.microsoft.com/playwright:v${renderer.playwright}-noble` &&
+    /^sha256:[a-f0-9]{64}$/.test(renderer.container.digest ?? '') &&
+    renderer.container.platform === 'linux' && renderer.container.arch === 'x64' &&
+    renderer.fontconfig?.asset === 'scripts/test-prune/visual-fonts.conf' && digest(renderer.fontconfig.sha256)
+  need((legacyRenderer || containerRenderer) &&
     renderer.runner.platform === 'linux' && renderer.runner.arch === 'x64' && text(renderer.playwright) &&
     renderer.browser?.name === 'chromium-headless-shell' && text(renderer.browser.revision) && text(renderer.browser.version) &&
-    renderer.browser.headless === true && same(renderer.browser.args, ['--disable-gpu']) &&
+    renderer.browser.headless === true && same(renderer.browser.args, renderer.rasterSetting ? preparedRenderer(visual, renderer.rasterSetting).browser.args : ['--disable-gpu']) &&
     renderer.deviceScaleFactor === 1 && same(renderer.colourScheme, ['light', 'dark']) && renderer.reducedMotion === 'reduce' &&
     renderer.timezone === 'Europe/Vienna' && renderer.locale === 'en-GB' && renderer.fonts?.length === 10 &&
     renderer.fonts[0].family === 'Inter Variable' && renderer.fonts[0].asset === 'web/tests/visual/fonts/inter-v4.1.ttf' &&
     renderer.fonts.every(font => digest(font.sha256) && text(font.asset) && text(font.license)) &&
-    same(renderer.fontconfig?.aliases, { '-apple-system': 'Inter Variable', 'system-ui': 'Inter Variable', 'sans-serif': 'Inter Variable', monospace: 'JetBrains Mono' }), 'Missing deterministic hosted visual renderer policy')
+    same(renderer.fontconfig?.aliases, { '-apple-system': 'Inter Variable', 'system-ui': 'Inter Variable', 'sans-serif': 'Inter Variable', monospace: 'JetBrains Mono' }), 'Missing deterministic visual renderer policy')
   need(visual.comparison?.threshold === 0 && visual.comparison.maxDiffPixels === 0 && text(visual.comparison.justification),
     'Visual comparison requires exact pixels with a documented tolerance policy')
   need(visual.capture?.workflow === '.github/workflows/ci.yml' && visual.capture.event === 'workflow_dispatch' &&

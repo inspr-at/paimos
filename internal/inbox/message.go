@@ -348,6 +348,24 @@ func acceptMessageWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 	if in.IdempotencyKey == "" || len(in.IdempotencyKey) > maxKeyRunes*utf8.UTFMax || strings.ContainsRune(in.IdempotencyKey, 0) || utf8.RuneCountInString(in.IdempotencyKey) > maxKeyRunes {
 		return Message{}, badRequest("invalid idempotency_key")
 	}
+	var target receiptTarget
+	if in.RecipientSessionID == nil {
+		// Freeze direct pull delivery mode before appending events. Replacing or
+		// disabling a target must not turn an already queued pull into a push.
+		var targetID string
+		var version int
+		err := tx.QueryRow(ctx, `SELECT t.id::text,t.version,t.adapter,t.address FROM inbox_message_targets t
+ WHERE t.principal_id=$1::uuid AND t.target_kind='pull'
+ AND (t.enabled OR NOT EXISTS(SELECT 1 FROM inbox_message_targets active WHERE active.principal_id=t.principal_id AND active.enabled))
+ ORDER BY t.enabled DESC,t.created_at DESC,t.id LIMIT 1 FOR KEY SHARE OF t`, in.RecipientPrincipalID).Scan(&targetID, &version, &target.Adapter, &target.Address)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return Message{}, err
+		}
+		if err == nil {
+			target.ID, target.Version = &targetID, &version
+			target.internal = true
+		}
+	}
 	id := in.MessageID
 	if id == "" {
 		if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
@@ -379,7 +397,7 @@ func acceptMessageWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Ac
 	if err := enqueueWakesWith(ctx, tx, p.TenantID, out, appendChange); err != nil {
 		return Message{}, err
 	}
-	if err := insertReceiptWith(ctx, tx, p, out.ID, "queued", receiptTarget{}, "", "", appendChange); err != nil {
+	if err := insertReceiptWith(ctx, tx, p, out.ID, "queued", target, "", "", appendChange); err != nil {
 		return Message{}, err
 	}
 	return out, nil
@@ -416,7 +434,12 @@ func enqueueWakesWith(ctx context.Context, tx pgx.Tx, tenantID string, msg Messa
 	// and compatible with target writers' NO KEY UPDATE locks.
 	rows, err := tx.Query(ctx, `SELECT id::text FROM inbox_delivery_targets
 		WHERE principal_id = $1::uuid AND kind = 'webhook' AND enabled
-		ORDER BY id`, msg.RecipientPrincipalID)
+		AND NOT EXISTS(SELECT 1 FROM principals WHERE id=$1::uuid AND messaging_only IS TRUE)
+		AND NOT EXISTS(SELECT 1 FROM inbox_message_targets WHERE principal_id=$1::uuid AND target_kind='pull' AND enabled)
+		AND NOT EXISTS(SELECT 1 FROM inbox_message_deliveries d JOIN inbox_message_targets t
+		 ON t.tenant_id=d.tenant_id AND t.id=COALESCE(d.effective_target_id,d.target_id)
+		 WHERE d.message_id=$2::uuid AND t.target_kind='pull')
+		ORDER BY id`, msg.RecipientPrincipalID, msg.ID)
 	if err != nil {
 		return err
 	}

@@ -407,6 +407,7 @@
         "internal/version/**",
         "internal/perf/**",
         "scripts/**",
+        "scripts/test-prune/visual-probe.mjs",
         "web/scripts/**",
         ".github/**",
         "api/**",
