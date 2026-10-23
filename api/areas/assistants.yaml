@@ -1,0 +1,184 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/assistants
+paths:
+  /assistants:
+    get:
+      operationId: listAssistants
+      summary: List hosted assistant principals
+      description: "Person-only, requires members.read. Includes existing messaging-only identities with a conservative default policy. A policy is configuration, not a grant of project or key authority."
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: "A bounded page ordered by principal ID."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assistants]
+                properties:
+                  assistants: {type: array, maxItems: 100, items: {$ref: "#/components/schemas/Assistant"}}
+                  next_cursor: {type: string, format: uuid}
+        "403": {description: "Person or members.read authority missing."}
+    post:
+      operationId: createAssistant
+      summary: Create or link a hosted assistant identity and policy
+      description: "Person-only, requires live workspace agents.create and keys.manage. Creates an agent principal in the assistant class with the existing messaging-only restriction and no key or role grant. An optional principal_id links an existing messaging-only identity owned by the same person, preserving its keys, inbox and status. The owner must be an active person in this tenant."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [display_name, vendor, owner_person_id, policy]
+              properties:
+                principal_id: {type: string, format: uuid}
+                display_name: {type: string, minLength: 1, maxLength: 200}
+                vendor: {type: string, enum: [grok, unknown]}
+                owner_person_id: {type: string, format: uuid}
+                policy: {$ref: "#/components/schemas/AssistantPolicy"}
+      responses:
+        "201":
+          description: "Identity and policy saved atomically, without issuing credentials."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Assistant"}
+        "400": {description: "Invalid or oversized input."}
+        "403": {description: "Person or live authority missing."}
+        "404": {description: "Owner or existing messaging identity not found in this tenant."}
+        "409": {description: "Name or configured identity already exists."}
+  /assistants/{principalId}:
+    parameters:
+      - {name: principalId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getAssistant
+      summary: Read a hosted assistant
+      description: "Person-only, requires members.read. Returns the existing principal identity, status, owner and policy."
+      responses:
+        "200":
+          description: "Assistant identity and policy."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Assistant"}
+        "403": {description: "Person or members.read authority missing."}
+        "404": {description: "Assistant not found in this tenant."}
+    patch:
+      operationId: updateAssistant
+      summary: Update hosted assistant metadata
+      description: "Person-only, requires live workspace agents.create and keys.manage. Owner transfer is excluded to preserve the existing messaging and key ownership. Disabled assistants cannot be reactivated through this route."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: integer, minimum: 0}
+                display_name: {type: string, minLength: 1, maxLength: 200}
+                vendor: {type: string, enum: [grok, unknown]}
+      responses:
+        "200":
+          description: "Updated identity."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Assistant"}
+        "403": {description: "Person or live authority missing."}
+        "404": {description: "Assistant not found in this tenant."}
+        "409": {description: "Revision changed or name already exists."}
+  /assistants/{principalId}/disable:
+    post:
+      operationId: disableAssistant
+      summary: Disable a hosted assistant and revoke its keys
+      description: "Person-only, requires live workspace agents.create and keys.manage. Principal deactivation, live-key revocation and audit commit together. Repeated calls return the disabled identity."
+      parameters:
+        - {name: principalId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: "Disabled assistant."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Assistant"}
+        "403": {description: "Person or live authority missing."}
+        "404": {description: "Assistant not found in this tenant."}
+  /assistants/{principalId}/policy:
+    parameters:
+      - {name: principalId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getAssistantPolicy
+      summary: Read an assistant policy
+      description: "A person needs members.read. An agent needs live inbox.read and may read only its own assistant policy. This exact new read route is available to messaging-only identities; every existing route keeps its authorization."
+      responses:
+        "200":
+          description: "Policy with principal status and revision."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AssistantPolicySnapshot"}
+        "403": {description: "Missing scope, authority or self ownership."}
+        "404": {description: "Assistant not found in this tenant."}
+    put:
+      operationId: updateAssistantPolicy
+      summary: Replace an assistant policy
+      description: "Person-only, requires live workspace agents.create and keys.manage. Project IDs must be visible projects in this tenant, and scopes must be known agent-grantable permissions. Neither allowlist grants authority. All outward or irreversible effects require approval, and asking a person for secrets or manual steps remains forbidden. Enforcement in adapters and routines is wired separately."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, policy]
+              properties:
+                expected_revision: {type: integer, minimum: 0}
+                policy: {$ref: "#/components/schemas/AssistantPolicy"}
+      responses:
+        "200":
+          description: "Saved policy snapshot."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AssistantPolicySnapshot"}
+        "400": {description: "Invalid policy or project."}
+        "403": {description: "Person or live authority missing."}
+        "404": {description: "Assistant not found in this tenant."}
+        "409": {description: "Revision changed."}
+components:
+  schemas:
+    AssistantPolicy:
+      type: object
+      additionalProperties: false
+      required: [allowed_projects, allowed_scopes, weekly_budget, outward_action_rule, never_ask_person_for_secrets_or_manual_steps]
+      properties:
+        allowed_projects: {type: array, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}, description: "Explicit project allowlist; empty means no project authority under this policy."}
+        allowed_scopes: {type: array, maxItems: 200, uniqueItems: true, items: {type: string, maxLength: 100}, description: "Additional ceiling for later adapter enforcement; never a key or role grant."}
+        weekly_budget:
+          type: object
+          additionalProperties: false
+          required: [amount, unit]
+          properties:
+            amount: {type: string, pattern: '^(0|[1-9][0-9]{0,11})(\.[0-9]{1,6})?$', description: "Exact non-negative decimal; zero permits no spend."}
+            unit: {type: string, enum: [USD, EUR, tokens, credits]}
+        outward_action_rule: {type: string, enum: [approval_required]}
+        never_ask_person_for_secrets_or_manual_steps: {type: boolean, enum: [true]}
+    AssistantPolicySnapshot:
+      type: object
+      required: [principal_id, owner_person_id, status, revision, policy]
+      properties:
+        principal_id: {type: string, format: uuid}
+        owner_person_id: {type: string, format: uuid}
+        status: {type: string, enum: [active, deactivated]}
+        revision: {type: integer, minimum: 0, description: "Zero denotes a legacy messaging identity using the default policy."}
+        policy: {$ref: "#/components/schemas/AssistantPolicy"}
+    Assistant:
+      allOf:
+        - {$ref: "#/components/schemas/AssistantPolicySnapshot"}
+        - type: object
+          required: [kind, principal_kind, display_name, vendor, messaging_only]
+          properties:
+            kind: {type: string, enum: [assistant], description: "Agent class alongside builder; the principal kind remains agent."}
+            principal_kind: {type: string, enum: [agent]}
+            display_name: {type: string}
+            vendor: {type: string, enum: [grok, unknown]}
+            messaging_only: {type: boolean, description: "Existing principal restriction is preserved independently of policy."}
