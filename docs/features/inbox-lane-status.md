@@ -23,8 +23,10 @@ aeon tell "$LEAD_PRINCIPAL_ID" --inbox \
 
 On the next report, a new idempotency key and the progress since midday are
 used. Once the decision arrives, both blocker flags are omitted. Morning,
-midday, unblock and completion reports remain in the recipient's normal
-`aeon listen --inbox` history. Exact retries reuse the same key and message ID;
+midday, unblock and completion reports arrive through the recipient's normal
+`aeon listen --inbox` and are retained as durable inbox messages. Acknowledged
+messages leave the pending inbox; the latest lane status stays available.
+Exact retries reuse the same key and message ID;
 a changed report with that key conflicts and does not refresh its age.
 
 Project addressing also supports the status flags:
