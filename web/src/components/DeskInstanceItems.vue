@@ -31,7 +31,7 @@ const action = computed(() => {
     case 'connecting': return text('Cancel', 'Abbrechen')
     case 'ended': return text('Reconnect', 'Neu verbinden')
     case 'unreachable': return text('Try again', 'Erneut versuchen')
-    case 'ok': return props.variant === 'goals' && props.read.summary?.open ? (props.read.expanded ? text('Hide', 'Ausblenden') : text('Show', 'Anzeigen')) : props.variant === 'desk' && (props.read.summary?.open ?? 0) > 5 && !props.read.allItems ? text(`Show all ${props.read.summary!.open}`, `Alle ${props.read.summary!.open} anzeigen`) : ''
+    case 'ok': return props.variant === 'goals' && props.read.summary?.open ? (props.read.expanded ? text('Hide', 'Ausblenden') : text('Show', 'Anzeigen')) : ''
     default: return ''
   }
 })
@@ -64,7 +64,6 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
       <span class="instance-actions">
         <span class="action-slot">
           <span v-for="label in [text('Reconnect', 'Neu verbinden'), text('Try again', 'Erneut versuchen')]" :key="label" class="action-size" aria-hidden="true">{{ label }}</span>
-          <span v-if="variant === 'desk'" class="action-size" aria-hidden="true">{{ text('Show all 0000000000', 'Alle 0000000000 anzeigen') }}</span>
           <button v-if="action" type="button" class="instance-action" @click="act">{{ action }}</button>
         </span>
         <button v-if="variant === 'goals' && read.state === 'not connected'" type="button" class="instance-dismiss" :aria-label="text('Not now', 'Nicht jetzt')" @click="store.dismiss(read.tag)"><AppIcon name="close" :size="14" /></button>
@@ -73,6 +72,8 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
       </span>
     </div>
     <span class="sr-only" aria-live="polite">{{ announcement }}</span>
+    <!-- Above the growing rows: expanding never moves the clicked action. -->
+    <button v-if="variant === 'desk' && (read.summary?.open ?? 0) > 5" type="button" class="instance-expand" :aria-expanded="read.allItems" @click="store.showAll(read.tag)">{{ (read.summary?.open ?? 0) > 100 ? text('Show first 100', 'Erste 100 anzeigen') : text(`Show all ${read.summary!.open}`, `Alle ${read.summary!.open} anzeigen`) }}</button>
     <div v-if="showItems" class="instance-items" :style="!read.summary && read.slots ? { minHeight: `${read.slots * 44}px` } : undefined">
       <p v-if="read.state === 'unreachable' && read.summary" class="instance-asof">{{ text(`As of ${time}`, `Stand ${time}`) }}</p>
       <a v-for="line in lines" :key="`${line.kind}:${line.id}`" class="instance-item" :href="line.url" target="_blank" rel="noopener noreferrer" :aria-label="`${line.title} · ${text(`Decide on ${read.tag}`, `Auf ${read.tag} entscheiden`)}`" @click="emit('navigate')">
@@ -111,6 +112,8 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
 .instance-item { display: flex; align-items: center; gap: 10px; height: 44px; color: var(--ink); text-decoration: none; border-top: 1px solid var(--line); font-size: 13px; }
 .instance-item:hover { background: var(--row-hover); }
 .instance-item svg { flex: none; color: var(--ink-3); }
+.instance-expand { display: inline-flex; align-items: center; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-size: 13px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.instance-expand:focus-visible { outline: none; border-radius: 4px; box-shadow: var(--focus-ring); }
 .instance-body { flex: 1; display: grid; min-width: 0; gap: 2px; }
 .instance-body > .instance-title { font-weight: 600; }
 .instance-body small { display: flex; align-items: center; gap: 8px; color: var(--ink-3); font-size: 11.5px; }
