@@ -430,7 +430,7 @@ func mergeGroupInventory(t *testing.T, w map[string]any) []string {
 	for id, value := range treeMap(w["jobs"]) {
 		j := treeMap(value)
 		if id == "visual-reference-capture" {
-			if j["if"] != "github.event_name == 'workflow_dispatch' && inputs.visual_capture == true" || j["needs"] != nil || j["continue-on-error"] != nil {
+			if j["if"] != "github.event_name == 'workflow_dispatch' && (inputs.visual_capture == true || inputs.visual_probe != '')" || j["needs"] != nil || j["continue-on-error"] != nil {
 				t.Fatal("visual capture must remain an independent, blocking manual job, excluded from queue execution evidence")
 			}
 			continue

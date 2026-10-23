@@ -9,6 +9,7 @@ case "${1:-}" in
     capture_data=${2:?usage: lead-commands.sh prepare CAPTURE_ARTIFACT_DIR REVIEWED_RUNNER_DIR NEW_PLAN_ROOT}
     reviewed_data=${3:?reviewed runner artifact directory required}
     plan_root=${4:?fresh plan root required}
+    node --input-type=module -e 'import { resolve } from "node:path"; if (!resolve(process.argv[1]).startsWith(resolve("web/test-results") + "/")) throw new Error("Plan root must stay under web/test-results");' "$plan_root"
     if [ -e "$plan_root" ]; then
       echo 'Plan root must be fresh; never overwrite earlier proof or receipts.' >&2
       exit 1
