@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/release-picker.spec.ts",
-    "listedTests": 26,
+    "listedTests": 19,
     "tierTiming": {
       "caseSeconds": {
         "max": 16.265,

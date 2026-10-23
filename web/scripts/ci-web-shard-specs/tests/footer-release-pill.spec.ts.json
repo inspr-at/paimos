@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/footer-release-pill.spec.ts",
-    "listedTests": 40,
+    "listedTests": 42,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.93,

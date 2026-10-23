@@ -13,6 +13,7 @@ import { mockReleases, type History } from './releases-fixtures'
 import { historicHistory, NOTES } from './releases-historic-fixtures'
 import { expectStableControls } from './helpers/stable'
 
+const SHOTS = process.env.AEON_323_SHOTS
 const V102 = '260929082208.0.0'
 const V105 = '260929113854.0.0'
 const esc = (v: string) => v.replaceAll('.', '\\.')

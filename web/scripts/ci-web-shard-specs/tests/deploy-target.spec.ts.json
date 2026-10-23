@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/deploy-target.spec.ts",
-    "listedTests": 7,
+    "listedTests": 1,
     "tierTiming": {
       "caseSeconds": {
         "max": 2.142,

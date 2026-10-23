@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/version-reveal.spec.ts",
-    "listedTests": 6,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
         "max": 2.954,
