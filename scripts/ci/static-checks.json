@@ -91,12 +91,12 @@
     "visual-reference-capture": {
       "kind": "not-static",
       "reason": "AEON-1674 manual hosted browser capture and artifact-only review packaging; never a local static check or reference publication.",
-      "runs_sha256": "87335ef625c02452b9b348e48edd0c04fecae87e7dc9ec8bf077997392524870"
+      "runs_sha256": "384b6f80633ec11cbc16f8767f9d1180c06854d2263bcf6ef317a9586e4fe0dc"
     },
     "visual-comparison": {
       "kind": "not-static",
       "reason": "AEON-1692 required digest-pinned container visual execution; guarded by renderer, manifest and baseline-update tests.",
-      "runs_sha256": "e4db671e540632e465e0aaf10de4a4f29211d29914ace9f1fc4605ecc41e1f57"
+      "runs_sha256": "adc20a5464c40a727fadcf2c44beda8103804e4a11932d450e0069b56f2e42dd"
     }
   },
   "exclusions": [

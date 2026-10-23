@@ -3,6 +3,7 @@ package releaseworkflow
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -1214,6 +1216,67 @@ func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
 }
 
 func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
+	// AEON-1692: a container mount has different ownership and a different path
+	// from checkout's host path. Exercise the actual workflow bootstrap against
+	// Git's ownership check before any visual policy can read baseline history.
+	t.Run("visual-container-git-ownership", func(t *testing.T) {
+		for _, owner := range []struct{ workflow, job string }{
+			{"ci.yml", "visual-reference-capture"},
+			{"ci.yml", "visual-comparison"},
+			{"nightly-full.yml", "visual-comparison"},
+		} {
+			t.Run(owner.workflow+"/"+owner.job, func(t *testing.T) {
+				job := treeMap(treeMap(treeWorkflow(t, owner.workflow)["jobs"])[owner.job])
+				ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+				defer cancel()
+				dir, err := filepath.EvalSymlinks(t.TempDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+				checkout, other := filepath.Join(dir, "container checkout"), filepath.Join(dir, "unrelated")
+				env := append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+filepath.Join(dir, "gitconfig"),
+					"GIT_TEST_ASSUME_DIFFERENT_OWNER=1", "GITHUB_WORKSPACE="+filepath.Join(dir, "host checkout"))
+				run := func(cwd, input, program string, args ...string) (string, error) {
+					cmd := exec.CommandContext(ctx, program, args...)
+					cmd.Dir, cmd.Env, cmd.Stdin = cwd, env, strings.NewReader(input)
+					out, err := cmd.CombinedOutput()
+					return string(out), err
+				}
+				for _, path := range []string{checkout, other} {
+					if out, err := run(dir, "", "git", "init", "--quiet", path); err != nil {
+						t.Fatalf("initialize fixture: %v\n%s", err, out)
+					}
+				}
+				const payload = "baseline history fixture\n"
+				object, err := run(checkout, payload, "git", "-c", "safe.directory="+checkout, "hash-object", "-w", "--stdin")
+				if err != nil {
+					t.Fatalf("write fixture object: %v\n%s", err, object)
+				}
+				object = strings.TrimSpace(object)
+				if out, err := run(checkout, "", "git", "show", object); err == nil || !strings.Contains(out, "detected dubious ownership") {
+					t.Fatalf("negative control must reject the mounted checkout for ownership: %v\n%s", err, out)
+				}
+				trust := reuseStep(t, job, "Trust the visual container checkout")
+				steps := reuseSteps(job)
+				if len(steps) < 3 || !strings.HasPrefix(fmt.Sprint(treeMap(steps[0])["uses"]), "actions/checkout@") ||
+					treeMap(steps[1])["name"] != trust["name"] || len(trust) != 2 {
+					t.Fatal("container checkout trust must run unconditionally immediately after checkout")
+				}
+				if out, err := run(checkout, "", "bash", "-euo", "pipefail", "-c", fmt.Sprint(trust["run"])); err != nil {
+					t.Fatalf("container checkout bootstrap: %v\n%s", err, out)
+				}
+				if out, err := run(checkout, "", "git", "show", object); err != nil || out != payload {
+					t.Fatalf("container Git history read: %v\n%s", err, out)
+				}
+				if out, err := run(checkout, "", "git", "config", "--global", "--get-all", "safe.directory"); err != nil || strings.TrimSpace(out) != checkout {
+					t.Fatalf("trust must name only the actual container checkout: %v\n%s", err, out)
+				}
+				if out, err := run(other, "", "git", "rev-parse", "--show-toplevel"); err == nil || !strings.Contains(out, "detected dubious ownership") {
+					t.Fatalf("an unrelated repository must remain untrusted: %v\n%s", err, out)
+				}
+			})
+		}
+	})
 	// Pin the accepted c72eb506 classification/full-execution configuration.
 	// Keep that historical fixture and the original AEON-681 tier fixture.
 	// Seven tier-adapted execution jobs use the additive merge-main pins (e2e-run
