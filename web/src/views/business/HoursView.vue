@@ -759,10 +759,11 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
 }
 /* Compact keys leave visible space between day values on narrow phones. */
 @media (max-width: 520px) {
-  .week-grid .c-ticket { width: 74px; }
+  .week-grid .c-ticket { width: 74px; padding-left: 6px; }
   .week-grid .ticket-chip { padding: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--ink); }
   .week-grid .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
   .week-grid .c-day { font-size: 11px; }
+  .week-grid thead .c-day { padding-right: 5px !important; }
   /* Preserve the Total column's intended inset over the base cell padding. */
   .week-grid .c-total { padding-left: 2px; }
 }

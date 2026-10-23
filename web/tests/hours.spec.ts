@@ -145,7 +145,8 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     // Measure actual text, including both lines of the header. Cell boxes can
     // fit perfectly while the adjacent time values still read as one number.
     const textRows = await grid(page).locator('tr').evaluateAll(rows => rows.map(row => {
-      const cells = Array.from(row.querySelectorAll('.c-day'))
+      const header = row.parentElement?.tagName === 'THEAD'
+      const cells = Array.from(row.querySelectorAll(header ? '.c-day, .c-total' : '.c-day'))
       const text = cells.map(cell => {
         const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT)
         const rects: DOMRect[] = []
@@ -159,14 +160,14 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
           right: Math.max(...rects.map(rect => rect.right)),
           visible: rects.length > 0 && rects.every(rect => rect.width > 0 && rect.height > 0) }
       })
-      return { label: row.querySelector('th')?.textContent?.trim(), text,
+      return { label: row.querySelector('th')?.textContent?.trim(), header, text,
         gaps: text.slice(1).map((next, i) => next.left - text[i].right) }
     }))
     expect(textRows).toHaveLength(5) // Header, all three tickets and per-day totals.
     for (const row of textRows) {
-      expect(row.text).toHaveLength(7)
+      expect(row.text).toHaveLength(row.header ? 8 : 7)
       expect(row.text.every(text => text.visible), `${width} ${theme}: ${row.label} has positive text boxes`).toBe(true)
-      expect(row.gaps).toHaveLength(6)
+      expect(row.gaps).toHaveLength(row.header ? 7 : 6)
       for (const [i, gap] of row.gaps.entries()) {
         expect(gap, `${width} ${theme}: ${row.label}, ${row.text[i].value} → ${row.text[i + 1].value}`).toBeGreaterThanOrEqual(6)
       }
@@ -194,7 +195,9 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     measurements.push({ width, theme, textRows, unchangedWideLayout })
     const crowdedTickets = await grid(page).locator('tbody th').evaluateAll(cells => cells.flatMap(cell => {
       const chip = cell.querySelector('.ticket-chip')!, edge = chip.getBoundingClientRect().right
-      return edge > cell.getBoundingClientRect().right ? [chip.textContent] : []
+      const range = document.createRange(); range.selectNodeContents(cell.nextElementSibling!)
+      const gap = range.getBoundingClientRect().left - edge
+      return edge > cell.getBoundingClientRect().right || gap < 6 ? [{ ticket: chip.textContent, gap }] : []
     }))
     expect(crowdedTickets, 'ticket names stay inside their column, clear of the first day').toEqual([])
     expect(await Promise.all(Object.values(controls).map(control => control.boundingBox())), 'week controls and rows move by 0 px').toEqual(boxes)
