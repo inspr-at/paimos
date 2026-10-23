@@ -32,7 +32,12 @@ test('visual references require approval, immutable attachment bytes and every e
     const changed = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), files }))
     return { changed, pinned: { ...visual, baselineAuthority: { ...visual.baselineAuthority, source: { ...visual.baselineAuthority.source, sha256: hash(changed) } } } }
   }
-  assert.throws(() => verifyBaselineBundle(bytes, manifest), /Missing approved visual reference states/)
+  // Keep this negative control independent of later real attachment approvals.
+  const unpinned = structuredClone(visual)
+  for (const state of unpinned.states) {
+    for (const checkpoint of state.checkpoints) checkpoint.reference = { attachmentMember: null, sha256: null }
+  }
+  assert.throws(() => verifyBaselineBundle(bytes, unpinned), /Missing approved visual reference states/)
   assert.throws(() => readBaselineBundle('', visual), /Missing approved visual baseline attachment/)
   assert.throws(() => verifyBaselineBundle(Buffer.concat([bytes, Buffer.from(' ')]), visual), /attachment SHA-256 mismatch/)
   const absent = rehash(files.slice(1))

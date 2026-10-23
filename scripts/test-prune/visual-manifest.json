@@ -4,29 +4,75 @@
   "source": "AEON-1668 section 8 and Tick addendum (2026-10-22)",
   "approval": {
     "reviewer": "Tick",
-    "status": "pending",
-    "approvedAt": null,
-    "evidence": null
+    "status": "approved",
+    "approvedAt": "2026-10-23 (03:3x Europe/Vienna; exact minute/second not supplied)",
+    "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94",
+    "states": [
+      "projects",
+      "access",
+      "knowledge",
+      "public-quote",
+      "agent-rules",
+      "start-agent",
+      "quote-editor"
+    ],
+    "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+    "recordedBy": "LEAD-M",
+    "scope": "Only these seven states and their exact 30 checkpoint bytes are approved; CI materialization remains blocked."
   },
   "baselineAuthority": {
-    "status": "pending-review",
+    "status": "awaiting-ci-materialization",
     "source": {
       "kind": "existing-ppm-ticket-attachment",
       "ticket": "AEON-1670",
       "instance": "PPM / INSPR",
-      "attachmentId": null,
-      "sha256": null
+      "attachmentId": "a2b2206f-adbc-429e-afee-eeaf42422a69",
+      "sha256": "2c17e829b380a9d3d357871f0f18ba8c2d6f021b00bb15c74f2884406a436055",
+      "nodeId": "9b233c96-f176-4151-bba1-d82cea3ccc89",
+      "name": "AEON-1674-approved-1-2e6c7938e.tar",
+      "bytes": 13977600,
+      "format": "tar",
+      "captureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+      "manifest": {
+        "attachmentId": "b204962a-03a0-4cff-8b28-64abdf136a94",
+        "name": "AEON-1674-approved-1-2e6c7938e.tar.manifest.json",
+        "bytes": 29816,
+        "sha256": "e826bde57eccd7bbb711072474f9dea94f5710bfb5313cb1469518ddac89dc16"
+      },
+      "baselineBundle": {
+        "attachmentMember": "baseline.json",
+        "sha256": "c7673b146cc62d0e055bbe8fe9020bfa7f314b89a052a6ee75123e88cbacefe8"
+      },
+      "archiveManifest": {
+        "attachmentMember": "manifest.json",
+        "sha256": "b5e7c215b92ce31ff4ac19fb1e8d4fbeea3d56ed18a6b6a9447e8cd5c3cd9ab5"
+      }
     },
     "retention": {
       "policy": "Keep the approved reference attachment for the lifetime of this visual set; do not rely on expiring CI captures. Removal or loss requires a newly reviewed reference.",
-      "availability": "P02 must verify download through the existing authorized PPM attachment path, then CI materializes the pinned bytes and verifies SHA-256 before comparison. No new credentials.",
-      "verifiedAt": null
+      "availability": "Both permanent AEON-1670 attachments were downloaded through the existing authorized local PPM CLI and byte-verified. Hosted CI has no existing PPM attachment-read mechanism; approval cannot become comparison or cut authority until CI verifies the archive SHA-256 and materializes the reviewed baseline.json.",
+      "verifiedAt": "2026-10-23T02:30:54Z",
+      "verificationScope": "local-authorized-ppm-cli-only",
+      "ciVerifiedAt": null
     },
     "onMissing": "fail",
     "onExpired": "fail",
     "onDigestMismatch": "fail",
     "automaticRewrite": false,
-    "currentRunMayBeReference": false
+    "currentRunMayBeReference": false,
+    "ciMaterialization": {
+      "status": "blocked",
+      "missing": "An existing authorized PPM / INSPR attachment-read mechanism available to GitHub-hosted web-setup and web-shard jobs for the AEON-1670 node and these attachment ids.",
+      "evidence": [
+        "ci.yml web-setup, web-unit and web-shard run on ubuntu-latest without a PPM credential, configured PPM client or attachment download step.",
+        "Repository Actions secret names: empty; organization Actions secret names: empty.",
+        "Repository variable names: AEON_POOL_EVENTS and CI_AFFECTED_LANE; environments: homebrew-tap, release-pinning, release-signing.",
+        "Workflow credential references use GITHUB_TOKEN and release/signing App authorities; no existing PPM token exchange or attachment-read bridge was found."
+      ],
+      "stopAuthority": "AEON-1674 round-4 brief, item 2: If CI has no existing way to read a ppm attachment, STOP and report exactly what is missing.",
+      "newCredentialCreated": false,
+      "workflowChanged": false
+    }
   },
   "profiles": {
     "phone": {
@@ -83,8 +129,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-projects-390-light.png",
+            "sha256": "8519c93e2a7a952f30d6ce1d0ab48e32ddd79463459c86199bff6538a0e1efab"
           }
         },
         {
@@ -92,8 +138,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-projects-390-dark.png",
+            "sha256": "ddc43d9b15fa1930dc9bcf549787470657516f12a18e21293a6c116bfc99e02b"
           }
         },
         {
@@ -101,8 +147,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-projects-1440-light.png",
+            "sha256": "0175d598db47e8b029c3536e4aa2a4cb0754a5e19ba8a5e12ce282aae1433462"
           }
         },
         {
@@ -110,11 +156,21 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-projects-1440-dark.png",
+            "sha256": "e6cbde33b03c58a63f0cae97a2d766586df240ab30b8fbafeda9f64ec7308431"
           }
         }
-      ]
+      ],
+      "approval": {
+        "reviewer": "Tick",
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "reportedLocalTime": "03:3x",
+        "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+        "recordedBy": "LEAD-M",
+        "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+        "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+      }
     },
     {
       "id": "tickets",
@@ -571,8 +627,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-access-390-light.png",
+            "sha256": "743a8fe55ec54f8798c192578a9a23b6f23815c0ea662823e193808358c146e5"
           }
         },
         {
@@ -580,8 +636,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-access-390-dark.png",
+            "sha256": "f3d1b4b1d2be51203155ff02d5dd3599112783fd95f18451652a888b4c2fb8c1"
           }
         },
         {
@@ -589,8 +645,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-access-1440-light.png",
+            "sha256": "008eda61cf1a578bb48f9e5cf79e2ad429517eb04dfd8ccb85053949731b2d96"
           }
         },
         {
@@ -598,11 +654,21 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-access-1440-dark.png",
+            "sha256": "8db78eae4a67f02137b5c7a1b377cdad35dacc7246dd9c0168f8fcc10c2af359"
           }
         }
-      ]
+      ],
+      "approval": {
+        "reviewer": "Tick",
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "reportedLocalTime": "03:3x",
+        "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+        "recordedBy": "LEAD-M",
+        "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+        "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+      }
     },
     {
       "id": "knowledge",
@@ -623,8 +689,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-knowledge-390-light.png",
+            "sha256": "ff28b405b63815af0fe2a70f09e59f4eecde859ea5df9038f217b0f1fd6c3b5e"
           }
         },
         {
@@ -632,8 +698,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-knowledge-390-dark.png",
+            "sha256": "17919f4494b5822072960c2368dd0e2900a6c188f82c3a65b62cd47e0fc4b785"
           }
         },
         {
@@ -641,8 +707,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-knowledge-1440-light.png",
+            "sha256": "fccfca14678a5c7468be9b75765c7df1582bfe070abd23ca1e012bc081137532"
           }
         },
         {
@@ -650,11 +716,21 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-knowledge-1440-dark.png",
+            "sha256": "287843c87f236fa98c221a779147daa68852b33a389fb0bfb19b0532b5758640"
           }
         }
-      ]
+      ],
+      "approval": {
+        "reviewer": "Tick",
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "reportedLocalTime": "03:3x",
+        "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+        "recordedBy": "LEAD-M",
+        "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+        "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+      }
     },
     {
       "id": "delivery-numbers",
@@ -785,8 +861,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-quote-editor-390-light.png",
+            "sha256": "64ddaad52116ec3a450ac8bda3a8442dbaae2a9d977aad306ec13e89df3618e0"
           }
         },
         {
@@ -794,8 +870,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-quote-editor-390-dark.png",
+            "sha256": "cafe304c9208107a3bc0215cc26c3853148293465f2c0ba483abd6b66ba76502"
           }
         },
         {
@@ -803,8 +879,8 @@
           "profile": "tablet",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-quote-editor-1024-light.png",
+            "sha256": "6275bc483c8a5b285ac72d2d7c1f25051f3e93836d2bb4da4e136155cbab384a"
           }
         },
         {
@@ -812,8 +888,8 @@
           "profile": "tablet",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-quote-editor-1024-dark.png",
+            "sha256": "f90ddbb1d4dc3945bde50069751f354aafa184e5d7cb536a23b8349b50614943"
           }
         },
         {
@@ -821,8 +897,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-quote-editor-1440-light.png",
+            "sha256": "5a2005772e7f7ed0ebde03fb1e5cbc07ed6fcb205fcadc62d667032c671e1226"
           }
         },
         {
@@ -830,11 +906,22 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-quote-editor-1440-dark.png",
+            "sha256": "624d2d15f950370c1f04a79a8f70c1bdf40c1b1a1747200ba6c49753f5056372"
           }
         }
-      ]
+      ],
+      "approval": {
+        "reviewer": "Tick",
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "reportedLocalTime": "03:3x",
+        "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+        "recordedBy": "LEAD-M",
+        "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+        "nonBlockingFollowUp": "AEON-1688",
+        "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+      }
     },
     {
       "id": "public-quote",
@@ -855,8 +942,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-public-quote-390-light.png",
+            "sha256": "51546bea03be63529e63f592564ad11fe800084f654920ffff09b78bf4f8a837"
           }
         },
         {
@@ -864,8 +951,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-public-quote-390-dark.png",
+            "sha256": "72f868b23dd7e1287ad057e6766bd7a342fb44ce82138d6ac5c9eae3984a38d0"
           }
         },
         {
@@ -873,8 +960,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-public-quote-1440-light.png",
+            "sha256": "af715164cc53349e7cfd0e7d3d72a21b7dbfd27cb9d7a9b7e7ae25a904ee9d2d"
           }
         },
         {
@@ -882,11 +969,21 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-public-quote-1440-dark.png",
+            "sha256": "d5fc77516559612ee0cf117d6bf524c0be456fcc0f48a13c3a0eecec076572bf"
           }
         }
-      ]
+      ],
+      "approval": {
+        "reviewer": "Tick",
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "reportedLocalTime": "03:3x",
+        "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+        "recordedBy": "LEAD-M",
+        "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+        "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+      }
     },
     {
       "id": "start-agent",
@@ -907,8 +1004,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-start-agent-390-light.png",
+            "sha256": "98369040c4211f53fbccdff6647ffce94f4405894058c624b050e63a348226c6"
           }
         },
         {
@@ -916,8 +1013,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-start-agent-390-dark.png",
+            "sha256": "67c4a299ae66225290fda59e5e0fe774559fb6ec4c0b2d8996bc421b89a09054"
           }
         },
         {
@@ -925,8 +1022,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-start-agent-1440-light.png",
+            "sha256": "bee1ff8ca8cf33f69e6508d7df6f2c23b55a830ba2a2b31626cc452a9b6d7ced"
           }
         },
         {
@@ -934,11 +1031,22 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-start-agent-1440-dark.png",
+            "sha256": "ca2dfc4b987393b1b8f792a7e45d541a363af52a296fe3a50ad4415ca046dd15"
           }
         }
-      ]
+      ],
+      "approval": {
+        "reviewer": "Tick",
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "reportedLocalTime": "03:3x",
+        "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+        "recordedBy": "LEAD-M",
+        "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+        "nonBlockingFollowUp": "AEON-1688",
+        "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+      }
     },
     {
       "id": "agent-rules",
@@ -959,8 +1067,8 @@
           "profile": "phone",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agent-rules-390-light.png",
+            "sha256": "516241b932cf0bd0605abc8581da43f10958c63e5f9d2ce332a7f9cf58fea018"
           }
         },
         {
@@ -968,8 +1076,8 @@
           "profile": "phone",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agent-rules-390-dark.png",
+            "sha256": "f6921129daabc4c0354267dcc53bd972cf783b54e2bbcdf4b115fa403d90f276"
           }
         },
         {
@@ -977,8 +1085,8 @@
           "profile": "desktop",
           "theme": "light",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agent-rules-1440-light.png",
+            "sha256": "961a9ad53b88bc6dcb18585035d2ff0428c00d83b3f6f87e6c245ae56a2fb0c5"
           }
         },
         {
@@ -986,11 +1094,21 @@
           "profile": "desktop",
           "theme": "dark",
           "reference": {
-            "attachmentMember": null,
-            "sha256": null
+            "attachmentMember": "V-agent-rules-1440-dark.png",
+            "sha256": "c04d48809cfae61c3ab7f9a363f9f4a232339cc16fe5e7aba15ff9f180699e72"
           }
         }
-      ]
+      ],
+      "approval": {
+        "reviewer": "Tick",
+        "decision": "ok-to-pin",
+        "reviewedOn": "2026-10-23",
+        "reportedLocalTime": "03:3x",
+        "timePrecision": "As recorded by LEAD; exact minute/second not supplied.",
+        "recordedBy": "LEAD-M",
+        "sourceCaptureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+        "evidence": "LEAD-M AEON-1674 round-3/round-4 briefs; AEON-1670 detached manifest attachment b204962a-03a0-4cff-8b28-64abdf136a94"
+      }
     },
     {
       "id": "capacity",

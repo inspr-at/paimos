@@ -2,9 +2,9 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "fix3-fixture-contract-proven-reference-and-product-prerequisites-blocked",
+  "status": "round4-approved-attachment-recorded-ci-read-path-blocked",
   "cuts": false,
-  "note": "Fix3 corrects the legacy Session Chat fixture with exact session-bound native feature-disabled and chat binding/history/live contracts. The new ESSENTIAL browser regression passes remotely and fails against e775cb75 at the intended native 503 versus backend 404 assertion. All prior assertions, 80 comparisons, source tiers, historical evidence and approved reference bytes remain intact; no cuts, demotions or product changes. CI structured outcomes show all 80 actual failures are visual checkpoints, while the Lead Panel, Agents split, performance and status-icon cases mentioned in the report passed. Reference attachment handoff, verified CI materialization and separately owned product fixes still block completion.",
+  "note": "BLOCKED: Round 4 records the permanent AEON-1670 archive and detached-manifest attachment identities/digests, all 30 exact member pins and Tick approval for only seven states. Both attachments downloaded through the existing local PPM CLI and all 62 tar members, 61 payload digests, 30 decoded baseline PNGs and 30 quality reports verified. Hosted web CI has no existing authorized PPM attachment-read mechanism: repository and organization Actions secret-name inventories are empty, and current web jobs have no configured client or download bridge. Item 2 explicitly requires stopping here; LEAD must supply an existing CI-accessible authority. No workflow or per-state gating implementation, acceptance negative-control proof, recaptures, cuts, pushes, deployments or review/model calls are claimed. Static remains for hosted CI under the night protocol.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -25,7 +25,7 @@
     },
     {
       "kind": "reference-authority",
-      "reason": "Tick approved projects, access, knowledge, public-quote, agent-rules, start-agent and quote-editor for source 2e6c7938e. Their exact 30 captures are in the approved round-3 archive. LEAD still supplies the permanent AEON-1670 attachment identity; availability and CI materialization must be verified before any per-area pin or cut. The six changes-requested areas wait for AEON-1688 and the next capture round."
+      "reason": "Permanent attachments and Tick approvals are now recorded and locally verified in round 4. CI materialization remains blocked because GitHub-hosted web jobs have no existing authorized PPM attachment-read mechanism. Round-4 item 2 requires STOP; comparison and cut authority remain disabled. Changed states still await AEON-1688 and the next reference round."
     },
     {
       "kind": "quality-finding",
@@ -50,7 +50,7 @@
     {
       "kind": "reference-authority",
       "round": 3,
-      "reason": "Tick approved projects, access, knowledge, public-quote, agent-rules, start-agent and quote-editor for source 2e6c7938e. Their exact 30 captures are in the approved round-3 archive. LEAD still supplies the permanent AEON-1670 attachment identity; availability and CI materialization must be verified before any per-area pin or cut. The six changes-requested areas wait for AEON-1688 and the next capture round."
+      "reason": "Permanent attachments and Tick approvals are now recorded and locally verified in round 4. CI materialization remains blocked because GitHub-hosted web jobs have no existing authorized PPM attachment-read mechanism. Round-4 item 2 requires STOP; comparison and cut authority remain disabled. Changed states still await AEON-1688 and the next reference round."
     }
   ],
   "measurements": [
@@ -3426,5 +3426,145 @@
       "originalApprovedArchiveUnchanged": true,
       "scratchBranchRemoved": true
     }
+  },
+  "round4": {
+    "brief": "aeon-1674-prune-p02-shell-visual-r4.md",
+    "mergedMain": "0411c88abf894d35253e289129cfa85273e7ae0e",
+    "completedStep": 1,
+    "stoppedAtStep": 2,
+    "stopReason": "An existing authorized PPM / INSPR attachment-read mechanism available to GitHub-hosted web-setup and web-shard jobs for the AEON-1670 node and these attachment ids.",
+    "stopInstruction": "AEON-1674 round-4 brief, item 2: If CI has no existing way to read a ppm attachment, STOP and report exactly what is missing.",
+    "source": {
+      "kind": "existing-ppm-ticket-attachment",
+      "ticket": "AEON-1670",
+      "instance": "PPM / INSPR",
+      "attachmentId": "a2b2206f-adbc-429e-afee-eeaf42422a69",
+      "sha256": "2c17e829b380a9d3d357871f0f18ba8c2d6f021b00bb15c74f2884406a436055",
+      "nodeId": "9b233c96-f176-4151-bba1-d82cea3ccc89",
+      "name": "AEON-1674-approved-1-2e6c7938e.tar",
+      "bytes": 13977600,
+      "format": "tar",
+      "captureSHA": "2e6c7938e5a5e8b7d8febdffd5c8e7efc5228498",
+      "manifest": {
+        "attachmentId": "b204962a-03a0-4cff-8b28-64abdf136a94",
+        "name": "AEON-1674-approved-1-2e6c7938e.tar.manifest.json",
+        "bytes": 29816,
+        "sha256": "e826bde57eccd7bbb711072474f9dea94f5710bfb5313cb1469518ddac89dc16"
+      },
+      "baselineBundle": {
+        "attachmentMember": "baseline.json",
+        "sha256": "c7673b146cc62d0e055bbe8fe9020bfa7f314b89a052a6ee75123e88cbacefe8"
+      },
+      "archiveManifest": {
+        "attachmentMember": "manifest.json",
+        "sha256": "b5e7c215b92ce31ff4ac19fb1e8d4fbeea3d56ed18a6b6a9447e8cd5c3cd9ab5"
+      }
+    },
+    "attachmentVerification": {
+      "verifiedAt": "2026-10-23T02:30:54Z",
+      "archiveSHA256": "2c17e829b380a9d3d357871f0f18ba8c2d6f021b00bb15c74f2884406a436055",
+      "detachedManifestSHA256": "e826bde57eccd7bbb711072474f9dea94f5710bfb5313cb1469518ddac89dc16",
+      "archiveMembersVerified": 62,
+      "payloadDigestsVerified": 61,
+      "decodedBaselinePNGsVerified": 30,
+      "qualityReportsVerified": 30,
+      "approvedStates": [
+        "projects",
+        "access",
+        "knowledge",
+        "public-quote",
+        "agent-rules",
+        "start-agent",
+        "quote-editor"
+      ],
+      "approvedCheckpoints": 30,
+      "ciAvailabilityVerified": false,
+      "imageComparisonsClaimed": 0
+    },
+    "ciAccessEvidence": [
+      "ci.yml web-setup, web-unit and web-shard run on ubuntu-latest without a PPM credential, configured PPM client or attachment download step.",
+      "Repository Actions secret names: empty; organization Actions secret names: empty.",
+      "Repository variable names: AEON_POOL_EVENTS and CI_AFFECTED_LANE; environments: homebrew-tap, release-pinning, release-signing.",
+      "Workflow credential references use GITHUB_TOKEN and release/signing App authorities; no existing PPM token exchange or attachment-read bridge was found."
+    ],
+    "requiredGatingTable": [
+      {
+        "decision": "approved",
+        "states": [
+          "projects",
+          "access",
+          "knowledge",
+          "public-quote",
+          "agent-rules",
+          "start-agent",
+          "quote-editor"
+        ],
+        "checkpoints": 30,
+        "afterMaterialization": "strict image comparison plus quality",
+        "implemented": false
+      },
+      {
+        "decision": "changes-requested",
+        "states": [
+          "tickets",
+          "agents",
+          "decision-desk",
+          "account-use-matrix",
+          "delivery-numbers",
+          "models"
+        ],
+        "checkpoints": 30,
+        "afterMaterialization": "quality checks plus explicit awaiting reference; absence of reference alone is nonblocking",
+        "implemented": false
+      },
+      {
+        "decision": "deferred",
+        "states": [
+          "goals",
+          "session-chat",
+          "hours",
+          "capacity",
+          "ticket-workspace"
+        ],
+        "checkpoints": 20,
+        "afterMaterialization": "quality checks plus explicit awaiting reference; absence of reference alone is nonblocking",
+        "implemented": false
+      }
+    ],
+    "acceptanceNegativeControls": {
+      "tamperedArchive": "not run: CI archive materialization is blocked before implementation",
+      "pinnedImageChanged": "not run in this round: approved archive cannot yet be materialized by CI",
+      "awaitingStateNeverBlocks": "not run: per-state gating change deferred under the explicit item-2 STOP instruction",
+      "archiveHashVerification": "Both downloaded attachment digests and every archive payload were byte-verified; this is attachment evidence, not CI fail-closed acceptance proof."
+    },
+    "existingTestFixtureChanges": [
+      "Ledger test expects the real recorded approved subset instead of the superseded pending approval.",
+      "Missing-pin negative control constructs an explicitly unpinned synthetic manifest rather than assuming real reference authority remains empty."
+    ],
+    "tests": {
+      "status": "hosted-CI-pending",
+      "reason": "No local test/build/browser suite run; the worktree is on the daily Mac and the brief assigns static to hosted CI under the night protocol."
+    },
+    "static": {
+      "status": "hosted-CI-pending",
+      "reason": "Round-4 brief: Static in hosted CI (night protocol).",
+      "countedAsGreen": false
+    },
+    "remaining": [
+      "LEAD identifies an existing authorized PPM attachment-read mechanism available to GitHub-hosted web jobs; do not create or copy credentials.",
+      "Then implement archive fetching by attachment id, bounded integrity-checked materialization and per-state quality/comparison reporting.",
+      "Prove tampered archive fails, pinned image changes fail and awaiting reference alone does not block.",
+      "Run affected tests and required hosted static checks before reporting completion."
+    ],
+    "handoffPercent": 40,
+    "newTestRegistrations": 0,
+    "newSourceFiles": [],
+    "outsideWriteSet": [],
+    "recapturedChangesRequestedStates": false,
+    "cuts": false,
+    "workflowChanged": false,
+    "newCredentialCreated": false,
+    "noPushOrDeploy": true,
+    "noModelOrReviewGateCalls": true
   }
 }
