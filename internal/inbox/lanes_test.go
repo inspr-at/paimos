@@ -265,15 +265,26 @@ func testLaneStatusFinalWriteAuthority(t *testing.T) {
 			session := messageTestSession(t, w, project, w.agent, "Revoked lane")
 			var target string
 			if err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.agent.TenantID, func(tx pgx.Tx) error {
-				return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
- SELECT $1,id,'MSG-3','Revoked target',$2 FROM node_kinds WHERE slug='work' RETURNING id::text`, w.agent.TenantID, project).Scan(&target)
+				if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
+ SELECT $1,id,'MSG-3','Revoked target',$2 FROM node_kinds WHERE slug='work' RETURNING id::text`, w.agent.TenantID, project).Scan(&target); err != nil {
+					return err
+				}
+				var role string
+				if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'lane_reporter','Lane reporter') RETURNING id::text`, w.agent.TenantID).Scan(&role); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, w.agent.TenantID, role, w.agent.Scopes); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, w.agent.ID, role)
+				return err
 			}); err != nil {
 				t.Fatal(err)
 			}
 			var pause atomic.Bool
 			admitted, resume := make(chan struct{}), make(chan struct{})
 			var release sync.Once
-			t.Cleanup(func() { release.Do(func() { close(resume) }) })
+			defer release.Do(func() { close(resume) })
 			mux := http.NewServeMux()
 			m.base.Mount(mux)
 			srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
@@ -318,15 +329,22 @@ func testLaneStatusFinalWriteAuthority(t *testing.T) {
 				if _, err := tx.Exec(ctx, db.TenantFenceSQL); err != nil {
 					return err
 				}
-				_, err := tx.Exec(ctx, `DELETE FROM role_permissions rp USING roles r
- WHERE rp.tenant_id=r.tenant_id AND rp.role_id=r.id AND r.key='member' AND rp.permission=$1`, permission)
+				tag, err := tx.Exec(ctx, `DELETE FROM role_permissions rp USING roles r
+ WHERE rp.tenant_id=r.tenant_id AND rp.role_id=r.id AND r.key='lane_reporter' AND rp.permission=$1`, permission)
+				if err == nil && tag.RowsAffected() != 1 {
+					return fmt.Errorf("revocation changed %d rows", tag.RowsAffected())
+				}
 				return err
 			}); err != nil {
 				t.Fatal(err)
 			}
 			release.Do(func() { close(resume) })
 			got := dbtest.Await(t, ctx, done)
-			if got.status != 403 {
+			want := 403
+			if permission == "nodes.read" {
+				want = 404 // A now-hidden target is indistinguishable from absent.
+			}
+			if got.status != want {
 				t.Fatalf("revoked %s returned %d: %s", permission, got.status, got.body)
 			}
 			var latest string
