@@ -375,5 +375,5 @@
   {"table":"work_parent_releases","export":"","review":"parent_node_id project_node_id release_node_id retained_membership","secret":"","metadata":"tenant_id","subjects":"","locator":"tenant_id","hold":"audit-review"},
   {"table":"work_vocabulary","export":"","review":"revision vocabulary","secret":"","metadata":"tenant_id","subjects":"","locator":"tenant_id","hold":"none"},
   {"table":"workspace_model_provider","export":"id revision updated_at","review":"settings","secret":"credential","metadata":"tenant_id","subjects":"","locator":"id revision","hold":"none"},
-  {"table":"desk_instance_connections","export":"origin created_at last_used_at","review":"principal_id","secret":"token_hash state_hash","metadata":"tenant_id id instance_tag expires_at revoked_at","subjects":"principal_id","locator":"id","hold":"none"}
+  {"table":"desk_instance_connections","export":"origin created_at last_used_at","review":"principal_id","secret":"token_hash state_hash exchange_code_hash pkce_challenge","metadata":"tenant_id id instance_tag expires_at revoked_at exchange_expires_at exchange_used_at","subjects":"principal_id","locator":"id","hold":"none"}
 ]

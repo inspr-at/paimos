@@ -12,13 +12,17 @@ No account role or credential belongs in deployment configuration.
 
 An active signed-in person chooses Connect. A top-level page on the sibling
 shows their account and asks for confirmation. Any person can connect; an agent
-key cannot. Confirmation is a same-origin POST with a random state. The home
-instance consumes its hash once and issues a 90-day read-only summary grant.
-It stores only the grant hash, person, receiving origin, timestamps and state
-hash. The fixed receiving address is `/instances/connected`; the credential
-travels only in its fragment. The receiving browser verifies the pending state,
-its ten-minute lifetime, local person and configured sibling, consumes it once,
-and removes the fragment before authentication/return-path processing or rendering.
+key cannot. The receiving browser creates a state and an independent PKCE
+verifier, keeps both in its person-bound pending record, and sends only the
+S256 challenge to the confirmation page. Confirmation is a same-origin POST.
+The home instance stores only a SHA-256 code hash, bound state hash, challenge,
+origin and a 60-second expiry. The fixed receiving address is
+`/instances/connected`; its fragment carries a single-use code and state.
+The browser removes that fragment before authentication/return-path processing
+or rendering. It checks its pending person's identity and configured sibling,
+then exchanges code, state and verifier in a CORS POST with credentials omitted.
+Only the no-store response body carries the 90-day read-only bearer. Successful
+exchange atomically consumes the code and stores only the new bearer hash.
 
 Credentials stay in browser storage, partitioned by local tenant and person.
 They are never saved through preference APIs, displayed, or sent to the other
@@ -32,27 +36,43 @@ five first lines by default (title, project key, asker, creation time and exact
 app link), expanding on request to at most 100 first lines with explicit partial
 coverage and a home-Desk link for larger sets, total open/held counts, the first upcoming step and an as-of timestamp.
 There is no context, answer, option, decision or write authority. Exact configured
-origins receive CORS for GET with Authorization, including preflight, without
+origins receive CORS for GET and DELETE with Authorization and POST exchange
+with Content-Type, including preflight, without
 Access-Control-Allow-Credentials. A credential is also bound to its receiving origin.
 
 A stolen raw grant can read that person's current summary until expiry or
 revocation, including by a non-browser client that supplies the bound Origin.
 Origin binding is not protection against theft of a bearer credential. It cannot
 sign in, read full decision context, change anything, issue another grant or
-exercise another person's authority. SHA-256 protects the high-entropy grant at
-rest. Personal settings on the home instance list issued grants without hashes
+exercise another person's authority. It may revoke only its own grant.
+Reads are limited to 12 per minute per token hash within each server process,
+with 429 and Retry-After when exceeded; the browser keeps that connection as
+unreachable, retaining its dated last answer. Usage timestamps update only
+when older than five minutes. Normal polls do not take the tenant writer
+fence; due usage writes reauthorize under that fence. The fresh post-read
+snapshot still rejects exact revocation, expiry, deactivation and access loss.
+SHA-256 protects the high-entropy grant at rest. Personal settings on the home instance list issued grants without hashes
 or raw values and revoke them immediately. Removing a connection on the receiving
-browser deletes its local credential and offers Undo; home-instance revocation
-ends the grant for every copy. Permission loss and inactive accounts also end reads.
+browser first revokes it on the home instance and then deletes its local
+credential. Failure keeps the credential so Disconnect can be retried and
+never reports success. Replacement revokes the previous grant before exchanging
+and adopting the new one. Explicit sign-out clears that person’s stored grants,
+notification claims, settings and pending verifiers, leaving other people’s
+storage alone. Home-instance revocation ends the grant for every copy.
+Permission loss and inactive accounts also end reads.
 
-Unknown/disconnected instances prevent a global all-clear statement. Unreachable
+Unknown discovery or an unread connected grant prevents a global all-clear
+statement. Unconnected and ended connections contribute no items. Unreachable
 instances retain only this tab's last successful summary, explicitly dated;
 expired/revoked connections discard cached items. Consolidated badges include
 known sibling totals, and their tooltip shows each instance and stale/unknown
 coverage. Goals expands sibling rows only on click and remembers its row slots.
 
 Browser notices use the existing device opt-in. The initial read establishes a
-baseline; subsequent new item identities are claimed once in browser storage,
+baseline; only items created after the previous successful source read can
+notify. Items merely entering the top five never notify. Claims and the source
+watermark survive reload, while a new grant also excludes its initial backlog.
+Eligible item identities are claimed once in browser storage,
 with a browser lock for multiple tabs. Notices open the exact home item. Where
 page notifications are unavailable, the existing service worker uses a local
 handoff with the home URL in a fragment; the app rechecks the local person and
@@ -64,3 +84,15 @@ v2 supplies consolidated count breakdowns, remote Desk/preview groups, the
 Decided-tab home links, notification copy and per-instance notification switches.
 The shared sync line retains the local read status and includes each sibling’s
 read status and age in its tooltip, including cached or ended connections.
+
+A stolen callback code, including the entire value recovered from browser
+history or history sync, cannot grant a summary read. It cannot be exchanged
+without the independent PKCE verifier retained in the receiving browser's
+person-bound pending record. It expires in about 60 seconds and is unusable
+after successful exchange. Code plus state plus the matching verifier can
+redeem the still-unused code during that window; origin headers alone cannot
+prove possession. A stolen bearer still permits the bounded summary reads
+above until revocation, expiry or access loss. No code or bearer is an
+interactive browser session. A same-origin XSS can still steal browser storage;
+non-extractable request proofs, home-instance Disconnect all, and clearing old
+peek cookies on discovery remain follow-up work.

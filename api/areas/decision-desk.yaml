@@ -95,6 +95,7 @@ paths:
         '204': {description: "Grant ended"}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+        '429': {description: "Per-token request limit reached", headers: {Retry-After: {schema: {type: integer, minimum: 1}}}, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /decision-desk/connections:
     get:
       operationId: decisionDeskConnections

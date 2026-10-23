@@ -388,8 +388,10 @@ func TestConnectionHistoryCodeRequiresSingleUsePKCE(t *testing.T) {
 		if code == "" || params.Has("token") || strings.Contains(out.URL, "desk_") {
 			t.Fatal("history received a bearer instead of a single-use code")
 		}
-		if w = request("GET", "/api/decision-desk/owner-summary", sibling.Origin, code, nil); w.Code != 401 {
-			t.Fatalf("history code granted a read: %d", w.Code)
+		for _, historyValue := range []string{code, strings.Replace(code, "code_", "desk_", 1)} {
+			if w = request("GET", "/api/decision-desk/owner-summary", sibling.Origin, historyValue, nil); w.Code != 401 {
+				t.Fatalf("history value granted a read: %d", w.Code)
+			}
 		}
 		var stored []byte
 		var seconds float64
@@ -429,6 +431,12 @@ func TestConnectionHistoryCodeRequiresSingleUsePKCE(t *testing.T) {
 		if w = exchange(state, strings.Repeat("v", 43)); w.Code != 401 {
 			t.Fatalf("replayed code: %d", w.Code)
 		}
+		credentialRequest := httptest.NewRequest("GET", "/api/decision-desk/owner-summary", nil)
+		credentialRequest.Header.Set("Authorization", "Bearer "+credential.Token)
+		if principal, _, ok := summaryCredential(credentialRequest); !ok || principal.BrowserSession {
+			t.Fatal("desk capability claims an interactive browser session")
+		}
+
 		// The exact value in history cannot read, even after successful exchange.
 		if w = request("GET", "/api/decision-desk/owner-summary", sibling.Origin, code, nil); w.Code != 401 {
 			t.Fatal("used history value granted a read")
@@ -528,5 +536,41 @@ func TestExchangeAndDisconnectPreflight(t *testing.T) {
 		if w.Code != tc.want || w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Header().Get("Vary"), "Origin") || w.Header().Get("Access-Control-Allow-Credentials") != "" {
 			t.Fatalf("%s preflight: %d %s", tc.path, w.Code, w.Body.String())
 		}
+	}
+}
+
+// Risk: concurrent due polls all write usage, or a sliding-window boundary
+// admits a burst early. This clock is isolated from all database timestamps.
+func TestSummaryLimiterWindowAndUsageClaim(t *testing.T) {
+	m := New(nil)
+	now := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	m.summaryNow = func() time.Time { return now }
+	hash := sha256.Sum256([]byte("limiter-test"))
+	retry, finish := m.summaryAllowance(hash[:], true)
+	if retry != 0 || finish == nil {
+		t.Fatal("first due read must claim the usage write")
+	}
+	for range 11 {
+		if retry, next := m.summaryAllowance(hash[:], true); retry != 0 || next != nil {
+			t.Fatal("parallel read claimed another usage write or lost its read budget")
+		}
+	}
+	finish(true)
+	if retry, next := m.summaryAllowance(hash[:], true); retry != 60 || next != nil {
+		t.Fatalf("burst limit: retry %d", retry)
+	}
+	now = now.Add(30 * time.Second)
+	if retry, _ := m.summaryAllowance(hash[:], false); retry != 30 {
+		t.Fatalf("retry after: %d", retry)
+	}
+	now = now.Add(31 * time.Second)
+	if retry, next := m.summaryAllowance(hash[:], true); retry != 0 || next != nil {
+		t.Fatal("recent usage must not write after the rate window expires")
+	}
+	now = now.Add(4 * time.Minute)
+	if retry, next := m.summaryAllowance(hash[:], true); retry != 0 || next == nil {
+		t.Fatal("usage write was not due after five minutes")
+	} else {
+		next(true)
 	}
 }

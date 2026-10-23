@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -379,18 +380,32 @@ func (m *Module) disconnectSummary(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	// Verify before taking the fence; final authorization and update are inside it.
 	var id string
+	var revoked bool
 	lookup := func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT id::text FROM desk_instance_connections WHERE tenant_id=$1 AND principal_id=$2 AND token_hash=$3 AND origin=$4`, p.TenantID, p.ID, hash, r.Header.Get("Origin")).Scan(&id)
+		err := tx.QueryRow(ctx, `SELECT id::text,revoked_at IS NOT NULL FROM desk_instance_connections WHERE tenant_id=$1 AND principal_id=$2 AND token_hash=$3 AND origin=$4`, p.TenantID, p.ID, hash, r.Header.Get("Origin")).Scan(&id, &revoked)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConnectionEnded
 		}
 		return err
 	}
 	err := db.InTenantReadSnapshot(db.NoProjects(ctx, "decision desk: validate self-revocation"), m.pool, p.TenantID, lookup)
+	if err == nil && revoked {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err == nil {
+		retry, _ := m.summaryAllowance(hash, false)
+		if retry > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(retry))
+			httpapi.WriteError(w, 429, "connection request limit reached")
+			return
+		}
 		err = m.connectionWrite(ctx, p, func(tx pgx.Tx) error {
 			if err := lookup(tx); err != nil {
 				return err
+			}
+			if revoked {
+				return nil
 			}
 			_, err := tx.Exec(ctx, `UPDATE desk_instance_connections SET revoked_at=coalesce(revoked_at,clock_timestamp()) WHERE tenant_id=$1 AND id=$2`, p.TenantID, id)
 			return err
