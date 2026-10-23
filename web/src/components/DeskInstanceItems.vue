@@ -62,7 +62,7 @@ const announcement = computed(() => ['ok', 'unreachable', 'ended'].includes(prop
       <AppIcon name="server" :size="16" />
       <span class="instance-copy" :data-tip="`${read.tag} · ${message}`"><b :data-tip="tooltip">{{ variant === 'goals' ? read.tag : text(`On ${read.tag}`, `Auf ${read.tag}`) }}</b><span aria-hidden="true"> · </span>{{ headerMessage }}</span>
       <span class="instance-actions">
-        <span class="action-slot">
+        <span v-if="variant === 'goals' || action" class="action-slot">
           <span v-for="label in [text('Reconnect', 'Neu verbinden'), text('Try again', 'Erneut versuchen')]" :key="label" class="action-size" aria-hidden="true">{{ label }}</span>
           <button v-if="action" type="button" class="instance-action" @click="act">{{ action }}</button>
         </span>

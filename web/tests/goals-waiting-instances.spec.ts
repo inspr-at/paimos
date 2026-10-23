@@ -128,6 +128,8 @@ for (const width of [1440, 1024, 390] as const) {
     if (width === 390) {
       await page.setViewportSize({ width: 320, height: 950 })
       expect(await page.locator('.desk-page').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+      const heading = page.getByTestId('instance-pma').locator('.instance-copy')
+      expect(await heading.evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1)
       const item = await page.getByTestId('instance-pma').locator('.instance-item').first().boundingBox()
       expect(item!.height).toBeGreaterThanOrEqual(44)
       await shot(page, info, 'desk-320-light')
