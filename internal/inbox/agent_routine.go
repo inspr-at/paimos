@@ -3,11 +3,11 @@ package inbox
 
 import (
 	"context"
-	"errors"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -19,7 +19,7 @@ import (
 // principal's inbox remains available to agentd/listening workers.
 func QueueAgentRoutineTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal, owner, project, run, body string) (string, []events.Change, error) {
 	if _, err := normalizeSend(sender, owner, body, "routine-run/"+run, nil, nil); err != nil {
-		return "", nil, err
+		return "", nil, workorders.Fail(400, err.Error())
 	}
 	for _, check := range []struct {
 		p          tenant.Principal
@@ -54,7 +54,7 @@ func QueueAgentRoutineTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal
 		return "", nil, err
 	}
 	if len(addresses) > 1 {
-		return "", nil, errors.New("routine owner has ambiguous primary targets")
+		return "", nil, workorders.Fail(409, "routine owner has ambiguous primary targets")
 	}
 	// Fence fallback and ordinary webhook FK parents before returning any audit.
 	var targets int
@@ -62,7 +62,7 @@ func QueueAgentRoutineTx(ctx context.Context, tx pgx.Tx, sender tenant.Principal
 		return "", nil, err
 	}
 	if targets > 32 {
-		return "", nil, errors.New("routine owner webhook target limit exceeded")
+		return "", nil, workorders.Fail(409, "routine owner webhook target limit exceeded")
 	}
 	if len(addresses) == 1 {
 		if _, err := tx.Exec(ctx, `SELECT id FROM inbox_message_targets WHERE project_id=$1 AND address=$2 AND enabled ORDER BY id FOR KEY SHARE`, project, addresses[0]); err != nil {

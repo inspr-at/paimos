@@ -11,9 +11,11 @@ with `PUT /api/recurrences/{id}/agent-owner`, supplying `expected_revision`,
 `owner_principal_id` and `destination`. The grant requires an interactive person
 session and live recurrence, inbox and output permissions for the person and
 agent. It pauses the routine; the existing resume control activates its schedule.
-Changing the routine's input invalidates the grant until renewed. Pause/resume
-controls preserve an otherwise unchanged grant. Personal/workspace routines and
-native assignments retain their existing ownership and execution consent rules.
+Changing the routine's input clears the grant until renewed, so later runs use
+the edited person/native definition. Earlier runs retain their frozen grant.
+Pause/resume controls preserve an otherwise unchanged grant. Personal/workspace
+routines and native assignments retain their existing ownership and execution
+consent rules.
 
 The destination is `ticket_comment` with a same-project `ticket_id`, `new_ticket`
 under the routine output parent, or `knowledge`. Every occurrence retains its
@@ -33,6 +35,11 @@ including admitted runs and unknown costs. Missing policy holds the run with
 `owner_weekly_budget_exhausted`. The next scheduler pass retries budget holds.
 AEON-754 package F supplies the package A policy integration. Production dispatch
 therefore remains closed until that integration is installed.
+
+Reconciliation cancels pending dispatches for retired routines, unavailable
+targets and permanently invalid grants or inputs. Temporary failures defer the
+dispatch for a later pass, allowing other runs to progress. Refused inbox
+acceptance rolls back any provisional budget reservation.
 
 The server wires `routineactions.WriteAgentResultTx` through
 `Module.WithAgentResultWriter`, sharing the ordinary result mutation guards.

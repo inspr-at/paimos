@@ -57,6 +57,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"recurrences/module.go:lock":                        "tenant:NO KEY UPDATE tree:try tree",
 		"recurrences/agent_owner.go:setAgentOwner":          "recurrence.lock",
 		"recurrences/agent_dispatch.go:dispatchAgentRun":    "recurrence.lock",
+		"recurrences/agent_dispatch.go:deferAgentDispatch":  "recurrence.lock",
 		"recurrences/agent_result.go:completeAgentResult":   "recurrence.lock",
 		"recurrences/module.go:create":                      "recurrence.lock",
 		"recurrences/module.go:update":                      "recurrence.lock",

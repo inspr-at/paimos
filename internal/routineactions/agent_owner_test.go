@@ -4,6 +4,7 @@ package routineactions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -422,4 +424,214 @@ func (f *agentOwnedFixture) receipts(id string) []Occurrence {
 		return rows.Err()
 	})
 	return out
+}
+
+// Risk: an invalidated agent grant must not intercept later native/person work.
+func TestAgentOwnedRoutineEditRestoresNativeOwnership(t *testing.T) {
+	f := agentOwnedSetup(t)
+	r, _ := f.agentRoutine()
+	before := f.manual(r.ID, "before-edit")
+	if before.Run == nil {
+		t.Fatal("granted routine did not create an agent run")
+	}
+	var kind string
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `SELECT aeon_seed_work_kinds($1)`, f.p.TenantID); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT id::text FROM work_kinds WHERE slug='backend' AND project_id IS NULL AND archived_at IS NULL`).Scan(&kind)
+	})
+	edit := r.Input
+	edit.QueueEach = true
+	edit.Template.EstimateHours = 1
+	edit.Template.Criteria = []string{"Verify the native review"}
+	edit.Definition.Assignment = &recurrences.Assignment{
+		Goal: "Review the native workspace", Role: "build", WorkKindID: kind,
+		AllowedActions:      []string{"work.update"},
+		RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"},
+		Budget:              recurrences.DefinitionBudget{Mode: "off"},
+	}
+	f.call(f.p, "PUT", "/api/recurrences/"+r.ID, struct {
+		Input
+		ExpectedRevision int64 `json:"expected_revision"`
+	}{edit, r.Revision}, 200)
+	native := f.manual(r.ID, "after-edit")
+	if native.Run == nil || native.Run.WorkOrderID == nil || native.Run.AgentRunID == nil {
+		t.Fatalf("definition edit did not restore native intent: %+v", native)
+	}
+	if raw := f.call(f.p, "GET", "/api/recurrences/"+r.ID+"/agent-owner", nil, 200); strings.TrimSpace(string(raw)) != "null" {
+		t.Fatalf("definition edit retained the agent grant: %s", raw)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var restored bool
+		err := tx.QueryRow(t.Context(), `SELECT r.owner_principal_id=$2 AND r.agent_owner_config IS NULL
+ AND r.assignment->>'goal'=$3 AND NOT r.execute_consent AND r.consent_revision=0
+ AND EXISTS(SELECT 1 FROM routine_effect_outbox WHERE run_id=r.id AND kind='routine.execute' AND state='pending')
+ AND NOT EXISTS(SELECT 1 FROM routine_effect_outbox WHERE run_id=r.id AND kind='routine.agent_dispatch')
+ AND EXISTS(SELECT 1 FROM routine_runs WHERE id=$4 AND agent_owner_config IS NOT NULL)
+ FROM routine_runs r WHERE r.id=$1`, native.Run.ID, f.p.ID, edit.Definition.Assignment.Goal, before.Run.ID).Scan(&restored)
+		if err == nil && !restored {
+			t.Fatal("edit lost person ownership, native consent rules or the frozen earlier run")
+		}
+		return err
+	})
+}
+
+// Risks: permanent refusals monopolizing a bounded batch, transient failures
+// immediately retrying, and reservations surviving a refused inbox acceptance.
+// Outbox timestamps and the schedule fixture use the database clock; no sleeps.
+func TestAgentRoutineDispatchFailuresYieldQueue(t *testing.T) {
+	for _, scenario := range []struct {
+		name, reason string
+		transient    bool
+	}{
+		{"retired", "routine_unavailable", false},
+		{"deleted_parent", "routine_target_unavailable", false},
+		{"moved_parent", "routine_target_unavailable", false},
+		{"invalid_owner", "invalid_agent_owner", false},
+		{"invalid_current_grant", "invalid_agent_owner", false},
+		{"invalid_assignment", "invalid_agent_assignment", false},
+		{"ambiguous_targets", "agent_dispatch_refused", false},
+		{"webhook_limit", "agent_dispatch_refused", false},
+		{"budget_client_error", "agent_dispatch_refused", false},
+		{"transient_budget", "agent_dispatch_retry", true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			f := agentOwnedSetup(t)
+			bad, owner := f.agentRoutine()
+			batch := 1
+			if scenario.name == "retired" || scenario.transient {
+				batch = 20 // Fill the scheduler's entire dispatch batch.
+			}
+			var runs []string
+			for i := 0; i < batch; i++ {
+				o := f.manual(bad.ID, fmt.Sprintf("bad-%d", i))
+				if o.Run == nil {
+					t.Fatal("missing agent dispatch intent")
+				}
+				runs = append(runs, o.Run.ID)
+			}
+			if scenario.name == "retired" {
+				// Reproduce production's missing-policy hold before retirement.
+				if err := f.m.DispatchAgentRuns(t.Context(), f.p.TenantID); err != nil {
+					t.Fatal(err)
+				}
+				f.call(f.p, "DELETE", "/api/recurrences/"+bad.ID, map[string]int64{"expected_revision": bad.Revision}, 204)
+			}
+			good, _ := f.agentRoutine()
+			healthy := f.manual(good.ID, "healthy")
+			if healthy.Run == nil {
+				t.Fatal("missing healthy dispatch intent")
+			}
+			var movedTo string
+			if scenario.name == "moved_parent" {
+				f.node("project", nil, &movedTo)
+			}
+			f.tx(func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE routine_effect_outbox SET reconcile_after=clock_timestamp()-interval '1 minute' WHERE run_id=ANY($1::uuid[])`, runs); err != nil {
+					return err
+				}
+				var err error
+				switch scenario.name {
+				case "deleted_parent":
+					if _, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=clock_timestamp() WHERE parent_id=$1`, bad.ParentID); err != nil {
+						return err
+					}
+					_, err = tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=clock_timestamp() WHERE id=$1`, bad.ParentID)
+				case "moved_parent":
+					_, err = tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, bad.ParentID, movedTo)
+				case "invalid_owner":
+					_, err = tx.Exec(t.Context(), `UPDATE routine_runs SET agent_owner_config='[]' WHERE id=ANY($1::uuid[])`, runs)
+				case "invalid_current_grant":
+					_, err = tx.Exec(t.Context(), `UPDATE recurrence_definitions SET agent_owner_config='[]' WHERE recurrence_id=$1`, bad.ID)
+				case "invalid_assignment":
+					_, err = tx.Exec(t.Context(), `UPDATE routine_runs SET assignment='{"template":{"title":1}}' WHERE id=ANY($1::uuid[])`, runs)
+				case "ambiguous_targets":
+					_, err = tx.Exec(t.Context(), `INSERT INTO inbox_message_targets(tenant_id,project_id,principal_id,address,adapter,target_kind,maximum_level,role,version,sealed_target,has_secret)
+ SELECT $1,$2,$3,'grok_bot:ambiguous-'||i,'grok_bot_routine','webhook','simple','primary',1,decode('00','hex'),false FROM generate_series(1,2) i`, f.p.TenantID, f.project, owner.ID)
+				case "webhook_limit":
+					_, err = tx.Exec(t.Context(), `INSERT INTO inbox_delivery_targets(tenant_id,principal_id,kind,webhook_url)
+ SELECT $1,$2,'webhook','https://example.invalid/routine/'||i FROM generate_series(1,33) i`, f.p.TenantID, owner.ID)
+				}
+				return err
+			})
+			unavailable := errors.New("temporary budget store failure")
+			f.m.WithAgentBudget(func(ctx context.Context, tx pgx.Tx, request AgentBudgetRequest) (AgentBudgetDecision, error) {
+				// A policy may reserve in this transaction before inbox validation.
+				if _, err := tx.Exec(ctx, `UPDATE nodes SET fields=fields||jsonb_build_object('test_reservations',coalesce((fields->>'test_reservations')::int,0)+1) WHERE id=$1`, f.project); err != nil {
+					return AgentBudgetDecision{}, err
+				}
+				if request.RunID != healthy.Run.ID {
+					if scenario.transient {
+						return AgentBudgetDecision{}, unavailable
+					}
+					if scenario.name == "budget_client_error" {
+						return AgentBudgetDecision{}, workorders.Fail(409, "policy refuses this run")
+					}
+				}
+				return AgentBudgetDecision{Allowed: true}, nil
+			})
+			for i := 0; i < 2; i++ {
+				err := f.m.DispatchAgentRuns(t.Context(), f.p.TenantID)
+				if scenario.transient && i == 0 {
+					if !errors.Is(err, unavailable) {
+						t.Fatalf("transient dispatch lost its failure: %v", err)
+					}
+				} else if err != nil {
+					t.Fatalf("dispatch pass %d: %v", i+1, err)
+				}
+			}
+			f.tx(func(tx pgx.Tx) error {
+				var refused, queued, reservations int
+				state := "cancelled"
+				if scenario.transient {
+					state = "pending"
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM routine_runs r JOIN routine_effect_outbox o ON o.run_id=r.id
+ WHERE r.id=ANY($1::uuid[]) AND r.state='held' AND o.state=$2 AND o.result->>'reason'=$3
+ AND o.reconcile_after>o.updated_at AND NOT EXISTS(SELECT 1 FROM inbox_messages WHERE idempotency_key='routine-run/'||r.id::text)`, runs, state, scenario.reason).Scan(&refused); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM routine_effect_outbox o JOIN inbox_messages m ON m.idempotency_key='routine-run/'||o.run_id::text
+ WHERE o.run_id=$1 AND o.state='succeeded' AND o.result->>'reason'='queued_to_owner'`, healthy.Run.ID).Scan(&queued); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT coalesce((fields->>'test_reservations')::int,0) FROM nodes WHERE id=$1`, f.project).Scan(&reservations); err != nil {
+					return err
+				}
+				if refused != batch || queued != 1 || reservations != 1 {
+					t.Fatalf("queue did not progress atomically: refused=%d/%d queued=%d reservations=%d", refused, batch, queued, reservations)
+				}
+				return nil
+			})
+		})
+	}
+}
+
+func (f *agentOwnedFixture) agentRoutine() (Recurrence, tenant.Principal) {
+	f.t.Helper()
+	owner := tenant.Principal{TenantID: f.p.TenantID, Kind: tenant.Agent, Scopes: []string{"nodes.read", Permission, "knowledge.write", "inbox.read"}}
+	var role string
+	f.tx(func(tx pgx.Tx) error {
+		if err := tx.QueryRow(f.t.Context(), `INSERT INTO principals(tenant_id,kind,name,agent_access_configured) VALUES($1,'agent','Routine owner',true) RETURNING id::text`, f.p.TenantID).Scan(&owner.ID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(f.t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,$2,'Routine worker') RETURNING id::text`, f.p.TenantID, "routine_"+strings.ReplaceAll(owner.ID, "-", "")).Scan(&role); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(f.t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, f.p.TenantID, role, owner.Scopes); err != nil {
+			return err
+		}
+		_, err := tx.Exec(f.t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.p.TenantID, owner.ID, role, f.project)
+		return err
+	})
+	in := f.input()
+	in.OverlapPolicy = "create"
+	in.Definition = &Definition{Scope: DefinitionScope{Kind: "project", ProjectID: f.project}, OwnerPrincipalID: f.p.ID}
+	f.node("work", &f.project, &in.ParentID)
+	r := f.create(in)
+	f.call(f.p, "PUT", "/api/recurrences/"+r.ID+"/agent-owner", map[string]any{
+		"expected_revision": r.Revision, "owner_principal_id": owner.ID, "destination": AgentDestination{Kind: "knowledge"},
+	}, 200)
+	return f.get(r.ID), owner
 }

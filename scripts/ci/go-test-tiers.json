@@ -10410,7 +10410,11 @@
     ,
     {"kind":"go","package":"internal/reviewgate","name":"TestParseFinalVerdict","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/routineactions","name":"TestAgentOwnedRoutineEditRestoresNativeOwnership","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/routineactions","name":"TestAgentOwnedRoutineResearchBudgetAndAuthority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineactions","name":"TestAgentRoutineDispatchFailuresYieldQueue","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineactions","name":"TestRoutineActionCatalogueClosedAndBounded","tier":"ESSENTIAL"}
     ,
