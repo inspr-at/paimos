@@ -57,6 +57,8 @@ type Run struct {
 	RecoveryTier              string          `json:"recovery_service_tier,omitempty"`
 	RecoveryLabel             *string         `json:"recovery_display_label,omitempty"`
 	ReadOnlyReview            bool            `json:"read_only_review,omitempty"`
+	RunOnce                   bool            `json:"run_once,omitempty"`
+	Instruction               string          `json:"instruction,omitempty"`
 	RetryOfRunID              string          `json:"retry_of_run_id"`
 	CapacityHandoff           bool            `json:"capacity_handoff,omitempty"`
 	Purpose                   string          `json:"purpose,omitempty"`

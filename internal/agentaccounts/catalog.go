@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/accountuse"
+	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
@@ -60,9 +61,10 @@ type CatalogHost struct {
 }
 
 type CatalogHarness struct {
-	Harness          string           `json:"harness"`
-	Accounts         []CatalogAccount `json:"accounts"`
-	DefaultAccountID *string          `json:"default_account_id"`
+	ReadOnlyRun      agentverification.Capability `json:"read_only_run"`
+	Harness          string                       `json:"harness"`
+	Accounts         []CatalogAccount             `json:"accounts"`
+	DefaultAccountID *string                      `json:"default_account_id"`
 }
 
 type CatalogAccount struct {
@@ -393,7 +395,7 @@ func buildCatalog(accounts []Account, profiles []catalogProfile, occupancy map[s
 			host.Label = a.HostLabel
 		}
 		if len(host.Harnesses) == 0 || host.Harnesses[len(host.Harnesses)-1].Harness != a.Harness {
-			host.Harnesses = append(host.Harnesses, CatalogHarness{Harness: a.Harness, Accounts: []CatalogAccount{}})
+			host.Harnesses = append(host.Harnesses, CatalogHarness{Harness: a.Harness, Accounts: []CatalogAccount{}, ReadOnlyRun: agentverification.ReadOnlyRunFor(a.Harness)})
 		}
 		h := &host.Harnesses[len(host.Harnesses)-1]
 		h.Accounts = append(h.Accounts, catalogAccount(a, profiles, occupancy[a.ID], now))
