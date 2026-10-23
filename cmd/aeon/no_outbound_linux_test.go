@@ -338,7 +338,7 @@ func TestDefaultServerHasNoOutboundNetwork(t *testing.T) {
 		select {
 		case err := <-done:
 			if err != nil {
-				t.Errorf("server failed under network denial: %v", err)
+				t.Errorf("server failed under network denial: %v\n%s", err, logs.String())
 			}
 		case <-time.After(20 * time.Second):
 			_ = cmd.Process.Kill()
