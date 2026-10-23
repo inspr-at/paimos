@@ -750,7 +750,7 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [1600,
 test('assistants use the existing Agents dock with stable tabs, locked policy and audited revision saves', async ({ page }, testInfo) => {
   test.setTimeout(120_000)
   // The approved remote entry point exposes Playwright. Run the affected unit
-  // and glyph guard in that same remote checkout, before allocating a browser.
+  // and glyph guard in that same remote checkout before the interactions.
   const units = execFileSync(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', 'tests/assistants.unit.test.ts', '--maxWorkers=1'], { encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 * 1024 })
   const glyphs = execFileSync(process.execPath, ['--test', 'tests/text-glyphs.test.ts'], { encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 * 1024 })
   await testInfo.attach('assistant-units-and-glyphs', { body: units + glyphs, contentType: 'text/plain' })

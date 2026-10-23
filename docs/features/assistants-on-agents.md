@@ -9,6 +9,10 @@ preference scoped to the current person and workspace. Live reads preserve row
 order; closing the panel or focusing the page permits a new status/name sort when
 the pointer and keyboard focus are outside the section.
 
+The first Assistants card appears with Sessions after the initial metadata and
+permission reads settle. This keeps it from flashing above a still-loading
+capacity row or moving when a linked session opens its dock.
+
 The identity and policy API supplies names, vendor, project/scope ceilings and an
 exact weekly budget. Empty project allowlists mean **no projects**. Policy editing
 requires a person who owns the assistant and currently holds both `agents.create`

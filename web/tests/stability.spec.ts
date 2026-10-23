@@ -11,6 +11,7 @@ import { mockSettings, settingsData } from './settings-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
 import { crmData, mockCRM } from './crm-fixtures'
 import { mockPublicQuote, mockQuotes, quoteWorld } from './quote-list-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 
 const world = {
   me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' },
@@ -74,6 +75,11 @@ for (const width of [390, 1440]) {
 
     test('the agents page holds still while its reads land', async ({ page }) => {
       await base(page)
+      await page.route('**/api/me/permissions*', route => {
+        const permissions = mockEffectivePermissions('member', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+        permissions.workspace.permissions.push('members.read')
+        return route.fulfill({ json: permissions })
+      })
       // The shared Agents fixture owns its new assistant read too: a missing
       // route must not make a healthy page (or Session Chat) look unavailable.
       const assistantsRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/assistants')
