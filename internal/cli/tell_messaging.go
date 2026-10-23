@@ -154,7 +154,10 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			}
 			if err := rt.do(http.MethodPost, path, req, &sent); err != nil {
 				if explicitSenderSession {
-					return rt.fail(fmt.Errorf("send with --sender-session (must be your active authorized session): %w", err), "")
+					if isPeer {
+						return rt.fail(fmt.Errorf("send with --sender-session (must be your active authorized session): %w", err), "")
+					}
+					return rt.fail(fmt.Errorf("send with --sender-session (must be your active session in the target project): %w", err), "")
 				}
 				return err
 			}
