@@ -78,6 +78,7 @@ export function assistantCopy(language: DisplayLanguage = displayLanguage()) {
     noActivity: de ? 'Keine Aktivität in dieser Ansicht.' : 'No activity in this view.',
     changed: (name: string, time: string, what: string) => de ? `Geändert von ${name} um ${time}: ${what}` : `Changed by ${name} at ${time}: ${what}`,
     policyChanged: de ? 'Richtlinie geändert' : 'Policy changed', identityCreated: de ? 'Identität eingerichtet' : 'Identity created',
+    identityChanged: de ? 'Identität geändert' : 'Identity changed',
     projectsChanged: de ? 'Projekte geändert' : 'Projects changed', scopesChanged: de ? 'Tätigkeiten geändert' : 'Scopes changed',
     name: de ? 'Name' : 'Name', vendor: de ? 'Anbieter' : 'Vendor', vendorUnknown: de ? 'Anbieter nicht gemeldet' : 'Vendor not reported',
     close: de ? 'Assistentendetails schließen' : 'Close assistant details', details: de ? 'Assistentendetails' : 'Assistant details',

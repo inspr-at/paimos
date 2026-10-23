@@ -793,6 +793,8 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await expect(section.locator('.last-column').first()).toBeHidden()
   await expect(section.locator('.folded-facts').first()).toBeVisible()
   await shot('1024-light-folded')
+  await page.emulateMedia({ colorScheme: 'dark' }); await shot('1024-dark-folded')
+  await page.emulateMedia({ colorScheme: 'light' })
   await page.setViewportSize({ width: 1440, height: 1000 })
   const policyRevision = amy.revision
   await section.getByRole('button', { name: 'Amy · Status unavailable', exact: true }).click()
@@ -812,6 +814,8 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
       for (const locked of ['outward', 'secrets']) await expect(details.locator(`[data-locked-rule="${locked}"] input, [data-locked-rule="${locked}"] select`)).toHaveCount(0)
     }
     await shot(`1440-light-panel-${name.toLowerCase()}`)
+    await page.emulateMedia({ colorScheme: 'dark' }); await shot(`1440-dark-panel-${name.toLowerCase()}`)
+    await page.emulateMedia({ colorScheme: 'light' })
   } })) })
   await details.getByRole('button', { name: 'More assistant actions' }).click()
   await page.getByRole('menuitem', { name: 'Edit policy', exact: true }).click()
@@ -823,6 +827,8 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await saveGuard.check(() => budget.fill('15'))
   saveGuard.done()
   await shot('1440-light-panel-policy-edit')
+  await page.emulateMedia({ colorScheme: 'dark' }); await shot('1440-dark-panel-policy-edit')
+  await page.emulateMedia({ colorScheme: 'light' })
   await save.click()
   await expect(details.getByRole('status')).toHaveText('Policy saved')
   expect(writes).toHaveLength(1)
@@ -849,17 +855,30 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await expect(details.getByRole('button', { name: 'More assistant actions' })).toHaveCount(0)
   expect((await new AxeBuilder({ page }).include('.assistant-panel').withRules(['color-contrast']).analyze()).violations).toEqual([])
   await shot('1440-light-panel-policy-readonly')
+  await page.emulateMedia({ colorScheme: 'dark' }); await shot('1440-dark-panel-policy-readonly')
+  await page.emulateMedia({ colorScheme: 'light' })
   for (const width of [390, 320]) {
     await details.getByRole('button', { name: 'Close assistant details' }).click()
     await page.setViewportSize({ width, height: 844 })
     await section.scrollIntoViewIfNeeded()
     expect(await section.locator('.assistant-row').first().evaluate(el => el.getBoundingClientRect().height)).toBe(64)
-    if (width === 390) await shot('390-light-cards')
+    if (width === 390) {
+      await shot('390-light-cards')
+      await page.emulateMedia({ colorScheme: 'dark' }); await shot('390-dark-cards')
+      await page.emulateMedia({ colorScheme: 'light' })
+    }
     await section.getByRole('button', { name: 'Amy · Status unavailable', exact: true }).click()
     const sheet = await details.boundingBox()
     expect(sheet?.height).toBe(844)
     expect(await details.getByRole('tab', { name: 'Overview', exact: true }).evaluate(el => el.getBoundingClientRect().height)).toBe(44)
-    await expectStableControls({ controls: { tabs: details.getByRole('tablist'), close: details.getByRole('button', { name: 'Close assistant details' }), sheet: details }, scrollAreas: { body: details.locator('.assistant-panel-scroll') }, interactions: ['Overview', 'Policy'].map(name => ({ name, run: async () => { await details.getByRole('tab', { name, exact: true }).click(); if (width === 390) await shot(`390-light-sheet-${name.toLowerCase()}`) } })) })
+    await expectStableControls({ controls: { tabs: details.getByRole('tablist'), close: details.getByRole('button', { name: 'Close assistant details' }), sheet: details }, scrollAreas: { body: details.locator('.assistant-panel-scroll') }, interactions: ['Overview', 'Policy'].map(name => ({ name, run: async () => {
+      await details.getByRole('tab', { name, exact: true }).click()
+      if (width === 390) {
+        await shot(`390-light-sheet-${name.toLowerCase()}`)
+        await page.emulateMedia({ colorScheme: 'dark' }); await shot(`390-dark-sheet-${name.toLowerCase()}`)
+        await page.emulateMedia({ colorScheme: 'light' })
+      }
+    } })) })
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   }
   await details.getByRole('button', { name: 'Close assistant details' }).click()
@@ -871,6 +890,14 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await expect(section.locator('.assistant-row')).toHaveCount(7)
   await page.reload()
   await expect(section.locator('.assistant-row')).toHaveCount(7)
+  const longName = 'Rechercheassistentin für bereichsübergreifende Wissenspflege und Posteingang'
+  amy.display_name = longName; amy.revision++
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.reload()
+  await expect(section.locator(`[data-assistant="${amy.principal_id}"] strong`)).toHaveAttribute('data-tip', longName)
+  await section.scrollIntoViewIfNeeded(); await shot('390-dark-long-german-name')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   expect(errors).toEqual([])
 })
 

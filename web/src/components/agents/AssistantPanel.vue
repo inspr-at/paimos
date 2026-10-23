@@ -158,7 +158,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <div v-show="tab === 'activity'" id="assistant-pane-activity" role="tabpanel" aria-labelledby="assistant-tab-activity" class="assistant-activity">
         <div class="activity-filters"><label for="assistant-activity-filter">{{ words.tabs.activity }}</label><select id="assistant-activity-filter" v-model="activityFilter" class="field" @change="refusalsOnly = false"><option v-for="(label, key) in words.filters" :key="key" :value="key">{{ label }}</option></select></div>
         <p v-if="facts.activity === null">{{ words.activityUnavailable }}</p><p v-if="store.historyState === 'forbidden' || store.historyState === 'error'">{{ words.historyUnavailable }} {{ store.historyError }}</p><p v-if="store.historyTruncated">{{ words.truncated }}</p>
-        <article v-for="event in activities" :key="event.key" class="assistant-log-entry"><time :datetime="event.at">{{ new Date(event.at).toLocaleString('en-GB') }}</time><p>{{ event.text }}</p><RouterLink v-if="event.href" :to="event.href">{{ event.href }}</RouterLink></article><p v-if="!activities.length">{{ words.noActivity }}</p><p class="history-range">{{ words.historyRange }}</p>
+        <article v-for="event in activities" :key="event.key" class="assistant-log-entry"><time :datetime="event.at">{{ new Date(event.at).toLocaleString('en-GB') }}</time><p>{{ event.text }}</p><RouterLink v-if="event.href" :to="event.href">{{ event.href }}</RouterLink></article><p v-if="!activities.length && store.historyState === 'ready' && (activityFilter === 'policy' || facts.activity !== null)">{{ words.noActivity }}</p><p class="history-range">{{ words.historyRange }}</p>
       </div>
     </div>
     <footer class="assistant-save-bar">

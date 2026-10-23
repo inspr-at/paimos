@@ -128,6 +128,7 @@ export async function assistantPolicyEvents(now: number, signal?: AbortSignal): 
 export function policyChange(event: AssistantEvent): string {
   const words = assistantCopy(), before = event.before?.policy, after = event.after?.policy
   if (event.type === 'assistant.created') return words.identityCreated
+  if (event.type === 'assistant.updated') return words.identityChanged
   if (event.type === 'assistant.disabled') return words.disconnected
   if (!before || !after) return words.policyChanged
   const changes: string[] = []
