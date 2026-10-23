@@ -49,7 +49,7 @@ async function switchGraph(page: Page, world: ReturnType<typeof ticketGraphWorld
   await expect(graph).toBeEnabled()
 }
 
-for (const width of [1440, 400]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1440, 400]) for (const theme of ['light'] as const) {
   test(`header graph off by default, developer switch keeps the header still ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await page.emulateMedia({ colorScheme: theme })

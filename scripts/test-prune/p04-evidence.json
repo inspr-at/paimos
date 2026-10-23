@@ -2,21 +2,671 @@
   "version": 1,
   "ticket": "AEON-1676",
   "package": "P04",
-  "status": "replacement-preparation-only",
-  "recordedAt": "2026-10-22T23:30:39.102805+00:00",
-  "cutBlocker": {
-    "path": "scripts/test-prune/visual-manifest.json",
-    "approval": "pending",
-    "baselineAuthority": "pending-review",
-    "required": "Tick-approved immutable available references from P02; no protected cut, demotion, historical rewrite or approval bypass."
-  },
+  "status": "cut-round-a-validation",
+  "recordedAt": "2026-10-23T08:46:02.568Z",
   "browserCases": {
     "sourceOwners": 46,
     "before": 696,
-    "after": 696,
+    "after": 671,
     "plannedCeiling": 32,
-    "removed": 0,
+    "removed": 25,
     "demoted": 0
+  },
+  "cutRoundA": {
+    "scope": "Unprotected duplicates only, under the cut A brief. No protected anchor, selection flag, assertion of a retained case, production source, frozen baseline or historical replay record is changed.",
+    "groups": [
+      {
+        "file": "tests/aeon-1028-projheader.spec.ts",
+        "before": 42,
+        "after": 38,
+        "removedKeys": [
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 1440px dark",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 400px dark",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › flows into columns at 1100×1000 and fits",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › flows into columns at 1280×800 and fits"
+        ],
+        "retainedKeys": [
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 1440px light",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 400px light",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: Display beside New › stays beside New in the Graph view, where New is absent",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: Display beside New › stays on the toolbar at tablet width, where the header bar has no Display",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › flows into columns at 1024×800 and fits",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › flows into columns at 1440×900 and fits",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › is a full-height sheet on a phone, with its title and Done pinned",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › keeps sort actions and the other blocks still when a sort key is added or removed (±0.5px)",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › lets a couple dozen saved views flow across columns without the panel scrolling",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › lets the long column list break between rows only when the window is too short for whole blocks",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › moves a split column row into the slot its new order reserves",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › phone targets are 44px",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › recounts its columns when the window changes height while open",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › stays one column when the window is tall enough, and fits",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: what the menu carries › Hide closed switches in place, and the gear opens its choices where Display is",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: what the menu carries › Needs attention opens this project's list of suggestions",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: what the menu carries › a display choice keeps the menu open and shows on the button",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: what the menu carries › choosing a header size from the menu unfolds the header",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: what the menu carries › choosing a saved view opens it and says so the next time the menu opens",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: what the menu carries › choosing a section goes there and closes the menu",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: what the menu carries › lists the sections, then the saved views with Hide closed and its gear, then the usual options",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: what the menu carries › opens focused on the current section, and Escape closes it back onto the button",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: what the menu carries › saving the list as a view works from the menu",
+          "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: what the menu carries › unfolding the header closes the menu instead of leaving it on a hidden button",
+          "browser:tests/aeon-1028-projheader.spec.ts:folding and unfolding the header › keeps the collapsed toolbar still while the menu opens, closes and takes choices (±0.5px)",
+          "browser:tests/aeon-1028-projheader.spec.ts:folding and unfolding the header › keeps the header switch and the bar below it where they are (±0.5px)",
+          "browser:tests/aeon-1028-projheader.spec.ts:folding and unfolding the header › keeps the menu's own controls still through every choice at 1440px (±0.5px)",
+          "browser:tests/aeon-1028-projheader.spec.ts:folding and unfolding the header › keeps the menu's own controls still through every choice at 400px (±0.5px)",
+          "browser:tests/aeon-1028-projheader.spec.ts:folding and unfolding the header › moves nothing in the toolbar at 1024px (±0.5px)",
+          "browser:tests/aeon-1028-projheader.spec.ts:folding and unfolding the header › moves nothing in the toolbar at 1440px (±0.5px)",
+          "browser:tests/aeon-1028-projheader.spec.ts:folding and unfolding the header › moves nothing in the toolbar at 390px (±0.5px)",
+          "browser:tests/aeon-1028-projheader.spec.ts:the All tickets pill › ends with the same room as it starts with at 1440px",
+          "browser:tests/aeon-1028-projheader.spec.ts:the All tickets pill › ends with the same room as it starts with at 400px",
+          "browser:tests/aeon-1028-projheader.spec.ts:the other two header views › comfortable: Display keeps its place in the header bar and its menu is the one it was",
+          "browser:tests/aeon-1028-projheader.spec.ts:the other two header views › compact: Display keeps its place in the header bar and its menu is the one it was",
+          "browser:tests/aeon-1028-projheader.spec.ts:the ticket count › is gone from the Outline and Graph toolbars too",
+          "browser:tests/aeon-1028-projheader.spec.ts:the ticket count › is gone from the toolbar in every header view at 1440px; the footer still says it",
+          "browser:tests/aeon-1028-projheader.spec.ts:the ticket count › is gone from the toolbar in every header view at 400px; the list’s end still says it"
+        ],
+        "replacements": [
+          {
+            "source": "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 1440px dark",
+            "destination": "retained:p04-cutA:aeon-1028-projheader",
+            "nativeKeys": [
+              "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 1440px light"
+            ]
+          },
+          {
+            "source": "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 400px dark",
+            "destination": "retained:p04-cutA:aeon-1028-projheader",
+            "nativeKeys": [
+              "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: Display beside New › shows Display next to New, with the switch and the filters still there, at 400px light"
+            ]
+          },
+          {
+            "source": "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › flows into columns at 1100×1000 and fits",
+            "destination": "retained:p04-cutA:aeon-1028-projheader",
+            "nativeKeys": [
+              "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › flows into columns at 1440×900 and fits"
+            ]
+          },
+          {
+            "source": "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › flows into columns at 1280×800 and fits",
+            "destination": "retained:p04-cutA:aeon-1028-projheader",
+            "nativeKeys": [
+              "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › flows into columns at 1024×800 and fits"
+            ]
+          }
+        ]
+      },
+      {
+        "file": "tests/aeon-1042-headergraph.spec.ts",
+        "before": 4,
+        "after": 2,
+        "removedKeys": [
+          "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 1440 dark",
+          "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 400 dark"
+        ],
+        "retainedKeys": [
+          "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 1440 light",
+          "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 400 light"
+        ],
+        "replacements": [
+          {
+            "source": "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 1440 dark",
+            "destination": "retained:p04-cutA:aeon-1042-headergraph",
+            "nativeKeys": [
+              "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 1440 light"
+            ]
+          },
+          {
+            "source": "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 400 dark",
+            "destination": "retained:p04-cutA:aeon-1042-headergraph",
+            "nativeKeys": [
+              "browser:tests/aeon-1042-headergraph.spec.ts:header graph off by default, developer switch keeps the header still 400 light"
+            ]
+          }
+        ]
+      },
+      {
+        "file": "tests/aeon-1188-displayhome.spec.ts",
+        "before": 8,
+        "after": 5,
+        "removedKeys": [
+          "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px dark",
+          "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px dark",
+          "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px dark"
+        ],
+        "retainedKeys": [
+          "browser:tests/aeon-1188-displayhome.spec.ts:Outline on a phone: Expand all from the Display sheet closes it and returns focus",
+          "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px light",
+          "browser:tests/aeon-1188-displayhome.spec.ts:on a phone, ⋯ › Display… opens the same full-width Display sheet as the Filters link",
+          "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px light",
+          "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px light"
+        ],
+        "replacements": [
+          {
+            "source": "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px dark",
+            "destination": "retained:p04-cutA:aeon-1188-displayhome",
+            "nativeKeys": [
+              "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px light"
+            ]
+          },
+          {
+            "source": "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px dark",
+            "destination": "retained:p04-cutA:aeon-1188-displayhome",
+            "nativeKeys": [
+              "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px light"
+            ]
+          },
+          {
+            "source": "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px dark",
+            "destination": "retained:p04-cutA:aeon-1188-displayhome",
+            "nativeKeys": [
+              "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px light"
+            ]
+          }
+        ]
+      },
+      {
+        "file": "tests/aeon-974-typefilter.spec.ts",
+        "before": 15,
+        "after": 8,
+        "removedKeys": [
+          "browser:tests/aeon-974-typefilter.spec.ts:Filter and Search stay put while pills overflow, come and go at 940",
+          "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 1024 dark",
+          "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 1024 light",
+          "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 1440 dark",
+          "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 1440 light",
+          "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 390 dark",
+          "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 390 light"
+        ],
+        "retainedKeys": [
+          "browser:tests/aeon-974-typefilter.spec.ts:Filter and Search stay put while pills overflow, come and go at 1024",
+          "browser:tests/aeon-974-typefilter.spec.ts:Type rows wait for their names and counts, then hold their places while the menu is open",
+          "browser:tests/aeon-974-typefilter.spec.ts:a shared-name Type option shows a partial saved choice as mixed; a click completes it and never narrows it",
+          "browser:tests/aeon-974-typefilter.spec.ts:levels that share a name are one Type option, one pill and one request for all of them",
+          "browser:tests/aeon-974-typefilter.spec.ts:links and saved views with the legacy type or Parents / Leaves open as Type",
+          "browser:tests/aeon-974-typefilter.spec.ts:the Filters sheet shows its filters once their counts are in and keeps every row in place",
+          "browser:tests/aeon-974-typefilter.spec.ts:the toolbar shows Filter and only applied filters; Type uses the workspace names and never moves Filter or the list",
+          "browser:tests/aeon-974-typefilter.spec.ts:with Type applied, the Filters sheet waits for its unfiltered counts; a later new value never moves the sections below"
+        ],
+        "replacements": [
+          {
+            "source": "browser:tests/aeon-974-typefilter.spec.ts:Filter and Search stay put while pills overflow, come and go at 940",
+            "destination": "retained:p04-cutA:aeon-974-typefilter",
+            "nativeKeys": [
+              "browser:tests/aeon-974-typefilter.spec.ts:Filter and Search stay put while pills overflow, come and go at 1024"
+            ]
+          },
+          {
+            "source": "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 1024 dark",
+            "destination": "retained:p04-cutA:aeon-974-typefilter",
+            "nativeKeys": [
+              "browser:tests/aeon-974-typefilter.spec.ts:a shared-name Type option shows a partial saved choice as mixed; a click completes it and never narrows it",
+              "browser:tests/aeon-974-typefilter.spec.ts:the Filters sheet shows its filters once their counts are in and keeps every row in place",
+              "browser:tests/aeon-974-typefilter.spec.ts:the toolbar shows Filter and only applied filters; Type uses the workspace names and never moves Filter or the list"
+            ]
+          },
+          {
+            "source": "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 1024 light",
+            "destination": "retained:p04-cutA:aeon-974-typefilter",
+            "nativeKeys": [
+              "browser:tests/aeon-974-typefilter.spec.ts:a shared-name Type option shows a partial saved choice as mixed; a click completes it and never narrows it",
+              "browser:tests/aeon-974-typefilter.spec.ts:the Filters sheet shows its filters once their counts are in and keeps every row in place",
+              "browser:tests/aeon-974-typefilter.spec.ts:the toolbar shows Filter and only applied filters; Type uses the workspace names and never moves Filter or the list"
+            ]
+          },
+          {
+            "source": "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 1440 dark",
+            "destination": "retained:p04-cutA:aeon-974-typefilter",
+            "nativeKeys": [
+              "browser:tests/aeon-974-typefilter.spec.ts:a shared-name Type option shows a partial saved choice as mixed; a click completes it and never narrows it",
+              "browser:tests/aeon-974-typefilter.spec.ts:the Filters sheet shows its filters once their counts are in and keeps every row in place",
+              "browser:tests/aeon-974-typefilter.spec.ts:the toolbar shows Filter and only applied filters; Type uses the workspace names and never moves Filter or the list"
+            ]
+          },
+          {
+            "source": "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 1440 light",
+            "destination": "retained:p04-cutA:aeon-974-typefilter",
+            "nativeKeys": [
+              "browser:tests/aeon-974-typefilter.spec.ts:a shared-name Type option shows a partial saved choice as mixed; a click completes it and never narrows it",
+              "browser:tests/aeon-974-typefilter.spec.ts:the Filters sheet shows its filters once their counts are in and keeps every row in place",
+              "browser:tests/aeon-974-typefilter.spec.ts:the toolbar shows Filter and only applied filters; Type uses the workspace names and never moves Filter or the list"
+            ]
+          },
+          {
+            "source": "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 390 dark",
+            "destination": "retained:p04-cutA:aeon-974-typefilter",
+            "nativeKeys": [
+              "browser:tests/aeon-974-typefilter.spec.ts:a shared-name Type option shows a partial saved choice as mixed; a click completes it and never narrows it",
+              "browser:tests/aeon-974-typefilter.spec.ts:the Filters sheet shows its filters once their counts are in and keeps every row in place",
+              "browser:tests/aeon-974-typefilter.spec.ts:the toolbar shows Filter and only applied filters; Type uses the workspace names and never moves Filter or the list"
+            ]
+          },
+          {
+            "source": "browser:tests/aeon-974-typefilter.spec.ts:applied Type filter at 390 light",
+            "destination": "retained:p04-cutA:aeon-974-typefilter",
+            "nativeKeys": [
+              "browser:tests/aeon-974-typefilter.spec.ts:a shared-name Type option shows a partial saved choice as mixed; a click completes it and never narrows it",
+              "browser:tests/aeon-974-typefilter.spec.ts:the Filters sheet shows its filters once their counts are in and keeps every row in place",
+              "browser:tests/aeon-974-typefilter.spec.ts:the toolbar shows Filter and only applied filters; Type uses the workspace names and never moves Filter or the list"
+            ]
+          }
+        ]
+      },
+      {
+        "file": "tests/group-figures.spec.ts",
+        "before": 15,
+        "after": 11,
+        "removedKeys": [
+          "browser:tests/group-figures.spec.ts:AEON-1388 a filter change empties the group figures at once: no group shows the previous scope’s numbers while it is counted again",
+          "browser:tests/group-figures.spec.ts:AEON-1388 grouped list at 1024 px, light and dark: figures or the phone line, still on hover",
+          "browser:tests/group-figures.spec.ts:AEON-1388 grouped list at 1440 px, light and dark: figures or the phone line, still on hover",
+          "browser:tests/group-figures.spec.ts:AEON-1388 grouped list at 390 px, light and dark: figures or the phone line, still on hover"
+        ],
+        "retainedKeys": [
+          "browser:tests/group-figures.spec.ts:AEON-1388 an ungrouped list keeps the checkbox above the row checkboxes and the sort control, without a chevron",
+          "browser:tests/group-figures.spec.ts:AEON-1388 collapse and expand all: the first cell, Alt-click on a chevron and Display; folds survive a reload of the view",
+          "browser:tests/group-figures.spec.ts:AEON-1388 each group row carries its figures in its own columns: sums of its leaves, nothing where there is nothing to say",
+          "browser:tests/group-figures.spec.ts:AEON-1388 figures land in reserved slots: the group row and the header never move while they arrive",
+          "browser:tests/group-figures.spec.ts:AEON-1388 phones: one muted line after the name, at most three facts in order, never wrapped; Display orders the groups",
+          "browser:tests/group-figures.spec.ts:AEON-1388 sorting by key stays reachable: KEY at rest shows its arrow, and the slot control sorts the same way",
+          "browser:tests/group-figures.spec.ts:AEON-1388 the first header cell swaps KEY for three controls in fixed slots, on hover of that cell only",
+          "browser:tests/group-figures.spec.ts:AEON-1390 Display › Groups matches the header and a saved view keeps the group order across a reload",
+          "browser:tests/group-figures.spec.ts:AEON-1390 the grouped-by column flips the group order; other columns sort inside the groups; both arrows hold their slots",
+          "browser:tests/group-figures.spec.ts:AEON-1486 phones: a long epic title keeps the summary visible, disclosed and still at 390 px",
+          "browser:tests/group-figures.spec.ts:coarse pointer › AEON-1388 a coarse pointer shows the first cell’s controls, 44 px each, above the group rows’ own"
+        ],
+        "replacements": [
+          {
+            "source": "browser:tests/group-figures.spec.ts:AEON-1388 a filter change empties the group figures at once: no group shows the previous scope’s numbers while it is counted again",
+            "destination": "runtime:p04-group-scope",
+            "nativeKeys": [
+              "node:tests/p04-runtime.test.ts:P04 figures: a changed filter clears counts before idle and rejects a held old answer",
+              "node:tests/p04-runtime.test.ts:P04 figures: a changed person clears counts before idle and rejects a held old answer",
+              "node:tests/p04-runtime.test.ts:P04 figures: a changed project clears counts before idle and rejects a held old answer",
+              "node:tests/p04-runtime.test.ts:P04 negative control: keeping old-scope counts until idle is detected"
+            ]
+          },
+          {
+            "source": "browser:tests/group-figures.spec.ts:AEON-1388 grouped list at 1024 px, light and dark: figures or the phone line, still on hover",
+            "destination": "retained:p04-cutA:group-figures",
+            "nativeKeys": [
+              "browser:tests/group-figures.spec.ts:AEON-1388 each group row carries its figures in its own columns: sums of its leaves, nothing where there is nothing to say",
+              "browser:tests/group-figures.spec.ts:AEON-1388 phones: one muted line after the name, at most three facts in order, never wrapped; Display orders the groups"
+            ]
+          },
+          {
+            "source": "browser:tests/group-figures.spec.ts:AEON-1388 grouped list at 1440 px, light and dark: figures or the phone line, still on hover",
+            "destination": "retained:p04-cutA:group-figures",
+            "nativeKeys": [
+              "browser:tests/group-figures.spec.ts:AEON-1388 each group row carries its figures in its own columns: sums of its leaves, nothing where there is nothing to say",
+              "browser:tests/group-figures.spec.ts:AEON-1388 phones: one muted line after the name, at most three facts in order, never wrapped; Display orders the groups"
+            ]
+          },
+          {
+            "source": "browser:tests/group-figures.spec.ts:AEON-1388 grouped list at 390 px, light and dark: figures or the phone line, still on hover",
+            "destination": "retained:p04-cutA:group-figures",
+            "nativeKeys": [
+              "browser:tests/group-figures.spec.ts:AEON-1388 each group row carries its figures in its own columns: sums of its leaves, nothing where there is nothing to say",
+              "browser:tests/group-figures.spec.ts:AEON-1388 phones: one muted line after the name, at most three facts in order, never wrapped; Display orders the groups"
+            ]
+          }
+        ]
+      },
+      {
+        "file": "tests/project-status-counts.spec.ts",
+        "before": 12,
+        "after": 7,
+        "removedKeys": [
+          "browser:tests/project-status-counts.spec.ts:live count digit growth stays still at 1440px",
+          "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 1024px dark",
+          "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 1440px dark",
+          "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 1440px light",
+          "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 390px dark"
+        ],
+        "retainedKeys": [
+          "browser:tests/project-status-counts.spec.ts:canonical status and bucket filters survive reload, Outline and Clear all",
+          "browser:tests/project-status-counts.spec.ts:live count digit growth stays still at 1024px",
+          "browser:tests/project-status-counts.spec.ts:manual Hide toggles stick when a status is cleared; visible selection restores only automatic overrides",
+          "browser:tests/project-status-counts.spec.ts:older and partial summary detail is labelled honestly",
+          "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 1024px light",
+          "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 390px light",
+          "browser:tests/project-status-counts.spec.ts:truncated summary keeps custom Done QA visible through reload and restores Hide on clear"
+        ],
+        "replacements": [
+          {
+            "source": "browser:tests/project-status-counts.spec.ts:live count digit growth stays still at 1440px",
+            "destination": "retained:p04-cutA:project-status-counts",
+            "nativeKeys": [
+              "browser:tests/project-status-counts.spec.ts:live count digit growth stays still at 1024px"
+            ]
+          },
+          {
+            "source": "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 1024px dark",
+            "destination": "retained:p04-cutA:project-status-counts",
+            "nativeKeys": [
+              "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 1024px light"
+            ]
+          },
+          {
+            "source": "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 1440px dark",
+            "destination": "retained:p04-cutA:project-status-counts",
+            "nativeKeys": [
+              "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 1024px light"
+            ]
+          },
+          {
+            "source": "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 1440px light",
+            "destination": "retained:p04-cutA:project-status-counts",
+            "nativeKeys": [
+              "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 1024px light"
+            ]
+          },
+          {
+            "source": "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 390px dark",
+            "destination": "retained:p04-cutA:project-status-counts",
+            "nativeKeys": [
+              "browser:tests/project-status-counts.spec.ts:status filters and stable grid at 390px light"
+            ]
+          }
+        ]
+      }
+    ],
+    "retainedProof": "All 96 original cases in these six owners passed on mbp2606 before pruning. All retained case bodies are unchanged. The 13 runtime replacements, including four negative controls, passed before the converted scope-clearing browser case was removed.",
+    "protectedAfterP02": [
+      {
+        "file": "tests/header-desk-split.spec.ts",
+        "keys": [
+          "browser:tests/header-desk-split.spec.ts:from 601 to 1440 px the trail never cuts a chip and returns whole when the window widens"
+        ]
+      },
+      {
+        "file": "tests/header-glimpse-context.spec.ts",
+        "keys": [
+          "browser:tests/header-glimpse-context.spec.ts:Hide closed and status use the Tickets context and Open graph retains it"
+        ]
+      },
+      {
+        "file": "tests/header-glimpse.spec.ts",
+        "keys": [
+          "browser:tests/header-glimpse.spec.ts:eight linked tickets appear once the viewport reaches 1280",
+          "browser:tests/header-glimpse.spec.ts:header shots dark › keeps AA contrast at 1280",
+          "browser:tests/header-glimpse.spec.ts:header shots dark › keeps AA contrast at 1600",
+          "browser:tests/header-glimpse.spec.ts:header shots dark › keeps AA contrast at 390",
+          "browser:tests/header-glimpse.spec.ts:header shots light › keeps AA contrast at 1280",
+          "browser:tests/header-glimpse.spec.ts:header shots light › keeps AA contrast at 1600",
+          "browser:tests/header-glimpse.spec.ts:header shots light › keeps AA contrast at 390",
+          "browser:tests/header-glimpse.spec.ts:hover shows Open graph and Pause; clicking the glimpse opens the graph",
+          "browser:tests/header-glimpse.spec.ts:long title and description stay separate from the glimpse while resizing",
+          "browser:tests/header-glimpse.spec.ts:the 2D fallback also frames the dense core with faded edges"
+        ]
+      },
+      {
+        "file": "tests/list-columns.spec.ts",
+        "keys": [
+          "browser:tests/list-columns.spec.ts:assignee sort uses the live worker when nobody is stored, and progress and ETA stay compact",
+          "browser:tests/list-columns.spec.ts:progress and ETA columns at 1600px dark",
+          "browser:tests/list-columns.spec.ts:progress and ETA columns at 1600px light",
+          "browser:tests/list-columns.spec.ts:progress and ETA columns at 390px dark",
+          "browser:tests/list-columns.spec.ts:progress and ETA columns at 390px light",
+          "browser:tests/list-columns.spec.ts:progress names a stale estimate when the ETA column is hidden"
+        ]
+      },
+      {
+        "file": "tests/live-agents.spec.ts",
+        "keys": [
+          "browser:tests/live-agents.spec.ts:a card comes alive while its agents work, says who and on what, and idle cards stay still",
+          "browser:tests/live-agents.spec.ts:a phone shows the live robots on cards and rows without scrolling sideways in dark",
+          "browser:tests/live-agents.spec.ts:a phone shows the live robots on cards and rows without scrolling sideways in light",
+          "browser:tests/live-agents.spec.ts:event evidence (no-preference) › a new activity entry glints once; heartbeats, ordinary polls and remounts do not",
+          "browser:tests/live-agents.spec.ts:event evidence (reduce) › a new activity entry glints once; heartbeats, ordinary polls and remounts do not",
+          "browser:tests/live-agents.spec.ts:list rows carry a compact live chip: robots and the state word",
+          "browser:tests/live-agents.spec.ts:long names stay on one line and a long popover still reaches its links",
+          "browser:tests/live-agents.spec.ts:motion › only the activity ring moves continuously; the robot stays still on hover",
+          "browser:tests/live-agents.spec.ts:stopped records that remain in the feed do not keep the project live",
+          "browser:tests/live-agents.spec.ts:the UI audit lets a chip share its own link only in its slot",
+          "browser:tests/live-agents.spec.ts:the pill counts sessions still in progress and keeps each state on its own row",
+          "browser:tests/live-agents.spec.ts:without permission to know the agent the chip still says an agent works",
+          "browser:tests/live-agents.spec.ts:working and lost-heartbeat agents: polls every 20 seconds and says what changed"
+        ]
+      },
+      {
+        "file": "tests/live-list.spec.ts",
+        "keys": [
+          "browser:tests/live-list.spec.ts:Show brings a waiting change into a selected row",
+          "browser:tests/live-list.spec.ts:Show leaves the row under an open editor as it was: saving still meets the change as a conflict",
+          "browser:tests/live-list.spec.ts:a list read that fails is tried again",
+          "browser:tests/live-list.spec.ts:a selected row keeps the version A saw: a bulk change meets the newer one as a conflict",
+          "browser:tests/live-list.spec.ts:a ticket closed elsewhere dims in place, then leaves by itself when nothing is going on",
+          "browser:tests/live-list.spec.ts:changes by the same person in another tab reach the list; the tab’s own changes need no read",
+          "browser:tests/live-list.spec.ts:field changes patch in place; a regrouped row waits as moved until u",
+          "browser:tests/live-list.spec.ts:on a phone the marked row, the pill and the deleted selection fit 390 px",
+          "browser:tests/live-list.spec.ts:the row under an open editor keeps its revision: saving meets the change as a conflict",
+          "browser:tests/live-list.spec.ts:with a selection the update waits; Show applies it and keeps the rest of the selection"
+        ]
+      },
+      {
+        "file": "tests/outline.spec.ts",
+        "keys": [
+          "browser:tests/outline.spec.ts:AEON-385 fix1: Show keeps filtered siblings with field patches in place",
+          "browser:tests/outline.spec.ts:AEON-385 fix1: Show keeps lazy siblings with field patches in place",
+          "browser:tests/outline.spec.ts:AEON-385 fix1: a closed parent remains dimmed context and stays out of List matches",
+          "browser:tests/outline.spec.ts:AEON-385 fix1: expanding a destination after a remote move keeps one row through Show",
+          "browser:tests/outline.spec.ts:AEON-385 fix1: expanding a destination before a remote move keeps one row through Show",
+          "browser:tests/outline.spec.ts:AEON-385 fix1: the phone updates pill floats without shifting rows (dark)",
+          "browser:tests/outline.spec.ts:AEON-385 fix1: the phone updates pill floats without shifting rows (light)",
+          "browser:tests/outline.spec.ts:AEON-385 fix2: phone list chip clears controls for empty (dark)",
+          "browser:tests/outline.spec.ts:AEON-385 fix2: phone list chip clears controls for empty (light)",
+          "browser:tests/outline.spec.ts:AEON-385 fix2: phone list chip clears controls for selected (dark)",
+          "browser:tests/outline.spec.ts:AEON-385 fix2: phone list chip clears controls for selected (light)",
+          "browser:tests/outline.spec.ts:AEON-385 fix2: phone list chip clears controls for viewer (dark)",
+          "browser:tests/outline.spec.ts:AEON-385 fix2: phone list chip clears controls for viewer (light)",
+          "browser:tests/outline.spec.ts:AEON-385 fix2: phone outline chip clears controls for empty (dark)",
+          "browser:tests/outline.spec.ts:AEON-385 fix2: phone outline chip clears controls for empty (light)",
+          "browser:tests/outline.spec.ts:AEON-385 fix2: phone outline chip clears controls for selected (dark)",
+          "browser:tests/outline.spec.ts:AEON-385 fix2: phone outline chip clears controls for selected (light)",
+          "browser:tests/outline.spec.ts:AEON-385 fix2: phone outline chip clears controls for viewer (dark)",
+          "browser:tests/outline.spec.ts:AEON-385 fix2: phone outline chip clears controls for viewer (light)",
+          "browser:tests/outline.spec.ts:AEON-385: a child page is distrusted at stream loss, before reconnect",
+          "browser:tests/outline.spec.ts:AEON-385: an old parent page cannot restore the count after moving its last child",
+          "browser:tests/outline.spec.ts:AEON-385: bulk move relocates lazy Outline rows immediately and sends displayed revisions",
+          "browser:tests/outline.spec.ts:AEON-385: filtered ancestor values and ancestry follow events without reloading",
+          "browser:tests/outline.spec.ts:AEON-385: filtered field patches keep sibling order",
+          "browser:tests/outline.spec.ts:AEON-385: live Outline patches fields and holds moves, additions and deletion until Show (dark)",
+          "browser:tests/outline.spec.ts:AEON-385: live Outline patches fields and holds moves, additions and deletion until Show (light)",
+          "browser:tests/outline.spec.ts:a created child moved away remotely and back locally remains expandable after reload",
+          "browser:tests/outline.spec.ts:dragging a ticket onto an epic moves it there, guarded against newer copies",
+          "browser:tests/outline.spec.ts:epics show subtree progress; children indent under their parents with guide lines",
+          "browser:tests/outline.spec.ts:keyboard: arrows open and close, step in and out; Space toggles; Enter opens",
+          "browser:tests/outline.spec.ts:n on an epic creates tickets inside it and stays open for the next",
+          "browser:tests/outline.spec.ts:on a phone outline rows are two lines; the chevron expands and the row opens in dark",
+          "browser:tests/outline.spec.ts:on a phone outline rows are two lines; the chevron expands and the row opens in light",
+          "browser:tests/outline.spec.ts:the List | Outline switch keeps the view in the URL and the same toolbar"
+        ]
+      },
+      {
+        "file": "tests/palette.spec.ts",
+        "keys": [
+          "browser:tests/palette.spec.ts:knowledge keys open visible scoped entries and superseded responses stay discarded"
+        ]
+      },
+      {
+        "file": "tests/planning-columns.spec.ts",
+        "keys": [
+          "browser:tests/planning-columns.spec.ts:Cost stays behind harness.read even when saved; models and tokens remain visible",
+          "browser:tests/planning-columns.spec.ts:Cursor Grok hovers match profile keys and explain runs without a planned role",
+          "browser:tests/planning-columns.spec.ts:Display model preferences persist per person and preserve full hovers and effort",
+          "browser:tests/planning-columns.spec.ts:approved cells show estimates, running figures, measured checks and session models",
+          "browser:tests/planning-columns.spec.ts:double-click fits visible planning values without measuring hidden descriptions",
+          "browser:tests/planning-columns.spec.ts:empty saved ticks persist after toggles, narrow desktop layout and reload",
+          "browser:tests/planning-columns.spec.ts:legacy Paid preferences and view links map to Cost once",
+          "browser:tests/planning-columns.spec.ts:mixed billing totals carry no plan chip",
+          "browser:tests/planning-columns.spec.ts:omitted model versions do not match explicit versions even when version display is hidden",
+          "browser:tests/planning-columns.spec.ts:planning fragment implementation in light and dark; phones retain the card layout",
+          "browser:tests/planning-columns.spec.ts:planning hovers match effort, running usage and pre-session calibration",
+          "browser:tests/planning-columns.spec.ts:real capped registry response displays independent estimates and the registry gap",
+          "browser:tests/planning-columns.spec.ts:server list response preserves exact usage-less and mixed-session hovers",
+          "browser:tests/planning-columns.spec.ts:unknown planned and used effort stays undrawn and is explained to hover and screen readers"
+        ]
+      },
+      {
+        "file": "tests/project-advanced.spec.ts",
+        "keys": [
+          "browser:tests/project-advanced.spec.ts:AEON-1235: Advanced writes preserve revisions, bounds and honest repair refusals",
+          "browser:tests/project-advanced.spec.ts:AEON-1235: New project retains key conflicts and reports partial group assignment once",
+          "browser:tests/project-advanced.spec.ts:AEON-1235: approved P4 reference states and check.mjs audit against the build at 1024px dark",
+          "browser:tests/project-advanced.spec.ts:AEON-1235: approved P4 reference states and check.mjs audit against the build at 1024px light",
+          "browser:tests/project-advanced.spec.ts:AEON-1235: approved P4 reference states and check.mjs audit against the build at 1440px dark",
+          "browser:tests/project-advanced.spec.ts:AEON-1235: approved P4 reference states and check.mjs audit against the build at 1440px light",
+          "browser:tests/project-advanced.spec.ts:AEON-1235: approved P4 reference states and check.mjs audit against the build at 390px dark",
+          "browser:tests/project-advanced.spec.ts:AEON-1235: approved P4 reference states and check.mjs audit against the build at 390px light",
+          "browser:tests/project-advanced.spec.ts:AEON-1235: approved P4 reference states and check.mjs audit against the build at 400px dark",
+          "browser:tests/project-advanced.spec.ts:AEON-1235: approved P4 reference states and check.mjs audit against the build at 400px light",
+          "browser:tests/project-advanced.spec.ts:AEON-1235: stale project responses and missing authority cannot enable admin writes"
+        ]
+      },
+      {
+        "file": "tests/project-delivery-settings.spec.ts",
+        "keys": [
+          "browser:tests/project-delivery-settings.spec.ts:AEON-1226: approved repository reference states and check.mjs audit against the build at 1024px dark",
+          "browser:tests/project-delivery-settings.spec.ts:AEON-1226: approved repository reference states and check.mjs audit against the build at 1024px light",
+          "browser:tests/project-delivery-settings.spec.ts:AEON-1226: approved repository reference states and check.mjs audit against the build at 1440px dark",
+          "browser:tests/project-delivery-settings.spec.ts:AEON-1226: approved repository reference states and check.mjs audit against the build at 1440px light",
+          "browser:tests/project-delivery-settings.spec.ts:AEON-1226: approved repository reference states and check.mjs audit against the build at 390px dark",
+          "browser:tests/project-delivery-settings.spec.ts:AEON-1226: approved repository reference states and check.mjs audit against the build at 390px light",
+          "browser:tests/project-delivery-settings.spec.ts:AEON-1226: approved repository reference states and check.mjs audit against the build at 400px dark",
+          "browser:tests/project-delivery-settings.spec.ts:AEON-1226: approved repository reference states and check.mjs audit against the build at 400px light",
+          "browser:tests/project-delivery-settings.spec.ts:AEON-1226: repository states stay put and delivery edits preserve authority, inheritance and identity",
+          "browser:tests/project-delivery-settings.spec.ts:AEON-1253: repository shows the history source without moving its controls",
+          "browser:tests/project-delivery-settings.spec.ts:AEON-1326: nr3b-learn-slot stays put when the phone summary title wraps",
+          "browser:tests/project-delivery-settings.spec.ts:AEON-1326: nr3b-scroll-returns keeps the Actions explainer open so Escape focuses its trigger"
+        ]
+      },
+      {
+        "file": "tests/project-groups.spec.ts",
+        "keys": [
+          "browser:tests/project-groups.spec.ts:Open, Doing and Done cells: icons hold the left edge, numbers the right, three equal columns",
+          "browser:tests/project-groups.spec.ts:a member sees shared groups, may not add to them, and has no Share or Delete",
+          "browser:tests/project-groups.spec.ts:axe: grouped list, cards and the move dialog in dark",
+          "browser:tests/project-groups.spec.ts:axe: grouped list, cards and the move dialog in light",
+          "browser:tests/project-groups.spec.ts:cards: the switch is remembered; a card shows its ring, aligned counts, people and last activity"
+        ]
+      },
+      {
+        "file": "tests/project-header.spec.ts",
+        "keys": [
+          "browser:tests/project-header.spec.ts:delayed epic labels stay frozen until the filter popover closes",
+          "browser:tests/project-header.spec.ts:three densities preserve controls at 1024px dark",
+          "browser:tests/project-header.spec.ts:three densities preserve controls at 1024px light"
+        ]
+      },
+      {
+        "file": "tests/project-list.spec.ts",
+        "keys": [
+          "browser:tests/project-list.spec.ts:a status menu is keyboard driven with digits",
+          "browser:tests/project-list.spec.ts:blocked is a status between backlog and in progress",
+          "browser:tests/project-list.spec.ts:density switches between 36 and 30 pixel rows",
+          "browser:tests/project-list.spec.ts:facet menus filter with counts, show chips, and closed statuses reveal closed work",
+          "browser:tests/project-list.spec.ts:grouping by status and by epic",
+          "browser:tests/project-list.spec.ts:keyboard opens the side panel; j and k follow; Esc and Back close it",
+          "browser:tests/project-list.spec.ts:project header shows the project summary counts, cancelled work out of scope",
+          "browser:tests/project-list.spec.ts:the list asks for open work in the project and shows every column",
+          "browser:tests/project-list.spec.ts:wide screens dock the side panel beside the list; narrow ones overlay it"
+        ]
+      },
+      {
+        "file": "tests/project-sections.spec.ts",
+        "keys": [
+          "browser:tests/project-sections.spec.ts:dark 1600px: SVG tabs, arrow keys, focus order and no horizontal page scroll",
+          "browser:tests/project-sections.spec.ts:dark 390px: SVG tabs, arrow keys, focus order and no horizontal page scroll",
+          "browser:tests/project-sections.spec.ts:light 1600px: SVG tabs, arrow keys, focus order and no horizontal page scroll",
+          "browser:tests/project-sections.spec.ts:light 390px: SVG tabs, arrow keys, focus order and no horizontal page scroll"
+        ]
+      },
+      {
+        "file": "tests/project-sort.spec.ts",
+        "keys": [
+          "browser:tests/project-sort.spec.ts:Alt and the arrow keys move a card, announced; the card menu moves it too; the list moves with Alt up and down"
+        ]
+      },
+      {
+        "file": "tests/projects.spec.ts",
+        "keys": [
+          "browser:tests/projects.spec.ts:j, k and Enter open a project from the keyboard"
+        ]
+      },
+      {
+        "file": "tests/ticket-graph-view.spec.ts",
+        "keys": [
+          "browser:tests/ticket-graph-view.spec.ts:Hide closed reloads the graph projection; the legend and bounded-result notice are visible",
+          "browser:tests/ticket-graph-view.spec.ts:mobile filters contain only supported dimensions and Hide closed",
+          "browser:tests/ticket-graph-view.spec.ts:saved assignee, type, priority, status and body search match the header context",
+          "browser:tests/ticket-graph-view.spec.ts:status, priority, type and search use the Tickets query"
+        ]
+      },
+      {
+        "file": "tests/views-filters.spec.ts",
+        "keys": [
+          "browser:tests/views-filters.spec.ts:AEON-718 Graph offers saved views, persists mode and applies their filters",
+          "browser:tests/views-filters.spec.ts:AEON-718 plain columns save and reopen in list despite personal changes",
+          "browser:tests/views-filters.spec.ts:AEON-718 plain columns save and reopen in outline despite personal changes",
+          "browser:tests/views-filters.spec.ts:Shift F opens every filter: labels, parent, cost unit and release by name, and a relative date",
+          "browser:tests/views-filters.spec.ts:a custom date range filters imported start dates by day",
+          "browser:tests/views-filters.spec.ts:a link to a view someone cannot see keeps its filters and drops the view",
+          "browser:tests/views-filters.spec.ts:an excluded value filters with \"not\", shows in its control and travels in the URL and the API",
+          "browser:tests/views-filters.spec.ts:at 1024px the view bar and toolbar never overflow the page",
+          "browser:tests/views-filters.spec.ts:at 1280px the view bar and toolbar never overflow the page",
+          "browser:tests/views-filters.spec.ts:at 1440px the view bar and toolbar never overflow the page",
+          "browser:tests/views-filters.spec.ts:at 1920px the view bar and toolbar never overflow the page",
+          "browser:tests/views-filters.spec.ts:at 390px the view bar and toolbar never overflow the page",
+          "browser:tests/views-filters.spec.ts:coarse-pointer project attention link › expanded project attention target activates without moving controls at 1024px in dark",
+          "browser:tests/views-filters.spec.ts:coarse-pointer project attention link › expanded project attention target activates without moving controls at 1024px in light",
+          "browser:tests/views-filters.spec.ts:coarse-pointer project attention link › expanded project attention target activates without moving controls at 1440px in dark",
+          "browser:tests/views-filters.spec.ts:coarse-pointer project attention link › expanded project attention target activates without moving controls at 1440px in light",
+          "browser:tests/views-filters.spec.ts:coarse-pointer project attention link › expanded project attention target activates without moving controls at 390px in dark",
+          "browser:tests/views-filters.spec.ts:coarse-pointer project attention link › expanded project attention target activates without moving controls at 390px in light",
+          "browser:tests/views-filters.spec.ts:filters and views have no axe violations in dark",
+          "browser:tests/views-filters.spec.ts:filters and views have no axe violations in light",
+          "browser:tests/views-filters.spec.ts:grouping by assignee, priority and label counts its groups; groups collapse together",
+          "browser:tests/views-filters.spec.ts:in a view the column set belongs to the view; row height is the person’s own",
+          "browser:tests/views-filters.spec.ts:project attention navigation fits and stays still at 1024px in dark",
+          "browser:tests/views-filters.spec.ts:project attention navigation fits and stays still at 1024px in light",
+          "browser:tests/views-filters.spec.ts:project attention navigation fits and stays still at 1440px in dark",
+          "browser:tests/views-filters.spec.ts:project attention navigation fits and stays still at 1440px in light",
+          "browser:tests/views-filters.spec.ts:project attention navigation fits and stays still at 390px in dark",
+          "browser:tests/views-filters.spec.ts:project attention navigation fits and stays still at 390px in light",
+          "browser:tests/views-filters.spec.ts:saving a view: named from its filters, shared, then the bar shows it and changes mark it until saved",
+          "browser:tests/views-filters.spec.ts:the palette finds a project’s views by name and opens them",
+          "browser:tests/views-filters.spec.ts:the sort editor adds, reverses, reorders and removes keys, the same as Shift-clicking headers",
+          "browser:tests/views-filters.spec.ts:view menu: rename, duplicate, default on the next visit, share, copy link and delete with undo"
+        ]
+      },
+      {
+        "file": "tests/knowledge-shots.spec.ts",
+        "keys": [
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 02-list-search",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 04-list-empty",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 05-list-nomatch",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 07-entry-anchor",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 09-external",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 10-proposed",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 11-edit",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 12-edit-rename",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 13-conflict",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 16-cross-search",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 17-palette",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 18-missing",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 19-renamed",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 22-dock-edit",
+          "browser:tests/knowledge-shots.spec.ts:knowledge shots 23-dock-missing"
+        ]
+      }
+    ],
+    "keptUniqueRisks": [
+      "Split column movement and height-triggered reflow, phone pinned actions, focus restoration and control-stability guards remain native.",
+      "Graph picking/fullscreen/disposal, live-row retention, lazy Outline trees and Knowledge edit/dock remain native.",
+      "Protected header shrink and contrast identities stay unchanged; AEON-1663 is not claimed closed by this cut round."
+    ],
+    "remaining": "This round does not claim the final P04 32-case consolidation. Protected cuts need P02, and each remaining unique risk still needs an exact proven recipient."
   },
   "runtime": {
     "owner": "web/tests/p04-runtime.test.ts",
@@ -26,76 +676,44 @@
       "passed": 13,
       "failed": 0,
       "skipped": 0,
-      "durationMs": 432.663166
+      "durationMs": 505.901583
     },
-    "execution": "Single small-file local fallback after remote-spec refused for occupied remote slots. No browser launched locally.",
-    "logArtifact": "web/test-results/p04-runtime.log",
+    "execution": "One small Node file; no browser launched locally.",
+    "logArtifact": "web/test-results/cutA-runtime.log",
     "nativeCollection": "node-collect-hook.mjs / node-collect.mjs --batch for this exact source; canonical classifyManifest/saveManifest writer"
   },
-  "graphLifecycle": {
-    "destination": "runtime:p04-graph-lifecycle",
-    "proved": "GraphCanvas aborts pending setup when replaced or unmounted, disposes late and active renderer instances, ignores obsolete label callbacks, and forwards current data and FPS. This proves host ownership, not native canvas picking or GPU internals."
-  },
-  "headerContext": {
-    "destination": "runtime:p04-header-context",
-    "proved": "HeaderGlimpse rejects old project/filter results, keeps section searches out of Tickets, routes effective filters, preserves a person pause, and clears a delivered narrow viewport sample despite stale synchronous hints. Physical layout, native notifications and paint remain browser obligations."
-  },
-  "groupScope": {
-    "destination": "runtime:p04-group-scope",
-    "proved": "useGroupFigures clears changed filter/project/person counts before idle, aborts and ignores a held old answer, then publishes only the new scope; stopped loaders cannot publish late counts. Rendered groups and column movement remain browser obligations."
-  },
-  "negativeControls": {
-    "mechanism": "Compile an in-memory copy of production setup with one guard removed and require the corresponding behavioral assertion to reject it. Product files and Git trees are never mutated.",
-    "detected": [
-      "missing late-renderer disposal",
-      "accepting an aborted header context",
-      "ignoring a delivered narrow viewport sample",
-      "keeping old-scope figures until idle"
-    ]
-  },
   "browserTiming": {
-    "measuredBeforeMs": null,
-    "measuredAfterMs": null,
-    "measuredDeltaMs": null,
-    "reason": "All 696 source browser cases are unchanged. No whole-package before/after run or saving is claimed. A targeted original-case sample ran remotely; earlier attempts were refused for occupied slots or the host guard.",
-    "baselineSample": {
-      "sourceCommit": "2c9707daf5cee89594a355333529c72751abf369",
-      "spec": "tests/header-glimpse.spec.ts",
-      "grep": "AEON-1414",
-      "host": "approved remote browser lane",
-      "passed": 2,
-      "failed": 0,
-      "reportedRunnerSeconds": 9.0,
-      "retainedCases": [
-        "AEON-1414: a visual viewport shrink clears the glimpse while frames and other resize notifications are held",
-        "AEON-1414: a shrink clears the glimpse while viewport notifications and animation frames are stalled"
-      ]
-    },
-    "invalidAttempt": {
-      "filter": "AEON-1337|AEON-1414",
-      "exitCode": 1,
-      "cause": "Remote helper interpolated the multi-pattern filter into its shell: AEON-1414: command not found; reporter EPIPE. Discarded as invalid evidence and rerun with the documented single-word filter."
-    }
+    "host": "mbp2606",
+    "workers": 1,
+    "localFallback": false,
+    "measuredBeforeReported": "2.3m",
+    "measuredBeforeSeconds": 138,
+    "reportedPrecisionSeconds": 6,
+    "measuredAfterSeconds": null,
+    "measuredDeltaSeconds": null,
+    "batches": [
+      {
+        "id": 1,
+        "specs": [
+          "tests/aeon-1028-projheader.spec.ts",
+          "tests/aeon-1042-headergraph.spec.ts",
+          "tests/aeon-1188-displayhome.spec.ts",
+          "tests/aeon-974-typefilter.spec.ts",
+          "tests/group-figures.spec.ts",
+          "tests/project-status-counts.spec.ts"
+        ],
+        "before": {
+          "sourceCommit": "a7ea6c7cad7349acf79c1b25d75d6c8bb0d56284",
+          "passed": 96,
+          "failed": 0,
+          "runnerReported": "2.3m",
+          "logArtifact": "web/test-results/cutA-before.log"
+        },
+        "after": null
+      }
+    ],
+    "note": "Runner-reported time includes the browser test run, rounded by Playwright; it is not an invoice or a whole-package estimate."
   },
-  "static": {
-    "command": "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh",
-    "exitCode": 3,
-    "result": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR’s hosted CI static job"
-  },
-  "remaining": [
-    "P02 visual/reference prerequisite",
-    "The 32 retained native browser cases and donor removals/demotions",
-    "Native browser negative controls and measured before/after runner time",
-    "Affected runtime/browser suites through approved remote/CI entry points and full static exit 0",
-    "AEON-1663 browser synchronization acceptance; known-flaky list remains coordinator-owned"
-  ],
-  "sourceSha256": {
-    "web/tests/p04-runtime.test.ts": "95f43bc28106db898258846fea9a5805d487a1be54b5cadf20bdcc6aab1ec673",
-    "web/src/components/graph/GraphCanvas.vue": "0083c735203c34db3b85875e845c6a7cc7e55c1b21314ac20d4ba2879728fbd2",
-    "web/src/components/work/HeaderGlimpse.vue": "7e722318d634c1f10d4230b4e9cde3e0a0e13d08abea689db3e26e04dab01836",
-    "web/src/lib/useGroupFigures.ts": "6a2435f5599e386bdfc80567045bb6ed466572329cd63da84685c64caf5b0132"
-  },
-  "mergedMain": "2c9707daf5cee89594a355333529c72751abf369",
   "checks": {
     "standingLedger": {
       "command": "node scripts/test-prune/check.mjs",
@@ -103,17 +721,147 @@
       "cuts": false,
       "protectedRisks": 647
     },
+    "ledgerBehavior": {
+      "command": "node --experimental-strip-types --test web/tests/test-prune-ledger.test.ts",
+      "exitCode": 0,
+      "passed": 1
+    },
     "canonicalManifests": {
       "command": "node scripts/test-tiers/cli.mjs manifests --check",
       "exitCode": 0
     },
-    "historicalP01Snapshot": {
-      "command": "node scripts/test-prune/check.mjs --p01",
-      "exitCode": 1,
-      "error": "Frozen launch-policy changed: scripts/ci/go-test-tiers.json",
-      "reason": "The explicit one-time P01 freeze differs from origin/main; this package does not change the Go tier manifest. Standing mode passes.",
-      "baselineSha256": "ad40dbe81c4910a07773596ac52e062b3312b00d4b54017f06c5be5aa5aff0f1",
-      "mainSha256": "7d3b3d34218d72209fddbe77932958c9bda27117456cbdd25cceaf3c99adf88e"
+    "postGateMetadata": {
+      "removed": 14,
+      "removedKeysStillReferenced": []
+    }
+  },
+  "sourceSha256": {
+    "web/tests/aeon-1028-projheader.spec.ts": "6af0a499a8972fb4d3264246f41cadbb27ff39f0b0857663ce019badaa9e2db9",
+    "web/tests/aeon-1042-headergraph.spec.ts": "504af95826602e23193dcda93d598f5ce6f89b4b3bceca04e7f775b288a2b800",
+    "web/tests/aeon-1188-displayhome.spec.ts": "6a77ba9eafe510d4bc481c3e31f383f819313d60821957618eff9ad69f59b11e",
+    "web/tests/aeon-974-typefilter.spec.ts": "7ef4dca167444afdab67d4bad11d6742f5d322de4f4c9d4c1d74e38b2d29722f",
+    "web/tests/group-figures.spec.ts": "dabaa0a891794b6159d70260b1fcd7da072e5cf6caa536344b156a44d1ec575c",
+    "web/tests/project-status-counts.spec.ts": "fd9e02e1d36f0fc0f37dff8ec1fefe0675573a6eabeb2c4f5c6d8535d7016a1b",
+    "web/tests/p04-runtime.test.ts": "95f43bc28106db898258846fea9a5805d487a1be54b5cadf20bdcc6aab1ec673"
+  },
+  "mergedMain": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
+  "preparationRound": {
+    "version": 1,
+    "ticket": "AEON-1676",
+    "package": "P04",
+    "status": "replacement-preparation-only",
+    "recordedAt": "2026-10-22T23:30:39.102805+00:00",
+    "cutBlocker": {
+      "path": "scripts/test-prune/visual-manifest.json",
+      "approval": "pending",
+      "baselineAuthority": "pending-review",
+      "required": "Tick-approved immutable available references from P02; no protected cut, demotion, historical rewrite or approval bypass."
+    },
+    "browserCases": {
+      "sourceOwners": 46,
+      "before": 696,
+      "after": 696,
+      "plannedCeiling": 32,
+      "removed": 0,
+      "demoted": 0
+    },
+    "runtime": {
+      "owner": "web/tests/p04-runtime.test.ts",
+      "tier": "ESSENTIAL",
+      "command": "node --experimental-strip-types --test web/tests/p04-runtime.test.ts",
+      "result": {
+        "passed": 13,
+        "failed": 0,
+        "skipped": 0,
+        "durationMs": 432.663166
+      },
+      "execution": "Single small-file local fallback after remote-spec refused for occupied remote slots. No browser launched locally.",
+      "logArtifact": "web/test-results/p04-runtime.log",
+      "nativeCollection": "node-collect-hook.mjs / node-collect.mjs --batch for this exact source; canonical classifyManifest/saveManifest writer"
+    },
+    "graphLifecycle": {
+      "destination": "runtime:p04-graph-lifecycle",
+      "proved": "GraphCanvas aborts pending setup when replaced or unmounted, disposes late and active renderer instances, ignores obsolete label callbacks, and forwards current data and FPS. This proves host ownership, not native canvas picking or GPU internals."
+    },
+    "headerContext": {
+      "destination": "runtime:p04-header-context",
+      "proved": "HeaderGlimpse rejects old project/filter results, keeps section searches out of Tickets, routes effective filters, preserves a person pause, and clears a delivered narrow viewport sample despite stale synchronous hints. Physical layout, native notifications and paint remain browser obligations."
+    },
+    "groupScope": {
+      "destination": "runtime:p04-group-scope",
+      "proved": "useGroupFigures clears changed filter/project/person counts before idle, aborts and ignores a held old answer, then publishes only the new scope; stopped loaders cannot publish late counts. Rendered groups and column movement remain browser obligations."
+    },
+    "negativeControls": {
+      "mechanism": "Compile an in-memory copy of production setup with one guard removed and require the corresponding behavioral assertion to reject it. Product files and Git trees are never mutated.",
+      "detected": [
+        "missing late-renderer disposal",
+        "accepting an aborted header context",
+        "ignoring a delivered narrow viewport sample",
+        "keeping old-scope figures until idle"
+      ]
+    },
+    "browserTiming": {
+      "measuredBeforeMs": null,
+      "measuredAfterMs": null,
+      "measuredDeltaMs": null,
+      "reason": "All 696 source browser cases are unchanged. No whole-package before/after run or saving is claimed. A targeted original-case sample ran remotely; earlier attempts were refused for occupied slots or the host guard.",
+      "baselineSample": {
+        "sourceCommit": "2c9707daf5cee89594a355333529c72751abf369",
+        "spec": "tests/header-glimpse.spec.ts",
+        "grep": "AEON-1414",
+        "host": "approved remote browser lane",
+        "passed": 2,
+        "failed": 0,
+        "reportedRunnerSeconds": 9,
+        "retainedCases": [
+          "AEON-1414: a visual viewport shrink clears the glimpse while frames and other resize notifications are held",
+          "AEON-1414: a shrink clears the glimpse while viewport notifications and animation frames are stalled"
+        ]
+      },
+      "invalidAttempt": {
+        "filter": "AEON-1337|AEON-1414",
+        "exitCode": 1,
+        "cause": "Remote helper interpolated the multi-pattern filter into its shell: AEON-1414: command not found; reporter EPIPE. Discarded as invalid evidence and rerun with the documented single-word filter."
+      }
+    },
+    "static": {
+      "command": "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh",
+      "exitCode": 3,
+      "result": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR’s hosted CI static job"
+    },
+    "remaining": [
+      "P02 visual/reference prerequisite",
+      "The 32 retained native browser cases and donor removals/demotions",
+      "Native browser negative controls and measured before/after runner time",
+      "Affected runtime/browser suites through approved remote/CI entry points and full static exit 0",
+      "AEON-1663 browser synchronization acceptance; known-flaky list remains coordinator-owned"
+    ],
+    "sourceSha256": {
+      "web/tests/p04-runtime.test.ts": "95f43bc28106db898258846fea9a5805d487a1be54b5cadf20bdcc6aab1ec673",
+      "web/src/components/graph/GraphCanvas.vue": "0083c735203c34db3b85875e845c6a7cc7e55c1b21314ac20d4ba2879728fbd2",
+      "web/src/components/work/HeaderGlimpse.vue": "7e722318d634c1f10d4230b4e9cde3e0a0e13d08abea689db3e26e04dab01836",
+      "web/src/lib/useGroupFigures.ts": "6a2435f5599e386bdfc80567045bb6ed466572329cd63da84685c64caf5b0132"
+    },
+    "mergedMain": "2c9707daf5cee89594a355333529c72751abf369",
+    "checks": {
+      "standingLedger": {
+        "command": "node scripts/test-prune/check.mjs",
+        "exitCode": 0,
+        "cuts": false,
+        "protectedRisks": 647
+      },
+      "canonicalManifests": {
+        "command": "node scripts/test-tiers/cli.mjs manifests --check",
+        "exitCode": 0
+      },
+      "historicalP01Snapshot": {
+        "command": "node scripts/test-prune/check.mjs --p01",
+        "exitCode": 1,
+        "error": "Frozen launch-policy changed: scripts/ci/go-test-tiers.json",
+        "reason": "The explicit one-time P01 freeze differs from origin/main; this package does not change the Go tier manifest. Standing mode passes.",
+        "baselineSha256": "ad40dbe81c4910a07773596ac52e062b3312b00d4b54017f06c5be5aa5aff0f1",
+        "mainSha256": "7d3b3d34218d72209fddbe77932958c9bda27117456cbdd25cceaf3c99adf88e"
+      }
     }
   }
 }
