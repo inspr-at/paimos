@@ -758,4 +758,11 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
   .conflict .btn { margin-left: 24px; }
   .hint { display: none; }
 }
+/* Compact keys leave visible space between day values on narrow phones. */
+@media (max-width: 520px) {
+  .week-grid .c-ticket { width: 74px; }
+  .week-grid .ticket-chip { padding: 0; border-radius: 0; background: transparent; box-shadow: none; color: var(--ink); }
+  .week-grid .ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
+  .week-grid .c-day { font-size: 11px; }
+}
 </style>

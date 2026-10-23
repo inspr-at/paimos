@@ -2,6 +2,7 @@
 // Hours: the week grid, fast entry, people and agents, period review and approval.
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
+import { writeFile } from 'node:fs/promises'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { addHistoricalPeriod, businessData, mira, mockBusiness, nova, WEEK39, type BusinessMockOptions } from './business-fixtures'
 import { colourContrast } from '../src/lib/themeEngine'
@@ -104,6 +105,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
   await expect(entries.locator('.entry').first()).toContainText('127.50')
   // AEON-1687: the complete seven-day grid must fit its own container on a
   // phone, rather than concealing a wider table in a horizontal scroller.
+  const measurements = []
   for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 900 })
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
@@ -129,6 +131,52 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     expect(dayCells.some(cell => cell.text === '10:30'), 'the grid includes a five-character day value').toBe(true)
     expect(dayCells.filter(cell => cell.scrollWidth > cell.clientWidth), `${width} ${theme}: every day value fits its cell`).toEqual([])
     expect(dayCells.filter(cell => cell.textWidth > cell.contentWidth + 0.5), `${width} ${theme}: day text stays inside the content box`).toEqual([])
+    // Measure actual text, including both lines of the header. Cell boxes can
+    // fit perfectly while the adjacent time values still read as one number.
+    const textRows = await grid(page).locator('tr').evaluateAll(rows => rows.map(row => {
+      const cells = Array.from(row.querySelectorAll('.c-day'))
+      const text = cells.map(cell => {
+        const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT)
+        const rects: DOMRect[] = []
+        while (walker.nextNode()) {
+          if (!walker.currentNode.textContent?.trim()) continue
+          const range = document.createRange()
+          range.selectNodeContents(walker.currentNode)
+          rects.push(...Array.from(range.getClientRects()))
+        }
+        return { value: cell.textContent, left: Math.min(...rects.map(rect => rect.left)),
+          right: Math.max(...rects.map(rect => rect.right)),
+          visible: rects.length > 0 && rects.every(rect => rect.width > 0 && rect.height > 0) }
+      })
+      return { label: row.querySelector('th')?.textContent?.trim(), text,
+        gaps: text.slice(1).map((next, i) => next.left - text[i].right) }
+    }))
+    expect(textRows).toHaveLength(5) // Header, all three tickets and per-day totals.
+    for (const row of textRows) {
+      expect(row.text).toHaveLength(7)
+      expect(row.text.every(text => text.visible), `${width} ${theme}: ${row.label} has positive text boxes`).toBe(true)
+      expect(row.gaps).toHaveLength(6)
+      for (const [i, gap] of row.gaps.entries()) {
+        expect(gap, `${width} ${theme}: ${row.label}, ${row.text[i].value} → ${row.text[i + 1].value}`).toBeGreaterThanOrEqual(6)
+      }
+    }
+    // Disabling only this round's compact rule restores the pre-fix layout.
+    // Tablet and desktop must retain exactly the same control and grid boxes.
+    const unchangedWideLayout = await page.evaluate(() => {
+      const compact = Array.from(document.styleSheets).flatMap(sheet => Array.from(sheet.cssRules))
+        .find((rule): rule is CSSMediaRule => rule instanceof CSSMediaRule
+          && rule.conditionText === '(max-width: 520px)' && rule.cssText.includes('.week-grid'))
+      if (!compact) throw new Error('Compact Hours rule not found')
+      const measure = () => Array.from(document.querySelectorAll('.toolbar, .week-card, .week-grid th, .week-grid td, .week-foot'))
+        .map(element => element.getBoundingClientRect().toJSON())
+      const fixed = measure(), condition = compact.media.mediaText
+      try {
+        compact.media.mediaText = 'not all'
+        return { fixed, previous: measure() }
+      } finally { compact.media.mediaText = condition }
+    })
+    if (width >= 1024) expect(unchangedWideLayout.fixed, `${width} ${theme}: 0 px change from the pre-fix layout`).toEqual(unchangedWideLayout.previous)
+    measurements.push({ width, theme, textRows, unchangedWideLayout })
     const crowdedTickets = await grid(page).locator('tbody th').evaluateAll(cells => cells.flatMap(cell => {
       const chip = cell.querySelector('.ticket-chip')!, edge = chip.getBoundingClientRect().right
       return edge > cell.getBoundingClientRect().right ? [chip.textContent] : []
@@ -142,6 +190,7 @@ test('the week grid sums per ticket and day with exact amounts', async ({ page }
     expect(axe.violations, `${width} ${theme}: Hours WCAG A/AA`).toEqual([])
     await page.screenshot({ path: info.outputPath(`AEON-1687-hours-${width}-${theme}.png`) })
   }
+  await writeFile(info.outputPath('AEON-1687-hours-checks.md'), JSON.stringify(measurements, null, 2))
   expect(errors).toEqual([])
 })
 
