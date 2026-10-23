@@ -97,6 +97,28 @@ export const sessionChat: VisualSetup = async (page, _profile, theme) => {
     sender_session_id: worker.id, sender_principal_id: worker.agent_principal_id, recipient_principal_id: me.id,
     created_at: new Date(NOW - 60_000).toISOString() })
   await mockAgents(page, data, { now: () => NOW })
+  // Legacy chat has a bound thread but no qualified native runtime. Model the
+  // typed feature-disabled response, not a missing backend mock; a native
+  // snapshot would select the owned-session UI and remove this chat entirely.
+  // Unknown paths and every mutation still fall through to the strict checks.
+  const conversation = '7c000000-0000-4000-8000-000000001674'
+  await page.route('**/api/**', route => {
+    const request = route.request(), path = new URL(request.url()).pathname
+    if (request.method() !== 'GET') return route.fallback()
+    if (path === `/api/projects/${worker.project_id}/harness-sessions/${worker.id}/native-context`) return route.fulfill({ status: 503,
+      json: { reason: 'feature_disabled', request_id: null, retryable: false } })
+    if (path === `/api/chat-sessions/${worker.id}/thread`) return route.fulfill({ json: {
+      contract: 'chat-v1', conversation_id: conversation, role: { contract: 'chat-v1' }, revision: '1', binding_epoch: '1',
+      readiness: { state: 'offline', capabilities: [], reason: 'session_offline' },
+    } })
+    if (path === `/api/chat-threads/${conversation}/messages`) return route.fulfill({ json: {
+      contract: 'chat-v1', items: [], has_more_before: false, has_more_after: false,
+      before_cursor: null, after_cursor: null, snapshot_cursor: 'p02', migration_epoch: '0',
+    } })
+    if (path === `/api/chat-threads/${conversation}/live`) return route.fulfill({ contentType: 'text/event-stream',
+      body: 'event: ready\ndata: {"contract":"chat-live-v1"}\n\n' })
+    return route.fallback()
+  })
   await page.goto(`/agents/${worker.id}?tab=messages`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await panel.getByRole('tab', { name: /^Chat/ }).click()

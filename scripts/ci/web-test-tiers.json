@@ -15634,6 +15634,8 @@
     ,
     {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"P02 Session Chat fixture binds its chat reads and native refusal to the displayed session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

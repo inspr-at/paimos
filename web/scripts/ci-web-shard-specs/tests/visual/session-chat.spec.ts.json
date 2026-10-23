@@ -1,14 +1,14 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 40,
-    "selectedTests": 4,
+    "seconds": 50,
+    "selectedTests": 5,
     "source": "AEON-1674 initial scheduling estimate; comparisons remain unproven until references are approved."
   },
   "spec": {
     "file": "tests/visual/session-chat.spec.ts",
-    "listedTests": 4,
-    "weightSeconds": 40,
+    "listedTests": 5,
+    "weightSeconds": 50,
     "weightSource": "AEON-1674-initial-estimate"
   }
 }
