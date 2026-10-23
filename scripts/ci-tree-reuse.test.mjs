@@ -76,6 +76,18 @@ test('found: an exact-SHA successful merge-group full suite reuses with source n
     if (conclusion === 'cancelled') await assert.rejects(verifyRun(repository, 123, bundled.api, sha), /incomplete suite/);
     else assert.deepEqual(await verifyRun(repository, 123, bundled.api, sha), { run: 123, attempt: 1, sha });
   }
+  // AEON-1674: manual artifact capture is present but skipped on merge-group
+  // runs. It must never replace execution evidence or run during reuse.
+  for (const conclusion of ['skipped', 'success', 'failure', 'cancelled']) {
+    const captured = fixture();
+    captured.jobs.jobs.push({ name: 'visual-reference-capture', status: 'completed', conclusion, run_attempt: 1 });
+    captured.jobs.total_count++;
+    if (conclusion === 'skipped') {
+      assert.deepEqual(await verifyRun(repository, 123, captured.api, sha), { run: 123, attempt: 1, sha });
+      job(captured, 'web-shard (1)').steps[0].conclusion = 'skipped';
+      await assert.rejects(verifyRun(repository, 123, captured.api, sha), /missing full execution evidence/);
+    } else await assert.rejects(verifyRun(repository, 123, captured.api, sha), /manual capture must be skipped|incomplete suite/);
+  }
 });
 
 test('the full suite reuses without the retired comparison job and still requires every surviving job', async () => {

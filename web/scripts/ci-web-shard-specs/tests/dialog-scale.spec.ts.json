@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/dialog-scale.spec.ts",
-    "listedTests": 8,
+    "listedTests": 9,
     "tierTiming": {
       "caseSeconds": {
         "max": 31.386,

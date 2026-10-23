@@ -1365,6 +1365,31 @@ test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 860s and eight
   assert.equal(previous.shards.length,20)
   assert.equal(previous.fitsBudget,true)
   assert.ok(previous.projectedMaxSeconds>800,`twenty-shard main must miss 800s, got ${previous.projectedMaxSeconds.toFixed(3)}s`)
+  // P02 also proves that staging its replacements beside the original
+  // population exceeds twenty shards. Rebuild that historical population
+  // and overlay only P02's staged launch records; later cuts must not erase
+  // either this counterexample or the unchanged live 860/900-second guards.
+  const staged=new Set(JSON.parse(readFileSync(new URL('../test-prune/p02-execution.json',import.meta.url))).candidateNativeKeys)
+  const beforePrune=new Set(frozen.catalogue.map(key))
+  const additions=replayRows.filter(row=>staged.has(key(row))&&!beforePrune.has(key(row)))
+  const owners=new Set([
+    ...JSON.parse(readFileSync(new URL('../test-prune/risk-ledger.json',import.meta.url))).specs.filter(row=>row.package==='P02').map(row=>row.file),
+    ...additions.filter(row=>row.kind==='browser').map(row=>row.file),
+  ])
+  const stagedPolicy=structuredClone(frozen.launchPolicy)
+  for(const group of stagedPolicy.groups) group.specs=group.specs.filter(spec=>!owners.has(spec.file))
+  for(const group of policy.groups) {
+    const specs=group.specs.filter(spec=>owners.has(spec.file))
+    if(!specs.length) continue
+    let target=stagedPolicy.groups.find(row=>row.id===group.id)
+    if(!target) { target={...group,specs:[]}; stagedPolicy.groups.push(target) }
+    target.specs.push(...specs)
+  }
+  const stagedGate=fullGateTests([...frozen.catalogue,...additions]).filter(row=>row.kind==='browser')
+  const enlarged=webShardPlan(stagedGate,stagedPolicy,{mode:'full',maximum:20})
+  assert.equal(enlarged.shards.length,20)
+  assert.equal(enlarged.fitsBudget,false)
+  assert.throws(()=>assertWebShardBudget(enlarged),/over the 900s budget/)
   const narrow=webShardPlan(historicalGate,frozen.launchPolicy,{mode:'full',maximum:18})
   assert.equal(narrow.shards.length,18)
   assert.equal(narrow.budgetSeconds,900)

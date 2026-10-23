@@ -14,7 +14,7 @@ const accountId = 'ac000000-0000-4000-8000-000000000001'
 const spareAccountId = 'ac000000-0000-4000-8000-000000000002'
 const laptopAccountId = 'ac000000-0000-4000-8000-000000000003'
 
-export async function mockStartAgent(page: Page, options: { ticketTitle?: string; expertStart?: boolean; lostOnceResponse?: boolean; wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'same-name-hosts' | 'claude' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
+export async function mockStartAgent(page: Page, options: { now?: number; ticketTitle?: string; expertStart?: boolean; lostOnceResponse?: boolean; wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'same-name-hosts' | 'claude' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
   const work = fixtures()
   if (options.ticketTitle) work.nodes.find(node => node.id === 'n-1')!.title = options.ticketTitle
   const workParents = new Set(work.nodes.filter(node => ['work', 'epic', 'ticket', 'task'].includes(node.kind_slug)).map(node => node.parent_id))
@@ -30,7 +30,7 @@ export async function mockStartAgent(page: Page, options: { ticketTitle?: string
   const profile: ModelProfile = { id: profileId, slug: 'Build · deliberate', harness: 'codex', family: 'openai', model: 'workspace-build', effort: 'high', tier: 'standard', enabled: true }
   if (options.catalog === 'pi-openrouter') Object.assign(profile, { harness: 'pi', family: 'unknown', model: 'openrouter/stealth/space-bunny-alpha', effort: 'off' })
   const ungranted: ModelProfile = { ...profile, id: 'c2000000-0000-4000-8000-000000000099', slug: 'Ungranted model', model: 'ungranted-model', enabled: true }
-  const now = Date.now()
+  const now = options.now ?? Date.now()
   const span = { starts_at: new Date(now - 60_000).toISOString(), ends_at: new Date(now - 60_000 + 5 * 3_600_000).toISOString() }
   const reasons = [...(options.offline ? ['probe'] as const : []), ...(options.unavailable ? ['state'] as const : []), ...(options.catalog === 'empty-grants' ? ['models'] as const : [])]
   const available = !options.wait && reasons.length === 0 && options.catalog !== 'empty-grants'

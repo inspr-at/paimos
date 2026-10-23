@@ -7250,6 +7250,8 @@
     ,
     {"kind":"browser","file":"tests/clip-tip-overflow.spec.ts","name":"overflow fix4: 390px light › touch scrolling keeps the originating picker open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"P02 real phone hold reveals text, scrolling cancels a pending hold and the next tap still activates","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px dark › long press reads a production epic picker before a tap selects and closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/clip-tip-touch.spec.ts","name":"touch fix5: 1024px dark › long press remains until an outside tap; cancellation and changed records cannot reveal stale text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -7471,6 +7473,12 @@
     {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"768px light › lifecycle: keyboard disclosure follows unclipped without refocus","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"768px light › ticket titles keep the existing two-line phone layout and reveal full desktop names","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"P02 a clipped ticket name exposes its full text and keyboard opens that exact record","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"P02 a disclosed reused anchor follows changed text and dismisses when the record disappears","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"P02 keyboard disclosure follows scrolling, reads overflow and restores the same picker option on Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/coarse-hit-area.spec.ts","name":"1024px coarse pointer › shared controls extend to a 44px hit area","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9050,6 +9058,8 @@
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"screenshots › ticket-header-business 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/headings.spec.ts","name":"P02 keyboard and touch read the full heading in a short viewport without moving its controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/headings.spec.ts","name":"Rules Preview refreshes a keyboard-focused identity after clipping (dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/headings.spec.ts","name":"Rules Preview refreshes a keyboard-focused identity after clipping (light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10402,6 +10412,10 @@
     ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"Business tabs: a closed Customers or Quotes says how to open it; earlier links lead there","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/nav.spec.ts","name":"P02 account menu keyboard focus returns through a route and browser Back","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/nav.spec.ts","name":"P02 keyboard places navigate outside fields and preserve text-field shortcuts","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"at 390 the ticket fits: previous and next fold into More, chips and screens wrap","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"axe: header places and the business tabs in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10661,6 +10675,14 @@
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk native choices, reason and failure stay still 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Decision Desk native choices, reason and failure stay still 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"P02 desktop top actions stay anchored while content grows and scrolls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"P02 floating search and selectors keep positive geometry through loading, empty and returned results","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"P02 phone choices and pinned actions retain geometry and focus across a memo series","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"P02 physical switch geometry and the stability guard reject displaced, collapsed and overflowing controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"confirmation content grows away from its controls at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -12080,6 +12102,12 @@
     ,
     {"kind":"browser","file":"tests/resilient-polling.spec.ts","name":"Live Agents pauses in a hidden tab and refreshes when shown and back online","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"P02 a refused role change preserves authority and stationary choices until a successful retry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"P02 native radio arrows and Enter apply the chosen role while keyboard Cancel writes nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"P02 phone long role choices scroll inside a pinned sheet with real reachable hit targets","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"a description distinguishes duplicate role names when it is present in the payload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"a rejected role change and another choice keep actions still at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -12826,6 +12854,10 @@
     ,
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"sign-out confirmation names its scope and a failed write keeps the reviewed account open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"P02 a Settings dock becomes an isolated phone sheet with pinned series actions and focus return","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"P02 failed Settings submits preserve the field, platform shortcut and two-step Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"Settings primary actions have no glow and retain keyboard focus in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"Settings primary actions have no glow and retain keyboard focus in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -12937,6 +12969,12 @@
     {"kind":"browser","file":"tests/shell.spec.ts","name":"404 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/shell.spec.ts","name":"OIDC sign-in resumes the saved path after the full-page callback","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"P02 OIDC callback restores the protected return path and workspace title","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"P02 a failed route chunk offers an honest reload of its intended destination","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"P02 session expiry refuses protected navigation and resumes after sign-in","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/shell.spec.ts","name":"a raw api 401 also leaves a public route in place until protected navigation","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -13292,6 +13330,8 @@
     ,
     {"kind":"browser","file":"tests/tap-targets.spec.ts","name":"768px fine light compact › ticket and tier controls keep their visuals, reach and position","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/tenant-brand.spec.ts","name":"P02 an admin uploads a bounded sanitized logo and reloads the saved workspace brand","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/tenant-brand.spec.ts","name":"SVG upload names non-drawing removals in de-AT","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/tenant-brand.spec.ts","name":"SVG upload names non-drawing removals in en-GB","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -13350,6 +13390,10 @@
     ,
     {"kind":"browser","file":"tests/theme-agents.spec.ts","name":"visible screenshots and Personal agent behaviour controls stay stable in all viewport modes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"P02 live OS mode changes retain the selected theme colours","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"P02 saved theme restoration blocks the first app paint until confirmed colours arrive","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"a reload waits for the saved colours before rendering the app","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/theme-apply.spec.ts","name":"extreme saved accents keep personal appearance links readable in both modes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -13383,6 +13427,10 @@
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Load more is disabled while the current theme is unavailable and works again after Reload (390 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"New theme duplicates the default even on a later list page; managers may edit it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"P02 a staged theme edit saves once, preserves independent fields and survives reload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"P02 a theme conflict retains the unsaved draft and needs a deliberate choice after reload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1024 dark: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13702,6 +13750,8 @@
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"a sideways strip is assessed as it stands; a control under a vertical scroller’s edge waits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"a top-layer modal escapes its page clipping while its own scroller still rejects oversized children","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"known fixture responses and decorative labelled versions are filtered precisely","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"layout shift audit arms after navigation and resets startup movement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13846,6 +13896,180 @@
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"view menu: rename, duplicate, default on the next visit, share, copy link and delete with undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/visual/access.spec.ts","name":"V-access-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/access.spec.ts","name":"V-access-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/access.spec.ts","name":"V-access-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/access.spec.ts","name":"V-access-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-1024-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-1024-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/account-use-matrix.spec.ts","name":"V-account-use-matrix-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/agent-rules.spec.ts","name":"V-agent-rules-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/agent-rules.spec.ts","name":"V-agent-rules-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/agent-rules.spec.ts","name":"V-agent-rules-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/agent-rules.spec.ts","name":"V-agent-rules-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-1024-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-1024-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/agents.spec.ts","name":"V-agents-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/capacity.spec.ts","name":"V-capacity-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/capacity.spec.ts","name":"V-capacity-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/capacity.spec.ts","name":"V-capacity-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/capacity.spec.ts","name":"V-capacity-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-1024-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-1024-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/decision-desk.spec.ts","name":"V-decision-desk-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/delivery-numbers.spec.ts","name":"V-delivery-numbers-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/delivery-numbers.spec.ts","name":"V-delivery-numbers-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/delivery-numbers.spec.ts","name":"V-delivery-numbers-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/delivery-numbers.spec.ts","name":"V-delivery-numbers-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/goals.spec.ts","name":"V-goals-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/goals.spec.ts","name":"V-goals-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/goals.spec.ts","name":"V-goals-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/goals.spec.ts","name":"V-goals-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/hours.spec.ts","name":"V-hours-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/hours.spec.ts","name":"V-hours-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/hours.spec.ts","name":"V-hours-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/hours.spec.ts","name":"V-hours-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/knowledge.spec.ts","name":"V-knowledge-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/knowledge.spec.ts","name":"V-knowledge-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/knowledge.spec.ts","name":"V-knowledge-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/knowledge.spec.ts","name":"V-knowledge-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/models.spec.ts","name":"V-models-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/models.spec.ts","name":"V-models-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/models.spec.ts","name":"V-models-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/models.spec.ts","name":"V-models-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/projects.spec.ts","name":"V-projects-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/projects.spec.ts","name":"V-projects-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/projects.spec.ts","name":"V-projects-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/projects.spec.ts","name":"V-projects-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/public-quote.spec.ts","name":"V-public-quote-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/public-quote.spec.ts","name":"V-public-quote-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/public-quote.spec.ts","name":"V-public-quote-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/public-quote.spec.ts","name":"V-public-quote-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-1024-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-1024-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/quote-editor.spec.ts","name":"V-quote-editor-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/reference-guard.spec.ts","name":"P02 Agents permission requests load successfully and retain explicit error recovery","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/reference-guard.spec.ts","name":"P02 Delivery phone capture includes its heading and on-target headline in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/reference-guard.spec.ts","name":"P02 Session Chat fixture binds its chat reads and native refusal to the displayed session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/reference-guard.spec.ts","name":"P02 capacity reference keeps the same open popover and scroll across themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/reference-guard.spec.ts","name":"P02 quote editor selects the rendered paragraph when its hidden measurement copy comes first","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/reference-guard.spec.ts","name":"P02 quote font guard rejects an unloaded profile face","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/reference-guard.spec.ts","name":"visual comparison rejects a changed control and never creates a missing reference","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/session-chat.spec.ts","name":"V-session-chat-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/start-agent.spec.ts","name":"V-start-agent-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/start-agent.spec.ts","name":"V-start-agent-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/start-agent.spec.ts","name":"V-start-agent-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/start-agent.spec.ts","name":"V-start-agent-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/ticket-workspace.spec.ts","name":"V-ticket-workspace-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/ticket-workspace.spec.ts","name":"V-ticket-workspace-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/ticket-workspace.spec.ts","name":"V-ticket-workspace-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/ticket-workspace.spec.ts","name":"V-ticket-workspace-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/tickets.spec.ts","name":"V-tickets-1440-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/tickets.spec.ts","name":"V-tickets-1440-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/tickets.spec.ts","name":"V-tickets-390-dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/visual/tickets.spec.ts","name":"V-tickets-390-light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"a 2051-event access history shows its newest revocation and accurately reports the bounded window","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"knowledge keeps a failed second query visibly stale, with retry and the previous query named","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13855,6 +14079,8 @@
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"start-time typing keeps the cost unit and controls stable (390, light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"timing failures keep typed values and controls anchored, and save again on blur","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/wide.spec.ts","name":"P02 a wide table accepts native column drag and keyboard resize and restores the stored width","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/wide.spec.ts","name":"back trail › following links inside the panel builds a trail with Back and Alt+Left; list moves clear it","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
@@ -14594,6 +14820,8 @@
     ,
     {"kind":"node","file":"tests/avatar.test.ts","name":"zones and languages read well","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/brandMarks.test.ts","name":"P02 live product branding updates page and overlay titles while invalid brands preserve the confirmed value","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/brandMarks.test.ts","name":"known harnesses and providers use distinct vendored silhouettes","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/business-setup-owner.test.ts","name":"every setup link on the Business pages ends in Settings › Business","tier":"GATED-FULL"}
@@ -15091,6 +15319,12 @@
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"the header glimpse needs a wide viewport, motion, and eight tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"the shared context pages the Tickets query and drops links outside its membership","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/header-menus.test.ts","name":"P02 rendered account menus bind the current identity and preserve it when sign-out fails","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/header-menus.test.ts","name":"P02 rendered app menus react to current authority, person kind and workspace membership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/header-menus.test.ts","name":"P02 rendered help waits for its recipient and reuses a refused feedback identity until confirmed","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/header-menus.test.ts","name":"feedback says where it was written, then the words","tier":"GATED-FULL"}
     ,
@@ -15999,6 +16233,10 @@
     {"kind":"node","file":"tests/vendor-signals.test.ts","name":"a vendor stop stays calm and names the real reset, then becomes stopped","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/vendor-signals.test.ts","name":"status line copy names whose computer it is","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/visual-baselines.test.ts","name":"visual references require approval, immutable attachment bytes and every exact member","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/visual-baselines.test.ts","name":"visual report-only switch records failures and restores blocking without granting historical cut authority","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/work-aggregates.test.ts","name":"fractional progress rounded by the formatter to 100% retains ETA and staleness in every mode","tier":"NIGHTLY"}
     ,
@@ -17309,6 +17547,8 @@
     {"kind":"vitest","file":"tests/footer-release.unit.test.ts","name":"only shows a known positive new count (null)","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/footer-release.unit.test.ts","name":"uses the running release publication time, then tag time, then reservation","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"P02 footer actions route to the named exception and loading or hidden authority cannot claim one","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"the ping and who speaks > lets a sheet speak over its page and gives the centre back when it closes","tier":"NIGHTLY"}
     ,
@@ -22574,9 +22814,27 @@
     ,
     {"kind":"vitest","file":"tests/tier-evidence-live.unit.test.ts","name":"ignores other sessions and throttles matching telemetry with one trailing read","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 a pending touch disclosure is cancelled by changed record","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 a pending touch disclosure is cancelled by nine pixels","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 a pending touch disclosure is cancelled by pointer cancellation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 a pending touch disclosure is cancelled by removed record","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 a pending touch disclosure is cancelled by scroll","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 a pending touch disclosure is cancelled by second contact","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 an eight-pixel hold reveals at 500 ms and suppresses only its own compatibility click","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"P02 focused disclosure follows a changed record and discards a disconnected anchor and late observer","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"a nested scroll retains the focused label and repositions its disclosure","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/tooltip-focus.unit.test.ts","name":"pointer movement keeps the complete label owned by keyboard focus","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/ui-audit-rules.unit.test.ts","name":"P02 audit exceptions require the exact fixture, HTTP outcome and decorative accessible counterpart","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/use-identity-scope.unit.test.ts","name":"a permission reset drops runs, and nothing starts while nobody is signed in","tier":"ESSENTIAL"}
     ,

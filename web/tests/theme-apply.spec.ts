@@ -202,3 +202,31 @@ test('waiting glyph ink survives the robot clock styles in both modes', async ({
     expect(await mark.locator('path').evaluate(el => getComputedStyle(el).stroke)).toBe(cssRgb(inkOn(fill)))
   }
 })
+
+test("P02 saved theme restoration blocks the first app paint until confirmed colours arrive", async ({ page }) => {
+  await setup(page)
+  const chosen = values()
+  let release!: () => void, requested!: () => void
+  const barrier = new Promise<void>(resolve => { release = resolve })
+  const called = new Promise<void>(resolve => { requested = resolve })
+  await page.route('**/api/me/theme', async route => { requested(); await barrier; await route.fulfill({ json: activeTheme(chosen) }) })
+  await page.goto('/p/PHAROS?sort=key&group=none', { waitUntil: 'domcontentloaded' })
+  await called
+  expect(await page.locator('#app').evaluate(el => el.childElementCount)).toBe(0)
+  expect(await page.locator('body').evaluate(el => getComputedStyle(el).backgroundImage)).toBe('none')
+  release()
+  await expect(page.locator('#row-n-1')).toBeVisible()
+  expect(await page.locator('html').evaluate(el => getComputedStyle(el).getPropertyValue('--teal').trim())).toBe(chosen.primary.light)
+})
+
+test("P02 live OS mode changes retain the selected theme colours", async ({ page }) => {
+  await setup(page)
+  const chosen = values()
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.route('**/api/me/theme', route => route.fulfill({ json: activeTheme(chosen) }))
+  await page.goto('/p/PHAROS?sort=key&group=none')
+  await expect(page.locator('#row-n-1')).toBeVisible()
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await expect.poll(() => page.locator('html').evaluate(el => getComputedStyle(el).getPropertyValue('--teal').trim())).toBe(deriveDark(chosen.primary.light))
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/)
+})

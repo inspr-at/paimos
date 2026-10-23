@@ -63,6 +63,54 @@ async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
 }
 
+test('P02 keyboard and touch read the full heading in a short viewport without moving its controls', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 400 }, hasTouch: true, reducedMotion: 'reduce' })
+  const page = await context.newPage()
+  try {
+    await mockWork(page, fixtures()); await mockRules(page)
+    const text = `${longTitle.repeat(12)} Vollständiger Schluss.`
+    await page.route('**/api/projects*', route => route.fulfill({ json: { items: [{ id: RULE_PROJECT, key: 'AEON', title: text,
+      state: 'active', open: 1, in_progress: 0, done: 0, cancelled: 0, total: 1, last_activity: '2026-09-28T10:00:00Z', people: [] }] } }))
+    await page.goto('/settings/agent-rules')
+    await page.getByRole('button', { name: 'Preview', exact: true }).click()
+    const preview = page.getByRole('dialog', { name: 'What agents receive' }), heading = preview.locator('.for-value')
+    await expect(preview.locator('.summary')).toBeVisible()
+    const shown = `${text} · Markus Barta · Builder`, reader = page.locator('.tooltip')
+    await expect(heading).toHaveText(shown)
+    await page.evaluate(() => document.fonts.ready)
+    const bounded = async () => {
+      await expect(reader).toHaveText(shown)
+      const bounds = (await reader.boundingBox())!
+      expect(bounds.x).toBeGreaterThanOrEqual(8); expect(bounds.y).toBeGreaterThanOrEqual(8)
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(382); expect(bounds.y + bounds.height).toBeLessThanOrEqual(392)
+      expect(await reader.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0)
+    }
+    await expectStableControls({ controls: { heading, change: preview.locator('.for .btn'), close: preview.getByRole('button', { name: 'Close what agents receive' }) },
+      interactions: [
+        { name: 'keyboard reveals the entire heading', run: async () => { await page.keyboard.press('Tab'); await heading.focus(); await expect(heading).toBeFocused(); await bounded() } },
+        { name: 'keyboard reads the final words', run: async () => {
+          await page.keyboard.press('ArrowDown'); await expect(reader).toBeFocused(); await page.keyboard.press('End')
+          await expect.poll(() => reader.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(1)
+          expect(await reader.evaluate(el => { const range = document.createRange(), node = el.firstChild!; range.setStart(node, node.textContent!.length - 40); range.setEnd(node, node.textContent!.length); const tail = range.getBoundingClientRect(), box = el.getBoundingClientRect(); return tail.top >= box.top && tail.bottom <= box.bottom && tail.right <= box.right })).toBe(true)
+        } },
+        { name: 'Escape restores the heading focus', run: async () => { await page.keyboard.press('Escape'); await expect(reader).toHaveCount(0); await expect(heading).toBeFocused() } },
+        { name: 'touch reveals and scrolls the same complete heading', run: async () => {
+          await heading.blur(); await heading.tap(); await bounded()
+          const cdp = await context.newCDPSession(page)
+          try {
+            const box = (await reader.boundingBox())!, x = box.x + box.width / 2, y = box.y + box.height - 20
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+            for (const distance of [20, 40, 80, 120]) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - distance }] })
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+            await expect.poll(() => reader.evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+          } finally { await cdp.detach() }
+          await bounded()
+        } },
+      ] })
+    await noOverflow(page)
+  } finally { await context.close() }
+})
+
 // These checks also run against 96593019: the existing tooltip must first
 // contain the exact identity, then fail specifically on viewport containment.
 test.describe('bounded heading reader', () => {

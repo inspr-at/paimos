@@ -283,20 +283,24 @@ function isoToday() { return iso(0) }
 function isoPlus(days: number) { return iso(days) }
 
 // A public page for one link: the frozen document, its state and the acceptance.
-export async function mockPublicQuote(page: Page, state: { acceptable: boolean; accepted?: boolean; receiptReady?: boolean; linkEnded?: boolean; missing?: boolean }) {
+export async function mockPublicQuote(page: Page, state: { acceptable: boolean; accepted?: boolean; receiptReady?: boolean; linkEnded?: boolean; missing?: boolean; now?: number; profile?: QuoteDoc['profile'] }) {
   const posted: unknown[] = []
-  const d = doc('Relaunch des Kundenportals', 'Bäckerei Hofer', [['Konzeption', '16', 11000], ['Umsetzung', '40', 9500]], iso(-3), iso(27))
+  const clock = state.now ?? Date.now()
+  const day = (days: number) => new Date(clock + days * 86_400_000).toISOString().slice(0, 10)
+  const instant = (days: number) => new Date(clock + days * 86_400_000).toISOString()
+  const d = doc('Relaunch des Kundenportals', 'Bäckerei Hofer', [['Konzeption', '16', 11000], ['Umsetzung', '40', 9500]], day(-3), day(27))
+  if (state.profile) d.profile = state.profile
   let accepted = !!state.accepted
   await page.route('**/api/public/quotes/**', route => {
     const path = new URL(route.request().url()).pathname
     if (state.missing) return route.fulfill({ status: 404, json: { error: 'quote link not found' } })
     if (path.endsWith('/accept')) {
       posted.push(route.request().postDataJSON()); accepted = true
-      return route.fulfill({ status: 201, json: { version: 1, content_sha256: DIGEST(1), accepted_at: new Date().toISOString(), confirmation_state: 'pending' } })
+      return route.fulfill({ status: 201, json: { version: 1, content_sha256: DIGEST(1), accepted_at: new Date(clock).toISOString(), confirmation_state: 'pending' } })
     }
     return route.fulfill({ headers: { 'Cache-Control': 'no-store' }, json: {
       document: d, offer_no: 'A260922-12', version: 1, content_sha256: DIGEST(1), state: accepted ? 'accepted' : 'issued',
-      expires_at: state.linkEnded ? stamp(-1) : stamp(20), acceptable: state.acceptable && !accepted, receipt_ready: !!state.receiptReady, ...(accepted ? { accepted_at: stamp(-1) } : {}),
+      expires_at: state.linkEnded ? instant(-1) : instant(20), acceptable: state.acceptable && !accepted, receipt_ready: !!state.receiptReady, ...(accepted ? { accepted_at: instant(-1) } : {}),
     } })
   })
   return posted

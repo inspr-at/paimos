@@ -39,6 +39,26 @@ test('overlap rule ignores a card action and modal background but keeps peer col
   expect((await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap' && f.detail.includes('#menu'))).toEqual([])
   await page.evaluate(() => { const dialog = document.createElement('dialog'); dialog.innerHTML = '<button id="inside">Inside</button>'; document.body.append(dialog); dialog.showModal() })
   expect((await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')).toEqual([])
+  await page.setContent(`<style>body { margin: 0; padding: 50px; } .row { position: relative; width: 200px; height: 70px; } .item-link { display: block; width: 200px; height: 70px; } .row-more { position: absolute; right: 0; top: 10px; width: 44px; height: 44px; } #name { display: inline-block; width: 120px; }</style><div class="row"><a id="row-link" class="item-link" href="#"><span id="name">Project</span></a><button id="row-action" class="row-more">Menu</button></div>`)
+  expect((await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')).toEqual([])
+  await page.locator('#name').evaluate(el => { Object.assign((el as HTMLElement).style, { position: 'absolute', left: '158px', top: '12px' }) })
+  const covered = (await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')
+  expect(covered).toHaveLength(1)
+  expect(covered[0]?.selector).toBe('#row-link'); expect(covered[0]?.detail).toContain('#row-action')
+  await page.setContent(`<style>body { margin: 0; } .app-header { position: fixed; inset: 0 0 auto; height: 50px; z-index: 2; background: white; } .app-header button { position: absolute; top: 0; left: 50px; width: 60px; height: 40px; } #header-second { left: 95px; } #under-header { position: absolute; left: 50px; top: 20px; width: 200px; height: 80px; }</style><button id="under-header">Scrolling content</button><header class="app-header"><button id="header-first">First</button><button id="header-second">Second</button></header>`)
+  const fixed = (await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')
+  expect(fixed).toHaveLength(1)
+  expect(fixed[0]?.selector).toBe('#header-first'); expect(fixed[0]?.detail).toContain('#header-second')
+  // A partially scrolled selector is clipped below a stationary control. Its
+  // hidden rectangle must not count, while two visible pixels still collide.
+  await page.setContent(`<style>body { margin: 0; } #stationary { position: absolute; z-index: 2; left: 20px; top: 50px; width: 100px; height: 60px; } #scrollport { position: absolute; top: 110px; left: 20px; width: 160px; height: 180px; overflow: auto; } #clipped { display: block; width: 100px; height: 60px; } .filler { height: 300px; }</style><button id="stationary">Key</button><div id="scrollport"><button id="clipped">Selector</button><div class="filler"></div></div>`)
+  await page.locator('#scrollport').evaluate(el => { el.scrollTop = 25 })
+  expect((await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')).toEqual([])
+  await page.locator('#stationary').evaluate(el => { el.style.top = '52px' })
+  const visibleCollision = (await page.evaluate(domAudit)).filter(f => f.kind === 'interactive-overlap')
+  expect(visibleCollision).toHaveLength(1)
+  expect(visibleCollision[0]?.selector).toBe('#stationary')
+  expect(visibleCollision[0]?.detail).toContain('#clipped')
 })
 
 test('touch rule lets an open menu cover controls and exempts dates in the paper’s text', async ({ page }) => {
@@ -77,6 +97,17 @@ test('a sideways strip is assessed as it stands; a control under a vertical scro
 test('partially visible controls wait until they can be assessed after scrolling', async ({ page }) => {
   await page.setContent('<style>body { margin: 0; } button { position: absolute; top: 680px; left: 50px; width: 32px; height: 32px; }</style><button id="edge">Edge</button>')
   expect((await page.evaluate(domAudit)).filter(f => f.kind === 'small-touch-target')).toEqual([])
+})
+
+test('a top-layer modal escapes its page clipping while its own scroller still rejects oversized children', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.setContent('<style>body{margin:0}main{width:300px;overflow:hidden}dialog{width:800px;max-width:none}#body{width:600px;overflow:auto}#content{width:400px;height:60px}</style><main><dialog><div id="body"><div id="content">A deliberately bounded modal body</div></div></dialog></main>')
+  await page.locator('dialog').evaluate(el => (el as HTMLDialogElement).showModal())
+  expect((await page.evaluate(domAudit)).filter(row => row.kind === 'horizontal-overflow')).toEqual([])
+  await page.locator('#content').evaluate(el => { el.style.width = '900px' })
+  const errors = (await page.evaluate(domAudit)).filter(row => row.kind === 'horizontal-overflow')
+  expect(errors).toHaveLength(1)
+  expect(errors[0]!.selector).toBe('#content')
 })
 
 test('known fixture responses and decorative labelled versions are filtered precisely', () => {

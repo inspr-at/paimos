@@ -1,0 +1,14 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 30,
+    "selectedTests": 7,
+    "source": "AEON-1674 scheduling estimate: six existing guards and the two-theme quote pagination selection regression; hosted comparison evidence remains separate."
+  },
+  "spec": {
+    "file": "tests/visual/reference-guard.spec.ts",
+    "listedTests": 7,
+    "weightSeconds": 30,
+    "weightSource": "AEON-1674-initial-estimate"
+  }
+}

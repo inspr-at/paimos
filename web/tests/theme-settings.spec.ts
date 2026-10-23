@@ -72,6 +72,48 @@ async function colour(page: Page, label: string, hex: string, screenshot?: strin
   await page.getByLabel('Hex colour', { exact: true }).fill(hex)
   await page.getByRole('button', { name: /^Done/ }).click()
 }
+
+test('P02 a staged theme edit saves once, preserves independent fields and survives reload', async ({ page }) => {
+  const data = await setup(page)
+  await page.goto('/settings/theme')
+  const original = clone(data.items[2]!.values)
+  await colour(page, 'Primary accent, light', '#3a5fc4')
+  expect(data.writes).toEqual([])
+  expect(data.items[2]!.values).toEqual(original)
+  await bar(page).getByRole('button', { name: /^Save/ }).click()
+  await expect(bar(page)).toHaveCount(0)
+  await expect(page.locator('.theme-status')).toContainText('Saved.')
+  expect(data.writes.filter(write => write.method === 'PATCH')).toEqual([{ method: 'PATCH', path: '/api/themes/copper', body: { name: 'Copper', values: { ...original, primary: { ...original.primary, light: '#3a5fc4' } }, revision: 3 } }])
+  await page.reload()
+  await expect(card(page)).toBeVisible()
+  expect(data.items[2]!.values.agents).toEqual(original.agents)
+  await page.getByRole('button', { name: 'Primary accent, light', exact: true }).click()
+  await expect(page.getByLabel('Hex colour', { exact: true })).toHaveValue('#3a5fc4')
+})
+
+test('P02 a theme conflict retains the unsaved draft and needs a deliberate choice after reload', async ({ page }) => {
+  const data = await setup(page, { fail: 409 })
+  await page.goto('/settings/theme')
+  await colour(page, 'Primary accent, light', '#3a5fc4')
+  await bar(page).getByRole('button', { name: /^Save/ }).click()
+  await expect(page.locator('.theme-status')).toContainText('changed elsewhere')
+  await expect(bar(page)).toBeVisible()
+  await expect(bar(page).getByRole('button', { name: /^Save/ })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Primary accent, light', exact: true })).toContainText('#3a5fc4')
+  expect(data.items[2]!.values.primary.light).toBe('#0e6f6c')
+  expect(data.writes.filter(write => write.method === 'PATCH')).toHaveLength(1)
+  data.fail = 0; data.items[2]!.revision++
+  await bar(page).getByRole('button', { name: 'Discard', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Primary accent, light', exact: true })).toBeEnabled()
+  // Reload is a read, never a replay of the stale write or implicit consent.
+  expect(data.writes.filter(write => write.method === 'PATCH')).toHaveLength(1)
+  await colour(page, 'Primary accent, light', '#3a5fc4')
+  await bar(page).getByRole('button', { name: /^Save/ }).click()
+  await expect(bar(page)).toHaveCount(0)
+  await expect(page.locator('.theme-status')).toContainText('Saved.')
+  expect(data.items[2]!.values.primary.light).toBe('#3a5fc4')
+  expect(data.writes.filter(write => write.method === 'PATCH').map(write => write.body!.revision)).toEqual([3, 4])
+})
 for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
   test(`Theme settings ${width} ${mode}: preview, derived colours, marker and overlay stay still`, async ({ page }) => {
     await page.setViewportSize({ width, height: 950 })

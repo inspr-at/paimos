@@ -8,13 +8,90 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { businessData, mockBusiness, NOW, type BusinessMockOptions } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { decorativeVersionContrast } from './ui-audit-rules'
+
+test('P02 keyboard places navigate outside fields and preserve text-field shortcuts', async ({ page }) => {
+  await setup(page)
+  await page.goto('/')
+  await page.locator('main').focus()
+  await page.keyboard.press('g'); await page.keyboard.press('a')
+  await expect(page).toHaveURL('/agents')
+  await expect(places(page).getByRole('link', { name: 'Agents', exact: true })).toHaveAttribute('aria-current', 'page')
+  await page.keyboard.press('g'); await page.keyboard.press('p')
+  await expect(page).toHaveURL('/')
+  const search = page.getByRole('searchbox').first()
+  await search.focus(); await page.keyboard.type('ga')
+  await expect(search).toHaveValue('ga')
+  await expect(page).toHaveURL(/\/(?:\?q=ga)?$/)
+  const mod = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? 'Meta' : 'Control')
+  await search.press(`${mod}+a`); await search.press('Backspace')
+  await expect(search).toHaveValue('')
+})
+
+test('P02 account menu keyboard focus returns through a route and browser Back', async ({ page }) => {
+  const data = await setup(page)
+  data.nodes.find(node => node.id === 'n-4')!.state = 'blocked'
+  await page.addInitScript(() => {
+    class Stream extends EventTarget {
+      readyState = 1
+      onopen: (() => void) | null = null
+      onerror: (() => void) | null = null
+      close() { this.readyState = 2 }
+      constructor() {
+        super()
+        queueMicrotask(() => { this.onopen?.(); this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 40, resumed: false }), lastEventId: '40' })) })
+      }
+    }
+    Object.assign(window, { EventSource: Stream })
+  })
+  await page.goto('/')
+  const account = page.getByRole('button', { name: /^Account for / })
+  await account.focus(); await page.keyboard.press('Enter')
+  const menu = page.getByRole('menu', { name: 'Account', exact: true })
+  await expect(menu.getByRole('menuitem', { name: 'Personal settings', exact: true })).toBeFocused()
+  const audit = await new AxeBuilder({ page }).include('.hm-panel').withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+  const violations: { id: string; target: string }[] = []
+  for (const violation of audit.violations) for (const node of violation.nodes) {
+    const target = node.target.join(' ')
+    // Preserve the audit's existing exception only for decorative coordinates
+    // with a real accessible version counterpart. Every other finding remains.
+    const labelled = violation.id === 'color-contrast' && await page.locator(target).evaluate(el => !!el.closest('.calendar-version[aria-label], .version-coordinate[aria-label]')).catch(() => false)
+    if (!decorativeVersionContrast(target, violation.id, labelled)) violations.push({ id: violation.id, target })
+  }
+  expect(violations).toEqual([])
+  await page.keyboard.press('End')
+  await expect(menu.getByRole('menuitem').last()).toBeFocused()
+  await page.keyboard.press('Home')
+  await expect(menu.getByRole('menuitem', { name: 'Personal settings', exact: true })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(account).toBeFocused()
+  await page.keyboard.press('Enter'); await page.keyboard.press('Enter')
+  await expect(page).toHaveURL('/settings/personal')
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true, level: 1 })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Settings sections' }).getByRole('link', { name: /^Personal / })).toHaveAttribute('aria-current', 'page')
+  await page.goBack()
+  await expect(page).toHaveURL('/')
+  await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible()
+  await account.focus(); await page.keyboard.press('Enter'); await page.keyboard.press('Escape')
+  await expect(account).toBeFocused()
+  await page.goto('/p/PHAROS/tickets')
+  const summary = page.locator('footer.app-footer .sum')
+  await expect(summary).toHaveAccessibleName(/1 blocked\. Show the blocked tickets\.$/)
+  await summary.click()
+  await expect(page).toHaveURL(/status=blocked/)
+  await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(1)
+  await expect(page.locator('#row-n-4')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+})
 
 const places = (page: Page) => page.getByRole('navigation', { name: 'Places' })
 const crumbs = (page: Page) => page.getByRole('navigation', { name: 'Breadcrumb' })
 async function setup(page: Page, options: BusinessMockOptions = {}) {
-  await mockWork(page, fixtures())
+  const data = fixtures()
+  await mockWork(page, data)
   await mockBusiness(page, businessData(options), options)
   await mockSettings(page, settingsData())
+  return data
 }
 
 test('three places in order of use; the active one is highlighted and the breadcrumb continues from it', async ({ page }) => {
