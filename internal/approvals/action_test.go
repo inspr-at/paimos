@@ -76,6 +76,82 @@ func actionCreate(t *testing.T, f *fixture, project string, in ActionInput) Acti
 	return out
 }
 
+// Risk: mentioning credentials or asking for deployment approval must not
+// consume an idempotency key with a false refusal. Actual human asks, including
+// disguised ones in any free-text field, must still be refused and recorded.
+func checkOutwardActionHumanAsks(t *testing.T) {
+	f, project, in := actionFixture(t)
+	fields := []struct {
+		name string
+		set  func(*ActionInput, string)
+	}{
+		{"what", func(in *ActionInput, text string) { in.What = text }},
+		{"why", func(in *ActionInput, text string) { in.Why = text }},
+		{"exact_effect", func(in *ActionInput, text string) { in.ExactEffect = text }},
+		{"reversal_plan", func(in *ActionInput, text string) { in.ReversalPlan = text }},
+	}
+	for i, tc := range []struct{ kind, text string }{
+		{"secrets", "We need to rotate the leaked API key for the payment provider"},
+		{"external_message", "Send a message to the customer that their API key was revoked"},
+		{"deploy", "Please approve the deploy of release r141 to production"},
+		{"deploy", "Bitte Deploy von r141 auf csb1 freigeben"},
+		{"external_message", "Share the new password policy document with the client"},
+		{"deploy", "Deploy release r141 to csb1"},
+		{"production_change", "Could you approve the merge of the reviewed change?"},
+		{"secrets", "Request approval to revoke a leaked token using existing secret authority"},
+		{"secrets", "Ask the provider to revoke the leaked API key through its configured API"},
+	} {
+		for _, field := range fields {
+			t.Run(fmt.Sprintf("pending/%d/%s", i, field.name), func(t *testing.T) {
+				next := in
+				next.IdempotencyKey, next.Kind = fmt.Sprintf("legitimate-%d-%s", i, field.name), tc.kind
+				field.set(&next, tc.text)
+				item := actionCreate(t, f, project, next)
+				if item.State != "pending" || item.ApprovalID == nil || item.Reason != "" || item.ResolvedAt != nil || item.OutcomeReceipt != nil {
+					t.Fatalf("legitimate %s request %q was not left for approval: %+v", field.name, tc.text, item)
+				}
+				if replay := actionCreate(t, f, project, next); replay.ID != item.ID || replay.State != "pending" {
+					t.Fatalf("legitimate request replay changed its pending approval: %+v", replay)
+				}
+			})
+		}
+	}
+	for i, text := range []string{
+		"Please send me your API key",
+		"Give us the password",
+		"Provide me with an API token",
+		"We will need the API key from you",
+		"Bitte schick mir ein Token",
+		"Bitte gib uns das Passwort",
+		"Der Agent braucht Zugangsdaten von dir",
+		"Please run this command manually",
+		"You must execute this command",
+		"Bitte den Befehl manuell ausführen",
+	} {
+		for _, field := range fields {
+			t.Run(fmt.Sprintf("refused/%d/%s", i, field.name), func(t *testing.T) {
+				next := in
+				next.IdempotencyKey = fmt.Sprintf("human-ask-%d-%s", i, field.name)
+				field.set(&next, text)
+				item := actionCreate(t, f, project, next)
+				if item.State != "refused" || item.ApprovalID != nil || !strings.Contains(item.Reason, "prohibited") || item.ResolvedAt == nil || item.OutcomeReceipt == nil || item.OutcomeReceipt.State != "queued" {
+					t.Fatalf("human ask %q in %s was not refused with an outcome: %+v", text, field.name, item)
+				}
+			})
+		}
+	}
+	for _, humanInput := range []string{"secrets", "tokens", "manual_steps"} {
+		t.Run("explicit/"+humanInput, func(t *testing.T) {
+			next := in
+			next.IdempotencyKey, next.HumanInput = "explicit-"+humanInput, humanInput
+			item := actionCreate(t, f, project, next)
+			if item.State != "refused" || item.ApprovalID != nil || !strings.Contains(item.Reason, "prohibited") || item.ResolvedAt == nil || item.OutcomeReceipt == nil || item.OutcomeReceipt.State != "queued" {
+				t.Fatalf("explicit human_input=%s bypassed refusal: %+v", humanInput, item)
+			}
+		})
+	}
+}
+
 func checkOutwardActionLifecycle(t *testing.T) {
 	f, project, in := actionFixture(t)
 	ctx := t.Context()

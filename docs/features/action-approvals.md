@@ -36,10 +36,12 @@ and no successful decision is reported.
 
 `human_input` explicitly declares `none`, `secrets`, `tokens` or `manual_steps`.
 The latter three are refused, recorded and reported to the agent without
-creating a decidable approval. Common English and German requests in free text
-are also refused. These recognizers supplement the explicit declaration; they
-do not claim to classify arbitrary natural language. Credential values must
-never be included in a request.
+creating a decidable approval. Common English and German asks directed at a
+person for credentials or manual work in free text are also refused. Mentioning
+credential rotation, password policies or deploy/merge approval does not itself
+trigger a refusal. These recognizers supplement the explicit declaration; they
+do not claim to classify arbitrary natural language. Credential values must never
+be included in a request.
 
 Tenant kinds default to `deploy`, `trade`, `money`, `secrets`,
 `production_change` and `external_message`. Here `secrets` means using existing

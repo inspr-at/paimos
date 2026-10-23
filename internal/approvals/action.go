@@ -67,10 +67,11 @@ type ActionReceipt struct {
 
 var actionKindPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
 
-// Structured human_input is mandatory. These conservative recognizers also
-// refuse common attempts to disguise a human ask as human_input=none. They are
-// defense in depth, not a claim to understand arbitrary natural language.
-var forbiddenHumanAsk = regexp.MustCompile(`(?i)(?:\b(?:give|send|provide|paste|share|enter|supply|ask|need|request|gib|sende|schick|teile|benötige|brauche)\b[^\n.!?]{0,120}\b(?:secrets?|tokens?|api[ _-]?keys?|passwords?|passwörter|passwort|zugangsdaten|schlüssel)\b|\b(?:secrets?|tokens?|api[ _-]?keys?|passwords?)\b[^\n.!?]{0,80}\b(?:from you|from the user|from the human|von dir|vom menschen)\b|\b(?:please|you must|you need to|can you|could you|bitte|du musst)\b[^\n.!?]{0,80}\b(?:manually|manual steps?|run this|run the command|execute this|deploy|merge|manuell|ausführen)\b)`)
+// Structured human_input is mandatory and is the primary refusal gate. These
+// recognizers also refuse common asks directed at a person when human_input=none.
+// Mentioning credentials or requesting deploy/merge approval is not a human ask.
+// This is defense in depth, not arbitrary natural-language classification.
+var forbiddenHumanAsk = regexp.MustCompile(`(?i)(?:\b(?:(?:give|send|provide|paste|share|supply)[ \t]+(?:me|us)|(?:gib|sende|schick|teile)[ \t]+(?:mir|uns))\b[^\n.!?]{0,120}\b(?:secrets?|tokens?|api[ _-]?keys?|passwords?|passwörter|passwort|zugangsdaten|schlüssel)\b|\b(?:secrets?|tokens?|api[ _-]?keys?|passwords?|passwörter|passwort|zugangsdaten|schlüssel)\b[^\n.!?]{0,80}\b(?:from you|from the user|from the human|von dir|vom menschen)\b|\b(?:please|you must|you need to|can you|could you|bitte|du musst)\b[^\n.!?]{0,80}\b(?:manually|manual steps?|run this|run the command|execute this|manuell|ausführen)\b)`)
 
 func normalizeAction(in *ActionInput) error {
 	fields := []struct {
