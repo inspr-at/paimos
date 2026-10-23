@@ -181,7 +181,17 @@ func etaInterval(ctx context.Context, tx pgx.Tx) (time.Duration, error) {
 }
 
 func (m *Module) stampSessions(ctx context.Context, tx pgx.Tx, sessions []*Session) error {
+	if len(sessions) == 0 {
+		return nil
+	}
 	if err := m.stampReporterSessions(ctx, tx, sessions); err != nil {
+		return err
+	}
+	now, err := m.ownershipNow(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if err := stampChildCounts(ctx, tx, sessions, now); err != nil {
 		return err
 	}
 	return stampMoveRights(ctx, tx, sessions)

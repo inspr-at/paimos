@@ -13,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/credentialguard"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -242,6 +243,7 @@ func (m *Module) getFlowRun(w http.ResponseWriter, r *http.Request) {
 // stored.
 type rolloutInput struct {
 	Schema        string            `json:"schema"`
+	Repository    string            `json:"repository"`
 	Direction     string            `json:"direction"`
 	Outcome       string            `json:"outcome"`
 	Release       string            `json:"release"`
@@ -361,6 +363,9 @@ func parseRollout(in rolloutInput, project string, now time.Time) (flowBatch, er
 	}
 	if in.Direction != "" && in.Direction != "forward" {
 		return bad("only forward rollouts are flow runs")
+	}
+	if in.Repository != "" && !reviewgate.ValidRepository(in.Repository) {
+		return bad("invalid rollout repository binding")
 	}
 	if !flowRelease.MatchString(in.Release) {
 		return bad("release must be a release label such as 126")
@@ -488,6 +493,14 @@ func (m *Module) reportRollout(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+	fact, err := rolloutMetricFact(in, m.now())
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if fact != nil {
+		batch.Evidence = []metricFactInput{*fact}
+	}
 	changed, err := m.flowWrite(r.Context(), p.TenantID, &p, func(ctx context.Context, tx pgx.Tx, apply func([]flowBatch) error) error {
 		if _, err := projectSettings(ctx, tx, project); err != nil {
 			return err
@@ -496,6 +509,15 @@ func (m *Module) reportRollout(w http.ResponseWriter, r *http.Request) {
 		if err := requireMetrics(ctx, tx, p, "delivery.manage", project); err != nil {
 			if err := requireMetrics(ctx, tx, p, "delivery.rollout.write", project); err != nil {
 				return err
+			}
+		}
+		if in.Repository != "" {
+			source, err := loadMetricSourceTx(ctx, tx, project, false)
+			if err != nil {
+				return err
+			}
+			if source == nil || source.Repository != in.Repository {
+				return fail(409, "project repository changed; discard the captured rollout")
 			}
 		}
 		if err := knownPrincipalsTx(ctx, tx, batch); err != nil {
