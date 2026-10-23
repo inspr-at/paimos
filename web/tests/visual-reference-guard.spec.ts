@@ -6,8 +6,8 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { test, expect, type Response } from '@playwright/test'
-import { sessionChat } from './visual/fixtures'
-import { checkVisual, compareVisualReference, visualCases } from './visual/checkpoint'
+import { sessionChat, sessionChatUnavailable } from './visual/fixtures'
+import { checkVisual, compareVisualReference, visualCases, prepareVisualFonts, renderedFonts } from './visual/checkpoint'
 
 test('visual comparison rejects a changed control and never creates a missing reference', async ({ page, browser }, info) => {
   expect(info.config.updateSnapshots).toBe('none')
@@ -23,7 +23,12 @@ test('visual comparison rejects a changed control and never creates a missing re
   // Exercise the product gate with a synthetic approved/pinned state. Neither
   // this fixture nor its pixels can become a product reference.
   const visual = JSON.parse(readFileSync(new URL('../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
-  visual.approval.states = ['projects']
+  visual.approval = { reviewer: 'Tick', status: 'approved', approvedAt: 'synthetic-only', evidence: 'Synthetic comparator proof', states: ['projects'] }
+  visual.baselineAuthority.status = 'approved'
+  Object.assign(visual.baselineAuthority.source, { attachmentId: 'synthetic-only' })
+  visual.baselineAuthority.retention.verifiedAt = 'synthetic-only'
+  visual.renderer.runner.imageVersion = 'synthetic-image'
+  const renderer = structuredClone(visual.renderer)
   for (const state of visual.states) {
     delete state.approval
     for (const checkpoint of state.checkpoints) checkpoint.reference = { attachmentMember: null, sha256: null }
@@ -35,35 +40,47 @@ test('visual comparison rejects a changed control and never creates a missing re
     checkpoint.reference = { attachmentMember: `${checkpoint.id}.png`, sha256: hash(png) }
     return { name: `${checkpoint.id}.png`, base64: png.toString('base64') }
   })
-  const bundle = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), files }))
+  const bundle = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), renderer, files }))
   visual.baselineAuthority.source.format = 'json'
   visual.baselineAuthority.source.sha256 = hash(bundle)
   const baselineFile = info.outputPath('synthetic-pinned-bundle.json')
   writeFileSync(baselineFile, bundle)
   const checkpoint = project.checkpoints[0]
-  expect(await compareVisualReference(page, info, checkpoint, { visual, baselineFile })).toBe(true)
+  expect(await compareVisualReference(page, info, checkpoint, { visual, baselineFile, renderer })).toBe(true)
   await page.getByRole('button').evaluate(element => { element.style.background = 'rgb(0, 0, 220)' })
-  await expect(compareVisualReference(page, info, checkpoint, { visual, baselineFile, timeout: 1500 }))
+  await expect(compareVisualReference(page, info, checkpoint, { visual, baselineFile, renderer, timeout: 1500 }))
     .rejects.toThrow(/Screenshot comparison failed|pixels.*different/)
-  // Both changes-requested and deferred states bypass only comparison, without
-  // reading a missing baseline or creating a reference. Their report is visible.
+  await expect(compareVisualReference(page, info, checkpoint, { visual, baselineFile: info.outputPath('absent-bundle.json'), renderer: { ...renderer, locale: 'de-DE' } }))
+    .rejects.toThrow('renderer differs from reference: locale')
+  // Awaiting states retain strict quality checks without PNG captures.
   const qualityDocument = '<html lang="en"><head><title>Synthetic quality control</title><style>button { min-width: 80px; height: 44px; }</style></head><body><main><button>Continue</button></main></body></html>'
-  for (const id of ['tickets', 'goals']) {
-    const pending = visual.states.find((state: { id: string }) => state.id === id).checkpoints[0]
-    expect(await compareVisualReference(page, info, pending, { visual, baselineFile: info.outputPath('absent-bundle.json') })).toBe(false)
-    expect(info.annotations.some(row => row.type === 'awaiting reference' && row.description?.includes(pending.id))).toBe(true)
-    // Use the complete product runner too, with a synthetic quality-only
-    // document. No changed product state is recaptured for this control.
-    await checkVisual(browser, info, visualCases(id)[0]!, async qualityPage => { await qualityPage.setContent(qualityDocument) })
-    const report = JSON.parse(readFileSync(info.outputPath(`${pending.id}.md`), 'utf8'))
-    expect(report).toMatchObject({ baselineCompared: false, pngSHA256: null,
-      reference: { mode: 'awaiting-reference' }, layout: [], axe: [], console: [], responses: [] })
-    expect(existsSync(info.outputPath(`${pending.id}.png`))).toBe(false)
+  const pending = visualCases('tickets')[0]!
+  expect(await compareVisualReference(page, info, pending, { visual, baselineFile: info.outputPath('absent-bundle.json') })).toBe(false)
+  await checkVisual(browser, info, pending, async qualityPage => { await qualityPage.setContent(qualityDocument) })
+  const report = JSON.parse(readFileSync(info.outputPath(`${pending.id}.md`), 'utf8'))
+  expect(report).toMatchObject({ baselineCompared: false, pngSHA256: null, requirementsRun: true,
+    reference: { mode: 'awaiting-reference' }, layout: [], axe: [], console: [], responses: [], fonts: [{ family: 'JetBrains Mono', custom: true }] })
+  expect(existsSync(info.outputPath(`${pending.id}.png`))).toBe(false)
+  for (const id of ['goals', 'ticket-workspace']) {
+    const deferred = visualCases(id)[0]!
+    // The setup must never run; an unbuilt product is neither inspected nor
+    // failed, and its explicit until/reason report is attached to the test.
+    await checkVisual(browser, info, deferred, async () => { throw new Error('Deferred setup must not run') })
+    expect(JSON.parse(readFileSync(info.outputPath(`${deferred.id}.md`), 'utf8')))
+      .toMatchObject({ requirementsRun: false, reference: { mode: 'deferred', reason: expect.stringContaining('deferred until AEON-') } })
+    expect(info.annotations.some(row => row.type === 'deferred' && row.description?.includes(deferred.id))).toBe(true)
+    expect(existsSync(info.outputPath(`${deferred.id}.png`))).toBe(false)
   }
   await expect(checkVisual(browser, info, visualCases('hours')[0]!, async qualityPage => {
     await qualityPage.setContent(qualityDocument)
     await qualityPage.evaluate(() => console.error('Synthetic quality failure must still block an awaiting state'))
   })).rejects.toThrow(/unexpected console\/page failure/)
+  await page.setContent(qualityDocument)
+  await prepareVisualFonts(page, String(info.project.use.baseURL))
+  expect(await renderedFonts(page)).toEqual([{ family: 'JetBrains Mono', custom: true }])
+  await page.addStyleTag({ content: 'button { font-family: Arial !important; }' })
+  await expect(renderedFonts(page)).rejects.toThrow(/System-font fallback/)
+
 })
 
 // Risk: optional native/chat reads escape the fixture to a backend 404, so
@@ -75,7 +92,7 @@ test('P02 Session Chat fixture binds its chat reads and native refusal to the di
   const nativeRead = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/native-context'))
   const threadRead = page.waitForResponse(response => /^\/api\/chat-sessions\/[^/]+\/thread$/.test(new URL(response.url()).pathname))
   await page.clock.setFixedTime(new Date('2026-09-23T12:00:00Z'))
-  await sessionChat(page, 'desktop', 'light')
+  await sessionChatUnavailable(page, 'desktop', 'light')
   const [native, thread] = await Promise.all([nativeRead, threadRead])
   expect(native.status(), 'legacy chat requires the typed native refusal, not a backend 404 or a native snapshot').toBe(503)
   expect(thread.status(), 'chat binding must be mocked, not a backend refusal').toBe(200)
@@ -98,4 +115,14 @@ test('P02 Session Chat fixture binds its chat reads and native refusal to the di
   expect(errors).toEqual([])
   expect(reads.filter(response => response.status() >= 400).map(response => ({ path: new URL(response.url()).pathname, status: response.status() })))
     .toEqual([{ path: new URL(native.url()).pathname, status: 503 }])
+  reads.length = 0
+  const healthyNativeRead = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/native-context') && response.status() === 200)
+  await sessionChat(page, 'desktop', 'light')
+  const healthyNative = await healthyNativeRead
+  expect(await healthyNative.json()).toMatchObject({ profile: 'native', current_binding: { project_id: 'p-pharos', harness_session_id: session } })
+  await expect(page.getByRole('tabpanel', { name: /^Chat/ })).toContainText('Owned session input from this panel is not available yet. Use the qualified session client.')
+  await expect(page.getByText('The session’s live capabilities could not be read. Reopen the panel to try again.', { exact: true })).toHaveCount(0)
+  expect(reads.filter(response => response.status() >= 400).map(response => new URL(response.url()).pathname)).toEqual([])
+  expect(errors).toEqual([])
+
 })

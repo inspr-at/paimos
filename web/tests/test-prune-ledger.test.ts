@@ -36,7 +36,7 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   const summary = checkRepository()
   assert.deepEqual(summary, { browserCases: 5318, specs: 378, core: 29, protectedRisks: 647,
     driftCases: 455, candidateGroups: 31, candidateCases: 155, visualCases: 80,
-    visualApproval: 'approved', phase: 'P01', cuts: false })
+    visualApproval: 'pending-linux-capture', phase: 'P01', cuts: false })
   const original = {
     baseline,
     ledger: json('scripts/test-prune/risk-ledger.json'),
@@ -169,6 +169,7 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
     destination.verification = { status: 'verified', evidence: 'Synthetic authority counterexample, never a product approval' }
   areaCut.visual.approval = { reviewer: 'Tick', status: 'approved', approvedAt: 'synthetic-proof', evidence: 'Synthetic proof only' }
   areaCut.visual.baselineAuthority.status = 'approved'
+  areaCut.visual.renderer.runner.imageVersion = 'synthetic-image'
   Object.assign(areaCut.visual.baselineAuthority.source, { attachmentId: 'synthetic-only', sha256: 'a'.repeat(64) })
   areaCut.visual.baselineAuthority.retention.verifiedAt = 'synthetic-proof'
   const area = areaCut.visual.states.find((row: { id: string }) => row.id === 'agents')

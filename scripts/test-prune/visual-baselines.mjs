@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validateVisual } from './check.mjs'
+import { assertRenderer } from './visual-renderer.mjs'
 
 const MAX_BUNDLE = 48 * 1024 * 1024
 const MAX_ARCHIVE = 64 * 1024 * 1024
@@ -39,6 +40,7 @@ export function verifyBaselineBundle(bytes, visual, { stateIds = pinnedStates(vi
   need(sha256(bytes) === expectedDigest, 'Visual baseline attachment SHA-256 mismatch')
   const bundle = JSON.parse(bytes)
   need(bundle.version === 1 && /^[a-f0-9]{40}$/.test(bundle.captureSHA ?? ''), 'Invalid visual baseline bundle provenance')
+  assertRenderer(bundle.renderer, visual.renderer)
   if (source.format === 'tar') need(bundle.captureSHA === source.captureSHA, 'Visual baseline capture SHA mismatch')
   const pinned = pinnedStates(visual)
   validateVisual(visual, { cuts: true, stateIds: pinned })
@@ -67,9 +69,9 @@ export function referenceGates(visual) {
     const approved = visual.approval.states?.includes(state.id) || state.approval?.decision === 'ok-to-pin' ||
       state.checkpoints.some(checkpoint => checkpoint.reference?.attachmentMember || checkpoint.reference?.sha256)
     if (approved) validateVisual(visual, { cuts: true, stateIds: [state.id] })
-    return { state: state.id, checkpoints: state.checkpoints.length, mode: approved ? 'compare' : 'awaiting-reference',
+    return { state: state.id, checkpoints: state.checkpoints.length, mode: approved ? 'compare' : state.referenceStatus === 'deferred' ? 'deferred' : 'awaiting-reference',
       status: approved ? 'approved' : state.referenceStatus === 'deferred' ? 'deferred' : 'changes-requested',
-      reason: approved ? 'Tick-approved, digest-pinned reference' : state.deferredReason ??
+      reason: approved ? 'Tick-approved, digest-pinned reference' : state.referenceStatus === 'deferred' ? `deferred until ${state.deferredUntil.join(' and ')}: ${state.deferredReason}` :
         state.approval?.reason ?? 'Changes requested; awaiting AEON-1688 and the next reviewed reference round' }
   })
 }
@@ -82,9 +84,9 @@ export function referenceGate(visual, checkpointId) {
 
 export function referenceReport(visual) {
   const gates = referenceGates(visual)
-  return { gates, markdown: ['Visual reference gates (quality checks remain required for every state).', '',
+  return { gates, markdown: ['Visual reference gates (deferred states report only; other states require quality checks).', '',
     '| State | Checkpoints | Reference gate |', '| --- | ---: | --- |',
-    ...gates.map(gate => `| ${gate.state} | ${gate.checkpoints} | ${gate.mode === 'compare' ? 'strict image comparison + quality' :
+    ...gates.map(gate => `| ${gate.state} | ${gate.checkpoints} | ${gate.mode === 'deferred' ? gate.reason : gate.mode === 'compare' ? 'strict image comparison + quality' :
       `awaiting reference (${gate.status}); quality required — ${gate.reason}`} |`), ''].join('\n') }
 }
 
@@ -110,6 +112,7 @@ export function verifyReferenceArchive(archive, detachedBytes, visual, { tar = e
     'Visual detached manifest size mismatch')
   need(sha256(detachedBytes) === source.manifest.sha256, 'Visual detached manifest SHA-256 mismatch')
   const detached = JSON.parse(detachedBytes)
+  assertRenderer(detached.renderer, visual.renderer)
   const gates = referenceGates(visual)
   const approved = gates.filter(gate => gate.mode === 'compare').map(gate => gate.state)
   need(detached.version === 1 && detached.captureSHA === source.captureSHA &&
@@ -139,23 +142,40 @@ export function verifyReferenceArchive(archive, detachedBytes, visual, { tar = e
   const innerBytes = readTar(['-xOf', '-', source.archiveManifest.attachmentMember], MAX_MANIFEST)
   need(sha256(innerBytes) === source.archiveManifest.sha256, 'Visual archive manifest SHA-256 mismatch')
   const inner = JSON.parse(innerBytes)
+  assertRenderer(inner.renderer, visual.renderer)
   need(JSON.stringify(inner.payload) === JSON.stringify(detached.payload), 'Visual archive payload manifest mismatch')
   const baseline = readTar(['-xOf', '-', source.baselineBundle.attachmentMember], MAX_BUNDLE)
   const baselineEntry = expected.get(source.baselineBundle.attachmentMember)
   need(baselineEntry && baseline.length === baselineEntry.bytes && sha256(baseline) === baselineEntry.sha256,
     'Visual archived baseline SHA-256 mismatch')
   const references = verifyBaselineBundle(baseline, visual)
+  // The archive includes review evidence as well as the baseline. Every named
+  // payload must match its digest, not only the decoded reference PNG bundle.
+  for (const [name, entry] of expected) {
+    need(Number.isSafeInteger(entry.bytes) && entry.bytes > 0 && entry.bytes <= MAX_BUNDLE, 'Invalid visual payload size')
+    const bytes = name === source.baselineBundle.attachmentMember ? baseline : readTar(['-xOf', '-', name], name.endsWith('.png') ? MAX_PNG : MAX_MANIFEST)
+    need(bytes.length === entry.bytes && sha256(bytes) === entry.sha256, `Visual archive payload SHA-256 mismatch: ${name}`)
+  }
   return { baseline, references }
 }
 
 export function materializeBaseline(directory, visual, { download = false, run = execFileSync } = {}) {
+  const report = referenceReport(visual)
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(join(directory, 'reference-gates.json'), JSON.stringify(report.gates, null, 2) + '\n')
+  writeFileSync(join(directory, 'reference-gates.md'), report.markdown)
+  if (!report.gates.some(gate => gate.mode === 'compare')) {
+    console.log('No active visual comparison authority; Linux capture awaits Tick approval and explicit pins. Historical assets are not downloaded.')
+    console.log(report.markdown)
+    return null
+  }
   const { source } = visual.baselineAuthority
   need(/^[A-Za-z0-9._-]+\.tar$/.test(source.name) && source.manifest.name === `${source.name}.manifest.json`, 'Invalid visual reference asset names')
   mkdirSync(directory, { recursive: true })
   if (download) {
     const mirror = source.mirror
     need(mirror?.kind === 'github-prerelease' && mirror.repository === 'inspr-at/paimos' &&
-      mirror.tag === 'test-references-1', 'Missing approved GitHub visual reference mirror')
+      /^test-references-\d+$/.test(mirror.tag), 'Missing approved GitHub visual reference mirror')
     try {
       run('gh', ['release', 'download', mirror.tag, '--repo', mirror.repository, '--pattern', source.name,
         '--pattern', source.manifest.name, '--dir', directory], { timeout: 120_000, maxBuffer: 64 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -169,9 +189,6 @@ export function materializeBaseline(directory, visual, { download = false, run =
   // No output is written until the archive, both manifests and bundle verify.
   const path = join(directory, 'baseline.json')
   writeFileSync(path, baseline)
-  const report = referenceReport(visual)
-  writeFileSync(join(directory, 'reference-gates.json'), JSON.stringify(report.gates, null, 2) + '\n')
-  writeFileSync(join(directory, 'reference-gates.md'), report.markdown)
   console.log(`Verified approved visual references: ${references.size} PNGs; archive SHA-256 ${source.sha256}`)
   console.log(report.markdown)
   return path

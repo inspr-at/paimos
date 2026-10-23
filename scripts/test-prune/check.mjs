@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { assertRenderer } from './visual-renderer.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const rank = { NIGHTLY: 0, 'GATED-FULL': 1, ESSENTIAL: 2 }
@@ -96,6 +97,17 @@ export function validateVisual(visual, { cuts = false, stateIds = visual.states?
     need(requirements?.[field] === true, `Missing visual requirement: ${field}`)
   need(requirements.maskAssessedContent === false && requirements.fullPageTour === false &&
     requirements.controlStabilityTolerancePx === 0.5 && requirements.captures === 'testInfo.outputPath()', 'Visual capture/stability ownership changed')
+  const renderer = visual.renderer
+  need(renderer?.runner?.label === 'ubuntu-24.04' && renderer.runner.imageOS === 'ubuntu24' &&
+    renderer.runner.platform === 'linux' && renderer.runner.arch === 'x64' && text(renderer.playwright) &&
+    renderer.browser?.name === 'chromium-headless-shell' && text(renderer.browser.revision) && text(renderer.browser.version) &&
+    renderer.browser.headless === true && same(renderer.browser.args, ['--disable-gpu']) &&
+    renderer.deviceScaleFactor === 1 && same(renderer.colourScheme, ['light', 'dark']) && renderer.reducedMotion === 'reduce' &&
+    renderer.timezone === 'Europe/Vienna' && renderer.locale === 'en-GB' && renderer.fonts?.length === 1 &&
+    renderer.fonts[0].family === 'JetBrains Mono' && renderer.fonts[0].asset === 'web/src/assets/fonts/jetbrains.woff2' &&
+    digest(renderer.fonts[0].sha256), 'Missing deterministic hosted visual renderer policy')
+  need(visual.comparison?.threshold === 0 && visual.comparison.maxDiffPixels === 0 && text(visual.comparison.justification),
+    'Visual comparison requires exact pixels with a documented tolerance policy')
   const authority = visual.baselineAuthority
   need(authority?.onMissing === 'fail' && authority.onExpired === 'fail' && authority.onDigestMismatch === 'fail' &&
     authority.automaticRewrite === false && authority.currentRunMayBeReference === false, 'Visual baseline failures must fail closed')
@@ -106,6 +118,7 @@ export function validateVisual(visual, { cuts = false, stateIds = visual.states?
       text(visual.approval.evidence) && text(visual.approval.approvedAt), 'Cuts require Tick approval of visual fixtures and references')
     need(authority.status === 'approved' && text(authority.source.attachmentId) && digest(authority.source.sha256) &&
       text(authority.retention.verifiedAt), 'Cuts require an approved, pinned and available immutable baseline source')
+    assertRenderer(renderer, renderer)
   }
   return checkpoints.size
 }

@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
-import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGates, referenceReport } from '../../scripts/test-prune/visual-baselines.mjs'
-import { packCandidates } from '../../scripts/test-prune/visual-candidates.mjs'
+import { verifyBaselineBundle, readBaselineBundle, verifyReferenceArchive, referenceGates, referenceReport, materializeBaseline } from '../../scripts/test-prune/visual-baselines.mjs'
+import { packCandidates, writeCandidateArchive } from '../../scripts/test-prune/visual-candidates.mjs'
+
+import { assertRenderer, captureEnabled, rendererIdentity } from '../../scripts/test-prune/visual-renderer.mjs'
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const manifest = JSON.parse(readFileSync(new URL('../../scripts/test-prune/visual-manifest.json', import.meta.url), 'utf8'))
@@ -14,6 +18,7 @@ test('visual references require approval, immutable attachment bytes and every e
   // independently proves that actual differing pixels reject the comparison.
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jS1cAAAAASUVORK5CYII=', 'base64')
   const visual = structuredClone(manifest)
+  visual.renderer.runner.imageVersion = 'synthetic-image'
   for (const state of visual.states) {
     delete state.referenceStatus; delete state.deferredUntil; delete state.deferredReason
   }
@@ -26,11 +31,11 @@ test('visual references require approval, immutable attachment bytes and every e
     checkpoint.reference = { attachmentMember: `${checkpoint.id}.png`, sha256: hash(png) }
     return { name: checkpoint.reference.attachmentMember, base64: png.toString('base64') }
   }))
-  const bytes = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), files }))
+  const bytes = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), renderer: visual.renderer, files }))
   visual.baselineAuthority.source.sha256 = hash(bytes)
   assert.equal(verifyBaselineBundle(bytes, visual).size, 80)
   const rehash = (files: unknown[]) => {
-    const changed = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), files }))
+    const changed = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), renderer: visual.renderer, files }))
     return { changed, pinned: { ...visual, baselineAuthority: { ...visual.baselineAuthority, source: { ...visual.baselineAuthority.source, sha256: hash(changed) } } } }
   }
   // Keep this negative control independent of later real attachment approvals.
@@ -51,20 +56,24 @@ test('visual references require approval, immutable attachment bytes and every e
   // Risk: a mutable release tag, a corrupt download or an incorrect digest
   // must never reach tar, even when the reviewed baseline itself is valid.
   const mirrored = structuredClone(manifest)
+  mirrored.approval = structuredClone(manifest.history[0].approval)
+  mirrored.baselineAuthority = structuredClone(manifest.history[0].baselineAuthority)
+  mirrored.renderer.runner.imageVersion = 'synthetic-image'
+  for (const historical of manifest.history[0].states) Object.assign(mirrored.states.find((state: { id: string }) => state.id === historical.id), structuredClone(historical))
   const approved = mirrored.states.filter((state: { approval?: { decision: string } }) => state.approval?.decision === 'ok-to-pin')
   const approvedFiles = approved.flatMap((state: { checkpoints: { id: string; reference: { attachmentMember: string; sha256: string } }[] }) => state.checkpoints.map(checkpoint => {
     checkpoint.reference.sha256 = hash(png)
     return { name: checkpoint.reference.attachmentMember, base64: png.toString('base64') }
   }))
   const source = mirrored.baselineAuthority.source
-  const baseline = Buffer.from(JSON.stringify({ version: 1, captureSHA: source.captureSHA, files: approvedFiles }))
+  const baseline = Buffer.from(JSON.stringify({ version: 1, captureSHA: source.captureSHA, renderer: mirrored.renderer, files: approvedFiles }))
   source.baselineBundle.sha256 = hash(baseline)
   const payload = [...approvedFiles.flatMap((file: { name: string }) => [
     { name: file.name, bytes: png }, { name: `quality/${file.name.replace('.png', '.json')}`, bytes: Buffer.from('{}') },
   ]), { name: 'baseline.json', bytes: baseline }]
   const members = approved.flatMap((state: { checkpoints: { id: string; reference: { attachmentMember: string; sha256: string } }[] }) =>
     state.checkpoints.map(checkpoint => ({ id: checkpoint.id, ...checkpoint.reference })))
-  const inner = { version: 1, captureSHA: source.captureSHA, states: mirrored.approval.states, members,
+  const inner = { version: 1, captureSHA: source.captureSHA, renderer: mirrored.renderer, states: mirrored.approval.states, members,
     payload: payload.map(file => ({ name: file.name, bytes: file.bytes.length, sha256: hash(file.bytes) })) }
   const innerBytes = Buffer.from(JSON.stringify(inner))
   source.archiveManifest.sha256 = hash(innerBytes)
@@ -99,15 +108,36 @@ test('visual references require approval, immutable attachment bytes and every e
   assert.throws(() => verifyReferenceArchive(Buffer.alloc(0), detached, mirrored, noExtraction), /archive size mismatch/)
 
   const gates = referenceGates(manifest)
-  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').length, 7)
-  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').reduce((n: number, gate: { checkpoints: number }) => n + gate.checkpoints, 0), 30)
-  const awaiting = gates.filter((gate: { mode: string }) => gate.mode === 'awaiting-reference')
-  assert.equal(awaiting.length, 11)
-  assert.equal(awaiting.reduce((n: number, gate: { checkpoints: number }) => n + gate.checkpoints, 0), 50)
-  for (const gate of awaiting) assert.ok(referenceReport(manifest).markdown.includes(`| ${gate.state} | ${gate.checkpoints} | awaiting reference (${gate.status})`))
-  const lostPin = structuredClone(manifest)
+  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'compare').length, 0)
+  assert.equal(gates.filter((gate: { mode: string }) => gate.mode === 'awaiting-reference').length, 16)
+  assert.deepEqual(gates.filter((gate: { mode: string }) => gate.mode === 'deferred').map((gate: { state: string }) => gate.state), ['goals', 'ticket-workspace'])
+  assert.match(referenceReport(manifest).markdown, /deferred until AEON-1621 and AEON-1625/)
+  assert.equal(manifest.history[0].states.flatMap((state: { checkpoints: unknown[] }) => state.checkpoints).length, 30)
+  const noDownload = mkdtempSync(join(tmpdir(), 'aeon-1674-no-authority-'))
+  try {
+    assert.equal(materializeBaseline(noDownload, manifest, { download: true, run: () => assert.fail('Historical assets must not be downloaded') }), null)
+  } finally { rmSync(noDownload, { recursive: true, force: true }) }
+  const lostPin = structuredClone(mirrored)
   lostPin.states.find((state: { id: string }) => state.id === 'projects').checkpoints[0].reference.sha256 = null
   assert.throws(() => referenceGates(lostPin), { message: 'Unpinned visual reference: V-projects-390-light' })
+
+  // Every renderer field is a rejection boundary. The version is deliberately
+  // synthetic; current runner metadata cannot authorize any product reference.
+  const renderer = visual.renderer
+  assertRenderer(renderer, renderer)
+  for (const key of Object.keys(renderer)) {
+    const changed = { ...structuredClone(renderer), [key]: 'changed' }
+    assert.throws(() => assertRenderer(changed, renderer), /renderer differs from reference/)
+  }
+  const missingImage = structuredClone(renderer); missingImage.runner.imageVersion = null
+  assert.throws(() => assertRenderer(renderer, missingImage), /renderer differs from reference: reference has no pinned runner ImageVersion/)
+  assertRenderer(renderer, missingImage, { capture: true })
+  const actual = rendererIdentity(manifest, manifest.renderer.browser.version, { env: { AEON_VISUAL_RUNNER: 'ubuntu-24.04', ImageOS: 'ubuntu24', ImageVersion: 'synthetic-image' }, platform: 'linux', arch: 'x64' })
+  assertRenderer(actual, renderer)
+  assert.equal(captureEnabled(manifest, {}), false)
+  assert.throws(() => captureEnabled(manifest, { AEON_VISUAL_CAPTURE: '1', GITHUB_EVENT_NAME: 'pull_request' }), /only by the manual/)
+  assert.throws(() => captureEnabled(manifest, { AEON_VISUAL_CAPTURE: '1', GITHUB_EVENT_NAME: 'push' }), /only by the manual/)
+  assert.equal(captureEnabled(manifest, { AEON_VISUAL_CAPTURE: '1', GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_WORKFLOW: 'CI', GITHUB_JOB: 'visual-reference-capture' }), true)
 
   // One pinned area does not need reference bytes from unrelated pending or
   // deferred states. The required state's own missing member still rejects.
@@ -118,16 +148,16 @@ test('visual references require approval, immutable attachment bytes and every e
   const goals = partial.states.find((state: { id: string }) => state.id === 'goals')
   Object.assign(goals, { referenceStatus: 'deferred', deferredUntil: ['AEON-1621', 'AEON-1625'], deferredReason: 'Synthetic future canvas' })
   const partialFiles = files.filter((file: { name: string }) => file.name.startsWith('V-projects-'))
-  const partialBytes = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), files: partialFiles }))
+  const partialBytes = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), renderer: visual.renderer, files: partialFiles }))
   partial.baselineAuthority.source.sha256 = hash(partialBytes)
   assert.equal(verifyBaselineBundle(partialBytes, partial, { stateIds: ['projects'] }).size, 4)
   assert.throws(() => verifyBaselineBundle(partialBytes, partial, { stateIds: ['agents'] }), { message: 'Unpinned visual reference: V-agents-390-light' })
   assert.throws(() => verifyBaselineBundle(partialBytes, partial, { stateIds: ['goals'] }), /Deferred visual reference: V-goals-390-light/)
-  const missingPartialBytes = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), files: partialFiles.slice(1) }))
+  const missingPartialBytes = Buffer.from(JSON.stringify({ version: 1, captureSHA: 'a'.repeat(40), renderer: visual.renderer, files: partialFiles.slice(1) }))
   partial.baselineAuthority.source.sha256 = hash(missingPartialBytes)
   assert.throws(() => verifyBaselineBundle(missingPartialBytes, partial), /exactly 4 pinned references/)
 
-  const records = manifest.states.filter((state: { referenceStatus?: string }) => state.referenceStatus !== 'deferred').flatMap((state: { owner: string; fixture: string; fixturesByProfile?: Record<string, string>; checkpoints: { id: string; profile: string; theme: string }[] }) => state.checkpoints.map(checkpoint => {
+  const records = manifest.states.filter((state: { id: string }) => manifest.capture.states.includes(state.id)).flatMap((state: { owner: string; fixture: string; fixturesByProfile?: Record<string, string>; checkpoints: { id: string; profile: string; theme: string }[] }) => state.checkpoints.map(checkpoint => {
     const viewport = manifest.profiles[checkpoint.profile]
     // Only the bounded PNG header is consumed by this packaging proof. Actual
     // raster decoding and pixel differences remain in the browser negative test.
@@ -135,13 +165,13 @@ test('visual references require approval, immutable attachment bytes and every e
     sized.writeUInt32BE(viewport.width, 16); sized.writeUInt32BE(viewport.height, 20)
     return { png: sized, quality: { id: checkpoint.id, owner: state.owner,
       fixture: state.fixturesByProfile?.[checkpoint.profile] ?? state.fixture, theme: checkpoint.theme, viewport,
-      captureSHA: 'a'.repeat(40), pngSHA256: hash(sized), layout: [], axe: [], console: [], responses: [] } }
+      captureSHA: 'a'.repeat(40), renderer, requirementsRun: true, captureMode: true, baselineCompared: false, fonts: [{ family: 'JetBrains Mono', custom: true }], pngSHA256: hash(sized), layout: [], axe: [], console: [], responses: [] } }
   }))
   const packed = packCandidates(records, manifest)
   assert.equal(packed.review.status, 'pending-Tick-review')
-  assert.equal(packed.review.members.length, 60)
-  assert.deepEqual(packed.review.deferred.map((state: { id: string }) => state.id), ['goals', 'session-chat', 'hours', 'capacity', 'ticket-workspace'])
-  assert.throws(() => packCandidates(records.slice(1), manifest), /all 60/)
+  assert.equal(packed.review.members.length, 42)
+  assert.deepEqual(packed.review.deferred.map((state: { id: string }) => state.id), ['goals', 'ticket-workspace'])
+  assert.throws(() => packCandidates(records.slice(1), manifest), /all 42/)
   assert.throws(() => packCandidates([...records.slice(0, -1), records[0]], manifest), /Duplicate/)
   const changedSource = records.map((record: { png: Buffer; quality: Record<string, unknown> }) => ({ png: record.png, quality: { ...record.quality } }))
   changedSource[1].quality.captureSHA = 'b'.repeat(40)
@@ -162,4 +192,41 @@ test('visual references require approval, immutable attachment bytes and every e
   }
   const wrongBytes = records.map((record: { png: Buffer }, index: number) => index ? record : { ...record, png: Buffer.concat([record.png, Buffer.from('changed')]) })
   assert.throws(() => packCandidates(wrongBytes, manifest), /Capture digest mismatch/)
+  const wrongRenderer = records.map((record: { quality: Record<string, unknown> }, index: number) => index ? record : { ...record, quality: { ...record.quality, renderer: { ...renderer, locale: 'de-DE' } } })
+  assert.throws(() => packCandidates(wrongRenderer, manifest), /renderer differs from reference: locale/)
+  const fallback = records.map((record: { quality: Record<string, unknown> }, index: number) => index ? record : { ...record, quality: { ...record.quality, fonts: [{ family: 'Arial', custom: false }] } })
+  assert.throws(() => packCandidates(fallback, manifest), /Missing self-hosted font/)
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-1674-candidate-'))
+  try {
+    const output = join(directory, 'artifact')
+    const candidate = writeCandidateArchive(records, manifest, output)
+    assert.equal(candidate.status, 'pending-Tick-review')
+    assert.equal(candidate.members.length, 42)
+    assert.equal(candidate.archive.sha256, hash(readFileSync(join(output, candidate.archive.name))))
+    assert.equal(candidate.payload.length, 85)
+    assert.match(readFileSync(join(output, 'members.sha256'), 'utf8'), /quality\/V-projects-390-light.json/)
+    // The generated archive can be consumed only after explicit synthetic
+    // approval and pins. This proves next-round transport compatibility too.
+    const pinned = structuredClone(manifest)
+    pinned.renderer = renderer
+    pinned.approval = { reviewer: 'Tick', status: 'approved', approvedAt: 'synthetic-only', evidence: 'Synthetic approval for transport test', states: candidate.states }
+    pinned.baselineAuthority = structuredClone(mirrored.baselineAuthority)
+    const source = pinned.baselineAuthority.source
+    const detached = readFileSync(join(output, `${candidate.archive.name}.manifest.json`))
+    Object.assign(source, { sha256: candidate.archive.sha256, bytes: candidate.archive.bytes, captureSHA: candidate.captureSHA,
+      baselineBundle: candidate.baselineBundle, archiveManifest: { attachmentMember: 'manifest.json', sha256: candidate.manifestSHA256 },
+      manifest: { bytes: detached.length, sha256: hash(detached) } })
+    pinned.baselineAuthority.source.baselineBundle.attachmentMember = 'baseline.json'
+    for (const state of pinned.states) {
+      delete state.approval
+      for (const checkpoint of state.checkpoints) {
+        const member = candidate.members.find((member: { id: string }) => member.id === checkpoint.id)
+        if (member) checkpoint.reference = { attachmentMember: member.attachmentMember, sha256: member.sha256 }
+      }
+    }
+    const archive = readFileSync(join(output, candidate.archive.name))
+    assert.equal(verifyReferenceArchive(archive, detached, pinned).references.size, 42)
+    const tampered = Buffer.from(archive); tampered[600] ^= 1
+    assert.throws(() => verifyReferenceArchive(tampered, detached, pinned, noExtraction), /archive SHA-256 mismatch/)
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })

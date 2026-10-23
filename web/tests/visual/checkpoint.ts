@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, type Browser, type Page, type TestInfo } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { readBaselineBundle, referenceGate } from '../../../scripts/test-prune/visual-baselines.mjs'
+import { assertRenderer, captureEnabled, rendererIdentity } from '../../../scripts/test-prune/visual-renderer.mjs'
 import { domAudit } from '../ui-audit-rules'
 
 const manifest = JSON.parse(readFileSync(fileURLToPath(new URL('../../../scripts/test-prune/visual-manifest.json', import.meta.url)), 'utf8'))
@@ -32,9 +33,20 @@ export function visualCases(id: string): Checkpoint[] {
 
 export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: Checkpoint, setup: VisualSetup) {
     const gate = await reportReference(info, checkpoint)
+    // Product not built yet: report the explicit authority and return before
+    // context creation, fixture setup or any product requirement assertion.
+    if (gate.mode === 'deferred') {
+      writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify({ id: checkpoint.id, reference: gate, requirementsRun: false }, null, 2))
+      return
+    }
+    const capture = captureEnabled(manifest)
+    if (capture && !manifest.capture.states.includes(gate.state)) throw new Error(`State is outside the manual capture set: ${gate.state}`)
+    const renderer = rendererIdentity(manifest, browser.version(), { browserOptions: info.project.use })
+    if (capture || gate.mode === 'compare') assertRenderer(renderer, manifest.renderer, { capture })
     const viewport = manifest.profiles[checkpoint.profile]
-    const context = await browser.newContext({ viewport, colorScheme: checkpoint.theme, reducedMotion: 'reduce',
-      hasTouch: checkpoint.profile === 'phone', locale: 'en-GB', timezoneId: 'Europe/Vienna' })
+    const context = await browser.newContext({ viewport, deviceScaleFactor: manifest.renderer.deviceScaleFactor,
+      colorScheme: checkpoint.theme, reducedMotion: manifest.renderer.reducedMotion,
+      hasTouch: checkpoint.profile === 'phone', locale: manifest.renderer.locale, timezoneId: manifest.renderer.timezone })
     const page = await context.newPage()
     const errors: string[] = []
     const responses: { path: string; status: number }[] = []
@@ -46,6 +58,7 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
     await page.clock.setFixedTime(new Date('2026-09-23T12:00:00Z'))
     try {
       await setup(page, checkpoint.profile, checkpoint.theme)
+      await prepareVisualFonts(page, String(info.project.use.baseURL))
       await page.evaluate(async theme => {
         document.documentElement.dataset.theme = theme
         await document.fonts.ready
@@ -55,25 +68,30 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
         await Promise.all([...document.images].map(img => img.decode().catch(() => {})))
         await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
       }, checkpoint.theme)
-      // Awaiting states run quality only; round 5 does not recapture their
-      // unapproved images or manufacture a replacement reference.
-      const png = gate.mode === 'compare' ? await page.screenshot({ path: info.outputPath(`${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }) : null
+      const emulation = await page.evaluate(() => ({ scale: devicePixelRatio, locale: navigator.language,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
+        theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }))
+      expect(emulation, 'renderer differs from reference: browser context settings').toEqual({ scale: renderer.deviceScaleFactor,
+        locale: renderer.locale, timezone: renderer.timezone, reduced: true, theme: checkpoint.theme })
+      const fonts = await renderedFonts(page)
+      const png = capture || gate.mode === 'compare' ? await page.screenshot({ path: info.outputPath(`${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }) : null
       const layout = (await page.evaluate(domAudit)).filter(row => ['horizontal-overflow', 'interactive-overlap', 'clipped-text'].includes(row.kind))
       const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
       const violations = axe.violations.map(row => ({ id: row.id, impact: row.impact, nodes: row.nodes.map(node => node.target) }))
       const report = { id: checkpoint.id, owner: checkpoint.owner, fixture: checkpoint.fixture,
         captureSHA, pngSHA256: png ? createHash('sha256').update(png).digest('hex') : null, baselineCompared: false,
-        reference: gate, viewport, theme: checkpoint.theme, layout, axe: violations, console: errors, responses }
+        reference: gate, viewport, theme: checkpoint.theme, renderer, fonts, requirementsRun: true,
+        captureMode: capture, layout, axe: violations, console: errors, responses }
       const saveReport = () => writeFileSync(info.outputPath(`${checkpoint.id}.md`), JSON.stringify(report, null, 2))
       saveReport()
       expect(errors, 'unexpected console/page failure').toEqual([])
       expect(responses, 'unexpected failed HTTP reads').toEqual([])
       expect(layout, 'unexpected clipping, overlap or overflow').toEqual([])
       expect(violations, 'WCAG A/AA violations').toEqual([])
-      report.baselineCompared = gate.mode === 'compare' ? await compareVisualReference(page, info, checkpoint) : false
+      report.baselineCompared = !capture && gate.mode === 'compare' ? await compareVisualReference(page, info, checkpoint, { renderer }) : false
       saveReport()
     } catch (error) {
-      if (gate.mode === 'compare') await page.screenshot({ path: info.outputPath(`failed-${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }).catch(() => {})
+      if (capture || gate.mode === 'compare') await page.screenshot({ path: info.outputPath(`failed-${checkpoint.id}.png`), animations: 'disabled', caret: 'hide' }).catch(() => {})
       writeFileSync(info.outputPath(`failed-${checkpoint.id}.md`), `${checkpoint.id}: ${String(error)}\n${JSON.stringify({ console: errors, responses }, null, 2)}\n`)
       throw error
     } finally { await context.close() }
@@ -81,9 +99,10 @@ export async function checkVisual(browser: Browser, info: TestInfo, checkpoint: 
 
 async function reportReference(info: TestInfo, checkpoint: { id: string }, visual = manifest) {
   const gate = referenceGate(visual, checkpoint.id)
-  if (gate.mode === 'awaiting-reference') {
-    const message = `${checkpoint.id}: awaiting reference (${gate.status}); quality checks required. ${gate.reason}`
-    info.annotations.push({ type: 'awaiting reference', description: message })
+  if (gate.mode !== 'compare') {
+    const message = gate.mode === 'deferred' ? `${checkpoint.id}: ${gate.reason}; product requirement checks not run.` :
+      `${checkpoint.id}: awaiting reference (${gate.status}); quality checks required. ${gate.reason}`
+    info.annotations.push({ type: gate.mode === 'deferred' ? 'deferred' : 'awaiting reference', description: message })
     await info.attach(`${checkpoint.id}-awaiting-reference`, { body: message, contentType: 'text/plain' })
     console.log(message)
   }
@@ -93,15 +112,53 @@ async function reportReference(info: TestInfo, checkpoint: { id: string }, visua
 // Kept shared with the real checkpoint runner so negative controls exercise
 // the same pinned/awaiting dispatch and pixel comparator as product states.
 export async function compareVisualReference(page: Page, info: TestInfo, checkpoint: { id: string; reference: { attachmentMember: string } },
-  { visual = manifest, baselineFile = process.env.AEON_VISUAL_BASELINE_FILE, timeout }: { visual?: typeof manifest; baselineFile?: string; timeout?: number } = {}) {
+  { visual = manifest, baselineFile = process.env.AEON_VISUAL_BASELINE_FILE, timeout, renderer = rendererIdentity(visual, page.context().browser()!.version(), { browserOptions: info.project.use }) }:
+    { visual?: typeof manifest; baselineFile?: string; timeout?: number; renderer?: Record<string, unknown> } = {}) {
   const gate = referenceGate(visual, checkpoint.id)
-  if (gate.mode === 'awaiting-reference') {
+  if (gate.mode !== 'compare') {
     await reportReference(info, checkpoint, visual)
     return false
   }
+  assertRenderer(renderer, visual.renderer)
   materializeReference(info, checkpoint, { visual, baselineFile })
-  await expect(page).toHaveScreenshot(`${checkpoint.id}.png`, { fullPage: false, animations: 'disabled', caret: 'hide', threshold: .2, maxDiffPixels: 0, timeout })
+  await expect(page).toHaveScreenshot(`${checkpoint.id}.png`, { fullPage: false, animations: 'disabled', caret: 'hide',
+    threshold: visual.comparison.threshold, maxDiffPixels: visual.comparison.maxDiffPixels, timeout })
   return true
+}
+
+// Only test setup changes typography: production assets and styles stay owned
+// by their product tickets. There is one app-hosted font in this checkout.
+export async function prepareVisualFonts(page: Page, baseURL: string) {
+  const url = new URL('/src/assets/fonts/jetbrains.woff2', baseURL).href
+  await page.addStyleTag({ content: `@font-face { font-family: 'JetBrains Mono'; src: url('${url}') format('woff2'); font-weight: 100 800; font-display: block; }
+    :root { --font: 'JetBrains Mono'; --serif: 'JetBrains Mono'; --mono: 'JetBrains Mono'; }
+    *, *::before, *::after { font-family: 'JetBrains Mono' !important; }` })
+  await page.evaluate(async () => {
+    const loaded = await document.fonts.load('14px "JetBrains Mono"')
+    if (!loaded.length || loaded.some(face => face.status !== 'loaded')) throw new Error('Self-hosted visual font did not load')
+    await document.fonts.ready
+  })
+}
+
+export async function renderedFonts(page: Page) {
+  const client = await page.context().newCDPSession(page)
+  try {
+    await client.send('DOM.enable'); await client.send('CSS.enable')
+    const { root } = await client.send('DOM.getDocument')
+    const { nodeIds } = await client.send('DOM.querySelectorAll', { nodeId: root.nodeId, selector: 'body, body *' })
+    if (nodeIds.length > 10_000) throw new Error('Visual font audit exceeds its node bound')
+    const rendered = new Map<string, { family: string; custom: boolean }>()
+    for (const nodeId of nodeIds) {
+      const { fonts } = await client.send('CSS.getPlatformFontsForNode', { nodeId })
+      for (const font of fonts) if (font.glyphCount > 0) {
+        if (!font.isCustomFont || font.familyName !== 'JetBrains Mono')
+          throw new Error(`System-font fallback in visual checkpoint: ${font.familyName}`)
+        rendered.set(font.familyName, { family: font.familyName, custom: font.isCustomFont })
+      }
+    }
+    if (!rendered.size) throw new Error('Visual font audit found no rendered glyphs')
+    return [...rendered.values()]
+  } finally { await client.detach() }
 }
 
 export function materializeReference(info: TestInfo, checkpoint: { id: string; reference: { attachmentMember: string } },

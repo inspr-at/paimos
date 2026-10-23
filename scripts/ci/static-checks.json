@@ -87,6 +87,11 @@
       "kind": "not-static",
       "reason": "Hosted artifact aggregation and reporting.",
       "runs_sha256": "7854095e549016705c7c0757450788386f9d6ba1092f0d46d6b75241ef65e782"
+    },
+    "visual-reference-capture": {
+      "kind": "not-static",
+      "reason": "AEON-1674 manual hosted browser capture and artifact-only review packaging; never a local static check or reference publication.",
+      "runs_sha256": "fa0c0d663cc4f3fe1b8ac4f7c2373a4fd07cfdc738b4bb4ea5dd04fabb0abe5f"
     }
   },
   "exclusions": [

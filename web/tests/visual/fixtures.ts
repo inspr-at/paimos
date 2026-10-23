@@ -17,11 +17,20 @@ import { mockFlow } from '../delivery-flow-fixtures'
 import { capacityWorld, NOW as CAPACITY_NOW } from '../capacity-fixtures'
 import { mockDailyPlan } from '../agents-daily-fixtures'
 import { mockStartAgent } from '../start-agent-fixtures'
+import { makeNative } from '../native-session-program-fixtures'
 import type { VisualSetup, Theme } from './checkpoint'
 import { visualChrome } from './chrome-fixture'
 
 export const LONG = 'Projektübergreifende Entwicklungszusammenarbeit und langfristige Infrastrukturverantwortung mit vollständiger Qualitätsprüfung'
 export const NOW = Date.parse('2026-09-23T12:00:00Z')
+async function healthyLead(page: Page) {
+  await page.route('**/api/projects/*/lead', route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const lead = { project_id: new URL(route.request().url()).pathname.split('/')[3]!, revision: 0, generation: 0,
+      session_id: null, state: 'none' as const, reason: '', process_active: false, automatic_launch_enabled: false }
+    return route.fulfill({ json: { ...lead, actions: mockLeadActions(lead) } })
+  })
+}
 const nodes = { 'p-pharos': { key: 'PRJ-17', title: LONG }, 'p-aeon': { key: 'PRJ-35', title: 'Aeon' },
   'n-1': { key: 'PHAROS-11', title: LONG }, 'n-2': { key: 'PHAROS-12', title: 'Connector recovery' }, 'n-a1': { key: 'AEON-1', title: 'Aeon foundation' } }
 function agentsData(now = NOW) {
@@ -73,12 +82,7 @@ export const agents: VisualSetup = async (page, _profile, theme) => {
   await mockAgents(page, data, { now: () => NOW })
   // This reference depicts a successful lead read. Missing action projections
   // remain covered separately by the lead-panel refusal test.
-  await page.route('**/api/projects/*/lead', route => {
-    if (route.request().method() !== 'GET') return route.fallback()
-    const lead = { project_id: new URL(route.request().url()).pathname.split('/')[3]!, revision: 0, generation: 0,
-      session_id: null, state: 'none' as const, reason: '', process_active: false, automatic_launch_enabled: false }
-    return route.fulfill({ json: { ...lead, actions: mockLeadActions(lead) } })
-  })
+  await healthyLead(page)
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible()
   await expect(page.locator('.sessions [data-row]').first()).toBeVisible()
@@ -87,7 +91,7 @@ export const agents: VisualSetup = async (page, _profile, theme) => {
   await expect(page.locator(`[data-row="s:${data.sessions[6]!.id}"]`)).toBeVisible()
 }
 
-export const sessionChat: VisualSetup = async (page, _profile, theme) => {
+async function setupSessionChat(page: Page, theme: Theme, unavailable: boolean) {
   await work(page, theme)
   const data = agentsData(), worker = data.sessions[0]!
   worker.display_label = 'Release coordination'
@@ -97,16 +101,21 @@ export const sessionChat: VisualSetup = async (page, _profile, theme) => {
     sender_session_id: worker.id, sender_principal_id: worker.agent_principal_id, recipient_principal_id: me.id,
     created_at: new Date(NOW - 60_000).toISOString() })
   await mockAgents(page, data, { now: () => NOW })
-  // Legacy chat has a bound thread but no qualified native runtime. Model the
-  // typed feature-disabled response, not a missing backend mock; a native
-  // snapshot would select the owned-session UI and remove this chat entirely.
-  // Unknown paths and every mutation still fall through to the strict checks.
+  await healthyLead(page)
+  // A valid native-context selects the product's owned-session Chat pane. That
+  // pane currently explains its native-client input limit; fabricating a 200
+  // refusal would hide an invalid contract to keep the legacy composer visible.
+  // The separate unavailable fixture retains the legacy post/composer and 503.
+  const native = makeNative()
+  Object.assign(native.current_binding!, { project_id: worker.project_id, harness_session_id: worker.id })
+  native.harness = worker.harness
+  native.terminal_viewer_url = null
   const conversation = '7c000000-0000-4000-8000-000000001674'
   await page.route('**/api/**', route => {
     const request = route.request(), path = new URL(request.url()).pathname
     if (request.method() !== 'GET') return route.fallback()
-    if (path === `/api/projects/${worker.project_id}/harness-sessions/${worker.id}/native-context`) return route.fulfill({ status: 503,
-      json: { reason: 'feature_disabled', request_id: null, retryable: false } })
+    if (path === `/api/projects/${worker.project_id}/harness-sessions/${worker.id}/native-context`) return unavailable ? route.fulfill({ status: 503,
+      json: { reason: 'feature_disabled', request_id: null, retryable: false } }) : route.fulfill({ json: native })
     if (path === `/api/chat-sessions/${worker.id}/thread`) return route.fulfill({ json: {
       contract: 'chat-v1', conversation_id: conversation, role: { contract: 'chat-v1' }, revision: '1', binding_epoch: '1',
       readiness: { state: 'offline', capabilities: [], reason: 'session_offline' },
@@ -122,9 +131,13 @@ export const sessionChat: VisualSetup = async (page, _profile, theme) => {
   await page.goto(`/agents/${worker.id}?tab=messages`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await panel.getByRole('tab', { name: /^Chat/ }).click()
-  await expect(panel.getByRole('textbox', { name: 'Message to Release coordination', exact: true })).toBeVisible()
-  await expect(panel.getByText('Übergabebericht', { exact: true })).toBeVisible()
+  if (unavailable) {
+    await expect(panel.getByRole('textbox', { name: 'Message to Release coordination', exact: true })).toBeVisible()
+    await expect(panel.getByText('Übergabebericht', { exact: true })).toBeVisible()
+  } else await expect(panel.getByText('Owned session input from this panel is not available yet. Use the qualified session client.', { exact: true })).toBeVisible()
 }
+export const sessionChat: VisualSetup = async (page, _profile, theme) => setupSessionChat(page, theme, false)
+export const sessionChatUnavailable: VisualSetup = async (page, _profile, theme) => setupSessionChat(page, theme, true)
 
 export const decisionDesk: VisualSetup = async (page, _profile, theme) => {
   await work(page, theme)
