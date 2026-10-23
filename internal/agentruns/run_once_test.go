@@ -230,7 +230,9 @@ func exerciseRunOnceSettlement(t *testing.T) {
 						if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'settlement_observer','Settlement observer') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
 							return err
 						}
-						if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'nodes.read'),($1,$2,'work_orders.write'),($1,$2,'run.create')`, f.person.TenantID, role); err != nil {
+						// Revoke only ticket writes. Keep the creator's live telemetry
+						// ceiling so the exact run can still report its outcome.
+						if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,rp.permission FROM role_permissions rp JOIN roles r ON r.id=rp.role_id AND r.tenant_id=rp.tenant_id WHERE r.key='admin' AND rp.permission<>'nodes.write'`, f.person.TenantID, role); err != nil {
 							return err
 						}
 						_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, f.person.ID, role)
