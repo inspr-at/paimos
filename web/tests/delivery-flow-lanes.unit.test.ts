@@ -9,6 +9,8 @@ import {
 } from '../src/lib/deliveryFlow'
 import { exampleLive, EXAMPLE_NOW } from './delivery-flow-example-fixtures'
 import { hintParts, flowText } from '../src/lib/deliveryFlowText'
+import { liveData, recordedRuns } from '../src/lib/deliveryFlowData'
+import { liveHarnessFlow } from './delivery-flow-live-fixtures'
 
 const words = (en: string) => ({ en, de: en })
 const step = (start: number, end: number, lane: Lane = 'ops', kind: FlowStep['kind'] = 'work'): FlowStep => ({ start, end, lane, kind, expert: words(`s${start}`), simple: words(`s${start}`) })
@@ -41,6 +43,18 @@ it('rows are reserved once per data set: each step takes the first free row and 
 })
 
 it('ten concurrent builders take ten rows; above twelve a lane folds into "+N more" until a person expands it', () => {
+  // AEON-1697: the actual wave-A start/stop intervals, including later attempts,
+  // must survive the API projection → Live → packing path, not just fake steps.
+  const answer = liveHarnessFlow()
+  const live = liveData(recordedRuns(answer, { extendOpen: true }))!
+  expect(live.sets[0]!.runs).toHaveLength(10)
+  const [recorded] = laneModel(live)
+  expect(recorded!.items).toHaveLength(21)
+  expect(recorded!.rows.build).toBe(10)
+  expect(new Set(recorded!.items.map(item => item.row)).size).toBe(10)
+  expect(overlaps(recorded!)).toEqual([])
+  expect(laneRows(recorded!, 'build', false)).toEqual({ bars: 10, fold: null, total: 10 })
+  expect(laneRows(recorded!, 'build', true)).toEqual({ bars: 10, fold: null, total: 10 })
   const builders = (n: number) => Array.from({ length: n }, (_, k) => step(10 + k, 60 + k, 'build'))
   const lanes = (steps: FlowStep[]): FlowData => { const d = data(steps); d.sets[0]!.lanes = ['build', 'ci']; return d }
   const [ten] = laneModel(lanes(builders(10)))
