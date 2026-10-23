@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/capacity-pace.spec.ts",
-    "listedTests": 13,
+    "listedTests": 12,
     "tierTiming": {
       "caseSeconds": {
         "max": 7.138,

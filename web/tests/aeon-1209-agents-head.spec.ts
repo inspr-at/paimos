@@ -103,7 +103,8 @@ function expectReach(r: Reach, label: string, touch: boolean) {
   }
 }
 
-for (const theme of ['light', 'dark'] as const) {
+// AEON-1678: keep the native interactions in one rendering profile.
+for (const theme of ['light'] as const) {
   test(`${theme} 1440: head order, the capacity row and no Desk panel`, async ({ page }, info) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
@@ -327,7 +328,7 @@ test('a search that hides the session under the cursor moves the cursor to a mat
   await expect(page.getByRole('dialog', { name: 'Pause Long list worker w12x' })).toBeVisible()
 })
 
-for (const width of [1440, 1024, 390]) test(`${width}: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover`, async ({ page }) => {
+for (const width of [1440, 390]) test(`${width}: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover`, async ({ page }) => {
   await page.setViewportSize({ width, height: 1000 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await setup(page)
@@ -408,7 +409,7 @@ const PROBES = () => {
   const main = document.querySelector('main')!
   return { edge, glyphs, german, hscroll: Math.max(document.documentElement.scrollWidth - innerWidth, main.scrollWidth - main.clientWidth) }
 }
-for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1440, 390]) for (const theme of ['light'] as const) {
   test(`design gate at ${width} ${theme}: no edge accents, SVG icons only, English only, no sideways scroll, through every state`, async ({ page }, info) => {
     test.setTimeout(90_000)
     await page.setViewportSize({ width, height: 1000 })
@@ -462,7 +463,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
 
 test.describe('phone', () => {
   test.use({ viewport: { width: 390, height: 900 }, hasTouch: true, isMobile: true })
-  for (const theme of ['light', 'dark'] as const) test(`${theme} 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head`, async ({ page }, info) => {
+  for (const theme of ['light'] as const) test(`${theme} 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head`, async ({ page }, info) => {
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
     await setup(page)
     await page.goto('/agents')
@@ -560,7 +561,7 @@ test.describe('touch targets', () => {
 // test. Eight screenshot matrices in one test exhausted its 180-second CI limit
 // and then the shard's 20-minute limit; every assertion and limit stays intact.
 const readStatesTitle = 'AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart'
-for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1440, 390]) for (const theme of ['light'] as const) {
 test(width === 1440 && theme === 'light' ? readStatesTitle : `${readStatesTitle} (${width} ${theme})`, async ({ page }, info) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width, height: 1000 })

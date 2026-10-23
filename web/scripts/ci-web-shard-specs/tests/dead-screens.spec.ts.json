@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/dead-screens.spec.ts",
-    "listedTests": 12,
+    "listedTests": 4,
     "tierTiming": {
       "caseSeconds": {
         "max": 4.275,

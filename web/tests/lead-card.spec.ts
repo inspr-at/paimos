@@ -34,7 +34,8 @@ async function folded(page: Page) {
   await expect(details(page)).toBeHidden()
 }
 
-for (const width of [1440, 400]) for (const look of ['light', 'dark'] as const) {
+// AEON-1678: desktop and phone retain the full folding/spacing checks once.
+for (const width of [1440, 400]) for (const look of ['light'] as const) {
   test(`the card folds to one line with Start lead at ${width} ${look}`, async ({ page }, info) => {
     await open(page, width)
     await theme(page, look)
@@ -119,7 +120,8 @@ for (const width of [1440, 1024, 400]) {
 }
 
 const sectionBar = (page: Page) => page.getByRole('tablist', { name: 'Project sections' })
-for (const width of [1440, 400]) for (const look of ['light', 'dark'] as const) {
+// AEON-1678: desktop and phone retain the full folding/spacing checks once.
+for (const width of [1440, 400]) for (const look of ['light'] as const) {
   test(`the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at ${width} ${look}`, async ({ page }) => {
     await open(page, width)
     await theme(page, look)

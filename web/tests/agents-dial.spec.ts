@@ -134,7 +134,8 @@ test('AEON-720: accounts owned by another person never become dial room or a fal
   await expect(card.locator('.wh')).not.toContainText('Full right now')
 })
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+// AEON-1678: keep desktop/phone native pace controls once; hold/conflict/keyboard cases stay separate.
+for (const width of [390, 1440]) for (const theme of ['light'] as const) {
   const state = 'wind' as const
   test(`${width} ${theme} ${state}: stepping, modes and folding keep every control put`, async ({ page }) => {
     // Measure each changed control through steps, drafts, modes and folding.

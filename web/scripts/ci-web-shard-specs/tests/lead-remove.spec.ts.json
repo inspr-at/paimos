@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/lead-remove.spec.ts",
-    "listedTests": 7,
+    "listedTests": 3,
     "tierTiming": {
       "caseSeconds": {
         "max": 7.824,
