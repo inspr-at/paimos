@@ -4,7 +4,7 @@
   "package": "P06",
   "round": "cut-A",
   "status": "implementation-complete-browser-capacity-blocked",
-  "recordedAt": "2026-10-23T08:55:51.582Z",
+  "recordedAt": "2026-10-23T09:06:36.676Z",
   "baseCommit": "c0f172e52e68ac58d399b6fccfd82978ddde3770",
   "selectedAccount": {
     "instance": "ppm",
@@ -204,7 +204,7 @@
     ],
     "protectedAnchorsRemoved": 0,
     "assertionsWeakened": 0,
-    "retainedVerification": "Scoped TypeScript AST expansion matches every pre-cut native manifest identity. All retained callback bodies are byte-identical apart from the provenance screenshot directory being replaced by testInfo.outputPath(); every profile cut maps to retained callbacks with the identical original body. Native post-cut discovery remains for hosted CI."
+    "retainedVerification": "Scoped TypeScript AST expansion matches every pre-cut native manifest identity. All retained assertions are unchanged apart from provenance screenshot output ownership. Each profile cut maps to retained callbacks with the identical original body. The approved remote runner executed all 55 native cases from six affected specs successfully; native execution/discovery for the other 18 specs remains capacity-refused."
   },
   "runtime": {
     "owner": "web/tests/agents-prune.unit.test.ts",
@@ -299,6 +299,42 @@
     "static": {
       "result": "deferred-to-hosted-CI",
       "authority": "Cut A brief: Static in hosted CI."
+    },
+    "browserAfter": {
+      "result": "partial-pass-remaining-capacity-refused",
+      "host": "mbp2606",
+      "commit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+      "passed": 55,
+      "specs": [
+        "tests/dead-screens.spec.ts",
+        "tests/groups.spec.ts",
+        "tests/lead-card.spec.ts",
+        "tests/lead-flow.spec.ts",
+        "tests/vendor-signals.spec.ts",
+        "tests/pi-openrouter.spec.ts"
+      ],
+      "playwrightReportedTime": "1.8m",
+      "remainingSpecs": [
+        "tests/agent-rules-ticks.spec.ts",
+        "tests/agent-rules-budget-clients.spec.ts",
+        "tests/provenance.spec.ts",
+        "tests/lead-remove.spec.ts",
+        "tests/lead-start.spec.ts",
+        "tests/aeon-1209-agents-head.spec.ts",
+        "tests/aeon-1210-agents-tree.spec.ts",
+        "tests/aeon-1211-agents-rows.spec.ts",
+        "tests/aeon-1213-agents-split.spec.ts",
+        "tests/agent-recovery.spec.ts",
+        "tests/lead-adoption.spec.ts",
+        "tests/agent-pause.spec.ts",
+        "tests/agents-dial.spec.ts",
+        "tests/agents-dial-daily.spec.ts",
+        "tests/agents-handover.spec.ts",
+        "tests/agents-display.spec.ts",
+        "tests/agents-mission.spec.ts",
+        "tests/capacity-pace.spec.ts"
+      ],
+      "remainingCases": 213
     }
   },
   "protectedAfterP02": {
@@ -366,6 +402,91 @@
       "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/dead-screens.spec.ts tests/groups.spec.ts tests/lead-card.spec.ts tests/lead-flow.spec.ts tests/vendor-signals.spec.ts tests/pi-openrouter.spec.ts'",
       "exitCode": 3,
       "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n"
+    },
+    {
+      "batch": 1,
+      "stage": "after",
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/agent-rules-ticks.spec.ts tests/agent-rules-budget-clients.spec.ts tests/provenance.spec.ts tests/lead-remove.spec.ts tests/lead-start.spec.ts tests/aeon-1209-agents-head.spec.ts'",
+      "exitCode": 3,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n"
+    },
+    {
+      "batch": 2,
+      "stage": "after",
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/aeon-1210-agents-tree.spec.ts tests/aeon-1211-agents-rows.spec.ts tests/aeon-1213-agents-split.spec.ts tests/agent-recovery.spec.ts tests/lead-adoption.spec.ts tests/agent-pause.spec.ts'",
+      "exitCode": 3,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n"
+    },
+    {
+      "batch": 3,
+      "stage": "after",
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/agents-dial.spec.ts tests/agents-dial-daily.spec.ts tests/agents-handover.spec.ts tests/agents-display.spec.ts tests/agents-mission.spec.ts tests/capacity-pace.spec.ts'",
+      "exitCode": 3,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n"
+    },
+    {
+      "batch": 4,
+      "stage": "after",
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/dead-screens.spec.ts tests/groups.spec.ts tests/lead-card.spec.ts tests/lead-flow.spec.ts tests/vendor-signals.spec.ts tests/pi-openrouter.spec.ts'",
+      "exitCode": 0,
+      "output": "55 passed (1.8m)\nAEON_PW_PROCESSES reported remaining_processes=0\nrc=0; results in web/test-results/remote",
+      "commit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+      "host": "mbp2606",
+      "passed": 55,
+      "playwrightReportedTime": "1.8m",
+      "evidence": "Completed approved remote-spec.sh run; terminal summary captured. Full tail contained the 55 native progress entries."
+    },
+    {
+      "stage": "after",
+      "batch": 1,
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/agent-rules-ticks.spec.ts tests/agent-rules-budget-clients.spec.ts tests/provenance.spec.ts tests/lead-remove.spec.ts tests/lead-start.spec.ts tests/aeon-1209-agents-head.spec.ts'",
+      "commit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+      "host": "mbp2606",
+      "exitCode": 3,
+      "entryElapsedSeconds": 0.178,
+      "passed": null,
+      "playwrightReportedTime": null,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n",
+      "retry": true
+    },
+    {
+      "stage": "after",
+      "batch": 2,
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/aeon-1210-agents-tree.spec.ts tests/aeon-1211-agents-rows.spec.ts tests/aeon-1213-agents-split.spec.ts tests/agent-recovery.spec.ts tests/lead-adoption.spec.ts tests/agent-pause.spec.ts'",
+      "commit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+      "host": "mbp2606",
+      "exitCode": 3,
+      "entryElapsedSeconds": 0.172,
+      "passed": null,
+      "playwrightReportedTime": null,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n",
+      "retry": true
+    },
+    {
+      "stage": "after",
+      "batch": 3,
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/agents-dial.spec.ts tests/agents-dial-daily.spec.ts tests/agents-handover.spec.ts tests/agents-display.spec.ts tests/agents-mission.spec.ts tests/capacity-pace.spec.ts'",
+      "commit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+      "host": "mbp2606",
+      "exitCode": 3,
+      "entryElapsedSeconds": 0.166,
+      "passed": null,
+      "playwrightReportedTime": null,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n",
+      "retry": true
+    },
+    {
+      "stage": "before",
+      "batch": 4,
+      "command": "REMOTE_ONLY=1 /Users/markus/.aeon/lead/aeon/remote-spec.sh /Users/markus/Code/aeon-worktrees/aeon-1678-prune-p06-agents 'tests/dead-screens.spec.ts tests/groups.spec.ts tests/lead-card.spec.ts tests/lead-flow.spec.ts tests/vendor-signals.spec.ts tests/pi-openrouter.spec.ts'",
+      "commit": "c0f172e52e68ac58d399b6fccfd82978ddde3770",
+      "host": "mbp2606",
+      "exitCode": 3,
+      "entryElapsedSeconds": 0.18,
+      "passed": null,
+      "playwrightReportedTime": null,
+      "output": "remote busy: 2/2 remote runs (CI pool 0/4)\nremote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI\n",
+      "retry": true
     }
   ],
   "runnerMeasurement": {
@@ -375,12 +496,27 @@
     "beforeSeconds": null,
     "afterSeconds": null,
     "changeSeconds": null,
-    "result": "unmeasured: approved before-run batches refused remote capacity; no browser runtime saving is claimed"
+    "result": "unmeasured before/after change: all approved before batches, including a retry at the committed pre-cut ancestor in the same worktree, were capacity-refused. One after batch passed (55 cases, reported 1.8m); no browser runtime saving is claimed.",
+    "observedAfter": {
+      "batch": 4,
+      "commit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+      "cases": 55,
+      "specs": [
+        "tests/dead-screens.spec.ts",
+        "tests/groups.spec.ts",
+        "tests/lead-card.spec.ts",
+        "tests/lead-flow.spec.ts",
+        "tests/vendor-signals.spec.ts",
+        "tests/pi-openrouter.spec.ts"
+      ],
+      "playwrightReportedTime": "1.8m",
+      "unit": "rounded Playwright suite duration; no before comparison available"
+    }
   },
   "browserRunnerTimeChangeSeconds": null,
   "remaining": [
-    "Remote execution of all 24 affected specs and native catalogue verification await capacity or hosted CI.",
-    "The required same-host browser before/after runner-time delta is unmeasured; only case-count reduction is established.",
+    "Remote execution/native catalogue verification for 18 affected specs (213 cases) awaits capacity or hosted CI; six specs (55 cases) passed on mbp2606.",
+    "The required same-host browser before/after runner-time delta is unmeasured: before runs were refused. No runtime saving is claimed.",
     "Static checks run in hosted CI as explicitly assigned by the cut-A brief. Protected cuts wait for P02 and verified replacement lineage."
   ],
   "sourceOwnership": {
@@ -401,5 +537,8 @@
     "runtimeCases": 9,
     "negativeControls": 6,
     "removedBrowserCases": 0
-  }
+  },
+  "implementationCommit": "7f296ad2fee7242eef78ae9813cf8262b3a1abac",
+  "finalMergedMain": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
+  "finalMainMergeResult": "Fetched newest origin/main immediately before completion; already up to date."
 }
