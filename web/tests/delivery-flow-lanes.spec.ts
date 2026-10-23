@@ -344,3 +344,77 @@ for (const [width, theme, lang] of [[1440, 'light', 'en'], [1440, 'dark', 'en'],
     await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-994-p5-lanes/flow-lanes-${width}-${theme}-${lang}.png`) })
   })
 }
+
+// P11: actual hit testing at the phone edge, followed by brush pan and playhead drag.
+test('AEON-1683: phone timeline edge handles resize and the brush and playhead retain stationary controls', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await setup(page)
+  await page.goto('/p/AEON/delivery?view=flow')
+  await page.getByTestId('flow-bar').getByRole('radio', { name: 'Fit all' }).click()
+  await expect.poll(() => windowText(page)).toBe('18:13 – 21:45')
+  await overview(page).scrollIntoViewIfNeeded()
+  const guard = await controlStability(page, {
+    zoom: page.getByTestId('flow-bar').getByRole('radiogroup', { name: 'Zoom' }),
+    follow: page.getByTestId('flow-follow'), chip: page.getByTestId('flow-chip'), overview: overview(page),
+  })
+  const drag = async (at: { x: number; y: number }, dx: number) => guard.check(async () => {
+    await page.mouse.move(at.x, at.y); await page.mouse.down()
+    await page.mouse.move(at.x + dx, at.y, { steps: 6 }); await page.mouse.up()
+  })
+  const before = await windowText(page)
+  const geometry = await overview(page).evaluate(host => {
+    const svg = host.querySelector('svg')!
+    const frame = svg.getBoundingClientRect()
+    const box = (id: string) => host.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect()
+    const clip = (r: DOMRect) => ({
+      w: Math.min(r.right, frame.right) - Math.max(r.left, frame.left),
+      h: Math.min(r.bottom, frame.bottom) - Math.max(r.top, frame.top),
+    })
+    const area = (a: DOMRect, b: DOMRect) => {
+      const w = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+      const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+      return Math.max(0, w) * Math.max(0, h)
+    }
+    const hr = box('flow-overview-hr'), hl = box('flow-overview-hl'), ph = box('flow-overview-playhead')
+    const x = frame.right - 30, y = frame.top + frame.height / 2
+    return {
+      frameW: frame.width,
+      hl: clip(hl), hr: clip(hr),
+      playOverlap: area(hr, ph) + area(hl, ph),
+      rightPart: document.elementFromPoint(x, y)?.getAttribute('data-part') ?? '',
+      x, y,
+    }
+  })
+  expect(geometry.frameW).toBeGreaterThan(240)
+  expect(geometry.frameW).toBeLessThan(640)
+  expect(geometry.hl.w).toBeGreaterThanOrEqual(44)
+  expect(geometry.hl.h).toBeGreaterThanOrEqual(44)
+  expect(geometry.hr.w).toBeGreaterThanOrEqual(44)
+  expect(geometry.hr.h).toBeGreaterThanOrEqual(44)
+  expect(geometry.playOverlap).toBe(0)
+  // 30 px in from the right edge is outside the old 12 px sliver, so a miss does not resize.
+  expect(geometry.rightPart).toBe('hr')
+  await drag(geometry, -36)
+  const shrunk = await windowText(page)
+  expect(shrunk?.split('–')[0]?.trim()).toBe(before?.split('–')[0]?.trim())
+  expect(minuteOf(shrunk?.split('–')[1] ?? null)).toBeLessThan(minuteOf(before?.split('–')[1] ?? null))
+  const left = await center(page, '[data-testid="flow-overview-hl"]')
+  const end = await windowText(page)
+  await drag(left, 36)
+  const later = await windowText(page)
+  expect(later?.split('–')[1]?.trim()).toBe(end?.split('–')[1]?.trim())
+  expect(minuteOf(later)).toBeGreaterThan(minuteOf(end))
+  // Moving the brush pans the window while keeping its span and the chosen time.
+  const span = minuteOf(later?.split('–')[1] ?? null) - minuteOf(later)
+  await drag(await center(page, '[data-testid="flow-overview"] .ln-brush'), 24)
+  const panned = await windowText(page)
+  expect(panned).not.toBe(later)
+  expect(minuteOf(panned?.split('–')[1] ?? null) - minuteOf(panned)).toBe(span)
+  await expect(clock(page)).toHaveText('At 20:25 (now)')
+  // The distinct playhead target moves the time rather than resizing the brush.
+  await drag(await center(page, '[data-testid="flow-overview"] [data-part="ovph"]'), -36)
+  expect(minuteOf(await clock(page).textContent())).toBeLessThan(20 * 60 + 25)
+  await expect(chip(page)).toHaveText(/^Viewing /)
+  guard.done()
+
+})
