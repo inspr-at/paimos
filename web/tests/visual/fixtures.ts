@@ -249,13 +249,17 @@ export const hours: VisualSetup = async (page, _profile, theme) => {
 async function visualQuoteProfile(page: Page): Promise<QuoteProfileSnapshot> {
   const root = new URL('../../../internal/business/quotes/profiles/inspr/', import.meta.url)
   const { definition } = JSON.parse(readFileSync(new URL('profile.json', root), 'utf8'))
+  const snapshot = { id: '7e5a0000-0000-4000-8000-000000001674', revision: 1, definition }
+  await page.route(`**/api/quote-profiles/${snapshot.id}*`, route => route.fulfill({ json: {
+    ...snapshot, name: 'INSPR', archived_at: null, created_at: new Date(NOW).toISOString(), updated_at: new Date(NOW).toISOString(),
+  } }))
   const allowed = new Set([...definition.fonts.map((face: { asset_id: string }) => face.asset_id), definition.footer.asset_id])
   await page.route('**/api/quote-profiles/assets/**', route => {
     const asset = decodeURIComponent(new URL(route.request().url()).pathname.split('/assets/')[1]!)
     if (!allowed.has(asset)) throw new Error(`Unexpected INSPR quote asset: ${asset}`)
     return route.fulfill({ body: readFileSync(new URL(asset, root)), contentType: asset.endsWith('.woff2') ? 'font/woff2' : 'image/svg+xml' })
   })
-  return { id: '7e5a0000-0000-4000-8000-000000001674', revision: 1, definition }
+  return snapshot
 }
 
 export const quoteEditor: VisualSetup = async (page, _profile, theme) => {

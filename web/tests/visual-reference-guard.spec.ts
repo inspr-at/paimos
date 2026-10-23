@@ -193,12 +193,13 @@ test('P02 Session Chat fixture binds its chat reads and native refusal to the di
   // Refusal and healthy fixtures get separate contexts. Replacing route stacks
   // under an old thread poll could send the old session's read to the new mock.
   await page.close()
-  const healthyContext = await browser.newContext({ baseURL: info.project.use.baseURL })
+  const healthyContext = await browser.newContext({ baseURL: info.project.use.baseURL, viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
   try {
     const healthyPage = await healthyContext.newPage(), healthyReads: Response[] = [], healthyErrors: string[] = []
     healthyPage.on('response', response => healthyReads.push(response))
     healthyPage.on('pageerror', error => healthyErrors.push(error.message))
     await healthyPage.clock.setFixedTime(new Date('2026-09-23T12:00:00Z'))
+    await prepareVisualFonts(healthyPage, String(info.project.use.baseURL))
     const healthyNativeRead = healthyPage.waitForResponse(response => new URL(response.url()).pathname.endsWith('/native-context'))
     await sessionChat(healthyPage, 'desktop', 'light')
     const healthyNative = await healthyNativeRead
@@ -211,6 +212,12 @@ test('P02 Session Chat fixture binds its chat reads and native refusal to the di
     await expect(healthyPage.getByText('The session’s live capabilities could not be read. Reopen the panel to try again.', { exact: true })).toHaveCount(0)
     expect(healthyReads.filter(response => response.status() >= 400).map(response => ({ path: new URL(response.url()).pathname, status: response.status() }))).toEqual([{ path: new URL(healthyNative.url()).pathname, status: 503 }])
     expect(healthyErrors).toEqual([])
+    await fontEvidence(healthyPage, 'session-chat')
+    await healthyPage.screenshot({ path: info.outputPath('session-chat-1440.png'), animations: 'disabled', caret: 'hide' })
+    await healthyPage.setViewportSize({ width: 390, height: 844 })
+    await healthyPage.locator('.thread-scroll').evaluate(element => { element.scrollTop = 0 })
+    await expect(thread.getByRole('separator', { name: 'Today', exact: true })).toBeVisible()
+    await healthyPage.screenshot({ path: info.outputPath('session-chat-390.png'), animations: 'disabled', caret: 'hide' })
   } finally { await healthyContext.close() }
 
 })
