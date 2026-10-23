@@ -31,7 +31,7 @@ export interface AssistantFacts {
   spend: null | { amount: string; daily: { day: string; amount: string }[]; resumes?: string }
   approvals: null | { id: string; title: string; target: string; at: string; href: string; decision?: string; by?: string }[]
   routines: null | { id: string; name: string; schedule: string; next: string | null; result?: { label: string; href: string }; paused: boolean; revision: number }[]
-  activity: null | { at: string; text: string; kind: 'messages' | 'runs' | 'approvals'; href?: string }[]
+  activity: null | { at: string; text: string; kind: 'messages' | 'runs' | 'approvals'; href?: string; refused?: boolean }[]
   lastActivity: null | { at: string; text: string }
   paused: null | { by: string; at: string }
 }
@@ -75,12 +75,13 @@ export function policyGroups(scopes: string[]): string[] {
   const words = assistantCopy()
   const groups = new Set<string>()
   for (const scope of scopes) {
-    if (scope === 'nodes.write') groups.add(words.writeTickets)
+    if (scope === 'nodes.write') groups.add(scopes.includes('nodes.read') ? words.writeTickets : words.writeTicketsOnly)
     else if (scope === 'nodes.read' && !scopes.includes('nodes.write')) groups.add(words.readTickets)
     else if (scope === 'knowledge.write') groups.add(words.writeKnowledge)
     else if (scope === 'knowledge.read' && !scopes.includes('knowledge.write')) groups.add(words.readKnowledge)
     else if (scope === 'inbox.send') groups.add(words.messagePeople)
-    else if (scope === 'inbox.read' || scope === 'inbox.receipt') groups.add(words.readInbox)
+    else if (scope === 'inbox.read') groups.add(scopes.includes('inbox.receipt') ? words.readInbox : words.readInboxOnly)
+    else if (scope === 'inbox.receipt') groups.add(scopes.includes('inbox.read') ? words.readInbox : words.acknowledgeInbox)
     else groups.add(scope) // Unknown registry labels stay explicit, never silently omitted.
   }
   return [...groups]

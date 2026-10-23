@@ -767,7 +767,7 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
       </div>
       <div class="agents-split">
         <div v-show="!panelOnly" ref="listPane" class="agents-list-pane" @transitionend="finishLayout">
-        <AssistantsSection :items="assistants.items" :facts="assistants.facts" :state="assistants.state" :error="assistants.error" :truncated="assistants.truncated" :can-connect="assistants.mayConnect" :can-approve="can('approvals.decide')" :now="agents.now" :sort-epoch="assistantSortEpoch" :selected="assistantId" :owner="person" @open="openAssistant" @retry="assistants.load()" />
+        <AssistantsSection :items="assistants.items" :facts="assistants.facts" :state="assistants.state" :error="assistants.error" :truncated="assistants.truncated" :can-connect="assistants.mayConnect" :can-approve="can('approvals.decide')" :now="agents.now" :sort-epoch="assistantSortEpoch" :selected="assistantId" :owner="person" :project-names="Object.fromEntries(projects.projects.map(project => [project.id, project.routeKey]))" @open="openAssistant" @retry="assistants.load()" />
         <SessionList
           v-if="agents.loaded" ref="sessionList"
           :groups="sessionGroups" :history="sessionHistory" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"

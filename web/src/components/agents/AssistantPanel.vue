@@ -45,9 +45,9 @@ const statusLine = computed(() => {
 })
 const history = computed(() => store.events.filter(event => (event.after?.principal_id ?? event.before?.principal_id) === props.item.principal_id).sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || b.id - a.id))
 const activities = computed(() => [
-  ...history.value.map(event => ({ key: `policy:${event.id}`, at: event.at, kind: 'policy', text: words.changed(event.actor_principal_id === session.identity?.principal.id ? session.identity.principal.name : event.actor_principal_id.slice(0, 8), time(event.at), policyChange(event)), href: undefined as string | undefined })),
+  ...history.value.map(event => ({ key: `policy:${event.id}`, at: event.at, kind: 'policy', text: words.changed(event.actor_principal_id === session.identity?.principal.id ? session.identity.principal.name : event.actor_principal_id.slice(0, 8), time(event.at), policyChange(event)), href: undefined as string | undefined, refused: false })),
   ...(props.facts.activity ?? []).map((event, index) => ({ ...event, key: `activity:${index}` })),
-].filter(event => (activityFilter.value === 'all' || event.kind === activityFilter.value) && (!refusalsOnly.value || event.kind === 'approvals')).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)))
+].filter(event => (activityFilter.value === 'all' || event.kind === activityFilter.value) && (!refusalsOnly.value || event.refused)).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)))
 const displayPolicy = computed(() => editing.value && draft.value ? draft.value : props.item.policy)
 const dirty = computed(() => editing.value && JSON.stringify(draft.value) !== JSON.stringify(original.value?.policy))
 const budgetValid = computed(() => !!draft.value && /^(0|[1-9][0-9]{0,11})(\.[0-9]{1,6})?$/.test(draft.value.weekly_budget.amount))
@@ -180,7 +180,7 @@ h2 small { display: block; margin-top: 4px; font-size: 12px; font-weight: 400; c
 .assistant-close { flex: none; }
 .panel-status { display: flex; align-items: center; gap: 7px; margin: 10px 0 4px; font-size: 13px; font-weight: 600; }
 .down { color: var(--danger); }
-.panel-status-line { margin: 0; color: var(--ink-2); font-size: 12px; line-height: 1.5; min-height: 36px; overflow-wrap: anywhere; }
+.panel-status-line { margin: 0; color: var(--ink-2); font-size: 12px; line-height: 1.5; height: 36px; overflow-y: auto; overflow-wrap: anywhere; }
 .assistant-actions { display: flex; align-items: center; justify-content: space-between; height: 44px; gap: 8px; }
 .unavailable-action { font-size: 12px; color: var(--ink-2); }
 .assistant-tabs { display: flex; gap: 2px; height: 44px; overflow-x: auto; scrollbar-width: thin; }

@@ -862,6 +862,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   }
   await details.getByRole('button', { name: 'Close assistant details' }).click()
+  await expect(details).toHaveCount(0)
   items.push(...Array.from({ length: 5 }, (_, n) => ({ ...amy, principal_id: `af000000-0000-4000-8000-00000000000${n}`, display_name: `Research ${n}` })))
   await page.reload()
   await expect(section.locator('.assistant-row')).toHaveCount(5)
