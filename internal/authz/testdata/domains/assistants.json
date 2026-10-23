@@ -1,0 +1,12 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "routes": {
+    "GET /api/assistants": "members.read",
+    "GET /api/assistants/{principalId}": "members.read",
+    "POST /api/assistants": "agents.create",
+    "PATCH /api/assistants/{principalId}": "agents.create",
+    "POST /api/assistants/{principalId}/disable": "agents.create",
+    "GET /api/assistants/{principalId}/policy": "members.read|inbox.read",
+    "PUT /api/assistants/{principalId}/policy": "agents.create"
+  }
+}
