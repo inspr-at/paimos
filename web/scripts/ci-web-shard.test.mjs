@@ -627,17 +627,31 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const deskLessons = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/decision-desk-lessons.spec.ts')
   assert.ok(deskLessons && deskLessons.listedTests === 26, 'Lesson decision regressions must remain in the gate')
   assert.ok(gated.some(spec => spec.file === deskLessons.file), 'Lesson decisions must remain gated')
-  // AEON-1309 splits its nine unchanged panel cases so files can be packed
-  // independently. Charge only this slice's declared weights, like the other
-  // additions above; the historical <300s bound and twelve shards stay intact.
-  const panelFiles = new Set(['tests/native-session-program.spec.ts',
-    'tests/native-session-program-390.spec.ts', 'tests/native-session-program-1024.spec.ts',
-    'tests/native-session-program-1440.spec.ts', 'tests/native-session-program-reader.spec.ts',
-    'tests/native-session-program-validation.spec.ts'])
+  // AEON-1309 splits panel coverage across six independently packed files.
+  // AEON-1679 Cut A removes only the three duplicate dark viewport cases;
+  // pin every surviving identity and reconcile each count with native discovery.
+  // Charge the declared weights without changing the historical <300s bound.
+  const panelCases = [
+    ['tests/native-session-program.spec.ts', 'AEON-1309: fake-host mode changes stay read-only, preserve the menu and reject stale context'],
+    ['tests/native-session-program-390.spec.ts', 'AEON-1309: 390 light panel controls, layouts and live-reader anchor stay stable'],
+    ['tests/native-session-program-1024.spec.ts', 'AEON-1309: 1024 light panel controls, layouts and live-reader anchor stay stable'],
+    ['tests/native-session-program-1440.spec.ts', 'AEON-1309: 1440 light panel controls, layouts and live-reader anchor stay stable'],
+    ['tests/native-session-program-reader.spec.ts', 'AEON-1309: negative control reproduces reader drift with the anchor disabled'],
+    ['tests/native-session-program-validation.spec.ts', 'AEON-1309: malformed native JSON and invalid shapes stay incomplete without granting control'],
+  ]
+  const panelFiles = new Set(panelCases.map(([file]) => file))
   const panelAdded = real.groups.flatMap(group => group.specs).filter(spec => panelFiles.has(spec.file))
   assert.equal(panelAdded.length, 6, 'All six balanced panel files must remain declared')
-  assert.equal(panelAdded.reduce((sum, spec) => sum + spec.listedTests, 0), 9, 'The split must retain every panel case')
-  for (const spec of panelAdded) assert.ok(gated.some(candidate => candidate.file === spec.file), 'Panel specs must remain in the declared gate')
+  const panelCollected = flattenBrowser(JSON.parse(command(process.execPath, ['node_modules/@playwright/test/cli.js', 'test',
+    '-c', 'playwright.ui.config.ts', ...panelFiles, '--list', '--reporter=json'], { cwd: webRoot })), 'playwright.ui.config.ts')
+  assert.deepEqual(panelCollected.map(row => [row.file, row.name]).sort(), panelCases.toSorted(),
+    'Native discovery must retain every panel authority, viewport, reader and validation case after Cut A')
+  for (const spec of panelAdded) {
+    assert.equal(spec.listedTests, panelCollected.filter(row => row.file === spec.file).length,
+      `${spec.file} must declare its exact native panel case count`)
+    assert.equal(gated.filter(candidate => candidate.file === spec.file).length, 1,
+      'Panel specs must remain in the declared gate exactly once')
+  }
   const panelGrowth = panelAdded.reduce((sum, spec) => sum + spec.weightSeconds, 0)
   // AEON-1316 adds its project Definitions spec after the historical budget.
   // Keep the old budget and charge only this independently bounded addition.
