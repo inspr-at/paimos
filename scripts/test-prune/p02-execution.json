@@ -4020,10 +4020,22 @@
           "passed": 2,
           "evidence": "web/test-results/remote/r9-delivery-deferrals/",
           "scope": "Both ordinary Delivery 390 cases report deferred before setup and product requirements; together with the first batch all ten real deferral registrations pass."
+        },
+        "fullDeliveryQuality": {
+          "sourceSHA": "0b0e7f7d785b1530cc41e1626e7cc8c7ae25e187",
+          "passed": 5,
+          "scope": "All five P02 fixture guards pass. The Delivery guard now uses the shared checkVisual runner for both phone themes, with zero layout, axe, console, HTTP or font findings; each report records requirementsRun true and baselineCompared false.",
+          "evidence": "web/test-results/remote/r9-delivery-quality/"
         }
       },
-      "static": "First locked entrypoint attempt refused remote capacity; bounded retry in progress.",
-      "hostedCI": "Coordinator-owned next step after push; worker does not claim an already-green #891 or 70 completed real Linux comparisons."
+      "static": "Locked ci-static retry at ea054bc01: 43 checks passed, none skipped; only web-shard-spec-tests hit its unchanged budget: ci-static: web-shard-spec-tests exceeded timeout_seconds=120 after 120.02s (process group termination requested). The contained tests pass in web-shard-tests in 330.43s. This is the same shared-runner timeout documented in round 8, covered by worker-common known environment list 3; no timeout or shard/listing implementation changed. Full exit-0 static proof and real 70-checkpoint Linux comparisons remain assigned to hosted PR CI.",
+      "hostedCI": "Coordinator-owned next step after push; worker does not claim an already-green #891 or 70 completed real Linux comparisons.",
+      "negativeControl": {
+        "sourceSHA": "edf22529a",
+        "scope": "Temporary scratch branch restored only the pre-fix Delivery setup; the new guard failed at the exact headline viewport assertion, received viewport ratio 0.",
+        "result": "Expected failure; assigned branch restored, scratch ref deleted, negative commit absent from delivery ancestry.",
+        "evidence": "web/test-results/remote/r9-negative-delivery/"
+      }
     }
   }
 }
