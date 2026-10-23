@@ -6812,6 +6812,8 @@
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"approval controls require the action permission even with an admin legacy role","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"assistant Desk approvals keep independent links, waiting order and partial coverage","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"assistants use the existing Agents dock with stable tabs, locked policy and audited revision saves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"closing a session panel goes back instead of adding history, like the ticket panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -16846,7 +16848,11 @@
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/assistants.unit.test.ts","name":"assistant approvals use only the current persons Desk items and expose partial or failed coverage","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/assistants.unit.test.ts","name":"assistant facts retain the specified status order, exact budget words and independent Desk links","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/assistants.unit.test.ts","name":"assistant identity polls reuse discovered routines instead of repeating the owner and history sweep","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"discards a pending attach list after a person change even when its transport ignores abort","tier":"ESSENTIAL"}
     ,

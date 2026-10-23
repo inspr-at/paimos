@@ -12,9 +12,10 @@ const props = defineProps<{ items: Assistant[]; facts: Record<string, AssistantF
 const emit = defineEmits<{ open: [id: string, anchor: HTMLElement]; retry: [] }>()
 const words = assistantCopy(), root = ref<HTMLElement>(), order = ref<string[]>([]), expanded = ref(false)
 const pointer = ref(false)
+let initialApprovalOrder = false
 const storageKey = () => `aeon:assistants:expanded:${props.owner}`
 watch(() => props.owner, () => {
-  order.value = []; pointer.value = false
+  order.value = []; pointer.value = false; initialApprovalOrder = false
   try { expanded.value = localStorage.getItem(storageKey()) === 'true' } catch { expanded.value = false }
 }, { immediate: true })
 function reorder() {
@@ -24,6 +25,11 @@ function reorder() {
 watch(() => props.items, items => {
   order.value = order.value.length ? retainAssistantOrder(items, order.value) : assistantOrder(items, props.facts, props.now)
 }, { immediate: true })
+watch(() => props.facts, facts => {
+  if (initialApprovalOrder || !props.items.length || props.items.some(item => facts[item.principal_id]?.approvals == null)) return
+  initialApprovalOrder = true
+  reorder()
+}, { immediate: true })
 watch(() => props.sortEpoch, reorder)
 onMounted(() => window.addEventListener('focus', reorder))
 onBeforeUnmount(() => window.removeEventListener('focus', reorder))
@@ -31,10 +37,11 @@ function showAll() { expanded.value = true; try { localStorage.setItem(storageKe
 const ordered = computed(() => order.value.flatMap(id => props.items.find(item => item.principal_id === id) ?? []))
 const shown = computed(() => expanded.value ? ordered.value : ordered.value.slice(0, 5))
 const factsOf = (item: Assistant) => props.facts[item.principal_id] ?? unavailableAssistantFacts()
-const metricsPending = computed(() => props.items.every(item => { const facts = factsOf(item); return facts.spend === null && facts.approvals === null && facts.adapter === null }))
+const metricsPending = computed(() => props.items.every(item => { const facts = factsOf(item); return facts.spend === null && facts.adapter === null }))
 const statusOf = (item: Assistant) => assistantStatus(item, factsOf(item), props.now)
-const labelOf = (item: Assistant) => statusOf(item) === 'waiting' && !props.canApprove ? words.waitingOther : words.statuses[statusOf(item)]
+const labelOf = (item: Assistant) => statusOf(item) === 'waiting' && !(factsOf(item).approvalsCanDecide ?? props.canApprove) ? words.waitingOther : words.statuses[statusOf(item)]
 const approvalsOf = (item: Assistant) => factsOf(item).approvals?.filter(row => !row.decision).length ?? null
+const approvalLabel = (item: Assistant) => words.toApprove(approvalsOf(item) ?? 0, factsOf(item).approvalsTruncated)
 const vendorOf = (item: Assistant) => item.vendor === 'grok' ? 'Grok' : words.vendorUnknown
 function activityLine(item: Assistant) {
   const activity = factsOf(item).lastActivity
@@ -86,7 +93,7 @@ function adapterLine(item: Assistant) {
             <span v-if="factsOf(item).routines !== null" v-clip-tip :id="`assistant-routines-${item.principal_id}`" class="routines-column">{{ routineLine(item) }}</span><span v-else :id="`assistant-routines-${item.principal_id}`" class="routines-column" :title="words.notAvailableYet" :data-tip="words.notAvailableYet">—</span>
             <span v-if="factsOf(item).adapter" v-clip-tip :id="`assistant-adapter-${item.principal_id}`" class="adapter-column" :title="adapterLine(item)">{{ adapterLine(item) }}</span><span v-else :id="`assistant-adapter-${item.principal_id}`" class="adapter-column" :title="words.notAvailableYet" :data-tip="words.notAvailableYet">—</span>
           </button>
-          <span class="assistant-approvals"><RouterLink v-if="approvalsOf(item)" :to="assistantDeskLink(item.principal_id)" @click.stop>{{ words.toApprove(approvalsOf(item)!) }}</RouterLink><span v-else :title="approvalsOf(item) === null ? words.notAvailableYet : undefined" :data-tip="approvalsOf(item) === null ? words.notAvailableYet : undefined" @click="openCell(item, $event)">—</span></span>
+          <span class="assistant-approvals"><RouterLink v-if="approvalsOf(item) || factsOf(item).approvalsTruncated" :to="assistantDeskLink(item.principal_id)" :title="factsOf(item).approvalsTruncated ? words.truncated : undefined" @click.stop>{{ approvalLabel(item) }}</RouterLink><span v-else :title="approvalsOf(item) === null ? words.approvalsUnavailable : undefined" :data-tip="approvalsOf(item) === null ? words.approvalsUnavailable : undefined" @click="openCell(item, $event)">—</span></span>
         </div>
       </div>
       <button v-if="!expanded && items.length > 5" type="button" class="assistant-show-all" @click="showAll">{{ words.showAll(items.length) }}<AppIcon name="chevron" :size="14" /></button>

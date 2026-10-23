@@ -624,6 +624,7 @@ const activeHints = computed(() => hintGroups.map(group => ({ ...group, keys: gr
 
 // ---------- Live ----------
 let stop: (() => void) | undefined
+let stopAssistants: (() => void) | undefined
 const poller = usePoller(() => Promise.all([agents.loadAll(), assistants.load(), capacity.load(), pause.refreshLeaving()]), 20_000, { invalidate: () => { agents.invalidatePolls(); assistants.invalidate(); capacity.invalidate() } })
 let clock: ReturnType<typeof setInterval> | undefined
 let debounce: ReturnType<typeof setTimeout> | undefined
@@ -674,6 +675,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', evidenceVisible)
   void agents.loadAll()
   void assistants.load()
+  stopAssistants = assistants.watchPage()
   void capacity.load()
   stop = subscribeAgents(changed, value => { live.value = value }, () => agents.deliveryChanged())
   poller.start()
@@ -685,7 +687,7 @@ onBeforeUnmount(() => {
   if (layoutFrame !== undefined) cancelAnimationFrame(layoutFrame)
   evidenceRefresh.stop(); document.removeEventListener('visibilitychange', evidenceVisible)
   stopTierWatch?.()
-  stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
+  stop?.(); stopAssistants?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
   shortcutDisposers.forEach(dispose => dispose())
 })
 watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } }, { immediate: true })

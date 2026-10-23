@@ -40,15 +40,16 @@ export interface AssistantFacts {
   spend: null | { amount: string; daily: { day: string; amount: string }[]; resumes?: string }
   approvals: null | { id: string; title: string; target: string; at: string; href: string; decision?: string; by?: string }[]
   routines: null | AssistantRoutine[]
+  approvalsTruncated?: boolean; approvalsError?: string; approvalsCanDecide?: boolean
   routinesTruncated?: boolean; routinesError?: string; activityIncomplete?: boolean
   activity: null | { at: string; text: string; kind: 'messages' | 'runs' | 'approvals'; href?: string; refused?: boolean }[]
   lastActivity: null | { at: string; text: string }
   paused: null | { by: string; at: string }
 }
 export const unavailableAssistantFacts = (): AssistantFacts => ({ adapter: null, spend: null, approvals: null, routines: null, activity: null, lastActivity: null, paused: null })
-// Capabilities follow merged contracts. Adapter health and action requests stay
-// closed until their real, permission-checked readers have merged.
-export const assistantCapabilities = Object.freeze({ adapter: false, approvals: false, routines: true, pause: false, approvers: false, resetWeekday: false })
+// Capabilities follow merged contracts. Open approvals use the shared Desk
+// projection; adapter health still awaits its permission-checked reader.
+export const assistantCapabilities = Object.freeze({ adapter: false, approvals: true, routines: true, pause: false, approvers: false, resetWeekday: false })
 
 export function assistantStatus(item: Assistant, facts: AssistantFacts, now: number): AssistantStatus {
   if (facts.paused || item.status === 'deactivated' || budgetPercent(item.policy, facts) === 100) return 'paused'

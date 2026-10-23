@@ -1,11 +1,91 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { expect, it } from 'vitest'
-import { createSSRApp, defineComponent, h } from 'vue'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createPinia, disposePinia, setActivePinia } from 'pinia'
+import { createSSRApp, defineComponent, h, reactive } from 'vue'
 import { renderToString } from 'vue/server-renderer'
-import { assistantOrder, assistantStatus, budgetPercent, policyChange, retainAssistantOrder, unavailableAssistantFacts, type Assistant } from '../src/lib/assistants'
+import { assistantOrder, assistantStatus, budgetPercent, listAssistants, policyChange, retainAssistantOrder, unavailableAssistantFacts, type Assistant } from '../src/lib/assistants'
+import { readAssistantRoutines } from '../src/lib/assistantRoutines'
+import type { DeskProjection } from '../src/lib/decisionDesk'
+import { useAssistants } from '../src/stores/assistants'
 import { assistantCopy } from '../src/lib/assistantsCopy'
 import AssistantsSection from '../src/components/agents/AssistantsSection.vue'
 import { assistantEvidence } from './agents-fixtures'
+
+vi.mock('../src/lib/assistants', async original => ({ ...await original<typeof import('../src/lib/assistants')>(), listAssistants: vi.fn() }))
+vi.mock('../src/lib/assistantRoutines', async original => ({ ...await original<typeof import('../src/lib/assistantRoutines')>(), readAssistantRoutines: vi.fn() }))
+vi.mock('../src/stores/session', () => ({ useSession: () => viewer }))
+vi.mock('../src/stores/projects', () => ({ useProjects: () => ({ load: async () => {}, byId: () => ({ routeKey: 'AEON' }) }) }))
+vi.mock('../src/stores/decisionDesk', () => ({ useDecisionDesk: () => desk }))
+vi.mock('../src/lib/sharedRequests', () => ({ subscribeBrowserEvents: (events: string[], changed: (event?: string) => void) => { routineHints = { events, changed }; return () => {} } }))
+vi.mock('../src/lib/authz', () => ({ can: () => true, permissionsKnown: () => true, ensurePermissions: async () => {}, onAccessRevalidate: () => () => {} }))
+const viewer = reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'owner', kind: 'person' } } })
+const desk = reactive<{ projection: DeskProjection | null; failures: number; error: string }>({ projection: null, failures: 0, error: '' })
+let pinia: ReturnType<typeof createPinia>
+let routineHints: { events: string[]; changed: (event?: string) => void }
+beforeEach(() => {
+  pinia = createPinia(); setActivePinia(pinia)
+  viewer.identity.principal.id = 'owner'; viewer.identity.principal.kind = 'person'
+  desk.projection = null; desk.failures = 0; desk.error = ''
+  vi.mocked(listAssistants).mockReset(); vi.mocked(readAssistantRoutines).mockReset()
+  vi.mocked(listAssistants).mockResolvedValue({ items: assistantEvidence(Date.now(), 'owner').items, truncated: false })
+  vi.mocked(readAssistantRoutines).mockResolvedValue({ rows: [], truncated: false })
+})
+afterEach(() => { disposePinia(pinia); vi.useRealTimers() })
+
+it('assistant identity polls reuse discovered routines instead of repeating the owner and history sweep', async () => {
+  // Risk: each 20-second identity poll repeats hundreds of per-routine reads.
+  const store = useAssistants()
+  await store.load()
+  await vi.waitFor(() => expect(store.facts[store.items[0]!.principal_id]?.routines).toEqual([]))
+  expect(readAssistantRoutines).toHaveBeenCalledTimes(1)
+  await store.load()
+  await store.load()
+  expect(readAssistantRoutines).toHaveBeenCalledTimes(1)
+  vi.useFakeTimers()
+  const stop = store.watchPage()
+  expect(routineHints.events).toEqual(expect.arrayContaining(['recurrence.updated', 'recurrence.agent_result', 'assistant.policy_updated', 'assistant.disabled']))
+  routineHints.changed('recurrence.updated')
+  routineHints.changed('recurrence.agent_result')
+  await vi.advanceTimersByTimeAsync(400)
+  expect(readAssistantRoutines).toHaveBeenCalledTimes(2)
+  routineHints.changed('assistant.policy_updated')
+  await vi.advanceTimersByTimeAsync(400)
+  expect(readAssistantRoutines).toHaveBeenCalledTimes(3)
+  await store.loadRoutines() // Opening the panel explicitly refreshes its data.
+  expect(readAssistantRoutines).toHaveBeenCalledTimes(4)
+  stop()
+})
+
+it('assistant approvals use only the current persons Desk items and expose partial or failed coverage', async () => {
+  // Risk: unconnected approvals hide waiting work, or another principal's asks
+  // and a partial Desk page are presented as this assistant's complete count.
+  const store = useAssistants()
+  await store.load()
+  const amy = store.items.find(item => item.display_name === 'Amy')!
+  const scout = store.items.find(item => item.display_name === 'Scout')!
+  const now = Date.now()
+  const row = (id: string, principal: string): DeskProjection['items'][number] => ({ id, kind: 'approval', title: `Outward action ${id}`, created_at: new Date(now).toISOString(), revision: 1, held: true, project_id: 'project', ticket_key: 'AEON-1', asked_by: { id: principal, name: 'Same display name' }, href: `/decision-desk?item=a:${id}`, source: `/api/approvals/${id}` })
+  expect(store.facts[amy.principal_id]?.approvals).toBeNull()
+  desk.projection = { items: [row('one', amy.principal_id), row('two', amy.principal_id), row('unrelated', 'another-principal'), { ...row('doctrine', amy.principal_id), kind: 'doctrine' }], counts: { open: 4, held: 4, chores: 0 }, has_more: false, as_of: new Date(now).toISOString() }
+  expect(store.facts[amy.principal_id]?.approvals?.map(item => item.id)).toEqual(['a:one', 'a:two'])
+  expect(store.facts[scout.principal_id]?.approvals).toEqual([])
+  expect(assistantStatus(amy, store.facts[amy.principal_id]!, now)).toBe('waiting')
+  expect(assistantOrder(store.items, store.facts, now)[0]).toBe(amy.principal_id)
+  expect(store.facts[amy.principal_id]?.approvalsTruncated).toBe(false)
+  expect(store.facts[amy.principal_id]?.approvals?.[0]).toMatchObject({ title: 'Outward action one', target: 'AEON-1', href: `/decision-desk?assistant=${amy.principal_id}&item=a%3Aone` })
+  desk.projection.has_more = true
+  expect(store.facts[amy.principal_id]?.approvalsTruncated).toBe(true)
+  expect(assistantCopy('en').toApprove(2, true)).toBe('2+ to approve')
+  expect(assistantCopy('de').toApprove(2, true)).toBe('2+ zur Freigabe')
+  desk.projection.has_more = false; desk.failures = 1
+  expect(store.facts[amy.principal_id]?.approvalsTruncated).toBe(true)
+  expect(store.facts[amy.principal_id]?.approvalsError).toBeTruthy()
+  desk.projection = null
+  expect(store.facts[amy.principal_id]?.approvals).toBeNull()
+  viewer.identity.principal.id = 'other-owner'
+  expect(store.items).toEqual([])
+  expect(store.facts).toEqual({})
+})
 
 it('assistant facts retain the specified status order, exact budget words and independent Desk links', async () => {
   // Risk: plausible zero/healthy values, wrong ordering, or an approval link
@@ -50,7 +130,7 @@ it('assistant facts retain the specified status order, exact budget words and in
   for (const field of ['last-column', 'budget-unknown', 'routines-column', 'adapter-column']) {
     expect(unknown).toMatch(new RegExp(`class="${field}"[^>]*title="Not available yet"[^>]*>—</span>`))
   }
-  expect(unknown).toMatch(/class="assistant-approvals"[^>]*><span title="Not available yet" data-tip="Not available yet"[^>]*>—<\/span>/)
+  expect(unknown).toMatch(/class="assistant-approvals"[^>]*><span title="Open approvals are unavailable\." data-tip="Open approvals are unavailable\."[^>]*>—<\/span>/)
   expect(unknown).not.toContain('>Unavailable<')
   const empty = await render([])
   expect(empty).toContain('assistants glass-card')

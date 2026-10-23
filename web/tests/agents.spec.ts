@@ -797,16 +797,21 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   expect(positions.capacity).toBeLessThanOrEqual(positions.assistants.top)
   expect(positions.assistants.bottom).toBeLessThanOrEqual(positions.sessions)
   await expect(page.locator(`[data-row="s:${session(5)}"]`)).toHaveCount(0)
-  // Health/spend and the section's per-assistant approval reader are not
-  // connected: those facts stay unknown. Owned routines use D's revisioned API.
+  // Health/spend stay unknown. The Desk confirms there are no open asks for
+  // these assistants; owned routines use D's revisioned API.
   await expect(section.locator('.assistant-state').first()).toHaveText('Status unavailable')
   await expect(section.locator('.budget-unknown')).toHaveCount(2)
-  for (const selector of ['.budget-unknown', '.assistant-approvals > span', '.adapter-column']) {
+  for (const selector of ['.budget-unknown', '.adapter-column']) {
     for (const cell of await section.locator(selector).all()) {
       await expect(cell).toHaveText('—')
       await expect(cell).toHaveAttribute('title', 'Not available yet')
       await expect(cell).toHaveAttribute('data-tip', 'Not available yet')
     }
+  }
+  await expect(section.locator('.assistant-approvals > span')).toHaveCount(2)
+  for (const cell of await section.locator('.assistant-approvals > span').all()) {
+    await expect(cell).toHaveText('—')
+    await expect(cell).not.toHaveAttribute('data-tip', 'Not available yet')
   }
   const lastActivity = section.locator('.assistant-row').first().locator('.last-column')
   await expect(lastActivity).toHaveText('Ran Inbox triage 1 · 30 min ago')
@@ -850,11 +855,12 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   const details = page.getByRole('complementary', { name: 'Assistant details', exact: true })
   await expect(details).toBeVisible()
   const overview = details.getByRole('tabpanel', { name: 'Overview', exact: true })
-  await expect(overview.locator('.overview-pending')).toHaveText("Spend, adapter health and approvals appear once they're connected.")
+  await expect(overview.locator('.overview-pending')).toHaveText("Spend and adapter health appear once they're connected.")
   await expect(overview).not.toContainText('Spend and daily totals are not available yet.')
   await expect(overview).not.toContainText('Adapter health is not available yet.')
   await expect(overview).not.toContainText('Assistant approvals are not available yet.')
-  await expect(overview.locator('[data-tip="Not available yet"]')).toHaveCount(4)
+  await expect(overview.locator('[data-tip="Not available yet"]')).toHaveCount(3)
+  await expect(overview).toContainText('No open approvals')
   await expect(details.locator('.assistant-panel-head')).not.toContainText('Pause and resume for this assistant are not available yet.')
   await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
   const tabs = details.getByRole('tablist')
@@ -863,7 +869,8 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
     await tabs.getByRole('tab', { name, exact: true }).click()
     if (name === 'Approvals') {
       const pane = details.getByRole('tabpanel', { name: 'Approvals', exact: true })
-      await expect(pane).toContainText('Assistant approvals are not available yet.')
+      await expect(pane).toContainText('No open approvals')
+      await expect(pane).toContainText('Recent decisions are unavailable.')
       await expect(pane.getByRole('button')).toHaveCount(0)
     }
     if (name === 'Routines') {
@@ -881,7 +888,7 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
       runOwners[routines[1]!.id] = 'af000000-0000-4000-8000-000000000099'
       const ownerGuard = await controlStability(page, Object.fromEntries([0, 1, 2].map(index => [`routine ${index + 1}`, pane.locator('[data-routine]').nth(index).getByRole('button')])))
       await ownerGuard.check(async () => {
-        await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+        await page.evaluate(() => (window as unknown as { fixtureQuietStreams: { emit: (name: string, data: string, id: number) => void } }).fixtureQuietStreams.emit('recurrence.updated', '{}', 1705))
         await expect(pane.locator('[data-routine]').nth(1)).toContainText('The latest run belongs to another owner.')
         await expect(pane.locator('[data-routine]').nth(1).getByRole('link', { name: 'AEON-1 · Aeon foundation' })).toHaveCount(0)
       })
@@ -992,6 +999,108 @@ test('assistants use the existing Agents dock with stable tabs, locked policy an
   await identityGuard.check(async () => { amy.display_name = 'Amy'; amy.revision++; await page.evaluate(() => window.dispatchEvent(new Event('focus'))); await expect(details.locator('.assistant-title-name')).toHaveText('Amy') })
   identityGuard.done()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+  expect(errors).toEqual([])
+})
+
+test('assistant Desk approvals keep independent links, waiting order and partial coverage', async ({ page }, testInfo) => {
+  // Risk: merged outward approvals never reach Agents, or a partial/failed read
+  // claims a complete count. Deciding must remain exclusively on the Desk.
+  test.setTimeout(120_000)
+  const errors = watchErrors(page), now = Date.now()
+  const { data, work } = await setup(page)
+  work.preferences['ui.agents.sections'] = { dial: false }
+  const { items } = assistantEvidence(now, me.id)
+  const amy = items.find(item => item.display_name === 'Amy')!
+  amy.display_name = 'Zamy' // Waiting must outrank Scout's alphabetical position.
+  await mockAssistants(page, items, me.id)
+  const asks = [1, 2].map(n => ({ ...data.approvals[0]!, id: `da000000-0000-4000-8000-00000000000${n}`, agent_principal_id: amy.principal_id, agent_name: 'Same display name', scope: 'approvals.request.outward_message', resource_kind: 'node', resource_id: 'n-a1', run_id: null, rationale: `Send the approved summary ${n}`, decision: null, proposed_at: new Date(now - n * 60_000).toISOString(), expires_at: new Date(now + 3600_000).toISOString() }))
+  data.approvals.push(...asks)
+  let partial = false, readable = true, mayApprove = true
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/me/permissions*', route => {
+    const effective = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    if (!mayApprove) effective.workspace.permissions = effective.workspace.permissions.filter(permission => permission !== 'approvals.decide')
+    return route.fulfill({ json: effective })
+  })
+  await page.route('**/api/decision-desk/projection?**', async route => {
+    await held
+    if (!readable) return route.fulfill({ status: 503, json: { error: 'Desk temporarily unavailable' } })
+    const cursor = Number(new URL(route.request().url()).searchParams.get('cursor') ?? 0)
+    const rows = asks.map(ask => ({ id: ask.id, kind: 'approval', revision: 1, title: ask.rationale, created_at: ask.proposed_at, expires_at: ask.expires_at, held: true, can_decide: mayApprove, asked_by: { id: ask.agent_principal_id, name: ask.agent_name }, ticket_key: 'AEON-1', href: `/decision-desk?item=a:${ask.id}`, source: `/api/approvals/${ask.id}` }))
+    const other = data.approvals[0]!
+    rows.push({ ...rows[0]!, id: other.id, asked_by: { id: other.agent_principal_id, name: asks[0]!.agent_name }, href: `/decision-desk?item=a:${other.id}`, source: `/api/approvals/${other.id}` })
+    return route.fulfill({ json: { items: rows, counts: { open: partial ? 1003 : 3, held: partial ? 1003 : 3, chores: 0 }, has_more: partial, ...(partial ? { next_cursor: String(cursor + 1) } : {}), as_of: new Date(now).toISOString() } })
+  })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await openAgents(page)
+  const section = page.locator('.assistants'), amyRow = section.locator(`[data-assistant="${amy.principal_id}"]`)
+  await expect(section.locator('.assistant-row')).toHaveCount(2)
+  await expect(section.locator('.assistant-name strong').first()).toHaveText('Scout')
+  release()
+  const link = amyRow.getByRole('link', { name: '2 to approve', exact: true })
+  await expect(link).toHaveAttribute('href', `/decision-desk?assistant=${amy.principal_id}`)
+  await expect(section.locator('.assistant-name strong').first()).toHaveText('Zamy')
+  await expect(amyRow.locator('.assistant-state')).toHaveText('Waiting for you')
+  await amyRow.locator('.assistant-open').focus()
+  await page.keyboard.press('Tab')
+  await expect(link).toBeFocused()
+  await expect(page.getByRole('complementary', { name: 'Assistant details', exact: true })).toHaveCount(0)
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(`/decision-desk?assistant=${amy.principal_id}`)
+  await expect(page.getByTestId('desk-scope')).toContainText('Showing items from this assistant.')
+  for (const ask of asks) await expect(page.getByTestId(`desk-row-a:${ask.id}`)).toBeVisible()
+  await expect(page.getByTestId(`desk-row-a:${data.approvals[0]!.id}`)).toHaveCount(0)
+  await openAgents(page)
+  await expect(link).toBeVisible()
+  amy.display_name = 'Rechercheassistentin für bereichsübergreifende Wissenspflege und Posteingang'; amy.revision++
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(amyRow.locator('strong')).toHaveAttribute('data-tip', amy.display_name)
+  const details = page.getByRole('complementary', { name: 'Assistant details', exact: true })
+  const checks: { width: number; theme: string; approvals: number; overflow: number }[] = []
+  for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    await section.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1705-fix4-${width}-${theme}-waiting.png`), fullPage: true })
+    await amyRow.locator('.assistant-open').click()
+    const tabs = details.getByRole('tablist'), close = details.getByRole('button', { name: 'Close assistant details' })
+    await expectStableControls({ controls: { tabs, close, overview: tabs.getByRole('tab', { name: 'Overview', exact: true }), approvals: tabs.getByRole('tab', { name: 'Approvals', exact: true }), ...(width === 390 ? { sheet: details } : {}) }, scrollAreas: { body: details.locator('.assistant-panel-scroll') }, interactions: [{ name: 'open approvals without moving controls', run: async () => {
+      await tabs.getByRole('tab', { name: 'Approvals', exact: true }).click()
+      const pane = details.getByRole('tabpanel', { name: 'Approvals', exact: true })
+      await expect(pane.locator('.assistant-log-entry')).toHaveCount(2)
+      await expect(pane).toContainText('Send the approved summary 1')
+      await expect(pane).toContainText('AEON-1')
+      await expect(pane).toContainText('Recent decisions are unavailable.')
+      await expect(pane.getByRole('button')).toHaveCount(0)
+      await expect(pane.getByRole('link', { name: 'Open on the Desk', exact: true }).first()).toHaveAttribute('href', `/decision-desk?assistant=${amy.principal_id}&item=a%3A${asks[0]!.id}`)
+    } }] })
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
+    checks.push({ width, theme, approvals: 2, overflow })
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1705-fix4-${width}-${theme}-approvals.png`), fullPage: true })
+    await close.click()
+  }
+  await amyRow.locator('.assistant-open').click()
+  await details.getByRole('tab', { name: 'Approvals', exact: true }).click()
+  await page.clock.install()
+  const wake = async () => {
+    await page.evaluate(() => (window as unknown as { fixtureQuietStreams: { emit: (name: string, data: string, id: number) => void } }).fixtureQuietStreams.emit('approval.proposed', '{}', 1705))
+    await page.clock.fastForward(3001)
+  }
+  partial = true
+  await wake()
+  await expect(amyRow.getByRole('link', { name: '2+ to approve', exact: true })).toHaveAttribute('title', 'This list is partial; more entries are available.')
+  await expect(details.locator('.panel-status-line')).toContainText('At least 2 actions need an approval')
+  await expect(details.getByRole('tabpanel', { name: 'Approvals', exact: true })).toContainText('This list is partial; more entries are available.')
+  readable = false
+  await wake()
+  await expect(details.getByRole('alert')).toHaveText('Open approvals could not be refreshed. Check again on the Desk.')
+  readable = true; partial = false; mayApprove = false
+  await page.reload()
+  await expect(amyRow.locator('.assistant-state')).toHaveText('Waiting for an approval')
+  await expect(amyRow.getByRole('link', { name: '2 to approve', exact: true })).toBeVisible()
+  await testInfo.attach('aeon-1705-fix4-checks.json', { body: JSON.stringify(checks), contentType: 'application/json' })
   expect(errors).toEqual([])
 })
 

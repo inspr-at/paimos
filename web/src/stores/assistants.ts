@@ -4,14 +4,18 @@ import { computed, onScopeDispose, ref, watch } from 'vue'
 import { APIError, pauseRecurrence } from '../lib/api'
 import { can, ensurePermissions, onAccessRevalidate, permissionsKnown } from '../lib/authz'
 import { assistantCopy } from '../lib/assistantsCopy'
-import { assistantCapabilities, assistantPolicyEvents, assistantRequest, disconnectAssistant, listAssistants, saveAssistantPolicy, unavailableAssistantFacts, type Assistant, type AssistantEvent, type AssistantPolicy, type AssistantSnapshot, type AssistantRoutine } from '../lib/assistants'
+import { assistantCapabilities, assistantDeskLink, assistantPolicyEvents, assistantRequest, disconnectAssistant, listAssistants, saveAssistantPolicy, unavailableAssistantFacts, type Assistant, type AssistantEvent, type AssistantPolicy, type AssistantSnapshot, type AssistantRoutine } from '../lib/assistants'
 import { presentAssistantRoutine, readAssistantRoutines, type OwnedAssistantRoutine } from '../lib/assistantRoutines'
 import { useSession } from './session'
 import { useProjects } from './projects'
+import { useDecisionDesk } from './decisionDesk'
+import { deskItemID } from '../lib/decisionDesk'
+import { subscribeBrowserEvents } from '../lib/sharedRequests'
 
 export const useAssistants = defineStore('assistants', () => {
   const session = useSession()
   const projects = useProjects()
+  const desk = useDecisionDesk()
   const owner = computed(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '')
   const items = ref<Assistant[]>([]), state = ref<'loading' | 'ready' | 'error' | 'forbidden' | 'unavailable'>('loading')
   const error = ref(''), truncated = ref(false)
@@ -19,20 +23,32 @@ export const useAssistants = defineStore('assistants', () => {
   const historyTruncated = ref(false), historyError = ref('')
   const busy = ref<Record<string, boolean>>({})
   const ownedRoutines = ref<OwnedAssistantRoutine[]>([]), routinesReady = ref(false), routinesTruncated = ref(false), routinesError = ref('')
-  let routineRead = 0, routineController: AbortController | undefined, routineFlight: Promise<void> | undefined
+  let routineRead = 0, routineStarted = false, routineController: AbortController | undefined, routineFlight: Promise<void> | undefined
   let generation = 0, read = 0, historyRead = 0, controller: AbortController | undefined, historyController: AbortController | undefined
   let flight: Promise<void> | undefined
   const facts = computed(() => Object.fromEntries(items.value.map(item => {
     const own = ownedRoutines.value.filter(row => row.owner === item.principal_id)
     const latest = own.flatMap(row => row.lastActivity ?? []).sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0] ?? null
-    return [item.principal_id, { ...unavailableAssistantFacts(), routines: routinesReady.value ? own.map(row => row.view) : null, routinesTruncated: routinesTruncated.value || !!routinesError.value, routinesError: routinesError.value, activity: routinesReady.value ? own.flatMap(row => row.activity ?? []) : null, activityIncomplete: true, lastActivity: latest }]
+    // Reuse the Desk's bounded, permission-checked live projection. Names are
+    // presentation only: ownership always comes from the asker's principal id.
+    const page = session.identity?.principal.kind === 'person' && mayRead.value ? desk.projection : null
+    const requests = page?.items.filter(row => ['approval', 'question', 'action_request'].includes(row.kind) && row.asked_by?.id === item.principal_id)
+    const approvals = requests ? requests.map(row => ({
+      id: deskItemID(row), title: row.title, target: row.ticket_key || projects.byId(row.project_id ?? '')?.routeKey || row.project_id || assistantCopy().workspace,
+      at: row.created_at, href: `${assistantDeskLink(item.principal_id)}&item=${encodeURIComponent(deskItemID(row))}`,
+    })) : null
+    return [item.principal_id, { ...unavailableAssistantFacts(), approvals,
+      approvalsCanDecide: requests ? requests.some(row => row.can_decide === true) : undefined,
+      approvalsTruncated: !!page && (page.has_more || page.items.length !== page.counts.open || desk.failures > 0),
+      approvalsError: desk.failures ? assistantCopy().approvalsRefreshFailed : desk.error,
+      routines: routinesReady.value ? own.map(row => row.view) : null, routinesTruncated: routinesTruncated.value || !!routinesError.value, routinesError: routinesError.value, activity: routinesReady.value ? own.flatMap(row => row.activity ?? []) : null, activityIncomplete: true, lastActivity: latest }]
   })))
   const mayConnect = computed(() => session.identity?.principal.kind === 'person' && can('agents.create') && can('keys.manage'))
   const mayRead = computed(() => session.identity?.principal.kind === 'person' ? can('members.read') : session.identity?.principal.kind === 'agent' && can('inbox.read'))
   function mayEdit(item: Assistant) { return mayConnect.value && session.identity?.principal.id === item.owner_person_id }
   function reset() {
     generation++; read++; historyRead++; controller?.abort(); historyController?.abort(); flight = undefined
-    routineRead++; routineController?.abort(); routineFlight = undefined; ownedRoutines.value = []; routinesReady.value = false; routinesTruncated.value = false; routinesError.value = ''
+    routineRead++; routineController?.abort(); routineFlight = undefined; routineStarted = false; ownedRoutines.value = []; routinesReady.value = false; routinesTruncated.value = false; routinesError.value = ''
     items.value = []; events.value = []; busy.value = {}; state.value = 'loading'; historyState.value = 'idle'
     error.value = ''; historyError.value = ''; truncated.value = false; historyTruncated.value = false
   }
@@ -70,7 +86,7 @@ export const useAssistants = defineStore('assistants', () => {
         // A poll begun before a successful policy write cannot rewind that row.
         items.value = body.items.map(item => (current.get(item.principal_id)?.revision ?? -1) > item.revision ? current.get(item.principal_id)! : item)
         truncated.value = body.truncated; state.value = 'ready'; error.value = ''
-        if (assistantCapabilities.routines && identity.principal.kind === 'person') void loadRoutines()
+        if (assistantCapabilities.routines && !routineStarted && identity.principal.kind === 'person') void loadRoutines()
       } catch (failure) {
         if (turn !== read || who !== owner.value || epoch !== generation) return
         state.value = failure instanceof APIError && failure.status === 403 ? 'forbidden' : failure instanceof APIError && failure.status === 404 ? 'unavailable' : 'error'
@@ -123,8 +139,9 @@ export const useAssistants = defineStore('assistants', () => {
     }
   }
   function loadRoutines(): Promise<void> {
-    if (!owner.value || session.identity?.principal.kind !== 'person' || !items.value.length) return Promise.resolve()
+    if (!owner.value || !mayRead.value || session.identity?.principal.kind !== 'person' || !items.value.length) return Promise.resolve()
     if (routineFlight) return routineFlight
+    routineStarted = true
     const turn = ++routineRead, who = owner.value, epoch = generation
     routineController?.abort(); routineController = new AbortController()
     const signal = AbortSignal.any([routineController.signal, AbortSignal.timeout(30_000)])
@@ -148,6 +165,29 @@ export const useAssistants = defineStore('assistants', () => {
     routineFlight = request
     return request
   }
+  function watchPage() {
+    let timer: ReturnType<typeof setTimeout> | undefined, stopped = false, identityChanged = false
+    // Hints only. Batch named events, then read the authorized APIs; routine
+    // discovery never runs from the page's 20-second identity poll.
+    const stop = subscribeBrowserEvents([
+      'assistant.created', 'assistant.updated', 'assistant.policy_updated', 'assistant.disabled',
+      'recurrence.created', 'recurrence.updated', 'recurrence.deleted', 'recurrence.paused', 'recurrence.resumed',
+      'recurrence.occurred', 'recurrence.skipped', 'recurrence.agent_result',
+    ], event => {
+      if (event?.startsWith('assistant.')) identityChanged = true
+      const epoch = generation
+      timer ??= setTimeout(async () => {
+        timer = undefined
+        const refreshIdentity = identityChanged; identityChanged = false
+        if (stopped || epoch !== generation) return
+        if (refreshIdentity) await load()
+        // A hint received during discovery must be read after that snapshot.
+        if (routineFlight) await routineFlight
+        if (!stopped && epoch === generation) await loadRoutines()
+      }, 400)
+    })
+    return () => { stopped = true; clearTimeout(timer); stop() }
+  }
   function mayManageRoutine(routine: AssistantRoutine) { return session.identity?.principal.kind === 'person' && can('recurrences.manage', routine.projectId) }
   async function toggleRoutine(assistantId: string, routine: AssistantRoutine): Promise<boolean> {
     const id = routine.id, who = owner.value, epoch = generation, binding = ownedRoutines.value.find(row => row.wire.id === id && row.owner === assistantId)
@@ -167,5 +207,5 @@ export const useAssistants = defineStore('assistants', () => {
     } finally { if (who === owner.value && epoch === generation) busy.value[key] = false }
   }
   watch([owner, mayRead, () => permissionsKnown()], () => { void load() }, { immediate: true })
-  return { items, facts, state, error, truncated, mayConnect, mayRead, mayEdit, load, invalidate, save, disconnect, adopt, busy, events, historyState, historyTruncated, historyError, loadHistory, mayManageRoutine, toggleRoutine }
+  return { items, facts, state, error, truncated, mayConnect, mayRead, mayEdit, load, loadRoutines, watchPage, invalidate, save, disconnect, adopt, busy, events, historyState, historyTruncated, historyError, loadHistory, mayManageRoutine, toggleRoutine }
 })
