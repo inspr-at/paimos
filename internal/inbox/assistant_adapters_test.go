@@ -66,8 +66,8 @@ func testAssistantAdapterRoundTrip(t *testing.T) {
 	post(outsider, path, string(create), 403)
 	// Prove the key reaches the same route's read permission before checking
 	// the person-only write, so a missing role/scope cannot satisfy the test.
-	if status, _ := receiptRequest(t, srv, managerKey, "GET", path, ""); status != 200 {
-		t.Fatalf("manager scope fixture cannot read registry: %d", status)
+	if status, data := receiptRequest(t, srv, managerKey, "GET", path, ""); status != 200 {
+		t.Fatalf("manager scope fixture cannot read registry: %d %s", status, data)
 	}
 	post(managerKey, path, string(create), 403)
 	data := post(owner, path, string(create), 201)

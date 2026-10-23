@@ -433,6 +433,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		"GET /api/projects/{projectId}/native-sessions/{ownedSessionId}/receipts",
 		"GET /api/projects/{projectId}/native-sessions/{ownedSessionId}/events":
 		return "harness.read", true
+	case "GET /api/projects/{projectId}/assistant-adapters",
+		"GET /api/projects/{projectId}/assistant-adapters/{adapterId}":
+		return "inbox.manage", true
+	case "POST /api/projects/{projectId}/assistant-adapters",
+		"POST /api/projects/{projectId}/assistant-adapters/{adapterId}/test-send":
+		return "", false // Registry writes and test sends require a person session.
 	case "POST /api/projects/{projectId}/native-sessions",
 		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/resume",
 		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/interrupt",
