@@ -11,13 +11,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/db"
@@ -259,6 +262,187 @@ func testAssistantAdapterRevocation(t *testing.T) {
 	if countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM assistant_adapters`) != 0 {
 		t.Fatal("revoked caller wrote an adapter")
 	}
+}
+
+// Risk: hostname validation can stall every tenant write while waiting for DNS.
+// Pause resolution, then probe the actual tenant/tree fences and read transaction.
+// Live sends must still reject authorization or target changes across that gap.
+func testAssistantAdapterValidationWithoutWriteFences(t *testing.T) {
+	resolver := assistantAdapterDNS(t)
+	original := net.DefaultResolver
+	net.DefaultResolver = resolver
+	t.Cleanup(func() { net.DefaultResolver = original })
+	for _, tc := range []struct {
+		name   string
+		dryRun bool
+		change string
+		status int
+		state  string
+	}{
+		{"dry run", true, "", http.StatusOK, "validated"},
+		{"live send", false, "", http.StatusAccepted, "queued"},
+		{"live permission revoked", false, "revoke", http.StatusForbidden, "forbidden"},
+		{"live target replaced", false, "replace", http.StatusConflict, "conflict"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, m, project, srv := messagingWorld(t)
+			path := "/api/projects/" + project + "/assistant-adapters"
+			registration := map[string]string{"vendor": "grok", "principal_id": w.agent.ID, "address": "grok_bot:worker", "endpoint": "https://hooks.example.org/assistant", "webhook_secret": "fixture-dns-webhook"}
+			status, data := compatPost(t, srv, w.admin, path, registration)
+			if status != http.StatusCreated {
+				t.Fatalf("register hostname target: %d %s", status, data)
+			}
+			adapter := mustJSON[AssistantAdapterConfig](t, data)
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			var backend int
+			m.databaseClock = func(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+				var now time.Time
+				err := tx.QueryRow(ctx, `SELECT clock_timestamp(),pg_backend_pid()`).Scan(&now, &backend)
+				return now, err
+			}
+			entered, release := make(chan struct{}), make(chan struct{})
+			var enterOnce, releaseOnce sync.Once
+			releaseDNS := func() { releaseOnce.Do(func() { close(release) }) }
+			net.DefaultResolver = &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				enterOnce.Do(func() { close(entered) })
+				select {
+				case <-release:
+					return resolver.Dial(ctx, network, address)
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}}
+			t.Cleanup(func() { net.DefaultResolver = resolver })
+			body, err := json.Marshal(map[string]any{"dry_run": tc.dryRun, "body": "hostname test send", "idempotency_key": "hostname-test"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, path+"/"+adapter.ID+"/test-send", bytes.NewReader(body))
+			req.SetPathValue("projectId", project)
+			req.SetPathValue("adapterId", adapter.ID)
+			req = req.WithContext(tenant.WithPrincipal(ctx, w.admin))
+			response := httptest.NewRecorder()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				m.testAssistantAdapter(response, req)
+			}()
+			t.Cleanup(func() {
+				releaseDNS()
+				cancel()
+				select {
+				case <-done:
+				case <-time.After(15 * time.Second):
+					t.Error("test-send shutdown hung")
+				}
+			})
+			select {
+			case <-entered:
+			case <-done:
+				t.Fatalf("test-send skipped hostname resolution: %d %s", response.Code, response.Body)
+			case <-ctx.Done():
+				t.Fatal("test-send did not reach the DNS barrier")
+			}
+			var readCommitted bool
+			if err := w.db.Admin.QueryRow(ctx, `SELECT xact_start IS NULL FROM pg_stat_activity WHERE pid=$1`, backend).Scan(&readCommitted); err != nil {
+				t.Fatal(err)
+			}
+			if !readCommitted {
+				t.Error("DNS lookup retained the adapter read transaction")
+			}
+			if err := db.InTenant(dbtest.Seed(ctx), w.db.App, w.admin.TenantID, func(tx pgx.Tx) error {
+				var id string
+				if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE NOWAIT`, w.admin.TenantID).Scan(&id); err != nil {
+					return fmt.Errorf("DNS lookup retained the tenant write fence: %w", err)
+				}
+				var free bool
+				if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1::text,0))`, w.admin.TenantID).Scan(&free); err != nil {
+					return err
+				}
+				if !free {
+					return fmt.Errorf("DNS lookup retained the tree write fence")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			switch tc.change {
+			case "revoke":
+				dbtest.BindRole(t, w.db, w.admin.TenantID, w.admin.ID, "viewer")
+			case "replace":
+				registration["endpoint"] = "https://8.8.8.8/replacement"
+				status, data := compatPost(t, srv, w.admin, path, registration)
+				if status != http.StatusCreated || mustJSON[AssistantAdapterConfig](t, data).ID == adapter.ID {
+					t.Fatalf("replace target during DNS: %d %s", status, data)
+				}
+			}
+			releaseDNS()
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal("test-send did not finish after DNS release")
+			}
+			if response.Code != tc.status {
+				t.Fatalf("test-send: %d want %d: %s", response.Code, tc.status, response.Body)
+			}
+			wantMessages := 0
+			if tc.status >= 400 {
+				failure := mustJSON[map[string]any](t, response.Body.Bytes())
+				if failure["error"] != tc.state {
+					t.Fatalf("test-send failed for the wrong reason: %s", response.Body)
+				}
+			} else {
+				result := mustJSON[assistantAdapterTestResult](t, response.Body.Bytes())
+				if result.AdapterID != adapter.ID || result.DryRun != tc.dryRun || result.State != tc.state || (result.MessageID != "") == tc.dryRun {
+					t.Fatalf("dishonest test-send result: %s", response.Body)
+				}
+				if !tc.dryRun {
+					wantMessages = 1
+				}
+			}
+			if got := countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM inbox_compat_messages`); got != wantMessages {
+				t.Fatalf("queued messages: %d want %d", got, wantMessages)
+			}
+		})
+	}
+}
+
+func assistantAdapterDNS(t *testing.T) *net.Resolver {
+	t.Helper()
+	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 2048)
+		for {
+			n, addr, err := conn.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			var query dnsmessage.Message
+			if query.Unpack(buf[:n]) != nil || len(query.Questions) != 1 {
+				continue
+			}
+			answer := dnsmessage.Message{Header: dnsmessage.Header{ID: query.ID, Response: true, RecursionAvailable: true}, Questions: query.Questions}
+			if question := query.Questions[0]; question.Type == dnsmessage.TypeA {
+				answer.Answers = []dnsmessage.Resource{{Header: dnsmessage.ResourceHeader{Name: question.Name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET, TTL: 60}, Body: &dnsmessage.AResource{A: [4]byte{8, 8, 8, 8}}}}
+			}
+			if data, err := answer.Pack(); err == nil {
+				_, _ = conn.WriteTo(data, addr)
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		_ = conn.Close()
+		<-done
+	})
+	return &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "udp", conn.LocalAddr().String())
+	}}
 }
 
 // Risk: an expansion that works on an empty DB can lose old ciphertext or

@@ -30,6 +30,7 @@ func (f routineRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { r
 func TestRoutineDispatcherUsesEncryptedTargetAndFencedCompletion(t *testing.T) {
 	t.Run("assistant registry round trip", testAssistantAdapterRoundTrip)
 	t.Run("assistant registration revocation", testAssistantAdapterRevocation)
+	t.Run("assistant test validation without write fences", testAssistantAdapterValidationWithoutWriteFences)
 	t.Run("legacy assistant migration", testAssistantAdapterMigration)
 	t.Run("pull assistant round trip", testAssistantPullRoundTrip)
 	t.Run("existing messaging assistant pull migration", testAssistantPullMigration)
