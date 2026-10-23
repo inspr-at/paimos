@@ -2,7 +2,7 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "r3-seven-approved-states-packaged-fixtures-prepared",
+  "status": "r3-approved-archive-ready-fixtures-await-hosted-ci",
   "cuts": false,
   "note": "Round 3 splits only the seven Tick-approved states from immutable 2e6c7938e captures, preserving all selected PNG and quality-report bytes. Agents now supplies caller-specific lead actions; Delivery preparation scrolls the main panel to its top; Models preparation uses the real Settings route instead of the headerless isolated harness and nearest scrolling. Six changes-requested states are not recaptured. No cuts, demotions or pinning; permanent attachment identity, verified availability and CI materialization remain coordinator-owned next-round prerequisites. Per-area reference authority is unchanged.",
   "counts": {
@@ -3198,8 +3198,58 @@
       "baseline30MembersDecodedAndVerified": true,
       "perStateApprovalAndSourceRecorded": true,
       "archiveDigestRecordedInDetachedManifest": true,
-      "browserFixtures": "pending-targeted-non-capture-run",
-      "static": "pending-approved-entry-point"
+      "browserFixtures": {
+        "status": "unproven-remote-admission-refused",
+        "selection": [
+          {
+            "spec": "tests/models-simple.spec.ts",
+            "grep": "admins",
+            "purpose": "Existing admin/lock case plus non-capture real-shell phone-dark and desktop-light stability checks."
+          },
+          {
+            "spec": "tests/aeon-1212-lead-panel.spec.ts",
+            "grep": "omission",
+            "purpose": "Retained independent missing-action/read-only behavior test."
+          }
+        ],
+        "refusedRuns": 5,
+        "hostGuardRefusal": "remote busy (host guard); wait or rely on PR CI",
+        "slotRefusal": "remote busy: 2/2 remote runs (CI pool 0/4); remote busy (no free mbp2606 slot: global cap / CI pool / battery); keep coding and retry in a few minutes, or rely on PR CI",
+        "exitCode": 3,
+        "retryPolicy": "Retried within the bounded ten-minute maximum; no local browser fallback. Hosted PR CI must supply browser proof.",
+        "earlierInvalidFilter": {
+          "exitCode": 1,
+          "error": "bash: line 13: server: command not found; reporter write EPIPE",
+          "cause": "The remote wrapper interpolated the combined regex pipe into its shell pipeline. Subsequent requests use separate one-word filters. No browser pass or assertion failure is inferred from this invalid run."
+        }
+      },
+      "static": {
+        "status": "INCOMPLETE",
+        "entryPoint": "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh",
+        "exitCode": 3,
+        "reason": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job",
+        "countedAsGreen": false
+      },
+      "nodeSuites": {
+        "command": "node --test web/tests/test-prune-ledger.test.ts web/tests/visual-baselines.test.ts",
+        "passed": 2,
+        "failed": 0
+      },
+      "typescriptSyntax": {
+        "files": [
+          "web/tests/visual/fixtures.ts",
+          "web/tests/models-simple.spec.ts"
+        ],
+        "parsed": true,
+        "fullTypecheckClaimed": false
+      },
+      "modelsNativeDeclarations": {
+        "unchangedTitles": 25,
+        "newDeclarations": 0
+      },
+      "finalArchiveReverification": "All seven per-state approvals, every selected original PNG/quality byte pair, 61 payload digests, 30 decoded baseline entries, internal manifest digest and all 62 regular tar entries verified again independently.",
+      "gitDiffCheck": "passed",
+      "latestOriginMainRechecked": "44dff09b4 (already merged)"
     },
     "fixtureChanges": {
       "agents": "Explicit GET /api/projects/*/lead includes mockLeadActions for a successful caller projection. automatic_launch_enabled remains false; the independent action-omission/read-only browser case is retained.",
@@ -3235,6 +3285,20 @@
         "path": "web/tests/models-simple.spec.ts",
         "reason": "Extend its existing admin/lock case to exercise the actual Models visual fixture without screenshots; prove the application header stays visible and still on phone and desktop, without adding browser registrations."
       }
-    ]
+    ],
+    "implementationSHA": "9bbbfa98fb",
+    "handoff": {
+      "roundStatusPercent": 95,
+      "reason": "Only remote browser/static evidence remains unavailable; implementation and byte-verified approved archive are complete.",
+      "next": "LEAD uploads the approved archive to AEON-1670 and supplies the attachment identity next round. CI verifies the current fixture preparations; the six changed states are recaptured only after AEON-1688 merges.",
+      "cutsAllowedNow": false,
+      "archiveReadyForUpload": true,
+      "productDesignRequired": false,
+      "productUIChanged": false,
+      "originPush": false,
+      "deploy": false,
+      "reviewGate": false,
+      "modelCLICalls": false
+    }
   }
 }
