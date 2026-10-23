@@ -116,10 +116,20 @@ func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
 	query := leaf
 	query.Q = "PICK"
 	query.Limit = 30
-	querySQL, queryArgs := listSQL(query, nil)
 	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(t.Context(), p), eta.AggregateReadTimeout)
 	defer cancel()
 	err = db.InTenant(ctx, appPool, p.TenantID, func(tx pgx.Tx) error {
+		// Explain the same permission-projected lead query as the HTTP path.
+		var err error
+		query.seen, err = assigneeAudience(ctx, tx, p)
+		if err != nil {
+			return err
+		}
+		query.leadYellow, query.leadRed, err = readLeadMinutes(ctx, tx, p.ID)
+		if err != nil {
+			return err
+		}
+		querySQL, queryArgs := listSQL(query, nil)
 		var raw []byte
 		if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+querySQL, queryArgs...).Scan(&raw); err != nil {
 			return err
@@ -128,15 +138,18 @@ func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
 		if err := json.Unmarshal(raw, &documents); err != nil {
 			return err
 		}
-		var nodeVisits float64
+		var nodeVisits, candidateVisits float64
 		var visit func(map[string]any)
 		visit = func(plan map[string]any) {
+			rows, _ := plan["Actual Rows"].(float64)
+			filtered, _ := plan["Rows Removed by Filter"].(float64)
+			loops, _ := plan["Actual Loops"].(float64)
 			if plan["Relation Name"] == "nodes" {
-				rows, _ := plan["Actual Rows"].(float64)
-				filtered, _ := plan["Rows Removed by Filter"].(float64)
-				loops, _ := plan["Actual Loops"].(float64)
 				nodeVisits += (rows + filtered) * loops
 				t.Logf("picker plan: alias=%v index=%v rows=%v loops=%v", plan["Alias"], plan["Index Name"], rows+filtered, loops)
+			}
+			if plan["CTE Name"] == "matched" || plan["CTE Name"] == "leaf_flags" || plan["CTE Name"] == "selected" {
+				candidateVisits += (rows + filtered) * loops
 			}
 			for _, child := range planChildren(plan) {
 				visit(child)
@@ -147,6 +160,12 @@ func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
 		// never a whole-corpus parent/ancestor scan for every selected row.
 		if budget := float64(4*(leaves+3) + 32*(query.Limit+1)); nodeVisits > budget {
 			return fmt.Errorf("picker rescanned nodes per page row: %.0f visits, budget %.0f", nodeVisits, budget)
+		}
+		// A materialized input can still be compared once per candidate. Count
+		// that work too, so a fast runner cannot hide repeated page joins.
+		t.Logf("picker candidate work: %.0f input visits", candidateVisits)
+		if budget := float64(4*(leaves+3) + 32*(query.Limit+1)); candidateVisits > budget {
+			return fmt.Errorf("picker rescanned candidates: %.0f visits, budget %.0f", candidateVisits, budget)
 		}
 		return nil
 	})

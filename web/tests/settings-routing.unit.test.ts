@@ -110,12 +110,16 @@ it('retired Flow routes resolve to tickets and remove retired navigation paramet
     '/p/PHAROS?view=journey&stage=build',
     '/p/PHAROS/PHAROS-11?section=journey',
     '/projects/p-pharos/journey/plan',
+    '/p/PHAROS/journey/?stage=build&release=old&walk=PHAROS-12#request',
+    '/p/PHAROS/journey?stage=plan&stage=build&walk=PHAROS-11#ticket',
   ]) {
     await router.push(url)
     expect(router.currentRoute.value.path, url).not.toContain('/journey')
     expect(router.currentRoute.value.query, url).not.toHaveProperty('stage')
     expect(router.currentRoute.value.query, url).not.toHaveProperty('walk')
+    expect(router.currentRoute.value.query, url).not.toHaveProperty('release')
     expect(router.currentRoute.value.query, url).not.toHaveProperty('view', 'journey')
     expect(router.currentRoute.value.query, url).not.toHaveProperty('section', 'journey')
+    expect(router.currentRoute.value.hash, url).toBe(new URL(url, 'https://aeon.test').hash)
   }
 })

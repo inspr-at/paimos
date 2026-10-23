@@ -1567,8 +1567,10 @@ func listSQL(q listQuery, anchor any) (string, []any) {
     -- Count visible children for the page once instead of rescanning nodes per row.
     child_counts AS MATERIALIZED (
         SELECT c.parent_id,count(*)::int AS child_count FROM nodes c
-        JOIN selected s ON s.id=c.parent_id
         WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.deleted_at IS NULL
+            -- Keep membership as a hashed subplan: stale estimates must not
+            -- turn it into a nested comparison of each node with the page.
+            AND (c.parent_id IN (SELECT id FROM selected)) IS TRUE
         GROUP BY c.parent_id
     )
     , page_rows AS (SELECT ` + nodeCols + `,k.slug,k.label,nullif(n.fields->>'priority',''),assignee.id::text,assignee.name,
@@ -1577,7 +1579,12 @@ func listSQL(q listQuery, anchor any) (string, []any) {
            coalesce(cc.child_count,0),
            project.id::text,project.key,project.title,
            epic.id::text,epic.key,epic.title,` + leadColumns + moneyCols + aggregateCols + `,s.rn
-    FROM selected s JOIN nodes n ON n.id=s.id JOIN node_kinds k ON k.id=n.kind_id
+    FROM selected s CROSS JOIN LATERAL (
+        SELECT n.* FROM nodes n
+        WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=s.id
+            AND (n.tenant_id,n.id)>=(current_setting('aeon.tenant_id')::uuid,s.id)
+            AND (n.tenant_id,n.id)<=(current_setting('aeon.tenant_id')::uuid,s.id) OFFSET 0
+    ) n JOIN node_kinds k ON k.id=n.kind_id
     LEFT JOIN child_counts cc ON cc.parent_id=n.id
     ` + assigneeJoin + pageWorker + `
     -- Keep parent/ancestor reads dependent on their selected ID. With stale
