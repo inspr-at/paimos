@@ -22,7 +22,8 @@ func TestAskCLIAndMCPParity(t *testing.T) {
 	const requestID = "a0000000-0000-4000-8000-000000000003"
 	const questionID = "a0000000-0000-4000-8000-000000000004"
 	const ticketID = "a0000000-0000-4000-8000-000000000005"
-	in := questions.Input{RequestID: requestID, Question: "Which option?", Context: "The context", Options: []questions.Option{{ID: "1", Title: "Local", Description: "Simple", Answer: "Use local."}}, Recommend: "1", Why: "Small", Meanwhile: "parked", MeanwhileText: "Working on docs", SuggestedOutcome: "once", TicketID: ticketID, SessionID: sessionID, AnywayReason: "New evidence"}
+	remindSeconds := 7200
+	in := questions.Input{RemindAfterSeconds: &remindSeconds, RequestID: requestID, Question: "Which option?", Context: "The context", Options: []questions.Option{{ID: "1", Title: "Local", Description: "Simple", Answer: "Use local."}}, Recommend: "1", Why: "Small", Meanwhile: "parked", MeanwhileText: "Working on docs", SuggestedOutcome: "once", TicketID: ticketID, SessionID: sessionID, AnywayReason: "New evidence"}
 	var mu sync.Mutex
 	var inputs []questions.Input
 	statusCalls := 0
@@ -58,7 +59,7 @@ func TestAskCLIAndMCPParity(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("AEON_URL", srv.URL)
 	t.Setenv("AEON_API_KEY", testKey)
-	code, out, errOut := runCLI([]string{"aeon", "ask", "--project", project, "--ticket", ticketID, "Which option?", "--context-file", "-", "--option", `["Local","Simple","Use local."]`, "--recommend", "1", "--why", "Small", "--meanwhile", "parked", "--meanwhile-text", "Working on docs", "--keep", "once", "--anyway", "New evidence", "--request-id", requestID, "--session", sessionID, "--json"}, "The context")
+	code, out, errOut := runCLI([]string{"aeon", "ask", "--project", project, "--ticket", ticketID, "Which option?", "--context-file", "-", "--option", `["Local","Simple","Use local."]`, "--recommend", "1", "--why", "Small", "--meanwhile", "parked", "--meanwhile-text", "Working on docs", "--keep", "once", "--anyway", "New evidence", "--request-id", requestID, "--session", sessionID, "--remind-after", "2h", "--json"}, "The context")
 	assertNoSecret(t, out+errOut)
 	if code != 0 {
 		t.Fatalf("ask: %d %s", code, errOut)
@@ -188,6 +189,12 @@ func TestAskKeepWithoutMappingDowngradesToOnce(t *testing.T) {
 
 func TestAskOptionAndContextBounds(t *testing.T) {
 	isolate(t)
+	for _, duration := range []string{"-2h", "721h", "1ms", "bad", "999999999999999999999999h"} {
+		code, _, errOut := runCLI([]string{"aeon", "ask", "--project", "AEON", "Question", "--remind-after", duration, "--option", `["A","B","C"]`}, "")
+		if code == 0 || !strings.Contains(errOut, "--remind-after must be") {
+			t.Fatalf("unbounded reminder reached network: %s: %d %s", duration, code, errOut)
+		}
+	}
 	for _, raw := range []string{`["one","two"]`, `{"id":"a","title":"X","description":"","answer":"Y","principal_id":"forged"}`, `{"id":"a"} {}`, `not json`} {
 		if _, err := parseQuestionOption(raw, 1); err == nil {
 			t.Fatalf("accepted %s", raw)

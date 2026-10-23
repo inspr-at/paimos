@@ -81,6 +81,9 @@ export async function resilientFetch(url: string, init: RequestInit = {}, timeou
   const gapLimit = Math.max(30_000, (bounded ? timeoutMs : 10_000) + 5_000)
   for (let attempt = 0; ; attempt++) {
     if (Date.now() - invocationStarted > gapLimit) throw new StaleRequestError('Request crossed a long timer gap')
+    // A poll can fail just as the browser goes offline. Its pending backoff
+    // must not start another request while periodic reads are paused.
+    if (attempt > 0 && typeof navigator !== 'undefined' && navigator.onLine === false) throw new RequestFailure('network')
     const started = Date.now()
     const timeout = bounded ? AbortSignal.timeout(timeoutMs) : undefined
     const signal = timeout ? (init.signal ? AbortSignal.any([init.signal, timeout]) : timeout) : init.signal

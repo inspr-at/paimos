@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Route } from '@playwright/test'
 import { agentData, mockAgents } from './agents-fixtures'
 import { fixtures, liveAgent, me, mockWork } from './work-fixtures'
 
@@ -73,10 +73,15 @@ test('Live Agents pauses in a hidden tab and refreshes when shown and back onlin
   data.live.push(liveAgent({ project_id: 'p-aeon', name: 'aeon-worker' }))
   await mockWork(page, data)
   let attempts = 0
+  let holdWakeRead = false
+  let wakeRead!: Route
+  let markWakeRead!: () => void
+  const wakeReadStarted = new Promise<void>(resolve => { markWakeRead = resolve })
   // The live read includes inactive sessions, so the URL is /live?include_inactive=true.
   await page.route('**/api/harness-sessions/live*', async route => {
     attempts++
     if (attempts === 1) return route.abort('timedout')
+    if (holdWakeRead) { holdWakeRead = false; wakeRead = route; markWakeRead(); return }
     return route.fallback()
   })
   await page.goto('/')
@@ -86,10 +91,19 @@ test('Live Agents pauses in a hidden tab and refreshes when shown and back onlin
   const before = attempts
   await page.clock.fastForward(65_000)
   expect(attempts).toBe(before)
+  holdWakeRead = true
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
+  await wakeReadStarted
   await expect.poll(() => attempts).toBeGreaterThan(before)
   await context.setOffline(true)
+  await expect.poll(() => page.evaluate(() => navigator.onLine)).toBe(false)
   const offline = attempts
+  // Fail the read that began while visible only after the browser is offline.
+  // Its GET backoff must stay quiet too, not just the next polling tick.
+  const failed = page.waitForEvent('requestfailed', request => request === wakeRead.request())
+  await wakeRead.abort('internetdisconnected')
+  await failed
+  await page.clock.runFor(1_000)
   await page.clock.fastForward(21_000)
   expect(attempts).toBe(offline)
   await context.setOffline(false)

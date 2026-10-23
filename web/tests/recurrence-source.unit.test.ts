@@ -8,6 +8,7 @@ import ts from 'typescript'
 import { createScope } from '../src/lib/identityScope'
 import * as Recurrences from '../src/lib/recurrences'
 import { recurrenceSchedule } from '../src/lib/recurrenceMarker'
+import { triggerShort } from '../src/lib/routineRuns'
 import * as workVocabulary from '../src/lib/workVocabulary'
 import type { Recurrence } from '../src/lib/recurrences'
 import type { ListItem, NodeRecurrence } from '../src/lib/api'
@@ -246,6 +247,34 @@ it('Repeat creates children of a canonical parent and siblings of a canonical le
 // or manual Run now is blocked by an unrelated release picker.
 it('preserves non-release triggers through edits and manual runs', async () => {
   vi.stubGlobal('navigator', { platform: 'Mac' })
+  // AEON-1628: editing an elapsed schedule must not turn a 15-minute cadence
+  // into every minute, and every surface must describe the saved interval.
+  for (const [rrule, words, marker] of [
+    ['FREQ=MINUTELY;INTERVAL=15', 'Every 15 minutes', 'every 15 minutes'],
+    ['FREQ=HOURLY;INTERVAL=6', 'Every 6 hours', 'every 6 hours'],
+    ['FREQ=MINUTELY', 'Every minute', 'every minute'],
+    ['FREQ=HOURLY;INTERVAL=1', 'Every hour', 'every hour'],
+  ]) {
+    const recurrence = definition()
+    recurrence.trigger = { kind: 'time', rrule, time_of_day: '00:00', timezone: 'Europe/Vienna', start_date: '2026-10-23' }
+    const draft = setup<{ schedule: { time: string; zone: string }; template: Recurrences.RecurrenceTemplate; input: Vue.ComputedRef<Recurrences.RecurrenceInput> }>(source('components/recurrences/RecurrenceEditor.vue'), { project, recurrence }, {
+      vue: { ...Vue, useId: () => 'elapsed-editor', onMounted: () => {}, onBeforeUnmount: Vue.onScopeDispose },
+      '../../lib/api': { ...editorApi, createRecurrence: vi.fn(), updateRecurrence: vi.fn(), getNode: vi.fn(), previewRecurrenceDraft: async () => ({ times: [] }) },
+      '../../lib/authz': editorAuthz, '../../lib/useIdentityScope': { useIdentityScope: identityScope }, '../../lib/recurrences': Recurrences, ...editorModules(),
+      '../../stores/workVocabulary': { useWorkVocabulary: () => ({ leaf: { name: 'Work', icon: 'check' } }) }, '../../lib/workVocabulary': workVocabulary,
+    })
+    draft.template.name = 'Renamed routine'
+    expect(draft.input.value.trigger).toEqual(recurrence.trigger)
+    const canonicalRule = rrule.includes('INTERVAL=') ? rrule : `${rrule};INTERVAL=1`
+    draft.schedule.time = '01:30'
+    expect.soft(draft.input.value.trigger, `time edit: ${rrule}`).toEqual({ ...recurrence.trigger, rrule: canonicalRule, time_of_day: '01:30' })
+    draft.schedule.zone = 'UTC'
+    expect.soft(draft.input.value.trigger, `zone edit: ${rrule}`).toEqual({ ...recurrence.trigger, rrule: canonicalRule, time_of_day: '01:30', timezone: 'UTC' })
+    expect.soft(Recurrences.triggerWords(recurrence.trigger), `full label: ${rrule}`).toBe(`${words} · Europe/Vienna`)
+    expect.soft(triggerShort(recurrence.trigger), `row label: ${rrule}`).toBe(words)
+    expect.soft(recurrenceSchedule(recurrence.trigger), `marker label: ${rrule}`).toBe(marker)
+    expect(recurrence.trigger.rrule).toBe(rrule)
+  }
   for (const event of ['node.done', 'knowledge.changed', 'external.tag', 'external.deploy'] as const) {
     const recurrence = definition()
     recurrence.trigger = { kind: 'event', event, ...(event.startsWith('external.') ? { external: { principal_id: 'sender', public_key: 'public' } } : { filter: { project_ids: ['watched-project'], tag: event === 'knowledge.changed' ? 'website' : undefined } }) }

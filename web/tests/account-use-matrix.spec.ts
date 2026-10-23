@@ -646,17 +646,23 @@ test('"Choose where" from Needs you opens For new things and brings the new acco
   expect(errors).toEqual([])
 })
 
-test('a cleared New tag keeps its room: with a long account name the clicked box, the rows below and Add context stay put through save, the read after it and Undo (desktop and phone)', async ({ page }) => {
+test('a cleared New tag keeps its room: with a long account name the clicked box, the rows below and Add context stay put through save, the read after it and Undo (desktop and phone)', async ({ page }, info) => {
+  test.setTimeout(120_000)
   const errors = watchErrors(page)
   const w = await setup(page)
   // The new account comes first, so other rows follow it; its long name pushes the tag onto a line of its own.
+  // AEON-1689: the confirmation must stay within two lines, keep Undo reachable and announce the full names.
   const fresh = w.accounts.find(a => a.id === ACCOUNTS.claude)!
-  fresh.label = 'Claude Max for Acme client work and nightly release builds'
+  fresh.label = 'Projektübergreifende Entwicklungszusammenarbeit und langfristige Infrastrukturverantwortung mit vollständiger Qualitätsprüfung'
+  const context = w.contexts.find(c => c.id === C.def)!
+  context.name = fresh.label
   w.accounts = [fresh, ...w.accounts.filter(a => a !== fresh)]
-  for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+  for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+    const size = { width, height: width === 390 ? 844 : 1000 }
     fresh.awaiting = true; w.holding = { count: 0, first: [] }
     await page.setViewportSize(size)
     await open(page)
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     const row = zone(page).locator(`[data-use-row="${ACCOUNTS.claude}"]`), tag = row.locator('[data-use-new]')
     // The fixture holds the risk: the tag sits on a line below the name, so losing its room would shorten the row.
     const name = (await row.locator('.nm').boundingBox())!, mark = (await tag.boundingBox())!
@@ -666,20 +672,79 @@ test('a cleared New tag keeps its room: with a long account name the clicked box
       lastRow: rowBox(page, ACCOUNTS.spare), lastCell: cell(page, ACCOUNTS.spare, C.beta), add: zone(page).getByRole('button', { name: 'Add context' }),
     }
     for (const control of Object.values(controls)) await control.scrollIntoViewIfNeeded()
-    const guard = await controlStability(page, controls)
+    const guard = await controlStability(page, controls, { tolerance: 0 })
     // The save ends the wait: the tag and the tint go, the row keeps its height, also once the matrix is read
     // again and the server no longer reports the wait (the project waiting since shows that read arrived).
     w.holding = WAITING
     await guard.check(async () => {
       await controls.clicked.click()
-      await expect(page.locator('.toast').filter({ hasText: '1 cell changed' })).toBeVisible()
+      const notice = page.locator('.toast').filter({ hasText: '1 cell changed' })
+      await expect(notice).toBeVisible()
+      await expect(notice.locator('.toast-message')).toHaveAttribute('aria-label', `Allowed ${fresh.label} in ${context.name}: 1 cell changed.`)
+      if (width === 390) {
+        await expect(notice).toHaveCSS('border-radius', '12px')
+        await expect(notice.locator('.toast-phone')).toHaveText('Allowed Projektübergreife… in Projektübergreife…: 1 cell changed.')
+        expect(await notice.locator('.toast-phone').evaluate(el => el.getBoundingClientRect().height)).toBeLessThanOrEqual(36)
+        const r = (await notice.boundingBox())!
+        expect(r.x).toBeGreaterThanOrEqual(16)
+        expect(r.x + r.width).toBeLessThanOrEqual(width - 16)
+        expect(r.height).toBeLessThanOrEqual(48)
+        for (const action of ['Undo', 'Dismiss']) {
+          const b = (await notice.getByRole('button', { name: action }).boundingBox())!
+          expect(b.height).toBeGreaterThanOrEqual(44)
+          expect(b.y).toBeGreaterThanOrEqual(r.y)
+          expect(b.y + b.height).toBeLessThanOrEqual(r.y + r.height)
+        }
+      } else {
+        const message = notice.locator('.toast-wide')
+        await expect(message).toBeVisible()
+        await expect(message).toHaveText('Allowed Projektübergreifende Entwicklungszusamm… in Projektübergreifende Entwicklungszusamm…: 1 cell changed.')
+        await expect(notice.locator('.toast-phone')).toBeHidden()
+        await expect(notice).toHaveCSS('border-radius', '12px')
+        const lines = await message.evaluate(el => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))
+        expect(lines, 'the fixture exercises a wrapping desktop confirmation').toBeGreaterThan(1)
+        expect(lines, 'desktop confirmations use at most two lines').toBeLessThanOrEqual(2)
+        const r = (await notice.boundingBox())!
+        expect(r.x).toBeGreaterThanOrEqual(16)
+        expect(r.x + r.width).toBeLessThanOrEqual(width - 16)
+        for (const action of ['Undo', 'Dismiss']) {
+          const b = (await notice.getByRole('button', { name: action }).boundingBox())!
+          expect(b.width).toBeGreaterThan(0)
+          expect(b.x).toBeGreaterThanOrEqual(r.x)
+          expect(b.x + b.width).toBeLessThanOrEqual(r.x + r.width)
+          expect(b.y).toBeGreaterThanOrEqual(r.y)
+          expect(b.y + b.height).toBeLessThanOrEqual(r.y + r.height)
+        }
+      }
+      await page.screenshot({ path: info.outputPath(`AEON-1689/account-use-${width}-${theme}.png`) })
       await expect(tag).toHaveCount(0); await expect(row).not.toHaveClass(/\bnew\b/)
       await expect(zone(page).locator('[data-use-holding]')).toContainText('Waiting now: Website relaunch')
     })
-    await guard.check(async () => { await page.locator('body').press('u'); await expect(page.locator('.toast').filter({ hasText: 'Undone:' })).toBeVisible() })
+    await guard.check(async () => {
+      await page.locator('body').press('u')
+      const undone = page.locator('.toast').filter({ hasText: 'Undone:' })
+      await expect(undone).toBeVisible()
+      await expect(undone.locator('.toast-message')).toHaveAttribute('aria-label', `Undone: Allowed ${fresh.label} in ${context.name}.`)
+      if (width > 600) {
+        const lines = await undone.locator('.toast-wide').evaluate(el => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))
+        expect(lines).toBeGreaterThan(0)
+        expect(lines).toBeLessThanOrEqual(2)
+        await expect(undone).toHaveCSS('border-radius', lines > 1 ? '12px' : '999px')
+      }
+    })
     guard.done()
     await expect(controls.clicked).not.toBeChecked()
     expect(fresh.awaiting, 'Undo is a person\'s save as well: the wait stays ended').toBe(false)
+    if (width > 600) {
+      // A short sentence keeps its pill; the observer must not treat every compact toast as multiline.
+      await cell(page, ACCOUNTS.main, C.acme).click()
+      const short = page.locator('.toast').filter({ hasText: 'Not allowed Main in Acme client work: 1 cell changed.' })
+      await expect(short).toBeVisible()
+      await expect(short).toHaveCSS('border-radius', '999px')
+      expect(await short.locator('.toast-wide').evaluate(el => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))).toBe(1)
+      await short.getByRole('button', { name: 'Undo', exact: true }).click()
+      await expect(cell(page, ACCOUNTS.main, C.acme)).toBeChecked()
+    }
   }
   expect(errors).toEqual([])
 })
