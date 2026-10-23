@@ -112,7 +112,7 @@ export const decisionDesk: VisualSetup = async (page, _profile, theme) => {
   await page.getByTestId('stamp-doctrine').scrollIntoViewIfNeeded()
   await page.getByTestId('stamp-doctrine').press('Tab')
   await page.keyboard.press('Shift+Tab')
-  await expect(page.locator('.tooltip')).toContainText('Doctrine needs an authorized source')
+  await expect(page.locator('.tooltip')).toHaveText('Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.')
 }
 
 export const access: VisualSetup = async (page, _profile, theme) => {
