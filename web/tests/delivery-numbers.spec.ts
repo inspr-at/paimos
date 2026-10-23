@@ -154,17 +154,28 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
   test(`Delivery numbers at ${width} ${theme} ${lang} keep controls still`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await setup(page, { theme, lang, prefs: { level: 'expert', window: 7 } })
+    // The paused-launch lead is the state containing the inline Settings link.
+    await page.route('**/api/projects/p-aeon/lead', route => route.fulfill({ json: {
+      project_id: 'p-aeon', revision: 0, generation: 0, session_id: null, state: 'none', reason: '', process_active: false, automatic_launch_enabled: false,
+      actions: { start: { available: false, blocked_reason: 'automatic_launch_disabled' } },
+    } }))
     await page.goto('/p/AEON/delivery')
     const windows = head(page).getByRole('radiogroup', { name: 'Chart window' })
     const levels = head(page).getByRole('radiogroup', { name: 'Level of detail' })
     await expect(page.getByTestId('delivery-tiles').locator('[aria-busy="true"]')).toHaveCount(0)
-    const guard = await controlStability(page, { windows, levels, views: head(page).getByRole('tablist') })
+    const link = page.locator('.lead-now .settings-link')
+    await expect(link).toBeVisible()
+    const line = await link.evaluate(el => ({ height: el.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(el.parentElement!).lineHeight) }))
+    expect(line.height, 'inline Settings link never raises the text line').toBeLessThanOrEqual(line.lineHeight)
+    const nav = page.locator('.app-header'), before = await nav.boundingBox()
+    const guard = await controlStability(page, { windows, levels, nav, views: head(page).getByRole('tablist') }, { tolerance: 0 })
     await guard.check(() => windows.getByRole('radio', { name: '90 days' }).click())
     await guard.check(() => windows.getByRole('radio', { name: '7 days' }).click())
     guard.done()
+    expect(await nav.boundingBox(), 'Delivery selection moves navigation by 0 px').toEqual(before)
     await page.mouse.move(0, 0)
     await page.locator('.dl').evaluate(el => { for (let p = el.parentElement; p; p = p.parentElement) p.scrollTop = 0; window.scrollTo(0, 0) })
-    await page.screenshot({ path: info.outputPath(`aeon-994-p2-shell/delivery-${width}-${theme}-${lang}-top.png`) })
+    await page.screenshot({ path: info.outputPath(`AEON-1688/delivery-${width}-${theme}-${lang}.png`) })
     // The whole page in one picture: as tall as the Delivery section reaches.
     const bottom = await page.locator('.dl').evaluate(el => { let top = el.getBoundingClientRect().bottom; for (let p = el.parentElement; p; p = p.parentElement) top += p.scrollTop; return top + window.scrollY })
     await page.setViewportSize({ width, height: Math.ceil(Math.min(6000, bottom + 80)) })

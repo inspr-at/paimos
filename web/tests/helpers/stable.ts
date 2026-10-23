@@ -6,6 +6,7 @@ export interface StableOptions {
   controls: Record<string, Locator>
   interactions: StableInteraction[]
   scrollAreas?: Record<string, Locator>
+  tolerance?: number
 }
 
 // Scroll-container coordinates distinguish intentional scrolling from layout
@@ -39,7 +40,7 @@ async function box(locator: Locator, name = 'control') {
  * downward. Locators may match the next series item; pass scrolling bodies to
  * catch horizontal overflow as well.
  */
-export async function expectStableControls({ controls, interactions, scrollAreas = {} }: StableOptions) {
+export async function expectStableControls({ controls, interactions, scrollAreas = {}, tolerance = 0.5 }: StableOptions) {
   expect(Object.keys(controls).length, 'name at least one control').toBeGreaterThan(0)
   expect(interactions.length, 'provide at least one interaction').toBeGreaterThan(0)
   const overflow = async (step: string) => {
@@ -56,7 +57,7 @@ export async function expectStableControls({ controls, interactions, scrollAreas
     for (const [name, locator] of Object.entries(controls)) {
       const current = await box(locator, name), before = baseline.get(name)!
       for (const axis of ['x', 'y', 'width', 'height'] as const) {
-        expect(Math.abs(current[axis] - before[axis]), `${interaction.name}: ${name}.${axis} (${before[axis]} → ${current[axis]})`).toBeLessThanOrEqual(0.5)
+        expect(Math.abs(current[axis] - before[axis]), `${interaction.name}: ${name}.${axis} (${before[axis]} → ${current[axis]})`).toBeLessThanOrEqual(tolerance)
       }
     }
     await overflow(interaction.name)

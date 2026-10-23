@@ -198,7 +198,24 @@ test('a review filter stays through search and kind, and All entries clears it',
 
 // AEON-1459 (D5): phones have no footer bar. A failed save still says so, over the page's foot, and
 // retries from there; saving and the needs line stay quiet, so nothing floats over the page for them.
-test('a phone save that fails is said over the page and retried from there', async ({ page }) => {
+test('a phone save that fails is said over the page and retried from there', async ({ page }, info) => {
+  // Start connected, then explicitly lose the stream after the list has a snapshot.
+  await page.addInitScript(() => {
+    const streams: Stream[] = []
+    class Stream extends EventTarget {
+      readyState = 1
+      onopen: (() => void) | null = null
+      onerror: (() => void) | null = null
+      constructor(public url: string) {
+        super(); streams.push(this)
+        queueMicrotask(() => { this.onopen?.(); this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 0, resumed: false }) })) })
+      }
+      close() { this.readyState = 2 }
+    }
+    Object.assign(window, { EventSource: Stream, pauseTicketUpdates: () => {
+      for (const stream of streams.filter(stream => stream.readyState === 1)) { stream.readyState = 0; stream.onerror?.(); stream.dispatchEvent(new Event('error')) }
+    } })
+  })
   await page.setViewportSize({ width: 390, height: 800 })
   await mockWork(page, fixtures())
   let fail = true
@@ -235,6 +252,32 @@ test('a phone save that fails is said over the page and retried from there', asy
   })
   await expect.poll(() => page.evaluate(async () => (await import('/src/lib/footerSummary.ts')).footerSummary.value?.aria ?? '')).toMatch(/2 need you/)
   await expect(notice).toHaveCount(0)
+  // AEON-1688: the paused notice fits at 390; wider screens retain their footer.
+  await page.goto('/p/PHAROS/tickets')
+  const toolbar = page.getByRole('toolbar', { name: 'Ticket list controls', exact: true })
+  await expect.poll(() => page.evaluate(async () => (await import('/src/lib/footerSummary.ts')).footerLive.value?.paused)).toBe(false)
+  await page.evaluate(() => (window as unknown as { pauseTicketUpdates(): void }).pauseTicketUpdates())
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: width === 390 ? 800 : 1000 })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    const status = width === 390 ? notice : sum(page)
+    if (width === 390) await expect(notice).toHaveText('Updates paused · retrying')
+    else { await expect(notice).toHaveCount(0); await expect(status).toHaveAttribute('data-conn', 'off') }
+    const before = await toolbar.boundingBox()
+    const guard = await controlStability(page, { toolbar, status }, { tolerance: 0 })
+    await guard.check(async () => {
+      await status.hover()
+      if (width === 390) {
+        const lines = await notice.locator('span').evaluate(el => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))
+        expect(lines).toBeCloseTo(1, 1)
+        expect(await notice.locator('span').evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0)
+      }
+    })
+    guard.done()
+    expect(await toolbar.boundingBox(), 'notice moves the toolbar by 0 px').toEqual(before)
+    await page.mouse.move(0, 0)
+    await page.screenshot({ path: info.outputPath(`AEON-1688/tickets-${width}-${theme}.png`) })
+  }
 })
 
 // The narrowest footer is 720 px wide: phones and short screens have none (AEON-1459).
