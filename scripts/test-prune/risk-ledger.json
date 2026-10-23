@@ -1772,7 +1772,7 @@
       "currentBrowserCases": 227,
       "targetCeiling": 30,
       "originalCasesRemoved": 0,
-      "reason": "Positive/negative remote proof refused; immutable visual authority/reference pins remain pending. No cut or safety lineage change is authorized by prepared-only evidence."
+      "reason": "Recorded runtime, negative-control and native candidates passed. Immutable visual references remain unpinned, full static checks are paused, and remaining P10 replacements/cuts are incomplete; original cases are retained."
     }
   }
 }
