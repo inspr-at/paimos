@@ -726,8 +726,10 @@ test('a cleared New tag keeps its room: with a long account name the clicked box
       await expect(undone).toBeVisible()
       await expect(undone.locator('.toast-message')).toHaveAttribute('aria-label', `Undone: Allowed ${fresh.label} in ${context.name}.`)
       if (width > 600) {
-        await expect(undone).toHaveCSS('border-radius', '12px')
-        expect(await undone.locator('.toast-wide').evaluate(el => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))).toBeLessThanOrEqual(2)
+        const lines = await undone.locator('.toast-wide').evaluate(el => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight))
+        expect(lines).toBeGreaterThan(0)
+        expect(lines).toBeLessThanOrEqual(2)
+        await expect(undone).toHaveCSS('border-radius', lines > 1 ? '12px' : '999px')
       }
     })
     guard.done()
