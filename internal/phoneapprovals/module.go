@@ -48,15 +48,16 @@ type DeskPushSource interface {
 }
 
 type Module struct {
-	DeskPush DeskPushSource
-	pool     *pgxpool.Pool
-	pairing  *agentpairing.Module
-	wa       *webauthn.WebAuthn
-	origin   string
-	vault    cipher.AEAD
-	vapid    *webpush.Options
-	deskNow  func() time.Time // Tests derive this clock from the fixture database.
-	send     func(context.Context, []byte, *webpush.Subscription, *webpush.Options) (*http.Response, error)
+	DeskPush      DeskPushSource
+	ActionOutcome approvals.ActionOutcomeWriter
+	pool          *pgxpool.Pool
+	pairing       *agentpairing.Module
+	wa            *webauthn.WebAuthn
+	origin        string
+	vault         cipher.AEAD
+	vapid         *webpush.Options
+	deskNow       func() time.Time // Tests derive this clock from the fixture database.
+	send          func(context.Context, []byte, *webpush.Subscription, *webpush.Options) (*http.Response, error)
 	// Native step-up owns target authorization. The adapter is wired at startup
 	// without a package cycle; decisions remain on its protected native routes.
 	StepUpReviewTx func(context.Context, pgx.Tx, tenant.Principal, string) (Review, error)
@@ -503,7 +504,7 @@ func (m *Module) decision(w http.ResponseWriter, r *http.Request) {
 	case "approval":
 		a, err := approvals.DecideVerified(ctx, m.pool, p, id, d.Decision.Decision, d.Reason, func(tx pgx.Tx, a approvals.Approval) error {
 			return m.verify(ctx, tx, p, kind, id, d, approvalReview(a))
-		})
+		}, m.ActionOutcome)
 		if err != nil {
 			m.rejected(ctx, p, kind, id)
 			var own *problem

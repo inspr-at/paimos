@@ -16,11 +16,12 @@ import (
 // The contract is edited by hand in several packages; it must stay valid YAML
 // (it was broken twice on 2026-09-26: an unclosed brace and braces in a flow map).
 func TestOpenAPISpecParses(t *testing.T) {
-	// The bundle is ignored output, including in a standalone remote checkout.
+	// The bundle is ignored build output. Standalone remote package runs must
+	// prepare it from authored areas, just like reportercontract's TestMain.
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	if out, err := exec.CommandContext(ctx, "node", "../../api/generate.mjs", "--write").CombinedOutput(); err != nil {
-		t.Fatalf("prepare OpenAPI: %v\n%s", err, out)
+	if output, err := exec.CommandContext(ctx, "node", "../../api/generate.mjs", "--write").CombinedOutput(); err != nil {
+		t.Fatalf("prepare OpenAPI: %v\n%s", err, output)
 	}
 	b, err := os.ReadFile("../../api/openapi.yaml")
 	if err != nil {
