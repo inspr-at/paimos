@@ -2,9 +2,9 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "fix4-workflow-and-workspace-fixed-renderer-and-product-prerequisites-open",
+  "status": "round6-linux-capture-implemented-validation-in-progress",
   "cuts": false,
-  "note": "Fix4: merged origin/main through c3aab754e; corrected historical workflow projections while explicitly checking blocking read-only reference download, runtime packing and per-shard verification. Both reported workflow regressions pass. Existing attachment, placement and overlap regressions were strengthened without changing native identities; all 29 affected browser cases pass, including every strict workspace quality checkpoint and 390/1024/1440 light/dark action stability. Exact 96907f1c counterexamples fail at both workflow assertions and all four intended browser cases. Main fixes also make all Hours and Capacity quality cases pass. Approved image pins, original cases, tiers, no-cut status and quality assertions remain in force. Completion is not claimed: hosted approved-image comparisons still differ, Goals lacks approved v6 controls, Session Chat intentionally returns a native-context 503 rejected by strict quality, and full remote validation has runner/static limitations. No push to origin, deploy, review gate or other model call.",
+  "note": "Round 6 implements an explicit workflow_dispatch visual_capture input on existing CI, artifact-only packaging of 42 checkpoints across ten states, exact hosted renderer identity with post-capture ImageVersion pinning, self-hosted glyph checks, zero pixel tolerance, historical-only macOS pins, early reporting of deferred Goals/workspace, and healthy native-context Session Chat with separate typed-refusal coverage. The prescribed AttachmentStrip/TicketPlacement product changes and their coupled fix4-only assertions are restored to merged origin/main; all original tests and registrations remain. No cuts or new pins. Hosted static and actual Linux capture remain assigned to CI/LEAD as directed; Tick approval and publication as test-references-2 belong to the next round.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -19,35 +19,16 @@
   },
   "blockers": [
     {
-      "kind": "reference-renderer",
+      "kind": "next-round-reference-approval",
+      "reason": "No current comparison authority. LEAD dispatches CI with visual_capture=true on this branch; Tick reviews the 42 hosted Linux captures, LEAD publishes test-references-2, and the next round pins exact assets plus the captured ImageVersion. This is the specified handoff, not permission to cut."
+    },
+    {
+      "kind": "deferred-product",
       "states": [
-        "projects",
-        "access",
-        "knowledge",
-        "public-quote",
-        "agent-rules",
-        "start-agent",
-        "quote-editor"
+        "goals",
+        "ticket-workspace"
       ],
-      "reason": "All 30 approved image comparisons failed on hosted Linux. Access expected PNG digests match all four approved pins, with zero layout/axe/console/HTTP findings; received text widths and weights differ. The application uses an OS system-font stack. Approved renderer metadata is absent, so matching the capture environment or newly reviewed environment-compatible bytes requires coordinator ownership; no pins, tolerances or image content were rewritten."
-    },
-    {
-      "kind": "product-prerequisite",
-      "state": "goals",
-      "reason": "The required v6 Expert/Simple controls are absent; all four checkpoints fail at the explicit fixture prerequisite. Keep the approved design and AEON-1621/AEON-1625 dependencies rather than substitute another UI or skip assertions."
-    },
-    {
-      "kind": "quality-finding",
-      "state": "session-chat",
-      "reason": "AEON-1687 fixes the chat semantics, but all four strict quality cases still reject the typed feature_disabled 503 from the legacy session native-context read. A valid NativeSessionView selects the owned-session UI and removes the requested legacy composer; replacing the refusal with a fabricated success would change the state under test. No console/HTTP exception was added."
-    },
-    {
-      "kind": "reference-review",
-      "reason": "Six changes-requested states await AEON-1688 and the next reviewed capture round. Workspace, Hours and Capacity now pass strict quality while retaining their existing deferred reference status. No reference recapture or cuts were made."
-    },
-    {
-      "kind": "validation-environment",
-      "reason": "Full scripts/releaseworkflow remote run on agm2 fails in unrelated fixture executables because /bin/bash is absent, and a shell-path fixture cannot find bash. Both affected workflow cases pass in a separate remote run. Static entry point exits 3 under the night protocol. Only a 132ms single-file audit unit fallback was run locally; no local browser or full suite."
+      "reason": "Goals reports deferred until AEON-1621 and AEON-1625; workspace reports its separate Tick product follow-up. No unbuilt product requirements run."
     }
   ],
   "measurements": [
@@ -2249,14 +2230,6 @@
     {
       "file": "web/playwright.ui.config.ts",
       "reason": "Places verified reference PNGs in ignored output and forbids automatic snapshot rewriting."
-    },
-    {
-      "file": "web/src/components/work/AttachmentStrip.vue",
-      "reason": "Outside the P02 test package: reserve a stationary Delete/Cancel row above the existing preview and give coarse pointers a separate 44px action target; fixes the named blocking Open/Delete collision without an audit exception."
-    },
-    {
-      "file": "web/src/components/work/TicketPlacement.vue",
-      "reason": "Outside the P02 test package: retain the definition-list element and put the named live status inside it, eliminating aria-prohibited-attr while preserving feedback geometry."
     }
   ],
   "unprovenRuntimeFiles": [],
@@ -3844,6 +3817,110 @@
       "evidenceDirectory": "web/test-results/AEON-1674-fix4-awaiting",
       "referenceCaptures": 0,
       "awaitingAnnotations": 30
+    }
+  },
+  "historyBeforeRound6": {
+    "status": "fix4-workflow-and-workspace-fixed-renderer-and-product-prerequisites-open",
+    "note": "Fix4: merged origin/main through c3aab754e; corrected historical workflow projections while explicitly checking blocking read-only reference download, runtime packing and per-shard verification. Both reported workflow regressions pass. Existing attachment, placement and overlap regressions were strengthened without changing native identities; all 29 affected browser cases pass, including every strict workspace quality checkpoint and 390/1024/1440 light/dark action stability. Exact 96907f1c counterexamples fail at both workflow assertions and all four intended browser cases. Main fixes also make all Hours and Capacity quality cases pass. Approved image pins, original cases, tiers, no-cut status and quality assertions remain in force. Completion is not claimed: hosted approved-image comparisons still differ, Goals lacks approved v6 controls, Session Chat intentionally returns a native-context 503 rejected by strict quality, and full remote validation has runner/static limitations. No push to origin, deploy, review gate or other model call.",
+    "blockers": [
+      {
+        "kind": "reference-renderer",
+        "states": [
+          "projects",
+          "access",
+          "knowledge",
+          "public-quote",
+          "agent-rules",
+          "start-agent",
+          "quote-editor"
+        ],
+        "reason": "All 30 approved image comparisons failed on hosted Linux. Access expected PNG digests match all four approved pins, with zero layout/axe/console/HTTP findings; received text widths and weights differ. The application uses an OS system-font stack. Approved renderer metadata is absent, so matching the capture environment or newly reviewed environment-compatible bytes requires coordinator ownership; no pins, tolerances or image content were rewritten."
+      },
+      {
+        "kind": "product-prerequisite",
+        "state": "goals",
+        "reason": "The required v6 Expert/Simple controls are absent; all four checkpoints fail at the explicit fixture prerequisite. Keep the approved design and AEON-1621/AEON-1625 dependencies rather than substitute another UI or skip assertions."
+      },
+      {
+        "kind": "quality-finding",
+        "state": "session-chat",
+        "reason": "AEON-1687 fixes the chat semantics, but all four strict quality cases still reject the typed feature_disabled 503 from the legacy session native-context read. A valid NativeSessionView selects the owned-session UI and removes the requested legacy composer; replacing the refusal with a fabricated success would change the state under test. No console/HTTP exception was added."
+      },
+      {
+        "kind": "reference-review",
+        "reason": "Six changes-requested states await AEON-1688 and the next reviewed capture round. Workspace, Hours and Capacity now pass strict quality while retaining their existing deferred reference status. No reference recapture or cuts were made."
+      },
+      {
+        "kind": "validation-environment",
+        "reason": "Full scripts/releaseworkflow remote run on agm2 fails in unrelated fixture executables because /bin/bash is absent, and a shell-path fixture cannot find bash. Both affected workflow cases pass in a separate remote run. Static entry point exits 3 under the night protocol. Only a 132ms single-file audit unit fallback was run locally; no local browser or full suite."
+      }
+    ]
+  },
+  "round6": {
+    "brief": "aeon-1674-prune-p02-shell-visual-r6.md",
+    "trigger": "gh workflow run ci.yml --ref work/aeon-1674-prune-p02-shell-visual -f visual_capture=true",
+    "captureCheckpoints": 42,
+    "captureStates": [
+      "projects",
+      "access",
+      "knowledge",
+      "public-quote",
+      "agent-rules",
+      "start-agent",
+      "quote-editor",
+      "session-chat",
+      "hours",
+      "capacity"
+    ],
+    "renderer": {
+      "label": "ubuntu-24.04",
+      "imageVersion": "observed by capture, required to be pinned after approval",
+      "playwright": "1.64.1",
+      "browser": "chromium-headless-shell 1248 / 156.0.8078.4",
+      "deviceScaleFactor": 1,
+      "colourScheme": [
+        "light",
+        "dark"
+      ],
+      "reducedMotion": "reduce",
+      "timezone": "Europe/Vienna",
+      "locale": "en-GB",
+      "fonts": "app-hosted JetBrains Mono, asset SHA-256 pinned and rendered glyphs checked by CDP"
+    },
+    "tolerance": {
+      "threshold": 0,
+      "maxDiffPixels": 0,
+      "why": "Deterministic renderer; no additional colour, geometry or anti-aliasing allowance."
+    },
+    "reverted": {
+      "web/src/components/work/AttachmentStrip.vue": "Removed fix4 separate Delete action row (28px/48px coarse), top-right repositioning and 44px coarse hit target. These prevented Open/Delete overlap and belong to Tick product follow-up.",
+      "web/src/components/work/TicketPlacement.vue": "Removed fix4 named live status span inside the definition-list dd and status scrolling/focus CSS. This preserved definition semantics and removed an axe naming violation; belongs to Tick product follow-up.",
+      "web/tests/attachments.spec.ts": "Restored main test, retaining every original assertion; coupled new fix4 overlap/coarse-target assertions cannot require the reverted product fix. No native registration removed.",
+      "web/tests/ticket-placement.spec.ts": "Restored main tests; removed only fix4 role=status and whole-workspace axe assertions coupled to the reverted product fix. Original revision, option, write-count and stability assertions remain."
+    },
+    "preexistingProductDeltaRetained": {
+      "web/src/components/access/AgentsTab.vue": "Earlier-round identity-guarded closeRolePicker(true) fix retained; round 6 specifically reverts the two fix4 work components. No new product behavior added."
+    },
+    "validation": {
+      "nodeTransportAndLedger": "2/2 passed",
+      "ciCommandRegistry": "passed",
+      "aptWorkflowBounds": "passed",
+      "remoteFirstBatch": {
+        "sha": "70176982c",
+        "passed": 21,
+        "failed": 1,
+        "failure": "Synthetic about:blank font request failed same-origin loading; setup corrected in 2b3f82e7a.",
+        "passedStates": [
+          "goals",
+          "ticket-workspace",
+          "session-chat",
+          "hours",
+          "capacity"
+        ],
+        "passedNativeGuard": true
+      },
+      "remoteSecondBatch": "in progress",
+      "static": "Hosted CI only, as round-6 brief directs. No local static suite, review gate or model CLI run."
     }
   }
 }
