@@ -1536,9 +1536,9 @@
   },
   "tick1": {
     "brief": "aeon-1696-prune-wave-a-tick1.md",
-    "status": "all-requested-acceptance-passed-final-static-timing-retry",
+    "status": "implementation-and-requested-acceptance-proven-hosted-static-timeout-handoff",
     "testedBrowserHead": "8a03e3c442d0f613fc3abd7abee5f568a72fb09b",
-    "main": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
+    "main": "ecb819ba898f3fcb944f395388fb2c24a8b7ce83",
     "mergedExactFixHeads": [
       {
         "package": "P04",
@@ -1568,8 +1568,8 @@
     ],
     "newBrowserCases": 0,
     "catalogue": {
-      "mainBefore": 5360,
-      "after": 4622,
+      "mainBefore": 5473,
+      "after": 4735,
       "netBrowserCut": 738,
       "removedBrowserIdentities": 748,
       "addedBrowserIdentities": 10,
@@ -1582,7 +1582,11 @@
       "existingJourneyRegistrationsPreserved": true,
       "nightlyCasesInDriftFiles": 1435,
       "fullExtraNightlyCases": 501,
-      "protectedBaselineAndVisualManifestUnchanged": true
+      "protectedBaselineUnchanged": true,
+      "visualManifestMatchesReviewedMain": true,
+      "all647RiskRowsMatchReviewedMain": true,
+      "visualApproval": "awaiting-set-3",
+      "protectedCuts": false
     },
     "heading": {
       "owner": "tests/ticket-panel.spec.ts",
@@ -1706,10 +1710,61 @@
         "suiteExitCode": 0
       },
       "finalRemoteStatic": {
-        "status": "retry-running",
-        "requiredTierCommand": "node --test scripts/test-tiers/test-tiers.test.mjs",
-        "head": "c2841fed8",
-        "requiredTierCommandPassed": true
+        "entryPoint": "ci-static-remote.sh",
+        "head": "26206e5d1cba7df24b51c4df5a416231e6009c5b",
+        "main": "ecb819ba898f3fcb944f395388fb2c24a8b7ce83",
+        "status": "failed-only-shared-runner-time-budgets",
+        "exitCode": 1,
+        "seconds": 418.88,
+        "passed": 42,
+        "optionalSkipped": 0,
+        "requiredTierCommand": {
+          "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+          "passed": true,
+          "seconds": 158.19
+        },
+        "fullWebShardSuite": {
+          "command": "npm run ci:web:shard:test",
+          "passed": true,
+          "seconds": 307.46
+        },
+        "strictNativeCatalogue": {
+          "check": "web-tiers",
+          "passed": true,
+          "seconds": 17.08,
+          "browserCases": 4735
+        },
+        "typecheck": {
+          "passed": true,
+          "seconds": 16.25
+        },
+        "lint": {
+          "passed": true,
+          "seconds": 7.2
+        },
+        "audit": {
+          "testsPassed": true,
+          "coveragePassed": true
+        },
+        "remainingTimeouts": [
+          {
+            "check": "web-shard-spec-tests",
+            "error": "ci-static: web-shard-spec-tests exceeded timeout_seconds=120 after 120.02s (process group termination requested)",
+            "command": "cd web && node --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs",
+            "knownEnvironmentListEntry": 3,
+            "whyEnvironmentOnly": "The unchanged duplicate wrapper has the same 120-second timeout documented on reviewed P02 main and the initial consolidation. The full larger shard suite runs the same assertions successfully in 307.46s. The listing/shard algorithm is unchanged; no assertion or budget is weakened."
+          },
+          {
+            "check": "apt-step-bounds",
+            "error": "ci-static: apt-step-bounds exceeded timeout_seconds=60 after 60.02s (process group termination requested)",
+            "command": "node --test scripts/check-apt-bounds.test.mjs",
+            "knownEnvironmentListEntry": 3,
+            "completedAssertionsPassed": 17,
+            "assertionFailures": 0,
+            "cancelledParent": 1,
+            "whyEnvironmentOnly": "Only the outer unchanged 60-second wall-clock budget stopped the fixture suite on the shared runner. The first 17 behavior checks passed, with no assertion failure. Neither apt implementation nor its tests is changed by AEON-1696; the same full check passed in 44.31s before the P02 merge."
+          }
+        ]
       },
       "staticRetrySetupFailure": {
         "entryPoint": "ci-static-remote.sh",
@@ -1740,6 +1795,111 @@
         "remainingCheck": "web-shard-spec-tests",
         "error": "ci-static: web-shard-spec-tests exceeded timeout_seconds=120 after 120.02s (process group termination requested)",
         "context": "The unchanged real-manifest 1/12/24/256-shard inventory check took 83.782s. This shorter wrapper passed at the identical web-shard source in the first run (119.45s); the larger suite passes the same assertions. The 120-second deadline is unchanged."
+      },
+      "staticMainRace": {
+        "entryPoint": "ci-static-remote.sh",
+        "exitCode": 1,
+        "status": "merge-main-refused",
+        "newMain": "ecb819ba898f3fcb944f395388fb2c24a8b7ce83",
+        "cause": "P02 main landed during retry; no static test ran before resolving the four shared conflicts."
+      },
+      "postMainBrowser": {
+        "entryPoint": "remote-spec.sh",
+        "head": "0895b62b92a5e8ec992707a64a6b6583e123708a",
+        "status": "passed",
+        "specs": [
+          "tests/ticket-panel.spec.ts",
+          "tests/aeon-974-typefilter.spec.ts",
+          "tests/aeon-1438-chat-thread.spec.ts"
+        ],
+        "artifactDirectory": "web/test-results/aeon-1696-tick1-post-main",
+        "host": "agm2-ci",
+        "run": "spec-0895b62b92-15594",
+        "passed": 70,
+        "failed": 0,
+        "skipped": 0,
+        "reportedTime": "2.2m",
+        "exitCode": 0,
+        "suiteExitCode": 0,
+        "runnerCleanupComplete": true
+      },
+      "postMainStaticRefusals": [
+        {
+          "entryPoint": "ci-static-remote.sh",
+          "exitCode": 3,
+          "cause": "remote busy: 2/2 remote runs (CI pool 0/4); remote busy (2 remote runs already active on mbp2606, global cap)"
+        },
+        {
+          "entryPoint": "ci-static-remote.sh",
+          "head": "26206e5d1",
+          "exitCode": 3,
+          "cause": "remote busy: 2/2 remote runs (CI pool 0/4); remote busy (2 remote runs already active on mbp2606, global cap)"
+        }
+      ],
+      "postMainSharedProof": {
+        "status": "failed-before-phase-fix",
+        "entryPoint": "remote-spec.sh",
+        "transportBranch": "scratch/aeon-1696-tick1-post-main-proof",
+        "transportCommit": "ac6165bc6",
+        "deliveryContainsLauncher": false,
+        "p04AndLedgerCommand": "node --test --test-concurrency=1 tests/p04-runtime.test.ts tests/test-prune-ledger.test.ts",
+        "selectedTierEntryProof": "node --test --test-name-pattern=^(AEON-1667 twenty-two shards|test-prune ledger rejects|P11 pruning rejects) scripts/test-tiers/test-tiers.test.mjs",
+        "artifactDirectory": "web/test-results/aeon-1696-tick1-post-main-runtime-details",
+        "host": "agm2-ci",
+        "run": "spec-ac6165bc64-90842",
+        "p04RuntimePassed": 13,
+        "p11LedgerPassed": 1,
+        "failed": 1,
+        "failure": "The new P02 P01 cut-refusal fixture inherited phase P11, so the unchanged assertion expected P01 cannot remove or demote but received The P01 snapshot check only applies to P01.",
+        "fixCommit": "26206e5d1",
+        "fix": "Give only the synthetic P01 area-cut fixture phase P01; keep the original cut-refusal assertion and all reference-authority checks unchanged. Final required tier rerun proves this fix."
+      },
+      "postMainMergedHeadsBrowser": {
+        "entryPoint": "remote-spec.sh",
+        "head": "26206e5d1",
+        "status": "passed",
+        "specs": [
+          "tests/aeon-1209-agents-head.spec.ts",
+          "tests/delivery-flow-lanes.spec.ts",
+          "tests/aeon-1028-projheader.spec.ts"
+        ],
+        "artifactDirectory": "web/test-results/aeon-1696-tick1-post-main-merged-heads",
+        "host": "agm2-ci",
+        "run": "spec-26206e5d1c-22856",
+        "passed": 77,
+        "failed": 0,
+        "skipped": 0,
+        "reportedTime": "2.5m",
+        "exitCode": 0,
+        "suiteExitCode": 0,
+        "runnerCleanupComplete": true
+      },
+      "postMainSharedProofFixed": {
+        "entryPoint": "remote-spec.sh",
+        "status": "passed",
+        "host": "agm2-ci",
+        "run": "spec-3afe595b5f-48148",
+        "transportBranch": "scratch/aeon-1696-tick1-post-main-proof",
+        "transportCommit": "3afe595b5",
+        "deliverySourceHead": "26206e5d1",
+        "p04RuntimePassed": 13,
+        "ledgerPassed": 2,
+        "selectedTierEntryChecksPassed": 3,
+        "selectedTierEntryChecks": [
+          "AEON-1667 twenty-two shards keep main incl. AEON-1502 under 860s and eighteen over the 900s guard",
+          "test-prune ledger rejects removed risks without lineage and keeps P01 execution frozen",
+          "P11 pruning rejects missing original-case mappings and dangling current destinations"
+        ],
+        "selectedTierEntryCommand": "node --test --test-name-pattern=^(AEON-1667 twenty-two shards|test-prune ledger rejects|P11 pruning rejects) scripts/test-tiers/test-tiers.test.mjs",
+        "failed": 0,
+        "reportedTransportTime": "11.9s",
+        "reportedNodeRuntimeAndLedgerSeconds": 5.017689592,
+        "transportCasesPassed": 1,
+        "exitCode": 0,
+        "suiteExitCode": 0,
+        "runnerCleanupComplete": true,
+        "artifactDirectory": "web/test-results/aeon-1696-tick1-post-main-runtime-fixed",
+        "deliveryContainsLauncher": false
       }
     },
     "constraints": {
@@ -1755,7 +1915,54 @@
       "reason": "The first required-tier rerun rejected the six G7 profiles restored by the exact requested P06 head because the consolidation had narrowed its expected set to two. Restore an exact eight-name expectation, retaining every ESSENTIAL and PR/merge-group selection assertion. No test identity, selector behavior or scheduling limit changes."
     },
     "outsideWriteSet": [
-      "scripts/test-tiers/browser-areas.test.mjs \u2014 align the consolidated inventory assertion with all eight G7 profiles restored by the requested P06 head."
-    ]
+      "scripts/test-tiers/browser-areas.test.mjs \u2014 align the consolidated inventory assertion with all eight G7 profiles restored by the requested P06 head.",
+      "scripts/test-tiers/test-tiers.test.mjs \u2014 preserve both original and P02 staged historical budget counterexamples after shared main conflict.",
+      "web/tests/test-prune-ledger.test.ts \u2014 retain P02 authority regressions alongside consolidated P11/frozen-P01 fixture handling.",
+      "web/tests/chat-thread-fixtures.ts \u2014 remove only the incoming extra EOF blank line flagged by git diff --check."
+    ],
+    "preP02Main": "11b092730e55abd0d0cdb645f0feb0dd970c0076",
+    "preP02Catalogue": {
+      "mainBefore": 5360,
+      "after": 4622,
+      "netBrowserCut": 738,
+      "removedBrowserIdentities": 748,
+      "addedBrowserIdentities": 10,
+      "sumLatestPackageCuts": 738,
+      "restoredG7EssentialProfiles": 6
+    },
+    "mainReconciliation": {
+      "main": "ecb819ba898f3fcb944f395388fb2c24a8b7ce83",
+      "mergeCommit": "0895b62b92a5e8ec992707a64a6b6583e123708a",
+      "why": "P02 landed while the last pre-main static retry was starting; its merge-main probe correctly rejected four unresolved shared conflicts.",
+      "conflicts": [
+        "docs/features/test-prune-ledger.md",
+        "scripts/test-prune/risk-ledger.json",
+        "scripts/test-tiers/test-tiers.test.mjs",
+        "web/tests/test-prune-ledger.test.ts"
+      ],
+      "method": "Rebuild ledger with identity-keyed three-way object deltas, taking reviewed main authority and every package addition; preserve all 647 main risk rows exactly. Regenerate tier/shard manifests from reviewed main plus nine exact package heads using canonical writers. Combine P02 visual authority/fixture regression additions with valid frozen P01 fixture factory and current P11 phase. Preserve original frozen historical packing checks and reconstruct the staged P02 counterexample from frozen original rows plus exact candidate keys, overlaying only P02 launch records. No budgets, assertions or authority are weakened.",
+      "historicalP02TwentyShardCounterexampleSeconds": 905.2483570000002,
+      "unchangedFullBudgetSeconds": 900,
+      "unchangedLiveTargetSeconds": 860,
+      "minimalWhitespaceFix": "Remove the extra blank line at EOF from incoming web/tests/chat-thread-fixtures.ts to make git diff --check pass.",
+      "phaseFixtureFix": {
+        "commit": "26206e5d1",
+        "detail": "The newly adopted P02 area-cut counterexample inherits the live ledger phase. Set only its synthetic ledger to P01 so the unchanged expected P01 cut-refusal error is exercised, rather than an invalid-phase error. Both ledger tests and the three targeted tier-entry checks pass after this correction."
+      }
+    },
+    "postMainUniqueBrowserCasesPassed": 147,
+    "recordedAt": "2026-10-23T12:28:00.774322+00:00",
+    "testedFinalSourceHead": "26206e5d1cba7df24b51c4df5a416231e6009c5b",
+    "workerPct": 95,
+    "remainingProof": [
+      "Hosted PR CI must execute the full static check without the shared-runner 120-second web-shard-spec-tests and 60-second apt-step-bounds timeouts. All requested acceptance, strict native catalogue validation and targeted post-main proof pass."
+    ],
+    "handoffReason": "worker-common Green before handing in / known environment list item 3: report 95% rather than claim full-static green. Source work is complete; no additional review gate is run.",
+    "unchangedTimeoutImplementationsVerifiedAgainstMain": [
+      "scripts/check-apt-bounds.test.mjs",
+      "scripts/ci/bounded-apt.sh",
+      "web/scripts/ci-web-shard.mjs"
+    ],
+    "scratchLaunchersAbsentFromDelivery": true
   }
 }
