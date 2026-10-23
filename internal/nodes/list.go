@@ -1395,7 +1395,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		in := arg(array(q.Shapes))
 		out := arg(array(q.ShapesNot))
 		sql += `, leaf_flags AS MATERIALIZED (
-        SELECT id, is_leaf FROM aeon_work_leaf_flags(ARRAY(SELECT id FROM matched))
+        SELECT id, is_leaf FROM aeon_work_leaf_flags_bounded(ARRAY(SELECT id FROM matched))
     ), filtered AS (
         SELECT m.* FROM matched m
         LEFT JOIN leaf_flags lf ON lf.id = m.id
