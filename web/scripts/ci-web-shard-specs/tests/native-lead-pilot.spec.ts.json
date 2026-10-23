@@ -9,12 +9,12 @@
     "listedTests": 2,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.332,
-        "median": 4.083,
-        "min": 3.899
+        "max": 4.67,
+        "median": 4.67,
+        "min": 4.04
       },
-      "seconds": 24.739,
-      "selectedTests": 6
+      "seconds": 10.475539,
+      "selectedTests": 2
     },
     "weightSeconds": 30,
     "weightSource": "AEON-1287: conservative estimate for six unmeasured conversation/stability cases"

@@ -8,6 +8,15 @@
   "spec": {
     "file": "tests/visual/quote-editor.spec.ts",
     "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.657,
+        "median": 3.022,
+        "min": 2.872
+      },
+      "seconds": 25.223756,
+      "selectedTests": 6
+    },
     "weightSeconds": 60,
     "weightSource": "AEON-1674-initial-estimate"
   }

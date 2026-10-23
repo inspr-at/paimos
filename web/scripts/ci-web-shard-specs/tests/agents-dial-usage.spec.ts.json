@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/agents-dial-usage.spec.ts",
     "listedTests": 9,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 22.31,
+        "median": 5.719,
+        "min": 2.862
+      },
+      "seconds": 67.946447,
+      "selectedTests": 6
+    },
     "weightSeconds": 60,
     "weightSource": "AEON-1511 estimate, nine dial cases including touch retries and captures at 1440, 1024 and 390"
   }

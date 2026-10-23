@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/idle-requests.spec.ts",
     "listedTests": 2,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 1.214,
+        "median": 1.214,
+        "min": 0.499
+      },
+      "seconds": 2.270655,
+      "selectedTests": 2
+    },
     "weightSeconds": 10,
     "weightSource": "unmeasured-test-rate"
   }

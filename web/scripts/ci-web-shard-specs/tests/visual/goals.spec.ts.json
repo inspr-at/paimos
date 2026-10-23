@@ -8,6 +8,15 @@
   "spec": {
     "file": "tests/visual/goals.spec.ts",
     "listedTests": 4,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 6.676,
+        "median": 6.572,
+        "min": 6.353
+      },
+      "seconds": 34.591402,
+      "selectedTests": 4
+    },
     "weightSeconds": 40,
     "weightSource": "AEON-1674-initial-estimate"
   }

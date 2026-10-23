@@ -8,11 +8,11 @@
     "file": "tests/aeon-908-polish.spec.ts",
     "tierTiming": {
       "caseSeconds": {
-        "max": 9.084,
-        "median": 7.174,
-        "min": 5.43
+        "max": 7.478,
+        "median": 7.139,
+        "min": 5.428
       },
-      "seconds": 30.233,
+      "seconds": 36.561685,
       "selectedTests": 4
     },
     "weightSeconds": 120

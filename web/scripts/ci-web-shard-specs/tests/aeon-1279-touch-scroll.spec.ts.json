@@ -9,12 +9,12 @@
     "listedTests": 6,
     "tierTiming": {
       "caseSeconds": {
-        "max": 8.308,
-        "median": 3.684,
-        "min": 3.47
+        "max": 4.059,
+        "median": 2.986,
+        "min": 2.684
       },
-      "seconds": 27.333,
-      "selectedTests": 6
+      "seconds": 17.394451,
+      "selectedTests": 4
     },
     "weightSeconds": 60,
     "weightSource": "remote-one-worker-AEON-1279-30s-plus-margin"

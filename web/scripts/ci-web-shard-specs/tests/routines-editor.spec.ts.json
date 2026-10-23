@@ -9,12 +9,12 @@
     "listedTests": 5,
     "tierTiming": {
       "caseSeconds": {
-        "max": 8.055,
-        "median": 3.385,
-        "min": 1.742
+        "max": 9.564,
+        "median": 5.361,
+        "min": 2.883
       },
-      "seconds": 28.818,
-      "selectedTests": 7
+      "seconds": 29.504268,
+      "selectedTests": 4
     },
     "weightSeconds": 40,
     "weightSource": "AEON-1182 estimate: five mocked routine editor flows, one worker"

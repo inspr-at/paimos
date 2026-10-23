@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/aeon-1473-desk-tab.spec.ts",
     "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.825,
+        "median": 1.461,
+        "min": 1.209
+      },
+      "seconds": 15.327072,
+      "selectedTests": 6
+    },
     "weightSeconds": 15.536585,
     "weightSource": "unmeasured-test-rate"
   }

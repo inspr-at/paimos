@@ -9,12 +9,12 @@
     "listedTests": 3,
     "tierTiming": {
       "caseSeconds": {
-        "max": 20.651,
-        "median": 2.59,
-        "min": 2.08
+        "max": 2.276,
+        "median": 2.276,
+        "min": 1.557
       },
-      "seconds": 26.21,
-      "selectedTests": 3
+      "seconds": 4.956016,
+      "selectedTests": 2
     },
     "weightSeconds": 20,
     "weightSource": "AEON-1163 mbp2606 single worker 12.8s for 3 cases plus margin"

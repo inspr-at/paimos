@@ -932,6 +932,8 @@
     "AEON-1604: aeon-1604-edit-key was not in a hosted nightly run yet. An mbp2606 one-worker run of all eight cases at 8fc57dce5 passed in 7.6 seconds; nightlyTiming keeps that wall as a scheduling estimate, not a hosted measurement. PR packing stays on the unmeasured-test-rate weight."
     ,
     "AEON-1632: aeon-1632-desk-links-peek was not in a hosted nightly run yet. An mbp2606 one-worker run of its five cases at 98cc2dc34 passed in 10.0 seconds; nightlyTiming keeps that wall as a scheduling estimate, not a hosted measurement. PR packing stays on the unmeasured-test-rate weight."
+    ,
+    "AEON-1696 fix4: refresh 306 whole-file tier scheduling estimates from the successful font-guard run 39969924024 at 21815206bef5777ba47f192de32afb96865c9ad3 (reused by main run 39972730649). Match retained case identities, apportion each measured launch wall by native case duration (including pinned-font setup), then add a 15% scheduling reserve. Twelve changed owners fill missing identities from completed batches of merge-group run 39970115033; no cancelled shard contributes a timing. header-menus and tenant-brand retain prior estimates because 58 skipped identities have no runtime measurement. Keep all 2843 gated browser identities, launch policies, 22 shards, 120s setup reserve, 860s target, 900s budget and 1200s job cap. Maximum projected wall is 819.565894s; the two-minute reserve exceeds every successful source job residual (job wall minus browser launch wall). Historical exact-spec weights and nightly timings stay on their recorded evidence."
   ]
   ,
   "nightlyTiming": {

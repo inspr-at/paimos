@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/goals-waiting-instances.spec.ts",
     "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.093,
+        "median": 2.127,
+        "min": 1.288
+      },
+      "seconds": 15.751967,
+      "selectedTests": 6
+    },
     "weightSeconds": 13.317073,
     "weightSource": "unmeasured-test-rate"
   }

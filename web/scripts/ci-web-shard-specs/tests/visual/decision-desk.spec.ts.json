@@ -8,6 +8,15 @@
   "spec": {
     "file": "tests/visual/decision-desk.spec.ts",
     "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.8,
+        "median": 4.523,
+        "min": 3.399
+      },
+      "seconds": 34.371269,
+      "selectedTests": 6
+    },
     "weightSeconds": 60,
     "weightSource": "AEON-1674-initial-estimate"
   }

@@ -9,12 +9,12 @@
     "listedTests": 15,
     "tierTiming": {
       "caseSeconds": {
-        "max": 3.87,
-        "median": 1.851,
-        "min": 1.578
+        "max": 3.419,
+        "median": 3.155,
+        "min": 2.246
       },
-      "seconds": 52.879,
-      "selectedTests": 27
+      "seconds": 15.136993,
+      "selectedTests": 4
     },
     "weightSeconds": 62.5,
     "weightSource": "AEON-1172 estimate: twenty-five mocked account list and panel flows, most at three widths, two themes"

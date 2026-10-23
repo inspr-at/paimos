@@ -1378,7 +1378,10 @@ test('AEON-1667 twenty-two shards keep main incl. AEON-1502 under 860s and eight
   ])
   const stagedPolicy=structuredClone(frozen.launchPolicy)
   for(const group of stagedPolicy.groups) group.specs=group.specs.filter(spec=>!owners.has(spec.file))
-  for(const group of policy.groups) {
+  // Freeze the original staged timings: a later measured refresh cannot
+  // change what this historical pre-prune overflow counterexample proves.
+  const stagedGroups=JSON.parse(readFileSync(new URL('../test-prune/wave-a-execution.json',import.meta.url))).fix4.historicalStagedPolicyGroups
+  for(const group of stagedGroups) {
     const specs=group.specs.filter(spec=>owners.has(spec.file))
     if(!specs.length) continue
     let target=stagedPolicy.groups.find(row=>row.id===group.id)
@@ -1449,7 +1452,11 @@ test('AEON-1619 hosted shards 2, 13 and 14 keep launch-wall timings from run 395
     'tests/work-kinds.spec.ts':[6.412,2],
     'tests/work-surfaces-fix2.spec.ts':[56.127,12],
   }
-  const readRecord=file=>JSON.parse(readFileSync(new URL(`../../web/scripts/ci-web-shard-specs/${file}.json`,import.meta.url)))
+  // This is a historical measurement regression. Live scheduling is refreshed
+  // independently; the immutable pre-prune policy retains the original proof.
+  const historicalPolicy=JSON.parse(readFileSync(new URL('../test-prune/baseline.json',import.meta.url))).launchPolicy
+  const readRecord=file=>({spec:historicalPolicy.groups.flatMap(group=>group.specs).find(spec=>spec.file===file),
+    nightlyTiming:historicalPolicy.nightlyTiming.files[file]})
   for(const [file,[seconds,selectedTests]] of Object.entries(measured)) {
     const spec=readRecord(file).spec
     assert.equal(spec.tierTiming?.seconds,seconds,file)
@@ -1466,7 +1473,7 @@ test('AEON-1619 hosted shards 2, 13 and 14 keep launch-wall timings from run 395
   const requests=readRecord('tests/session-requests.spec.ts').spec
   assert.equal(requests.weightSeconds,22.94)
   assert.equal(requests.weightSource,'hosted-CI-39565819178')
-  const policy=loadWebPolicy()
+  const policy=historicalPolicy
   // This regression describes the recorded run, whose selected counts stay
   // fixed when later prune packages remove current registrations. Live packing
   // and selected-slice scaling have their own catalogue checks below.

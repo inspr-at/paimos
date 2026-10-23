@@ -9,12 +9,12 @@
     "listedTests": 1,
     "tierTiming": {
       "caseSeconds": {
-        "max": 17.851,
-        "median": 16.224,
-        "min": 14.596
+        "max": 11.932,
+        "median": 11.932,
+        "min": 11.932
       },
-      "seconds": 37.262,
-      "selectedTests": 2
+      "seconds": 15.51725,
+      "selectedTests": 1
     },
     "weightSeconds": 13.333333333333334,
     "weightSource": "AEON-1309: original conservative 60s panel estimate apportioned by unchanged case count after file split; pending guarded measurement"

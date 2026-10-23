@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/group-figures.spec.ts",
     "listedTests": 11,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 8.129,
+        "median": 4.332,
+        "min": 2.804
+      },
+      "seconds": 25.974666,
+      "selectedTests": 4
+    },
     "weightSeconds": 31.073171,
     "weightSource": "unmeasured-test-rate"
   }

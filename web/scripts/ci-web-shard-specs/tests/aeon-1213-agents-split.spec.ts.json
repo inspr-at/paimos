@@ -9,12 +9,12 @@
     "listedTests": 12,
     "tierTiming": {
       "caseSeconds": {
-        "max": 14.6,
-        "median": 3.952,
-        "min": 2.773
+        "max": 12.041,
+        "median": 3.249,
+        "min": 2.453
       },
-      "seconds": 77.221,
-      "selectedTests": 15
+      "seconds": 60.367263,
+      "selectedTests": 12
     },
     "weightSeconds": 40,
     "weightSource": "unmeasured-P5-one-worker-budget"

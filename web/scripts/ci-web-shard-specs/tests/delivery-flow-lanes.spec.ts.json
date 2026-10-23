@@ -9,12 +9,12 @@
     "listedTests": 12,
     "tierTiming": {
       "caseSeconds": {
-        "max": 7.15,
-        "median": 3.125,
-        "min": 2.329
+        "max": 4.854,
+        "median": 2.115,
+        "min": 1.766
       },
-      "seconds": 37.106,
-      "selectedTests": 11
+      "seconds": 36.668801,
+      "selectedTests": 12
     },
     "weightSeconds": 12,
     "weightSource": "aeon-1005-estimate"

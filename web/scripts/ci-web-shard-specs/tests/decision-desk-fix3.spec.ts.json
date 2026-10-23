@@ -9,12 +9,12 @@
     "listedTests": 3,
     "tierTiming": {
       "caseSeconds": {
-        "max": 6.015,
-        "median": 5.506,
-        "min": 2.184
+        "max": 6.129,
+        "median": 6.122,
+        "min": 4.245
       },
-      "seconds": 43.085,
-      "selectedTests": 9
+      "seconds": 20.36013,
+      "selectedTests": 3
     },
     "weightSeconds": 40,
     "weightSource": "AEON-569 regression port; conservative initial estimate"

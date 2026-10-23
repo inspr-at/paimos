@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/aeon-1438-chat-thread.spec.ts",
     "listedTests": 16,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.075,
+        "median": 2.615,
+        "min": 1.895
+      },
+      "seconds": 65.879481,
+      "selectedTests": 16
+    },
     "weightSeconds": 41.703467,
     "weightSource": "unmeasured-test-rate"
   }

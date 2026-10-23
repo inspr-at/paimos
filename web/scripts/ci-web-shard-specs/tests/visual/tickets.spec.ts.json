@@ -8,6 +8,15 @@
   "spec": {
     "file": "tests/visual/tickets.spec.ts",
     "listedTests": 4,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.792,
+        "median": 2.731,
+        "min": 1.982
+      },
+      "seconds": 13.44351,
+      "selectedTests": 4
+    },
     "weightSeconds": 40,
     "weightSource": "AEON-1674-initial-estimate"
   }
