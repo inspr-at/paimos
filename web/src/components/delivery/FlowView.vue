@@ -108,6 +108,10 @@ const retainBar = computed(() => !props.data && props.mode !== 'live' && props.c
 const at = (m: number) => props.data ? timeLabel(props.data, m) : ''
 const history = computed(() => live.value && !atNow(timeline))
 const chip = computed(() => history.value ? text.value.viewing.replace('{t}', at(timeline.T)) : text.value.live.replace('{t}', at(props.data?.now ?? 0)))
+// Reserve every digit's advance: Linux font hinting can differ by a pixel even
+// with tabular figures. Only the shown label changes while moving the time.
+const chipSizes = computed(() => [text.value.live, text.value.viewing].flatMap(label =>
+  Array.from({ length: 10 }, (_, digit) => label.replace('{t}', `${digit}${digit}:${digit}${digit}`))))
 const clock = computed(() => {
   const t = text.value, data = props.data
   if (!data) return ''
@@ -228,7 +232,7 @@ const emptyText = computed(() => {
         <template v-if="live">
           <span class="fl-livechip" :class="{ hist: history }" data-testid="flow-chip">
             <AppIcon :name="history ? 'history' : 'pulse'" :size="14" />
-            <span class="stack"><span class="shown">{{ chip }}</span><span aria-hidden="true">{{ text.live.replace('{t}', '00:00') }}</span><span aria-hidden="true">{{ text.viewing.replace('{t}', '00:00') }}</span></span>
+            <span class="stack"><span class="shown">{{ chip }}</span><span v-for="label in chipSizes" :key="label" aria-hidden="true">{{ label }}</span></span>
           </span>
         </template>
         <template v-else>
@@ -333,11 +337,8 @@ const emptyText = computed(() => {
 .play:disabled { opacity: .5; }
 .fl-rm { flex: 0 1 auto; max-width: 340px; font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A label slot as wide as its longest wording: switching words never moves a neighbour. */
-.stack { position: relative; display: inline-grid; }
+.stack { display: inline-grid; font-kerning: none; }
 .stack > span { grid-area: 1 / 1; white-space: nowrap; }
-/* Only the two sizing labels determine the slot. A live clock cannot change
-   its width when a platform font rounds the same tabular figures differently. */
-.stack > .shown { position: absolute; inset: 0 auto auto 0; }
 .stack > span[aria-hidden] { visibility: hidden; }
 .fl-livechip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, var(--teal) 10%, transparent); color: var(--teal-ink); font-size: 12.5px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .fl-livechip.hist { background: var(--surface-sunken); color: var(--ink-2); }

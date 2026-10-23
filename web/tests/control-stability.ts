@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { expect, type Locator, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 // Document position plus nested scroller offsets. window.scrollX/Y already
 // includes document.scrollingElement, so that element's own scroll must not
@@ -27,7 +27,7 @@ export function contentBox(
 export async function controlStability(page: Page, controls: Record<string, Locator>, options: { grows?: string[]; tolerance?: number } = {}) {
   let interactions = 0
   const measure = async () => {
-    const samples: Record<string, { x: number; y: number; width: number; height: number; layout: unknown }> = {}
+    const samples: Record<string, { x: number; y: number; width: number; height: number }> = {}
     for (const [name, locator] of Object.entries(controls)) {
       await expect(locator, name).toBeVisible()
       const sample = await locator.evaluate(el => {
@@ -36,15 +36,9 @@ export async function controlStability(page: Page, controls: Record<string, Loca
         for (let parent = el.parentElement; parent; parent = parent.parentElement) {
           ancestors.push({ scrollLeft: parent.scrollLeft, scrollTop: parent.scrollTop, root: parent === root })
         }
-        const layout = [el, ...el.querySelectorAll(':scope > *, :scope > * > *')].slice(0, 12).map(node => {
-          const style = getComputedStyle(node), box = node.getBoundingClientRect()
-          return { tag: node.tagName, class: node.getAttribute('class'), text: node.textContent?.trim(),
-            width: box.width, height: box.height, font: style.font, numeric: style.fontVariantNumeric,
-            features: style.fontFeatureSettings, kerning: style.fontKerning, flex: style.flex, visibility: style.visibility }
-        })
-        return { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, windowScroll: { x: window.scrollX, y: window.scrollY }, ancestors, layout }
+        return { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, windowScroll: { x: window.scrollX, y: window.scrollY }, ancestors }
       })
-      samples[name] = { ...contentBox(sample.rect, sample.windowScroll, sample.ancestors), layout: sample.layout }
+      samples[name] = contentBox(sample.rect, sample.windowScroll, sample.ancestors)
       expect(samples[name].width, name).toBeGreaterThan(0); expect(samples[name].height, name).toBeGreaterThan(0)
     }
     return samples
@@ -62,9 +56,15 @@ export async function controlStability(page: Page, controls: Record<string, Loca
           continue
         }
         for (const dimension of ['x', 'y', 'width', 'height'] as const) {
-          const difference = Math.abs(after[name][dimension] - before[name][dimension])
-          const detail = difference > (options.tolerance ?? .5) ? `: ${JSON.stringify({ before: before[name], after: after[name] })}` : ''
-          expect(difference, `${name}.${dimension}${detail}`).toBeLessThanOrEqual(options.tolerance ?? .5)
+          const delta = Math.abs(after[name][dimension] - before[name][dimension])
+          if (delta > (options.tolerance ?? .5)) {
+            const layout = await controls[name]!.evaluate(el => [el, ...Array.from(el.querySelectorAll('*')).slice(0, 32)].map(node => {
+              const style = getComputedStyle(node), rect = node.getBoundingClientRect()
+              return { tag: node.tagName, text: node.textContent?.slice(0, 240), width: rect.width, font: style.font, numbers: style.fontVariantNumeric, flex: style.flex, visibility: style.visibility }
+            }))
+            await test.info().attach(`unstable-${name}`, { body: JSON.stringify({ before: before[name], after: after[name], layout }, null, 2), contentType: 'application/json' })
+          }
+          expect(delta, `${name}.${dimension} (${before[name][dimension]} → ${after[name][dimension]})`).toBeLessThanOrEqual(options.tolerance ?? .5)
         }
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 'horizontal overflow').toBeLessThanOrEqual(1)

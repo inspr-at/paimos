@@ -520,7 +520,7 @@ test('an agent key never gets registry controls, even with the permissions', asy
   await expect(card(page).getByRole('switch')).toHaveCount(0)
 })
 
-test('controls stay put: the strip, an opened line\'s actions and the editor\'s buttons do not move (±0.5 px)', async ({ page }) => {
+test('controls stay put: the strip, an opened line\'s actions and the editor\'s buttons do not move (±0.5 px)', async ({ page }, info) => {
   const world = await setup(page, { usage: { incomplete: false, used_by: [{ column: 'other', layer: 'default', replacement: { line: 'openai:astra', effort: 'xhigh', harness: 'codex', model: 'gpt-6-astra' } }] } })
   await page.clock.install({ time: new Date('2026-10-09T08:00:00Z') })
   await page.clock.pauseAt(new Date('2026-10-09T08:00:01Z'))
@@ -533,7 +533,13 @@ test('controls stay put: the strip, an opened line\'s actions and the editor\'s 
   await add.check(() => editor(page).getByLabel('Add a thinking level (its own name)').fill('low medium high xhigh'))
   await add.check(() => strip.auto.click())
   await add.check(() => strip.check.click())
-  await add.check(() => page.clock.runFor('06:00'))
+  await expect(strip.check).toHaveAccessibleName('Checked · again in 5 min')
+  for (const minutes of [4, 3, 2, 1, 0]) {
+    await add.check(async () => {
+      await page.clock.runFor('01:00')
+      await expect(strip.check).toHaveAccessibleName(minutes ? `Checked · again in ${minutes} min` : 'Check now')
+    })
+  }
   await add.check(() => strip.add.click())
   add.done()
   // An open line: its own row and actions stay while the remove question, the pause menu and a fold below open and close.
@@ -565,6 +571,18 @@ test('controls stay put: the strip, an opened line\'s actions and the editor\'s 
   await inside.check(() => editor(page).getByRole('button', { name: 'Remove level extended-level' }).click())
   await inside.check(() => editor(page).getByLabel('Name', { exact: true }).press('Escape'))
   inside.done()
+  for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme })
+    const responsive = await controlStability(page, strip)
+    await responsive.check(async () => {
+      const checked = await strip.auto.isChecked()
+      await strip.auto.click()
+      await expect(strip.auto).toBeChecked({ checked: !checked })
+    })
+    responsive.done()
+    await card(page).screenshot({ path: info.outputPath(`aeon-1691/models-${width}-${colorScheme}.png`) })
+  }
   expect(world.writes.some(write => write.path.endsWith('/retire') || write.path.endsWith('/pause'))).toBe(false)
 })
 

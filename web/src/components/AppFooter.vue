@@ -170,9 +170,7 @@ const label = computed(() => {
 .footer-name { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 600 10px/16px var(--mono); letter-spacing: .24em; color: var(--ink-3); white-space: nowrap; font-variant-ligatures: none; }
 /* The centre holds only the summary. It never changes the size of its neighbours: the mark and the release sit in their own tracks. */
 .foot-c { flex: 0 1 auto; display: flex; align-items: center; justify-content: center; gap: 10px; min-width: 0; height: 100%; }
-/* Keep the equal tracks while they fit. At high zoom the release still needs
-   its intrinsic minimum for the version and count before the mark gets space. */
-.foot-r { flex: 1 1 0; display: flex; align-items: center; justify-content: flex-end; min-width: min-content; max-width: 100%; height: 100%; }
+.foot-r { flex: 1 1 0; display: flex; align-items: center; justify-content: flex-end; min-width: 0; height: 100%; }
 .sum { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 28px; padding: 0 10px 0 9px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font: 400 12.5px/16px var(--font); white-space: nowrap; font-variant-numeric: tabular-nums; --tone: var(--ok); }
 .sum > .full, .sum > .short { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 button.sum { cursor: pointer; }
@@ -207,8 +205,11 @@ button.sum:active { background: var(--row-selected); }
 /* The face uses natural widths; hover and focus never resize the target. */
 .version-pill { display: inline-flex; align-items: center; height: 100%; min-width: 0; max-width: 100%; flex: 0 1 auto; margin-right: -8px; padding: 0; border: 0; background: transparent; color: var(--ink-2); }
 .version-pill:focus-visible { box-shadow: none; }
-.pill-face { display: inline-flex; align-items: center; min-width: 0; height: 28px; padding: 0 8px; border-radius: 8px; white-space: nowrap; transition: background-color .15s ease, color .15s ease; }
+.pill-face { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; height: 28px; padding: 0 8px; border-radius: 8px; white-space: nowrap; transition: background-color .15s ease, color .15s ease; }
 .pill-face > svg { color: var(--ink-3); margin-right: 7px; }
+/* Keep the summary centred at zoomed widths; reserve the release text before
+   the decorative history icon when its half of the footer is narrow. */
+@container foot (max-width: 640px) { .pill-face > svg { display: none; } }
 .footer-codename { min-width: 0; max-width: 168px; overflow: hidden; text-overflow: ellipsis; font: 500 12.5px/16px var(--font); color: var(--ink); }
 .release-divider { flex: none; width: 1px; height: 12px; margin: 0 9px; background: var(--line-2); }
 .name-skeleton { display: block; width: 75px; height: 8px; }

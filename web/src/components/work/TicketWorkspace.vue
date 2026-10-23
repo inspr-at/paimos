@@ -971,9 +971,7 @@ defineExpose({
 .full.has-context .ws-main { max-width: none; }
 .full.has-context .ws-context { position: sticky; top: 16px; max-height: calc(100dvh - var(--header-h) - var(--footer-h) - 32px); overflow: auto; padding-right: 4px; }
 .full .ws-main { min-width: 0; max-width: 820px; }
-.full .sections :deep(.markdown-body), .full .inline-composer, .full .activity, .full .children { max-width: 72ch; }
-/* Keep the reading measure bounded with proportional test and system fonts. */
-.full .sections :deep(.markdown-body) { max-width: min(72ch, 46em); }
+.full .sections :deep(.markdown-body), .full .inline-composer, .full .activity, .full .children { max-width: min(72ch, 46em); }
 .full .ws-side { position: sticky; top: 16px; display: grid; gap: 14px; }
 .side-card { padding: 14px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised-2), var(--glass) 60%); box-shadow: var(--shadow); }
 .side-card :deep(.relation-label) { width: 84px; }

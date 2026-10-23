@@ -28,15 +28,17 @@ const controls = [
 
 function documentWithSheet() {
   const items = controls.map(([id, tag, cls]) =>
-    `<${tag} class="${cls}" id="${id}" ${tag === 'a' ? 'href="#reach"' : 'type="button"'} style="display:inline-block;width:28px;height:26px;padding:0;margin:0">${id}</${tag}>`).join('')
-  // The product loads tokens before base.css. Without them its body font is
-  // invalid, so overflowing fallback text can impersonate a larger hit area.
+    `<${tag} class="${cls}" id="${id}" ${tag === 'a' ? 'href="#reach"' : 'type="button"'} style="display:inline-block;width:28px;height:26px;padding:0;margin:0">${id[0]}</${tag}>`).join('')
+  // Load the same font and colour tokens as the product before the base sheet.
   return `<!doctype html><style>${tokens}\n${css}</style><main style="display:grid;grid-template-columns:repeat(3,28px);gap:64px;padding:80px">${items}</main>`
 }
 
 async function reach(page: Page, id: string) {
   return page.locator(`#${id}`).evaluate(el => {
     const rect = el.getBoundingClientRect()
+    const text = document.createRange()
+    text.selectNodeContents(el)
+    const textRect = text.getBoundingClientRect()
     const pseudo = getComputedStyle(el, '::before')
     const x = rect.x + rect.width / 2
     const y = rect.y + rect.height / 2
@@ -50,6 +52,7 @@ async function reach(page: Page, id: string) {
       height: Number.parseFloat(pseudo.height),
       visualWidth: rect.width,
       visualHeight: rect.height,
+      textFits: textRect.left >= rect.left && textRect.right <= rect.right,
       centre: own(0, 0),
       // Chromium excludes the right and bottom edges. Stay one fraction inside.
       edges: [own(-22, 0), own(21.99, 0), own(0, -22), own(0, 21.99)],
@@ -72,6 +75,7 @@ for (const device of [
         expect(box.centre, `${id} centre stays on the control`).toBe(true)
         expect(box.visualWidth, `${id} visual width stays the authored box`).toBe(28)
         expect(box.visualHeight, `${id} visual height stays the authored box`).toBe(26)
+        expect(box.textFits, `${id} fixture text stays inside its box`).toBe(true)
         if (device.extended) {
           expect(box.content, `${id} hit-area rule applies`).toBe('""')
           expect(box.width, `${id} hit area is at least 44px wide`).toBeGreaterThanOrEqual(44)
