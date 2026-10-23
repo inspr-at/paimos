@@ -17,7 +17,7 @@ describe('can()', () => {
       await refreshPermissions()
       expect(can('nodes.write'), label).toBe(expected)
       expect(can('keys.manage'), `${label} never implies key management`).toBe(false)
-      expect(can('comments.write'), label).toBe(permissions.includes('comments.write' as never))
+      expect(can('comments.write'), label).toBe((permissions as readonly string[]).includes('comments.write'))
     }
   })
   it('fails closed until the server returns effective grants', async () => {

@@ -9722,10 +9722,6 @@
     ,
     {"kind":"browser","file":"tests/guest.spec.ts","name":"P08: a project guest opens work, posts an owned comment and has no edit or admin controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/guest.spec.ts","name":"a project guest opens the workspace without errors","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/guest.spec.ts","name":"a project guest reads the project and may comment, nothing more","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"a long request wraps inside the preview at 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"a long request wraps inside the preview at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10396,29 +10392,9 @@
     ,
     {"kind":"browser","file":"tests/hours.spec.ts","name":"weeks move with the arrow keys; l focuses the entry line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"HTML content cannot move controls at 1024, dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"HTML content cannot move controls at 1024, light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"HTML content cannot move controls at 1440, dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"HTML content cannot move controls at 1440, light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"HTML content cannot move controls at 390, dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"HTML content cannot move controls at 390, light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"P08: separate-origin preview enforces CSP in the viewer and a detached tab","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"P08: unavailable, expired and departed previews keep download and discard late grants","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"expiry removes active scripts and switching away discards delayed grants","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"live lightbox isolates parent, credentials, APIs, active SVG and frame messages","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"missing/unsafe preview keeps download and refuses app-origin iframe","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/html-sandbox.spec.ts","name":"new-tab response enforces sandbox without the iframe; residual self-navigation is explicit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/idle-requests.spec.ts","name":"AEON-1117 raw ticket readers and quote heartbeats stop while hidden and resume with current screen identity","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -21000,7 +20976,7 @@
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Agents #models bookmark opens catalog freshness and keeps its context","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Flow routes resolve to tickets even when an old preference opted in","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Flow routes resolve to tickets and remove retired navigation parameters","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired briefing bookmarks open Agents and keep request links","tier":"GATED-FULL"}
     ,

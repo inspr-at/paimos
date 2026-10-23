@@ -24,25 +24,6 @@ async function asGuest(page: import('@playwright/test').Page) {
   return calls
 }
 
-test('a project guest reads the project and may comment, nothing more', async ({ page }) => {
-  const errors = watchErrors(page)
-  await asGuest(page)
-  await page.goto(ticket)
-  await expect(details(page).getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
-  await expect(details(page).getByLabel('Add a comment')).toBeEnabled()
-  await expect(details(page).getByRole('button', { name: /^(?:Edit|Add a) description$/ })).toHaveCount(0)
-  expect(errors).toEqual([])
-})
-
-test('a project guest opens the workspace without errors', async ({ page }) => {
-  const errors = watchErrors(page)
-  await asGuest(page)
-  await page.goto('/')
-  await expect(page.getByRole('link', { name: /Pharos/ }).first()).toBeVisible()
-  await expect(page.getByText(/something went wrong/i)).toHaveCount(0)
-  expect(errors).toEqual([])
-})
-
 test('P08: a project guest opens work, posts an owned comment and has no edit or admin controls', async ({ page }) => {
   const errors = watchErrors(page)
   const calls = await asGuest(page)

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "ticket": "AEON-1673",
-  "phase": "P01",
+  "phase": "P08",
   "baselineSha256": "e017c08a8cbad7451c9c1615a98f03cb10de1f1c85bef0d561c86fec1faaafc0",
   "approval": {
     "id": "AEON-1670-2026-10-22",
@@ -230,8 +230,8 @@
       "risk": "Permitted read/comment without admin/edit capability",
       "destination": "retained:tests/guest.spec.ts",
       "nativeBinding": {
-        "status": "pending-implementation",
-        "key": null
+        "status": "implemented",
+        "key": "browser:tests/guest.spec.ts:P08: a project guest opens work, posts an owned comment and has no edit or admin controls"
       },
       "package": "P08"
     },
@@ -241,8 +241,8 @@
       "risk": "Actual separate-origin/CSP boundary",
       "destination": "retained:tests/html-sandbox.spec.ts",
       "nativeBinding": {
-        "status": "pending-implementation",
-        "key": null
+        "status": "implemented",
+        "key": "browser:tests/html-sandbox.spec.ts:P08: separate-origin preview enforces CSP in the viewer and a detached tab"
       },
       "package": "P08"
     },
@@ -617,7 +617,7 @@
     {"file":"tests/developer-settings.spec.ts","package":"P08","verdict":"CONVERT","auditBefore":7,"before":7,"after":0,"risk":"Extend settings-routing.unit.test.ts for retired Flow redirects and ignored saved opt-ins; keep retired capabilities closed.","destinations":["runtime:settings-routing.unit.test.ts"]},
     {"file":"tests/features.spec.ts","package":"P08","verdict":"CONVERT","auditBefore":7,"before":7,"after":0,"risk":"features.unit.test.ts owns conflict/scope/rollout gating; no feature-flag combinations belong in a browser matrix.","destinations":["runtime:features.unit.test.ts"]},
     {"file":"tests/from-classic.spec.ts","package":"P08","verdict":"KEEP","auditBefore":2,"before":2,"after":1,"risk":"Protect sign-in return through /from-classic to the resolved destination; pure known/unknown link resolution becomes a unit/API check.","destinations":["retained:tests/from-classic.spec.ts"]},
-    {"file":"tests/guest.spec.ts","package":"P08","verdict":"KEEP","auditBefore":2,"before":2,"after":1,"risk":"Protect a project guest reading/commenting while edit/admin controls stay unavailable.","destinations":["retained:tests/guest.spec.ts"]},
+    {"file":"tests/guest.spec.ts","package":"P08","verdict":"KEEP","auditBefore":2,"before":2,"after":1,"risk":"Protect a project guest reading/commenting while edit/admin controls stay unavailable.","destinations":["retained:tests/guest.spec.ts"],"implementation":{"ticket":"AEON-1680","status":"implemented","actualAfter":1,"caseMap":"scripts/test-prune/p08-case-map.json"}},
     {"file":"tests/key-dialog.spec.ts","package":"P08","verdict":"MERGE","auditBefore":9,"before":9,"after":1,"risk":"Protect person creation of an explicitly scoped agent/key and the one-time key display; preset/role permutations stay in access-keys.unit.test.ts.","destinations":["retained:tests/key-dialog.spec.ts","runtime:access-keys.unit.test.ts"]},
     {"file":"tests/key-expiry.spec.ts","package":"P08","verdict":"CONVERT","auditBefore":13,"before":13,"after":0,"risk":"key-expiry.test.ts owns lifetime mapping/status; actual rotate/revoke behavior is retained in key-scopes.","destinations":["runtime:key-expiry.test.ts"]},
     {"file":"tests/key-full-access.spec.ts","package":"P08","verdict":"CONVERT","auditBefore":22,"before":22,"after":0,"risk":"access-keys.unit.test.ts and edit-key-scopes.unit.test.ts own preset ceilings/role extension; key-scopes retains the explicit human confirmation.","destinations":["runtime:access-keys.unit.test.ts","runtime:edit-key-scopes.unit.test.ts"]},
@@ -735,7 +735,7 @@
     {"file":"tests/usage-dashboard.spec.ts","package":"P11","verdict":"MERGE","auditBefore":10,"before":10,"after":1,"risk":"Protect range selection discarding a late prior response and honest incomplete pool/read failure with Retry.","destinations":["retained:tests/usage-dashboard.spec.ts"]},
     {"file":"tests/version-reveal.spec.ts","package":"P11","verdict":"MERGE","auditBefore":4,"before":4,"after":0,"risk":"Transfer actual copy/reveal/native activation into releases; version-crossfade.unit.test.ts owns transition timing.","destinations":["runtime:version-crossfade.unit.test.ts","retained:tests/releases.spec.ts"]},
     {"file":"tests/webcore-recovery.spec.ts","package":"P11","verdict":"MERGE","auditBefore":9,"before":9,"after":1,"risk":"Protect failed timing save preserving typed values and a successful blur retry; access-window/knowledge identity cases stay in webcore-recovery.unit.test.ts.","destinations":["retained:tests/webcore-recovery.spec.ts","runtime:webcore-recovery.unit.test.ts"]},
-    {"file":"tests/html-sandbox.spec.ts","package":"P08","verdict":"MERGE","auditBefore":10,"before":10,"after":2,"risk":"Protect a real separate-origin HTML preview blocking parent/API/script escape and expiry/navigation revoking late grants; retain the download fallback.","destinations":["retained:tests/html-sandbox.spec.ts"]}
+    {"file":"tests/html-sandbox.spec.ts","package":"P08","verdict":"MERGE","auditBefore":10,"before":10,"after":2,"risk":"Protect a real separate-origin HTML preview blocking parent/API/script escape and expiry/navigation revoking late grants; retain the download fallback.","destinations":["retained:tests/html-sandbox.spec.ts"],"implementation":{"ticket":"AEON-1680","status":"implemented","actualAfter":2,"caseMap":"scripts/test-prune/p08-case-map.json"}}
   ],
   "destinations": [
     {"id":"visual:projects","kind":"visual","owner":"tests/visual/projects.spec.ts","risk":"Long project names; live worker faces; one useful empty/error cue","package":"P02","state":"projects","verification":{"status":"planned","nativeKeys":[],"evidence":null}},
@@ -859,7 +859,7 @@
     {"id":"retained:tests/add-account.spec.ts","kind":"retained","owner":"web/tests/add-account.spec.ts","risk":"Protect Add account → connected-machine instructions → focus refresh finding the new account, without reopening a dismissed panel.","package":"P08","budget":1,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},
     {"id":"retained:tests/avatar-upload-bounds.spec.ts","kind":"retained","owner":"web/tests/avatar-upload-bounds.spec.ts","risk":"Protect a real camera image encode/crop within bounds plus cancel discarding a late result; EXIF/bounds permutations move to avatar.test.ts.","package":"P08","budget":1,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},
     {"id":"retained:tests/from-classic.spec.ts","kind":"retained","owner":"web/tests/from-classic.spec.ts","risk":"Protect sign-in return through /from-classic to the resolved destination; pure known/unknown link resolution becomes a unit/API check.","package":"P08","budget":1,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},
-    {"id":"retained:tests/guest.spec.ts","kind":"retained","owner":"web/tests/guest.spec.ts","risk":"Protect a project guest reading/commenting while edit/admin controls stay unavailable.","package":"P08","budget":1,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},
+    {"id":"retained:tests/guest.spec.ts","kind":"retained","owner":"web/tests/guest.spec.ts","risk":"Protect a project guest reading/commenting while edit/admin controls stay unavailable.","package":"P08","budget":1,"verification":{"status":"verified","nativeKeys":["browser:tests/guest.spec.ts:P08: a project guest opens work, posts an owned comment and has no edit or admin controls"],"evidence":"AEON-1680 scripts/test-prune/p08-case-map.json: remote positive replacement run and three failing production negative controls on scratch/aeon-1680-boundaries (5293d6277); no mutant commit on the work branch."}},
     {"id":"retained:tests/key-dialog.spec.ts","kind":"retained","owner":"web/tests/key-dialog.spec.ts","risk":"Protect person creation of an explicitly scoped agent/key and the one-time key display; preset/role permutations stay in access-keys.unit.test.ts.","package":"P08","budget":1,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},
     {"id":"retained:tests/key-scopes.spec.ts","kind":"retained","owner":"web/tests/key-scopes.spec.ts","risk":"Protect same-key scope edit/rotation without escalation and lost permission/ownership preventing an outstanding confirmation.","package":"P08","budget":2,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},
     {"id":"retained:tests/key-trim.spec.ts","kind":"retained","owner":"web/tests/key-trim.spec.ts","risk":"Protect person trim → explicit confirmation → restore, with blocked approval still declinable and a lost response retried with the same id.","package":"P08","budget":1,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},
@@ -925,7 +925,7 @@
     {"id":"retained:tests/status-icons.spec.ts","kind":"retained","owner":"web/tests/status-icons.spec.ts","risk":"Protect real reduced-motion and live/static icon rendering; delete the load-sensitive 1ms/frame test and leave profiling outside the test catalogue.","package":"P11","budget":1,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},
     {"id":"retained:tests/usage-dashboard.spec.ts","kind":"retained","owner":"web/tests/usage-dashboard.spec.ts","risk":"Protect range selection discarding a late prior response and honest incomplete pool/read failure with Retry.","package":"P11","budget":1,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},
     {"id":"retained:tests/webcore-recovery.spec.ts","kind":"retained","owner":"web/tests/webcore-recovery.spec.ts","risk":"Protect failed timing save preserving typed values and a successful blur retry; access-window/knowledge identity cases stay in webcore-recovery.unit.test.ts.","package":"P11","budget":1,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},
-    {"id":"retained:tests/html-sandbox.spec.ts","kind":"retained","owner":"web/tests/html-sandbox.spec.ts","risk":"Protect a real separate-origin HTML preview blocking parent/API/script escape and expiry/navigation revoking late grants; retain the download fallback.","package":"P08","budget":2,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},
+    {"id":"retained:tests/html-sandbox.spec.ts","kind":"retained","owner":"web/tests/html-sandbox.spec.ts","risk":"Protect a real separate-origin HTML preview blocking parent/API/script escape and expiry/navigation revoking late grants; retain the download fallback.","package":"P08","budget":2,"verification":{"status":"verified","nativeKeys":["browser:tests/html-sandbox.spec.ts:P08: separate-origin preview enforces CSP in the viewer and a detached tab","browser:tests/html-sandbox.spec.ts:P08: unavailable, expired and departed previews keep download and discard late grants"],"evidence":"AEON-1680 scripts/test-prune/p08-case-map.json: remote positive replacement run and three failing production negative controls on scratch/aeon-1680-boundaries (5293d6277); no mutant commit on the work branch."}},
     {"id":"runtime:agent-indicator.unit.test.ts","kind":"runtime","owner":"web/tests/agent-indicator.unit.test.ts","risk":"Persistence and renderer choice go to agent-indicator.unit.test.ts; one actual indicator is visible in the Agents visual state.","package":"P02","existsAtSnapshot":true,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},
     {"id":"runtime:brandMarks.test.ts","kind":"runtime","owner":"web/tests/brandMarks.test.ts","risk":"Brand propagation is data binding; extend brandMarks.test.ts and tenant-brand.test.ts, with shell title asserted in shell.","package":"P02","existsAtSnapshot":true,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},
     {"id":"runtime:tenant-brand.test.ts","kind":"runtime","owner":"web/tests/tenant-brand.test.ts","risk":"Brand propagation is data binding; extend brandMarks.test.ts and tenant-brand.test.ts, with shell title asserted in shell.","package":"P02","existsAtSnapshot":true,"verification":{"status":"planned","nativeKeys":[],"evidence":null}},

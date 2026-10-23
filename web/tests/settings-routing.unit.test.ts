@@ -104,8 +104,7 @@ it('Kinds of work resolves directly to the Settings route and retains definition
   expect(router.currentRoute.value.hash).toBe('#kind-security')
 })
 
-it('retired Flow routes resolve to tickets even when an old preference opted in', async () => {
-  vi.stubGlobal('localStorage', { getItem: () => JSON.stringify({ show_flow_controls: true }) })
+it('retired Flow routes resolve to tickets and remove retired navigation parameters', async () => {
   for (const url of [
     '/p/PHAROS/journey?stage=plan&walk=PHAROS-11',
     '/p/PHAROS?view=journey&stage=build',

