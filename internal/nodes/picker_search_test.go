@@ -278,7 +278,9 @@ func TestShapeLeafExcludesHiddenChild(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if count != 2 || len(flags) != 2 || flags[parent.ID] || !flags[leaf.ID] {
+		_, parentPresent := flags[parent.ID]
+		_, leafPresent := flags[leaf.ID]
+		if count != 2 || len(flags) != 2 || !parentPresent || !leafPresent || flags[parent.ID] || !flags[leaf.ID] {
 			return fmt.Errorf("canonical flags changed hidden-child, duplicate or non-work semantics: %v", flags)
 		}
 		if err := tx.QueryRow(t.Context(), settings).Scan(&afterVisible, &afterSystem); err != nil {
