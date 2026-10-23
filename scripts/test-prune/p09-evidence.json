@@ -1,0 +1,510 @@
+{
+  "version": 1,
+  "ticket": "AEON-1681",
+  "package": "P09",
+  "status": "blocked-before-cuts",
+  "blockers": [
+    {
+      "kind": "visual-reference-authority",
+      "source": "scripts/test-prune/visual-manifest.json",
+      "observed": {
+        "approval": "pending",
+        "baselineAuthority": "pending-review",
+        "attachmentId": null,
+        "sha256": null
+      },
+      "required": "The plan and ledger cutPrerequisites require Tick approval of the exact fixtures and an immutable available reference source before pruning starts."
+    },
+    {
+      "kind": "remote-browser-capacity",
+      "entryPoint": "remote-spec.sh",
+      "result": "exit 3",
+      "refusals": [
+        "remote busy (host guard); wait or rely on PR CI",
+        "remote busy: 2/2 remote runs (CI pool 0/4); no free mbp2606 slot"
+      ]
+    }
+  ],
+  "browser": {
+    "beforeCases": 420,
+    "afterCases": 420,
+    "plannedCeiling": 23,
+    "removed": 0,
+    "demoted": 0,
+    "runnerSecondsBefore": null,
+    "runnerSecondsAfter": null,
+    "measuredRunnerSecondsDelta": null,
+    "measurementStatus": "unmeasured: remote baseline refused; no browser reduction or timing saving claimed"
+  },
+  "runtime": {
+    "newCases": 22,
+    "passedCases": 75,
+    "wallSeconds": 5.608,
+    "profile": "Targeted local single-file runs, one worker, after LEAD remote refusal; no browser was launched locally. These observations are not browser runner-time comparisons.",
+    "runs": [
+      {
+        "file": "web/tests/desk-tab-lifecycle.unit.test.ts",
+        "command": "node node_modules/vitest/vitest.mjs run tests/desk-tab-lifecycle.unit.test.ts --maxWorkers=1",
+        "cases": 2,
+        "result": "passed",
+        "wallSeconds": 0.327
+      },
+      {
+        "file": "web/tests/decision-desk-fix2.unit.test.ts",
+        "command": "node node_modules/vitest/vitest.mjs run tests/decision-desk-fix2.unit.test.ts --maxWorkers=1",
+        "cases": 7,
+        "result": "passed",
+        "wallSeconds": 0.434
+      },
+      {
+        "file": "web/tests/decision-desk-fix3.unit.test.ts",
+        "command": "node node_modules/vitest/vitest.mjs run tests/decision-desk-fix3.unit.test.ts --maxWorkers=1",
+        "cases": 8,
+        "result": "passed",
+        "wallSeconds": 0.488
+      },
+      {
+        "file": "web/tests/decision-desk-memo.unit.test.ts",
+        "command": "node node_modules/vitest/vitest.mjs run tests/decision-desk-memo.unit.test.ts --maxWorkers=1",
+        "cases": 4,
+        "result": "passed",
+        "wallSeconds": 0.688
+      },
+      {
+        "file": "web/tests/decision-desk-cutover.unit.test.ts",
+        "command": "node node_modules/vitest/vitest.mjs run tests/decision-desk-cutover.unit.test.ts --maxWorkers=1",
+        "cases": 12,
+        "result": "passed",
+        "wallSeconds": 0.519
+      },
+      {
+        "file": "web/tests/decision-desk-project.unit.test.ts",
+        "command": "node node_modules/vitest/vitest.mjs run tests/decision-desk-project.unit.test.ts --maxWorkers=1",
+        "cases": 4,
+        "result": "passed",
+        "wallSeconds": 1.042
+      },
+      {
+        "file": "web/tests/outcome-proposals.unit.test.ts",
+        "command": "node node_modules/vitest/vitest.mjs run tests/outcome-proposals.unit.test.ts --maxWorkers=1",
+        "cases": 4,
+        "result": "passed",
+        "wallSeconds": 0.512
+      },
+      {
+        "file": "web/tests/attach-lifecycle.unit.test.ts",
+        "command": "node node_modules/vitest/vitest.mjs run tests/attach-lifecycle.unit.test.ts --maxWorkers=1",
+        "cases": 7,
+        "result": "passed",
+        "wallSeconds": 0.543
+      },
+      {
+        "file": "web/tests/phone-approval-lifecycle.unit.test.ts",
+        "command": "node node_modules/vitest/vitest.mjs run tests/phone-approval-lifecycle.unit.test.ts --maxWorkers=1",
+        "cases": 4,
+        "result": "passed",
+        "wallSeconds": 0.507
+      },
+      {
+        "file": "web/tests/stepup.unit.test.ts",
+        "command": "node node_modules/vitest/vitest.mjs run tests/stepup.unit.test.ts --maxWorkers=1",
+        "cases": 10,
+        "result": "passed",
+        "wallSeconds": 0.443
+      },
+      {
+        "file": "web/tests/desk-tab.test.ts",
+        "command": "node --experimental-strip-types --test tests/desk-tab.test.ts",
+        "cases": 13,
+        "result": "passed",
+        "wallSeconds": 0.105
+      }
+    ]
+  },
+  "negativeControls": [
+    {
+      "id": "tab-owner",
+      "source": "web/src/lib/useDeskTab.ts",
+      "sourceSha256": "1196e6b30207d777e6bcfd88525ef852bfb17998244d37eeda35e9482fa09f1e",
+      "mutation": {
+        "from": "if (owner.value && Date.now()",
+        "to": "if (true && Date.now()"
+      },
+      "test": "web/tests/desk-tab-lifecycle.unit.test.ts",
+      "titleFilter": "drops a pending",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.345
+    },
+    {
+      "id": "tab-reader",
+      "source": "web/src/lib/useDeskTab.ts",
+      "sourceSha256": "1196e6b30207d777e6bcfd88525ef852bfb17998244d37eeda35e9482fa09f1e",
+      "mutation": {
+        "from": "void readAgain()",
+        "to": "void Promise.resolve()"
+      },
+      "test": "web/tests/desk-tab-lifecycle.unit.test.ts",
+      "titleFilter": "refreshes a stale",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.36
+    },
+    {
+      "id": "tier-authority",
+      "source": "web/src/lib/decisionDeskApi.ts",
+      "sourceSha256": "2599992fad5ec70e808e464601c6f9a36774fb0e7f4c9420b4c0139368dc4a97",
+      "mutation": {
+        "from": "|| !can('harness.control', item.projectId)",
+        "to": ""
+      },
+      "test": "web/tests/decision-desk-fix2.unit.test.ts",
+      "titleFilter": "rechecks current tier authority",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.498
+    },
+    {
+      "id": "tier-receipt",
+      "source": "web/src/lib/decisionDeskApi.ts",
+      "sourceSha256": "2599992fad5ec70e808e464601c6f9a36774fb0e7f4c9420b4c0139368dc4a97",
+      "mutation": {
+        "from": "if (!result.requests.some(request =>",
+        "to": "if (false && !result.requests.some(request =>"
+      },
+      "test": "web/tests/decision-desk-fix2.unit.test.ts",
+      "titleFilter": "rechecks current tier authority",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.487
+    },
+    {
+      "id": "doctrine-review-identity",
+      "source": "web/src/components/agents/DecisionDeskMemo.vue",
+      "sourceSha256": "eaf2fa2fdc58b1d028e318f7cede3e2394f578eb43cf79b57530c58f2a225ca9",
+      "mutation": {
+        "from": " || (!state && props.pendingRuleIds?.includes(id))",
+        "to": ""
+      },
+      "test": "web/tests/decision-desk-memo.unit.test.ts",
+      "titleFilter": "links a published doctrine effect",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.818
+    },
+    {
+      "id": "project-owner",
+      "source": "web/src/stores/decisionDesk.ts",
+      "sourceSha256": "578884a2f982afdbd86dcfc11564265899af9231838a3b573714eb6deba79283",
+      "mutation": {
+        "from": "const current = () => turn === ruleTurn && projection.value === page && identity === owner.value && session.authenticationCurrent()",
+        "to": "const current = () => true"
+      },
+      "test": "web/tests/decision-desk-cutover.unit.test.ts",
+      "titleFilter": "rejects a held doctrine project",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.592
+    },
+    {
+      "id": "proposal-person",
+      "source": "web/src/components/rules/DoctrineProposals.vue",
+      "sourceSha256": "603dd28d6740f25c7e94fbfeb495273ccb0cef87848fe2c5ea8efe1ccb9cc500",
+      "mutation": {
+        "from": "if (!person.value) return",
+        "to": "if (false) return"
+      },
+      "test": "web/tests/outcome-proposals.unit.test.ts",
+      "titleFilter": "does not request or render",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.583
+    },
+    {
+      "id": "proposal-owner",
+      "source": "web/src/components/rules/DoctrineProposals.vue",
+      "sourceSha256": "603dd28d6740f25c7e94fbfeb495273ccb0cef87848fe2c5ea8efe1ccb9cc500",
+      "mutation": {
+        "from": "if (current !== generation) return",
+        "to": "if (false) return"
+      },
+      "test": "web/tests/outcome-proposals.unit.test.ts",
+      "titleFilter": "discards a held analysis",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.591
+    },
+    {
+      "id": "attach-owner",
+      "source": "web/src/lib/identityScope.ts",
+      "sourceSha256": "8bbc72012eaa6c0fa528c7a8362514c506b2ea280976b5bc1183c8636d358ecd",
+      "mutations": [
+        {
+          "from": "const live = () => !disposed && !controller.signal.aborted && generation === started.generation && owner() === started.owner",
+          "to": "const live = () => true"
+        }
+      ],
+      "test": "web/tests/attach-lifecycle.unit.test.ts",
+      "titleFilter": "discards a pending attach list",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.554
+    },
+    {
+      "id": "attach-choice",
+      "source": "web/src/components/agents/AttachApproval.vue",
+      "sourceSha256": "7ae064bbbc6381db83ba43a555344a1f7a280451d90f5587890602c22bf769bf",
+      "mutations": [
+        {
+          "from": "pending.value && !!choice.value &&",
+          "to": "pending.value && true &&"
+        }
+      ],
+      "test": "web/tests/attach-lifecycle.unit.test.ts",
+      "titleFilter": "waits for labels and an explicit choice",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.569
+    },
+    {
+      "id": "attach-digest",
+      "source": "web/src/components/agents/AttachApproval.vue",
+      "sourceSha256": "7ae064bbbc6381db83ba43a555344a1f7a280451d90f5587890602c22bf769bf",
+      "mutations": [
+        {
+          "from": "request_digest: current.request_digest",
+          "to": "request_digest: 'wrong-request'"
+        }
+      ],
+      "test": "web/tests/attach-lifecycle.unit.test.ts",
+      "titleFilter": "waits for labels and an explicit choice",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.604
+    },
+    {
+      "id": "attach-closed-review",
+      "source": "web/src/components/agents/AttachApproval.vue",
+      "sourceSha256": "7ae064bbbc6381db83ba43a555344a1f7a280451d90f5587890602c22bf769bf",
+      "mutations": [
+        {
+          "from": "return link.run(({ after, signal }) => after(attachAction(",
+          "to": "return dialogScope.run(({ after, signal }) => after(attachAction("
+        }
+      ],
+      "test": "web/tests/attach-lifecycle.unit.test.ts",
+      "titleFilter": "refreshes a confirmed exact request",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.591
+    },
+    {
+      "id": "consent-failed-save",
+      "source": "web/src/components/settings/SessionWatchingSettings.vue",
+      "sourceSha256": "6c54bd2c4be1fe47c96be15cf6adeda6c63e073cbfa788bc596c92f4c051aefd",
+      "mutations": [
+        {
+          "from": "  } catch {\n    if (!controller.signal.aborted)",
+          "to": "  } catch {\n    saved.value = choice.value\n    if (!controller.signal.aborted)"
+        }
+      ],
+      "test": "web/tests/attach-lifecycle.unit.test.ts",
+      "titleFilter": "keeps the saved consent policy",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.602
+    },
+    {
+      "id": "consent-reset",
+      "source": "web/src/components/settings/SessionWatchingSettings.vue",
+      "sourceSha256": "6c54bd2c4be1fe47c96be15cf6adeda6c63e073cbfa788bc596c92f4c051aefd",
+      "mutations": [
+        {
+          "from": "if (controller.signal.aborted || operation !== controller) return",
+          "to": "if (false) return"
+        }
+      ],
+      "test": "web/tests/attach-lifecycle.unit.test.ts",
+      "titleFilter": "refuses local consent without",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.578
+    },
+    {
+      "id": "phone-digest",
+      "source": "web/src/views/PhoneApprovalView.vue",
+      "sourceSha256": "a6e86de394de44c3c79ccb95f2e7f7ddd1d64ad351bc6e2be644b178639dd208",
+      "mutations": [
+        {
+          "from": "request_hash: value.request_hash",
+          "to": "request_hash: 'wrong-request'"
+        }
+      ],
+      "test": "web/tests/phone-approval-lifecycle.unit.test.ts",
+      "titleFilter": "requires an explicit choice",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.515
+    },
+    {
+      "id": "phone-expiry",
+      "source": "web/src/views/PhoneApprovalView.vue",
+      "sourceSha256": "a6e86de394de44c3c79ccb95f2e7f7ddd1d64ad351bc6e2be644b178639dd208",
+      "mutations": [
+        {
+          "from": "if (!review.value || !pending.value || busy.value || !can('profile.write')) return",
+          "to": "if (!review.value || busy.value || !can('profile.write')) return"
+        }
+      ],
+      "test": "web/tests/phone-approval-lifecycle.unit.test.ts",
+      "titleFilter": "expires the displayed request",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.544
+    },
+    {
+      "id": "phone-late-proof",
+      "source": "web/src/lib/phoneApprovals.ts",
+      "sourceSha256": "5b1f1e4a823741af68136b334d993070f301e353148759a51700ff6e1378c439",
+      "mutations": [
+        {
+          "from": "  signal?.throwIfAborted()\n  const response = await api",
+          "to": "  const response = await api"
+        }
+      ],
+      "test": "web/tests/phone-approval-lifecycle.unit.test.ts",
+      "titleFilter": "aborts a held passkey",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.505
+    },
+    {
+      "id": "tab-digit",
+      "source": "web/src/lib/deskTab.ts",
+      "sourceSha256": "98348f90ef1fce7c6de61b3ff8f0a890f0025af25716c34ae9973855145d58b8",
+      "mutations": [
+        {
+          "from": "ctx.fillText(dot.label, dot.x + dot.width / 2, dot.y + dot.height / 2 + (ascent - descent) / 2)",
+          "to": "void 0"
+        }
+      ],
+      "test": "web/tests/desk-tab.test.ts",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.109
+    },
+    {
+      "id": "tier-zero",
+      "source": "web/src/lib/decisionDeskApi.ts",
+      "sourceSha256": "2599992fad5ec70e808e464601c6f9a36774fb0e7f4c9420b4c0139368dc4a97",
+      "mutations": [
+        {
+          "from": "tier.revision < 0",
+          "to": "tier.revision <= 0"
+        }
+      ],
+      "test": "web/tests/decision-desk-fix3.unit.test.ts",
+      "result": "assertion-failed-as-expected",
+      "seconds": 0.497
+    }
+  ],
+  "mutationPolicy": "Each mutation was temporary in this assigned worktree, failed by assertion, and was restored in finally. No mutation was committed.",
+  "preparedMappings": [
+    {
+      "source": "tests/aeon-1473-desk-tab.spec.ts",
+      "sourceKeys": [
+        "browser:tests/aeon-1473-desk-tab.spec.ts:16 px favicon › AEON-1473: the amber dot reads at 16 px on light and dark tab strips",
+        "browser:tests/aeon-1473-desk-tab.spec.ts:32 px favicon › AEON-1473: the amber dot reads at 32 px on light and dark tab strips",
+        "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: a background tab reads the Desk itself and says New decision for two seconds, without focus or sound",
+        "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: a rise pops the favicon dot once in six frames; the visible title never swaps",
+        "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: an agent principal and a signed-out visitor see no count and the plain icon",
+        "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: every page leads with the badge’s count: none at 0, (1), (9), then (9+)",
+        "browser:tests/aeon-1473-desk-tab.spec.ts:AEON-1473: reduced motion changes only the number, visible or in the background"
+      ],
+      "runtimeDestinations": [
+        "runtime:desk-tab.test.ts",
+        "runtime:desk-tab-lifecycle.unit.test.ts"
+      ],
+      "cutStatus": "deferred",
+      "remainingProof": "Keep original native keyboard/focus, mounted page wiring, control stability and appearance cases until the corresponding retained journeys and Tick reference authority are verified."
+    },
+    {
+      "source": "tests/decision-desk-fix2.spec.ts",
+      "sourceKeys": [
+        "browser:tests/decision-desk-fix2.spec.ts:a directly linked canonical tier request beyond 30 sessions and 100 history rows remains actionable",
+        "browser:tests/decision-desk-fix2.spec.ts:current server restrictions explain and block publishing without sending a write",
+        "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1024 dark",
+        "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1024 light",
+        "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1440 dark",
+        "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 1440 light",
+        "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 390 dark",
+        "browser:tests/decision-desk-fix2.spec.ts:server outcomes and correction keep selectors and actions stable 390 light"
+      ],
+      "runtimeDestinations": [
+        "runtime:decision-desk-fix2.unit.test.ts",
+        "runtime:decision-desk-memo.unit.test.ts"
+      ],
+      "cutStatus": "deferred",
+      "remainingProof": "Keep original native keyboard/focus, mounted page wiring, control stability and appearance cases until the corresponding retained journeys and Tick reference authority are verified."
+    },
+    {
+      "source": "tests/decision-desk-fix3.spec.ts",
+      "sourceKeys": [
+        "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1024 dark",
+        "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1024 light",
+        "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1440 dark",
+        "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 1440 light",
+        "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 390 dark",
+        "browser:tests/decision-desk-fix3.spec.ts:doctrine draft effect and required review open the exact pending draft 390 light",
+        "browser:tests/decision-desk-fix3.spec.ts:published doctrine effects keep their proposal review while an earlier pending draft opens in the Desk",
+        "browser:tests/decision-desk-fix3.spec.ts:revision-zero native tier request can approve with exact ownership",
+        "browser:tests/decision-desk-fix3.spec.ts:revision-zero native tier request can decline with exact ownership"
+      ],
+      "runtimeDestinations": [
+        "runtime:decision-desk-fix3.unit.test.ts",
+        "runtime:decision-desk-memo.unit.test.ts"
+      ],
+      "cutStatus": "deferred",
+      "remainingProof": "Keep original native keyboard/focus, mounted page wiring, control stability and appearance cases until the corresponding retained journeys and Tick reference authority are verified."
+    },
+    {
+      "source": "tests/decision-desk-project.spec.ts",
+      "sourceKeys": [
+        "browser:tests/decision-desk-project.spec.ts:every kind names its project with a new-tab link; P opens it, but not while typing",
+        "browser:tests/decision-desk-project.spec.ts:revisiting a question after Decide & next retains its project link, colour and P action",
+        "browser:tests/decision-desk-project.spec.ts:tablet toolbar stays visible and stable on opening and resizing dark",
+        "browser:tests/decision-desk-project.spec.ts:tablet toolbar stays visible and stable on opening and resizing light",
+        "browser:tests/decision-desk-project.spec.ts:the Agents desk panel names each item's project with a new-tab link",
+        "browser:tests/decision-desk-project.spec.ts:the Agents doctrine project link stays put through a second desk refresh without repeated lookups",
+        "browser:tests/decision-desk-project.spec.ts:the Agents doctrine row resolves its project through the authorized ticket lookup",
+        "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1024 dark",
+        "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1024 light",
+        "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1440 dark",
+        "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 1440 light",
+        "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 390 dark",
+        "browser:tests/decision-desk-project.spec.ts:the desk controls stay still across a change of project 390 light",
+        "browser:tests/decision-desk-project.spec.ts:the filled key chip follows the item shown before, through J/K, the jump list and Decide & next"
+      ],
+      "runtimeDestinations": [
+        "runtime:decision-desk-project.unit.test.ts",
+        "runtime:decision-desk-cutover.unit.test.ts"
+      ],
+      "cutStatus": "deferred",
+      "remainingProof": "Keep original native keyboard/focus, mounted page wiring, control stability and appearance cases until the corresponding retained journeys and Tick reference authority are verified."
+    },
+    {
+      "source": "tests/outcome-proposals.spec.ts",
+      "sourceKeys": [
+        "browser:tests/outcome-proposals.spec.ts:agent principals never request or see the proposals list",
+        "browser:tests/outcome-proposals.spec.ts:empty analysis gives one quiet line",
+        "browser:tests/outcome-proposals.spec.ts:outcome proposals 1600 dark",
+        "browser:tests/outcome-proposals.spec.ts:outcome proposals 1600 light",
+        "browser:tests/outcome-proposals.spec.ts:outcome proposals 390 dark",
+        "browser:tests/outcome-proposals.spec.ts:outcome proposals 390 light"
+      ],
+      "runtimeDestinations": [
+        "runtime:decision-desk.unit.test.ts",
+        "runtime:outcome-proposals.unit.test.ts"
+      ],
+      "cutStatus": "deferred",
+      "remainingProof": "Keep original native keyboard/focus, mounted page wiring, control stability and appearance cases until the corresponding retained journeys and Tick reference authority are verified."
+    }
+  ],
+  "preservedRisks": [
+    "All 420 original browser identities, their tiers and launch records remain unchanged.",
+    "Native keyboard/IME/focus, pointer/touch, series geometry, rendered text and real mounted streams still require retained browser proof.",
+    "No Tick reference was invented, no historical replay evidence was rewritten, and no test assertion or required check was weakened."
+  ],
+  "nextCutPrerequisites": [
+    "Tick pins and approves the visual fixtures and immutable reference attachment through the coordinator-owned P02 work.",
+    "Prove the remaining retained P09 browser journeys, including negative controls and measured before/after runs, through the LEAD browser lane.",
+    "Only then remove the redundant groups and update native case mappings, tier rows and shard source records using the canonical writer."
+  ],
+  "validation": {
+    "ledger": "passed",
+    "manifests": "passed",
+    "remoteStatic": "not-yet-attempted"
+  }
+}

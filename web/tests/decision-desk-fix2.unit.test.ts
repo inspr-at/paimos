@@ -96,6 +96,24 @@ it('hydrates a canonical direct-linked tier session beyond the bulk session cap 
   expect(result.items.find(item => item.id === 't:linked-request')!.unavailable).toBeUndefined()
 })
 
+it('rechecks current tier authority and requires a receipt for the exact request before claiming a decision', async () => {
+  const native = session('pending'), fetch = tierFetch('pending', 'request')
+  vi.stubGlobal('fetch', fetch)
+  let allowed = true
+  const adapter = nativeTierAdapter(async () => [native], () => allowed)
+  const read = await adapter.read(projection('request', 'pending').items)
+  const item = read.items.find(row => row.id === 't:request')!, draft = { ...draftFor(item), optionId: 'approve' }
+  allowed = false
+  await expect(adapter.decide(item, draft, 'revoked')).rejects.toThrow('no longer actionable')
+  expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toEqual([])
+  allowed = true
+  fetch.mockImplementation(async (_url, init) => new Response(JSON.stringify({ session_id: 'pending', revision: 8, read_only: false,
+    requests: [{ id: init?.method === 'POST' ? 'another-request' : 'request', session_id: 'pending', tier: 'fast', reason: '', state: 'approved', created_at: '' }] })))
+  await expect(adapter.decide(item, draft, 'wrong-receipt')).rejects.toThrow('decision was not confirmed')
+  expect(item.decided).toBe(false)
+  expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
+})
+
 it('bounds streamed tier response bytes before decode and leaves the source explicitly unavailable', async () => {
   let cancelled = false
   vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream({

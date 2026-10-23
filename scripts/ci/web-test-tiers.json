@@ -16644,6 +16644,8 @@
     ,
     {"kind":"node","file":"tests/desk-tab.test.ts","name":"the background notice is the words New decision and carries no icon glyph","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/desk-tab.test.ts","name":"the canvas painter cuts a gap, paints the badge ink and draws a digit only at readable device sizes","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/desk-tab.test.ts","name":"the first count of a page shows at rest: no pop, no notice","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/desk-tab.test.ts","name":"the tab counts like the badge: none at 0, (1), (9), then (9+)","tier":"ESSENTIAL"}
@@ -18284,6 +18286,20 @@
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"discards a pending attach list after a person change even when its transport ignores abort","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"drops a held approval body on person change, including refresh and parent notifications","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"keeps the saved consent policy and the stricter draft separate after a refused save","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"refreshes a confirmed exact request after its review closes, while discarding the closed dialog body","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"refuses local consent without a capable upgraded computer and drops a held saved policy on access reset","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"refuses unsupported local confirmation, revoked authority and failed writes without claiming an approval","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attach-lifecycle.unit.test.ts","name":"waits for labels and an explicit choice, then writes both digests for the displayed request exactly once","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: Hours Undo is immediate, keeps its view and uses plain failures or silent DELETE 404","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attachment-deletion.unit.test.ts","name":"AEON-1416: Hours ignores superseded Undo and locks optimistic rows until confirmation","tier":"ESSENTIAL"}
@@ -18536,7 +18552,11 @@
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"drops a previous person read even if transport ignores abort, and resets the count synchronously","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"rejects a held doctrine project lookup after a person change, even when the transport ignores cancellation","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"reports an unknown count on failed refresh and retries without claiming an empty desk","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"resolves doctrine projects once for concurrent consumers and retains the authorized cache across a projection refresh","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"bounds streamed tier response bytes before decode and leaves the source explicitly unavailable","tier":"ESSENTIAL"}
     ,
@@ -18545,6 +18565,8 @@
     {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"hydrates pending tier requests independently of two full sessions of history and can decide their exact native request","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"integrates the server default and each publishing outcome, then corrects the exact revision with its doctrine mapping","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"rechecks current tier authority and requires a receipt for the exact request before claiming a decision","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"retains outcome failure, retryability, exact effect references and required review independently of a handed-off answer","tier":"ESSENTIAL"}
     ,
@@ -18571,6 +18593,8 @@
     {"kind":"vitest","file":"tests/decision-desk-lessons.unit.test.ts","name":"keeps a rule-draft lesson on the draft and off the changelog chevron","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-lessons.unit.test.ts","name":"names a changelog lesson with the entry title and no text chevron","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"links a published doctrine effect and its earlier pending review to their own exact destinations","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-memo.unit.test.ts","name":"names a lasting restriction beside a muted Decide when no stamp can be used","tier":"ESSENTIAL"}
     ,
@@ -18889,6 +18913,10 @@
     {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Desk offer requires every eligibility condition and tolerates unavailable browser storage","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"iPhone and iPad require the Home Screen while standalone and desktop browsers remain eligible","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-tab-lifecycle.unit.test.ts","name":"drops a pending background notice on person, agent and sign-out changes and never polls for an agent or visitor","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-tab-lifecycle.unit.test.ts","name":"refreshes a stale background badge through the shared reader, resets its age on a projection, and disposes the poll","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"only the Display menu mounts the display editors","tier":"ESSENTIAL"}
     ,
@@ -19958,6 +19986,14 @@
     ,
     {"kind":"vitest","file":"tests/models-situations.unit.test.ts","name":"situation matrix > shows every row with a cell, counts only what it shows, and writes orders the server accepts","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/outcome-proposals.unit.test.ts","name":"discards a held analysis after the person changes and cannot reveal the previous owner’s finding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/outcome-proposals.unit.test.ts","name":"does not request or render proposals for an agent principal","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/outcome-proposals.unit.test.ts","name":"renders analysis evidence and measured outcomes without inventing an approval action for a finding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/outcome-proposals.unit.test.ts","name":"reports empty only after successful reads and preserves an honest failure","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After beyond the lifetime ends the follow instead of reading later","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After inside the lifetime still waits, and one that reaches the deadline does not","tier":"GATED-FULL"}
@@ -20009,6 +20045,14 @@
     {"kind":"vitest","file":"tests/parent-benefit-generation.unit.test.ts","name":"retry captures its generation/revision and discards a result after navigation","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/parent-benefit-generation.unit.test.ts","name":"tenant changes fence an old status read even for the same node id","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/phone-approval-lifecycle.unit.test.ts","name":"aborts a held passkey after a person change and never posts or displays A’s decision for B","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/phone-approval-lifecycle.unit.test.ts","name":"expires the displayed request with its injected clock and starts no verification or decision afterwards","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/phone-approval-lifecycle.unit.test.ts","name":"records nothing on passkey cancellation, then binds an explicit decline to its new verification","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/phone-approval-lifecycle.unit.test.ts","name":"requires an explicit choice and a fresh proof before posting the exact reviewed request, hash and reason","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/phone-controls.unit.test.ts","name":"matching selection in the phone dock > keeps deletion feedback honest and blocks select-all during a bulk write","tier":"GATED-FULL"}
     ,
