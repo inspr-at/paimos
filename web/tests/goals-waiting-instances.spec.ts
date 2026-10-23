@@ -304,24 +304,31 @@ test('Settings connection statuses use sentence case and keep both connection ca
   // These existing long-text Settings captures also contain the standalone status.
   const account = 'Datenschutzbeauftragte für grenzüberschreitende Unternehmenszusammenarbeit'
   const origin = `https://${Array(4).fill('unternehmenszusammenarbeit'.repeat(2)).join('.')}.example`
-  await page.addInitScript(({ key, origin, account, now }) => {
-    const grant = JSON.parse(localStorage.getItem(key) ?? '{}')
-    localStorage.setItem(key, JSON.stringify({ ...grant, token: `desk_${'a'.repeat(8)}-${'a'.repeat(4)}-${'a'.repeat(4)}-${'a'.repeat(4)}-${'a'.repeat(12)}_${'b'.repeat(8)}-${'b'.repeat(4)}-${'b'.repeat(4)}-${'b'.repeat(4)}-${'b'.repeat(12)}_${'c'.repeat(43)}`, origin, account, createdAt: new Date(now).toISOString(), expiresAt: new Date(now + 90 * 86400_000).toISOString() }))
+  const context = page.context()
+  await page.close()
+  const longPage = await context.newPage()
+  await longPage.clock.install({ time: new Date(NOW) })
+  const longMock = await mockBand(longPage, { connected: false, sibling: 'down' })
+  await mockSettings(longPage, settingsData()); await longMock.mount()
+  await longPage.addInitScript(({ key, origin, account, now }) => {
+    localStorage.setItem(key, JSON.stringify({ token: `desk_${'a'.repeat(8)}-${'a'.repeat(4)}-${'a'.repeat(4)}-${'a'.repeat(4)}-${'a'.repeat(12)}_${'b'.repeat(8)}-${'b'.repeat(4)}-${'b'.repeat(4)}-${'b'.repeat(4)}-${'b'.repeat(12)}_${'c'.repeat(43)}`, origin, account, createdAt: new Date(now).toISOString(), expiresAt: new Date(now + 90 * 86400_000).toISOString() }))
   }, { key: `aeon.desk-connections.t1:${me.id}.pma`, origin, account, now: NOW })
-  await page.route('**/api/decision-desk/instances', route => route.fulfill({ json: { here: 'ppm', siblings: [{ tag: 'pma', origin }] } }))
-  await page.route(`${origin}/api/decision-desk/owner-summary*`, route => route.fulfill({ status: 503, headers: { 'access-control-allow-origin': new URL(page.url()).origin, 'access-control-allow-methods': 'GET, DELETE', 'access-control-allow-headers': 'Authorization, Accept' }, json: { error: 'unavailable' } }))
-  await page.route('**/api/decision-desk/connections', route => route.fulfill({ json: { connections: [{ id: 'c1', origin, instance: 'pma', created_at: iso(NOW), expires_at: iso(NOW + 90 * 86400_000) }] } }))
-  await page.goto('/settings/personal')
-  await expect(receiving.getByRole('status')).toHaveText("Couldn't be reached")
+  await longPage.route('**/api/decision-desk/instances', route => route.fulfill({ json: { here: 'ppm', siblings: [{ tag: 'pma', origin }] } }))
+  await longPage.route(`${origin}/api/decision-desk/owner-summary*`, route => route.fulfill({ status: 503, headers: { 'access-control-allow-origin': new URL(longPage.url()).origin, 'access-control-allow-methods': 'GET, DELETE', 'access-control-allow-headers': 'Authorization, Accept' }, json: { error: 'unavailable' } }))
+  await longPage.route('**/api/decision-desk/connections', route => route.fulfill({ json: { connections: [{ id: 'c1', origin, instance: 'pma', created_at: iso(NOW), expires_at: iso(NOW + 90 * 86400_000) }] } }))
+  await longPage.goto('/settings/personal')
+  const longReceiving = longPage.locator('#other-instances')
+  await expect(longReceiving.getByRole('status')).toHaveText("Couldn't be reached")
   for (const width of [1440, 1024, 390] as const) {
-    await page.setViewportSize({ width, height: 950 })
+    await longPage.setViewportSize({ width, height: 950 })
     for (const theme of ['light', 'dark'] as const) {
-      await page.emulateMedia({ colorScheme: theme })
-      await expect(receiving.locator('.connection-host')).toHaveAttribute('data-tip', new URL(origin).host)
-      expect(await receiving.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
-      await receiving.screenshot({ path: info.outputPath(`connections-long-${width}-${theme}.png`) })
+      await longPage.emulateMedia({ colorScheme: theme })
+      await expect(longReceiving.locator('.connection-host')).toHaveAttribute('data-tip', new URL(origin).host)
+      expect(await longReceiving.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+      await longReceiving.screenshot({ path: info.outputPath(`connections-long-${width}-${theme}.png`) })
     }
   }
+  await longPage.close()
 })
 
 test('sibling sync ages keep the number and seconds unit together', async ({ page }) => {
