@@ -4,13 +4,17 @@ import { displayLanguage, type DisplayLanguage } from './displayLanguage'
 // One catalog, following the app language; never switch a panel by browser locale.
 export function assistantCopy(language: DisplayLanguage = displayLanguage()) {
   const de = language === 'de'
+  const plurals = new Intl.PluralRules(language)
   return {
     heading: (n: number) => de ? `Assistenten · ${n}` : `Assistants · ${n}`,
     showAll: (n: number) => de ? `Alle anzeigen (${n})` : `Show all (${n})`,
     statuses: { waiting: de ? 'Wartet auf Freigabe' : 'Waiting for you', down: de ? 'Verbindung gestört' : 'Adapter down', working: de ? 'Arbeitet' : 'Working', idle: de ? 'Bereit' : 'Idle', paused: de ? 'Pausiert' : 'Paused', setup: de ? 'Nicht eingerichtet' : 'Not set up', unavailable: de ? 'Status nicht verfügbar' : 'Status unavailable' },
     waitingOther: de ? 'Wartet auf Freigabe' : 'Waiting for an approval',
     toApprove: (n: number, partial = false) => partial && !n ? de ? 'Freigaben prüfen' : 'Check approvals' : de ? `${n}${partial ? '+' : ''} zur Freigabe` : `${n}${partial ? '+' : ''} to approve`,
-    approvalLine: (n: number, partial = false) => de ? `${partial ? 'Mindestens ' : ''}${n} Aktionen brauchen eine Freigabe` : `${partial ? 'At least ' : ''}${n} actions need an approval`,
+    approvalLine: (n: number, partial = false) => {
+      const one = plurals.select(n) === 'one'
+      return de ? `${partial ? 'Mindestens ' : ''}${n} ${one ? 'Aktion braucht' : 'Aktionen brauchen'} eine Freigabe` : `${partial ? 'At least ' : ''}${n} ${one ? 'action needs' : 'actions need'} an approval`
+    },
     weekAmount: (a: string, b: string) => de ? `${a} von ${b}` : `${a} of ${b}`,
     thisWeekAmount: (a: string, b: string) => de ? `${a} von ${b} diese Woche` : `${a} of ${b} this week`,
     budgetReached: de ? 'Budget erreicht' : 'Budget reached',

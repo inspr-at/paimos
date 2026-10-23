@@ -1057,12 +1057,33 @@ test('assistant Desk approvals keep independent links, waiting order and partial
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(amyRow.locator('strong')).toHaveAttribute('data-tip', amy.display_name)
   const details = page.getByRole('complementary', { name: 'Assistant details', exact: true })
+  const expectClearApprovalBands = async () => {
+    const bands = await amyRow.evaluate(row => {
+      const box = (selector: string) => { const r = row.querySelector(selector)!.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, height: r.height } }
+      return { row: row.getBoundingClientRect().height, status: box('.assistant-state'), spend: box('.phone-facts'), link: box('.assistant-approvals a') }
+    })
+    expect(bands.row).toBe(64)
+    expect(bands.link.height).toBeGreaterThanOrEqual(44)
+    expect(bands.link.y, 'approval hit area starts below the status band').toBeGreaterThanOrEqual(bands.status.bottom)
+    expect(bands.link.x, 'approval hit area stays beside the spend facts').toBeGreaterThanOrEqual(bands.spend.right)
+  }
+  // A narrow card on a wide viewport must use the same non-overlapping bands.
+  await section.evaluate(element => { element.style.maxWidth = '500px' })
+  await expectClearApprovalBands()
+  await section.evaluate(element => { element.style.removeProperty('max-width') })
   const checks: { width: number; theme: string; approvals: number; overflow: number }[] = []
   for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.emulateMedia({ colorScheme: theme })
     await section.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: testInfo.outputPath(`aeon-1705-fix4-${width}-${theme}-waiting.png`), fullPage: true })
+    if (width === 390) {
+      await expectClearApprovalBands()
+      await amyRow.locator('.assistant-state').click()
+      await expect(details).toBeVisible()
+      await details.getByRole('button', { name: 'Close assistant details' }).click()
+      await expect(page).toHaveURL('/agents')
+    }
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1705-fix5-${width}-${theme}-waiting.png`), fullPage: true })
     await amyRow.locator('.assistant-open').click()
     const tabs = details.getByRole('tablist'), close = details.getByRole('button', { name: 'Close assistant details' })
     await expectStableControls({ controls: { tabs, close, overview: tabs.getByRole('tab', { name: 'Overview', exact: true }), approvals: tabs.getByRole('tab', { name: 'Approvals', exact: true }), ...(width === 390 ? { sheet: details } : {}) }, scrollAreas: { body: details.locator('.assistant-panel-scroll') }, interactions: [{ name: 'open approvals without moving controls', run: async () => {
@@ -1078,7 +1099,7 @@ test('assistant Desk approvals keep independent links, waiting order and partial
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     expect(overflow).toBeLessThanOrEqual(0)
     checks.push({ width, theme, approvals: 2, overflow })
-    await page.screenshot({ path: testInfo.outputPath(`aeon-1705-fix4-${width}-${theme}-approvals.png`), fullPage: true })
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1705-fix5-${width}-${theme}-approvals.png`), fullPage: true })
     await close.click()
   }
   await amyRow.locator('.assistant-open').click()
@@ -1089,12 +1110,19 @@ test('assistant Desk approvals keep independent links, waiting order and partial
     await page.clock.fastForward(3001)
   }
   const countGuard = await controlStability(page, { assistant: amyRow.locator('.assistant-open'), approvalLink: amyRow.locator('.assistant-approvals a') })
+  const digitLeft = () => amyRow.locator('.assistant-approvals a').evaluate(link => {
+    const range = document.createRange()
+    range.setStart(link.firstChild!, 0); range.setEnd(link.firstChild!, 1)
+    return range.getBoundingClientRect().x
+  })
+  const beforeDigit = await digitLeft()
   await countGuard.check(async () => {
     partial = true
     await wake()
     await expect(amyRow.getByRole('link', { name: '2+ to approve', exact: true })).toHaveAttribute('title', 'This list is partial; more entries are available.')
   })
   countGuard.done()
+  expect(Math.abs(await digitLeft() - beforeDigit), 'the first digit stays still when the count becomes partial').toBeLessThanOrEqual(.5)
   await expect(details.locator('.panel-status-line')).toContainText('At least 2 actions need an approval')
   await expect(details.getByRole('tabpanel', { name: 'Approvals', exact: true })).toContainText('This list is partial; more entries are available.')
   readable = false
@@ -1104,7 +1132,51 @@ test('assistant Desk approvals keep independent links, waiting order and partial
   await page.reload()
   await expect(amyRow.locator('.assistant-state')).toHaveText('Waiting for an approval')
   await expect(amyRow.getByRole('link', { name: '2 to approve', exact: true })).toBeVisible()
-  await testInfo.attach('aeon-1705-fix4-checks.json', { body: JSON.stringify(checks), contentType: 'application/json' })
+  await testInfo.attach('aeon-1705-fix5-checks.json', { body: JSON.stringify(checks), contentType: 'application/json' })
+  expect(errors).toEqual([])
+})
+
+test('assistant admission waiting sort retries after hover and focus leave the section', async ({ page }) => {
+  // Risk: the first Desk read arrives during interaction, permanently losing
+  // waiting-first admission order or moving a row under the pointer/focus.
+  const errors = watchErrors(page), now = Date.now()
+  const { work } = await setup(page)
+  work.preferences['ui.agents.sections'] = { dial: false }
+  const { items } = assistantEvidence(now, me.id)
+  const amy = items.find(item => item.display_name === 'Amy')!
+  amy.display_name = 'Zamy'
+  await mockAssistants(page, items, me.id)
+  let held: Promise<void>
+  await page.route('**/api/decision-desk/projection?**', async route => {
+    await held
+    return route.fulfill({ json: { items: [{ id: 'da000000-0000-4000-8000-000000000001', kind: 'approval', revision: 1, title: 'Send the summary', created_at: new Date(now).toISOString(), held: true, asked_by: { id: amy.principal_id, name: amy.display_name }, href: '/decision-desk?item=a:da000000-0000-4000-8000-000000000001' }], counts: { open: 1, held: 1, chores: 0 }, has_more: false, as_of: new Date(now).toISOString() } })
+  })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  for (const interaction of ['pointer', 'focus']) await test.step(interaction, async () => {
+    let release!: () => void
+    held = new Promise<void>(resolve => { release = resolve })
+    await page.mouse.move(0, 0)
+    await openAgents(page)
+    const section = page.locator('.assistants'), amyRow = section.locator(`[data-assistant="${amy.principal_id}"]`)
+    await expect(section.locator('.assistant-name strong').first()).toHaveText('Scout')
+    const open = amyRow.locator('.assistant-open')
+    if (interaction === 'pointer') await section.hover()
+    else await open.focus()
+    const guard = await controlStability(page, { amy: open, scout: section.locator('.assistant-row').first().locator('.assistant-open') }, { tolerance: 0 })
+    await guard.check(async () => {
+      release()
+      await expect(amyRow.getByRole('link', { name: '1 to approve', exact: true })).toBeVisible()
+      await expect(section.locator('.assistant-name strong').first()).toHaveText('Scout')
+    })
+    if (interaction === 'focus') await guard.check(async () => {
+      await amyRow.getByRole('link').focus()
+      await expect(section.locator('.assistant-name strong').first()).toHaveText('Scout')
+    })
+    guard.done()
+    if (interaction === 'pointer') await page.mouse.move(0, 0)
+    else await page.locator('h1').evaluate(element => { element.tabIndex = -1; element.focus() })
+    await expect(section.locator('.assistant-name strong').first()).toHaveText('Zamy')
+  })
   expect(errors).toEqual([])
 })
 

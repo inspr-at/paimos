@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { assistantConnectLink, assistantDeskLink, assistantMoney, assistantOrder, assistantStatus, ASSISTANT_STATUS_ICON, retainAssistantOrder, policyGroups, unavailableAssistantFacts, type Assistant, type AssistantFacts } from '../../lib/assistants'
 import { assistantCopy } from '../../lib/assistantsCopy'
 import { relativeTime } from '../../lib/work'
@@ -21,15 +21,17 @@ watch(() => props.owner, () => {
 function reorder() {
   if (pointer.value || root.value?.contains(document.activeElement)) return
   order.value = assistantOrder(props.items, props.facts, props.now)
+  if (props.items.length && props.items.every(item => props.facts[item.principal_id]?.approvals != null)) initialApprovalOrder = true
 }
+function admitApprovalOrder() {
+  if (!initialApprovalOrder && props.items.length && props.items.every(item => props.facts[item.principal_id]?.approvals != null)) reorder()
+}
+function leavePointer() { pointer.value = false; admitApprovalOrder() }
+function leaveFocus() { void nextTick(admitApprovalOrder) }
 watch(() => props.items, items => {
   order.value = order.value.length ? retainAssistantOrder(items, order.value) : assistantOrder(items, props.facts, props.now)
 }, { immediate: true })
-watch(() => props.facts, facts => {
-  if (initialApprovalOrder || !props.items.length || props.items.some(item => facts[item.principal_id]?.approvals == null)) return
-  initialApprovalOrder = true
-  reorder()
-}, { immediate: true })
+watch(() => props.facts, admitApprovalOrder, { immediate: true })
 watch(() => props.sortEpoch, reorder)
 onMounted(() => window.addEventListener('focus', reorder))
 onBeforeUnmount(() => window.removeEventListener('focus', reorder))
@@ -72,7 +74,7 @@ function adapterLine(item: Assistant) {
 }
 </script>
 <template>
-  <section ref="root" class="assistants glass-card" :class="{ 'metrics-pending': metricsPending }" aria-labelledby="assistants-heading" @pointerenter="pointer = true" @pointerleave="pointer = false">
+  <section ref="root" class="assistants glass-card" :class="{ 'metrics-pending': metricsPending }" aria-labelledby="assistants-heading" @pointerenter="pointer = true" @pointerleave="leavePointer" @focusout="leaveFocus">
     <header class="assistants-head" :aria-owns="controlId"><h2 id="assistants-heading">{{ words.heading(items.length) }}</h2><slot name="actions" /></header>
     <div v-if="state === 'loading' && !items.length" class="assistant-message" role="status">{{ words.loading }}</div>
     <div v-else-if="state === 'forbidden'" class="assistant-message">{{ words.noAccess }}</div>
@@ -93,7 +95,7 @@ function adapterLine(item: Assistant) {
             <span v-if="factsOf(item).routines !== null" v-clip-tip :id="`assistant-routines-${item.principal_id}`" class="routines-column">{{ routineLine(item) }}</span><span v-else :id="`assistant-routines-${item.principal_id}`" class="routines-column" :title="words.notAvailableYet" :data-tip="words.notAvailableYet">—</span>
             <span v-if="factsOf(item).adapter" v-clip-tip :id="`assistant-adapter-${item.principal_id}`" class="adapter-column" :title="adapterLine(item)">{{ adapterLine(item) }}</span><span v-else :id="`assistant-adapter-${item.principal_id}`" class="adapter-column" :title="words.notAvailableYet" :data-tip="words.notAvailableYet">—</span>
           </button>
-          <span class="assistant-approvals"><RouterLink v-if="approvalsOf(item) || factsOf(item).approvalsTruncated" :to="assistantDeskLink(item.principal_id)" :title="factsOf(item).approvalsTruncated ? words.truncated : undefined" @click.stop>{{ approvalLabel(item) }}</RouterLink><span v-else :title="approvalsOf(item) === null ? words.approvalsUnavailable : undefined" :data-tip="approvalsOf(item) === null ? words.approvalsUnavailable : undefined" @click="openCell(item, $event)">—</span></span>
+          <span class="assistant-approvals" aria-live="polite" aria-atomic="true"><RouterLink v-if="approvalsOf(item) || factsOf(item).approvalsTruncated" :to="assistantDeskLink(item.principal_id)" :title="factsOf(item).approvalsTruncated ? words.truncated : undefined" :data-tip="factsOf(item).approvalsTruncated ? words.truncated : undefined" @click.stop>{{ approvalLabel(item) }}</RouterLink><span v-else :title="approvalsOf(item) === null ? words.approvalsUnavailable : undefined" :data-tip="approvalsOf(item) === null ? words.approvalsUnavailable : undefined" @click="openCell(item, $event)">—</span></span>
         </div>
       </div>
       <button v-if="!expanded && items.length > 5" type="button" class="assistant-show-all" @click="showAll">{{ words.showAll(items.length) }}<AppIcon name="chevron" :size="14" /></button>
@@ -154,22 +156,17 @@ h2 { margin: 0; font-size: 15px; font-weight: 650; color: var(--ink); }
   .assistants-head { padding-inline: 12px; min-height: 52px; }
   .assistant-columns { display: none; }
   .assistant-rows { display: grid; }
-  .assistant-row, .assistant-row:last-child { height: 56px; display: block; padding: 0 12px; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
-  .assistant-identity { position: absolute; left: 12px; right: 12px; top: 8px; gap: 7px; }
+  .assistant-row, .assistant-row:last-child { height: 64px; display: block; padding: 0 12px; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+  .assistant-identity { position: absolute; left: 12px; right: 12px; top: 4px; gap: 7px; }
   .assistant-name { padding-right: 9em; }
-  .assistant-state { position: absolute; right: 12px; top: 10px; max-width: 48%; font-size: 11px; white-space: nowrap; }
+  .assistant-state { position: absolute; right: 12px; top: 4px; max-width: 48%; font-size: 11px; line-height: 14px; white-space: nowrap; }
   .assistant-state svg { display: none; }
   .folded-facts, .row-budget, .assistant-glance { display: none; }
-  .phone-facts { display: block; font-size: 12px; white-space: nowrap; }
-  .assistant-approvals:has(a) { display: block; position: absolute; left: calc(50% + 8px); right: 12px; bottom: 1px; }
-  .assistant-approvals a { min-height: 44px; justify-content: flex-end; }
+  .phone-facts { display: block; max-width: calc(50% - 8px); font-size: 12px; white-space: nowrap; }
+  .assistant-approvals:has(a) { display: block; position: absolute; left: calc(50% + 8px); right: 12px; bottom: 0; }
+  .assistant-approvals a { min-height: 44px; min-width: 16ch; justify-content: flex-start; font-variant-numeric: tabular-nums; }
   .assistant-open { display: block; padding: 0; border-radius: var(--radius); }
   .assistant-empty { flex-direction: column; align-items: flex-start; gap: 10px; padding: 12px; }
   .assistant-empty .btn { min-height: 44px; }
-}
-@media (max-width: 520px) {
-  .assistant-row, .assistant-row:last-child { height: 64px; }
-  .assistant-identity { top: 10px; }
-  .assistant-state { top: 12px; }
 }
 </style>

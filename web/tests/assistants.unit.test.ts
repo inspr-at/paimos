@@ -3,12 +3,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, disposePinia, setActivePinia } from 'pinia'
 import { createSSRApp, defineComponent, h, reactive } from 'vue'
 import { renderToString } from 'vue/server-renderer'
-import { assistantOrder, assistantStatus, budgetPercent, listAssistants, policyChange, retainAssistantOrder, unavailableAssistantFacts, type Assistant } from '../src/lib/assistants'
+import { assistantOrder, assistantStatus, budgetPercent, listAssistants, policyChange, retainAssistantOrder, unavailableAssistantFacts, type Assistant, type AssistantFacts } from '../src/lib/assistants'
 import { readAssistantRoutines } from '../src/lib/assistantRoutines'
 import type { DeskProjection } from '../src/lib/decisionDesk'
 import { useAssistants } from '../src/stores/assistants'
 import { assistantCopy } from '../src/lib/assistantsCopy'
 import AssistantsSection from '../src/components/agents/AssistantsSection.vue'
+import AssistantPanel from '../src/components/agents/AssistantPanel.vue'
 import { assistantEvidence } from './agents-fixtures'
 
 vi.mock('../src/lib/assistants', async original => ({ ...await original<typeof import('../src/lib/assistants')>(), listAssistants: vi.fn() }))
@@ -32,6 +33,68 @@ beforeEach(() => {
   vi.mocked(readAssistantRoutines).mockResolvedValue({ rows: [], truncated: false })
 })
 afterEach(() => { disposePinia(pinia); vi.useRealTimers() })
+
+async function renderApprovalViews(partial: boolean, count = 2) {
+  const now = Date.parse('2026-10-23T16:00:00Z')
+  const { items, facts } = assistantEvidence(now, 'owner')
+  const amy = items.find(item => item.display_name === 'Amy')!
+  const values: AssistantFacts = { ...facts[amy.principal_id]!, approvals: facts[amy.principal_id]!.approvals!.slice(0, count), approvalsTruncated: partial }
+  const store = useAssistants()
+  vi.spyOn(store, 'loadHistory').mockResolvedValue()
+  vi.spyOn(store, 'loadRoutines').mockResolvedValue()
+  const app = createSSRApp({ render: () => h('main', [
+    h(AssistantsSection, { items: [amy], facts: { [amy.principal_id]: values }, state: 'ready', error: '', truncated: false, canConnect: true, canApprove: true, now, sortEpoch: 0, selected: '', owner: 'owner' }),
+    h(AssistantPanel, { item: amy, facts: values, now, docked: true, sheet: false, layout: 'side', sidebarAvailable: true }),
+  ]) })
+  app.component('RouterLink', defineComponent({ props: ['to'], setup: (props, { slots }) => () => h('a', { href: props.to }, slots.default?.()) }))
+  return { html: await renderToString(app), id: amy.principal_id }
+}
+
+it('assistant approval status lines use singular and plural forms in both languages', () => {
+  // Risk: one pending approval reads as plural, including a partial count.
+  for (const [language, one, two, prefix] of [
+    ['en', '1 action needs an approval', '2 actions need an approval', 'At least '],
+    ['de', '1 Aktion braucht eine Freigabe', '2 Aktionen brauchen eine Freigabe', 'Mindestens '],
+  ] as const) {
+    const words = assistantCopy(language)
+    expect(words.approvalLine(1)).toBe(one)
+    expect(words.approvalLine(2)).toBe(two)
+    expect(words.approvalLine(1, true)).toBe(prefix + one)
+    expect(words.approvalLine(2, true)).toBe(prefix + two)
+  }
+})
+
+it('assistant partial approval links expose explanations to the shared tooltip', async () => {
+  // Risk: native titles leave keyboard users without the partial-list warning.
+  for (const partial of [true, false]) {
+    const { html, id } = await renderApprovalViews(partial)
+    const links = [...html.matchAll(/<a\b[^>]*>/g)].map(match => match[0]).filter(tag => tag.includes(`href="/decision-desk?assistant=${id}"`))
+    expect(links).toHaveLength(2) // The row link and the panel's Next link.
+    for (const link of links) {
+      if (partial) {
+        expect(link).toContain(`title="${assistantCopy().truncated}"`)
+        expect(link).toContain(`data-tip="${assistantCopy().truncated}"`)
+      } else {
+        expect(link).not.toContain('title=')
+        expect(link).not.toContain('data-tip=')
+      }
+    }
+  }
+})
+
+it('assistant approval counts and panel status lines announce complete updates politely', async () => {
+  // Risk: live Desk changes are silent, or the whole identity poll is announced.
+  for (const count of [2, 1]) {
+    const { html } = await renderApprovalViews(false, count)
+    for (const tag of [html.match(/<span class="assistant-approvals"[^>]*>/)?.[0], html.match(/<p class="panel-status-line"[^>]*>/)?.[0]]) {
+      expect(tag).toContain('aria-live="polite"')
+      expect(tag).toContain('aria-atomic="true"')
+    }
+    expect(html).toContain(`${count} to approve`)
+    expect(html).toContain(assistantCopy().approvalLine(count))
+    expect(html.match(/<section[^>]*class="assistants glass-card[^"]*"[^>]*>/)?.[0]).not.toContain('aria-live=')
+  }
+})
 
 it('assistant identity polls reuse discovered routines instead of repeating the owner and history sweep', async () => {
   // Risk: each 20-second identity poll repeats hundreds of per-routine reads.
