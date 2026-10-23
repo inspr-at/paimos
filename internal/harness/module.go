@@ -499,7 +499,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 
 type Session struct {
 	// Cross-project lineage is display attribution; it never grants parent controls.
-	CrossProjectParentID    *string `json:"cross_project_parent_harness_session_id,omitempty"`
+	CrossProjectParentID    *string      `json:"cross_project_parent_harness_session_id,omitempty"`
+	ChildCounts             *ChildCounts `json:"child_counts,omitempty"`
 	lineageParentID         *string
 	lineageParentVisible    bool
 	DeskAnswers             []deskdelivery.Answer    `json:"desk_answers,omitempty"`
