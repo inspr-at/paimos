@@ -198,7 +198,8 @@ test('test-prune ledger rejects removed risks without lineage and keeps P01 exec
   }
   assert.equal(validateLedger({ ...areaCut, sourceHash }).cuts, true,
     'A pinned Agents cut passes while unrelated Projects is unpinned and Goals is deferred')
-  assert.throws(() => validateLedger({ ...areaCut, sourceHash, p01: true }), /P01 cannot remove or demote/)
+  const p01AreaCut = { ...areaCut, ledger: { ...areaCut.ledger, phase: 'P01' } }
+  assert.throws(() => validateLedger({ ...p01AreaCut, sourceHash, p01: true }), /P01 cannot remove or demote/)
   const unpinnedArea = structuredClone(areaCut)
   unpinnedArea.visual.states.find((row: { id: string }) => row.id === 'agents').checkpoints[1].reference.sha256 = null
   assert.throws(() => validateLedger({ ...unpinnedArea, sourceHash }), { message: 'Unpinned visual reference: V-agents-390-dark' })
