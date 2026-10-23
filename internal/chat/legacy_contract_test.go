@@ -126,6 +126,7 @@ func TestAttachedResponsesUseSeparateSchemas(t *testing.T) {
 			t.Fatal(err)
 		}
 		raw = bytes.ReplaceAll(raw, []byte("./openapi-messaging.yaml#/components/schemas/"), []byte("#/$defs/"))
+		raw = bytes.ReplaceAll(raw, []byte("./openapi.yaml#/components/schemas/"), []byte("#/$defs/"))
 		raw = bytes.ReplaceAll(raw, []byte("#/components/schemas/"), []byte("#/$defs/"))
 		var schema jsonschema.Schema
 		if err := json.Unmarshal(raw, &schema); err != nil {
