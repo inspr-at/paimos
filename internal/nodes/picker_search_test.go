@@ -15,6 +15,8 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/eta"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
@@ -55,6 +57,20 @@ func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
 	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Picker"}`, projectKind.ID))
 	work := kindBySlug(t, p, "work")
 	const leaves = 4097
+	// Pin the pre-import statistics, including during the HTTP requests.
+	// This lock permits normal reads/writes but holds auto-analyze off, so
+	// runner timing cannot decide whether the expensive plan is exercised.
+	if _, err := adminPool.Exec(t.Context(), `ANALYZE nodes`); err != nil {
+		t.Fatal(err)
+	}
+	statistics, err := adminPool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer statistics.Rollback(t.Context())
+	if _, err := statistics.Exec(t.Context(), `LOCK TABLE nodes IN SHARE UPDATE EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
 	var ids []string
 	var parentID, childID string
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
@@ -93,6 +109,49 @@ func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "work scope root budget exceeded") {
 		t.Fatalf("corpus did not exceed the scope root budget: %v", err)
+	}
+	// Risk: stale row estimates can turn a set-based leaf filter into one
+	// rescan of the entire candidate set per row. Inspect actual work rather
+	// than relying on the speed of the test host.
+	query := leaf
+	query.Q = "PICK"
+	query.Limit = 30
+	querySQL, queryArgs := listSQL(query, nil)
+	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(t.Context(), p), eta.AggregateReadTimeout)
+	defer cancel()
+	err = db.InTenant(ctx, appPool, p.TenantID, func(tx pgx.Tx) error {
+		var raw []byte
+		if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+querySQL, queryArgs...).Scan(&raw); err != nil {
+			return err
+		}
+		var documents []map[string]any
+		if err := json.Unmarshal(raw, &documents); err != nil {
+			return err
+		}
+		var nodeVisits float64
+		var visit func(map[string]any)
+		visit = func(plan map[string]any) {
+			if plan["Relation Name"] == "nodes" {
+				rows, _ := plan["Actual Rows"].(float64)
+				filtered, _ := plan["Rows Removed by Filter"].(float64)
+				loops, _ := plan["Actual Loops"].(float64)
+				nodeVisits += (rows + filtered) * loops
+				t.Logf("picker plan: alias=%v index=%v rows=%v loops=%v", plan["Alias"], plan["Index Name"], rows+filtered, loops)
+			}
+			for _, child := range planChildren(plan) {
+				visit(child)
+			}
+		}
+		visit(documents[0]["Plan"].(map[string]any))
+		// Allow whole-corpus matching/counting plus bounded page enrichment;
+		// never a whole-corpus parent/ancestor scan for every selected row.
+		if budget := float64(4*(leaves+3) + 32*(query.Limit+1)); nodeVisits > budget {
+			return fmt.Errorf("picker rescanned nodes per page row: %.0f visits, budget %.0f", nodeVisits, budget)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	status, body := call(t, &p, http.MethodGet, "/api/nodes?kind=work&shape=leaf&limit=30&sort=-updated_at&rollups=omit&q=PICK", "")

@@ -299,7 +299,7 @@ test('P04 header: visibility and occlusion never resume a graph the person pause
   } finally { app.stop() }
 })
 
-async function deliveredWidth(mutation?: Mutation) {
+async function deliveredWidth(mutation?: Mutation, target: 'root' | 'body' = 'root') {
   const app = header(mutation)
   try {
     await app.start(); await app.answer(0, 'A')
@@ -308,15 +308,28 @@ async function deliveredWidth(mutation?: Mutation) {
     assert.ok(observer, 'the viewport observer is installed')
     // No frames, tasks, window events or fresh geometry: deliver only the
     // observer's narrow sample while all synchronous hints still say wide.
-    observer.deliver([{ target: app.env.document.documentElement, borderBoxSize: [{ inlineSize: 390 }], contentRect: { width: 390 } }])
+    observer.deliver([{ target: target === 'root' ? app.env.document.documentElement : app.env.document.body, borderBoxSize: [{ inlineSize: 390 }], contentRect: { width: 390 } }])
     await flush()
     assert.equal(app.state.paint.value, false, 'a delivered narrow width must clear the painted glimpse')
+    observer.deliver([{ target: app.env.document.body, borderBoxSize: [{ inlineSize: 1600 }], contentRect: { width: 1600 } }])
+    await flush()
+    assert.equal(app.state.paint.value, false, 'a body-only wide delivery cannot revive a cleared glimpse')
     app.env.media('(min-width: 1280px)', true)
     await flush()
     assert.equal(app.state.paint.value, false, 'a late wide-media callback cannot revive it')
+    observer.deliver([{ target: app.env.document.documentElement, borderBoxSize: [{ inlineSize: 1600 }], contentRect: { width: 1600 } }])
+    await flush()
+    assert.equal(app.requests.length, 2, 'a fresh wide root sample starts the current graph again')
+    await app.answer(1, 'Wide')
+    assert.equal(app.state.paint.value, true)
   } finally { app.stop() }
 }
-test('P04 header: a held-delivery narrow root sample wins over stale media and geometry', () => deliveredWidth())
+test('P04 header: a held-delivery narrow root sample wins over stale media and geometry', async () => {
+  await deliveredWidth()
+  // The root observer can be dropped independently. A body delivery must
+  // carry its measured width even before synchronous viewport reads catch up.
+  await deliveredWidth(undefined, 'body')
+})
 
 function grouped(mutation?: Mutation) {
   const env = environment(), requests: { id: string; query: ListQuery; signal: AbortSignal; result: ReturnType<typeof deferred<ProjectFigures>> }[] = []
@@ -391,9 +404,14 @@ test('P04 negative control: missing late-renderer disposal is detected', () => n
 test('P04 negative control: accepting an aborted graph context is detected', () => negative(() => staleContext({
   before: 'if (controller.signal.aborted || !allowed.value) return', after: 'if (!allowed.value) return',
 }), 'an old project context must not replace the current graph'))
-test('P04 negative control: ignoring a delivered viewport sample is detected', () => negative(() => deliveredWidth({
-  before: 'if (viewport) observedViewportWidth = viewport.borderBoxSize[0]?.inlineSize ?? viewport.contentRect.width', after: 'if (viewport) observedViewportWidth = Infinity',
-}), 'a delivered narrow width must clear the painted glimpse'))
+test('P04 negative control: ignoring a delivered viewport sample is detected', async () => {
+  await negative(() => deliveredWidth({
+    before: 'if (viewport) observedViewportWidth = viewport.borderBoxSize[0]?.inlineSize ?? viewport.contentRect.width', after: 'if (viewport) observedViewportWidth = Infinity',
+  }), 'a delivered narrow width must clear the painted glimpse')
+  await negative(() => deliveredWidth({
+    before: 'if (body) observedViewportWidth = Math.min(observedViewportWidth, body.borderBoxSize[0]?.inlineSize ?? body.contentRect.width)', after: 'if (body) observedViewportWidth = Infinity',
+  }, 'body'), 'a delivered narrow width must clear the painted glimpse')
+})
 test('P04 negative control: keeping old-scope counts until idle is detected', () => negative(() => changedScope('filter', {
   before: 'dropChanged(id, owner, group)', after: '/* negative control: old scope retained */',
 }), 'a changed scope must clear old figures before idle'))
