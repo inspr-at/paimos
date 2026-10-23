@@ -203,7 +203,15 @@ test('unticking versions changes what moves and the button label while the actio
   await expect(manyBoxes).toHaveCount(12)
   await expect(go(page)).toHaveAccessibleName('Remove 12 old versions')
   const countGuard = await controlStability(page, { count, go: go(page), keep: sheet(page).locator('[data-od-keep]') })
-  for (let index = 0; index < 11; index++) await countGuard.check(() => manyBoxes.nth(index).uncheck())
+  for (let index = 0; index < 11; index++) await countGuard.check(async () => {
+    await manyBoxes.nth(index).uncheck()
+    const inset = await count.evaluate(el => {
+      const digits = document.createRange()
+      digits.selectNodeContents(el)
+      return digits.getBoundingClientRect().x - el.getBoundingClientRect().x
+    })
+    expect(Math.abs(inset), 'the digits start at the count slot’s edge').toBeLessThanOrEqual(.5)
+  })
   await expect(go(page)).toHaveAccessibleName('Remove 1 old version')
   countGuard.done()
 })
@@ -311,6 +319,7 @@ test('screenshots of the tray and the sheet at 1440, 1024 and 390 px, light and 
         const change = () => boxes.nth(index).setChecked(checked)
         if (checked || index < 3) await countGuard.check(change)
         else await change()
+        if (!checked && index === 2) await page.screenshot({ path: testInfo.outputPath(`sheet-one-${width}-${scheme}.png`) })
       })
       guard.done()
       countGuard.done()
