@@ -61,6 +61,15 @@ func digest(raw []byte) string {
 // The deferred occurrence FK closes the atomic unit at commit. Queue IDs are
 // only the inert holder's existing rows; they grant no routing or execution.
 func persistRun(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence, o *Occurrence, source *EventContext, name, version string) error {
+	if o.NodeID != nil {
+		owner, err := loadAgentOwner(ctx, tx, r.ID)
+		if err != nil {
+			return err
+		}
+		if handled, err := persistAgentRun(ctx, tx, actor, r, o, owner); handled || err != nil {
+			return err
+		}
+	}
 	if o.NodeID == nil || r.Definition == nil || r.Definition.Assignment == nil {
 		return nil
 	}
