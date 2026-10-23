@@ -351,6 +351,7 @@ func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acce
 		}
 		if err == nil {
 			target.ID, target.Version = &targetID, &version
+			target.internal = true
 		}
 	}
 	var id string

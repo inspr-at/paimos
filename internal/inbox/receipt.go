@@ -36,10 +36,11 @@ type Receipt struct {
 }
 
 type receiptTarget struct {
-	ID      *string
-	Version *int
-	Adapter string
-	Address string
+	internal bool
+	ID       *string
+	Version  *int
+	Adapter  string
+	Address  string
 }
 
 func (m *module) handleReceipt(w http.ResponseWriter, r *http.Request) {
@@ -261,6 +262,11 @@ func appendReceiptEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, mess
 }
 
 func receiptEvent(messageID, state string, target receiptTarget, level, reason string) events.Change {
+	if target.internal {
+		// Direct senders did not select a project address. Its pull snapshot
+		// belongs only to the receipt row, never to the shared event stream.
+		target = receiptTarget{}
+	}
 	kind := "inbox.receipt_queued"
 	switch state {
 	case "handed_off":

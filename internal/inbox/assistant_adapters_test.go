@@ -686,6 +686,9 @@ func TestPullAssistantPickupRetention(t *testing.T) {
 			if countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM inbox_receipts WHERE message_id=$1 AND deliver_by IS NULL`, msg.ID) != 1 {
 				t.Fatal("pull has an online deadline")
 			}
+			if countSQL(t, w.db.App, w.admin.TenantID, `SELECT count(*) FROM events WHERE type='inbox.receipt_queued' AND after->>'message_id'=$1 AND (after ? 'target_id' OR after ? 'target_version' OR after ? 'adapter' OR after ? 'address')`, msg.ID) != 0 {
+				t.Fatal("direct receipt event exposed an implicit project binding")
+			}
 			// Old writers may already have attached a 30-minute deadline. It cannot
 			// override the recipient's pull mode after upgrade.
 			msg.CreatedAt = msg.CreatedAt.Add(-2 * time.Hour)
