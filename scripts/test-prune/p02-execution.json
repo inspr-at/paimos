@@ -2,9 +2,9 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "round12-report-only-implemented-remote-capacity-handoff",
+  "status": "round12-report-only-verified-unchanged-static-budget-handoff",
   "cuts": false,
-  "note": "Round 12 implements report-only execution for all 80 checkpoints with one comparison.mode switch, no active pins and no protected cuts. Set-1 history and the complete set-2 approval/pin snapshot remain immutable historical evidence; all 72 historical PNG/payload digests verify. Final renderer, clock, fonts and visual-only isolation are unchanged. Actual quality errors, renderer mismatches, comparisons and diff filenames remain visible in every-shard all-80 summaries and evidence; synthetic guard outputs cannot replace owner-spec results. Three focused Node tests and ten affected remote workflow Go tests pass. Browser and full static checks remain unproven after exit-3 capacity/host refusals; coordinator-owned PR #891 CI must confirm green after push. No origin push, deploy, reference capture, new pin, cut or review gate.",
+  "note": "Round 12 implements all-80 report-only execution, one comparison.mode switch, historical-only set-1/set-2 inputs and zero active pins/cut authority. Final renderer unchanged. All 80 real checkpoint tests and six blocking guards pass remotely at 1f026979c; reports record 72 quality passes, four missing Goals v6 prerequisites and four Ticket Workspace layout failures. Product comparisons explicitly report absent remote baseline input; the synthetic guard proves actual diff PNGs and blocking rejection when the switch changes. Every shard lists all 80 IDs/results/diff filenames and accepts only owner-spec evidence. Three Node checks, ten targeted remote workflow tests, all 72 historical digests and all other static checks pass; public documentation names were corrected and the scan now passes. The sole remaining static issue is the unchanged web-shard-spec-tests 120-second budget, whose contained suite passes under web-shard-tests in 368s. Hosted CI is still required; no hosted-green claim. No origin push, deployment, manual reference capture, new pin, cut or model review.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -20,7 +20,11 @@
   "blockers": [
     {
       "kind": "hosted-verification",
-      "reason": "PR #891 CI must run after coordinator push; the worker cannot push and cannot claim hosted green. AEON-1692 owns set-3 re-capture and pins."
+      "reason": "Coordinator-owned PR #891 CI remains required. No origin push is authorized."
+    },
+    {
+      "kind": "unchanged-static-budget",
+      "reason": "ci-static: web-shard-spec-tests exceeded timeout_seconds=120 after 120.02s (process group termination requested). The unchanged contained suite passes under web-shard-tests in 368s; the same duplicate-wrapper budget was recorded in round 10 (331.55s). No test skip or budget change."
     }
   ],
   "measurements": [
@@ -4214,8 +4218,56 @@
       "immutableArchive": "All payloads and 72 historical PNGs verify",
       "history": "Set-1 byte-for-byte JSON unchanged; set-2 approval/baselineAuthority/states snapshot exactly matches round 11",
       "staticInventory": "38 static commands classified",
-      "browser": "UNPROVEN: two remote-spec.sh attempts exit 3, remote busy (no free mbp2606 slot: global cap / CI pool / battery). No local browser fallback.",
-      "fullStatic": "UNPROVEN: ci-static-remote.sh exit 3, first remote paused: mbp2606 not GREEN; second remote busy (2 remote runs already active on mbp2606, global cap).",
+      "browser": {
+        "sourceSHA": "1f026979caff419ce5b7f7368170c526917247a9",
+        "runner": "approved remote-spec.sh",
+        "blockingGuards": {
+          "passed": 6,
+          "seconds": 24.3,
+          "actualDiffFiles": [
+            "V-projects-390-light-1-diff.png",
+            "V-projects-390-light-2-diff.png"
+          ]
+        },
+        "realCheckpoints": {
+          "passedReportOnlyTests": 80,
+          "batchPassCounts": [
+            28,
+            26,
+            26
+          ],
+          "qualityPassed": 72,
+          "qualityFailedReported": 8,
+          "qualityFailures": [
+            "Goals: four v6 view prerequisites",
+            "Ticket Workspace: four layout checks"
+          ],
+          "comparisonUnavailableMissingRemoteBaseline": 76,
+          "comparisonNotRunAfterGoalsSetupFailure": 4,
+          "requirementsAttempted": 80
+        },
+        "evidence": [
+          "tmp/AEON-1674-r12-real-evidence.json",
+          "tmp/AEON-1674-r12-ci-table.md",
+          "web/test-results/remote/r12-guards",
+          "web/test-results/remote/r12-states-a",
+          "web/test-results/remote/r12-states-b",
+          "web/test-results/remote/r12-states-c"
+        ]
+      },
+      "fullStatic": {
+        "sourceSHA": "1f026979caff419ce5b7f7368170c526917247a9",
+        "entryPoint": "ci-static-locked.sh",
+        "exit": 1,
+        "passed": 42,
+        "optionalSkipped": 0,
+        "seconds": 445.41,
+        "ownFailureFixed": "public-names: removed operator host names from the existing feature ledger; post-fix source scan passes",
+        "remainingIssue": "ci-static: web-shard-spec-tests exceeded timeout_seconds=120 after 120.02s (process group termination requested)",
+        "sameContainedSuite": "web-shard-tests PASSED in 368s",
+        "scopeAssessment": "Timing wrapper and measured listing/shard code unchanged by P02. The same issue is recorded by round 10; worker-common known environment list item 3 applies. Full test-tier, shard, releaseworkflow, typecheck, lint, audit and safety checks passed.",
+        "gatePolicy": "No timeout change, test skip, review gate or heavy local rerun. Hosted CI remains authoritative."
+      },
       "hostedCI": "coordinator-owned after push",
       "workflowGo": {
         "sourceSHA": "b81ae9b49e",
