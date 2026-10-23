@@ -616,6 +616,7 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 	want := cloneStep(t, before)
 	want["steps"] = wantSteps
 	setup = cloneStep(t, setup)
+	normalizeAEON1674VisualReferences(t, "web-setup", setup)
 	normalizeWebReproducibility(t, setup)
 	normalizeWebCatalogueOverlap(t, jobs, setup)
 	if condition, _ := setup["if"].(string); !strings.Contains(condition, " && needs.tree-reuse.outputs.reuse != 'pull_request'") {
@@ -630,6 +631,69 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 		t.Fatal("Parallel setup changed beyond moving units and their prerequisites/proofs")
 	}
 	return before
+}
+
+// Verify the blocking reference transport before projecting onto the immutable
+// pre-visual CI pins. Catalogue discovery needs dependencies, not reference
+// assets; browser shards must verify the exact transported bytes again.
+func normalizeAEON1674VisualReferences(t *testing.T, id string, job map[string]any) {
+	t.Helper()
+	var name, command, previous, next string
+	switch id {
+	case "web-setup":
+		name = "Download and verify approved visual reference assets"
+		command = "download"
+		previous = "actions/setup-node@"
+		next = "Resolve lockfile and Playwright cache keys"
+		if !reflect.DeepEqual(job["permissions"], map[string]any{"contents": "read"}) {
+			t.Fatal("visual setup must use only read-only repository authority")
+		}
+		delete(job, "permissions")
+		pack := reuseStep(t, job, "Pack web runtime for shards")
+		if pack["run"] != `tar -cf "$RUNNER_TEMP/web-runtime.tar" web/node_modules web/dist tmp/visual-baselines` {
+			t.Fatal("shared web runtime must carry the verified original reference assets")
+		}
+		pack["run"] = `tar -cf "$RUNNER_TEMP/web-runtime.tar" web/node_modules web/dist`
+	case "web-shard":
+		name = "Verify visual reference transport before comparison"
+		command = "verify"
+		previous = "Install Chromium system dependencies"
+		next = "Download affected browser execution plan"
+		env := treeMap(job["env"])
+		if env["AEON_VISUAL_BASELINE_FILE"] != "${{ github.workspace }}/tmp/visual-baselines/baseline.json" {
+			t.Fatal("every browser shard must compare against the verified transported baseline")
+		}
+		delete(env, "AEON_VISUAL_BASELINE_FILE")
+	default:
+		return
+	}
+	want := map[string]any{
+		"name": name,
+		"run":  "node scripts/test-prune/visual-baselines.mjs " + command + " tmp/visual-baselines\ncat tmp/visual-baselines/reference-gates.md >> \"$GITHUB_STEP_SUMMARY\"\n",
+	}
+	if id == "web-setup" {
+		want["env"] = map[string]any{"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
+	}
+	steps := reuseSteps(job)
+	found := -1
+	for i, value := range steps {
+		step := treeMap(value)
+		if step["name"] != name {
+			continue
+		}
+		if found != -1 || !reflect.DeepEqual(step, want) || i == 0 || i+1 >= len(steps) {
+			t.Fatal("visual reference transport must run exactly once, unconditionally and blocking")
+		}
+		before := treeMap(steps[i-1])
+		if before["name"] != previous && !strings.HasPrefix(fmt.Sprint(before["uses"]), previous) || treeMap(steps[i+1])["name"] != next {
+			t.Fatal("visual reference transport must precede runtime packing and browser execution")
+		}
+		found = i
+	}
+	if found == -1 {
+		t.Fatal("missing blocking visual reference transport")
+	}
+	job["steps"] = append(append([]any{}, steps[:found]...), steps[found+1:]...)
 }
 
 // AEON-1276 adds a blocking rebuild proof and failure evidence to runtime
@@ -1019,6 +1083,7 @@ func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
 	normalizeParallelWebSetup(t, jobs)
 	unit, browser := treeMap(jobs["web-unit"]), treeMap(jobs["web-shard"])
+	normalizeAEON1674VisualReferences(t, "web-shard", cloneStep(t, browser))
 	for _, j := range []map[string]any{unit, browser} {
 		if !reflect.DeepEqual(j["needs"], []any{"ci-plan", "web-setup", "tree-reuse", "apt-bundle"}) {
 			t.Fatal("Unit and browser shards must start together from setup, without depending on each other")
@@ -1095,6 +1160,9 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				j = normalizeParallelWebSetup(t, jobs)
 			}
 			j = cloneStep(t, j)
+			if id != "web-setup" { // Setup transport was proved before catalogue projection.
+				normalizeAEON1674VisualReferences(t, id, j)
+			}
 			normalizeOfflineAptBundle(t, id, j)
 			normalizeAEON1660Caches(t, id, j)
 			if id != "web-setup" { // The historical setup was already projected above.
