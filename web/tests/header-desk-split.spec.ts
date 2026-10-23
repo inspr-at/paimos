@@ -619,9 +619,13 @@ for (const width of [1024, 1440]) test(`a long request wraps inside the preview 
 // phones pin it at the foot of a full-height sheet.
 for (const width of [1440, 390]) test(`the preview's controls stay put through reading, a failure, Retry and a refresh at ${width}`, async ({ page }) => {
   await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
-  await page.clock.install({ time: new Date('2026-10-11T10:00:00Z') })
+  const now = new Date('2026-10-11T10:00:00Z')
+  await page.clock.install({ time: now })
   const added: DeskProjectionItem[] = []
   const control = await setup(page, { projectedSources: () => added })
+  // The business fixture freezes Date. Polls deliberately refuse a frozen wall
+  // clock, so restore the advancing clock before exercising their real cadence.
+  await page.clock.setSystemTime(now)
   // The first read waits until the preview is open.
   let release!: () => void
   const firstRead = new Promise<void>(resolve => { release = resolve })

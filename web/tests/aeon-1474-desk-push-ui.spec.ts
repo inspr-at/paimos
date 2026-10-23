@@ -328,7 +328,7 @@ test('AEON-1474 Settings and Desk remain still with EN and DE copy at phone tabl
     await page.goto('/settings/personal#notifications')
     const card = cardOf(page), toggle = card.getByRole('switch')
     await expect(toggle).toBeEnabled()
-    await expect(toggle).toContainText(de ? 'In diesem Browser benachrichtigen' : 'Notify me in this browser')
+    await expect(toggle).toHaveText(de ? 'In diesem Browser über wartende Entscheidungen benachrichtigen, auch auf verbundenen Instanzen' : 'Notify me in this browser when a decision waits, including connected instances')
     await expect(card.getByRole('status')).toHaveText(de ? 'Für diesen Browser aus' : 'Off for this browser')
     await expect(card.getByRole('listitem').first()).toContainText(de ? 'hinzugefügt am 1. Okt. 2026' : 'added 1 Oct 2026')
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
