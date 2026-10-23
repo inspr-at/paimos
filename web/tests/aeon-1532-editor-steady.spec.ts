@@ -292,12 +292,20 @@ async function editComment(page: Page) {
   // runs on that clock too, so the comment is inside its 15-minute edit window.
   await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z'))
   await page.setViewportSize({ width: 1440, height: 900 })
-  await mockWork(page, fixtures())
+  // The title can render while project grants still keep the composer disabled.
+  // Hold that response so this setup always exercises the CI failure's ordering.
+  let releaseGrants!: () => void
+  const grants = new Promise<void>(resolve => { releaseGrants = resolve })
+  await mockWork(page, fixtures(), {
+    hold: request => request.path === '/api/me/permissions' && request.query.get('project_id') === 'p-pharos' ? { until: grants } : undefined,
+  })
   await page.goto('/p/PHAROS/PHAROS-13')
   const ws = page.getByRole('complementary', { name: 'Ticket details' })
   await expect(ws.getByRole('heading', { name: 'Run the disposable Hetzner end-to-end check' })).toBeVisible()
+  await expect(ws.getByRole('textbox', { name: 'Add a comment' })).toBeDisabled()
   await page.keyboard.press('c')
   await page.keyboard.type('Ran it on hsb-lab.')
+  releaseGrants()
   await page.keyboard.press(`${mod}+Enter`)
   const comment = ws.locator('.entry.comment').filter({ hasText: 'Ran it on' })
   await expect(comment).toBeVisible()
