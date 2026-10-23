@@ -622,7 +622,7 @@
     "interpretation": "Playwright rounded both runs to 1.3m; no resolved native-runner reduction at that precision. Command wall includes setup and scheduling on a shared runner. No complete-P08 or unit saving is claimed. Per-spec historical case timings retain their provenance."
   },
   "cutA": {
-    "status": "implemented-awaiting-remote-proof",
+    "status": "blocked-remote-capacity",
     "beforeCommit": "249c3812e9b255bf48a3aef4ccb0b0b1e1b21e2b",
     "before": 543,
     "after": 479,
@@ -966,9 +966,10 @@
         }
       ],
       "before": "The keys baseline invocation was refused before execution; remaining before/after groups are pending capacity.",
-      "after": "Affected-spec execution is pending capacity.",
+      "after": "All three affected-spec groups were invoked through remote-spec.sh at 36b87cd39; each returned exit 3 before browser execution with the recorded 2/2-slots refusal.",
       "runnerTimeDeltaSeconds": null,
       "timingClaim": "No measured Cut-A runner-time change. Refusal wall time and the earlier round timing are not Cut-A browser savings."
-    }
+    },
+    "mainMerged": "11b092730e55abd0d0cdb645f0feb0dd970c0076"
   }
 }
