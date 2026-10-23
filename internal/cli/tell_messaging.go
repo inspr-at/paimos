@@ -19,7 +19,7 @@ func (rt *runtime) cmdMessagingTell() *Command {
 	var project, message, messageFile, level, reply, thread, key, recipientSession, senderSession, sessionCookieFile string
 	var expectsReply, action, principalInbox bool
 	var laneStatus laneStatusFlags
-	return &Command{Name: "tell", Short: "Send a durable message or inspect its receipt", Use: "tell <principal-uuid> --inbox -m TEXT | tell <harness:agent|principal-uuid> --project KEY -m TEXT | tell status <message-uuid>", minArgs: 1, maxArgs: 1,
+	return &Command{Name: "tell", Short: "Send a durable message or inspect its receipt", Use: "tell <peer-name|session:UUID> -m TEXT | tell <principal-uuid> --inbox -m TEXT | tell <harness:agent|principal-uuid> --project KEY -m TEXT | tell status <message-uuid>", minArgs: 1, maxArgs: 1,
 		subs: []*Command{{Name: "status", Short: "Read your message's push receipt", Use: "tell status <message-uuid>", minArgs: 1, maxArgs: 1, run: func(args []string) error {
 			if !validUUID(args[0]) {
 				return usagef("message ID must be a UUID")
@@ -37,7 +37,7 @@ func (rt *runtime) cmdMessagingTell() *Command {
 		addFlags: func(fs *flagSet) {
 			laneStatus.addFlags(fs)
 			fs.bool(&principalInbox, "inbox", 0, "send directly to a principal UUID without project or harness discovery")
-			fs.string(&project, "project", 0, "project key (required unless --inbox)")
+			fs.string(&project, "project", 0, "recipient project key (optional peer filter; required for a principal or harness address)")
 			fs.string(&message, "message", 'm', "message text (required)")
 			fs.string(&messageFile, "message-file", 0, "message text file, or - for stdin")
 			fs.string(&level, "level", 0, "simple or steer")
@@ -66,10 +66,11 @@ func (rt *runtime) cmdMessagingTell() *Command {
 				}
 				return rt.tellPrincipalInbox(address, message, messageFile, reply, key)
 			}
-			if !validUUID(address) && !messagingAddressRE.MatchString(address) {
+			isPeer := peerTellAddress(address)
+			if !isPeer && !validUUID(address) && !messagingAddressRE.MatchString(address) {
 				return usagef("invalid harness:agent address or principal UUID")
 			}
-			if strings.TrimSpace(project) == "" {
+			if !isPeer && strings.TrimSpace(project) == "" {
 				return usagef("--project is required")
 			}
 			body, err := rt.readText(message, messageFile, "message")
@@ -95,6 +96,9 @@ func (rt *runtime) cmdMessagingTell() *Command {
 				return usagef("invalid --idempotency-key")
 			}
 			if sessionCookieFile != "" {
+				if isPeer {
+					return usagef("--session-cookie-file requires a project-addressed reply")
+				}
 				if reply == "" || rt.agentName != "" {
 					return usagef("--session-cookie-file requires --reply-to without agent attribution")
 				}
@@ -102,9 +106,18 @@ func (rt *runtime) cmdMessagingTell() *Command {
 					return err
 				}
 			}
-			p, err := rt.projectNode(project)
-			if err != nil {
-				return err
+			var p apiNode
+			if isPeer {
+				peer, err := rt.resolvePeer(address, project, recipientSession)
+				if err != nil {
+					return err
+				}
+				p.ID, project, address, recipientSession = peer.ProjectID, peer.Project, peer.PrincipalID, peer.SessionID
+			} else {
+				p, err = rt.projectNode(project)
+				if err != nil {
+					return err
+				}
 			}
 			me, err := rt.caller()
 			if err != nil {
@@ -112,7 +125,11 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			}
 			explicitSenderSession := senderSession != ""
 			if !explicitSenderSession && rt.personClient == nil {
-				senderSession, err = rt.ambientSenderSession(context.Background(), p.ID, me.Principal.ID)
+				if isPeer {
+					senderSession, err = rt.ambientPeerSenderSession()
+				} else {
+					senderSession, err = rt.ambientSenderSession(context.Background(), p.ID, me.Principal.ID)
+				}
 				if err != nil {
 					return rt.fail(err, "")
 				}
@@ -137,8 +154,17 @@ func (rt *runtime) cmdMessagingTell() *Command {
 				req["thread_id"] = thread
 			}
 			var sent inbox.CompatMessage
-			if err := rt.do(http.MethodPost, "/api/projects/"+url.PathEscape(p.ID)+"/messages", req, &sent); err != nil {
+			path := "/api/projects/" + url.PathEscape(p.ID) + "/messages"
+			if isPeer {
+				path = "/api/peers/" + url.PathEscape(recipientSession) + "/messages"
+				delete(req, "to")
+				delete(req, "recipient_session_id")
+			}
+			if err := rt.do(http.MethodPost, path, req, &sent); err != nil {
 				if explicitSenderSession {
+					if isPeer {
+						return rt.fail(fmt.Errorf("send with --sender-session (must be your active authorized session): %w", err), "")
+					}
 					return rt.fail(fmt.Errorf("send with --sender-session (must be your active session in the target project): %w", err), "")
 				}
 				return err

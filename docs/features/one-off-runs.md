@@ -45,6 +45,30 @@ daemon must advertise `run_once_v1`; old daemons cannot pick up or claim these
 runs. One-off runs require a fresh Run once request to restart; automatic vendor
 continuation and the generic restart path cannot widen the saved ceiling.
 
+Terminal telemetry records one `run_once.settled` event and one ticket comment
+per run, linking its session in Agents (including History), or its run record
+when no session was registered. Successful runs move the leaf to **Done**
+in the same transaction, provided the initiating person still has `nodes.write`
+on its current project and the normal Done entry checks pass. This never supplies
+a person override, grants a permission, or changes a parent's status directly.
+Failed, cancelled and ownership-lost runs retain the ticket's status and record
+the reported error code (or terminal status). Cancelling a queued run records the
+reason `cancelled_by_person`. Replaying either terminal telemetry or queued
+cancellation creates no duplicate event, comment or status transition.
+
+The run pins the leaf's identity, state and revision at launch. **Any ticket edit
+after launch preserves its status**, including a person changing the state away
+and back. A changed binding, a new work child, an already terminal ticket, missing
+permission, failed Done check, reported error, or an unconfirmed/unstarted process
+also preserves its status; the result comment records why. Historical runs without
+a launch binding can record a result but cannot auto-close. Deleted tickets are
+never restored. The ticket remains the durable record after a successful run.
+
+The existing `TestRunOnceBindsContextOptionsAndCurrentAuthority/settlement` server
+guard covers project-created and selected leaves, lost launch responses, repeated
+settlement and cancellation, person edits and status changes, permission
+revocation, Done checks, and explicit process failure evidence.
+
 Host, harness, account, model and thinking use the existing computed defaults,
 shown in one summary. **Change** opens these settings below it; a quota, sign-in,
 wait or read-only qualification warning opens them automatically. Project

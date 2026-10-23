@@ -88,10 +88,30 @@ func TestAttachedResponsesUseSeparateSchemas(t *testing.T) {
 	}
 	defs := map[string]any{}
 	// InboxMessage embeds InboxSend, including its structured lane status.
-	for _, name := range []string{"InboxSend", "InboxLaneStatus", "InboxMessage", "InboxReceipt", "InboxSendResponse", "InboxReceiptResponse", "AttachedInboxMessage", "AttachedInboxReceipt", "AttachedMessageStatus"} {
+	for _, name := range []string{"InboxSend", "InboxLaneStatus", "InboxMessage", "InboxReceipt", "InboxSendResponse", "InboxReceiptResponse", "AttachedInboxMessage", "AttachedInboxReceipt", "AttachedMessageStatus", "ProjectMessage", "PeerMessage"} {
 		shape, ok := doc.Components.Schemas[name]
 		if !ok {
 			t.Fatalf("missing separate response schema %s", name)
+		}
+		defs[name] = shape
+	}
+	// ProjectMessage retains its released reference into the messaging contract.
+	messaging, err := os.ReadFile("../../api/openapi-messaging.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var compat struct {
+		Components struct {
+			Schemas map[string]any `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(messaging, &compat); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Message", "TargetBinding"} {
+		shape, ok := compat.Components.Schemas[name]
+		if !ok {
+			t.Fatalf("missing compatibility schema %s", name)
 		}
 		defs[name] = shape
 	}
@@ -105,6 +125,7 @@ func TestAttachedResponsesUseSeparateSchemas(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		raw = bytes.ReplaceAll(raw, []byte("./openapi-messaging.yaml#/components/schemas/"), []byte("#/$defs/"))
 		raw = bytes.ReplaceAll(raw, []byte("#/components/schemas/"), []byte("#/$defs/"))
 		var schema jsonschema.Schema
 		if err := json.Unmarshal(raw, &schema); err != nil {
@@ -153,6 +174,43 @@ func TestAttachedResponsesUseSeparateSchemas(t *testing.T) {
 	legacyReceipt := resolve(map[string]any{"$ref": "#/components/schemas/InboxReceipt"})
 	id := "11111111-1111-4111-8111-111111111111"
 	at := time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)
+	// Risk: documenting sender attribution changes a pinned legacy schema, or
+	// leaves the peer endpoint without typed fields or inherited requirements.
+	t.Run("peer sender project", func(t *testing.T) {
+		peer := response("/peers/{sessionId}/messages", "post", "201", "PeerMessage")
+		project := response("/projects/{projectId}/messages", "post", "201", "ProjectMessage")
+		msg := inbox.CompatMessage{
+			ID: id, SenderPrincipalID: id, RecipientPrincipalID: id,
+			SenderSessionID: &id, RecipientSessionID: &id,
+			SenderProjectID: &id, SenderProject: "AEON", SenderLabel: "lead (AEON)",
+			Body: "peer fixture", CreatedAt: at, Hop: 1,
+			Status: "accepted", ReplyObligation: "none", Level: "simple",
+		}
+		value := wire(msg)
+		if err := peer.Validate(value); err != nil {
+			t.Fatalf("cross-project peer response: %v", err)
+		}
+		if err := project.Validate(value); err != nil {
+			t.Fatalf("legacy project response compatibility: %v", err)
+		}
+		for _, field := range []string{"sender_project_id", "sender_project"} {
+			original := value[field]
+			value[field] = 123
+			if err := peer.Validate(value); err == nil {
+				t.Fatalf("peer response permits non-string %s", field)
+			}
+			value[field] = original
+		}
+		delete(value, "sender_project_id")
+		delete(value, "sender_project")
+		if err := peer.Validate(value); err != nil {
+			t.Fatalf("same-project peer response: %v", err)
+		}
+		delete(value, "created_at")
+		if err := peer.Validate(value); err == nil {
+			t.Fatal("peer response lost inherited project requirements")
+		}
+	})
 	msg := inbox.Message{ID: id, SenderPrincipalID: id, RecipientPrincipalID: id, Body: "durable fixture", IdempotencyKey: "fixture", SentEventID: 1, CreatedAt: at}
 	rec := inbox.Receipt{MessageID: id, IdempotencyKey: "fixture", Tenant: "fixture", SenderPrincipalID: id, RecipientPrincipalID: id, State: "queued"}
 	for name, tc := range map[string]struct {
