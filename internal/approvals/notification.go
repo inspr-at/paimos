@@ -23,6 +23,14 @@ func CanNotify(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (b
 	if err != nil {
 		return false, err
 	}
+	if hasActionScope(a.Scope) {
+		err = canDecideAction(ctx, tx, p, a)
+		var he *httpError
+		if errors.As(err, &he) {
+			return false, nil
+		}
+		return err == nil, err
+	}
 	if err = approvalVisible(ctx, tx, p, a); err != nil {
 		if errors.Is(err, authz.ErrForbidden) {
 			return false, nil

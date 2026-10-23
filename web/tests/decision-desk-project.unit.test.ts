@@ -3,7 +3,7 @@
 // changes between screens, or a "Now in …" notice for an item in the same project.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { deskProject, draftFor, projectHue, projectSwitch, type DeskProjection } from '../src/lib/decisionDesk'
-import { commitDesk, emptySources, loadDesk, questionItem, type Question } from '../src/lib/decisionDeskApi'
+import { approvalItem, commitDesk, decisionPermission, emptySources, loadDesk, questionItem, type Question } from '../src/lib/decisionDeskApi'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -76,5 +76,24 @@ describe('Decision Desk project identity', () => {
     expect(result.items.find(item => item.id === 'a:open')!.workOrderId).toBeUndefined()
     expect(reads).toContain('/api/runs/run-history')
     expect(reads).not.toContain('/api/runs/run-open')
+    // Outward effects keep their project and exact source through the same
+    // memo, and choose the action adapter without changing legacy requests.
+    const outward = { ...approval, id: 'outward', scope: 'approvals.request.outward_fixture', resource_kind: 'node' as const, resource_id: 'p-orbit', risk: 'high' as const, decision: null }
+    const item = { ...approvalItem(outward), projectId: 'p-orbit', projectName: 'Orbit', projectKey: 'ORB' }, sources = emptySources()
+    sources.approvals.set(item.id, outward)
+    expect(item.title).toBe('Approve this outward action?')
+    expect(item.choices[0]!.description).toContain('exact effect')
+    const projectAuthority = (permission: string, project?: string) => project === 'p-orbit' && ['approvals.read', 'approvals.decide', 'approvals.decide_high'].includes(permission)
+    expect(decisionPermission(item, sources, projectAuthority)).toBe(true)
+    expect(decisionPermission({ ...item, projectId: 'other-project' }, sources, projectAuthority)).toBe(false)
+    const write = vi.fn(async (path: string) => {
+      expect(path).toBe('/api/projects/p-orbit/action-approvals/outward/decision')
+      return Response.json({ ...outward, decision: 'approved' })
+    })
+    vi.stubGlobal('fetch', write)
+    const decided = await commitDesk(item, { ...draftFor(item), optionId: 'approved', reason: 'Exact wording and recipient checked' }, sources, 'outward-decision', false)
+    expect(decided.decided).toBe(true)
+    expect(deskProject(decided)).toEqual(deskProject(item))
+    expect(write).toHaveBeenCalledOnce()
   })
 })
