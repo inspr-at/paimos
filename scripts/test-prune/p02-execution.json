@@ -2,9 +2,9 @@
   "version": 1,
   "ticket": "AEON-1674",
   "package": "P02",
-  "status": "round6-linux-capture-implemented-validation-in-progress",
+  "status": "round6-capture-ready-no-active-reference-authority",
   "cuts": false,
-  "note": "Round 6 implements an explicit workflow_dispatch visual_capture input on existing CI, artifact-only packaging of 42 checkpoints across ten states, exact hosted renderer identity with post-capture ImageVersion pinning, self-hosted glyph checks, zero pixel tolerance, historical-only macOS pins, early reporting of deferred Goals/workspace, and healthy native-context Session Chat with separate typed-refusal coverage. The prescribed AttachmentStrip/TicketPlacement product changes and their coupled fix4-only assertions are restored to merged origin/main; all original tests and registrations remain. No cuts or new pins. Hosted static and actual Linux capture remain assigned to CI/LEAD as directed; Tick approval and publication as test-references-2 belong to the next round.",
+  "note": "Round 6 implements an explicit workflow_dispatch visual_capture input on existing CI, artifact-only packaging of 42 checkpoints across ten states, exact hosted renderer identity with post-capture ImageVersion pinning, self-hosted glyph checks, zero pixel tolerance, historical-only macOS pins, early reporting of deferred Goals/workspace, and healthy native-context Session Chat with separate typed-refusal coverage. AttachmentStrip, TicketPlacement and the earlier AgentsTab product changes are restored to merged origin/main, along with only the new P02 assertions coupled to those fixes; all original tests and registrations remain. No cuts or new pins. All 42 capture-state quality checkpoints, both browser guards, 86 role-picker cases after the Access revert, 15 original attachment/placement cases and all eight deferred cases passed remotely. Node transport/ledger and CI command/apt inventories pass. Hosted static and actual Linux capture remain assigned to CI/LEAD as directed; Tick approval and publication as test-references-2 belong to the next round.",
   "counts": {
     "originalBrowserCases": 1090,
     "originalBrowserCasesRetained": 1090,
@@ -2212,10 +2212,6 @@
   },
   "outsidePackageSourceHooks": [
     {
-      "file": "web/src/components/access/AgentsTab.vue",
-      "reason": "One identity-guarded successful-apply close restores native focus, as proven by two before-fix failing replacement journeys."
-    },
-    {
       "file": "web/tests/quote-list-fixtures.ts",
       "reason": "Optional injected clock keeps public-quote dates deterministic in the canonical visual state."
     },
@@ -3896,10 +3892,9 @@
       "web/src/components/work/AttachmentStrip.vue": "Removed fix4 separate Delete action row (28px/48px coarse), top-right repositioning and 44px coarse hit target. These prevented Open/Delete overlap and belong to Tick product follow-up.",
       "web/src/components/work/TicketPlacement.vue": "Removed fix4 named live status span inside the definition-list dd and status scrolling/focus CSS. This preserved definition semantics and removed an axe naming violation; belongs to Tick product follow-up.",
       "web/tests/attachments.spec.ts": "Restored main test, retaining every original assertion; coupled new fix4 overlap/coarse-target assertions cannot require the reverted product fix. No native registration removed.",
-      "web/tests/ticket-placement.spec.ts": "Restored main tests; removed only fix4 role=status and whole-workspace axe assertions coupled to the reverted product fix. Original revision, option, write-count and stability assertions remain."
-    },
-    "preexistingProductDeltaRetained": {
-      "web/src/components/access/AgentsTab.vue": "Earlier-round identity-guarded closeRolePicker(true) fix retained; round 6 specifically reverts the two fix4 work components. No new product behavior added."
+      "web/tests/ticket-placement.spec.ts": "Restored main tests; removed only fix4 role=status and whole-workspace axe assertions coupled to the reverted product fix. Original revision, option, write-count and stability assertions remain.",
+      "web/src/components/access/AgentsTab.vue": "Additional inherited delta removed to make the whole P02 branch test-only: identity-guarded closeRolePicker(true) after successful Apply restored trigger focus and avoided closing a newer picker. Main behavior is restored; LEAD/Tick own the separate product follow-up.",
+      "web/tests/role-picker-layout.spec.ts": "Removed only two new successful-Apply focus assertions coupled to the reverted Access product hook. All original cases/assertions, role writes/refusal, native keyboard selection, Cancel focus and control stability remain. No test is skipped or demoted."
     },
     "validation": {
       "nodeTransportAndLedger": "2/2 passed",
@@ -3919,8 +3914,76 @@
         ],
         "passedNativeGuard": true
       },
-      "remoteSecondBatch": "in progress",
-      "static": "Hosted CI only, as round-6 brief directs. No local static suite, review gate or model CLI run."
-    }
+      "remoteSecondBatch": {
+        "sha": "2b3f82e7a",
+        "passed": 17,
+        "failed": 5,
+        "passedStates": [
+          "projects",
+          "access",
+          "knowledge",
+          "public-quote"
+        ],
+        "failure": "Agent Rules file selector used system Arial; fixed in 6a09466ac. Visible fallback guard needed a painted frame; fixed in the same commit."
+      },
+      "static": "Hosted CI only, as round-6 brief directs. No local static suite, review gate or model CLI run.",
+      "remoteThirdBatch": {
+        "sha": "6a09466ac",
+        "passed": 28,
+        "failed": 3,
+        "passedStates": [
+          "agent-rules",
+          "quote-editor"
+        ],
+        "originalAttachmentsPassed": 13,
+        "originalPlacementPassed": 2,
+        "failure": "Hidden desktop Start Agent quota tooltip contributed Times layout fonts; changed glyph audit to painted text. Old refusal-page poll crossed route replacement in the healthy native guard; isolated contexts in a8758527c."
+      },
+      "remoteGuardIsolation": {
+        "sha": "a8758527c",
+        "passed": [
+          "both browser guards",
+          "both Start Agent phone cases"
+        ],
+        "failed": 2,
+        "failure": "Remaining Times font was in opacity-zero quota tooltip layout, not painted pixels; visibility-aware font audit implemented in 2180c7d0c."
+      },
+      "remoteCaptureAndGuards": {
+        "sha": "2180c7d0c",
+        "passed": 22,
+        "failed": 0,
+        "states": [
+          "agent-rules",
+          "capacity",
+          "hours",
+          "session-chat",
+          "start-agent"
+        ],
+        "guardCases": 2,
+        "result": "All strict quality, changed-image/renderer/visible-font rejection, hidden-font control, deferred-no-setup and healthy/refusal native checks passed."
+      },
+      "remoteRoleAndOtherCaptures": {
+        "sha": "4b0f3c6b0c7f5eae8fa09156d8fd7083d049f51a",
+        "passed": 108,
+        "failed": 0,
+        "seconds": 192,
+        "rolePickerCases": 86,
+        "visualCases": 22,
+        "states": [
+          "projects",
+          "access",
+          "knowledge",
+          "public-quote",
+          "quote-editor"
+        ]
+      },
+      "activeComparisonPins": 0,
+      "allCaptureStatesQualityPassed": 42,
+      "originalDeferredCasesPassed": 8,
+      "productSourceDiffAgainstMergedMain": [],
+      "evidence": "web/test-results/AEON-1674-r6/quality-evidence.json",
+      "fullHostedCIResultClaimed": false
+    },
+    "scopeRestorationAuthority": "Current user request to execute round-6 P02 stays test-only; restores earlier P02-added product hooks and their new coupled assertions. No baseline assertion or registration is removed."
   }
 }
