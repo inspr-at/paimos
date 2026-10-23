@@ -100,6 +100,7 @@ func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
 	// than relying on the speed of the test host.
 	query := leaf
 	query.Q = "PICK"
+	query.Limit = 30
 	querySQL, queryArgs := listSQL(query, nil)
 	err = db.InTenant(tenant.WithPrincipal(t.Context(), p), appPool, p.TenantID, func(tx pgx.Tx) error {
 		var raw []byte
@@ -110,16 +111,26 @@ func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
 		if err := json.Unmarshal(raw, &documents); err != nil {
 			return err
 		}
+		var nodeVisits float64
 		var visit func(map[string]any)
 		visit = func(plan map[string]any) {
-			if relation, _ := plan["Relation Name"].(string); relation == "nodes" || plan["CTE Name"] != nil || plan["Function Name"] != nil {
-				t.Logf("picker plan: node=%v relation=%v cte=%v function=%v rows=%v loops=%v", plan["Node Type"], plan["Relation Name"], plan["CTE Name"], plan["Function Name"], plan["Actual Rows"], plan["Actual Loops"])
+			if plan["Relation Name"] == "nodes" {
+				rows, _ := plan["Actual Rows"].(float64)
+				filtered, _ := plan["Rows Removed by Filter"].(float64)
+				loops, _ := plan["Actual Loops"].(float64)
+				nodeVisits += (rows + filtered) * loops
+				t.Logf("picker plan: alias=%v index=%v rows=%v loops=%v", plan["Alias"], plan["Index Name"], rows+filtered, loops)
 			}
 			for _, child := range planChildren(plan) {
 				visit(child)
 			}
 		}
 		visit(documents[0]["Plan"].(map[string]any))
+		// Allow whole-corpus matching/counting plus bounded page enrichment;
+		// never a whole-corpus parent/ancestor scan for every selected row.
+		if budget := float64(4*(leaves+3) + 32*(query.Limit+1)); nodeVisits > budget {
+			return fmt.Errorf("picker rescanned nodes per page row: %.0f visits, budget %.0f", nodeVisits, budget)
+		}
 		return nil
 	})
 	if err != nil {
