@@ -532,16 +532,19 @@ test.describe('phones', () => {
       // same product bytes under a private family so availability cannot be
       // satisfied by that installed face while the network is still held.
       await page.evaluate(url => {
-        const face = new FontFace('AEON Delayed Header Mono', `url(${JSON.stringify(url)})`, { weight: '100 800' })
+        const face = new FontFace('AEON Delayed Header Mono', `url(${JSON.stringify(url)})`, { weight: '100 800', display: 'swap' })
         document.fonts.add(face)
-        document.documentElement.style.setProperty('--mono', '"AEON Delayed Header Mono", ui-monospace, Menlo, monospace')
+        document.documentElement.style.setProperty('--mono', '"AEON Delayed Header Mono", sans-serif')
         void face.load()
       }, requested)
       expect(await page.evaluate(() => document.fonts.check('12px "AEON Delayed Header Mono"'))).toBe(false)
       await page.setViewportSize({ width: 415, height: 844 })
+      const inkWidth = () => key.evaluate(el => { const range = document.createRange(); range.selectNodeContents(el); return range.getBoundingClientRect().width })
+      const fallbackWidth = await inkWidth()
       release()
       await page.evaluate(() => document.fonts.load('12px "AEON Delayed Header Mono"').then(() => document.fonts.ready).then(() => undefined))
       expect(await page.evaluate(() => document.fonts.check('12px "AEON Delayed Header Mono"'))).toBe(true)
+      expect(Math.abs(await inkWidth() - fallbackWidth), 'the held font actually changes the ticket key metrics').toBeGreaterThan(.5)
       await expect.poll(() => key.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
       await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeHidden()
     } finally { release() }
